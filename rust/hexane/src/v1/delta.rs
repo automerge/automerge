@@ -650,12 +650,9 @@ impl<'a, T: DeltaValue> Iterator for DeltaIter<'a, T> {
 
 impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
 
-// ── Default-valued DeltaColumn ──────────────────────────────────────────────
+// ── Load with options ───────────────────────────────────────────────────────
 
-impl<T: DeltaValue> DeltaColumn<T>
-where
-    for<'a> <T::Inner as super::ColumnValueRef>::Get<'a>: Default,
-{
+impl<T: DeltaValue> DeltaColumn<T> {
     /// Deserialize with options (applied to the inner delta column).
     /// See [`LoadOpts`](super::LoadOpts).
     pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError> {

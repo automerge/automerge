@@ -180,10 +180,67 @@ pub trait ColumnEncoding: Default {
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
 
+    /// Streaming encoder for building encoded bytes from a sequence of values.
+    type Encoder<'a>: EncoderApi<'a, Self::Value>;
+
+    /// Create a new empty encoder.
+    fn encoder<'a>() -> Self::Encoder<'a>;
+
     fn encode<V: AsColumnRef<Self::Value>>(values: impl Iterator<Item = V>) -> Slab<Self::Tail> {
         let mut slab = Self::empty_slab();
         Self::splice_slab(&mut slab, 0, 0, values, usize::MAX);
         slab
+    }
+}
+
+/// Trait for streaming encoders that build encoded bytes from a sequence of values.
+pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
+    /// Append a single value.
+    fn append(&mut self, value: T::Get<'a>);
+    /// Append `n` copies of `value`.
+    fn append_n(&mut self, value: T::Get<'a>, n: usize);
+    /// Append all values from an iterator.
+    fn extend(&mut self, iter: impl IntoIterator<Item = T::Get<'a>>) {
+        for value in iter {
+            self.append(value);
+        }
+    }
+    /// Number of items appended so far.
+    fn len(&self) -> usize;
+    /// Returns `true` if no items have been appended.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Flush and return the encoded bytes. Consumes the encoder.
+    fn save(self) -> Vec<u8>;
+    /// Flush and append the encoded bytes to `out`. Returns the byte range written.
+    fn save_to(self, out: &mut Vec<u8>) -> std::ops::Range<usize>;
+    /// Like `save_to` but returns an empty range if the encoded data is empty
+    /// or consists entirely of a single run of `value`.
+    fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> std::ops::Range<usize>;
+    /// Flush and return a single [`Slab`] with correct len, segments, and tail.
+    fn into_slab(self) -> Slab<Self::Tail>;
+    /// The tail metadata type for this encoding.
+    type Tail: Copy + Clone + std::fmt::Debug + Default;
+
+    /// Encode values from an iterator and return the raw bytes.
+    fn encode(iter: impl IntoIterator<Item = T::Get<'a>>) -> Vec<u8>
+    where
+        Self: Default,
+    {
+        let mut enc = Self::default();
+        enc.extend(iter);
+        enc.save()
+    }
+
+    /// Encode values from an iterator and return a [`Slab`] with correct metadata.
+    fn encode_slab(iter: impl IntoIterator<Item = T::Get<'a>>) -> Slab<Self::Tail>
+    where
+        Self: Default,
+    {
+        let mut enc = Self::default();
+        enc.extend(iter);
+        enc.into_slab()
     }
 }
 
@@ -199,6 +256,11 @@ pub trait RunDecoder: Iterator {
     ///
     /// Returns `None` when the iterator is exhausted.
     fn next_run(&mut self) -> Option<Run<Self::Item>>;
+
+    /// Like [`next_run`](Self::next_run) but consumes at most `max` items
+    /// from repeat/null runs.  The remaining items stay in the decoder
+    /// for subsequent calls.
+    fn next_run_max(&mut self, max: usize) -> Option<Run<Self::Item>>;
 }
 
 /// Metadata extracted from a validated slab encoding.

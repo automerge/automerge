@@ -1,5 +1,5 @@
 use hexane::v1::Column;
-use rand::{rng, RngCore};
+use rand::{rng, Rng};
 use std::time::Instant;
 
 fn rand_bool() -> bool {

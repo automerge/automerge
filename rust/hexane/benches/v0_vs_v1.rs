@@ -3,7 +3,7 @@ use hexane::v1::{DeltaColumn, PrefixColumn};
 use hexane::*;
 use std::time::Duration;
 
-use rand::{rng, Rng, RngCore};
+use rand::{rng, Rng, RngExt};
 
 fn main() {
     divan::main();
@@ -936,7 +936,7 @@ mod prefix_queries_bool {
         let total = col.get_prefix(col.len());
         bencher.bench_local(|| {
             let target = if total > 0 {
-                rng().next_u32() % total
+                rng().random_range(0..total)
             } else {
                 0
             };
@@ -971,7 +971,7 @@ mod prefix_queries_bool {
         let total = col.get_prefix(col.len());
         bencher.bench_local(|| {
             let target = if total > 0 {
-                rng().next_u32() % total
+                rng().random_range(0..total)
             } else {
                 0
             };

@@ -1,5 +1,5 @@
 use hexane::v1::Column;
-use rand::{rng, Rng, RngCore};
+use rand::{rng, Rng, RngExt};
 use std::time::Instant;
 
 fn rand_string(len: usize) -> String {

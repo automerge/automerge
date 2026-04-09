@@ -308,14 +308,17 @@ impl<'a, T: RleValue> RleSegment<'a, T> {
 
 impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
     fn next_run(&mut self) -> Option<Run<Self::Item>> {
+        self.next_run_max(usize::MAX)
+    }
+
+    fn next_run_max(&mut self, max: usize) -> Option<Run<Self::Item>> {
         loop {
             if self.remaining > 0 {
-                let count = self.remaining;
                 return match &self.state {
                     RleDecoderState::Repeat(v) => {
                         let value = *v;
-                        self.remaining = 0;
-                        // byte_pos already past the value data for repeat runs
+                        let count = self.remaining.min(max);
+                        self.remaining -= count;
                         Some(Run { count, value })
                     }
                     RleDecoderState::Literal => {
@@ -327,7 +330,8 @@ impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
                     }
                     RleDecoderState::Null => {
                         let value = T::get_null();
-                        self.remaining = 0;
+                        let count = self.remaining.min(max);
+                        self.remaining -= count;
                         Some(Run { count, value })
                     }
                     RleDecoderState::Idle => None,

@@ -490,11 +490,15 @@ impl<'a> Iterator for BoolDecoder<'a> {
 
 impl<'a> RunDecoder for BoolDecoder<'a> {
     fn next_run(&mut self) -> Option<Run<bool>> {
+        self.next_run_max(usize::MAX)
+    }
+
+    fn next_run_max(&mut self, max: usize) -> Option<Run<bool>> {
         loop {
             if self.remaining > 0 {
-                let count = self.remaining;
+                let count = self.remaining.min(max);
                 let value = self.value;
-                self.remaining = 0;
+                self.remaining -= count;
                 return Some(Run { count, value });
             }
             if self.byte_pos >= self.data.len() {
@@ -598,6 +602,12 @@ impl ColumnEncoding for BoolEncoding {
 
     fn decoder(slab: &[u8]) -> BoolDecoder<'_> {
         BoolDecoder::new(slab)
+    }
+
+    type Encoder<'a> = super::encoder::BoolEncoder;
+
+    fn encoder<'a>() -> Self::Encoder<'a> {
+        super::encoder::BoolEncoder::new()
     }
 }
 

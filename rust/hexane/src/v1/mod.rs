@@ -8,6 +8,7 @@
 pub mod bool;
 pub mod column;
 pub mod delta;
+pub mod encoder;
 pub mod encoding;
 pub mod indexed;
 pub(crate) mod leb;
@@ -16,6 +17,11 @@ pub mod prefix;
 pub mod rle;
 pub use column::{Column, Iter};
 pub use delta::{DeltaColumn, DeltaIter, DeltaValue};
+/// Streaming encoder for column type `T`, resolved via `T::Encoding`.
+///
+/// For RLE types (u64, i64, String, etc.) this is [`RleEncoder`].
+/// For bool this is [`BoolEncoder`].
+pub type Encoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Encoder<'a>;
 pub use encoding::ColumnEncoding;
 pub use encoding::RunDecoder;
 pub use indexed::IndexedDeltaColumn;
@@ -72,6 +78,10 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
 
     /// Convert a borrowed `Get` value back to an owned `Self`.
     fn to_owned(val: Self::Get<'_>) -> Self;
+
+    /// Cross-lifetime equality: compare two `Get` values that may have
+    /// different borrow lifetimes.
+    fn eq(a: Self::Get<'_>, b: Self::Get<'_>) -> bool;
 }
 
 /// Simplified [`ColumnValueRef`] for `Copy` RLE types where `Get<'a> = Self`.
@@ -101,6 +111,9 @@ impl<T: ColumnValue> ColumnValueRef for T {
 
     fn to_owned(val: T) -> T {
         val
+    }
+    fn eq(a: T, b: T) -> bool {
+        a == b
     }
 }
 
@@ -172,6 +185,13 @@ impl<T: RleValue> ColumnValueRef for Option<T> {
     fn to_owned(val: Option<T::Get<'_>>) -> Option<T> {
         val.map(T::to_owned)
     }
+    fn eq(a: Option<T::Get<'_>>, b: Option<T::Get<'_>>) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => T::eq(a, b),
+            (None, None) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
@@ -225,6 +245,9 @@ impl ColumnValueRef for bool {
 
     fn to_owned(val: bool) -> bool {
         val
+    }
+    fn eq(a: bool, b: bool) -> bool {
+        a == b
     }
 }
 
@@ -399,6 +422,9 @@ impl ColumnValueRef for String {
     fn to_owned(val: &str) -> String {
         val.to_string()
     }
+    fn eq(a: &str, b: &str) -> bool {
+        a == b
+    }
 }
 
 impl RleValue for String {
@@ -440,6 +466,9 @@ impl ColumnValueRef for Vec<u8> {
 
     fn to_owned(val: &[u8]) -> Vec<u8> {
         val.to_vec()
+    }
+    fn eq(a: &[u8], b: &[u8]) -> bool {
+        a == b
     }
 }
 

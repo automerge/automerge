@@ -1,6 +1,7 @@
 use super::state::{RleCow, RleState};
 use super::*;
-use crate::v1::{AsColumnRef, RleValue};
+use crate::v1::leb::{encode_signed, encode_unsigned};
+use crate::v1::{AsColumnRef, Column, RleValue};
 
 pub(crate) fn rle_encode_state<T: RleValue>(
     values: impl Iterator<Item = T::Get<'static>>,
@@ -65,8 +66,8 @@ mod load_verify_tests {
     fn load_verify_rejects_null_in_non_nullable() {
         // Encode a null run (0, count=1) into raw bytes.
         let mut buf = Vec::new();
-        buf.extend(crate::v1::leb::encode_signed(0));
-        buf.extend(crate::v1::leb::encode_unsigned(1));
+        buf.extend(encode_signed(0));
+        buf.extend(encode_unsigned(1));
 
         // Non-nullable u64 should reject.
         let result = load::rle_load_and_verify::<u64>(
@@ -85,7 +86,7 @@ mod load_verify_tests {
     #[test]
     fn splice_lit_crosses_leb128_boundary() {
         let initial: Vec<u64> = (0..60).collect();
-        let mut col = crate::v1::Column::<u64>::from_values_with_max_segments(initial, 256);
+        let mut col = Column::<u64>::from_values_with_max_segments(initial, 256);
         assert_eq!(col.slab_count(), 1);
         assert_eq!(col.len(), 60);
 
