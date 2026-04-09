@@ -37,22 +37,6 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     }
 }
 
-impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
-    /// Returns `true` if the slab contains only `default` values.
-    /// O(1) — checks segment count then decodes only the first value.
-    pub(crate) fn is_default<T: ColumnValueRef>(&self) -> bool
-    where
-        for<'a> T::Get<'a>: PartialEq + Default,
-    {
-        let default = T::Get::default();
-        self.len == 0
-            || (self.segments == 1
-                && T::Encoding::decoder(&self.data)
-                    .next()
-                    .map_or(true, |v| v == default))
-    }
-}
-
 // ── SlabWeight ───────────────────────────────────────────────────────────────
 
 /// A value stored in a Fenwick tree (BIT) node.
@@ -626,21 +610,19 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     }
 }
 
-// ── Default-valued columns ──────────────────────────────────────────────────
+// ── Load / save with options ────────────────────────────────────────────────
 
-impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF>
-where
-    for<'a> T::Get<'a>: Default,
-{
-    /// Deserialize with options: length validation, value validation, and
-    /// default-on-empty behavior.
+impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
+    /// Deserialize with options: length validation, fill-on-empty, and
+    /// value validation.
     ///
     /// See [`LoadOpts`](super::LoadOpts) for available options.
     pub fn load_with(data: &[u8], opts: super::LoadOpts<T>) -> Result<Self, PackError> {
         if data.is_empty() {
-            return match opts.length {
-                Some(0) | None => Ok(Self::new()),
-                Some(len) => Ok(Self::fill_inner(len, T::Get::default())),
+            return match (opts.length, opts.fill) {
+                (Some(0) | None, _) => Ok(Self::new()),
+                (Some(len), Some(value)) => Ok(Self::fill_inner(len, value)),
+                (Some(len), None) => Err(PackError::InvalidLength(0, len)),
             };
         }
         let col = Self::load_verified(data, opts.max_segments, opts.validate)?;
@@ -652,29 +634,36 @@ where
         Ok(col)
     }
 
-    /// Returns `true` if every item in the column has the default value.
-    ///
-    /// O(S) — each slab must be single-segment with a default first value.
-    /// An empty column is considered default.
-    pub fn is_default(&self) -> bool {
-        self.total_len == 0 || self.slabs.iter().all(|s| s.is_default::<T>())
+    /// Returns `true` if the column is empty or every item equals `value`.
+    pub fn is_only(&self, value: impl AsColumnRef<T>) -> bool {
+        use super::encoding::RunDecoder;
+        self.total_len == 0
+            || self.slabs.iter().all(|s| {
+                if s.len == 0 {
+                    return true;
+                }
+                let mut dec = T::Encoding::decoder(&s.data);
+                match dec.next_run() {
+                    Some(run) => {
+                        run.count == s.len
+                            && T::eq(run.value, value.as_column_ref())
+                            && dec.next_run().is_none()
+                    }
+                    None => true,
+                }
+            })
     }
 
     /// Serialize the column by appending bytes to `out`, unless all values
-    /// are the default.
+    /// equal `value`.
     ///
-    /// Returns the byte range written (empty range if all-default or empty).
-    pub fn save_to_unless_default(&self, out: &mut Vec<u8>) -> Range<usize> {
-        if self.is_default() {
+    /// Returns the byte range written (empty range if all-equal or empty).
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: impl AsColumnRef<T>) -> Range<usize> {
+        if self.is_only(value.clone()) {
             out.len()..out.len()
         } else {
             self.save_to(out)
         }
-    }
-
-    /// Create a column of `len` default values.
-    pub fn init_default(len: usize) -> Self {
-        Self::fill_inner(len, T::Get::default())
     }
 }
 
@@ -863,8 +852,9 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         if self.items_left == 0 {
             return None;
         }
+        let max = self.items_left.min(self.slab_remaining);
         let run = loop {
-            if let Some(run) = self.decoder.next_run() {
+            if let Some(run) = self.decoder.next_run_max(max) {
                 break run;
             }
             self.slab_idx += 1;
@@ -877,7 +867,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         };
 
         let value = run.value;
-        let count = run.count.min(self.items_left).min(self.slab_remaining);
+        let count = run.count;
         self.items_left -= count;
         self.slab_remaining -= count;
         self.pos += count;
@@ -891,14 +881,17 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             self.slab_remaining = self.slabs[self.slab_idx].len;
             self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
 
-            if let Some(next_run) = self.decoder.next_run() {
+            let max = self.items_left.min(self.slab_remaining);
+            if let Some(next_run) = self.decoder.next_run_max(max) {
                 if next_run.value == value {
-                    let c = next_run.count.min(self.items_left).min(self.slab_remaining);
+                    let c = next_run.count;
                     total_count += c;
                     self.items_left -= c;
                     self.slab_remaining -= c;
                     self.pos += c;
                 } else {
+                    // Value doesn't match — reset decoder so the consumed
+                    // run can be re-read by subsequent calls.
                     self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
                     break;
                 }

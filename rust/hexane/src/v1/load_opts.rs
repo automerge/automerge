@@ -5,14 +5,17 @@ use super::ColumnValueRef;
 ///
 /// Use the builder methods to configure loading behavior:
 ///
-/// - [`with_length`](LoadOpts::with_length) — validate length and produce a
-///   default column when data is empty (requires `T::Get<'static>: Default`).
+/// - [`with_length`](LoadOpts::with_length) — validate that the loaded column
+///   has the expected number of items.
+/// - [`with_fill`](LoadOpts::with_fill) — when data is empty and `length` is
+///   set, create a column filled with this value instead of returning empty.
 /// - [`with_validation`](LoadOpts::with_validation) — validate each decoded
 ///   value with a function pointer.
 /// - [`with_max_segments`](LoadOpts::with_max_segments) — override the
 ///   slab segment budget.
 pub struct LoadOpts<T: ColumnValueRef> {
     pub(crate) length: Option<usize>,
+    pub(crate) fill: Option<T::Get<'static>>,
     pub(crate) validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
     pub(crate) max_segments: usize,
 }
@@ -29,6 +32,7 @@ impl<T: ColumnValueRef> LoadOpts<T> {
     pub fn new() -> Self {
         Self {
             length: None,
+            fill: None,
             validate: None,
             max_segments: DEFAULT_MAX_SEG,
         }
@@ -36,12 +40,23 @@ impl<T: ColumnValueRef> LoadOpts<T> {
 
     /// Require the loaded column to have exactly `len` items.
     ///
-    /// If the data is empty, produces a default column of `len` items
-    /// (all-null for `Option<T>`, all-false for `bool`) instead of erroring.
     /// If the data is non-empty and decodes to a different length, returns
     /// [`PackError::InvalidLength`](crate::PackError::InvalidLength).
+    ///
+    /// To produce a filled column when data is empty, combine with
+    /// [`with_fill`](Self::with_fill).
     pub fn with_length(mut self, len: usize) -> Self {
         self.length = Some(len);
+        self
+    }
+
+    /// When data is empty and [`with_length`](Self::with_length) is also set,
+    /// create a column of `length` copies of `value` instead of returning
+    /// an empty column.
+    ///
+    /// Has no effect unless `with_length` is also called.
+    pub fn with_fill(mut self, value: T::Get<'static>) -> Self {
+        self.fill = Some(value);
         self
     }
 

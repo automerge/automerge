@@ -180,4 +180,10 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
     fn decoder(slab: &[u8]) -> RleDecoder<'_, T> {
         RleDecoder::new(slab)
     }
+
+    type Encoder<'a> = super::encoder::RleEncoder<'a, T>;
+
+    fn encoder<'a>() -> Self::Encoder<'a> {
+        super::encoder::RleEncoder::new()
+    }
 }

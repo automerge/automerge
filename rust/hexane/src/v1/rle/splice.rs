@@ -197,8 +197,9 @@ fn find_partition<'a, T: RleValue, V: AsColumnRef<T>>(
 #[cfg(test)]
 mod partition_tests {
     use super::*;
-    use crate::v1::encoding::ColumnEncoding;
-    use crate::v1::rle::{state::RleState, RleEncoding};
+    use crate::v1::encoding::EncoderApi;
+    use crate::v1::rle::state::RleState;
+    use crate::v1::Encoder;
 
     fn state_item_count<T: RleValue, V: AsColumnRef<T>>(state: &RleState<'_, T, V>) -> usize {
         match state {
@@ -211,11 +212,11 @@ mod partition_tests {
     }
 
     fn encode_u64_slab(vals: &[u64]) -> Slab {
-        RleEncoding::<u64>::encode(vals.iter().copied())
+        Encoder::<u64>::encode_slab(vals.iter().copied())
     }
 
     fn encode_opt_slab(vals: &[Option<u64>]) -> Slab {
-        RleEncoding::<Option<u64>>::encode(vals.iter().copied())
+        Encoder::<Option<u64>>::encode_slab(vals.iter().copied())
     }
 
     #[test]

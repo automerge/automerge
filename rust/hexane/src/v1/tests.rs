@@ -1,4 +1,4 @@
-use crate::v1::{Column, DeltaColumn, LoadOpts, PrefixColumn};
+use crate::v1::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
 use proptest::prelude::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ impl GetEq<Option<Vec<u8>>> for Option<&[u8]> {
 /// Assert column contents match `expected`, and encoding is canonical.
 fn assert_col<T>(col: &Column<T>, expected: &[T])
 where
-    T: crate::v1::ColumnValueRef + std::fmt::Debug,
+    T: ColumnValueRef + std::fmt::Debug,
     for<'a> T::Get<'a>: GetEq<T> + std::fmt::Debug,
 {
     assert_eq!(col.len(), expected.len(), "length mismatch");
@@ -285,7 +285,7 @@ enum Op<T> {
 
 fn apply_ops<T>(ops: &[Op<T>], positions: &[usize], col: &mut Column<T>, mirror: &mut Vec<T>)
 where
-    T: crate::v1::ColumnValueRef + Clone + std::fmt::Debug,
+    T: ColumnValueRef + Clone + std::fmt::Debug,
     for<'a> T::Get<'a>: GetEq<T> + std::fmt::Debug,
 {
     for (op, &raw_pos) in ops.iter().zip(positions.iter()) {
@@ -439,7 +439,6 @@ fn column_string_from_iterator() {
 
 #[test]
 fn prefix_column_from_iterator() {
-    use crate::v1::PrefixColumn;
     let col: PrefixColumn<u64> = vec![3, 1, 4, 1, 5].into_iter().collect();
     assert_eq!(col.len(), 5);
     assert_eq!(col.get_prefix(3), 8); // 3+1+4
@@ -447,7 +446,6 @@ fn prefix_column_from_iterator() {
 
 #[test]
 fn delta_column_from_iterator() {
-    use crate::v1::DeltaColumn;
     let col: DeltaColumn<u64> = vec![10, 20, 30, 40].into_iter().collect();
     assert_eq!(col.len(), 4);
     assert_eq!(col.get(0), Some(10));
@@ -608,8 +606,6 @@ fn shift_next_cross_validation_with_v0() {
 
 #[test]
 fn prefix_iter_pos_and_shift_next() {
-    use crate::v1::PrefixColumn;
-
     let col: PrefixColumn<u64> = PrefixColumn::from_values(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     let mut iter = col.iter_range(0..4);
     assert_eq!(iter.pos(), 0);
@@ -637,130 +633,130 @@ fn prefix_iter_pos_and_shift_next() {
     assert!(iter.next().is_none());
 }
 
-// ── is_default / init_default ────────────────────────────────────────────────
+// ── fill / save_to_unless ────────────────────────────────────────────────────
 
 #[test]
-fn init_default_creates_all_null_column() {
-    let col = Column::<Option<u64>>::init_default(100);
+fn fill_creates_all_null_column() {
+    let col = Column::<Option<u64>>::fill(100, None);
     assert_eq!(col.len(), 100);
-    assert!(col.is_default());
     for i in 0..100 {
         assert_eq!(col.get(i), Some(None));
     }
 }
 
 #[test]
-fn init_default_null_zero_length() {
-    let col = Column::<Option<u64>>::init_default(0);
+fn fill_zero_length() {
+    let col = Column::<Option<u64>>::fill(0, None);
     assert_eq!(col.len(), 0);
-    assert!(col.is_default());
     assert!(col.is_empty());
 }
 
 #[test]
-fn is_default_false_for_non_null_column() {
-    let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), None, Some(3)]);
-    assert!(!col.is_default());
-}
-
-#[test]
-fn is_default_false_for_mixed_null_column() {
-    let col = Column::<Option<u64>>::from_values(vec![None, None, Some(0), None]);
-    assert!(!col.is_default());
-}
-
-#[test]
-fn is_default_true_for_manual_all_null() {
+fn save_to_unless_skips_all_null() {
     let col = Column::<Option<u64>>::from_values(vec![None, None, None, None, None]);
-    assert!(col.is_default());
+    let mut out = vec![];
+    let range = col.save_to_unless(&mut out, None);
+    assert!(range.is_empty());
 }
 
 #[test]
-fn is_default_nullable_types() {
-    // Option<i64>
-    let col = Column::<Option<i64>>::init_default(50);
-    assert!(col.is_default());
+fn save_to_unless_writes_non_null() {
+    let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), None, Some(3)]);
+    let mut out = vec![];
+    let range = col.save_to_unless(&mut out, None);
+    assert!(!range.is_empty());
+}
+
+#[test]
+fn save_to_unless_writes_mixed_null() {
+    let col = Column::<Option<u64>>::from_values(vec![None, None, Some(0), None]);
+    let mut out = vec![];
+    let range = col.save_to_unless(&mut out, None);
+    assert!(!range.is_empty());
+}
+
+#[test]
+fn fill_nullable_types() {
+    let col = Column::<Option<i64>>::fill(50, None);
     assert_eq!(col.get(0), Some(None));
 
-    // Option<String>
-    let col = Column::<Option<String>>::init_default(10);
-    assert!(col.is_default());
+    let col = Column::<Option<String>>::fill(10, Option::<String>::None);
     assert_eq!(col.get(0), Some(None));
 
-    // Option<Vec<u8>>
-    let col = Column::<Option<Vec<u8>>>::init_default(10);
-    assert!(col.is_default());
+    let col = Column::<Option<Vec<u8>>>::fill(10, Option::<Vec<u8>>::None);
     assert_eq!(col.get(0), Some(None));
 }
 
 #[test]
-fn init_default_null_roundtrips_through_save_load() {
-    let col = Column::<Option<u64>>::init_default(1000);
+fn fill_null_roundtrips_through_save_load() {
+    let col = Column::<Option<u64>>::fill(1000, None);
     let bytes = col.save();
     let loaded = Column::<Option<u64>>::load(&bytes).unwrap();
     assert_eq!(loaded.len(), 1000);
-    assert!(loaded.is_default());
 }
 
 #[test]
-fn is_default_after_insert_non_null() {
-    let mut col = Column::<Option<u64>>::init_default(10);
-    assert!(col.is_default());
+fn save_to_unless_after_insert() {
+    let mut col = Column::<Option<u64>>::fill(10, None);
+    let mut out = vec![];
+    assert!(col.save_to_unless(&mut out, None).is_empty());
     col.insert(5, Some(42));
-    assert!(!col.is_default());
+    assert!(!col.save_to_unless(&mut out, None).is_empty());
 }
 
 #[test]
-fn init_default_creates_all_false_column() {
-    let col = Column::<bool>::init_default(100);
+fn fill_creates_all_false_column() {
+    let col = Column::<bool>::fill(100, false);
     assert_eq!(col.len(), 100);
-    assert!(col.is_default());
     for i in 0..100 {
         assert_eq!(col.get(i), Some(false));
     }
 }
 
 #[test]
-fn init_default_bool_zero_length() {
-    let col = Column::<bool>::init_default(0);
+fn fill_bool_zero_length() {
+    let col = Column::<bool>::fill(0, false);
     assert_eq!(col.len(), 0);
-    assert!(col.is_default());
     assert!(col.is_empty());
 }
 
 #[test]
-fn is_default_false_for_mixed_bool() {
-    let col = Column::<bool>::from_values(vec![false, false, true, false]);
-    assert!(!col.is_default());
-}
-
-#[test]
-fn is_default_true_for_manual_all_false() {
+fn save_to_unless_skips_all_false() {
     let col = Column::<bool>::from_values(vec![false, false, false, false]);
-    assert!(col.is_default());
+    let mut out = vec![];
+    assert!(col.save_to_unless(&mut out, false).is_empty());
 }
 
 #[test]
-fn is_default_false_for_all_true() {
+fn save_to_unless_writes_mixed_bool() {
+    let col = Column::<bool>::from_values(vec![false, false, true, false]);
+    let mut out = vec![];
+    assert!(!col.save_to_unless(&mut out, false).is_empty());
+}
+
+#[test]
+fn save_to_unless_skips_all_true() {
     let col = Column::<bool>::from_values(vec![true, true, true]);
-    assert!(!col.is_default());
+    let mut out = vec![];
+    assert!(col.save_to_unless(&mut out, true).is_empty());
+    assert!(!col.save_to_unless(&mut out, false).is_empty());
 }
 
 #[test]
-fn init_default_bool_roundtrips_through_save_load() {
-    let col = Column::<bool>::init_default(1000);
+fn fill_bool_roundtrips_through_save_load() {
+    let col = Column::<bool>::fill(1000, false);
     let bytes = col.save();
     let loaded = Column::<bool>::load(&bytes).unwrap();
     assert_eq!(loaded.len(), 1000);
-    assert!(loaded.is_default());
 }
 
 #[test]
-fn is_default_after_insert_true() {
-    let mut col = Column::<bool>::init_default(10);
-    assert!(col.is_default());
+fn save_to_unless_bool_after_insert() {
+    let mut col = Column::<bool>::fill(10, false);
+    let mut out = vec![];
+    assert!(col.save_to_unless(&mut out, false).is_empty());
     col.insert(5, true);
-    assert!(!col.is_default());
+    assert!(!col.save_to_unless(&mut out, false).is_empty());
 }
 
 // ── Proptest ──────────────────────────────────────────────────────────────────
@@ -1710,25 +1706,20 @@ fn nth_sequential_calls() {
 // ── PrefixIter ↔ v0 cross-validation ────────────────────────────────────────
 
 /// Build both v0 and v1 columns from the same u64 data.
-fn build_both(
-    values: &[u64],
-) -> (
-    crate::ColumnData<crate::UIntCursor>,
-    crate::v1::PrefixColumn<u64>,
-) {
+fn build_both(values: &[u64]) -> (crate::ColumnData<crate::UIntCursor>, PrefixColumn<u64>) {
     let v0: crate::ColumnData<crate::UIntCursor> = values.iter().copied().collect();
-    let v1 = crate::v1::PrefixColumn::<u64>::from_values(values.to_vec());
+    let v1 = PrefixColumn::<u64>::from_values(values.to_vec());
     (v0, v1)
 }
 
 #[test]
 fn prefix_iter_range_matches_inner_iter_range() {
     let values: Vec<u64> = (1..=20).collect();
-    let col = crate::v1::PrefixColumn::<u64>::from_values(values);
+    let col = PrefixColumn::<u64>::from_values(values);
 
     for start in 0..20 {
         for end in start..=20 {
-            let inner_vals: Vec<u64> = col.inner().iter_range(start..end).collect();
+            let inner_vals: Vec<u64> = col.values().iter_range(start..end).collect();
             let prefix_vals: Vec<u64> = col.iter_range(start..end).map(|(_, v)| v).collect();
             assert_eq!(
                 inner_vals, prefix_vals,
@@ -1821,6 +1812,268 @@ fn prefix_iter_nth_matches_v0() {
         let v0_acc_through = v0_item.acc.as_u64() as u128 + v0_val as u128;
         assert_eq!(v0_acc_through, v1_total, "nth({skip}) prefix mismatch");
     }
+}
+
+/// Test next_run across a slab boundary where the next slab starts with a
+/// different value.  The cross-slab merge in Iter::next_run peeks the first
+/// run of the next slab.  If it doesn't match, the decoder must be reset so
+/// subsequent next()/next_run() calls read the correct data.
+#[test]
+fn next_run_cross_slab_mismatch_resets_decoder() {
+    // Build a multi-slab column: slab 1 ends with 5s, slab 2 starts with 7s.
+    // Use small max_segments to force multiple slabs.
+    let mut vals: Vec<u64> = vec![5; 10];
+    vals.extend(vec![7; 10]);
+    vals.extend(vec![5; 10]);
+    let col = Column::<u64>::from_values_with_max_segments(vals.clone(), 2);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+
+    // Iterate using next_run and collect values, then compare with next().
+    let run_vals: Vec<u64> = {
+        let mut iter = col.iter();
+        let mut result = Vec::new();
+        while let Some(run) = iter.next_run() {
+            for _ in 0..run.count {
+                result.push(run.value);
+            }
+        }
+        result
+    };
+    assert_eq!(run_vals, vals, "next_run should produce same values as direct iteration");
+
+    // Also verify by mixing next() and next_run() calls.
+    let mut iter = col.iter();
+    // Consume first few with next()
+    for (i, val) in vals[..8].iter().enumerate() {
+        assert_eq!(iter.next(), Some(*val), "next() at {}", i);
+    }
+    // Now next_run() should get the rest of the 5s run (2 items),
+    // NOT merge into the 7s from the next slab.
+    let run = iter.next_run().unwrap();
+    assert_eq!(run.value, 5);
+    assert_eq!(run.count, 2, "should get remaining 2 fives, not merge across slab");
+
+    // The next call should yield 7s from the second slab.
+    let next_val = iter.next().unwrap();
+    assert_eq!(next_val, 7, "after consuming 5s run, next item should be 7");
+
+    // Verify remaining iteration is correct.
+    // We consumed 8 via next(), 2 via next_run(), 1 via next(). Items 0..11 gone.
+    let remaining: Vec<u64> = iter.collect();
+    assert_eq!(remaining, vals[11..], "remaining values after mixed iteration");
+}
+
+// ── PrefixIter::nth branch coverage ──────────────────────────────────────────
+
+/// Helper: build a multi-slab PrefixColumn<u64> and collect all (prefix, value)
+/// via next() as the ground truth.
+fn prefix_ground_truth(vals: &[u64], max_seg: usize) -> (PrefixColumn<u64>, Vec<(u128, u64)>) {
+    let inner = Column::<u64>::from_values_with_max_segments(vals.to_vec(), max_seg);
+    let col = PrefixColumn::from_column(inner);
+    let all: Vec<_> = col.iter().collect();
+    assert_eq!(all.len(), vals.len());
+    (col, all)
+}
+
+#[allow(clippy::iter_nth_zero)]
+/// nth: branch 1 — n >= items_left → returns None, exhausts iterator.
+#[test]
+fn prefix_nth_past_end() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+    let mut iter = col.iter();
+    assert!(iter.nth(3).is_none(), "nth(3) on 3-item column");
+    assert_eq!(iter.items_left(), 0);
+    assert!(iter.next().is_none(), "exhausted after nth past end");
+
+    // Also: nth(0) on empty range
+    let mut iter = col.iter_range(5..5);
+    assert!(iter.nth(0).is_none());
+}
+
+#[allow(clippy::iter_nth_zero)]
+/// nth: branch 2 — n < slab_remaining → fast path within current slab.
+#[test]
+fn prefix_nth_fast_path_within_slab() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let all: Vec<_> = col.iter().collect();
+
+    // nth(0) == next()
+    let mut iter = col.iter();
+    assert_eq!(iter.nth(0).unwrap(), all[0]);
+    assert_eq!(iter.next().unwrap(), all[1]);
+
+    // nth(2) skips 2 items
+    let mut iter = col.iter();
+    assert_eq!(iter.nth(2).unwrap(), all[2]);
+    assert_eq!(iter.next().unwrap(), all[3]);
+
+    // nth to last item
+    let mut iter = col.iter();
+    assert_eq!(iter.nth(4).unwrap(), all[4]);
+    assert!(iter.next().is_none());
+}
+
+/// nth: branch 2 — fast path after partial consumption (next then nth).
+#[test]
+fn prefix_nth_fast_path_after_next() {
+    let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+    let all: Vec<_> = col.iter().collect();
+
+    let mut iter = col.iter();
+    assert_eq!(iter.next().unwrap(), all[0]);
+    assert_eq!(iter.nth(1).unwrap(), all[2]); // skip 1, land on [2]
+    assert_eq!(iter.next().unwrap(), all[3]);
+}
+
+/// nth: branch 3 — n >= slab_remaining → BIT traversal across slabs.
+#[test]
+fn prefix_nth_bit_traversal() {
+    let vals: Vec<u64> = (1..=30).collect();
+    let (col, all) = prefix_ground_truth(&vals, 2);
+    assert!(col.values().slab_count() > 1, "need multi-slab");
+
+    // nth that crosses slab boundary
+    let mut iter = col.iter();
+    let mid = all.len() / 2;
+    assert_eq!(iter.nth(mid).unwrap(), all[mid]);
+    assert_eq!(iter.next().unwrap(), all[mid + 1]);
+
+    // nth to last item via BIT
+    let mut iter = col.iter();
+    let last = all.len() - 1;
+    assert_eq!(iter.nth(last).unwrap(), all[last]);
+    assert!(iter.next().is_none());
+}
+
+/// nth: branch 3a — BIT traversal finds si >= slabs.len() → None.
+#[test]
+fn prefix_nth_bit_out_of_bounds() {
+    let vals: Vec<u64> = (1..=20).collect();
+    let (col, _all) = prefix_ground_truth(&vals, 2);
+
+    // Restrict range then try nth past it
+    let mut iter = col.iter_range(0..10);
+    assert!(iter.nth(10).is_none());
+    assert_eq!(iter.items_left(), 0);
+}
+
+/// nth: verify prefix values match next()-based ground truth for every position.
+#[test]
+fn prefix_nth_exhaustive_vs_next() {
+    let vals: Vec<u64> = vec![3, 0, 1, 0, 2, 0, 1, 5, 0, 0, 4, 0, 1, 2, 3];
+    let (col, all) = prefix_ground_truth(&vals, 3);
+
+    for (i, expected) in all.iter().enumerate() {
+        let result = col.iter().nth(i);
+        assert_eq!(result.unwrap(), *expected, "nth({}) mismatch", i);
+    }
+    assert!(col.iter().nth(vals.len()).is_none());
+}
+
+// ── PrefixIter::shift_next branch coverage ───────────────────────────────────
+
+/// shift_next: branch 1 — empty range → None.
+#[test]
+fn prefix_shift_next_empty_range() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+    let mut iter = col.iter();
+    assert!(iter.shift_next(2..2).is_none());
+    // Iterator state unchanged — can still iterate
+    assert_eq!(iter.next().unwrap().1, 1);
+}
+
+/// shift_next: branch 2 — normal case, from start.
+#[test]
+fn prefix_shift_next_from_start() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let all: Vec<_> = col.iter().collect();
+
+    let mut iter = col.iter();
+    let first = iter.shift_next(0..5).unwrap();
+    assert_eq!(first, all[0]);
+    assert_eq!(iter.items_left(), 4);
+}
+
+/// shift_next: branch 2 — skip forward then shift_next.
+#[test]
+fn prefix_shift_next_skip_forward() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let all: Vec<_> = col.iter().collect();
+
+    let mut iter = col.iter();
+    let _ = iter.next(); // pos=1
+    let shifted = iter.shift_next(3..5).unwrap();
+    assert_eq!(shifted, all[3], "shift_next(3..5) after consuming 1");
+    assert_eq!(iter.items_left(), 1);
+    assert_eq!(iter.next().unwrap(), all[4]);
+    assert!(iter.next().is_none());
+}
+
+/// shift_next: consecutive shift_next calls.
+#[test]
+fn prefix_shift_next_consecutive() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    let all: Vec<_> = col.iter().collect();
+
+    let mut iter = col.iter();
+    assert_eq!(iter.shift_next(0..8).unwrap(), all[0]);
+    assert_eq!(iter.shift_next(3..8).unwrap(), all[3]);
+    assert_eq!(iter.shift_next(6..8).unwrap(), all[6]);
+    assert_eq!(iter.next().unwrap(), all[7]);
+    assert!(iter.next().is_none());
+}
+
+/// shift_next: branch 2a — range is valid but column is empty at that range.
+#[test]
+fn prefix_shift_next_beyond_data() {
+    let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+    let mut iter = col.iter();
+    // shift_next to a range that starts at the end of the column
+    let result = iter.shift_next(3..5);
+    assert!(result.is_none(), "no data at position 3");
+}
+
+#[allow(clippy::iter_nth_zero)]
+/// shift_next then nth — the original automerge bug scenario.
+#[test]
+fn prefix_shift_next_then_nth() {
+    let col = PrefixColumn::<bool>::from_values(vec![true, false, true, false, true, false]);
+    let all: Vec<_> = col.iter().collect();
+
+    // shift_next then nth(0)
+    let mut iter = col.iter();
+    assert_eq!(iter.shift_next(0..6).unwrap(), all[0]);
+    assert_eq!(iter.nth(0).unwrap(), all[1]);
+
+    // shift_next to middle, then nth(0)
+    let mut iter = col.iter();
+    let _ = iter.next();
+    assert_eq!(iter.shift_next(2..6).unwrap(), all[2]);
+    assert_eq!(iter.nth(0).unwrap(), all[3]);
+
+    // shift_next then nth(1) — skip one
+    let mut iter = col.iter();
+    assert_eq!(iter.shift_next(0..6).unwrap(), all[0]);
+    assert_eq!(iter.nth(1).unwrap(), all[2]);
+}
+
+/// shift_next on multi-slab column — exercises BIT-based prefix recomputation.
+#[test]
+fn prefix_shift_next_multi_slab() {
+    let vals: Vec<u64> = (1..=30).collect();
+    let (col, all) = prefix_ground_truth(&vals, 2);
+    assert!(col.values().slab_count() > 1);
+
+    let mut iter = col.iter();
+    // Jump to middle of a later slab
+    let mid = 15;
+    let shifted = iter.shift_next(mid..30).unwrap();
+    assert_eq!(shifted, all[mid], "shift_next to mid of multi-slab");
+
+    // Verify remaining iteration
+    let remaining: Vec<_> = iter.collect();
+    let expected: Vec<_> = all[mid + 1..].to_vec();
+    assert_eq!(remaining, expected);
 }
 
 #[test]
@@ -1923,10 +2176,10 @@ proptest! {
     #[test]
     fn prefix_iter_proptest(values in prop::collection::vec(0..100u64, 1..200)) {
         let v0: crate::ColumnData<crate::UIntCursor> = values.iter().copied().collect();
-        let v1 = crate::v1::PrefixColumn::<u64>::from_values(values.clone());
+        let v1 = PrefixColumn::<u64>::from_values(values.clone());
 
         // 1. iter_range values match inner
-        let inner_vals: Vec<u64> = v1.inner().iter().collect();
+        let inner_vals: Vec<u64> = v1.values().iter().collect();
         let prefix_vals: Vec<u64> = v1.iter().map(|(_, v)| v).collect();
         prop_assert_eq!(&inner_vals, &prefix_vals);
         prop_assert_eq!(&inner_vals, &values);
@@ -1974,7 +2227,7 @@ proptest! {
     /// Cross-validate advance_total on random data using prefix sums as ground truth.
     #[test]
     fn advance_total_proptest(values in prop::collection::vec(0..10u64, 1..200)) {
-        let v1 = crate::v1::PrefixColumn::<u64>::from_values(values.clone());
+        let v1 = PrefixColumn::<u64>::from_values(values.clone());
         let total: u128 = values.iter().map(|&v| v as u128).sum();
 
         // Build prefix sums for verification
@@ -2009,17 +2262,25 @@ proptest! {
 // ── LoadOpts tests ─────────────────────────────────────────────────────────
 
 #[test]
-fn load_with_empty_data_and_length_gives_default_bool() {
-    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5)).unwrap();
+fn load_with_empty_data_and_fill_gives_filled_bool() {
+    let col =
+        Column::<bool>::load_with(&[], LoadOpts::new().with_length(5).with_fill(false)).unwrap();
     assert_eq!(col.len(), 5);
     assert!(col.iter().all(|v| !v));
 }
 
 #[test]
-fn load_with_empty_data_and_length_gives_default_nullable() {
-    let col = Column::<Option<u64>>::load_with(&[], LoadOpts::new().with_length(3)).unwrap();
+fn load_with_empty_data_and_fill_gives_filled_nullable() {
+    let col = Column::<Option<u64>>::load_with(&[], LoadOpts::new().with_length(3).with_fill(None))
+        .unwrap();
     assert_eq!(col.len(), 3);
     assert!(col.iter().all(|v| v.is_none()));
+}
+
+#[test]
+fn load_with_empty_data_length_without_fill_errors() {
+    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5));
+    assert!(matches!(err, Err(crate::PackError::InvalidLength(0, 5))));
 }
 
 #[test]
@@ -2100,10 +2361,11 @@ fn load_with_opts_is_copy() {
 }
 
 #[test]
-fn prefix_column_load_with_empty_gives_default() {
-    let col = PrefixColumn::<bool>::load_with(&[], LoadOpts::new().with_length(4)).unwrap();
+fn prefix_column_load_with_empty_and_fill() {
+    let col = PrefixColumn::<bool>::load_with(&[], LoadOpts::new().with_length(4).with_fill(false))
+        .unwrap();
     assert_eq!(col.len(), 4);
-    assert!(col.value_iter().all(|v| !v));
+    assert!(col.values().iter().all(|v| !v));
 }
 
 #[test]
@@ -2134,8 +2396,10 @@ fn delta_column_load_with_roundtrip() {
 }
 
 #[test]
-fn delta_column_load_with_nullable_empty_default() {
-    let col = DeltaColumn::<Option<u64>>::load_with(&[], LoadOpts::new().with_length(5)).unwrap();
+fn delta_column_load_with_nullable_empty_fill() {
+    let col =
+        DeltaColumn::<Option<u64>>::load_with(&[], LoadOpts::new().with_length(5).with_fill(None))
+            .unwrap();
     assert_eq!(col.len(), 5);
     for i in 0..5 {
         assert_eq!(col.get(i), Some(None));
@@ -2823,20 +3087,16 @@ fn string_splice_variable_length_values() {
 
 #[test]
 fn merge_slab_literal_to_same_value_start() {
-    use super::encoding::ColumnEncoding;
-    use super::rle::RleEncoding;
+    use super::encoding::{ColumnEncoding, EncoderApi};
 
-    // Slab A ends with literal run [..., 5]
-    // Slab B starts with repeat [5, 5, 5]
-    // Merge should combine the boundary values.
     let a_vals: &[u64] = &[1, 2, 3, 4, 5];
     let b_vals: &[u64] = &[5, 5, 5, 6, 7];
-    let mut a = RleEncoding::<u64>::encode(a_vals.iter().copied());
-    let b = RleEncoding::<u64>::encode(b_vals.iter().copied());
+    let mut a = super::Encoder::<u64>::encode_slab(a_vals.iter().copied());
+    let b = super::Encoder::<u64>::encode_slab(b_vals.iter().copied());
     validate_rle_column_slab::<u64>(&a);
     validate_rle_column_slab::<u64>(&b);
 
-    RleEncoding::<u64>::merge_slabs(&mut a, b);
+    super::rle::RleEncoding::<u64>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<u64>(&a);
 
     let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
@@ -2845,17 +3105,14 @@ fn merge_slab_literal_to_same_value_start() {
 
 #[test]
 fn merge_slab_repeat_to_literal_same_value() {
-    use super::encoding::ColumnEncoding;
-    use super::rle::RleEncoding;
+    use super::encoding::{ColumnEncoding, EncoderApi};
 
-    // Slab A ends with repeat [3, 3, 3]
-    // Slab B starts with literal [3, 4, 5]
     let a_vals: &[u64] = &[1, 2, 3, 3, 3];
     let b_vals: &[u64] = &[3, 4, 5];
-    let mut a = RleEncoding::<u64>::encode(a_vals.iter().copied());
-    let b = RleEncoding::<u64>::encode(b_vals.iter().copied());
+    let mut a = super::Encoder::<u64>::encode_slab(a_vals.iter().copied());
+    let b = super::Encoder::<u64>::encode_slab(b_vals.iter().copied());
 
-    RleEncoding::<u64>::merge_slabs(&mut a, b);
+    super::rle::RleEncoding::<u64>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<u64>(&a);
 
     let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
@@ -2864,18 +3121,14 @@ fn merge_slab_repeat_to_literal_same_value() {
 
 #[test]
 fn merge_slab_literal_to_literal_same_value() {
-    use super::encoding::ColumnEncoding;
-    use super::rle::RleEncoding;
+    use super::encoding::{ColumnEncoding, EncoderApi};
 
-    // Slab A ends with literal [..., 5]
-    // Slab B starts with literal [5, ...]
-    // The 5s at the boundary should merge into a repeat.
     let a_vals: &[u64] = &[1, 2, 5];
     let b_vals: &[u64] = &[5, 3, 4];
-    let mut a = RleEncoding::<u64>::encode(a_vals.iter().copied());
-    let b = RleEncoding::<u64>::encode(b_vals.iter().copied());
+    let mut a = super::Encoder::<u64>::encode_slab(a_vals.iter().copied());
+    let b = super::Encoder::<u64>::encode_slab(b_vals.iter().copied());
 
-    RleEncoding::<u64>::merge_slabs(&mut a, b);
+    super::rle::RleEncoding::<u64>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<u64>(&a);
 
     let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
@@ -2884,15 +3137,12 @@ fn merge_slab_literal_to_literal_same_value() {
 
 #[test]
 fn merge_slab_string_literal_boundary() {
-    use super::encoding::ColumnEncoding;
-    use super::rle::RleEncoding;
+    use super::encoding::{ColumnEncoding, EncoderApi};
 
-    let a_vals: Vec<String> = vec!["x".into(), "y".into(), "hello".into()];
-    let b_vals: Vec<String> = vec!["hello".into(), "hello".into(), "world".into()];
-    let mut a = RleEncoding::<String>::encode(a_vals.into_iter());
-    let b = RleEncoding::<String>::encode(b_vals.into_iter());
+    let mut a = super::Encoder::<String>::encode_slab(["x", "y", "hello"]);
+    let b = super::Encoder::<String>::encode_slab(["hello", "hello", "world"]);
 
-    RleEncoding::<String>::merge_slabs(&mut a, b);
+    super::rle::RleEncoding::<String>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<String>(&a);
 
     let merged: Vec<&str> = super::rle::RleDecoder::<String>::new(&a.data).collect();
