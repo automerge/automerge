@@ -19,8 +19,8 @@ pub use column::{Column, Iter};
 pub use delta::{DeltaColumn, DeltaIter, DeltaValue};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
-/// For RLE types (u64, i64, String, etc.) this is [`RleEncoder`].
-/// For bool this is [`BoolEncoder`].
+/// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.
+/// For bool this resolves to `BoolEncoder`.
 pub type Encoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Encoder<'a>;
 pub use encoding::ColumnEncoding;
 pub use encoding::RunDecoder;
