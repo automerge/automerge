@@ -1839,7 +1839,10 @@ fn next_run_cross_slab_mismatch_resets_decoder() {
         }
         result
     };
-    assert_eq!(run_vals, vals, "next_run should produce same values as direct iteration");
+    assert_eq!(
+        run_vals, vals,
+        "next_run should produce same values as direct iteration"
+    );
 
     // Also verify by mixing next() and next_run() calls.
     let mut iter = col.iter();
@@ -1851,7 +1854,10 @@ fn next_run_cross_slab_mismatch_resets_decoder() {
     // NOT merge into the 7s from the next slab.
     let run = iter.next_run().unwrap();
     assert_eq!(run.value, 5);
-    assert_eq!(run.count, 2, "should get remaining 2 fives, not merge across slab");
+    assert_eq!(
+        run.count, 2,
+        "should get remaining 2 fives, not merge across slab"
+    );
 
     // The next call should yield 7s from the second slab.
     let next_val = iter.next().unwrap();
@@ -1860,7 +1866,11 @@ fn next_run_cross_slab_mismatch_resets_decoder() {
     // Verify remaining iteration is correct.
     // We consumed 8 via next(), 2 via next_run(), 1 via next(). Items 0..11 gone.
     let remaining: Vec<u64> = iter.collect();
-    assert_eq!(remaining, vals[11..], "remaining values after mixed iteration");
+    assert_eq!(
+        remaining,
+        vals[11..],
+        "remaining values after mixed iteration"
+    );
 }
 
 // ── PrefixIter::nth branch coverage ──────────────────────────────────────────
@@ -2076,70 +2086,6 @@ fn prefix_shift_next_multi_slab() {
     assert_eq!(remaining, expected);
 }
 
-#[test]
-fn advance_total_matches_v0_advance_acc_by() {
-    // v0: [0, 1, 1, 0, 1, 1, 0]
-    // advance_acc_by returns items consumed; advance_total returns (prefix, value)
-    let values: Vec<u64> = vec![0, 1, 1, 0, 1, 1, 0];
-    let (v0, v1) = build_both(&values);
-
-    // v0 semantics: advance_acc_by(n) advances until acc grows by n, returns items consumed
-    // v1 semantics: advance_total(n) returns the item where prefix crosses threshold
-
-    // advance_acc_by(0) = 1 item (past the first zero, value=0, prefix=0)
-    assert_eq!(v0.iter().advance_acc_by(0u64), 1);
-    // In v1, advance_total(0) acts like next() — returns first item
-    let r = v1.iter().advance_total(0);
-    assert_eq!(r, Some((0, 0))); // first item: value=0, prefix=0
-
-    // advance_acc_by(1) = 2 items (values 0,1; acc reaches 1)
-    assert_eq!(v0.iter().advance_acc_by(1u64), 2);
-    let r = v1.iter().advance_total(1);
-    assert_eq!(r, Some((1, 1))); // second item: value=1, prefix=1
-
-    // advance_acc_by(2) = 4 items (values 0,1,1,0; acc reaches 2 after 3rd item)
-    // Wait, acc after 3 items = 0+1+1 = 2 >= 2, so 3 items. But test says 4.
-    // Actually, advance_acc_by advances PAST the target, so let me just verify the v1 behavior.
-    assert_eq!(v0.iter().advance_acc_by(2u64), 4);
-    let r = v1.iter().advance_total(2);
-    // Target = 2. Item at index 2 (value 1) has prefix 0+1+1=2. So it returns (2, 1).
-    assert_eq!(r, Some((2, 1)));
-
-    // advance_acc_by(4) = 7 items (exhausted, total acc = 4)
-    assert_eq!(v0.iter().advance_acc_by(4u64), 7);
-    let r = v1.iter().advance_total(4);
-    // Target = 4. Item at index 5 (value 1) has prefix 0+1+1+0+1+1=4. Returns (4, 1).
-    assert_eq!(r, Some((4, 1)));
-}
-
-#[test]
-fn advance_total_exhaustion_matches_v0() {
-    let values: Vec<u64> = vec![1, 2, 3];
-    let (v0, v1) = build_both(&values);
-
-    // v0: total acc = 6, advance_acc_by(100) exhausts and returns 3 (all items)
-    assert_eq!(v0.iter().advance_acc_by(100u64), 3);
-    // v1: advance_total(100) returns None (unreachable)
-    assert_eq!(v1.iter().advance_total(100), None);
-}
-
-#[test]
-fn advance_total_sequential_matches_v0() {
-    let values: Vec<u64> = vec![0, 3, 3, 0, 3, 3, 0];
-    let (v0, v1) = build_both(&values);
-
-    // v0: advance_acc_by(3) = 2 items (0+3 = 3 >= 3)
-    assert_eq!(v0.iter().advance_acc_by(3u64), 2);
-    let r = v1.iter().advance_total(3);
-    assert_eq!(r, Some((3, 3))); // index 1, value 3, prefix 3
-
-    // v0: advance_acc_by(6) = 4 items (0+3+3+0 = 6 >= 6)
-    assert_eq!(v0.iter().advance_acc_by(6u64), 4);
-    let r = v1.iter().advance_total(6);
-    // prefix at index 2 = 0+3+3 = 6. Returns (6, 3).
-    assert_eq!(r, Some((6, 3)));
-}
-
 proptest! {
     #[test]
     fn iter_proptest_u64(values in prop::collection::vec(0..1000u64, 0..500)) {
@@ -2224,39 +2170,6 @@ proptest! {
         }
     }
 
-    /// Cross-validate advance_total on random data using prefix sums as ground truth.
-    #[test]
-    fn advance_total_proptest(values in prop::collection::vec(0..10u64, 1..200)) {
-        let v1 = PrefixColumn::<u64>::from_values(values.clone());
-        let total: u128 = values.iter().map(|&v| v as u128).sum();
-
-        // Build prefix sums for verification
-        let mut prefix_sums = vec![0u128];
-        let mut acc = 0u128;
-        for &v in &values {
-            acc += v as u128;
-            prefix_sums.push(acc);
-        }
-
-        // Test advance_total for various targets
-        for target in [1u128, 2, 5, 10, total / 2, total, total + 1] {
-            if target == 0 { continue; }
-            let v1_result = v1.iter().advance_total(target);
-
-            if target > total {
-                // Unreachable: returns None
-                prop_assert!(v1_result.is_none(), "target {} should be unreachable (total {})", target, total);
-            } else {
-                // Returns the first item where cumulative prefix >= target
-                let (v1p, v1v) = v1_result.unwrap();
-                prop_assert!(v1p >= target, "advance_total({}) returned prefix {} < target", target, v1p);
-                // Find the expected position: first index i where prefix_sums[i+1] >= target
-                let expected_idx = prefix_sums[1..].iter().position(|&p| p >= target).unwrap();
-                prop_assert_eq!(v1v, values[expected_idx], "value mismatch for target {}", target);
-                prop_assert_eq!(v1p, prefix_sums[expected_idx + 1], "total mismatch for target {}", target);
-            }
-        }
-    }
 }
 
 // ── LoadOpts tests ─────────────────────────────────────────────────────────

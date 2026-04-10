@@ -20,7 +20,7 @@ use std::ops::Range;
 
 // ── RLE Encoder ─────────────────────────────────────────────────────────────
 
-/// Streaming encoder for RLE-encoded types (u64, i64, String, Option<u64>, etc.).
+/// Streaming encoder for RLE-encoded types (`u64`, `i64`, `String`, `Option<u64>`, etc.).
 ///
 /// Accepts values via [`append`](RleEncoder::append) and
 /// [`append_n`](RleEncoder::append_n), then produces the encoded bytes
