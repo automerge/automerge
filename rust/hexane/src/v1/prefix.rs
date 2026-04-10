@@ -11,7 +11,7 @@ use super::ColumnValueRef;
 /// Marker trait for unsigned prefix types.
 ///
 /// `get_index_for_prefix`, `get_index_for_total`, `find_prefix_in_slab`,
-/// and `advance_total` rely on monotonically increasing prefix sums.
+/// and `advance_prefix` rely on monotonically increasing prefix sums.
 /// Signed prefix types (e.g. `i128`) can decrease, making these operations
 /// incorrect. This trait gates those methods at compile time.
 pub trait UnsignedPrefix {}
@@ -374,6 +374,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
     /// `get_prefix(0)` returns `Default::default()` (zero).
     /// `get_prefix(len)` returns the sum of all values.
     pub fn get_prefix(&self, index: usize) -> T::Prefix {
+        // TODO : optimize with slab_prefix_remaining to avoid a `find_slab_bit` when possible
         if index == 0 || self.col.is_empty() {
             return T::Prefix::default();
         }
@@ -394,6 +395,42 @@ impl<T: PrefixValue> PrefixColumn<T> {
         };
         let partial = T::partial_sum(&self.col.slabs[si], items_in_slab);
         prefix_before + partial
+    }
+
+    /// Compute the prefix sum delta across `range.start..range.end`.
+    ///
+    /// Equivalent to `get_prefix(range.end) - get_prefix(range.start)`, but
+    /// when both endpoints fall in the same slab the slab is decoded only once.
+    pub fn prefix_delta(&self, range: std::ops::Range<usize>) -> T::Prefix {
+        if range.start >= range.end || self.col.is_empty() {
+            return T::Prefix::default();
+        }
+        if range.start == 0 {
+            return self.get_prefix(range.end);
+        }
+
+        let end = range.end.min(self.col.len());
+        let start = range.start.min(end);
+        if start == end {
+            return T::Prefix::default();
+        }
+
+        let (si_start, off_start, prefix_before_start) = self.find_slab_with_prefix(start - 1);
+        let (si_end, off_end, prefix_before_end) = self.find_slab_with_prefix(end - 1);
+
+        if si_start == si_end {
+            // Same slab — decode once, compute difference of partial sums.
+            let slab = &self.col.slabs[si_start];
+            let sum_end = T::partial_sum(slab, off_end + 1);
+            let sum_start = T::partial_sum(slab, off_start + 1);
+            sum_end - sum_start
+        } else {
+            // Different slabs — fall back to two independent queries.
+            let p_start =
+                prefix_before_start + T::partial_sum(&self.col.slabs[si_start], off_start + 1);
+            let p_end = prefix_before_end + T::partial_sum(&self.col.slabs[si_end], off_end + 1);
+            p_end - p_start
+        }
     }
 
     // ── Internal BIT queries ─────────────────────────────────────────────
@@ -474,6 +511,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
             col: Some(self),
             inner: self.col.iter(),
             total: T::Prefix::default(),
+            base: T::Prefix::default(),
         }
     }
 
@@ -489,12 +527,32 @@ impl<T: PrefixValue> PrefixColumn<T> {
             col: Some(self),
             inner: self.col.iter_range(start..end),
             total: prefix_before,
+            base: prefix_before,
         }
     }
 
     /// Collect all values into a Vec (without prefix sums).
     pub fn to_vec(&self) -> Vec<T::Get<'_>> {
         self.col.to_vec()
+    }
+}
+
+impl<T: PrefixValue> PrefixColumn<T>
+where
+    T::Prefix: UnsignedPrefix,
+{
+    /// Seek forward from `start`, advancing past `n` prefix units.
+    ///
+    /// Shorthand for `self.iter_range(start..).advance_prefix(n)`.
+    pub fn seek(&self, start: usize, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+        self.iter_range(start..self.len()).advance_prefix(n)
+    }
+
+    /// Get the value and prefix delta at `pos` relative to `start`.
+    ///
+    /// Shorthand for `self.iter_range(start..).advance_to(pos)`.
+    pub fn get_delta(&self, start: usize, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+        self.iter_range(start..self.len()).advance_to(pos)
     }
 }
 
@@ -659,6 +717,25 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 }
 
+// ── PrefixSeek ──────────────────────────────────────────────────────────────
+
+/// Result of a seek operation on a [`PrefixIter`].
+///
+/// Returned by [`PrefixIter::advance_prefix`] and [`PrefixIter::advance_to`].
+/// After the call the iterator is positioned at `pos + 1`, ready to yield
+/// subsequent items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrefixSeek<P, V> {
+    /// Position of the item.
+    pub pos: usize,
+    /// Inclusive prefix sum through this item (absolute).
+    pub prefix: P,
+    /// Prefix sum consumed since the iterator's range start.
+    pub prefix_delta: P,
+    /// The value at this position.
+    pub value: V,
+}
+
 // ── PrefixIter ───────────────────────────────────────────────────────────────
 
 /// Forward iterator over a [`PrefixColumn`] that yields `(prefix_sum, value)`.
@@ -668,8 +745,10 @@ impl<T: PrefixValue> PrefixColumn<T> {
 /// - `next()` is O(1): accumulates the total from the yielded value.
 /// - `nth(n)` is O(log S + runs): skips slabs via the inner iterator, then
 ///   recomputes the total from the Fenwick tree.
-/// - [`advance_total`](PrefixIter::advance_total) advances by prefix-sum
+/// - [`advance_prefix`](PrefixIter::advance_prefix) advances by prefix-sum
 ///   value instead of item count, using O(log S) BIT binary lifting.
+/// - [`advance_to`](PrefixIter::advance_to) jumps to a specific position
+///   and returns the value and prefix delta.
 ///
 /// Each yielded item is `(total, value)` where `total` is the inclusive
 /// sum of all values through the current item (`0..=pos`).
@@ -677,6 +756,7 @@ pub struct PrefixIter<'a, T: PrefixValue> {
     col: Option<&'a PrefixColumn<T>>,
     inner: Iter<'a, T>,
     total: T::Prefix,
+    base: T::Prefix,
 }
 
 impl<T: PrefixValue> Default for PrefixIter<'_, T> {
@@ -685,6 +765,7 @@ impl<T: PrefixValue> Default for PrefixIter<'_, T> {
             col: None,
             inner: Iter::default(),
             total: T::Prefix::default(),
+            base: T::Prefix::default(),
         }
     }
 }
@@ -695,6 +776,7 @@ impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
             col: self.col,
             inner: self.inner.clone(),
             total: self.total,
+            base: self.base,
         }
     }
 }
@@ -851,7 +933,9 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
             pos,
         );
         // Reset the prefix total to the exclusive sum before range.start.
-        self.total = col.get_prefix(range.start);
+        let prefix_before = col.get_prefix(range.start);
+        self.total = prefix_before;
+        self.base = prefix_before;
         // Create a fresh inner iterator for the range.
         self.inner = col.values().iter_range(range.clone());
         // Consume the first item.
@@ -861,56 +945,82 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     }
 }
 
+impl<'a, T: PrefixValue> PrefixIter<'a, T> {
+    /// Advance the iterator to a specific position and return the item there.
+    ///
+    /// Returns a [`PrefixSeek`] with the value, absolute prefix, and the
+    /// prefix delta since the iterator's range start.  After this call the
+    /// iterator is positioned at `pos + 1`, ready for further iteration.
+    ///
+    /// Returns `None` if `pos` is before the current position or past the end.
+    pub fn advance_to(&mut self, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
+        if pos < self.inner.pos || self.inner.items_left == 0 {
+            return None;
+        }
+        let skip = pos - self.inner.pos;
+        if skip >= self.inner.items_left {
+            return None;
+        }
+        let (total, value) = if skip == 0 {
+            self.next()?
+        } else {
+            self.nth(skip)?
+        };
+        // total is inclusive (includes this item's value).
+        // prefix_delta is the exclusive sum from base to just before this item.
+        let exclusive = total - T::to_prefix(value);
+        Some(PrefixSeek {
+            pos,
+            prefix: total,
+            prefix_delta: exclusive - self.base,
+            value,
+        })
+    }
+}
+
 impl<'a, T: PrefixValue> PrefixIter<'a, T>
 where
     T::Prefix: UnsignedPrefix,
 {
-    /// Advance the iterator until the inclusive total has increased by at
-    /// least `val`, and return that item.
+    /// Advance the iterator past `n` prefix units and return the item landed on.
     ///
-    /// This is like `nth()` but counts in prefix-sum units instead of items.
-    /// Uses O(log S) BIT binary lifting to find the target slab, then
-    /// O(log S) BIT seek to position the iterator at the target.
+    /// Skips items whose cumulative value sums to `n` (from the current
+    /// position), then returns the next item.  If a single item's value
+    /// exceeds the remaining budget, that item is returned (not skipped).
+    ///
+    /// Returns a [`PrefixSeek`] with the value, absolute prefix, and the
+    /// prefix delta since the iterator's range start.  After this call the
+    /// iterator is positioned at the returned item's `pos + 1`.
     ///
     /// Returns `None` (and exhausts the iterator) if the remaining items
-    /// cannot produce enough sum to reach the target.
-    pub fn advance_total(&mut self, val: T::Prefix) -> Option<(T::Prefix, T::Get<'a>)> {
-        if val <= T::Prefix::default() {
-            return self.next();
-        }
-        let col = self.col.expect("advance_total on default PrefixIter");
-        let target = self.total + val;
-        let target_pos = col.get_index_for_prefix(target);
-        let pos = self.inner.pos;
+    /// cannot produce enough sum.
+    pub fn advance_prefix(&mut self, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
+        let col = self.col.expect("advance_prefix on default PrefixIter");
+        let target = self.total + n;
 
-        if target_pos <= pos {
-            return self.next();
-        }
+        // The +1 makes us advance PAST items summing to n:
+        // get_index_for_total(target) returns the item whose inclusive total
+        // first reaches target. Adding 1 shifts to the next item — the first
+        // one not consumed by the budget.  When a single item overshoots
+        // (its value > remaining budget), the +1 still lands on that item
+        // because no prior item reached target+1.
+        let one = T::Prefix::try_from(1).unwrap_or_default();
+        let seek_target = target + one;
+        let target_pos = col.get_index_for_total(seek_target);
 
-        // Check if target is reachable.
-        let total_len = col.len();
-        if target_pos >= total_len {
-            let col_total = col.get_prefix(total_len);
-            if col_total < target {
-                // Target unreachable — exhaust the iterator.
-                let remaining = self.inner.len();
-                let _ = self.inner.nth(remaining);
-                self.total = col_total;
-                return None;
+        if target_pos < self.inner.pos || target_pos >= self.inner.pos + self.inner.items_left {
+            // Target unreachable — exhaust the iterator.
+            let remaining = self.inner.len();
+            if remaining > 0 {
+                let _ = self.inner.nth(remaining - 1);
             }
+            self.total = col.get_prefix(self.inner.pos);
+            return None;
         }
 
-        // target_pos is 1-indexed (count of items consumed to reach target).
-        // The item at index target_pos-1 caused the crossover.
-        let item_idx = target_pos - 1;
-        let remaining_end = pos + self.inner.len();
-
-        // Use iter_range for O(log S) BIT seek.
-        self.inner = col.values().iter_range(item_idx..remaining_end);
-        let val = self.inner.next()?;
-        self.total = col.get_prefix(self.inner.pos);
-        Some((self.total, val))
+        self.advance_to(target_pos)
     }
+
 }
 
 // ── FromIterator ────────────────────────────────────────────────────────────
@@ -1227,126 +1337,234 @@ mod tests {
         assert_eq!(iter.len(), 0);
     }
 
-    // ── advance_total tests ────────────────────────────────────────────
+    // ── advance_to tests ─────────────────────────────────────────────
 
     #[test]
-    fn advance_total_basic() {
-        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
-        // Prefix sums: [0, 1, 3, 6, 10, 15]
-        let mut iter = col.iter();
-        // advance_total(6): find first item where cumulative >= 6
-        // Item at index 2 (value 3) has prefix 6
-        let result = iter.advance_total(6);
-        assert_eq!(result, Some((6, 3)));
-    }
-
-    #[test]
-    fn advance_total_mid_stream() {
+    fn advance_to_single_slab() {
         let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
         let mut iter = col.iter();
-        // Consume first item: prefix=1
-        assert_eq!(iter.next(), Some((1, 1)));
-        // advance_total(5): target = 1 + 5 = 6
-        // Item at index 2 (value 3) has prefix 6
-        let result = iter.advance_total(5);
-        assert_eq!(result, Some((6, 3)));
-        // Next should be index 3
+        let tx = iter.advance_to(2).unwrap();
+        assert_eq!(tx.pos, 2);
+        assert_eq!(tx.value, 3);
+        assert_eq!(tx.prefix, 6); // inclusive: 1+2+3
+        assert_eq!(tx.prefix_delta, 3); // exclusive before pos 2: 1+2
+        // iterator continues from pos 3
         assert_eq!(iter.next(), Some((10, 4)));
     }
 
     #[test]
-    fn advance_total_exact_match() {
-        let col = PrefixColumn::<u64>::from_values(vec![5, 5, 5, 5]);
+    fn advance_to_first_item() {
+        let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30]);
         let mut iter = col.iter();
-        // advance_total(10): target = 10
-        // prefix(0)=5, prefix(1)=10, so item at index 1 has prefix 10
-        let result = iter.advance_total(10);
-        assert_eq!(result, Some((10, 5)));
+        let tx = iter.advance_to(0).unwrap();
+        assert_eq!(tx.pos, 0);
+        assert_eq!(tx.value, 10);
+        assert_eq!(tx.prefix, 10);
+        assert_eq!(tx.prefix_delta, 0); // nothing before first item
     }
 
     #[test]
-    fn advance_total_unreachable() {
-        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
-        // Total prefix = 6
-        let mut iter = col.iter();
-        let result = iter.advance_total(100);
-        assert_eq!(result, None);
-        assert_eq!(iter.len(), 0); // exhausted
-    }
-
-    #[test]
-    fn advance_total_zero() {
+    fn advance_to_last_item() {
         let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
         let mut iter = col.iter();
-        // advance_total(0) should behave like next()
-        let result = iter.advance_total(0);
-        assert_eq!(result, Some((1, 1)));
-    }
-
-    #[test]
-    fn advance_total_with_zeros() {
-        let col = PrefixColumn::<u64>::from_values(vec![0, 0, 5, 0, 3]);
-        // Prefix: [0, 0, 0, 5, 5, 8]
-        let mut iter = col.iter();
-        // advance_total(3): target = 3
-        // Item at index 2 (value 5) has prefix 5 >= 3
-        let result = iter.advance_total(3);
-        assert_eq!(result, Some((5, 5)));
-        // Next = index 3
-        assert_eq!(iter.next(), Some((5, 0)));
-    }
-
-    #[test]
-    fn advance_total_bool() {
-        let col = PrefixColumn::<bool>::from_values(vec![false, false, true, false, true, true]);
-        // Prefix (count of trues): [0, 0, 0, 1, 1, 2, 3]
-        let mut iter = col.iter();
-        // advance_total(2): find first where true_count >= 2
-        // Index 4 (true) has prefix 2
-        let result = iter.advance_total(2);
-        assert_eq!(result, Some((2, true)));
-        // Next = index 5
-        assert_eq!(iter.next(), Some((3, true)));
-    }
-
-    #[test]
-    fn advance_total_multi_slab() {
-        let mut col = PrefixColumn::<u64>::with_max_segments(4);
-        for i in 0..20 {
-            col.insert(i, (i + 1) as u64);
-        }
-        assert!(col.slab_count() > 1);
-        let mut iter = col.iter();
-        // advance_total(55): sum(1..=10) = 55
-        // Item at index 9 (value 10) has prefix 55
-        let result = iter.advance_total(55);
-        assert_eq!(result, Some((55, 10)));
-    }
-
-    #[test]
-    fn advance_total_sequential() {
-        let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
-        // Prefix: [0, 10, 30, 60, 100, 150]
-        let mut iter = col.iter();
-
-        // advance_total(25): target = 25, crosses at index 1 (prefix 30)
-        assert_eq!(iter.advance_total(25), Some((30, 20)));
-
-        // advance_total(50): target = 30 + 50 = 80, crosses at index 3 (prefix 100)
-        assert_eq!(iter.advance_total(50), Some((100, 40)));
-
-        // advance_total(100): target = 100 + 100 = 200, unreachable (total = 150)
-        assert_eq!(iter.advance_total(100), None);
-    }
-
-    #[test]
-    fn advance_total_last_item() {
-        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
-        // Total prefix = 15
-        let mut iter = col.iter();
-        // advance_total(15): target = 15, exactly at the last item
-        let result = iter.advance_total(15);
-        assert_eq!(result, Some((15, 5)));
+        let tx = iter.advance_to(2).unwrap();
+        assert_eq!(tx.pos, 2);
+        assert_eq!(tx.value, 3);
+        assert_eq!(tx.prefix_delta, 3); // 1+2
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn advance_to_out_of_range() {
+        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+        let mut iter = col.iter();
+        assert!(iter.advance_to(3).is_none());
+        assert!(iter.advance_to(100).is_none());
+    }
+
+    #[test]
+    fn advance_to_multi_slab() {
+        // Force multiple slabs with small max_segments
+        let vals: Vec<u64> = (1..=20).collect();
+        let col = PrefixColumn::from_column(
+            Column::<u64>::from_values_with_max_segments(vals.clone(), 3),
+        );
+        assert!(col.values().slab_count() > 1);
+
+        // advance_to a position in a later slab
+        let mut iter = col.iter();
+        let tx = iter.advance_to(15).unwrap();
+        assert_eq!(tx.pos, 15);
+        assert_eq!(tx.value, 16);
+        let expected_delta: u64 = (1..=15).sum(); // sum of items 0..15
+        assert_eq!(tx.prefix_delta, expected_delta as u128);
+        // can continue iterating
+        let next = iter.next().unwrap();
+        assert_eq!(next.1, 17);
+    }
+
+    #[test]
+    fn advance_to_with_range() {
+        let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+        // iter_range(2..5) covers values [30, 40, 50]
+        let mut iter = col.iter_range(2..5);
+        let tx = iter.advance_to(3).unwrap();
+        assert_eq!(tx.pos, 3);
+        assert_eq!(tx.value, 40);
+        // prefix_delta is relative to range start (pos 2)
+        // exclusive prefix before pos 3 from pos 2 = sum of item at pos 2 = 30
+        assert_eq!(tx.prefix_delta, 30);
+    }
+
+    #[test]
+    fn advance_to_before_current_pos() {
+        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+        let mut iter = col.iter();
+        iter.next(); // consume pos 0
+        iter.next(); // consume pos 1
+        // pos 0 is before current position
+        assert!(iter.advance_to(0).is_none());
+    }
+
+    // ── advance_prefix tests ─────────────────────────────────────────
+
+    #[test]
+    fn advance_prefix_single_slab_unit_values() {
+        // All 1s: advance_prefix(3) should land on pos 3 (past items 0,1,2)
+        let col = PrefixColumn::<u64>::from_values(vec![1, 1, 1, 1, 1]);
+        let mut iter = col.iter();
+        let tx = iter.advance_prefix(3).unwrap();
+        assert_eq!(tx.pos, 3);
+        assert_eq!(tx.value, 1);
+        assert_eq!(tx.prefix_delta, 3); // consumed 3 units before this item
+        assert_eq!(iter.next(), Some((5, 1)));
+    }
+
+    #[test]
+    fn advance_prefix_single_slab_multi_values() {
+        // [1, 1, 3, 1]: advance_prefix(3) lands on pos 2 (item with value 3
+        // overshoots remaining budget of 1)
+        let col = PrefixColumn::<u64>::from_values(vec![1, 1, 3, 1]);
+        let mut iter = col.iter();
+        let tx = iter.advance_prefix(3).unwrap();
+        assert_eq!(tx.pos, 2);
+        assert_eq!(tx.value, 3);
+        assert_eq!(tx.prefix_delta, 2); // 1+1 consumed before this item
+    }
+
+    #[test]
+    fn advance_prefix_exact_boundary() {
+        // [2, 3, 5]: advance_prefix(5) should land PAST the boundary
+        // items 0+1 sum to 5, so we land on pos 2
+        let col = PrefixColumn::<u64>::from_values(vec![2, 3, 5, 1]);
+        let mut iter = col.iter();
+        let tx = iter.advance_prefix(5).unwrap();
+        assert_eq!(tx.pos, 2);
+        assert_eq!(tx.value, 5);
+        assert_eq!(tx.prefix_delta, 5); // 2+3 consumed before pos 2
+    }
+
+    #[test]
+    fn advance_prefix_zero() {
+        let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30]);
+        let mut iter = col.iter();
+        // advance_prefix(0) should return the first item
+        let tx = iter.advance_prefix(0).unwrap();
+        assert_eq!(tx.pos, 0);
+        assert_eq!(tx.value, 10);
+        assert_eq!(tx.prefix_delta, 0);
+    }
+
+    #[test]
+    fn advance_prefix_unreachable() {
+        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
+        let mut iter = col.iter();
+        // total is 6, asking for 100
+        assert!(iter.advance_prefix(100).is_none());
+        assert_eq!(iter.items_left(), 0);
+    }
+
+    #[test]
+    fn advance_prefix_multi_slab() {
+        let vals: Vec<u64> = (1..=20).collect();
+        let col = PrefixColumn::from_column(
+            Column::<u64>::from_values_with_max_segments(vals.clone(), 3),
+        );
+        assert!(col.values().slab_count() > 1);
+
+        let mut iter = col.iter();
+        // advance past 100 prefix units: 1+2+...+13=91, 1+2+...+14=105
+        // so we land on item 13 (value=14)
+        let tx = iter.advance_prefix(100).unwrap();
+        assert_eq!(tx.value, 14);
+        assert_eq!(tx.pos, 13);
+        let expected_delta: u64 = (1..=13).sum(); // 91
+        assert_eq!(tx.prefix_delta, expected_delta as u128);
+        // can continue
+        assert_eq!(iter.next().unwrap().1, 15);
+    }
+
+    #[test]
+    fn advance_prefix_mid_stream() {
+        let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+        let mut iter = col.iter();
+        iter.next(); // consume pos 0 (value 1)
+        // now advance past 4 more units: items 1(2)+2(3)=5 >= 4
+        // lands on pos 2 (value 3, overshoots remaining 2)
+        let tx = iter.advance_prefix(4).unwrap();
+        assert_eq!(tx.pos, 2);
+        assert_eq!(tx.value, 3);
+        // prefix_delta from base(0): exclusive prefix before pos 2 = 1+2 = 3
+        assert_eq!(tx.prefix_delta, 3);
+    }
+
+    #[test]
+    fn advance_prefix_bool() {
+        let col =
+            PrefixColumn::<bool>::from_values(vec![false, true, false, true, true, false, true]);
+        let mut iter = col.iter();
+        // advance past 2 trues: pos 0(f), 1(t), 2(f), 3(t) — 2 trues consumed
+        // land on pos 4 (next item after 2 trues)
+        let tx = iter.advance_prefix(2).unwrap();
+        assert_eq!(tx.pos, 4);
+        assert!(tx.value);
+        assert_eq!(tx.prefix_delta, 2);
+    }
+
+    #[test]
+    fn advance_prefix_with_range() {
+        let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+        // iter_range(1..4) covers values [20, 30, 40]
+        let mut iter = col.iter_range(1..4);
+        // advance past 30 units: item at pos 1 (20) consumed, then pos 2 (30)
+        // overshoots remaining 10 → land on pos 2
+        let tx = iter.advance_prefix(30).unwrap();
+        assert_eq!(tx.pos, 2);
+        assert_eq!(tx.value, 30);
+        assert_eq!(tx.prefix_delta, 20); // relative to range start: only item at pos 1 consumed
+    }
+
+    // ── seek / get_delta convenience tests ───────────────────────────
+
+    #[test]
+    fn seek_convenience() {
+        let col = PrefixColumn::<u64>::from_values(vec![1, 1, 1, 1, 1]);
+        let tx = col.seek(0, 3).unwrap();
+        assert_eq!(tx.pos, 3);
+        assert_eq!(tx.prefix_delta, 3);
+
+        // seek from middle
+        let tx = col.seek(2, 2).unwrap();
+        assert_eq!(tx.pos, 4);
+        assert_eq!(tx.prefix_delta, 2);
+    }
+
+    #[test]
+    fn get_delta_convenience() {
+        let col = PrefixColumn::<u64>::from_values(vec![10, 20, 30, 40]);
+        let tx = col.get_delta(1, 3).unwrap();
+        assert_eq!(tx.pos, 3);
+        assert_eq!(tx.value, 40);
+        assert_eq!(tx.prefix_delta, 50); // 20+30 between pos 1 and pos 3
     }
 }
