@@ -3079,3 +3079,216 @@ where
         "tail.lit_tail mismatch"
     );
 }
+
+// ── scope_to_value tests ────────────────────────────────────────────────────
+
+#[test]
+fn scope_to_value_basic() {
+    // Same data as v0 test: [2,2,2, 3,3,3,3, 4,4,4,4,4,4,4,4, 5,5,5,5, 6,6,6, 8, 9,9]
+    let data: Vec<Option<u64>> = vec![
+        2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 8, 9, 9,
+    ]
+    .into_iter()
+    .map(Some)
+    .collect();
+    let col = Column::<Option<u64>>::from_values(data);
+
+    assert_eq!(col.scope_to_value(Some(4u64), ..), 7..15);
+    assert_eq!(col.scope_to_value(Some(4u64), ..11), 7..11);
+    assert_eq!(col.scope_to_value(Some(4u64), ..8), 7..8);
+    assert_eq!(col.scope_to_value(Some(4u64), 0..1), 1..1);
+    assert_eq!(col.scope_to_value(Some(4u64), 8..9), 8..9);
+    assert_eq!(col.scope_to_value(Some(4u64), 9..), 9..15);
+    assert_eq!(col.scope_to_value(Some(4u64), 14..16), 14..15);
+
+    assert_eq!(col.scope_to_value(Some(2u64), ..), 0..3);
+    assert_eq!(col.scope_to_value(Some(7u64), ..), 22..22);
+    assert_eq!(col.scope_to_value(Some(8u64), ..), 22..23);
+    assert_eq!(col.scope_to_value(Some(9u64), ..), 23..25);
+}
+
+#[test]
+fn scope_to_value_strings() {
+    let data: Vec<Option<String>> = ["aaa", "aaa", "bbb", "bbb", "bbb", "ccc"]
+        .into_iter()
+        .map(|s| Some(s.to_string()))
+        .collect();
+    let col = Column::<Option<String>>::from_values(data);
+
+    assert_eq!(col.scope_to_value(Some("aaa"), ..), 0..2);
+    assert_eq!(col.scope_to_value(Some("bbb"), ..), 2..5);
+    assert_eq!(col.scope_to_value(Some("ccc"), ..), 5..6);
+    assert_eq!(col.scope_to_value(Some("ddd"), ..), 6..6);
+    assert_eq!(col.scope_to_value(Some("aab"), ..), 2..2);
+}
+
+#[test]
+fn scope_to_value_not_found() {
+    let data: Vec<u64> = vec![1, 2, 3, 4, 5];
+    let col = Column::<u64>::from_values(data);
+
+    // Value less than all
+    assert_eq!(col.scope_to_value(0u64, ..), 0..0);
+    // Value greater than all
+    assert_eq!(col.scope_to_value(6u64, ..), 5..5);
+    // Value in a gap
+    assert_eq!(col.scope_to_value(3u64, 0..2), 2..2);
+}
+
+#[test]
+fn scope_to_value_empty() {
+    let col = Column::<u64>::from_values(vec![]);
+    assert_eq!(col.scope_to_value(1u64, ..), 0..0);
+}
+
+#[test]
+fn scope_to_value_single_element() {
+    let col = Column::<u64>::from_values(vec![5]);
+    assert_eq!(col.scope_to_value(5u64, ..), 0..1);
+    assert_eq!(col.scope_to_value(4u64, ..), 0..0);
+    assert_eq!(col.scope_to_value(6u64, ..), 1..1);
+}
+
+#[test]
+fn scope_to_value_range_truncation() {
+    // Run extends past the range end — must truncate
+    let data: Vec<u64> = vec![1, 1, 1, 2, 2, 2, 2, 2, 3, 3];
+    let col = Column::<u64>::from_values(data);
+
+    assert_eq!(col.scope_to_value(2u64, 4..6), 4..6);
+    assert_eq!(col.scope_to_value(2u64, 3..5), 3..5);
+    assert_eq!(col.scope_to_value(2u64, 3..), 3..8);
+    assert_eq!(col.scope_to_value(1u64, ..2), 0..2);
+}
+
+#[test]
+fn scope_to_value_multi_slab() {
+    // Force multiple slabs with small max_segments
+    let data: Vec<u64> = (0..100)
+        .flat_map(|i| std::iter::repeat(i).take(3))
+        .collect();
+    let col = Column::<u64>::from_values_with_max_segments(data, 4);
+    assert!(col.slab_count() > 1);
+
+    assert_eq!(col.scope_to_value(0u64, ..), 0..3);
+    assert_eq!(col.scope_to_value(50u64, ..), 150..153);
+    assert_eq!(col.scope_to_value(99u64, ..), 297..300);
+    // Not present
+    assert_eq!(col.scope_to_value(100u64, ..), 300..300);
+    // Subrange
+    assert_eq!(col.scope_to_value(50u64, 151..152), 151..152);
+    // 50 is past all values in 140..145 (which are ~46-48), insertion point at end
+    assert_eq!(col.scope_to_value(50u64, 140..145), 145..145);
+}
+
+#[test]
+fn scope_to_value_fuzz_vs_linear() {
+    use rand::{rng, RngExt};
+    let mut r = rng();
+
+    const N: u32 = 1000;
+    const STEP: u32 = 3;
+
+    // Build sorted data: each value i appears STEP times
+    let data: Vec<u64> = (0..N)
+        .flat_map(|i| std::iter::repeat(i as u64 * 2 + 1).take(STEP as usize))
+        .collect();
+    let col = Column::<u64>::from_values_with_max_segments(data.clone(), 8);
+    assert!(col.slab_count() > 1);
+
+    for _ in 0..1000 {
+        let roll = r.random_range(0..N);
+        let target_present = roll * 2 + 1;
+        let target_absent = roll * 2;
+
+        let mut a = r.random_range(0..(N * STEP)) as usize;
+        let mut b = r.random_range(0..(N * STEP)) as usize;
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+
+        // Compute expected result by linear scan
+        let expected_present = {
+            let first = data[a..b].iter().position(|&v| v == target_present as u64);
+            let last = data[a..b].iter().rposition(|&v| v == target_present as u64);
+            match (first, last) {
+                (Some(f), Some(l)) => (a + f)..(a + l + 1),
+                _ => {
+                    // insertion point
+                    let ip = data[a..b]
+                        .iter()
+                        .position(|&v| v >= target_present as u64)
+                        .map(|p| a + p)
+                        .unwrap_or(b);
+                    ip..ip
+                }
+            }
+        };
+
+        let expected_absent = {
+            let ip = data[a..b]
+                .iter()
+                .position(|&v| v >= target_absent as u64)
+                .map(|p| a + p)
+                .unwrap_or(b);
+            ip..ip
+        };
+
+        let result_present = col.scope_to_value(target_present as u64, a..b);
+        let result_absent = col.scope_to_value(target_absent as u64, a..b);
+
+        assert_eq!(
+            result_present, expected_present,
+            "target={} range={}..{}",
+            target_present, a, b
+        );
+        assert_eq!(
+            result_absent, expected_absent,
+            "target={} range={}..{}",
+            target_absent, a, b
+        );
+    }
+}
+
+// ── Column::remap tests ─────────────────────────────────────────────────────
+
+#[test]
+fn remap_u64_basic() {
+    let mut col = Column::<u64>::from_values(vec![1, 2, 2, 3, 4, 4, 4, 5]);
+    col.remap(|v| v * 10);
+    assert_eq!(col.to_vec(), vec![10, 20, 20, 30, 40, 40, 40, 50]);
+}
+
+#[test]
+fn remap_runs_preserved() {
+    // Long runs should still be runs after remap.
+    let vals: Vec<u64> = std::iter::repeat(7).take(100).collect();
+    let mut col = Column::<u64>::from_values(vals);
+    col.remap(|v| v + 1);
+    assert_eq!(col.len(), 100);
+    assert!(col.iter().all(|v| v == 8));
+    // Run-encoded so the column should be small.
+    let bytes = col.save();
+    assert!(
+        bytes.len() < 10,
+        "expected compact run encoding, got {} bytes",
+        bytes.len()
+    );
+}
+
+#[test]
+fn remap_multi_slab() {
+    let vals: Vec<u64> = (0..200u64).collect();
+    let mut col = Column::<u64>::from_values_with_max_segments(vals, 4);
+    assert!(col.slab_count() > 1);
+    col.remap(|v| v + 1000);
+    let expected: Vec<u64> = (0..200u64).map(|v| v + 1000).collect();
+    assert_eq!(col.to_vec(), expected);
+}
+
+#[test]
+fn remap_empty() {
+    let mut col = Column::<u64>::from_values(vec![]);
+    col.remap(|v| v * 2);
+    assert_eq!(col.len(), 0);
+}

@@ -558,6 +558,24 @@ impl ColumnEncoding for BoolEncoding {
         validate_slab(a);
     }
 
+    fn last_run(slab: &Slab) -> Option<Run<bool>> {
+        use super::encoding::RunDecoder;
+        if slab.len == 0 {
+            return None;
+        }
+        let mut dec = Self::decoder(&slab.data);
+        let mut last_val = None;
+        let mut last_count = 0;
+        while let Some(run) = dec.next_run() {
+            last_val = Some(run.value);
+            last_count = run.count;
+        }
+        Some(Run {
+            count: last_count,
+            value: last_val?,
+        })
+    }
+
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
         bool_validate_encoding(slab)
     }
