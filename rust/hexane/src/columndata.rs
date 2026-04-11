@@ -1261,6 +1261,10 @@ where
 }
 
 pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
+    normalize_range_max(range, usize::MAX)
+}
+
+pub(crate) fn normalize_range_max<R: RangeBounds<usize>>(range: R, max: usize) -> (usize, usize) {
     let start = match range.start_bound() {
         Bound::Unbounded => usize::MIN,
         Bound::Included(n) => *n,
@@ -1268,11 +1272,15 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
     };
 
     let end = match range.end_bound() {
-        Bound::Unbounded => usize::MAX,
+        Bound::Unbounded => max,
         Bound::Included(n) => *n + 1,
         Bound::Excluded(n) => *n,
     };
-    (start, end)
+    if start > end {
+        (start, start)
+    } else {
+        (start, end)
+    }
 }
 
 impl<'a, C, M> From<Vec<M>> for ColumnData<C>

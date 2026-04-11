@@ -15,7 +15,7 @@ pub(crate) mod leb;
 pub mod load_opts;
 pub mod prefix;
 pub mod rle;
-pub use column::{Column, Iter};
+pub use column::{Column, Iter, IterState};
 pub use delta::{DeltaColumn, DeltaIter, DeltaValue};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
@@ -23,6 +23,7 @@ pub use delta::{DeltaColumn, DeltaIter, DeltaValue};
 /// For bool this resolves to `BoolEncoder`.
 pub type Encoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Encoder<'a>;
 pub use encoding::ColumnEncoding;
+pub use encoding::EncoderApi;
 pub use encoding::RunDecoder;
 pub use indexed::IndexedDeltaColumn;
 pub use load_opts::LoadOpts;
@@ -33,8 +34,8 @@ mod tests;
 
 use crate::PackError;
 
-use bool::BoolEncoding;
-use rle::RleEncoding;
+pub use bool::BoolEncoding;
+pub use rle::RleEncoding;
 use std::fmt::Debug;
 
 // ── Run ─────────────────────────────────────────────────────────────────────

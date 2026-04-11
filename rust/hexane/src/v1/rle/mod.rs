@@ -16,7 +16,8 @@ use std::num::NonZeroU32;
 use crate::PackError;
 
 type Slab = super::column::Slab<RleTail>;
-use super::encoding::{ColumnEncoding, SlabInfo};
+use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
+use super::Run;
 use super::{AsColumnRef, ColumnValueRef, RleValue};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
@@ -136,6 +137,25 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         } else if b.len > 0 {
             rle_merge::<T>(a, &b);
         }
+    }
+
+    fn last_run(slab: &Slab) -> Option<Run<T::Get<'_>>> {
+        if slab.len == 0 {
+            return None;
+        }
+        // Decode just the last segment using the tail metadata.
+        // The tail gives us the byte offset of the last segment.
+        let mut dec = Self::decoder(&slab.data);
+        let mut last_val = None;
+        let mut last_count = 0;
+        while let Some(run) = dec.next_run() {
+            last_val = Some(run.value);
+            last_count = run.count;
+        }
+        Some(Run {
+            count: last_count,
+            value: last_val?,
+        })
     }
 
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<RleTail>, PackError> {

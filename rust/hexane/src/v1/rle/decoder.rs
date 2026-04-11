@@ -312,6 +312,9 @@ impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
     }
 
     fn next_run_max(&mut self, max: usize) -> Option<Run<Self::Item>> {
+        if max == 0 {
+            return None;
+        }
         loop {
             if self.remaining > 0 {
                 return match &self.state {

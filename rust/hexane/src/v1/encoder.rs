@@ -78,9 +78,20 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
         self.len += 1;
     }
 
+    pub fn append_owned(&mut self, value: T) {
+        self.flush += self.state.append(&mut self.buf, value);
+        self.len += 1;
+    }
+
     /// Append `n` copies of `value`.
     pub fn append_n(&mut self, value: T::Get<'a>, n: usize) {
         self.flush += self.state.append_n(&mut self.buf, RleCow::Ref(value), n);
+        self.len += n;
+    }
+
+    /// Append `n` copies of `value`.
+    pub fn append_n_owned(&mut self, value: T, n: usize) {
+        self.flush += self.state.append_n(&mut self.buf, value, n);
         self.len += n;
     }
 
@@ -112,13 +123,59 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
 
     /// Like [`save_to`](Self::save_to) but returns an empty range if the
     /// encoded data is empty or consists entirely of a single run of `value`.
-    /// Like [`save_to`](Self::save_to) but returns an empty range if the
-    /// encoded data is empty or consists entirely of a single run of `value`.
     pub fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> Range<usize> {
         if self.flush.segments == 0 && self.state.is_single_run_of(RleCow::Ref(value)) {
             return out.len()..out.len();
         }
         self.save_to(out)
+    }
+
+    /// Like [`save_to`](Self::save_to) but applies `f` to every value before
+    /// re-encoding.  The encoder's accumulated runs are walked directly with
+    /// [`RleDecoder`](super::rle::RleDecoder), so this avoids the round-trip
+    /// through [`Column`](super::Column) that
+    /// [`Column::remap`](super::Column::remap) would require.  Always writes
+    /// — no elision.
+    pub fn save_to_and_remap<F>(self, out: &mut Vec<u8>, f: F) -> Range<usize>
+    where
+        F: Fn(T) -> T,
+    {
+        let mut new_enc = RleEncoder::<'a, T>::new();
+        self.walk_runs(&mut new_enc, f);
+        new_enc.save_to(out)
+    }
+
+    /// Like [`save_to_unless`](Self::save_to_unless) but applies `f` to every
+    /// value before re-encoding.  See [`save_to_and_remap`](Self::save_to_and_remap)
+    /// for the non-eliding variant.
+    pub fn save_to_unless_and_remap<F>(
+        self,
+        out: &mut Vec<u8>,
+        unless: T::Get<'a>,
+        f: F,
+    ) -> Range<usize>
+    where
+        F: Fn(T) -> T,
+    {
+        let mut new_enc = RleEncoder::<'a, T>::new();
+        self.walk_runs(&mut new_enc, f);
+        new_enc.save_to_unless(out, unless)
+    }
+
+    /// Flush `self` and walk every run through `f`, re-emitting into `dst`.
+    /// Shared implementation for the `*_and_remap` methods.
+    fn walk_runs<F>(mut self, dst: &mut RleEncoder<'a, T>, f: F)
+    where
+        F: Fn(T) -> T,
+    {
+        use super::encoding::RunDecoder;
+        use super::rle::RleDecoder;
+        self.finish();
+        let mut dec = RleDecoder::<'_, T>::new(&self.buf);
+        while let Some(run) = dec.next_run() {
+            let value = T::to_owned(run.value);
+            dst.append_n_owned(f(value), run.count);
+        }
     }
 }
 
@@ -127,8 +184,14 @@ impl<'a, T: RleValue> super::encoding::EncoderApi<'a, T> for RleEncoder<'a, T> {
     fn append(&mut self, value: T::Get<'a>) {
         self.append(value);
     }
+    fn append_owned(&mut self, value: T) {
+        self.append_owned(value);
+    }
     fn append_n(&mut self, value: T::Get<'a>, n: usize) {
         self.append_n(value, n);
+    }
+    fn append_n_owned(&mut self, value: T, n: usize) {
+        self.append_n_owned(value, n);
     }
     fn extend(&mut self, iter: impl IntoIterator<Item = T::Get<'a>>) {
         self.extend(iter);
@@ -297,7 +360,14 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
     fn append(&mut self, value: bool) {
         self.append(value);
     }
+
+    fn append_owned(&mut self, value: bool) {
+        self.append(value);
+    }
     fn append_n(&mut self, value: bool, n: usize) {
+        self.append_n(value, n);
+    }
+    fn append_n_owned(&mut self, value: bool, n: usize) {
         self.append_n(value, n);
     }
     fn extend(&mut self, iter: impl IntoIterator<Item = bool>) {

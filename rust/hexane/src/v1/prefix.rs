@@ -708,11 +708,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 
     /// Serialize unless all values equal `value`.
-    pub fn save_to_unless(
-        &self,
-        out: &mut Vec<u8>,
-        value: impl super::AsColumnRef<T>,
-    ) -> std::ops::Range<usize> {
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: T::Get<'_>) -> std::ops::Range<usize> {
         self.col.save_to_unless(out, value)
     }
 }
@@ -1020,7 +1016,6 @@ where
 
         self.advance_to(target_pos)
     }
-
 }
 
 // ── FromIterator ────────────────────────────────────────────────────────────
@@ -1348,7 +1343,7 @@ mod tests {
         assert_eq!(tx.value, 3);
         assert_eq!(tx.prefix, 6); // inclusive: 1+2+3
         assert_eq!(tx.prefix_delta, 3); // exclusive before pos 2: 1+2
-        // iterator continues from pos 3
+                                        // iterator continues from pos 3
         assert_eq!(iter.next(), Some((10, 4)));
     }
 
@@ -1386,9 +1381,10 @@ mod tests {
     fn advance_to_multi_slab() {
         // Force multiple slabs with small max_segments
         let vals: Vec<u64> = (1..=20).collect();
-        let col = PrefixColumn::from_column(
-            Column::<u64>::from_values_with_max_segments(vals.clone(), 3),
-        );
+        let col = PrefixColumn::from_column(Column::<u64>::from_values_with_max_segments(
+            vals.clone(),
+            3,
+        ));
         assert!(col.values().slab_count() > 1);
 
         // advance_to a position in a later slab
@@ -1422,7 +1418,7 @@ mod tests {
         let mut iter = col.iter();
         iter.next(); // consume pos 0
         iter.next(); // consume pos 1
-        // pos 0 is before current position
+                     // pos 0 is before current position
         assert!(iter.advance_to(0).is_none());
     }
 
@@ -1487,9 +1483,10 @@ mod tests {
     #[test]
     fn advance_prefix_multi_slab() {
         let vals: Vec<u64> = (1..=20).collect();
-        let col = PrefixColumn::from_column(
-            Column::<u64>::from_values_with_max_segments(vals.clone(), 3),
-        );
+        let col = PrefixColumn::from_column(Column::<u64>::from_values_with_max_segments(
+            vals.clone(),
+            3,
+        ));
         assert!(col.values().slab_count() > 1);
 
         let mut iter = col.iter();
@@ -1509,8 +1506,8 @@ mod tests {
         let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
         let mut iter = col.iter();
         iter.next(); // consume pos 0 (value 1)
-        // now advance past 4 more units: items 1(2)+2(3)=5 >= 4
-        // lands on pos 2 (value 3, overshoots remaining 2)
+                     // now advance past 4 more units: items 1(2)+2(3)=5 >= 4
+                     // lands on pos 2 (value 3, overshoots remaining 2)
         let tx = iter.advance_prefix(4).unwrap();
         assert_eq!(tx.pos, 2);
         assert_eq!(tx.value, 3);
