@@ -1,7 +1,8 @@
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 
-use super::encoding::ColumnEncoding;
+use super::encoding::{ColumnEncoding, RunDecoder};
 use super::AsColumnRef;
 use super::ColumnValueRef;
 use crate::PackError;
@@ -440,6 +441,21 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         }
     }
 
+    /// Absolute position of the first item in slab `si`. O(log S) via BIT.
+    fn slab_start(&self, si: usize) -> usize {
+        if si == 0 {
+            return 0;
+        }
+        // Sum lengths of slabs 0..si using the BIT.
+        let mut sum = 0;
+        let mut i = si; // BIT is 1-indexed, query prefix sum of slabs 0..si = BIT query(si)
+        while i > 0 {
+            sum += self.bit[i].len();
+            i -= i & i.wrapping_neg();
+        }
+        sum
+    }
+
     /// Removes all elements from the column.
     pub fn clear(&mut self) {
         self.slabs.clear();
@@ -635,8 +651,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     }
 
     /// Returns `true` if the column is empty or every item equals `value`.
-    pub fn is_only(&self, value: impl AsColumnRef<T>) -> bool {
-        use super::encoding::RunDecoder;
+    pub fn is_only(&self, value: T::Get<'_>) -> bool {
         self.total_len == 0
             || self.slabs.iter().all(|s| {
                 if s.len == 0 {
@@ -645,9 +660,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
                 let mut dec = T::Encoding::decoder(&s.data);
                 match dec.next_run() {
                     Some(run) => {
-                        run.count == s.len
-                            && T::eq(run.value, value.as_column_ref())
-                            && dec.next_run().is_none()
+                        run.count == s.len && T::eq(run.value, value) && dec.next_run().is_none()
                     }
                     None => true,
                 }
@@ -658,12 +671,119 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// equal `value`.
     ///
     /// Returns the byte range written (empty range if all-equal or empty).
-    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: impl AsColumnRef<T>) -> Range<usize> {
-        if self.is_only(value.clone()) {
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: T::Get<'_>) -> Range<usize> {
+        if self.is_only(value) {
             out.len()..out.len()
         } else {
             self.save_to(out)
         }
+    }
+
+    /// Narrow a range to the contiguous run of items matching `value`.
+    ///
+    /// Assumes values within `range` are sorted.  Behaviour is undefined
+    /// if this precondition is violated.
+    ///
+    /// Returns the sub-range of `range` where every item equals `value`,
+    /// or an empty range at the appropriate insertion point if `value` is
+    /// not present.
+    pub fn scope_to_value<V: AsColumnRef<T>>(
+        &self,
+        value: V,
+        range: impl std::ops::RangeBounds<usize>,
+    ) -> Range<usize>
+    where
+        for<'x> T::Get<'x>: Ord,
+    {
+        let (start, end) = crate::columndata::normalize_range_max(range, self.total_len);
+
+        let target = value.as_column_ref();
+
+        let mut iter = self.iter_range(start..end);
+        let si_start = iter.get_slab();
+        let first_run = match iter.next_run() {
+            Some(r) => r,
+            None => return start..start,
+        };
+
+        match first_run.value.cmp(&target) {
+            Ordering::Equal => {
+                assert!(start + first_run.count <= end);
+                start..start + first_run.count
+            }
+            Ordering::Greater => start..start,
+            Ordering::Less => {
+                let (si_end, _) = self.find_slab(end - 1);
+
+                // Binary search slabs si_start+1..=si_end by first element.
+                let mut lo = si_start + 1;
+                let mut hi = si_end + 1;
+                let mut candidate = None;
+
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let mut dec = T::Encoding::decoder(&self.slabs[mid].data);
+                    let head = dec.next_run().unwrap();
+                    match head.value.cmp(&target) {
+                        Ordering::Less => {
+                            candidate = Some(mid);
+                            lo = mid + 1;
+                        }
+                        Ordering::Greater => hi = mid,
+                        Ordering::Equal => {
+                            // Target starts at (or before) this slab.
+                            // Check if the prior slab's last run also matches.
+                            let base = self.slab_start(mid);
+                            assert!(base < end);
+                            assert!(base >= start);
+                            assert!(mid > 0);
+                            let mut match_start = base;
+                            if let Some(tail) = T::Encoding::last_run(&self.slabs[mid - 1]) {
+                                if tail.value == target {
+                                    match_start = base.saturating_sub(tail.count).max(start);
+                                }
+                            }
+                            let match_end = (base + head.count).min(end);
+                            return match_start..match_end;
+                        }
+                    }
+                }
+
+                // `candidate` is the last slab whose first element < target.
+                // The target (if present) is at the end of this slab.
+                let (mut decoder, pos) = match candidate {
+                    Some(i) => {
+                        let pos = self.slab_start(i);
+                        let dec = T::Encoding::decoder(&self.slabs[i].data);
+                        (dec, pos)
+                    }
+                    None => {
+                        let pos = start + first_run.count;
+                        (iter.unwrap_decoder(), pos)
+                    }
+                };
+                let (skipped, count) = decoder.scan_for(target, end - pos);
+                let begin = pos + skipped;
+                begin..begin + count
+            }
+        }
+    }
+}
+
+// ── Remap ────────────────────────────────────────────────────────────────────
+
+impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
+    /// Replace this column with a re-encoded version where every item has been
+    /// transformed by `f`.
+    ///
+    /// Walks runs (not items) so a single `f` call covers a whole repeating
+    /// run.  For nullable columns (`Column<Option<T>>`), the function sees
+    /// `None` for null entries.
+    pub fn remap<F>(&mut self, f: F)
+    where
+        F: Fn(T) -> T,
+    {
+        *self = T::Encoding::remap(self.iter(), self.max_segments, f);
     }
 }
 
@@ -771,7 +891,6 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     where
         F: FnMut(B, Self::Item) -> B,
     {
-        use super::encoding::RunDecoder;
         let mut acc = init;
         while self.items_left > 0 {
             if let Some(run) = self.decoder.next_run() {
@@ -837,6 +956,12 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         }
     }
 
+    /// Returns the index of the current slab.
+    #[inline]
+    pub fn get_slab(&self) -> usize {
+        self.slab_idx
+    }
+
     /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
@@ -848,7 +973,6 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// For repeat runs, returns the full count. For literal runs, returns
     /// count=1 per value. Null runs return the null value with the full count.
     pub fn next_run(&mut self) -> Option<super::Run<T::Get<'a>>> {
-        use super::encoding::RunDecoder;
         if self.items_left == 0 {
             return None;
         }
@@ -904,6 +1028,10 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             count: total_count,
             value,
         })
+    }
+
+    fn unwrap_decoder(self) -> <T::Encoding as ColumnEncoding>::Decoder<'a> {
+        self.decoder
     }
 
     /// Moves the iterator window to `range` and returns the item at `range.start`.

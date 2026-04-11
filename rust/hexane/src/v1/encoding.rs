@@ -1,3 +1,4 @@
+use super::column;
 use super::column::{Column, Slab, WeightFn};
 use super::{AsColumnRef, ColumnValueRef, Run};
 use crate::PackError;
@@ -75,6 +76,28 @@ pub trait ColumnEncoding: Default {
         values: impl Iterator<Item = V>,
         max_segments: usize,
     ) -> (Vec<Slab<Self::Tail>>, usize);
+
+    fn remap<'a, F, WF>(
+        mut iter: column::Iter<'a, Self::Value>,
+        max: usize,
+        f: F,
+    ) -> Column<Self::Value, WF>
+    where
+        WF: WeightFn<Self::Value>,
+        F: Fn(Self::Value) -> Self::Value,
+    {
+        let mut encoder = Self::encoder();
+        encoder.max_segments(max);
+        while let Some(run) = iter.next_run() {
+            // an extra copy for remapping strings b/c of the borrow checker
+            // zero cost for copy types
+            // remap strings never used in automerge so good enough for now
+            let value = <Self::Value as ColumnValueRef>::to_owned(run.value);
+            let value = f(value);
+            encoder.append_n_owned(value, run.count);
+        }
+        encoder.into_column()
+    }
 
     /// Splice a Column: locate the target slab, splice it, handle overflow
     /// and cross-slab deletes, merge small neighbours, update the BIT.
@@ -174,6 +197,12 @@ pub trait ColumnEncoding: Default {
         }
     }
 
+    /// Decode the last run of a slab using tail metadata.
+    ///
+    /// Returns the value and count of the final run without decoding
+    /// the entire slab.  Returns `None` for empty slabs.
+    fn last_run(slab: &Slab<Self::Tail>) -> Option<Run<<Self::Value as ColumnValueRef>::Get<'_>>>;
+
     /// Decoder type for iterating over all items in a slab.
     type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;
 
@@ -197,20 +226,34 @@ pub trait ColumnEncoding: Default {
 pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
     /// Append a single value.
     fn append(&mut self, value: T::Get<'a>);
+    fn append_owned(&mut self, value: T);
     /// Append `n` copies of `value`.
     fn append_n(&mut self, value: T::Get<'a>, n: usize);
+    fn append_n_owned(&mut self, value: T, n: usize);
+
     /// Append all values from an iterator.
     fn extend(&mut self, iter: impl IntoIterator<Item = T::Get<'a>>) {
         for value in iter {
             self.append(value);
         }
     }
+
     /// Number of items appended so far.
     fn len(&self) -> usize;
+
     /// Returns `true` if no items have been appended.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    // TODO - actually store the segments
+    // make into_column not do an extra copy
+    fn max_segments(&mut self, _max: usize) {}
+
+    fn into_column<WF: WeightFn<T>>(self) -> Column<T, WF> {
+        Column::load(&self.save()).unwrap()
+    }
+
     /// Flush and return the encoded bytes. Consumes the encoder.
     fn save(self) -> Vec<u8>;
     /// Flush and append the encoded bytes to `out`. Returns the byte range written.
@@ -228,9 +271,34 @@ pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
     where
         Self: Default,
     {
+        let mut buf = vec![];
+        Self::encode_to(&mut buf, iter);
+        buf
+    }
+
+    fn encode_to(
+        buf: &mut Vec<u8>,
+        iter: impl IntoIterator<Item = T::Get<'a>>,
+    ) -> std::ops::Range<usize>
+    where
+        Self: Default,
+    {
         let mut enc = Self::default();
         enc.extend(iter);
-        enc.save()
+        enc.save_to(buf)
+    }
+
+    fn encode_to_unless(
+        buf: &mut Vec<u8>,
+        iter: impl IntoIterator<Item = T::Get<'a>>,
+        value: T::Get<'a>,
+    ) -> std::ops::Range<usize>
+    where
+        Self: Default,
+    {
+        let mut enc = Self::default();
+        enc.extend(iter);
+        enc.save_to_unless(buf, value)
     }
 
     /// Encode values from an iterator and return a [`Slab`] with correct metadata.
@@ -261,6 +329,31 @@ pub trait RunDecoder: Iterator {
     /// from repeat/null runs.  The remaining items stay in the decoder
     /// for subsequent calls.
     fn next_run_max(&mut self, max: usize) -> Option<Run<Self::Item>>;
+
+    /// Scan forward for `target`, assuming runs are sorted ascending.
+    ///
+    /// Walks runs (consuming at most `max` items total) until either the
+    /// target is found, a run greater than the target is encountered, or
+    /// the decoder is exhausted.
+    ///
+    /// Returns `(skipped, count)` where `skipped` is items consumed before
+    /// the match/insertion point and `count` is the length of the matching
+    /// run (or `0` if not found).
+    fn scan_for(&mut self, target: Self::Item, max: usize) -> (usize, usize)
+    where
+        Self::Item: Ord,
+    {
+        use std::cmp::Ordering;
+        let mut skipped = 0;
+        while let Some(run) = self.next_run_max(max - skipped) {
+            match run.value.cmp(&target) {
+                Ordering::Equal => return (skipped, run.count),
+                Ordering::Greater => return (skipped, 0),
+                Ordering::Less => skipped += run.count,
+            }
+        }
+        (skipped, 0)
+    }
 }
 
 /// Metadata extracted from a validated slab encoding.

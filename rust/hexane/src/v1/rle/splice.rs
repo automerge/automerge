@@ -819,7 +819,7 @@ fn head<T: RleValue>(slab: &Slab) -> (Postfix<'_, T>, usize) {
     }
 }
 
-fn tail<T: RleValue>(data: &[u8], tail: RleTail) -> (RleState<'_, T, T>, usize, usize) {
+pub(crate) fn tail<T: RleValue>(data: &[u8], tail: RleTail) -> (RleState<'_, T, T>, usize, usize) {
     let len = data.len();
     let bytes = tail.bytes as usize;
     let header_pos = len - bytes;
