@@ -7,6 +7,7 @@ use crate::op_set2::OpSet;
 
 use hexane::v1;
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -179,12 +180,12 @@ impl Iterator for ScanVisIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct VisibleOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
-    clock: Option<Clock>,
+    clock: Option<Cow<'a, Clock>>,
     iter: I,
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> VisibleOpIter<'a, I> {
-    pub(crate) fn new(iter: I, clock: Option<Clock>) -> Self {
+    pub(crate) fn new(iter: I, clock: Option<Cow<'a, Clock>>) -> Self {
         Self { iter, clock }
     }
 }
@@ -201,12 +202,11 @@ impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for VisibleOpIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let clock = self.clock.as_ref();
         for mut op in self.iter.by_ref() {
             if op.action == Action::Increment {
                 continue;
             }
-            if op.scope_to_clock(clock) {
+            if op.scope_to_clock(self.clock.as_deref()) {
                 return Some(op);
             }
         }
