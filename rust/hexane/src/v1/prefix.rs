@@ -4,7 +4,7 @@ use std::ops::{Add, AddAssign, Div, Mul, Range, Sub, SubAssign};
 
 use super::column::{find_slab_bit, Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use super::encoding::{ColumnEncoding, RunDecoder};
-use super::ColumnValueRef;
+use super::{ColumnValueRef, TypedLoadOpts};
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
 
@@ -702,7 +702,7 @@ impl PrefixValue for bool {
 
 impl<T: PrefixValue> PrefixColumn<T> {
     /// Deserialize with options. See [`LoadOpts`](super::LoadOpts).
-    pub fn load_with(data: &[u8], opts: super::LoadOpts<T>) -> Result<Self, crate::PackError> {
+    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, crate::PackError> {
         let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
         Ok(Self { col })
     }
