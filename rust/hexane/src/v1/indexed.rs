@@ -220,7 +220,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
 
     /// Deserialize with options (applied to the inner delta column).
     /// See [`LoadOpts`](super::LoadOpts).
-    pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError> {
+    pub fn load_with(data: &[u8], opts: super::TypedLoadOpts<T::Inner>) -> Result<Self, PackError> {
         let col = DeltaColumn::load_with(data, opts)?;
         let (tree, tree_n) = build_tree(&col);
         Ok(Self {

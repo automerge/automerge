@@ -2192,13 +2192,13 @@ fn load_with_empty_data_and_fill_gives_filled_nullable() {
 
 #[test]
 fn load_with_empty_data_length_without_fill_errors() {
-    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5));
+    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5).into());
     assert!(matches!(err, Err(crate::PackError::InvalidLength(0, 5))));
 }
 
 #[test]
 fn load_with_empty_data_and_zero_length() {
-    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0)).unwrap();
+    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0).into()).unwrap();
     assert_eq!(col.len(), 0);
 }
 
@@ -2206,7 +2206,7 @@ fn load_with_empty_data_and_zero_length() {
 fn load_with_length_mismatch_errors() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2)]);
     let data = col.save();
-    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5));
+    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5).into());
     assert!(matches!(err, Err(crate::PackError::InvalidLength(2, 5))));
 }
 
@@ -2214,7 +2214,8 @@ fn load_with_length_mismatch_errors() {
 fn load_with_length_match_succeeds() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), None, Some(3)]);
     let data = col.save();
-    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
+    let loaded =
+        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(1)));
     assert_eq!(loaded.get(1), Some(None));
@@ -2267,7 +2268,7 @@ fn load_with_validation_and_length() {
 
 #[test]
 fn load_with_opts_is_copy() {
-    let opts: LoadOpts<bool> = LoadOpts::new().with_length(5);
+    let opts = LoadOpts::new().with_length(5).with_fill::<bool>(false);
     let opts2 = opts; // copy
     let _ = opts; // still usable
     let _ = opts2;
@@ -2285,7 +2286,8 @@ fn prefix_column_load_with_empty_and_fill() {
 fn prefix_column_load_with_roundtrip() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false, true]);
     let data = col.save();
-    let loaded = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
+    let loaded =
+        PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
     assert_eq!(loaded.save(), data);
 }
 
@@ -2293,7 +2295,7 @@ fn prefix_column_load_with_roundtrip() {
 fn prefix_column_load_with_length_mismatch() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false]);
     let data = col.save();
-    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10));
+    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10).into());
     assert!(err.is_err());
 }
 
@@ -2301,7 +2303,7 @@ fn prefix_column_load_with_length_mismatch() {
 fn delta_column_load_with_roundtrip() {
     let col = DeltaColumn::<Option<u64>>::from_values(vec![Some(10), None, Some(30)]);
     let data = col.save();
-    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new()).unwrap();
+    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new().into()).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(10)));
     assert_eq!(loaded.get(1), Some(None));
@@ -2455,7 +2457,7 @@ fn cross_slab_fuzz() {
 // validating the full column invariants after each operation.
 // Marked #[ignore] — run with `cargo test -- --ignored fuzz_`.
 
-use super::column::{rebuild_bit, LenWeight};
+use super::column::{rebuild_bit, LenWeight, WeightFn};
 use super::encoding::ColumnEncoding;
 
 /// Validate every invariant on a Column<T>:
@@ -2489,7 +2491,7 @@ where
         assert_eq!(slab.segments, info.segments, "slab {i}: segments mismatch");
     }
 
-    let expected_bit = rebuild_bit::<T, LenWeight>(&col.slabs);
+    let expected_bit = rebuild_bit(&col.slabs, <LenWeight as WeightFn<T>>::compute);
     assert_eq!(col.bit, expected_bit, "BIT mismatch");
 }
 

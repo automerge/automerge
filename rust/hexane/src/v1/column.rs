@@ -3,8 +3,7 @@ use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 
 use super::encoding::{ColumnEncoding, RunDecoder};
-use super::AsColumnRef;
-use super::ColumnValueRef;
+use super::{AsColumnRef, ColumnValueRef, TypedLoadOpts};
 use crate::PackError;
 
 /// Type alias for the slab tail metadata of a column value type.
@@ -94,13 +93,15 @@ impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
 
 /// Rebuild BIT from scratch. O(S).
 /// The BIT is 1-indexed: `bit\[0\]` is unused, `bit\[1..=n\]` holds the tree.
-pub(crate) fn rebuild_bit<T: ColumnValueRef, WF: WeightFn<T>>(
-    slabs: &[Slab<TailOf<T>>],
-) -> Vec<WF::Weight> {
+///
+/// Generic over the slab type and weight: callers pass a closure that extracts
+/// the per-slab weight. `Column` passes `WF::compute`; other column types
+/// (e.g. the raw-byte arena) pass their own slab-length extractor.
+pub(crate) fn rebuild_bit<S, W: SlabWeight>(slabs: &[S], weight: impl Fn(&S) -> W) -> Vec<W> {
     let n = slabs.len();
-    let mut bit = vec![WF::Weight::default(); n + 1];
+    let mut bit = vec![W::default(); n + 1];
     for i in 0..n {
-        bit[i + 1] = WF::compute(&slabs[i]);
+        bit[i + 1] = weight(&slabs[i]);
     }
     // Standard O(n) BIT construction: propagate to parent.
     for i in 1..=n {
@@ -124,6 +125,50 @@ pub(crate) fn bit_point_update<W: SlabWeight>(bit: &mut [W], si: usize, old: W, 
         bit[i] += new;
         i += i & i.wrapping_neg();
     }
+}
+
+/// Walk the four slab boundaries around a recently-modified range and attempt
+/// to merge undersized neighbours.  The decision of *whether* two adjacent
+/// slabs can merge is column-specific (encoding-aware for RLE, byte-count-only
+/// for a raw arena); the caller passes `try_merge_pair(a, b)` which returns
+/// `true` if it actually merged slabs `a` and `b` (removing slab `b`).
+///
+/// Returns the adjusted range accounting for any merges that happened — the
+/// end shrinks by one for every merge that collapses two in-range slabs.
+pub(crate) fn try_merge_range_skeleton(
+    range: Range<usize>,
+    mut try_merge_pair: impl FnMut(usize, usize) -> bool,
+) -> Range<usize> {
+    let mut start = range.start;
+    let mut end = range.end;
+
+    if !range.is_empty() {
+        // external right
+        // [ . [. . . A] B .] -> [. [. . . AB] .]
+        //   0  1 2 3 4  5 6      0  1 2 3 4   5
+        try_merge_pair(end - 1, end);
+        // internal left
+        // [ . [. . B A] . .] -> [. [. . BA] .]
+        //   0  1 2 3 4  5 6      0  1 2 3   4
+        if range.len() > 1 && end > 2 && try_merge_pair(end - 2, end - 1) {
+            end -= 1;
+        }
+        // internal right
+        // [ . [A B . .] . .] -> [ . [AB . .] . .]
+        //   0  1 2 3 4  5 6       0  1  2 3  4 5
+        if (start..end).len() > 1 && try_merge_pair(start, start + 1) {
+            end -= 1;
+        }
+        // external left
+        // [ B [A . . .] . .] -> [ [BA . . .] . .]
+        //   0  1 2 3 4  5 6        0  1 2 3  4 5
+        if start > 1 && try_merge_pair(start - 1, start) {
+            start -= 1;
+            end -= 1;
+        }
+    }
+
+    start..end
 }
 
 /// Trait for types that can locate the slab containing a logical item index.
@@ -225,7 +270,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         total_len: usize,
         max_segments: usize,
     ) -> Self {
-        let bit = rebuild_bit::<T, WF>(&slabs);
+        let bit = rebuild_bit(&slabs, WF::compute);
         Self {
             slabs,
             bit,
@@ -247,7 +292,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     pub(crate) fn fill_inner(len: usize, value: T::Get<'_>) -> Self {
         let slab = T::Encoding::fill(len, value);
-        let bit = rebuild_bit::<T, WF>(std::slice::from_ref(&slab));
+        let bit = rebuild_bit(std::slice::from_ref(&slab), WF::compute);
         Self {
             slabs: vec![slab],
             bit,
@@ -291,7 +336,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     ) -> Result<Self, PackError> {
         let slabs = T::Encoding::load_and_verify(data, max_segments, validate)?;
         let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let bit = rebuild_bit::<T, WF>(&slabs);
+        let bit = rebuild_bit(&slabs, WF::compute);
         Ok(Self {
             slabs,
             bit,
@@ -496,7 +541,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
         if self.slabs.is_empty() {
             self.slabs.push(T::Encoding::empty_slab());
-            self.bit = rebuild_bit::<T, WF>(&self.slabs);
+            self.bit = rebuild_bit(&self.slabs, WF::compute);
         }
 
         T::Encoding::splice(self, index, del, iter);
@@ -525,36 +570,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Try merging at both boundaries of a slab range without rebuilding the BIT.
     /// Returns the adjusted range accounting for any merges that happened.
     pub(crate) fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
-        let mut start = range.start;
-        let mut end = range.end;
-
-        if !range.is_empty() {
-            // external right
-            // [ . [. . . A] B .] -> [. [. . . AB] .]
-            //   0  1 2 3 4  5 6      0  1 2 3 4   5
-            self.try_merge(end - 1, end);
-            // internal left
-            // [ . [. . B A] . .] -> [. [. . BA] .]
-            //   0  1 2 3 4  5 6      0  1 2 3   4
-            if range.len() > 1 && end > 2 && self.try_merge(end - 2, end - 1) {
-                end -= 1;
-            }
-            // internal right
-            // [ . [A B . .] . .] -> [ . [AB . .] . .]
-            //   0  1 2 3 4  5 6       0  1  2 3  4 5
-            if (start..end).len() > 1 && self.try_merge(start, start + 1) {
-                end -= 1;
-            }
-            // external left
-            // [ B [A . . .] . .] -> [ [BA . . .] . .]
-            //   0  1 2 3 4  5 6        0  1 2 3  4 5
-            if start > 1 && self.try_merge(start - 1, start) {
-                start -= 1;
-                end -= 1;
-            }
-        }
-
-        start..end
+        try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
     }
 
     /// Returns a forward iterator over all items in the column.
@@ -633,7 +649,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// value validation.
     ///
     /// See [`LoadOpts`](super::LoadOpts) for available options.
-    pub fn load_with(data: &[u8], opts: super::LoadOpts<T>) -> Result<Self, PackError> {
+    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, PackError> {
         if data.is_empty() {
             return match (opts.length, opts.fill) {
                 (Some(0) | None, _) => Ok(Self::new()),
@@ -1142,8 +1158,8 @@ impl<T: ColumnValueRef> FromIterator<T> for Column<T> {
 
 // ── Extend ──────────────────────────────────────────────────────────────────
 
-impl<T: ColumnValueRef, WF: WeightFn<T>> Extend<T> for Column<T, WF> {
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+impl<V: AsColumnRef<T>, T: ColumnValueRef, WF: WeightFn<T>> Extend<V> for Column<T, WF> {
+    fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.total_len;
         self.splice(len, 0, iter);
     }

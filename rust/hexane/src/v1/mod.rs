@@ -14,9 +14,10 @@ pub mod indexed;
 pub(crate) mod leb;
 pub mod load_opts;
 pub mod prefix;
+pub mod raw;
 pub mod rle;
 pub use column::{Column, Iter, IterState};
-pub use delta::{DeltaColumn, DeltaIter, DeltaValue};
+pub use delta::{DeltaColumn, DeltaEncoder, DeltaIter, DeltaValue};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.
@@ -26,8 +27,9 @@ pub use encoding::ColumnEncoding;
 pub use encoding::EncoderApi;
 pub use encoding::RunDecoder;
 pub use indexed::IndexedDeltaColumn;
-pub use load_opts::LoadOpts;
+pub use load_opts::{LoadOpts, TypedLoadOpts};
 pub use prefix::{PrefixColumn, PrefixIter, PrefixValue};
+pub use raw::{RawColumn, RawColumnIter};
 
 #[cfg(test)]
 mod tests;
@@ -391,6 +393,24 @@ impl RleValue for u32 {
         Ok((start - buf.len(), v))
     }
     fn pack(value: u32, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, value as u64).unwrap();
+        true
+    }
+}
+
+impl ColumnValue for usize {
+    type Encoding = RleEncoding<usize>;
+}
+
+impl RleValue for usize {
+    fn try_unpack(data: &[u8]) -> Result<(usize, usize), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        let v = usize::try_from(v).map_err(|_| PackError::InvalidValue("usize overflow".into()))?;
+        Ok((start - buf.len(), v))
+    }
+    fn pack(value: usize, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value as u64).unwrap();
         true
     }

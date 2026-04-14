@@ -193,7 +193,7 @@ pub trait ColumnEncoding: Default {
             let new_weight = WF::compute(&col.slabs[range.start]);
             bit_point_update(&mut col.bit, range.start, old_weight, new_weight);
         } else {
-            col.bit = rebuild_bit::<Self::Value, WF>(&col.slabs);
+            col.bit = rebuild_bit(&col.slabs, WF::compute);
         }
     }
 

@@ -1,8 +1,7 @@
 use std::marker::PhantomData;
 
 use super::prefix::PrefixValue;
-use super::ColumnValueRef;
-use super::PrefixColumn;
+use super::{ColumnValueRef, PrefixColumn, TypedLoadOpts};
 use crate::PackError;
 
 // ── DeltaValue trait ────────────────────────────────────────────────────────
@@ -22,7 +21,7 @@ use crate::PackError;
 /// | `Option<u64>`   | `Option<i64>` |
 /// | `Option<i32>`   | `Option<i64>` |
 /// | `Option<i64>`   | `Option<i64>` |
-pub trait DeltaValue: Copy {
+pub trait DeltaValue: Copy + PartialEq {
     /// The inner column value type for storing deltas.
     type Inner: PrefixValue + Copy;
 
@@ -144,6 +143,29 @@ impl DeltaValue for i64 {
     }
 }
 
+impl DeltaValue for usize {
+    type Inner = i64;
+    const NULLABLE: bool = false;
+    fn to_i64(self) -> Option<i64> {
+        Some(self as i64)
+    }
+    fn from_i64(v: i64) -> Self {
+        v as usize
+    }
+    fn null_value() -> Self {
+        panic!("non-nullable usize")
+    }
+    fn make_inner(delta: Option<i64>) -> i64 {
+        delta.expect("non-nullable usize")
+    }
+    fn get_inner(inner: i64) -> Option<i64> {
+        Some(inner)
+    }
+    fn prefix_to_i64(p: i128) -> i64 {
+        p as i64
+    }
+}
+
 // ── Nullable impls ──────────────────────────────────────────────────────────
 
 impl DeltaValue for Option<u32> {
@@ -238,6 +260,29 @@ impl DeltaValue for Option<i64> {
     }
 }
 
+impl DeltaValue for Option<usize> {
+    type Inner = Option<i64>;
+    const NULLABLE: bool = true;
+    fn to_i64(self) -> Option<i64> {
+        self.map(|v| v as i64)
+    }
+    fn from_i64(v: i64) -> Self {
+        Some(v as usize)
+    }
+    fn null_value() -> Self {
+        None
+    }
+    fn make_inner(delta: Option<i64>) -> Option<i64> {
+        delta
+    }
+    fn get_inner(inner: Option<i64>) -> Option<i64> {
+        inner
+    }
+    fn prefix_to_i64(p: i128) -> i64 {
+        p as i64
+    }
+}
+
 // ── DeltaColumn ─────────────────────────────────────────────────────────────
 
 /// A column that stores values using delta encoding, wrapping a
@@ -255,6 +300,7 @@ impl DeltaValue for Option<i64> {
 ///   adjusts the following delta so all subsequent realized values remain
 ///   unchanged.
 /// - Removing index `I` absorbs its delta into the following element.
+#[derive(Debug, Clone)]
 pub struct DeltaColumn<T: DeltaValue> {
     inner: PrefixColumn<T::Inner>,
     _phantom: PhantomData<T>,
@@ -655,12 +701,17 @@ impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
 impl<T: DeltaValue> DeltaColumn<T> {
     /// Deserialize with options (applied to the inner delta column).
     /// See [`LoadOpts`](super::LoadOpts).
-    pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError> {
+    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T::Inner>) -> Result<Self, PackError> {
         let col = super::Column::<T::Inner>::load_with(data, opts)?;
         Ok(Self {
             inner: PrefixColumn::from_column(col),
             _phantom: PhantomData,
         })
+    }
+
+    /// Collect all values into a Vec (without prefix sums).
+    pub fn to_vec(&self) -> Vec<T> {
+        self.iter().collect()
     }
 }
 
@@ -688,6 +739,204 @@ impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
 
     fn into_iter(self) -> DeltaIter<'a, T> {
         self.iter()
+    }
+}
+
+// ── DeltaEncoder ────────────────────────────────────────────────────────────
+
+/// Streaming encoder for delta-encoded columns.
+///
+/// Mirrors [`RleEncoder`](super::encoder::RleEncoder)'s interface but applies
+/// delta encoding on append: each absolute value is transformed into the
+/// difference from the previous non-null value before being written to an
+/// inner RLE encoder.  The serialized bytes are byte-compatible with both
+/// [`DeltaColumn::save`] and v0's `DeltaCursor::encode`.
+///
+/// Use this when you need to build a delta column incrementally (e.g. while
+/// walking change ops) rather than collecting a `Vec` and calling
+/// [`DeltaColumn::from_values`].
+///
+/// ```ignore
+/// let mut enc = DeltaEncoder::<i64>::new();
+/// enc.append(10);
+/// enc.append(20);
+/// enc.append(30);
+/// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
+/// ```
+pub struct DeltaEncoder<'a, T: DeltaValue>
+where
+    T::Inner: super::RleValue,
+{
+    inner: super::encoder::RleEncoder<'a, T::Inner>,
+    abs: i64,
+    /// Tracks whether every appended value has been equal so far.
+    ///
+    /// - `None` — either nothing has been appended yet, or the appended
+    ///   values are not all equal (i.e. the column is "mixed").
+    /// - `Some(v)` — every appended value has been equal to `v`.
+    ///
+    /// Used by [`save_to_unless`](Self::save_to_unless) to match v0's
+    /// `encode_unless_empty` semantics for nullable columns (where
+    /// `v == null`) and to provide RleEncoder-style single-run-of-value
+    /// elision for non-nullable columns.
+    uniform: Option<T>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: DeltaValue> Default for DeltaEncoder<'_, T>
+where
+    T::Inner: super::RleValue,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: DeltaValue> std::fmt::Debug for DeltaEncoder<'_, T>
+where
+    T::Inner: super::RleValue,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeltaEncoder")
+            .field("len", &self.inner.len())
+            .field("abs", &self.abs)
+            .finish()
+    }
+}
+
+impl<'a, T: DeltaValue> DeltaEncoder<'a, T>
+where
+    T::Inner: super::RleValue,
+{
+    /// Create a new empty delta encoder.
+    pub fn new() -> Self {
+        Self {
+            inner: super::encoder::RleEncoder::new(),
+            abs: 0,
+            uniform: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Number of items appended so far.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` if no items have been appended.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Append a single (absolute) value.
+    ///
+    /// For non-nullable types the value is always stored.  For nullable
+    /// types, a `null` value does not advance the running absolute — it's
+    /// emitted as a null entry in the inner column.
+    pub fn append(&mut self, value: T) {
+        self.append_n(value, 1);
+    }
+
+    /// Append `n` copies of the same (absolute) `value`.
+    ///
+    /// The first copy is encoded as `value - prev_abs`; subsequent copies
+    /// are encoded as `0` (since the absolute hasn't changed).  For a null
+    /// value, `n` null entries are emitted and `abs` is unchanged.
+    pub fn append_n(&mut self, value: T, n: usize) {
+        if n == 0 {
+            return;
+        }
+        // Update the uniform tracker.
+        if self.inner.is_empty() {
+            self.uniform = Some(value);
+        } else if self.uniform != Some(value) {
+            self.uniform = None;
+        }
+        match value.to_i64() {
+            Some(v) => {
+                let first_delta = v - self.abs;
+                self.abs = v;
+                self.inner
+                    .append_n_owned(T::make_inner(Some(first_delta)), 1);
+                if n > 1 {
+                    self.inner.append_n_owned(T::make_inner(Some(0)), n - 1);
+                }
+            }
+            None => {
+                self.inner.append_n_owned(T::make_inner(None), n);
+            }
+        }
+    }
+
+    /// Alias for [`append`](Self::append) — provided so call sites that
+    /// use [`append_owned`](super::encoder::RleEncoder::append_owned) on
+    /// `RleEncoder` can swap encoders without edits.
+    pub fn append_owned(&mut self, value: T) {
+        self.append(value);
+    }
+
+    /// Append all values from an iterator.
+    pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for v in iter {
+            self.append(v);
+        }
+    }
+
+    /// Flush and return the encoded bytes.  Consumes the encoder.
+    pub fn save(self) -> Vec<u8> {
+        self.inner.save()
+    }
+
+    /// Flush and append the encoded bytes to `out`.  Consumes the encoder.
+    /// Returns the byte range written.
+    pub fn save_to(self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
+        self.inner.save_to(out)
+    }
+
+    /// Flush and append the encoded bytes to `out`, returning an empty
+    /// range when the encoder is empty or every appended value equals
+    /// `value`.
+    ///
+    /// Mirrors [`RleEncoder::save_to_unless`](super::encoder::RleEncoder::save_to_unless)
+    /// on the absolute (realized) values.  For nullable delta columns
+    /// pass `None` to get v0's `encode_unless_empty` semantics (elide on
+    /// empty or all-null).
+    pub fn save_to_unless(self, out: &mut Vec<u8>, value: T) -> std::ops::Range<usize> {
+        if self.inner.is_empty() || self.uniform == Some(value) {
+            return out.len()..out.len();
+        }
+        self.inner.save_to(out)
+    }
+
+    /// Encode values from an iterator and return the raw bytes.
+    pub fn encode<I: IntoIterator<Item = T>>(iter: I) -> Vec<u8> {
+        let mut enc = Self::new();
+        enc.extend(iter);
+        enc.save()
+    }
+
+    /// Encode values from an iterator and append the bytes to `out`.
+    /// Returns the byte range written.
+    pub fn encode_to<I: IntoIterator<Item = T>>(
+        out: &mut Vec<u8>,
+        iter: I,
+    ) -> std::ops::Range<usize> {
+        let mut enc = Self::new();
+        enc.extend(iter);
+        enc.save_to(out)
+    }
+
+    /// Encode values from an iterator and append the bytes to `out`,
+    /// eliding the column if it's empty or every value equals `value`.
+    /// See [`save_to_unless`](Self::save_to_unless).
+    pub fn encode_to_unless<I: IntoIterator<Item = T>>(
+        out: &mut Vec<u8>,
+        iter: I,
+        value: T,
+    ) -> std::ops::Range<usize> {
+        let mut enc = Self::new();
+        enc.extend(iter);
+        enc.save_to_unless(out, value)
     }
 }
 
@@ -1132,6 +1381,284 @@ mod tests {
                 }
             }
             assert_v0_v1_save_match(&values);
+        }
+    }
+
+    // ── DeltaEncoder ────────────────────────────────────────────────────────
+
+    /// Encode `values` via `DeltaEncoder` and compare to v0 DeltaCursor
+    /// and v1 DeltaColumn::from_values.  All three must produce identical
+    /// serialized bytes.
+    fn assert_delta_encoder_match(values: &[Option<i64>]) {
+        use crate::ColumnData as V0ColumnData;
+        use crate::DeltaCursor;
+
+        // v0 reference
+        let mut v0: V0ColumnData<DeltaCursor> = V0ColumnData::new();
+        v0.splice(0, 0, values.to_vec());
+        let v0_bytes = v0.save();
+
+        // v1 from_values reference
+        let v1_col = DeltaColumn::<Option<i64>>::from_values(values.to_vec());
+        let v1_col_bytes = v1_col.save();
+
+        // v1 DeltaEncoder streaming
+        let mut enc = DeltaEncoder::<Option<i64>>::new();
+        for v in values {
+            enc.append(*v);
+        }
+        let enc_bytes = enc.save();
+
+        assert_eq!(
+            v0_bytes, v1_col_bytes,
+            "v0 / v1-from_values mismatch for {:?}",
+            values
+        );
+        assert_eq!(
+            enc_bytes, v0_bytes,
+            "DeltaEncoder mismatch for {:?}",
+            values
+        );
+
+        // Sanity: bytes reload into a DeltaColumn with the same values.
+        let reloaded = DeltaColumn::<Option<i64>>::load(&enc_bytes).unwrap();
+        for (i, exp) in values.iter().enumerate() {
+            assert_eq!(
+                reloaded.get(i).as_ref(),
+                Some(exp),
+                "reload mismatch at {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn delta_encoder_empty() {
+        assert_delta_encoder_match(&[]);
+    }
+
+    #[test]
+    fn delta_encoder_single() {
+        assert_delta_encoder_match(&[Some(42)]);
+    }
+
+    #[test]
+    fn delta_encoder_constant_stride() {
+        assert_delta_encoder_match(&[Some(10), Some(20), Some(30), Some(40)]);
+    }
+
+    #[test]
+    fn delta_encoder_with_nulls() {
+        assert_delta_encoder_match(&[None, Some(0), Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn delta_encoder_trailing_nulls() {
+        assert_delta_encoder_match(&[Some(1), Some(2), None, None, Some(3)]);
+    }
+
+    #[test]
+    fn delta_encoder_non_monotonic() {
+        assert_delta_encoder_match(&[Some(5), Some(3), Some(8), Some(2), Some(10)]);
+    }
+
+    #[test]
+    fn delta_encoder_repeated_values() {
+        // Same value repeated produces delta-0 runs; confirm those encode correctly.
+        assert_delta_encoder_match(&[Some(5), Some(5), Some(5), Some(10), Some(10)]);
+    }
+
+    #[test]
+    fn delta_encoder_append_n() {
+        // Verify append_n produces the same bytes as the same value appended
+        // one at a time.
+        let values: Vec<Option<i64>> = vec![Some(5); 7];
+        let single_bytes = {
+            let mut enc = DeltaEncoder::<Option<i64>>::new();
+            for v in &values {
+                enc.append(*v);
+            }
+            enc.save()
+        };
+        let append_n_bytes = {
+            let mut enc = DeltaEncoder::<Option<i64>>::new();
+            enc.append_n(Some(5), 7);
+            enc.save()
+        };
+        assert_eq!(single_bytes, append_n_bytes);
+    }
+
+    #[test]
+    fn delta_encoder_non_nullable_i64() {
+        // DeltaEncoder<i64> (non-nullable) should produce the same bytes as
+        // DeltaEncoder<Option<i64>> with all-Some values.
+        let values: Vec<i64> = vec![1, 3, 6, 10, 15];
+        let non_null = {
+            let mut enc = DeltaEncoder::<i64>::new();
+            for v in &values {
+                enc.append(*v);
+            }
+            enc.save()
+        };
+        let nullable = {
+            let mut enc = DeltaEncoder::<Option<i64>>::new();
+            for v in &values {
+                enc.append(Some(*v));
+            }
+            enc.save()
+        };
+        assert_eq!(non_null, nullable);
+    }
+
+    // ── encode_to_unless / save_to_unless ────────────────────────────────
+
+    #[test]
+    fn delta_encoder_unless_empty_elides() {
+        // Empty iterator → empty range regardless of `value`.
+        let mut out = Vec::new();
+        let range =
+            DeltaEncoder::<Option<i64>>::encode_to_unless(&mut out, std::iter::empty(), None);
+        assert!(range.is_empty());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn delta_encoder_unless_all_null_elides() {
+        // Nullable column, all-null sequence, `value = None` → elide.
+        let mut out = Vec::new();
+        let range =
+            DeltaEncoder::<Option<i64>>::encode_to_unless(&mut out, vec![None, None, None], None);
+        assert!(range.is_empty());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn delta_encoder_unless_matches_v0_encode_unless_empty_all_null() {
+        // Cross-check: v0 `encode_unless_empty` on an all-null sequence
+        // produces an empty range; v1 `encode_to_unless(None)` must too.
+        use crate::ColumnCursor;
+        use crate::DeltaCursor;
+
+        let values: Vec<Option<i64>> = vec![None; 5];
+
+        let mut v0_out = Vec::new();
+        let v0_range = DeltaCursor::encode_unless_empty(&mut v0_out, values.iter().copied());
+
+        let mut v1_out = Vec::new();
+        let v1_range = DeltaEncoder::<Option<i64>>::encode_to_unless(
+            &mut v1_out,
+            values.iter().copied(),
+            None,
+        );
+
+        assert_eq!(&v1_out[v1_range.clone()], &v0_out[v0_range.clone()]);
+        assert!(v0_range.is_empty());
+        assert!(v1_range.is_empty());
+    }
+
+    #[test]
+    fn delta_encoder_unless_mixed_nulls_and_values_saves() {
+        // Not all-null → must save normally.
+        let mut out = Vec::new();
+        let range = DeltaEncoder::<Option<i64>>::encode_to_unless(
+            &mut out,
+            vec![None, Some(5), None, Some(10)],
+            None,
+        );
+        assert!(!range.is_empty());
+
+        // And the bytes should round-trip via DeltaColumn::load.
+        let loaded = DeltaColumn::<Option<i64>>::load(&out[range]).unwrap();
+        assert_eq!(loaded.get(0), Some(None));
+        assert_eq!(loaded.get(1), Some(Some(5)));
+        assert_eq!(loaded.get(2), Some(None));
+        assert_eq!(loaded.get(3), Some(Some(10)));
+    }
+
+    #[test]
+    fn delta_encoder_unless_single_run_of_non_null_value_elides() {
+        // Non-null column, all values equal to `value` → elide.
+        // This is RleEncoder-style single-run elision on absolute values.
+        let mut out = Vec::new();
+        let range = DeltaEncoder::<i64>::encode_to_unless(&mut out, vec![7, 7, 7], 7);
+        assert!(range.is_empty());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn delta_encoder_unless_non_matching_value_saves() {
+        // Non-null column, all values equal but `value` doesn't match → save.
+        let mut out = Vec::new();
+        let range = DeltaEncoder::<i64>::encode_to_unless(&mut out, vec![7, 7, 7], 0);
+        assert!(!range.is_empty());
+    }
+
+    #[test]
+    fn delta_encoder_unless_mixed_values_saves() {
+        // Non-null column, values differ → save regardless of `value`.
+        let mut out = Vec::new();
+        let range = DeltaEncoder::<i64>::encode_to_unless(&mut out, vec![5, 6, 7], 5);
+        assert!(!range.is_empty());
+    }
+
+    #[test]
+    fn delta_encoder_unless_matches_for_all_sequences() {
+        // Fuzz: compare encode_to_unless(None) to v0 encode_unless_empty
+        // for nullable sequences.  Both should produce identical bytes
+        // for every input.
+        use crate::ColumnCursor;
+        use crate::DeltaCursor;
+        use rand::RngExt;
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(77777);
+
+        for _ in 0..200 {
+            let len = rng.random_range(0..50);
+            let mut values: Vec<Option<i64>> = Vec::with_capacity(len);
+            for _ in 0..len {
+                let r: u32 = rng.random_range(0..10);
+                if r == 0 {
+                    values.push(None);
+                } else {
+                    values.push(Some(rng.random_range(0..100)));
+                }
+            }
+
+            let mut v0_out = Vec::new();
+            let v0_range = DeltaCursor::encode_unless_empty(&mut v0_out, values.iter().copied());
+
+            let mut v1_out = Vec::new();
+            let v1_range = DeltaEncoder::<Option<i64>>::encode_to_unless(
+                &mut v1_out,
+                values.iter().copied(),
+                None,
+            );
+
+            assert_eq!(
+                &v1_out[v1_range], &v0_out[v0_range],
+                "mismatch for {:?}",
+                values
+            );
+        }
+    }
+
+    #[test]
+    fn delta_encoder_fuzz() {
+        use rand::RngExt;
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(54321);
+
+        for _ in 0..200 {
+            let len = rng.random_range(0..50);
+            let mut values: Vec<Option<i64>> = Vec::with_capacity(len);
+            for _ in 0..len {
+                let r: u32 = rng.random_range(0..10);
+                if r == 0 {
+                    values.push(None);
+                } else {
+                    values.push(Some(rng.random_range(0..100)));
+                }
+            }
+            assert_delta_encoder_match(&values);
         }
     }
 
