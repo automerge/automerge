@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
@@ -1439,18 +1440,15 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
-        // this function does not properly handle revocations
-        // because it does not use the index - no point in using
-        // the index b/c it does a full pass anyway
-        // so we hack the clock in to get the right results
-        // best option would be to rewrite this to use doc.iter() to build the result
-        let clock = match clock {
-            Some(c) => Some(c),
-            None if !self.change_graph.get_revocations().is_empty() => {
-                Some(self.clock_at(&self.get_heads()))
-            }
-            None => None,
-        };
+        // This function uses the slow path, but it still needs to filter out
+        // revoked / not-yet-visible ops. When the caller passed an explicit
+        // clock, it already has revocations folded in; otherwise consult the
+        // change graph for the active revocation clock.
+        let clock = clock.map(Cow::Owned).or_else(|| {
+            self.change_graph
+                .active_revocation_clock()
+                .map(Cow::Borrowed)
+        });
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut top_ops = self
             .ops()
@@ -1517,11 +1515,21 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
+        let revocations = self.change_graph.active_revocation_clock();
         // FIXME - now that we have blocks a correct text_rep is relevent
-        Ok(self.ops.parents(obj.id, clock))
+        Ok(self.ops.parents(obj.id, clock, revocations))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
+        // `ops.keys` always uses the slow path (no index for keys), so it must
+        // filter revoked ops itself. An explicit clock already has revocations
+        // folded in via `clock_at`; otherwise fall through to the change
+        // graph's active revocation clock.
+        let clock = clock.map(Cow::Owned).or_else(|| {
+            self.change_graph
+                .active_revocation_clock()
+                .map(Cow::Borrowed)
+        });
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.keys(&obj.id, clock))
@@ -1562,7 +1570,7 @@ impl Automerge {
     pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
         self.exid_to_obj(obj)
             .ok()
-            .map(|obj| Values::new(&self.ops, self.ops.top_ops(&obj.id, clock.clone()), clock))
+            .map(|obj| Values::new(&self.ops, self.ops.top_ops(&obj.id, clock.map(Cow::Owned))))
             .unwrap_or_default()
     }
 
@@ -1606,9 +1614,13 @@ impl Automerge {
             CursorPosition::Start => Ok(Cursor::Start),
             CursorPosition::End => Ok(Cursor::End),
             CursorPosition::Index(i) => {
-                let found = self
-                    .ops
-                    .seek_ops_by_index(&obj.id, i, seq_type, clock.as_ref());
+                let found = self.ops.seek_ops_by_index(
+                    &obj.id,
+                    i,
+                    seq_type,
+                    clock.as_ref(),
+                    self.change_graph.active_revocation_clock(),
+                );
 
                 if let Some(op) = found.ops.last() {
                     Ok(Cursor::Op(OpCursor::new(op.id, &self.ops, move_cursor)))
@@ -1639,7 +1651,13 @@ impl Automerge {
 
                 let found = self
                     .ops
-                    .seek_list_opid(&obj_meta.id, opid, seq_type, clock.as_ref())
+                    .seek_list_opid(
+                        &obj_meta.id,
+                        opid,
+                        seq_type,
+                        clock.as_ref(),
+                        self.change_graph.active_revocation_clock(),
+                    )
                     .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
 
                 match op.move_cursor {
@@ -1682,6 +1700,7 @@ impl Automerge {
                                     key,
                                     seq_type,
                                     clock.as_ref(),
+                                    self.change_graph.active_revocation_clock(),
                                 );
 
                                 match f {
@@ -1739,7 +1758,13 @@ impl Automerge {
                     .as_sequence_type()
                     .expect("list and text must have a sequence type");
                 self.ops
-                    .seek_ops_by_index(&obj.id, i, seq_type, clock.as_ref())
+                    .seek_ops_by_index(
+                        &obj.id,
+                        i,
+                        seq_type,
+                        clock.as_ref(),
+                        self.change_graph.active_revocation_clock(),
+                    )
                     .ops
                     .into_iter()
                     .next_back()
@@ -1772,7 +1797,13 @@ impl Automerge {
                     .as_sequence_type()
                     .expect("list and text must have a sequence type");
                 self.ops
-                    .seek_ops_by_index(&obj.id, i, seq_type, clock.as_ref())
+                    .seek_ops_by_index(
+                        &obj.id,
+                        i,
+                        seq_type,
+                        clock.as_ref(),
+                        self.change_graph.active_revocation_clock(),
+                    )
                     .ops
                     .into_iter()
                     .map(|op| op.tagged_value(self.ops()))
@@ -1794,23 +1825,16 @@ impl Automerge {
         index: usize,
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
-        // this function does not properly handle revocations
-        // because it does not use the index - no point in using
-        // the index b/c it does a full pass anyway
-        // so we hack the clock in to get the right results
-        // best option would be to rewrite this to use doc.iter() to build the result
-        let clock = match clock {
-            Some(c) => Some(c),
-            None if !self.change_graph.get_revocations().is_empty() => {
-                Some(self.clock_at(&self.get_heads()))
-            }
-            None => None,
-        };
+        // This function uses the slow path, but it still needs to filter out
+        // revoked / not-yet-visible ops. When the caller passed an explicit
+        // clock, it already has revocations folded in; otherwise consult the
+        // change graph for the active revocation clock.
+        let clock = clock.or_else(|| self.change_graph.active_revocation_clock().cloned());
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut iter = self
             .ops
             .iter_obj(&obj.id)
-            .visible_slow(clock)
+            .visible_slow(clock.map(Cow::Owned))
             .top_ops()
             .marks();
         iter.nth(index);
@@ -1843,6 +1867,7 @@ impl Automerge {
                                         op.id,
                                         SequenceType::List,
                                         None,
+                                        self.change_graph.active_revocation_clock(),
                                     ) else {
                                         continue;
                                     };

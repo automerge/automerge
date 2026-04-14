@@ -1,7 +1,7 @@
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    Author, AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, ROOT,
+    ActorId, Author, AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, ROOT,
 };
 
 #[test]
@@ -657,5 +657,172 @@ fn revoke_then_load_incremental() {
     assert_ne!(
         remote.get(ROOT, "key").unwrap().unwrap().0,
         "bad_override".into()
+    );
+}
+
+// Regression test for a bug in `change_graph::rebuild_revocation_clock`.
+//
+// `revocation_cached_clock` is an `OpClock` (indexed by actor, values are op
+// counters), but `rebuild_revocation_clock` populates it directly from
+// `revocations_mask`, whose values are *seq numbers* (not op counters). When a
+// revoked actor's last pre-revoke change has multiple ops, the seq number
+// (e.g. `1`) is much smaller than the op counters of those ops (e.g. `2`,
+// `3`, ...), so `Clock::covers` returns `false` for ops that should be
+// visible.
+//
+// The bug surfaces on the slow query path that consults the active revocation
+// clock (e.g. `keys()`, `marks()`); the indexed fast path (e.g. `get()`,
+// `iter()`, `length()`) is unaffected because the index is built from
+// `clock_at(heads)` which goes through `to_op_clock` and converts seq → max
+// op counter correctly.
+#[test]
+#[ignore = "known bug: rebuild_revocation_clock stores seq numbers as op counters"]
+fn revocation_cached_clock_handles_multi_op_changes() {
+    let bad = Author::try_from("ffff").unwrap();
+
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "good_key", "good").unwrap();
+
+    // Bad author makes a SINGLE change containing multiple ops. The change
+    // has seq=1, but its ops have global op-counters > 1 (the global counter
+    // is incremented per op, across all actors).
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.put(ROOT, "k1", "v1").unwrap();
+    fork.put(ROOT, "k2", "v2").unwrap();
+    fork.put(ROOT, "k3", "v3").unwrap();
+    fork.commit();
+
+    let pre_revoke_heads = fork.get_heads();
+
+    // A second change which should actually be revoked.
+    fork.put(ROOT, "post_revoke", "post").unwrap();
+    fork.commit();
+
+    doc.merge(&mut fork).unwrap();
+
+    // Revoke at heads after the multi-op change, so k1/k2/k3 stay; post_revoke
+    // goes.
+    doc.revoke(&bad, &pre_revoke_heads);
+
+    // Sanity check: the indexed fast path correctly preserves k1/k2/k3.
+    assert_eq!(doc.get(ROOT, "k1").unwrap().unwrap().0, "v1".into());
+    assert_eq!(doc.get(ROOT, "k2").unwrap().unwrap().0, "v2".into());
+    assert_eq!(doc.get(ROOT, "k3").unwrap().unwrap().0, "v3".into());
+    assert!(doc.get(ROOT, "post_revoke").unwrap().is_none());
+
+    // The slow path (keys → visible_slow → revocation cached clock) should
+    // agree. With the bug, `revocation_cached_clock[bad-actor] = 1` (the seq)
+    // but bad's ops have op-counters 2, 3, 4 — so `covers` returns false for
+    // all of them and they all disappear from `keys()`.
+    let keys: Vec<String> = doc.keys(ROOT).collect();
+    assert!(keys.contains(&"good_key".to_string()));
+    assert!(
+        keys.contains(&"k1".to_string()),
+        "k1 should be visible (before revoke point); got keys={:?}",
+        keys
+    );
+    assert!(
+        keys.contains(&"k2".to_string()),
+        "k2 should be visible (before revoke point); got keys={:?}",
+        keys
+    );
+    assert!(
+        keys.contains(&"k3".to_string()),
+        "k3 should be visible (before revoke point); got keys={:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"post_revoke".to_string()),
+        "post_revoke should be filtered; got keys={:?}",
+        keys
+    );
+}
+
+// Regression test for a bug in `change_graph::insert_actor`.
+//
+// When a new actor is inserted at a sorted position lower than existing
+// actors, all existing actor indices shift up. `insert_actor` updates
+// `self.actors`, `self.seq_index`, `self.actor_author`, and the per-node
+// clocks in `clock_cache`, but it does **not** re-key `revocations_mask`.
+// After a shift, the mask still has entries keyed at the old (now stale)
+// indices.
+//
+// As a result, `revocation_cached_clock` (rebuilt from the stale mask) marks
+// the wrong actors as revoked. The slow query path that consults the active
+// revocation clock then filters incorrectly.
+#[test]
+#[ignore = "known bug: insert_actor does not re-key revocations_mask"]
+fn revocation_mask_survives_actor_reordering() {
+    let bad = Author::try_from("ffff").unwrap();
+
+    // Two actor IDs with deterministic sort order: `actor_late` sorts AFTER
+    // `actor_early`. We add `actor_late` first, then `actor_early`, forcing
+    // an actor reordering on the second add.
+    let actor_late = ActorId::try_from("ff").unwrap();
+    let actor_early = ActorId::try_from("00").unwrap();
+
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::try_from("aa").unwrap()); // doc's own actor, between early and late
+    doc.put(ROOT, "good_key", "good").unwrap();
+
+    let pre_change = doc.get_heads();
+
+    // First bad actor publishes a change.
+    let mut fork_late = doc.fork().with_author(Some(bad.clone()));
+    fork_late.set_actor(actor_late);
+    fork_late.put(ROOT, "late_actor_key", "from_late").unwrap();
+    fork_late.commit();
+
+    doc.merge(&mut fork_late).unwrap();
+
+    // Revoke bad at `pre_change` — bad has no pre-change history, so all of
+    // bad's changes (current and future) should be revoked.
+    doc.revoke(&bad, &pre_change);
+
+    // Sanity check: the late-actor key is correctly hidden.
+    assert!(doc.get(ROOT, "late_actor_key").unwrap().is_none());
+
+    // Now add a second bad actor with an ID that sorts BEFORE the existing
+    // bad actor. This forces `insert_actor` to insert at a low index,
+    // shifting the existing bad actor (and the doc actor) up.
+    let mut fork_early = doc.fork().with_author(Some(bad.clone()));
+    fork_early.set_actor(actor_early);
+    fork_early
+        .put(ROOT, "early_actor_key", "from_early")
+        .unwrap();
+    fork_early.commit();
+    doc.merge(&mut fork_early).unwrap();
+
+    // After the actor reordering, both bad-actor keys should still be
+    // revoked (same author).
+    assert!(
+        doc.get(ROOT, "late_actor_key").unwrap().is_none(),
+        "late_actor_key should remain revoked after actor reordering"
+    );
+    assert!(
+        doc.get(ROOT, "early_actor_key").unwrap().is_none(),
+        "early_actor_key should be revoked (same author)"
+    );
+
+    // The slow path consults `revocation_cached_clock`, which is rebuilt
+    // from the stale `revocations_mask`. With the bug, the mask is keyed at
+    // the old indices: the actor at the *new* position 1 (the doc's own
+    // actor) ends up flagged as revoked, while the actor at the *new*
+    // position that previously belonged to `actor_late` does not.
+    let keys: Vec<String> = doc.keys(ROOT).collect();
+    assert!(
+        keys.contains(&"good_key".to_string()),
+        "good_key should remain visible; got keys={:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"late_actor_key".to_string()),
+        "late_actor_key should be filtered by keys(); got keys={:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"early_actor_key".to_string()),
+        "early_actor_key should be filtered by keys(); got keys={:?}",
+        keys
     );
 }
