@@ -37,6 +37,9 @@ pub(crate) struct ChangeGraph {
     author: Option<AuthorIdx>,
     pub(crate) revocations: HashMap<Author, Vec<ChangeHash>>,
     revocations_mask: HashMap<ActorIdx, Option<NonZeroU32>>,
+    /// Precomputed clock used by slow paths (which bypass the index) to
+    /// filter out revoked ops. Rebuilt whenever revocations change.
+    revocation_cached_clock: OpClock,
     pending_revoke: HashSet<ChangeHash>,
     actor_author: Vec<Option<AuthorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
@@ -101,6 +104,7 @@ impl ChangeGraph {
             author: None,
             revocations: HashMap::new(),
             revocations_mask: HashMap::new(),
+            revocation_cached_clock: OpClock(vec![u32::MAX; num_actors]),
             pending_revoke: HashSet::new(),
             max_ops: Vec::new(),
             max_op: 0,
@@ -162,6 +166,7 @@ impl ChangeGraph {
                 .insert(a.into(), clock.get_for_actor(&a));
         }
         self.revocations.insert(author, heads);
+        self.rebuild_revocation_clock();
     }
 
     pub(crate) fn set_revocations(&mut self, revocations: HashMap<Author, Vec<ChangeHash>>) {
@@ -171,6 +176,7 @@ impl ChangeGraph {
         for (author, heads) in revocations {
             self.revoke(author, heads)
         }
+        self.rebuild_revocation_clock();
     }
 
     fn recomp_revocations(&mut self) {
@@ -181,6 +187,7 @@ impl ChangeGraph {
                     .insert(a.into(), clock.get_for_actor(&a));
             }
         }
+        self.rebuild_revocation_clock();
     }
 
     pub(crate) fn unrevoke(&mut self, author: &Author) {
@@ -188,6 +195,28 @@ impl ChangeGraph {
             self.revocations_mask.remove(&a.into());
         }
         self.revocations.remove(author);
+        self.rebuild_revocation_clock();
+    }
+
+    /// The clock used to filter revoked ops on slow paths that bypass the
+    /// op-set index (e.g. `visible_slow`). `None` when no actors are
+    /// currently revoked — in which case slow paths can skip clock-based
+    /// filtering. Borrowed callers do not have to copy the clock.
+    pub(crate) fn active_revocation_clock(&self) -> Option<&OpClock> {
+        (!self.revocations.is_empty()).then_some(&self.revocation_cached_clock)
+    }
+
+    fn rebuild_revocation_clock(&mut self) {
+        self.revocation_cached_clock = (0_u32..self.num_actors() as u32)
+            .map(|actor_idx| {
+                let actor_idx = ActorIdx(actor_idx);
+                if let Some(mask) = self.revocations_mask.get(&actor_idx) {
+                    mask.map(|c| c.into())
+                } else {
+                    Some(u32::MAX)
+                }
+            })
+            .collect();
     }
 
     pub(crate) fn is_revoked(&self, actor: ActorIdx, seq: u64) -> bool {
@@ -223,6 +252,8 @@ impl ChangeGraph {
             let clock = self.calculate_clock(self.heads_to_nodes(heads));
             self.revocations_mask
                 .insert(actor.into(), clock.get_for_actor(&actor));
+            // Mask changed for this actor, so the cached clock is now stale.
+            self.rebuild_revocation_clock();
         }
         let author_id = self.put_author(author);
         self.actor_author[actor] = Some(author_id);
@@ -255,6 +286,12 @@ impl ChangeGraph {
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
+        // The new actor has no revocations recorded, so admit all of its ops
+        // until `rebuild_revocation_clock` runs again. NOTE: this preserves the
+        // invariant `revocation_cached_clock.len() == num_actors()`; it does
+        // NOT propagate the author's existing revocation onto the new actor
+        // index — see the ignored test `revocation_mask_survives_actor_reordering`.
+        self.revocation_cached_clock.0.insert(idx, u32::MAX);
         self.seq_index.insert(idx, vec![]);
         self.actor_author.insert(idx, None);
     }
@@ -269,6 +306,7 @@ impl ChangeGraph {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(idx);
             self.actor_author.remove(idx);
+            self.revocation_cached_clock.0.remove(idx);
         }
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
@@ -997,6 +1035,7 @@ impl ChangeGraphCols {
         let actor_author = vec![None; num_actors];
         let revocations = HashMap::default();
         let revocations_mask = HashMap::default();
+        let revocation_cached_clock = OpClock(vec![u32::MAX; num_actors]);
         let pending_revoke = HashSet::default();
 
         Ok(ChangeGraphCols(ChangeGraph {
@@ -1008,6 +1047,7 @@ impl ChangeGraphCols {
             actor_author,
             revocations,
             revocations_mask,
+            revocation_cached_clock,
             pending_revoke,
             parents,
             seq,

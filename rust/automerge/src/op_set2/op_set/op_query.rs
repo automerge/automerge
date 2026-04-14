@@ -8,6 +8,7 @@ use hexane::{ColumnDataIter, IntCursor};
 #[cfg(test)]
 use crate::iter::KeyOpIter;
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -36,7 +37,7 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
         KeyOpIter::new(self)
     }
 
-    fn visible_slow(self, clock: Option<Clock>) -> VisibleOpIter<'a, Self> {
+    fn visible_slow(self, clock: Option<Cow<'a, Clock>>) -> VisibleOpIter<'a, Self> {
         VisibleOpIter::new(self, clock)
     }
 
