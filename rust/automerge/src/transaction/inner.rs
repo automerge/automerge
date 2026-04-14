@@ -344,9 +344,13 @@ impl TransactionInner {
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc
-            .ops()
-            .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
+        let query = doc.ops().query_insert_at(
+            &obj.id,
+            index,
+            seq_type,
+            self.scope.as_ref(),
+            doc.change_graph.active_revocation_clock(),
+        )?;
 
         let marks = query.marks;
         let pos = query.pos;
@@ -427,9 +431,13 @@ impl TransactionInner {
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
         };
-        let mut query = doc
-            .ops()
-            .seek_ops_by_index(&obj.id, index, seq_type, self.scope.as_ref());
+        let mut query = doc.ops().seek_ops_by_index(
+            &obj.id,
+            index,
+            seq_type,
+            self.scope.as_ref(),
+            doc.change_graph.active_revocation_clock(),
+        );
         let id = self.next_id();
         let eid = query
             .ops
@@ -591,9 +599,13 @@ impl TransactionInner {
         let seq_type = splice_type.seq_type();
 
         let inserted_width = if !splice_type.is_empty() {
-            let query = doc
-                .ops()
-                .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
+            let query = doc.ops().query_insert_at(
+                &obj.id,
+                index,
+                seq_type,
+                self.scope.as_ref(),
+                doc.change_graph.active_revocation_clock(),
+            )?;
 
             index = query.index;
 
@@ -657,9 +669,13 @@ impl TransactionInner {
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
 
-            let query =
-                doc.ops()
-                    .seek_ops_by_index(&obj.id, delete_index, seq_type, self.scope.as_ref());
+            let query = doc.ops().seek_ops_by_index(
+                &obj.id,
+                delete_index,
+                seq_type,
+                self.scope.as_ref(),
+                doc.change_graph.active_revocation_clock(),
+            );
 
             let step = if let Some(op) = query.ops.last() {
                 op.width(seq_type, doc.text_encoding())
@@ -765,9 +781,13 @@ impl TransactionInner {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
 
-        let query =
-            doc.ops()
-                .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?;
+        let query = doc.ops().query_insert_at(
+            &obj.id,
+            index,
+            SequenceType::Text,
+            self.scope.as_ref(),
+            doc.change_graph.active_revocation_clock(),
+        )?;
 
         let pos = query.pos;
 
@@ -810,7 +830,13 @@ impl TransactionInner {
 
         let target = doc
             .ops()
-            .seek_ops_by_index(&text_obj.id, index, SequenceType::Text, self.scope.as_ref())
+            .seek_ops_by_index(
+                &text_obj.id,
+                index,
+                SequenceType::Text,
+                self.scope.as_ref(),
+                doc.change_graph.active_revocation_clock(),
+            )
             .ops
             .into_iter()
             .next_back()
@@ -827,6 +853,7 @@ impl TransactionInner {
                 block_id,
                 SequenceType::Text,
                 self.scope.as_ref(),
+                doc.change_graph.active_revocation_clock(),
             )
             .unwrap();
 
