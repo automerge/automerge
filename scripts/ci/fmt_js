@@ -3,5 +3,6 @@ set -eoux pipefail
 
 # see https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
 THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-yarn --cwd $THIS_SCRIPT/../../javascript install
-yarn --cwd $THIS_SCRIPT/../../javascript prettier -v
+JS_PROJECT=$THIS_SCRIPT/../../javascript
+npm --prefix $JS_PROJECT install
+npm --prefix $JS_PROJECT exec -- prettier -v

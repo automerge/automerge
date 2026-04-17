@@ -21,13 +21,13 @@ for more details.
 If you just want to build and test the package you need to do this:
 
 ```
-yarn install
-yarn run build
-yarn run test
+npm install
+npm run build
+npm test
 ```
 
 Any time you change the rust code in `../rust/*` you'll need to re-run the
-`yarn run build` command.
+`npm run build` command.
 
 Read on to understand what the `build` step is doing.
 

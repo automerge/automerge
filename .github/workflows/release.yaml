@@ -22,8 +22,8 @@ jobs:
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
-      - name: yarn install
-        run: yarn install
+      - name: npm install
+        run: npm install
       - name: build js
         run: node ./scripts/build.mjs
       - name: "npm publish pre-release"
@@ -54,8 +54,8 @@ jobs:
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
-      - name: yarn install
-        run: yarn install
+      - name: npm install
+        run: npm install
       - name: build js
         run: node ./scripts/build.mjs
       - name: build js docs

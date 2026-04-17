@@ -5,7 +5,7 @@ set -eoux pipefail
 THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 JS_PROJECT=$THIS_SCRIPT/../../javascript;
 
-yarn --cwd $JS_PROJECT install
+npm --prefix $JS_PROJECT install
 node $JS_PROJECT/scripts/build.mjs
-yarn --cwd $JS_PROJECT test
-yarn --cwd $JS_PROJECT packaging-tests
+npm --prefix $JS_PROJECT test
+npm --prefix $JS_PROJECT run packaging-tests

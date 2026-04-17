@@ -3,7 +3,7 @@
 ### Creating this example app
 
 ```bash
-   $ cd automerge-wasm && yarn pkg # this builds the npm package
+   $ cd automerge-wasm && npm pack # this builds the npm package
    $ cd ../examples
    $ npx create-react-app cra --template typescript
    $ cd cra

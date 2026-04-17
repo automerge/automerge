@@ -11,7 +11,7 @@ but see the following for a short getting started guid.
 First, install the library.
 
 ```
-yarn add @automerge/automerge
+npm install @automerge/automerge
 ```
 
 If you're writing a `node` application, you can skip straight to [Make some
