@@ -4,5 +4,5 @@
 /deno
 /web
 Cargo.lock
-yarn.lock
+package-lock.json
 index.d.ts

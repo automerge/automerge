@@ -85,7 +85,7 @@
       node = "${unstable.nodejs_20}/bin/node";
       wasm-opt = "${pkgs.binaryen}/bin/wasm-opt";
       wasm-pack = "${unstable.wasm-pack}/bin/wasm-pack";
-      yarn = "${pkgs.yarn}/bin/yarn";
+      npm = "${pkgs.nodejs_22}/bin/npm";
 
       cmd = command-utils.cmd.${system};
 
@@ -115,7 +115,7 @@
           "${wasm-pack} build ${wasm-dir} --dev --target=nodejs";
 
         "build:node" = cmd "Build JS-wrapped Wasm library"
-          "${yarn} install --cwd ${js-dir} && ${yarn} --cwd ${js-dir} run build";
+          "${npm} --prefix ${js-dir} install && ${npm} --prefix ${js-dir} run build";
 
         "build:deno" = cmd "Build Deno-wrapped Wasm library"
           "cd ${js-dir} && ${deno} install && ${deno} run build && cd ..";
@@ -224,7 +224,6 @@
             chromedriver
             unstable.deno
             nodejs_22 # Current LTS
-            pkgs.yarn
 
             # Clang
             cmake

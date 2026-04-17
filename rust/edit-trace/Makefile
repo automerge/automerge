@@ -4,8 +4,8 @@ rust:
 
 .PHONY: build-wasm
 build-wasm:
-	cd ../automerge-wasm && yarn
-	cd ../automerge-wasm && yarn release
+	cd ../automerge-wasm && npm install
+	cd ../automerge-wasm && npm run release
 
 .PHONY: wasm
 wasm: build-wasm
@@ -13,8 +13,8 @@ wasm: build-wasm
 
 .PHONY: build-js
 build-js: build-wasm
-	cd ../automerge-js && yarn
-	cd ../automerge-js && yarn build
+	cd ../automerge-js && npm install
+	cd ../automerge-js && npm run build
 
 .PHONY: js
 js: build-js

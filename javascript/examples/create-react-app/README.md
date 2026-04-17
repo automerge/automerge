@@ -19,7 +19,7 @@ the project.
 ### Install craco and craco-wasm
 
 ```bash
-yarn add craco craco-wasm
+npm install craco craco-wasm
 ```
 
 ### Modify `package.json` to use `craco` for scripts

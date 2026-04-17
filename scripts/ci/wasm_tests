@@ -2,6 +2,6 @@
 THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 WASM_PROJECT=$THIS_SCRIPT/../../rust/automerge-wasm;
 
-yarn --cwd $WASM_PROJECT install;
-yarn --cwd $WASM_PROJECT build;
-yarn --cwd $WASM_PROJECT test;
+npm --prefix $WASM_PROJECT install;
+npm --prefix $WASM_PROJECT run build;
+npm --prefix $WASM_PROJECT test;

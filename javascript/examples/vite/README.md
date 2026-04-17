@@ -9,8 +9,8 @@ There are three things you need to do to get WASM packaging working with vite:
 First, install the packages we need:
 
 ```bash
-yarn add vite-plugin-top-level-await
-yarn add vite-plugin-wasm
+npm install vite-plugin-top-level-await
+npm install vite-plugin-wasm
 ```
 
 In `vite.config.js`
@@ -43,12 +43,12 @@ export default defineConfig({
 Now start the dev server:
 
 ```bash
-yarn vite
+npm run dev
 ```
 
 ## Running the example
 
 ```bash
-yarn install
-yarn dev
+npm install
+npm run dev
 ```

@@ -30,6 +30,6 @@ module.exports = clientConfig
 ## Running the example
 
 ```bash
-yarn install
-yarn start
+npm install
+npm run start
 ```

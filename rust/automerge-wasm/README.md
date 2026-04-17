@@ -445,9 +445,9 @@ Object Ids uniquely identify an object within a document.  They are represented 
    $ rustup target add wasm32-unknown-unknown
    $ cargo install wasm-bindgen-cli
    $ cargo install wasm-opt
-   $ yarn
-   $ yarn release
-   $ yarn pack
+   $ npm install
+   $ npm run release
+   $ npm pack
   ```
 
 ### Appendix: WASM and Memory Allocation
