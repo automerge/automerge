@@ -1,5 +1,5 @@
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("a change referenced an actor index we couldn't find")]
     MissingActor,
     #[error("changes out of order")]
