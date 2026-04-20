@@ -208,12 +208,11 @@ impl<'a> OpEncoderStrategy<'a> {
 
         leb128::write::unsigned(&mut data, change.deps.len() as u64).unwrap();
 
-        // FIXME missing value here is changes out of order error
         let deps: Vec<_> = change
             .deps
             .iter()
-            .map(|i| graph.get_hash(*i as usize).unwrap())
-            .collect();
+            .map(|i| graph.get_hash(*i as usize).ok_or(Error::ChangesOutOfOrder))
+            .collect::<Result<_, _>>()?;
 
         for hash in &deps {
             data.write_all(hash.as_bytes()).unwrap();
@@ -870,8 +869,7 @@ impl<'a> ChangeCollector<'a> {
 
             let all_deps = BundleDeps::new(num_changes, &changes, deps);
             let change = self.builders[change.builder]
-                .finish(&change, &all_deps, &mut self.mapper)
-                .unwrap();
+                .finish(&change, &all_deps, &mut self.mapper)?;
 
             changes.push(Change::from(change));
         }

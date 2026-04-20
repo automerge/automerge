@@ -1145,7 +1145,10 @@ impl Automerge {
             let counter = s[0..n]
                 .parse()
                 .map_err(|_| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
-            let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
+            let actor = ActorId::from(
+                hex::decode(&s[(n + 1)..])
+                    .map_err(|_| AutomergeError::InvalidObjIdFormat(s.to_owned()))?,
+            );
             let actor = self
                 .ops
                 .lookup_actor(&actor)
