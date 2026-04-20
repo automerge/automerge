@@ -162,12 +162,15 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_validate_encoding::<T>(slab)
     }
 
-    fn load_and_verify(
-        data: &[u8],
+    fn load_and_verify_fold<'a, F, P: Default + Copy>(
+        data: &'a [u8],
         max_segments: usize,
-        validate: Option<for<'a> fn(<T as ColumnValueRef>::Get<'a>) -> Option<String>>,
-    ) -> Result<Vec<Slab>, PackError> {
-        rle_load_and_verify::<T>(data, max_segments, validate)
+        validate: Option<F>,
+    ) -> Result<Vec<Slab>, PackError>
+    where
+        F: Fn(P, usize, <T as ColumnValueRef>::Get<'a>) -> Result<P, String>,
+    {
+        rle_load_and_verify::<F, P, T>(data, max_segments, validate.as_ref())
     }
 
     fn do_merge(

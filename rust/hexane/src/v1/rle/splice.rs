@@ -81,6 +81,7 @@ struct RlePartition<'a, T: RleValue, V: AsColumnRef<T>> {
     postfix: Option<Postfix<'a, T>>,
 }
 
+#[inline(never)]
 fn find_partition<'a, T: RleValue, V: AsColumnRef<T>>(
     slab: &'a Slab,
     range: Range<usize>,
@@ -610,6 +611,7 @@ struct SpliceBuf {
 /// Build the splice buffer. Borrows slab immutably; returns owned output.
 /// After this, caller does: `slab.data.splice(result.range, result.bytes)`,
 /// applies rewrite, sets slab.len and slab.segments.
+#[inline(never)]
 fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     slab: &Slab,
     index: usize,
@@ -735,6 +737,7 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     result
 }
 
+#[inline(never)]
 pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
     slab: &mut Slab,
     index: usize,
@@ -859,6 +862,7 @@ pub(crate) fn tail<T: RleValue>(data: &[u8], tail: RleTail) -> (RleState<'_, T, 
     }
 }
 
+#[inline(never)]
 pub(crate) fn rle_merge<T: RleValue>(a: &mut Slab, b: &Slab) {
     let mut buf = vec![];
     let (seg, tail) = do_merge::<T>(&mut a.data, a.tail, a.segments, b, &mut buf);
@@ -867,6 +871,7 @@ pub(crate) fn rle_merge<T: RleValue>(a: &mut Slab, b: &Slab) {
     a.len += b.len;
 }
 
+#[inline(never)]
 pub(crate) fn do_merge<T: RleValue>(
     a: &mut Vec<u8>,
     a_tail: RleTail,

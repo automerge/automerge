@@ -53,6 +53,18 @@ harness = false
 name = "profile_bool_replace"
 harness = false
 
+[[bench]]
+name = "v1_vs_v0"
+harness = false
+
+[[bench]]
+name = "column_u64_mutations"
+harness = false
+
+[[bench]]
+name = "btree_b_sweep"
+harness = false
+
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]

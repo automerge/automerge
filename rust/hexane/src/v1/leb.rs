@@ -166,6 +166,7 @@ pub(crate) fn leb_signed_bytes(buf: &[u8], pos: usize) -> Range<usize> {
 
 /// Rewrite (or remove) a literal-run count header at `header_pos`.
 /// Returns the change in buffer length (can be negative if header shrinks).
+#[inline(never)]
 pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: usize) -> i64 {
     let len = buf.len();
     let header_bytes = leb_signed_bytes(buf, header_pos);

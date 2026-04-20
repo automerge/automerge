@@ -580,12 +580,21 @@ impl ColumnEncoding for BoolEncoding {
         bool_validate_encoding(slab)
     }
 
-    fn load_and_verify(
-        data: &[u8],
+    fn load_and_verify_fold<'a, F, P: Default + Copy>(
+        data: &'a [u8],
         max_segments: usize,
-        validate: Option<for<'a> fn(bool) -> Option<String>>,
-    ) -> Result<Vec<Slab>, PackError> {
-        bool_load_and_verify(data, max_segments, validate)
+        validate: Option<F>,
+    ) -> Result<Vec<Slab>, PackError>
+    //where F: Fn(P, usize, bool) -> Result<P, String>
+    //where F: Fn(P, usize, <Self::Value>::Get<'a>) -> Result<P, String>
+    where
+        F: Fn(
+            P,
+            usize,
+            <<BoolEncoding as ColumnEncoding>::Value as super::ColumnValueRef>::Get<'a>,
+        ) -> Result<P, String>, //where F: Fn(P, usize, bool) -> Result<P, String>
+    {
+        bool_load_and_verify(data, max_segments, validate.as_ref())
     }
 
     fn do_merge(
@@ -802,14 +811,19 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
 /// or re-encoding is needed: we just validate and byte-copy.
 ///
 /// If `max_segments` is odd it is rounded down to even (17 → 16).
-fn bool_load_and_verify(
+fn bool_load_and_verify<F, P: Default + Copy>(
     data: &[u8],
     max_segments: usize,
-    validate: Option<fn(bool) -> Option<String>>,
-) -> Result<Vec<Slab>, PackError> {
+    validate: Option<&F>,
+) -> Result<Vec<Slab>, PackError>
+where
+    F: for<'a> Fn(P, usize, bool) -> Result<P, String>,
+{
     if data.is_empty() {
         return Ok(vec![]);
     }
+
+    let mut p = Default::default();
 
     // Target half-full slabs, rounded to even so each slab starts on a false run.
     let target_segments = ((max_segments / 2) & !1).max(2);
@@ -843,8 +857,9 @@ fn bool_load_and_verify(
         if count > 0 {
             if let Some(validate) = validate {
                 let value = run_index % 2 != 0;
-                if let Some(msg) = validate(value) {
-                    return Err(PackError::InvalidValue(msg));
+                match validate(p, count, value) {
+                    Ok(new_p) => p = new_p,
+                    Err(msg) => return Err(PackError::InvalidValue(msg)),
                 }
             }
         }

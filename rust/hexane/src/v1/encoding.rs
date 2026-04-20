@@ -3,8 +3,16 @@ use super::column::{Column, Slab, WeightFn};
 use super::{AsColumnRef, ColumnValueRef, Run};
 use crate::PackError;
 
-/// Validation function type for [`ColumnEncoding::load_and_verify`].
-pub type ValidateFn<V> = for<'a> fn(<V as ColumnValueRef>::Get<'a>) -> Option<String>;
+/// Fold-style validation function for [`ColumnEncoding::load_and_verify`].
+///
+/// Receives `(accumulator, run_count, value)` for each run during the
+/// decoding pass.  Returns the updated accumulator on success or an
+/// error message.  The accumulator starts at `P::default()`.
+pub type ValidateFn<P, V> =
+    for<'a> fn(P, usize, <V as ColumnValueRef>::Get<'a>) -> Result<P, String>;
+
+/// Simple per-value validation function (no accumulator).
+pub type SimpleValidateFn<V> = for<'a> fn(<V as ColumnValueRef>::Get<'a>) -> Option<String>;
 
 /// Trait abstracting the byte-level encoding strategy for a column.
 ///
@@ -49,11 +57,30 @@ pub trait ColumnEncoding: Default {
     /// [`PackError::InvalidValue`] if the function returns `Some(msg)`.
     ///
     /// Returns a Vec of Slabs on success.
+    fn load_and_verify_fold<'a, F, P: Default + Copy>(
+        data: &'a [u8],
+        max_segments: usize,
+        validate: Option<F>,
+    ) -> Result<Vec<Slab<Self::Tail>>, PackError>
+    where
+        F: Fn(P, usize, <Self::Value as ColumnValueRef>::Get<'a>) -> Result<P, String>;
+
     fn load_and_verify(
         data: &[u8],
         max_segments: usize,
-        validate: Option<ValidateFn<Self::Value>>,
-    ) -> Result<Vec<Slab<Self::Tail>>, PackError>;
+        validate: Option<SimpleValidateFn<Self::Value>>,
+    ) -> Result<Vec<Slab<Self::Tail>>, PackError> {
+        Self::load_and_verify_fold(
+            data,
+            max_segments,
+            validate.map(|f| {
+                move |_, _c, v| match f(v) {
+                    Some(s) => Err(s),
+                    _ => Ok(()),
+                }
+            }),
+        )
+    }
 
     /// Merge slab `b`'s data into accumulator `acc`.
     /// `a_tail` and `a_segments` describe the current state of `acc`.
@@ -77,124 +104,25 @@ pub trait ColumnEncoding: Default {
         max_segments: usize,
     ) -> (Vec<Slab<Self::Tail>>, usize);
 
-    fn remap<'a, F, WF>(
+    fn remap<'a, F, WF, Idx>(
         mut iter: column::Iter<'a, Self::Value>,
         max: usize,
         f: F,
-    ) -> Column<Self::Value, WF>
+    ) -> Column<Self::Value, WF, Idx>
     where
         WF: WeightFn<Self::Value>,
+        WF::Weight: super::btree::SlabAggregate,
+        Idx: super::index::ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
     {
         let mut encoder = Self::encoder();
         encoder.max_segments(max);
         while let Some(run) = iter.next_run() {
-            // an extra copy for remapping strings b/c of the borrow checker
-            // zero cost for copy types
-            // remap strings never used in automerge so good enough for now
             let value = <Self::Value as ColumnValueRef>::to_owned(run.value);
             let value = f(value);
             encoder.append_n_owned(value, run.count);
         }
         encoder.into_column()
-    }
-
-    /// Splice a Column: locate the target slab, splice it, handle overflow
-    /// and cross-slab deletes, merge small neighbours, update the BIT.
-    fn splice<WF: WeightFn<Self::Value>, V: AsColumnRef<Self::Value>>(
-        col: &mut Column<Self::Value, WF>,
-        index: usize,
-        del: usize,
-        values: impl Iterator<Item = V>,
-    ) {
-        use super::column::{bit_point_update, find_slab_bit, rebuild_bit};
-
-        assert!(!col.slabs.is_empty());
-
-        // find_slab returns si == slabs.len() when index == total_len (append at end).
-        // Clamp to last slab with offset = slab.len.
-        let (mut si, mut offset) = find_slab_bit(&col.bit, index, col.slabs.len());
-        if si >= col.slabs.len() {
-            si = col.slabs.len() - 1;
-            offset = col.slabs[si].len;
-        }
-
-        let mut range = si..(si + 1);
-        let mut old_slab_len = col.slabs[si].len;
-        let old_weight = WF::compute(&col.slabs[si]);
-        let old_slab_count = col.slabs.len();
-
-        let (overflow, overflow_del) =
-            Self::splice_slab(&mut col.slabs[si], offset, del, values, col.max_segments);
-
-        // Insert overflow slabs.
-        if !overflow.is_empty() {
-            let pos = range.end;
-            range.end += overflow.len();
-            col.slabs.splice(pos..pos, overflow);
-        }
-
-        // Apply remaining deletes to subsequent slabs.
-        let mut remaining = overflow_del;
-        let drain_start = range.end;
-        while remaining > 0 && range.end < col.slabs.len() {
-            let slab_len = col.slabs[range.end].len;
-            if remaining >= slab_len {
-                old_slab_len += slab_len;
-                remaining -= slab_len;
-                range.end += 1;
-            } else {
-                old_slab_len += slab_len;
-                let (partial_overflow, _) = Self::splice_slab(
-                    &mut col.slabs[range.end],
-                    0,
-                    remaining,
-                    std::iter::empty::<V>(),
-                    col.max_segments,
-                );
-                range.end += 1; // include the partially deleted slab
-                if !partial_overflow.is_empty() {
-                    let pos = range.end;
-                    range.end += partial_overflow.len();
-                    col.slabs.splice(pos..pos, partial_overflow);
-                }
-                break;
-            }
-        }
-        // Bulk-remove fully consumed slabs in one shift.
-        if drain_start < range.end {
-            let partial = if remaining == 0 {
-                range.end - drain_start
-            } else {
-                range.end - drain_start - 1
-            };
-            if partial > 0 {
-                col.slabs.drain(drain_start..drain_start + partial);
-                range.end -= partial;
-            }
-        }
-
-        // add new total for affected slabs
-        col.total_len += col.slabs[range.clone()]
-            .iter()
-            .map(|s| s.len)
-            .sum::<usize>();
-        col.total_len -= old_slab_len; // and subtract the old total
-        debug_assert_eq!(
-            col.total_len,
-            col.slabs.iter().map(|s| s.len).sum::<usize>()
-        );
-
-        // Try merging small neighbours at the boundaries.
-        let range = col.try_merge_range(range);
-
-        // Update BIT.
-        if col.slabs.len() == old_slab_count && range.len() == 1 {
-            let new_weight = WF::compute(&col.slabs[range.start]);
-            bit_point_update(&mut col.bit, range.start, old_weight, new_weight);
-        } else {
-            col.bit = rebuild_bit(&col.slabs, WF::compute);
-        }
     }
 
     /// Decode the last run of a slab using tail metadata.
@@ -250,7 +178,12 @@ pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
     // make into_column not do an extra copy
     fn max_segments(&mut self, _max: usize) {}
 
-    fn into_column<WF: WeightFn<T>>(self) -> Column<T, WF> {
+    fn into_column<WF, Idx>(self) -> Column<T, WF, Idx>
+    where
+        WF: WeightFn<T>,
+        WF::Weight: super::btree::SlabAggregate,
+        Idx: super::index::ColumnIndex<WF::Weight>,
+    {
         Column::load(&self.save()).unwrap()
     }
 
