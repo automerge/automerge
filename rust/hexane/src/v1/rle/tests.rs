@@ -29,7 +29,10 @@ mod load_verify_tests {
     fn load_verify_roundtrip() {
         let mut buf = Vec::new();
         rle_encode_state::<u64>((0..1000u64).map(|i| i % 7), &mut buf);
-        let slabs = load::rle_load_and_verify::<u64>(&buf, 16, None).unwrap();
+        let slabs = load::rle_load_and_verify::<fn((), usize, u64) -> Result<(), String>, (), u64>(
+            &buf, 16, None,
+        )
+        .unwrap();
         let total: usize = slabs.iter().map(|s| s.len).sum();
         assert_eq!(total, 1000);
         let vals: Vec<u64> = slabs
@@ -54,7 +57,12 @@ mod load_verify_tests {
             [Some(1u64), None, None, Some(2), Some(2), None].into_iter(),
             &mut buf,
         );
-        let slabs = load::rle_load_and_verify::<Option<u64>>(&buf, 16, None).unwrap();
+        let slabs = load::rle_load_and_verify::<
+            fn((), usize, Option<u64>) -> Result<(), String>,
+            (),
+            Option<u64>,
+        >(&buf, 16, None)
+        .unwrap();
         let vals: Vec<Option<u64>> = slabs
             .iter()
             .flat_map(|s| RleDecoder::<Option<u64>>::new(&s.data))
@@ -70,13 +78,13 @@ mod load_verify_tests {
         buf.extend(encode_unsigned(1));
 
         // Non-nullable u64 should reject.
-        let result = load::rle_load_and_verify::<u64>(
+        fn reject_all(_: (), _count: usize, _v: u64) -> Result<(), String> {
+            Err("unexpected value validation call".to_string())
+        }
+        let result = load::rle_load_and_verify::<fn((), usize, u64) -> Result<(), String>, (), u64>(
             &buf,
             16,
-            Some(|_v: u64| {
-                // This shouldn't even be called — the null check should fire first.
-                Some("unexpected value validation call".to_string())
-            }),
+            Some(&(reject_all as fn((), usize, u64) -> Result<(), String>)),
         );
         assert!(result.is_err());
     }

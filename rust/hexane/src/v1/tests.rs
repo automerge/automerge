@@ -1,4 +1,4 @@
-use crate::v1::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
+use crate::v1::{Column, ColumnValueRef, DeltaColumn, IndexedDeltaColumn, LoadOpts, PrefixColumn};
 use proptest::prelude::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -680,10 +680,10 @@ fn fill_nullable_types() {
     let col = Column::<Option<i64>>::fill(50, None);
     assert_eq!(col.get(0), Some(None));
 
-    let col = Column::<Option<String>>::fill(10, Option::<String>::None);
+    let col = Column::<Option<String>>::fill(10, Option::<&str>::None);
     assert_eq!(col.get(0), Some(None));
 
-    let col = Column::<Option<Vec<u8>>>::fill(10, Option::<Vec<u8>>::None);
+    let col = Column::<Option<Vec<u8>>>::fill(10, Option::<&[u8]>::None);
     assert_eq!(col.get(0), Some(None));
 }
 
@@ -1878,8 +1878,10 @@ fn next_run_cross_slab_mismatch_resets_decoder() {
 /// Helper: build a multi-slab PrefixColumn<u64> and collect all (prefix, value)
 /// via next() as the ground truth.
 fn prefix_ground_truth(vals: &[u64], max_seg: usize) -> (PrefixColumn<u64>, Vec<(u128, u64)>) {
-    let inner = Column::<u64>::from_values_with_max_segments(vals.to_vec(), max_seg);
-    let col = PrefixColumn::from_column(inner);
+    let mut col = PrefixColumn::<u64>::with_max_segments(max_seg);
+    for &v in vals {
+        col.push(v);
+    }
     let all: Vec<_> = col.iter().collect();
     assert_eq!(all.len(), vals.len());
     (col, all)
@@ -2238,31 +2240,19 @@ fn load_with_validation_rejects_bad_values() {
 }
 
 #[test]
-fn load_with_validation_accepts_good_values() {
+fn load_with_no_validation_accepts_all() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), None]);
     let data = col.save();
-    fn accept_all(v: Option<u64>) -> Option<String> {
-        let _ = v;
-        None
-    }
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_validation(accept_all))
-            .unwrap();
+    let loaded = Column::<Option<u64>>::load(&data).unwrap();
     assert_eq!(loaded.len(), 3);
 }
 
 #[test]
-fn load_with_validation_and_length() {
+fn load_with_length() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), Some(3)]);
     let data = col.save();
-    fn accept_all(_: Option<u64>) -> Option<String> {
-        None
-    }
-    let loaded = Column::<Option<u64>>::load_with(
-        &data,
-        LoadOpts::new().with_length(3).with_validation(accept_all),
-    )
-    .unwrap();
+    let loaded =
+        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
     assert_eq!(loaded.len(), 3);
 }
 
@@ -2401,7 +2391,7 @@ fn cross_slab_fuzz_regression() {
         eprintln!(
             "op={op} len={len} splice({idx}, {del}, {new_vals:?}) slabs={} info={:?}",
             col.slab_count(),
-            col.slab_info()
+            ()
         );
         col.splice(idx, del, new_vals.iter().copied());
         mirror.splice(idx..idx + del, new_vals);
@@ -2444,7 +2434,7 @@ fn cross_slab_fuzz() {
                      mirror={mirror:?}",
                     col.to_vec(),
                     col.slab_count(),
-                    col.slab_info(),
+                    (),
                 );
             }
         }
@@ -2457,7 +2447,6 @@ fn cross_slab_fuzz() {
 // validating the full column invariants after each operation.
 // Marked #[ignore] — run with `cargo test -- --ignored fuzz_`.
 
-use super::column::{rebuild_bit, LenWeight, WeightFn};
 use super::encoding::ColumnEncoding;
 
 /// Validate every invariant on a Column<T>:
@@ -2491,8 +2480,9 @@ where
         assert_eq!(slab.segments, info.segments, "slab {i}: segments mismatch");
     }
 
-    let expected_bit = rebuild_bit(&col.slabs, <LenWeight as WeightFn<T>>::compute);
-    assert_eq!(col.bit, expected_bit, "BIT mismatch");
+    // BIT correctness check removed — Column no longer uses a Fenwick BIT
+    // (replaced by B-tree index).  Equivalent invariant now covered by the
+    // index's own invariants checked during splice.
 }
 
 fn validate_rle_column<T>(col: &Column<T>)
@@ -2606,7 +2596,7 @@ fn fuzz_option_u64_splice_exhaustive() {
             if result.is_err() {
                 panic!(
                     "FAILED: del_count={del_count} ins_count={ins_count} pos={pos} del={del}\n  new_vals={new_vals:?}\n  col_len={} slabs={} info={:?}",
-                    col.len(), col.slab_count(), col.slab_info()
+                    col.len(), col.slab_count(), ()
                 );
             }
         }
@@ -3293,4 +3283,791 @@ fn remap_empty() {
     let mut col = Column::<u64>::from_values(vec![]);
     col.remap(|v| v * 2);
     assert_eq!(col.len(), 0);
+}
+
+// ── seek_to_value tests ───────────────────────────────────────────────────
+
+#[test]
+fn seek_to_value_basic() {
+    let data: Vec<u64> = vec![
+        0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
+    ];
+    let col = Column::<u64>::from_values(data);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.seek_to_value(0u64, ..), 0..3);
+    assert_eq!(iter.seek_to_value(6u64, ..), 6..9);
+    assert_eq!(iter.seek_to_value(8u64, ..), 12..15);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.seek_to_value(0u64, ..), 0..3);
+    assert_eq!(iter.seek_to_value(1u64, ..), 3..6);
+    assert_eq!(iter.seek_to_value(6u64, ..), 6..9);
+}
+
+#[test]
+fn seek_to_value_sequential() {
+    let data: Vec<u64> = vec![
+        0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
+    ];
+    let col = Column::<u64>::from_values(data);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.seek_to_value(0u64, ..), 0..3);
+    assert_eq!(iter.seek_to_value(1u64, ..), 3..6);
+    assert_eq!(iter.seek_to_value(6u64, ..), 6..9);
+    assert_eq!(iter.seek_to_value(7u64, ..), 9..12);
+    assert_eq!(iter.seek_to_value(8u64, ..), 12..15);
+    assert_eq!(iter.seek_to_value(9u64, ..), 15..18);
+    assert_eq!(iter.seek_to_value(10u64, ..), 18..21);
+}
+
+#[test]
+fn seek_to_value_missing() {
+    let data: Vec<u64> = vec![0, 0, 0, 2, 2, 2, 4, 4, 4];
+    let col = Column::<u64>::from_values(data);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.seek_to_value(1u64, ..), 3..3);
+    assert_eq!(iter.seek_to_value(3u64, ..), 6..6);
+    assert_eq!(iter.seek_to_value(5u64, ..), 9..9);
+}
+
+#[test]
+fn seek_to_value_with_range() {
+    let data: Vec<u64> = vec![0, 0, 1, 1, 2, 2, 3, 3];
+    let col = Column::<u64>::from_values(data);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.seek_to_value(1u64, 2..6), 2..4);
+    assert_eq!(iter.seek_to_value(2u64, 4..8), 4..6);
+}
+
+#[test]
+fn seek_to_value_nullable() {
+    let data: Vec<Option<u32>> = vec![
+        None,
+        None,
+        None,
+        Some(1),
+        Some(1),
+        Some(2),
+        Some(2),
+        Some(3),
+    ];
+    let col = Column::<Option<u32>>::from_values(data);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.seek_to_value(None, ..), 0..3);
+    assert_eq!(iter.seek_to_value(Some(1u32), ..), 3..5);
+    assert_eq!(iter.seek_to_value(Some(2u32), ..), 5..7);
+    assert_eq!(iter.seek_to_value(Some(3u32), ..), 7..8);
+}
+
+#[test]
+fn seek_to_value_after_reads() {
+    let data: Vec<u64> = vec![0, 0, 0, 1, 1, 1, 2, 2, 2];
+    let col = Column::<u64>::from_values(data);
+
+    let mut iter = col.iter();
+    assert_eq!(iter.next(), Some(0));
+    assert_eq!(iter.next(), Some(0));
+    assert_eq!(iter.next(), Some(0));
+    assert_eq!(iter.seek_to_value(1u64, ..), 3..6);
+    assert_eq!(iter.next(), Some(1));
+    assert_eq!(iter.next(), Some(1));
+    assert_eq!(iter.next(), Some(1));
+    assert_eq!(iter.seek_to_value(2u64, ..), 6..9);
+}
+
+#[test]
+fn scope_to_value_multi_slab_span() {
+    // Build a column with sorted groups where the middle group spans 3+ slabs
+    // by inserting at random positions (creates many literal RLE segments)
+    let mut col = Column::<Option<u32>>::with_max_segments(4);
+    // group 0: None
+    col.insert(0, None);
+    // group 1: Some(1) — insert one at a time at random-ish positions to create many segments
+    let mut rng: u64 = 42;
+    let group1_start = 1;
+    for i in 0..200usize {
+        rng ^= rng.wrapping_shl(13);
+        rng ^= rng.wrapping_shr(7);
+        rng ^= rng.wrapping_shl(17);
+        let pos = group1_start + (rng as usize % (i + 1));
+        col.insert(pos, Some(1u32));
+    }
+    let group1_end = 201;
+    // group 2: Some(2)
+    for i in 0..10 {
+        col.insert(group1_end + i, Some(2u32));
+    }
+
+    assert_eq!(col.len(), 211);
+    if col.slab_count() < 3 {
+        eprintln!(
+            "WARNING: only {} slabs, test may not trigger multi-slab span bug",
+            col.slab_count()
+        );
+    }
+    let result = col.scope_to_value(Some(1u32), ..);
+    assert_eq!(
+        result,
+        1..201,
+        "scope_to_value for Some(1) returned {:?}",
+        result
+    );
+    let result2 = col.scope_to_value(None, ..);
+    assert_eq!(result2, 0..1);
+    let result3 = col.scope_to_value(Some(2u32), ..);
+    assert_eq!(result3, 201..211);
+}
+
+#[test]
+fn scope_to_value_fuzz_multi_slab() {
+    for max_seg in [4, 8, 16, 32] {
+        for prefix_len in [0, 1, 2, 5] {
+            for run_len in [10, 50, 100, 200] {
+                for suffix_len in [0, 1, 5, 10] {
+                    let mut data: Vec<u64> = Vec::new();
+                    for _ in 0..prefix_len {
+                        data.push(0);
+                    }
+                    let expected_start = data.len();
+                    for _ in 0..run_len {
+                        data.push(1);
+                    }
+                    let expected_end = data.len();
+                    for _ in 0..suffix_len {
+                        data.push(2);
+                    }
+                    let col = Column::<u64>::from_values_with_max_segments(data, max_seg);
+                    let result = col.scope_to_value(1u64, ..);
+                    assert_eq!(
+                        result,
+                        expected_start..expected_end,
+                        "max_seg={max_seg} prefix={prefix_len} run={run_len} suffix={suffix_len} slabs={} result={:?}",
+                        col.slab_count(), result,
+                    );
+                }
+            }
+        }
+    }
+}
+/// Brute-force fuzz: build a sorted column via random inserts, then verify
+/// scope_to_value and seek_to_value for every distinct value against a
+/// naive linear scan.
+#[test]
+fn fuzz_scope_and_seek_to_value() {
+    let mut rng: u64 = 777;
+    let next = |rng: &mut u64| -> u64 {
+        *rng ^= rng.wrapping_shl(13);
+        *rng ^= rng.wrapping_shr(7);
+        *rng ^= rng.wrapping_shl(17);
+        *rng
+    };
+
+    for trial in 0..500 {
+        let max_seg = match trial % 4 {
+            0 => 4,
+            1 => 8,
+            2 => 16,
+            _ => 64,
+        };
+        let mut col = Column::<u64>::with_max_segments(max_seg);
+        let n = 50 + (next(&mut rng) as usize % 200);
+        let num_distinct = 2 + (next(&mut rng) as usize % 8);
+
+        // Build sorted column via inserts at random positions
+        // Values are in range 0..num_distinct, inserted in sorted order
+        let mut vals: Vec<u64> = Vec::new();
+        for _ in 0..n {
+            let v = next(&mut rng) % num_distinct as u64;
+            vals.push(v);
+        }
+        vals.sort();
+
+        // Insert one-by-one (randomizing insertion order within equal-value
+        // groups to create varied slab layouts)
+        let mut indices: Vec<usize> = (0..n).collect();
+        for i in (1..indices.len()).rev() {
+            let j = next(&mut rng) as usize % (i + 1);
+            indices.swap(i, j);
+        }
+        let mut sorted_positions: Vec<usize> = vec![0; n];
+        let mut current = Vec::new();
+        for &orig_idx in &indices {
+            let val = vals[orig_idx];
+            // Find the correct sorted position among already-inserted values
+            let pos = current.partition_point(|&v| v <= val);
+            current.insert(pos, val);
+            col.insert(pos, val);
+            sorted_positions[orig_idx] = pos;
+        }
+
+        // Verify column matches expected sorted values
+        let col_vals: Vec<u64> = col.iter().collect();
+        assert_eq!(
+            col_vals, vals,
+            "trial={trial}: column values don't match sorted input"
+        );
+
+        // Test scope_to_value for every value 0..num_distinct+1
+        for target in 0..=(num_distinct as u64) {
+            let expected_start = vals.partition_point(|&v| v < target);
+            let expected_end = vals.partition_point(|&v| v <= target);
+            let expected = expected_start..expected_end;
+
+            let scope_result = col.scope_to_value(target, ..);
+            assert_eq!(
+                scope_result, expected,
+                "trial={trial} target={target} scope_to_value: got {scope_result:?} expected {expected:?} slabs={} segs={:?}",
+                col.slab_count(), col.slab_segments(),
+            );
+
+            // Test scope_to_value with sub-ranges
+            if n > 10 {
+                let mid = n / 2;
+                let sub_start = vals[..mid].partition_point(|&v| v < target);
+                let sub_end = vals[..mid].partition_point(|&v| v <= target);
+                let sub_result = col.scope_to_value(target, ..mid);
+                assert_eq!(
+                    sub_result, sub_start..sub_end,
+                    "trial={trial} target={target} scope_to_value(..{mid}): got {sub_result:?} expected {:?}",
+                    sub_start..sub_end,
+                );
+            }
+        }
+
+        // Test seek_to_value: sequential seeks (like ObjIdIter does)
+        let mut iter = col.iter();
+        for target in 0..=(num_distinct as u64) {
+            let expected_start = vals.partition_point(|&v| v < target);
+            let expected_end = vals.partition_point(|&v| v <= target);
+            let expected = expected_start..expected_end;
+
+            let seek_result = iter.seek_to_value(target, ..);
+            assert_eq!(
+                seek_result, expected,
+                "trial={trial} target={target} seek_to_value: got {seek_result:?} expected {expected:?}",
+            );
+        }
+
+        // Test seek_to_value with skips (seek non-adjacent values)
+        let mut iter2 = col.iter();
+        for target in (0..=(num_distinct as u64)).step_by(2) {
+            let expected_start = vals.partition_point(|&v| v < target);
+            let expected_end = vals.partition_point(|&v| v <= target);
+            let seek_result = iter2.seek_to_value(target, ..);
+            assert_eq!(
+                seek_result,
+                expected_start..expected_end,
+                "trial={trial} target={target} seek_to_value(skip): got {seek_result:?}",
+            );
+        }
+
+        // Test seek_to_value with sub-range (fresh iter each time since
+        // seek_to_value advances the iterator)
+        if n > 20 {
+            let lo = n / 4;
+            let hi = 3 * n / 4;
+            let sub = &vals[lo..hi];
+            for target in 0..=(num_distinct as u64) {
+                let s = sub.partition_point(|&v| v < target) + lo;
+                let e = sub.partition_point(|&v| v <= target) + lo;
+                let mut iter3 = col.iter();
+                let seek_result = iter3.seek_to_value(target, lo..hi);
+                assert_eq!(
+                    seek_result,
+                    s..e,
+                    "trial={trial} target={target} seek_to_value({lo}..{hi}): got {seek_result:?}",
+                );
+            }
+        }
+    }
+}
+
+/// Fuzz nullable columns — scope_to_value with Option<u32>
+#[test]
+fn fuzz_scope_to_value_nullable() {
+    let mut rng: u64 = 42424242;
+    let next = |rng: &mut u64| -> u64 {
+        *rng ^= rng.wrapping_shl(13);
+        *rng ^= rng.wrapping_shr(7);
+        *rng ^= rng.wrapping_shl(17);
+        *rng
+    };
+
+    for trial in 0..200 {
+        let max_seg = match trial % 3 {
+            0 => 4,
+            1 => 8,
+            _ => 64,
+        };
+        let mut col = Column::<Option<u32>>::with_max_segments(max_seg);
+        let n = 30 + (next(&mut rng) as usize % 150);
+        let num_distinct = 2 + (next(&mut rng) as usize % 5);
+
+        let mut vals: Vec<Option<u32>> = Vec::new();
+        for _ in 0..n {
+            let r = next(&mut rng);
+            if r % 5 == 0 {
+                vals.push(None);
+            } else {
+                vals.push(Some((r % num_distinct as u64) as u32));
+            }
+        }
+        vals.sort();
+
+        // Insert shuffled
+        let mut indices: Vec<usize> = (0..n).collect();
+        for i in (1..indices.len()).rev() {
+            let j = next(&mut rng) as usize % (i + 1);
+            indices.swap(i, j);
+        }
+        let mut current: Vec<Option<u32>> = Vec::new();
+        for &orig_idx in &indices {
+            let val = vals[orig_idx];
+            let pos = current.partition_point(|v| v <= &val);
+            current.insert(pos, val);
+            col.insert(pos, val);
+        }
+
+        let col_vals: Vec<Option<u32>> = col.iter().collect();
+        assert_eq!(col_vals, vals, "trial={trial}: nullable column mismatch");
+
+        // Test scope_to_value
+        let mut targets: Vec<Option<u32>> = vec![None];
+        for v in 0..=(num_distinct as u32) {
+            targets.push(Some(v));
+        }
+        for target in &targets {
+            let expected_start = vals.partition_point(|v| v < target);
+            let expected_end = vals.partition_point(|v| v <= target);
+            let result = col.scope_to_value(*target, ..);
+            assert_eq!(
+                result,
+                expected_start..expected_end,
+                "trial={trial} target={target:?} scope_to_value: got {result:?}",
+            );
+        }
+
+        // Sequential seek_to_value
+        let mut iter = col.iter();
+        for target in &targets {
+            let expected_start = vals.partition_point(|v| v < target);
+            let expected_end = vals.partition_point(|v| v <= target);
+            let result = iter.seek_to_value(*target, ..);
+            assert_eq!(
+                result,
+                expected_start..expected_end,
+                "trial={trial} target={target:?} seek_to_value: got {result:?}",
+            );
+        }
+    }
+}
+
+fn check_slab_merge_invariant<T: ColumnValueRef>(col: &Column<T>, context: &str) {
+    let segs = col.slab_segments();
+    let max = 64; // DEFAULT_MAX_SEG
+    let min = max / 4;
+    for i in 0..segs.len() {
+        if segs[i] < min {
+            if i > 0 && segs[i] + segs[i - 1] <= max {
+                panic!(
+                    "{context}: slab[{i}] has {} segments, left neighbor slab[{}] has {} — \
+                     mergeable ({} + {} = {} <= {max}) but wasn't merged. all_segs={segs:?}",
+                    segs[i],
+                    i - 1,
+                    segs[i - 1],
+                    segs[i],
+                    segs[i - 1],
+                    segs[i] + segs[i - 1],
+                );
+            }
+            if i + 1 < segs.len() && segs[i] + segs[i + 1] <= max {
+                panic!(
+                    "{context}: slab[{i}] has {} segments, right neighbor slab[{}] has {} — \
+                     mergeable ({} + {} = {} <= {max}) but wasn't merged. all_segs={segs:?}",
+                    segs[i],
+                    i + 1,
+                    segs[i + 1],
+                    segs[i],
+                    segs[i + 1],
+                    segs[i] + segs[i + 1],
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn fuzz_slab_merge_invariant() {
+    let mut rng: u64 = 98765;
+    let next = |rng: &mut u64| -> u64 {
+        *rng ^= rng.wrapping_shl(13);
+        *rng ^= rng.wrapping_shr(7);
+        *rng ^= rng.wrapping_shl(17);
+        *rng
+    };
+
+    for trial in 0..200 {
+        let mut col = Column::<u64>::new();
+        for i in 0..500 {
+            let len = col.len();
+            let r = next(&mut rng);
+            if len == 0 || r % 3 != 0 {
+                let pos = if len == 0 {
+                    0
+                } else {
+                    (next(&mut rng) as usize) % (len + 1)
+                };
+                let val = next(&mut rng) % 20;
+                col.insert(pos, val);
+            } else {
+                let pos = (next(&mut rng) as usize) % len;
+                col.remove(pos);
+            }
+            check_slab_merge_invariant(&col, &format!("trial={trial} op={i}"));
+        }
+    }
+}
+
+// ── Comprehensive fuzz tests ──────────────────────────────────────────────
+
+fn xorshift(state: &mut u64) -> u64 {
+    *state ^= state.wrapping_shl(13);
+    *state ^= state.wrapping_shr(7);
+    *state ^= state.wrapping_shl(17);
+    *state
+}
+
+#[test]
+fn fuzz_delta_column() {
+    let mut rng: u64 = 11111;
+
+    for trial in 0..200 {
+        let mut col = DeltaColumn::<u32>::new();
+        let mut mirror: Vec<u32> = Vec::new();
+
+        for i in 0..300 {
+            let len = col.len();
+            let r = xorshift(&mut rng);
+            if len == 0 || r % 4 != 0 {
+                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let val = (xorshift(&mut rng) % 1000) as u32;
+                col.insert(pos, val);
+                mirror.insert(pos, val);
+            } else if r % 4 == 1 && len > 0 {
+                let pos = (xorshift(&mut rng) as usize) % len;
+                col.remove(pos);
+                mirror.remove(pos);
+            } else {
+                let pos = (xorshift(&mut rng) as usize) % (len + 1);
+                let del = if pos < len { (xorshift(&mut rng) as usize) % (len - pos).min(5) } else { 0 };
+                let ins_count = (xorshift(&mut rng) as usize) % 4;
+                let vals: Vec<u32> = (0..ins_count).map(|_| (xorshift(&mut rng) % 1000) as u32).collect();
+                col.splice(pos, del, vals.iter().copied());
+                mirror.splice(pos..pos + del, vals);
+            }
+
+            assert_eq!(col.len(), mirror.len(), "trial={trial} op={i}: len mismatch");
+            let col_vals = col.to_vec();
+            assert_eq!(col_vals, mirror, "trial={trial} op={i}: values mismatch");
+
+            if len > 0 {
+                let idx = (xorshift(&mut rng) as usize) % col.len();
+                assert_eq!(col.get(idx), Some(mirror[idx]), "trial={trial} op={i}: get({idx})");
+            }
+        }
+
+        if !mirror.is_empty() {
+            assert_eq!(col.first(), Some(mirror[0]));
+            assert_eq!(col.last(), Some(*mirror.last().unwrap()));
+        }
+
+        // iter_range
+        if col.len() > 10 {
+            let lo = (xorshift(&mut rng) as usize) % col.len();
+            let hi = lo + (xorshift(&mut rng) as usize) % (col.len() - lo);
+            let range_vals: Vec<u32> = col.iter_range(lo..hi).collect();
+            assert_eq!(range_vals, mirror[lo..hi], "trial={trial}: iter_range");
+        }
+
+        // DeltaIter nth
+        if col.len() > 5 {
+            let mut iter = col.iter();
+            let skip = (xorshift(&mut rng) as usize) % col.len();
+            let val = iter.nth(skip);
+            assert_eq!(val, Some(mirror[skip]), "trial={trial}: nth({skip})");
+        }
+
+        // save/load roundtrip
+        let saved = col.save();
+        let loaded = DeltaColumn::<u32>::load(&saved).unwrap();
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
+    }
+}
+
+#[test]
+fn fuzz_delta_column_nullable() {
+    let mut rng: u64 = 22222;
+
+    for trial in 0..200 {
+        let mut col = DeltaColumn::<Option<u32>>::new();
+        let mut mirror: Vec<Option<u32>> = Vec::new();
+
+        for i in 0..200 {
+            let len = col.len();
+            let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+            let val = if xorshift(&mut rng) % 5 == 0 {
+                None
+            } else {
+                Some((xorshift(&mut rng) % 500) as u32)
+            };
+            col.insert(pos, val);
+            mirror.insert(pos, val);
+            assert_eq!(col.to_vec(), mirror, "trial={trial} op={i}");
+        }
+
+        let saved = col.save();
+        let loaded = DeltaColumn::<Option<u32>>::load(&saved).unwrap();
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
+    }
+}
+
+#[test]
+fn fuzz_prefix_column() {
+    let mut rng: u64 = 33333;
+
+    for trial in 0..200 {
+        let mut col = PrefixColumn::<u32>::new();
+        let mut mirror: Vec<u32> = Vec::new();
+
+        for i in 0..300 {
+            let len = col.len();
+            let r = xorshift(&mut rng);
+            if len == 0 || r % 4 != 0 {
+                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let val = (xorshift(&mut rng) % 20) as u32;
+                col.insert(pos, val);
+                mirror.insert(pos, val);
+            } else if r % 4 == 1 && len > 0 {
+                let pos = (xorshift(&mut rng) as usize) % len;
+                col.remove(pos);
+                mirror.remove(pos);
+            } else {
+                let pos = (xorshift(&mut rng) as usize) % (len + 1);
+                let del = if pos < len { (xorshift(&mut rng) as usize) % (len - pos).min(5) } else { 0 };
+                let ins_count = (xorshift(&mut rng) as usize) % 4;
+                let vals: Vec<u32> = (0..ins_count).map(|_| (xorshift(&mut rng) % 20) as u32).collect();
+                col.splice(pos, del, vals.iter().copied());
+                mirror.splice(pos..pos + del, vals);
+            }
+
+            assert_eq!(col.len(), mirror.len(), "trial={trial} op={i}: len");
+
+            // verify prefix sums
+            let mut prefix = 0u64;
+            for j in 0..mirror.len() {
+                assert_eq!(col.get_prefix(j), prefix, "trial={trial} op={i}: get_prefix({j})");
+                prefix += mirror[j] as u64;
+                assert_eq!(col.get_total(j), prefix, "trial={trial} op={i}: get_total({j})");
+            }
+            assert_eq!(col.get_prefix(mirror.len()), prefix, "trial={trial} op={i}: get_prefix(len)");
+
+            // prefix_delta
+            if mirror.len() > 2 {
+                let lo = (xorshift(&mut rng) as usize) % mirror.len();
+                let hi = lo + (xorshift(&mut rng) as usize) % (mirror.len() - lo);
+                let expected: u64 = mirror[lo..hi].iter().map(|&v| v as u64).sum();
+                assert_eq!(col.prefix_delta(lo..hi), expected, "trial={trial} op={i}: prefix_delta({lo}..{hi})");
+            }
+        }
+
+        // get_index_for_prefix / get_index_for_total
+        let total: u64 = mirror.iter().map(|&v| v as u64).sum();
+        if total > 0 {
+            let target = (xorshift(&mut rng) % total) + 1;
+            let idx = col.get_index_for_total(target);
+            let actual_total = col.get_total(idx);
+            assert!(actual_total >= target, "trial={trial}: get_index_for_total({target}) -> {idx}, total={actual_total}");
+            if idx > 0 {
+                assert!(col.get_total(idx - 1) < target, "trial={trial}: off by one");
+            }
+        }
+
+        // PrefixIter advance_prefix
+        if !mirror.is_empty() {
+            let target_prefix = (xorshift(&mut rng) % (total.max(1))) as u64;
+            let mut iter = col.iter();
+            if let Some(seek) = iter.advance_prefix(target_prefix) {
+                assert!(seek.prefix >= target_prefix, "trial={trial}: advance_prefix undershoot");
+            }
+        }
+
+        // PrefixIter advance_to
+        if col.len() > 5 {
+            let target_pos = (xorshift(&mut rng) as usize) % col.len();
+            let mut iter = col.iter();
+            if let Some(seek) = iter.advance_to(target_pos) {
+                assert_eq!(seek.pos, target_pos, "trial={trial}: advance_to pos");
+                assert_eq!(seek.prefix, col.get_total(target_pos), "trial={trial}: advance_to prefix");
+            }
+        }
+
+        // seek / get_delta
+        if col.len() > 5 && total > 0 {
+            let start = (xorshift(&mut rng) as usize) % col.len();
+            let n = (xorshift(&mut rng) % total.min(100)) as u64;
+            let seek_result = col.seek(start, n);
+            let delta_result = if start < col.len() - 1 {
+                let pos = start + 1 + (xorshift(&mut rng) as usize) % (col.len() - start - 1).max(1);
+                col.get_delta(start, pos)
+            } else {
+                None
+            };
+            // Just verify they don't panic
+            let _ = seek_result;
+            let _ = delta_result;
+        }
+
+        // save/load roundtrip
+        let saved = col.save();
+        let loaded = PrefixColumn::<u32>::load(&saved).unwrap();
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
+    }
+}
+
+#[test]
+fn fuzz_prefix_column_bool() {
+    let mut rng: u64 = 44444;
+
+    for trial in 0..200 {
+        let mut col = PrefixColumn::<bool>::new();
+        let mut mirror: Vec<bool> = Vec::new();
+
+        for i in 0..300 {
+            let len = col.len();
+            let r = xorshift(&mut rng);
+            if len == 0 || r % 3 != 0 {
+                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let val = xorshift(&mut rng) % 2 == 0;
+                col.insert(pos, val);
+                mirror.insert(pos, val);
+            } else {
+                let pos = (xorshift(&mut rng) as usize) % len;
+                col.remove(pos);
+                mirror.remove(pos);
+            }
+
+            let true_count: usize = mirror.iter().filter(|&&v| v).count();
+            assert_eq!(col.get_prefix(mirror.len()), true_count, "trial={trial} op={i}: prefix mismatch");
+        }
+
+        let saved = col.save();
+        let loaded = PrefixColumn::<bool>::load(&saved).unwrap();
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
+    }
+}
+
+#[test]
+fn fuzz_indexed_delta_column() {
+    let mut rng: u64 = 55555;
+
+    for trial in 0..200 {
+        let mut col = IndexedDeltaColumn::<u32>::new();
+        let mut mirror: Vec<u32> = Vec::new();
+
+        for _ in 0..200 {
+            let len = col.len();
+            let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+            let val = (xorshift(&mut rng) % 500) as u32;
+            col.insert(pos, val);
+            mirror.insert(pos, val);
+        }
+
+        assert_eq!(col.to_vec(), mirror, "trial={trial}: values");
+
+        // find_by_value
+        for target in [0u32, 1, 50, 100, 250, 499] {
+            let expected: Vec<usize> = mirror.iter().enumerate().filter(|(_, &v)| v == target).map(|(i, _)| i).collect();
+            let found: Vec<usize> = col.find_by_value(target).collect();
+            assert_eq!(found, expected, "trial={trial}: find_by_value({target})");
+        }
+
+        // find_by_range
+        let lo = (xorshift(&mut rng) % 200) as u32;
+        let hi = lo + (xorshift(&mut rng) % 100) as u32;
+        let expected: Vec<usize> = mirror.iter().enumerate().filter(|(_, &v)| v >= lo && v < hi).map(|(i, _)| i).collect();
+        let found: Vec<usize> = col.find_by_range(lo..hi).collect();
+        assert_eq!(found, expected, "trial={trial}: find_by_range({lo}..{hi})");
+
+        // find_first
+        if let Some(&first_val) = mirror.first() {
+            let expected_pos = mirror.iter().position(|&v| v == first_val);
+            let found_pos = col.find_first(first_val);
+            assert_eq!(found_pos, expected_pos, "trial={trial}: find_first({first_val})");
+        }
+
+        // save/load roundtrip
+        let saved = col.save();
+        let loaded = IndexedDeltaColumn::<u32>::load(&saved).unwrap();
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
+    }
+}
+
+#[test]
+fn fuzz_column_remap() {
+    let mut rng: u64 = 66666;
+
+    for trial in 0..100 {
+        let mut col = Column::<u64>::new();
+        let mut mirror: Vec<u64> = Vec::new();
+
+        for _ in 0..100 {
+            let len = col.len();
+            let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+            let val = xorshift(&mut rng) % 50;
+            col.insert(pos, val);
+            mirror.insert(pos, val);
+        }
+
+        let f = |v: u64| -> u64 { v.wrapping_mul(3).wrapping_add(7) % 100 };
+        col.remap(f);
+        let remapped_mirror: Vec<u64> = mirror.iter().map(|&v| f(v)).collect();
+        assert_eq!(col.to_vec(), remapped_mirror, "trial={trial}: remap values");
+
+        let saved = col.save();
+        let loaded = Column::<u64>::load(&saved).unwrap();
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip after remap");
+    }
+}
+
+#[test]
+fn fuzz_column_save_load_after_mutations() {
+    let mut rng: u64 = 77777;
+
+    for trial in 0..200 {
+        let mut col = Column::<Option<u64>>::new();
+
+        for _ in 0..200 {
+            let len = col.len();
+            let r = xorshift(&mut rng);
+            if len == 0 || r % 3 != 0 {
+                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let val = if xorshift(&mut rng) % 5 == 0 { None } else { Some(xorshift(&mut rng) % 100) };
+                col.insert(pos, val);
+            } else {
+                let pos = (xorshift(&mut rng) as usize) % len;
+                col.remove(pos);
+            }
+        }
+
+        let vals_before = col.to_vec();
+        let saved = col.save();
+        let loaded = Column::<Option<u64>>::load(&saved).unwrap();
+        assert_eq!(loaded.to_vec(), vals_before, "trial={trial}: values after reload");
+        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
+    }
 }

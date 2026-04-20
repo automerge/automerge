@@ -69,22 +69,27 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(
 /// Walks every run, validates with try_unpack, and splits into slabs by
 /// copying byte ranges. No re-encoding except when splitting a literal
 /// run (which requires rewriting the count header for each piece).
-pub(crate) fn rle_load_and_verify<T: RleValue>(
-    input: &[u8],
+pub(crate) fn rle_load_and_verify<'a, F, P: Default + Copy, T: RleValue>(
+    input: &'a [u8],
     max_segments: usize,
-    validate: Option<for<'a> fn(<T as super::ColumnValueRef>::Get<'a>) -> Option<String>>,
-) -> Result<Vec<Slab>, PackError> {
+    validate: Option<&F>,
+) -> Result<Vec<Slab>, PackError>
+where
+    F: Fn(P, usize, <T as super::ColumnValueRef>::Get<'a>) -> Result<P, String>,
+{
     let target_segments = max_segments / 2;
     if input.is_empty() {
         return Ok(vec![]);
     }
-    let _validate = move |value| {
+    let mut p = Default::default();
+    let _validate = move |p, count, value| {
         if let Some(v) = validate {
-            if let Some(m) = v(value) {
-                return Err(PackError::InvalidValue(m));
+            match v(p, count, value) {
+                Ok(new_p) => return Ok(new_p),
+                Err(m) => return Err(PackError::InvalidValue(m)),
             }
         }
-        Ok(())
+        Ok(p)
     };
     let mut decoder = RleDecoder::<T>::new(input);
     let mut slabs = vec![];
@@ -104,7 +109,7 @@ pub(crate) fn rle_load_and_verify<T: RleValue>(
                 lit_count = 0;
             }
             RleSegment::Lit { value, bytes } => {
-                _validate(value)?;
+                p = _validate(p, 1, value)?;
                 slab.len += 1;
                 slab.segments += 1;
                 slab.tail.lit_tail = NonZeroU32::new(bytes as u32);
@@ -116,7 +121,7 @@ pub(crate) fn rle_load_and_verify<T: RleValue>(
                 value,
                 bytes,
             } => {
-                _validate(value)?;
+                p = _validate(p, count, value)?;
                 slab.len += count;
                 slab.segments += 1;
                 slab.tail.lit_tail = None;
@@ -201,6 +206,8 @@ mod tests {
     use crate::v1::rle::{RleDecoder, RleEncoding};
     use crate::v1::{Column, ColumnValueRef};
 
+    type NoValidate = fn((), usize, u64) -> Result<(), String>;
+
     fn check_validate2<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>>(data: &[u8]) {
         let v1 = rle_validate_encoding::<T>(data).unwrap();
         let v2 = rle_validate_encoding::<T>(data).unwrap();
@@ -244,8 +251,8 @@ mod tests {
         let vals: Vec<u64> = (0..1000).map(|i| i % 7).collect();
         let col = Column::<u64>::from_values(vals);
         let saved = col.save();
-        let v1 = rle_load_and_verify::<u64>(&saved, 16, None).unwrap();
-        let v2 = rle_load_and_verify::<u64>(&saved, 16, None).unwrap();
+        let v1 = rle_load_and_verify::<NoValidate, (), u64>(&saved, 16, None).unwrap();
+        let v2 = rle_load_and_verify::<NoValidate, (), u64>(&saved, 16, None).unwrap();
         assert_eq!(v1.len(), v2.len(), "slab count mismatch");
         for (i, (s1, s2)) in v1.iter().zip(v2.iter()).enumerate() {
             assert_eq!(s1.data, s2.data, "slab {i} data mismatch");
@@ -391,12 +398,12 @@ mod tests {
     fn validate_load_rejects_null_in_non_nullable() {
         // Null run in a u64 column via load_and_verify2
         let data = rle_bytes(&[("null", &[0x00, 0x01])]);
-        assert!(rle_load_and_verify::<u64>(&data, 16, None).is_err());
+        assert!(rle_load_and_verify::<NoValidate, (), u64>(&data, 16, None).is_err());
     }
 
     #[test]
     fn validate_load_empty_input() {
-        let result = rle_load_and_verify::<u64>(&[], 16, None).unwrap();
+        let result = rle_load_and_verify::<NoValidate, (), u64>(&[], 16, None).unwrap();
         assert!(result.is_empty());
     }
 
@@ -410,7 +417,12 @@ mod tests {
     {
         let col = Column::<T>::from_values(vals.clone());
         let saved = col.save();
-        let slabs = rle_load_and_verify::<T>(&saved, max_segments, None).unwrap();
+        let slabs = rle_load_and_verify::<fn((), usize, T::Get<'_>) -> Result<(), String>, (), T>(
+            &saved,
+            max_segments,
+            None,
+        )
+        .unwrap();
 
         // Every slab must be well-formed with correct tail.
         let mut total_len = 0;
