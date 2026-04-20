@@ -15,8 +15,6 @@ use super::ColumnValueRef;
 ///   slab segment budget.
 pub struct LoadOpts {
     pub(crate) length: Option<usize>,
-    //pub(crate) fill: Option<T::Get<'static>>,
-    //pub(crate) validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
     pub(crate) max_segments: usize,
 }
 

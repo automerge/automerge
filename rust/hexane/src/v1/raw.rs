@@ -79,20 +79,72 @@ impl RawColumn {
 
     // ── Splice ──────────────────────────────────────────────────────────────
 
-    /// Insert / delete / replace bytes at `index`.  Panics if `index + del`
-    /// exceeds the column length.
-    pub fn splice(&mut self, index: usize, del: usize, bytes: &[u8]) {
-        self.try_splice(index, del, bytes)
+    /// Insert / delete / replace bytes at `index`, taking a stream of byte
+    /// slices for the inserted content.  Panics if `index + del` exceeds
+    /// the column length.
+    ///
+    /// Use this when the caller already has bytes broken into per-item
+    /// chunks (e.g. one `raw_value()` per op).  The chunks are concatenated
+    /// internally before handing off to [`splice_slice`](Self::splice_slice).
+    /// Zero- and single-chunk inputs skip the concatenation buffer.
+    pub fn splice<I, B>(&mut self, index: usize, del: usize, chunks: I)
+    where
+        I: IntoIterator<Item = B>,
+        B: AsRef<[u8]>,
+    {
+        self.try_splice(index, del, chunks)
             .expect("splice range out of bounds")
     }
 
     /// Non-panicking variant of [`splice`](Self::splice).
+    pub fn try_splice<I, B>(&mut self, index: usize, del: usize, chunks: I) -> Result<(), PackError>
+    where
+        I: IntoIterator<Item = B>,
+        B: AsRef<[u8]>,
+    {
+        let mut iter = chunks.into_iter();
+        let first = iter.next();
+        match first {
+            None => self.try_splice_slice(index, del, &[]),
+            Some(first) => match iter.next() {
+                None => {
+                    // Single chunk — forward without allocating a concat buffer.
+                    self.try_splice_slice(index, del, first.as_ref())
+                }
+                Some(second) => {
+                    let first = first.as_ref();
+                    let second = second.as_ref();
+                    let mut buf = Vec::with_capacity(first.len() + second.len());
+                    buf.extend_from_slice(first);
+                    buf.extend_from_slice(second);
+                    for chunk in iter {
+                        buf.extend_from_slice(chunk.as_ref());
+                    }
+                    self.try_splice_slice(index, del, &buf)
+                }
+            },
+        }
+    }
+
+    /// Insert / delete / replace bytes at `index` with a single byte slice.
+    /// Panics if `index + del` exceeds the column length.
+    pub fn splice_slice(&mut self, index: usize, del: usize, bytes: &[u8]) {
+        self.try_splice_slice(index, del, bytes)
+            .expect("splice range out of bounds")
+    }
+
+    /// Non-panicking variant of [`splice_slice`](Self::splice_slice).
     ///
     /// Flow mirrors `Column`'s `Encoding::splice`: locate the target slab,
     /// delegate to [`splice_slab`] which handles one slab plus any overflow,
     /// then clean up cross-slab deletes, merge undersized neighbours, and
     /// update the BIT.
-    pub fn try_splice(&mut self, index: usize, del: usize, bytes: &[u8]) -> Result<(), PackError> {
+    pub fn try_splice_slice(
+        &mut self,
+        index: usize,
+        del: usize,
+        bytes: &[u8],
+    ) -> Result<(), PackError> {
         if index
             .checked_add(del)
             .map(|end| end > self.total_len)
@@ -269,6 +321,7 @@ impl RawColumn {
             slabs: &self.slabs,
             slab_idx: 0,
             offset_in_slab: 0,
+            pos: 0,
         }
     }
 
@@ -285,6 +338,7 @@ impl RawColumn {
                 slabs: &self.slabs,
                 slab_idx: self.slabs.len(),
                 offset_in_slab: 0,
+                pos,
             };
         }
         let (slab_idx, offset) = find_slab_bit(&self.bit, pos, self.slabs.len());
@@ -292,6 +346,7 @@ impl RawColumn {
             slabs: &self.slabs,
             slab_idx,
             offset_in_slab: offset,
+            pos,
         }
     }
 
@@ -480,14 +535,24 @@ fn pick_split(offset_before_insert: usize, inserted_len: usize, total_len: usize
 ///
 /// [`take`]: RawColumnIter::take
 /// [`skip`]: RawColumnIter::skip
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RawColumnIter<'a> {
     slabs: &'a [RawSlab],
     slab_idx: usize,
     offset_in_slab: usize,
+    /// Absolute byte position — `slab_idx` and `offset_in_slab` are the
+    /// physical derivation; this mirrors them for `pos()` and `seek_to`.
+    pos: usize,
 }
 
 impl<'a> RawColumnIter<'a> {
+    /// Current absolute byte position.  Useful for suspending / later
+    /// resuming via [`RawColumn::iter_at`].
+    #[inline]
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
     /// Read the next `n` bytes and advance.  Panics if the read would cross
     /// a slab boundary — by the column's invariant this only happens if the
     /// caller passed a length that doesn't correspond to a single value
@@ -507,6 +572,7 @@ impl<'a> RawColumnIter<'a> {
         );
         let out = &slab.data[self.offset_in_slab..self.offset_in_slab + n];
         self.offset_in_slab += n;
+        self.pos += n;
         if self.offset_in_slab >= slab.data.len() && self.slab_idx + 1 < self.slabs.len() {
             self.slab_idx += 1;
             self.offset_in_slab = 0;
@@ -517,6 +583,7 @@ impl<'a> RawColumnIter<'a> {
     /// Advance the cursor by `n` bytes, crossing slab boundaries as needed.
     /// Panics if `n` walks past the end of the column.
     pub fn skip(&mut self, n: usize) {
+        self.pos += n;
         let mut remaining = n;
         while remaining > 0 {
             let slab = self
@@ -532,6 +599,18 @@ impl<'a> RawColumnIter<'a> {
             self.slab_idx += 1;
             self.offset_in_slab = 0;
         }
+    }
+
+    /// Forward-only absolute seek.  `target` must be `>= pos()`; use
+    /// [`RawColumn::iter_at`] for arbitrary seeks.  Equivalent to
+    /// `self.skip(target - self.pos())` with a bounds check.
+    pub fn seek_to(&mut self, target: usize) {
+        debug_assert!(
+            target >= self.pos,
+            "RawColumnIter::seek_to is forward-only (at {} want {target})",
+            self.pos,
+        );
+        self.skip(target - self.pos);
     }
 }
 
@@ -557,40 +636,40 @@ mod tests {
     #[test]
     fn single_slab_append() {
         let mut col = RawColumn::with_max_segments(32);
-        col.splice(0, 0, b"hello");
-        col.splice(5, 0, b", world");
+        col.splice_slice(0, 0, b"hello");
+        col.splice_slice(5, 0, b", world");
         drive(&col, b"hello, world");
     }
 
     #[test]
     fn single_slab_insert_middle() {
         let mut col = RawColumn::with_max_segments(32);
-        col.splice(0, 0, b"helloworld");
-        col.splice(5, 0, b", ");
+        col.splice_slice(0, 0, b"helloworld");
+        col.splice_slice(5, 0, b", ");
         drive(&col, b"hello, world");
     }
 
     #[test]
     fn single_slab_delete() {
         let mut col = RawColumn::with_max_segments(32);
-        col.splice(0, 0, b"hello, world");
-        col.splice(5, 2, b""); // delete ", "
+        col.splice_slice(0, 0, b"hello, world");
+        col.splice_slice(5, 2, b""); // delete ", "
         drive(&col, b"helloworld");
     }
 
     #[test]
     fn single_slab_replace() {
         let mut col = RawColumn::with_max_segments(32);
-        col.splice(0, 0, b"hello, world");
-        col.splice(7, 5, b"hexane");
+        col.splice_slice(0, 0, b"hello, world");
+        col.splice_slice(7, 5, b"hexane");
         drive(&col, b"hello, hexane");
     }
 
     #[test]
     fn splice_overflow_splits() {
         let mut col = RawColumn::with_max_segments(8);
-        col.splice(0, 0, b"abcdef"); // 6 bytes — fits
-        col.splice(3, 0, b"XYZ"); // becomes "abcXYZdef" = 9 bytes — overflow
+        col.splice_slice(0, 0, b"abcdef"); // 6 bytes — fits
+        col.splice_slice(3, 0, b"XYZ"); // becomes "abcXYZdef" = 9 bytes — overflow
         drive(&col, b"abcXYZdef");
         // Should have produced 2 slabs.
         assert_eq!(col.slabs.len(), 2, "expected split into 2 slabs");
@@ -603,17 +682,17 @@ mod tests {
         // Option B: split after insert → (5 | 8). Imbalance 3.
         // Should pick B.
         let mut col = RawColumn::with_max_segments(10);
-        col.splice(0, 0, b"PPPPSSSSSSSS"); // 12 bytes, forces split at construction
-                                           // Clear and rebuild cleanly with no pre-split.
+        col.splice_slice(0, 0, b"PPPPSSSSSSSS"); // 12 bytes, forces split at construction
+                                                 // Clear and rebuild cleanly with no pre-split.
         let mut col = RawColumn::with_max_segments(15);
-        col.splice(0, 0, b"PPPPSSSSSSSS"); // 12 bytes, fits
-        col.splice(4, 0, b"X"); // 13 bytes — still fits (< 15), no overflow
+        col.splice_slice(0, 0, b"PPPPSSSSSSSS"); // 12 bytes, fits
+        col.splice_slice(4, 0, b"X"); // 13 bytes — still fits (< 15), no overflow
         drive(&col, b"PPPPXSSSSSSSS");
 
         // Now force the overflow.
         let mut col = RawColumn::with_max_segments(12);
-        col.splice(0, 0, b"PPPPSSSSSSSS"); // exactly 12 bytes
-        col.splice(4, 0, b"X"); // 13 bytes — overflow by 1
+        col.splice_slice(0, 0, b"PPPPSSSSSSSS"); // exactly 12 bytes
+        col.splice_slice(4, 0, b"X"); // 13 bytes — overflow by 1
         drive(&col, b"PPPPXSSSSSSSS");
         assert_eq!(col.slabs.len(), 2);
         // Better split is "after insert": left=5 bytes, right=8.
@@ -628,8 +707,8 @@ mod tests {
         // Option B: after insert  → (10 | 1), imbalance 9.
         // Should pick A.
         let mut col = RawColumn::with_max_segments(10);
-        col.splice(0, 0, b"PPPPPPPPPS");
-        col.splice(9, 0, b"X");
+        col.splice_slice(0, 0, b"PPPPPPPPPS");
+        col.splice_slice(9, 0, b"X");
         drive(&col, b"PPPPPPPPPXS");
         assert_eq!(col.slabs.len(), 2);
         assert_eq!(col.slabs[0].data, b"PPPPPPPPP");
@@ -641,7 +720,7 @@ mod tests {
         // Blob larger than max_segments — cannot split (would cross value
         // boundaries), so it lives in one oversize slab.
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"xxxxxxxxxxxxxxxx"); // 16 bytes > max 4
+        col.splice_slice(0, 0, b"xxxxxxxxxxxxxxxx"); // 16 bytes > max 4
         drive(&col, b"xxxxxxxxxxxxxxxx");
         // Either one oversize slab or (if split at edge skipped) something,
         // but `get(0..16)` must return the whole thing intact.
@@ -651,7 +730,7 @@ mod tests {
     #[test]
     fn get_within_slab() {
         let mut col = RawColumn::with_max_segments(32);
-        col.splice(0, 0, b"hello, world");
+        col.splice_slice(0, 0, b"hello, world");
         assert_eq!(col.get(0..5), b"hello");
         assert_eq!(col.get(7..12), b"world");
         assert_eq!(col.get(0..12), b"hello, world");
@@ -662,24 +741,24 @@ mod tests {
     #[should_panic(expected = "cross-slab")]
     fn get_cross_slab_panics() {
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"abcd"); // slab 0 full
-        col.splice(4, 0, b"efgh"); // slab 1
-                                   // col is now split into two slabs; get a range spanning both.
+        col.splice_slice(0, 0, b"abcd"); // slab 0 full
+        col.splice_slice(4, 0, b"efgh"); // slab 1
+                                         // col is now split into two slabs; get a range spanning both.
         let _ = col.get(2..6);
     }
 
     #[test]
     fn try_get_cross_slab_errors() {
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"abcd");
-        col.splice(4, 0, b"efgh");
+        col.splice_slice(0, 0, b"abcd");
+        col.splice_slice(4, 0, b"efgh");
         assert!(col.try_get(2..6).is_err(), "expected cross-slab error");
     }
 
     #[test]
     fn try_get_oob_errors() {
         let mut col = RawColumn::new();
-        col.splice(0, 0, b"abc");
+        col.splice_slice(0, 0, b"abc");
         assert!(col.try_get(0..10).is_err());
         assert!(col.try_get(5..6).is_err());
     }
@@ -687,22 +766,22 @@ mod tests {
     #[test]
     fn try_splice_oob_errors() {
         let mut col = RawColumn::new();
-        col.splice(0, 0, b"abc");
-        assert!(col.try_splice(5, 0, b"x").is_err());
-        assert!(col.try_splice(0, 10, b"").is_err());
+        col.splice_slice(0, 0, b"abc");
+        assert!(col.try_splice_slice(5, 0, b"x").is_err());
+        assert!(col.try_splice_slice(0, 10, b"").is_err());
     }
 
     #[test]
     fn multi_slab_splice_across_boundary() {
         let mut col = RawColumn::with_max_segments(4);
         // Build up three slabs of content.
-        col.splice(0, 0, b"aaaa"); // slab 0 (4 bytes)
-        col.splice(4, 0, b"bbbb"); // pushes into slab 1 via split
-        col.splice(8, 0, b"cccc"); // pushes into slab 2
+        col.splice_slice(0, 0, b"aaaa"); // slab 0 (4 bytes)
+        col.splice_slice(4, 0, b"bbbb"); // pushes into slab 1 via split
+        col.splice_slice(8, 0, b"cccc"); // pushes into slab 2
         drive(&col, b"aaaabbbbcccc");
 
         // Delete 6 bytes starting at position 3 (crosses into slab 2).
-        col.splice(3, 6, b"");
+        col.splice_slice(3, 6, b"");
         drive(&col, b"aaaccc");
     }
 
@@ -714,14 +793,14 @@ mod tests {
         let mut col = RawColumn::with_max_segments(16);
         for i in 0..100 {
             let byte = b'a' + (i % 26) as u8;
-            col.splice(col.len(), 0, &[byte]);
+            col.splice_slice(col.len(), 0, &[byte]);
         }
         let len_before = col.len();
         let slabs_before = col.slabs.len();
         assert!(slabs_before > 1, "should have multiple slabs");
 
         // Delete most bytes — merges should happen.
-        col.splice(0, len_before - 10, b"");
+        col.splice_slice(0, len_before - 10, b"");
         assert_eq!(col.len(), 10);
         // Slab count should have shrunk (not necessarily to 1, but <= ceil(10/16) ish).
         assert!(
@@ -735,7 +814,7 @@ mod tests {
     #[test]
     fn iter_take_and_skip() {
         let mut col = RawColumn::with_max_segments(32);
-        col.splice(0, 0, b"hello, world");
+        col.splice_slice(0, 0, b"hello, world");
         let mut it = col.iter();
         assert_eq!(it.take(5), b"hello");
         it.skip(2);
@@ -745,9 +824,9 @@ mod tests {
     #[test]
     fn iter_across_slabs_with_skip() {
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"abcd");
-        col.splice(4, 0, b"efgh");
-        col.splice(8, 0, b"ijkl");
+        col.splice_slice(0, 0, b"abcd");
+        col.splice_slice(4, 0, b"efgh");
+        col.splice_slice(8, 0, b"ijkl");
         let mut it = col.iter();
         // Take bytes from within each slab; skip across boundaries.
         assert_eq!(it.take(4), b"abcd");
@@ -759,8 +838,8 @@ mod tests {
     #[test]
     fn iter_at_seeks() {
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"abcd");
-        col.splice(4, 0, b"efgh");
+        col.splice_slice(0, 0, b"abcd");
+        col.splice_slice(4, 0, b"efgh");
         let mut it = col.iter_at(4);
         assert_eq!(it.take(4), b"efgh");
     }
@@ -769,8 +848,8 @@ mod tests {
     #[should_panic(expected = "cross slab boundary")]
     fn iter_take_cross_slab_panics() {
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"abcd");
-        col.splice(4, 0, b"efgh");
+        col.splice_slice(0, 0, b"abcd");
+        col.splice_slice(4, 0, b"efgh");
         let mut it = col.iter();
         // take(8) would cross — must panic.
         let _ = it.take(8);
@@ -794,8 +873,8 @@ mod tests {
     #[test]
     fn save_to_range() {
         let mut col = RawColumn::with_max_segments(4);
-        col.splice(0, 0, b"abcd");
-        col.splice(4, 0, b"efgh");
+        col.splice_slice(0, 0, b"abcd");
+        col.splice_slice(4, 0, b"efgh");
         let mut out = b"prefix:".to_vec();
         let range = col.save_to(&mut out);
         assert_eq!(&out[range.clone()], b"abcdefgh");
@@ -840,14 +919,14 @@ mod tests {
                     let at = rng.range(len + 1);
                     let n = rng.range(8) + 1;
                     let bytes: Vec<u8> = (0..n).map(|_| (rng.next() & 0xff) as u8).collect();
-                    col.splice(at, 0, &bytes);
+                    col.splice_slice(at, 0, &bytes);
                     reference.splice(at..at, bytes);
                 }
                 // delete
                 1 if len > 0 => {
                     let at = rng.range(len);
                     let del = rng.range((len - at).min(6)) + 1;
-                    col.splice(at, del, b"");
+                    col.splice_slice(at, del, b"");
                     reference.drain(at..at + del);
                 }
                 // replace
@@ -856,7 +935,7 @@ mod tests {
                     let del = rng.range((len - at).min(4)) + 1;
                     let n = rng.range(6) + 1;
                     let bytes: Vec<u8> = (0..n).map(|_| (rng.next() & 0xff) as u8).collect();
-                    col.splice(at, del, &bytes);
+                    col.splice_slice(at, del, &bytes);
                     reference.splice(at..at + del, bytes);
                 }
                 _ => {}
