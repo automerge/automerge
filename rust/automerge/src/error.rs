@@ -52,6 +52,8 @@ pub enum AutomergeError {
     Load(#[from] LoadError),
     #[error(transparent)]
     LoadChangeError(#[from] LoadChangeError),
+    #[error(transparent)]
+    ChangeCollector(#[from] crate::storage::load::change_collector::Error),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
     #[error("hash {0} does not correspond to a change in this document")]

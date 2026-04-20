@@ -2597,3 +2597,47 @@ fn reproduce_clock_cache_bug() {
 
     assert!(base.get_changes(&heads).is_empty());
 }
+
+#[test]
+fn test_fork_at_merge_sync_no_panic() {
+    // Regression test for issue #1327
+    // Tests that fork_at + merge + sync operations don't panic with MissingOps error
+    let mut doc = new_doc();
+    doc.put(&ROOT, "note", "init").unwrap();
+    let h0 = doc.get_heads();
+
+    let mut branch_a = doc.fork_at(&h0).unwrap();
+    branch_a.put(&ROOT, "title", "A").unwrap();
+    doc.merge(&mut branch_a).unwrap();
+
+    doc.put(&ROOT, "a", "ok").unwrap();
+    let h1 = doc.get_heads();
+
+    // Should return an error rather than panic. The underlying MissingOps
+    // condition is not fixed here; we only require that it surfaces as an
+    // Err instead of crashing the process.
+    let _ = doc.fork_at(&h1);
+
+    // Sync operation should also not panic
+    let mut sync_state = automerge::sync::State::new();
+    let _msg = doc.sync().generate_sync_message(&mut sync_state);
+}
+
+#[test]
+fn test_fork_at_multiple_merges() {
+    // Regression test for issue #1327
+    // Tests that multiple fork_at + merge cycles work correctly
+    let mut doc = new_doc();
+    doc.put(&ROOT, "init", 1).unwrap();
+
+    for i in 0..5 {
+        let heads = doc.get_heads();
+        let mut fork = doc.fork_at(&heads).unwrap();
+        fork.put(&ROOT, format!("key_{}", i), i).unwrap();
+        doc.merge(&mut fork).unwrap();
+    }
+
+    // Should not panic during sync
+    let mut sync_state = automerge::sync::State::new();
+    let _ = doc.sync().generate_sync_message(&mut sync_state);
+}
