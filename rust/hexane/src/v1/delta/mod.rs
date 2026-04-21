@@ -1,12 +1,15 @@
+pub mod indexed;
+
 use std::marker::PhantomData;
 use std::ops::Range;
 
 use super::btree::DeltaAggregate;
 use super::column::{Column, WeightFn};
 use super::encoding::{ColumnEncoding, RunDecoder};
-use super::prefix::{PrefixValue, PrefixWeightFn};
+use super::prefix::PrefixValue;
 use super::{ColumnValueRef, RleValue, TypedLoadOpts};
 use crate::PackError;
+pub use indexed::IndexedDeltaWeightFn;
 
 // ── DeltaValue trait ────────────────────────────────────────────────────────
 
@@ -1272,15 +1275,16 @@ mod tests {
 }
 // ── DeltaColumn (B-tree backed, generic over weight fn) ────────────────────
 //
-// Default WF = PrefixWeightFn<T::Inner> — `len + prefix` aggregate, no
-// value queries.  WF = IndexedDeltaWeightFn<T> (see indexed.rs) uses
-// SlabAgg to unlock `find_by_value` / `find_by_range` via min/max pruning.
+// Default WF = IndexedDeltaWeightFn<T> — `SlabAgg` aggregate (len + total +
+// min/max offsets) that unlocks `find_by_value` / `find_by_range` via
+// min/max pruning.  For a smaller per-slab aggregate without value
+// queries, use `PrefixWeightFn<T::Inner>` (`len + prefix`).
 
 // ── DeltaColumn ────────────────────────────────────────────────────────────
 
 /// A delta-encoded column.  Generic over the per-slab aggregate: any
-/// [`WeightFn`] whose weight satisfies [`DeltaAggregate`] plugs in.
-pub struct DeltaColumn<T, WF = PrefixWeightFn<<T as DeltaValue>::Inner>>
+/// [`WeightFn`] whose weight satisfies `DeltaAggregate` plugs in.
+pub struct DeltaColumn<T, WF = IndexedDeltaWeightFn<T>>
 where
     T: DeltaValue,
     T::Inner: RleValue,

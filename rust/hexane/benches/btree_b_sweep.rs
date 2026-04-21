@@ -2,13 +2,13 @@
 //! modifies `const B` in btree.rs between runs.
 //!
 //! Tests Column<u64> (LenWeight = usize, tiny) and
-//! IndexedDeltaColumn<i64> (SlabAgg = 4×i64, large) on build + the
+//! DeltaColumn<i64> (SlabAgg = 4×i64, large) on build + the
 //! three splice sizes that stress the B-tree: insert/delete/replace
 //! at k=100.
 
 use divan::counter::ItemsCount;
 use divan::Bencher;
-use hexane::v1::{Column, IndexedDeltaColumn};
+use hexane::v1::{Column, DeltaColumn};
 use std::time::Duration;
 
 fn main() {
@@ -141,12 +141,12 @@ fn len_get(b: Bencher) {
     });
 }
 
-// ── IndexedDeltaColumn<i64> (SlabAgg = 4×i64) ─────────────────────────────
+// ── DeltaColumn<i64> (SlabAgg = 4×i64) ─────────────────────────────
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn agg_build(b: Bencher) {
     let v = initial_values_i64();
-    b.bench_local(|| divan::black_box(IndexedDeltaColumn::<i64>::from_values(v.clone())));
+    b.bench_local(|| divan::black_box(DeltaColumn::<i64>::from_values(v.clone())));
 }
 
 #[divan::bench(max_time = Duration::from_secs(6))]
@@ -154,7 +154,7 @@ fn agg_insert(b: Bencher) {
     let v = initial_values_i64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = IndexedDeltaColumn::<i64>::from_values(v.clone());
+            let mut c = DeltaColumn::<i64>::from_values(v.clone());
             let mut rng = Rng::new(0x1234);
             for _ in 0..OPS {
                 let pos = (rng.next() as usize) % (c.len() + 1);
@@ -170,7 +170,7 @@ fn agg_delete(b: Bencher) {
     let v = initial_values_i64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = IndexedDeltaColumn::<i64>::from_values(v.clone());
+            let mut c = DeltaColumn::<i64>::from_values(v.clone());
             let mut rng = Rng::new(0x1234);
             for _ in 0..OPS {
                 let len = c.len();
@@ -189,7 +189,7 @@ fn agg_replace(b: Bencher) {
     let v = initial_values_i64();
     b.counter(ItemsCount::new((OPS * K) as u64))
         .bench_local(|| {
-            let mut c = IndexedDeltaColumn::<i64>::from_values(v.clone());
+            let mut c = DeltaColumn::<i64>::from_values(v.clone());
             let mut rng = Rng::new(0x1234);
             for _ in 0..OPS {
                 let len = c.len();
@@ -206,7 +206,7 @@ fn agg_replace(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn agg_get(b: Bencher) {
-    let c = IndexedDeltaColumn::<i64>::from_values(initial_values_i64());
+    let c = DeltaColumn::<i64>::from_values(initial_values_i64());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = Rng::new(0xABCD);
         let mut acc: i64 = 0;
@@ -222,7 +222,7 @@ fn agg_get(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn agg_find_by_value(b: Bencher) {
-    let c = IndexedDeltaColumn::<i64>::from_values(initial_values_i64());
+    let c = DeltaColumn::<i64>::from_values(initial_values_i64());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = Rng::new(0xABCD);
         let mut acc: usize = 0;

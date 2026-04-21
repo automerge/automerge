@@ -1,16 +1,16 @@
-//! `ColumnIndex` abstracts the slab-index backing of [`Column2`].
+//! `ColumnIndex` abstracts the slab-index backing of a `Column`.
 //!
 //! Two concrete implementations:
 //!
 //! * [`BitIndex<W>`] — Fenwick BIT over a parallel `Vec<W>` of per-slab
 //!   weights.  Fast, cache-tight; requires `W: SlabWeight` (AddAssign +
 //!   SubAssign for incremental updates).
-//! * [`super::btree::SlabBTree<W>`] — B-tree over per-slab weights.
+//! * `super::btree::SlabBTree<W>` — B-tree over per-slab weights.
 //!   Slightly slower for plain positional lookups but supports
 //!   non-invertible aggregates (min/max) that Fenwick can't handle, and
 //!   typically wins on compound prefix-sum queries.
 //!
-//! `Column2<T, WF, Idx>` is parameterised over `Idx: ColumnIndex<WF::Weight>`
+//! `Column<T, WF, Idx>` is parameterised over `Idx: ColumnIndex<WF::Weight>`
 //! so you can swap indices with a type parameter change.
 
 use std::ops::Range;
@@ -38,7 +38,7 @@ pub trait ColumnIndex<W>: Default {
     /// Locate the slab containing the item at absolute position `index`
     /// within the column.  Returns `(slab_idx, offset_within_slab)`.
     /// If `index >= total_items`, returns `(len(), 0)` — past-end sentinel,
-    /// matching the behaviour of [`find_slab_bit`].
+    /// matching the behaviour of `find_slab_bit`.
     fn find_slab(&self, index: usize) -> (usize, usize);
 
     /// Replace slab `slab_idx`'s weight with `new_weight`.  O(log n) for
@@ -74,7 +74,7 @@ impl<W: SlabWeight> Default for BitIndex<W> {
 impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
     fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self {
         let weights: Vec<W> = iter.into_iter().collect();
-        let bit = rebuild_bit(&weights, |w| *w);
+        let bit = rebuild_bit(&weights, |w| w.clone());
         Self { weights, bit }
     }
 
@@ -87,14 +87,14 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
     }
 
     fn update_slab(&mut self, slab_idx: usize, new_weight: W) {
-        let old = self.weights[slab_idx];
-        self.weights[slab_idx] = new_weight;
+        let old = self.weights[slab_idx].clone();
+        self.weights[slab_idx] = new_weight.clone();
         bit_point_update(&mut self.bit, slab_idx, old, new_weight);
     }
 
     fn splice<I: IntoIterator<Item = W>>(&mut self, range: Range<usize>, new_weights: I) {
         self.weights.splice(range, new_weights);
-        self.bit = rebuild_bit(&self.weights, |w| *w);
+        self.bit = rebuild_bit(&self.weights, |w| w.clone());
     }
 }
 

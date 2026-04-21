@@ -12,14 +12,15 @@ pub mod delta;
 pub mod encoder;
 pub mod encoding;
 pub mod index;
-pub mod indexed;
 pub(crate) mod leb;
 pub mod load_opts;
 pub mod prefix;
 pub mod raw;
 pub mod rle;
 pub use column::{Column, Iter, IterState};
-pub use delta::{DeltaColumn, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
+pub use delta::{
+    DeltaColumn, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue, IndexedDeltaWeightFn,
+};
 pub use index::{BitIndex, ColumnIndex};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
@@ -29,7 +30,6 @@ pub type Encoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::E
 pub use encoding::ColumnEncoding;
 pub use encoding::EncoderApi;
 pub use encoding::RunDecoder;
-pub use indexed::{IndexedDeltaColumn, IndexedDeltaWeightFn};
 pub use load_opts::{LoadOpts, TypedLoadOpts};
 pub use prefix::{PrefixColumn, PrefixIter, PrefixIterState, PrefixValue};
 pub use raw::{RawColumn, RawColumnIter};
