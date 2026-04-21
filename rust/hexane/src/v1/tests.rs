@@ -1,4 +1,4 @@
-use crate::v1::{Column, ColumnValueRef, DeltaColumn, IndexedDeltaColumn, LoadOpts, PrefixColumn};
+use crate::v1::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
 use proptest::prelude::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -3429,18 +3429,11 @@ fn scope_to_value_fuzz_multi_slab() {
         for prefix_len in [0, 1, 2, 5] {
             for run_len in [10, 50, 100, 200] {
                 for suffix_len in [0, 1, 5, 10] {
-                    let mut data: Vec<u64> = Vec::new();
-                    for _ in 0..prefix_len {
-                        data.push(0);
-                    }
+                    let mut data: Vec<u64> = vec![0; prefix_len];
                     let expected_start = data.len();
-                    for _ in 0..run_len {
-                        data.push(1);
-                    }
+                    data.resize(expected_start + run_len, 1);
                     let expected_end = data.len();
-                    for _ in 0..suffix_len {
-                        data.push(2);
-                    }
+                    data.resize(expected_end + suffix_len, 2);
                     let col = Column::<u64>::from_values_with_max_segments(data, max_seg);
                     let result = col.scope_to_value(1u64, ..);
                     assert_eq!(
@@ -3754,7 +3747,11 @@ fn fuzz_delta_column() {
             let len = col.len();
             let r = xorshift(&mut rng);
             if len == 0 || r % 4 != 0 {
-                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let pos = if len == 0 {
+                    0
+                } else {
+                    (xorshift(&mut rng) as usize) % (len + 1)
+                };
                 let val = (xorshift(&mut rng) % 1000) as u32;
                 col.insert(pos, val);
                 mirror.insert(pos, val);
@@ -3764,20 +3761,34 @@ fn fuzz_delta_column() {
                 mirror.remove(pos);
             } else {
                 let pos = (xorshift(&mut rng) as usize) % (len + 1);
-                let del = if pos < len { (xorshift(&mut rng) as usize) % (len - pos).min(5) } else { 0 };
+                let del = if pos < len {
+                    (xorshift(&mut rng) as usize) % (len - pos).min(5)
+                } else {
+                    0
+                };
                 let ins_count = (xorshift(&mut rng) as usize) % 4;
-                let vals: Vec<u32> = (0..ins_count).map(|_| (xorshift(&mut rng) % 1000) as u32).collect();
+                let vals: Vec<u32> = (0..ins_count)
+                    .map(|_| (xorshift(&mut rng) % 1000) as u32)
+                    .collect();
                 col.splice(pos, del, vals.iter().copied());
                 mirror.splice(pos..pos + del, vals);
             }
 
-            assert_eq!(col.len(), mirror.len(), "trial={trial} op={i}: len mismatch");
+            assert_eq!(
+                col.len(),
+                mirror.len(),
+                "trial={trial} op={i}: len mismatch"
+            );
             let col_vals = col.to_vec();
             assert_eq!(col_vals, mirror, "trial={trial} op={i}: values mismatch");
 
             if len > 0 {
                 let idx = (xorshift(&mut rng) as usize) % col.len();
-                assert_eq!(col.get(idx), Some(mirror[idx]), "trial={trial} op={i}: get({idx})");
+                assert_eq!(
+                    col.get(idx),
+                    Some(mirror[idx]),
+                    "trial={trial} op={i}: get({idx})"
+                );
             }
         }
 
@@ -3819,7 +3830,11 @@ fn fuzz_delta_column_nullable() {
 
         for i in 0..200 {
             let len = col.len();
-            let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+            let pos = if len == 0 {
+                0
+            } else {
+                (xorshift(&mut rng) as usize) % (len + 1)
+            };
             let val = if xorshift(&mut rng) % 5 == 0 {
                 None
             } else {
@@ -3848,7 +3863,11 @@ fn fuzz_prefix_column() {
             let len = col.len();
             let r = xorshift(&mut rng);
             if len == 0 || r % 4 != 0 {
-                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let pos = if len == 0 {
+                    0
+                } else {
+                    (xorshift(&mut rng) as usize) % (len + 1)
+                };
                 let val = (xorshift(&mut rng) % 20) as u32;
                 col.insert(pos, val);
                 mirror.insert(pos, val);
@@ -3858,9 +3877,15 @@ fn fuzz_prefix_column() {
                 mirror.remove(pos);
             } else {
                 let pos = (xorshift(&mut rng) as usize) % (len + 1);
-                let del = if pos < len { (xorshift(&mut rng) as usize) % (len - pos).min(5) } else { 0 };
+                let del = if pos < len {
+                    (xorshift(&mut rng) as usize) % (len - pos).min(5)
+                } else {
+                    0
+                };
                 let ins_count = (xorshift(&mut rng) as usize) % 4;
-                let vals: Vec<u32> = (0..ins_count).map(|_| (xorshift(&mut rng) % 20) as u32).collect();
+                let vals: Vec<u32> = (0..ins_count)
+                    .map(|_| (xorshift(&mut rng) % 20) as u32)
+                    .collect();
                 col.splice(pos, del, vals.iter().copied());
                 mirror.splice(pos..pos + del, vals);
             }
@@ -3869,19 +3894,35 @@ fn fuzz_prefix_column() {
 
             // verify prefix sums
             let mut prefix = 0u64;
-            for j in 0..mirror.len() {
-                assert_eq!(col.get_prefix(j), prefix, "trial={trial} op={i}: get_prefix({j})");
-                prefix += mirror[j] as u64;
-                assert_eq!(col.get_total(j), prefix, "trial={trial} op={i}: get_total({j})");
+            for (j, &v) in mirror.iter().enumerate() {
+                assert_eq!(
+                    col.get_prefix(j),
+                    prefix,
+                    "trial={trial} op={i}: get_prefix({j})"
+                );
+                prefix += v as u64;
+                assert_eq!(
+                    col.get_total(j),
+                    prefix,
+                    "trial={trial} op={i}: get_total({j})"
+                );
             }
-            assert_eq!(col.get_prefix(mirror.len()), prefix, "trial={trial} op={i}: get_prefix(len)");
+            assert_eq!(
+                col.get_prefix(mirror.len()),
+                prefix,
+                "trial={trial} op={i}: get_prefix(len)"
+            );
 
             // prefix_delta
             if mirror.len() > 2 {
                 let lo = (xorshift(&mut rng) as usize) % mirror.len();
                 let hi = lo + (xorshift(&mut rng) as usize) % (mirror.len() - lo);
                 let expected: u64 = mirror[lo..hi].iter().map(|&v| v as u64).sum();
-                assert_eq!(col.prefix_delta(lo..hi), expected, "trial={trial} op={i}: prefix_delta({lo}..{hi})");
+                assert_eq!(
+                    col.prefix_delta(lo..hi),
+                    expected,
+                    "trial={trial} op={i}: prefix_delta({lo}..{hi})"
+                );
             }
         }
 
@@ -3891,7 +3932,10 @@ fn fuzz_prefix_column() {
             let target = (xorshift(&mut rng) % total) + 1;
             let idx = col.get_index_for_total(target);
             let actual_total = col.get_total(idx);
-            assert!(actual_total >= target, "trial={trial}: get_index_for_total({target}) -> {idx}, total={actual_total}");
+            assert!(
+                actual_total >= target,
+                "trial={trial}: get_index_for_total({target}) -> {idx}, total={actual_total}"
+            );
             if idx > 0 {
                 assert!(col.get_total(idx - 1) < target, "trial={trial}: off by one");
             }
@@ -3899,10 +3943,13 @@ fn fuzz_prefix_column() {
 
         // PrefixIter advance_prefix
         if !mirror.is_empty() {
-            let target_prefix = (xorshift(&mut rng) % (total.max(1))) as u64;
+            let target_prefix = xorshift(&mut rng) % (total.max(1));
             let mut iter = col.iter();
             if let Some(seek) = iter.advance_prefix(target_prefix) {
-                assert!(seek.prefix >= target_prefix, "trial={trial}: advance_prefix undershoot");
+                assert!(
+                    seek.prefix >= target_prefix,
+                    "trial={trial}: advance_prefix undershoot"
+                );
             }
         }
 
@@ -3912,17 +3959,22 @@ fn fuzz_prefix_column() {
             let mut iter = col.iter();
             if let Some(seek) = iter.advance_to(target_pos) {
                 assert_eq!(seek.pos, target_pos, "trial={trial}: advance_to pos");
-                assert_eq!(seek.prefix, col.get_total(target_pos), "trial={trial}: advance_to prefix");
+                assert_eq!(
+                    seek.prefix,
+                    col.get_total(target_pos),
+                    "trial={trial}: advance_to prefix"
+                );
             }
         }
 
         // seek / get_delta
         if col.len() > 5 && total > 0 {
             let start = (xorshift(&mut rng) as usize) % col.len();
-            let n = (xorshift(&mut rng) % total.min(100)) as u64;
+            let n = xorshift(&mut rng) % total.min(100);
             let seek_result = col.seek(start, n);
             let delta_result = if start < col.len() - 1 {
-                let pos = start + 1 + (xorshift(&mut rng) as usize) % (col.len() - start - 1).max(1);
+                let pos =
+                    start + 1 + (xorshift(&mut rng) as usize) % (col.len() - start - 1).max(1);
                 col.get_delta(start, pos)
             } else {
                 None
@@ -3951,7 +4003,11 @@ fn fuzz_prefix_column_bool() {
             let len = col.len();
             let r = xorshift(&mut rng);
             if len == 0 || r % 3 != 0 {
-                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+                let pos = if len == 0 {
+                    0
+                } else {
+                    (xorshift(&mut rng) as usize) % (len + 1)
+                };
                 let val = xorshift(&mut rng) % 2 == 0;
                 col.insert(pos, val);
                 mirror.insert(pos, val);
@@ -3962,7 +4018,11 @@ fn fuzz_prefix_column_bool() {
             }
 
             let true_count: usize = mirror.iter().filter(|&&v| v).count();
-            assert_eq!(col.get_prefix(mirror.len()), true_count, "trial={trial} op={i}: prefix mismatch");
+            assert_eq!(
+                col.get_prefix(mirror.len()),
+                true_count,
+                "trial={trial} op={i}: prefix mismatch"
+            );
         }
 
         let saved = col.save();
@@ -3976,12 +4036,16 @@ fn fuzz_indexed_delta_column() {
     let mut rng: u64 = 55555;
 
     for trial in 0..200 {
-        let mut col = IndexedDeltaColumn::<u32>::new();
+        let mut col = DeltaColumn::<u32>::new();
         let mut mirror: Vec<u32> = Vec::new();
 
         for _ in 0..200 {
             let len = col.len();
-            let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+            let pos = if len == 0 {
+                0
+            } else {
+                (xorshift(&mut rng) as usize) % (len + 1)
+            };
             let val = (xorshift(&mut rng) % 500) as u32;
             col.insert(pos, val);
             mirror.insert(pos, val);
@@ -3991,7 +4055,12 @@ fn fuzz_indexed_delta_column() {
 
         // find_by_value
         for target in [0u32, 1, 50, 100, 250, 499] {
-            let expected: Vec<usize> = mirror.iter().enumerate().filter(|(_, &v)| v == target).map(|(i, _)| i).collect();
+            let expected: Vec<usize> = mirror
+                .iter()
+                .enumerate()
+                .filter(|(_, &v)| v == target)
+                .map(|(i, _)| i)
+                .collect();
             let found: Vec<usize> = col.find_by_value(target).collect();
             assert_eq!(found, expected, "trial={trial}: find_by_value({target})");
         }
@@ -3999,7 +4068,12 @@ fn fuzz_indexed_delta_column() {
         // find_by_range
         let lo = (xorshift(&mut rng) % 200) as u32;
         let hi = lo + (xorshift(&mut rng) % 100) as u32;
-        let expected: Vec<usize> = mirror.iter().enumerate().filter(|(_, &v)| v >= lo && v < hi).map(|(i, _)| i).collect();
+        let expected: Vec<usize> = mirror
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v >= lo && v < hi)
+            .map(|(i, _)| i)
+            .collect();
         let found: Vec<usize> = col.find_by_range(lo..hi).collect();
         assert_eq!(found, expected, "trial={trial}: find_by_range({lo}..{hi})");
 
@@ -4007,12 +4081,15 @@ fn fuzz_indexed_delta_column() {
         if let Some(&first_val) = mirror.first() {
             let expected_pos = mirror.iter().position(|&v| v == first_val);
             let found_pos = col.find_first(first_val);
-            assert_eq!(found_pos, expected_pos, "trial={trial}: find_first({first_val})");
+            assert_eq!(
+                found_pos, expected_pos,
+                "trial={trial}: find_first({first_val})"
+            );
         }
 
         // save/load roundtrip
         let saved = col.save();
-        let loaded = IndexedDeltaColumn::<u32>::load(&saved).unwrap();
+        let loaded = DeltaColumn::<u32>::load(&saved).unwrap();
         assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
     }
 }
@@ -4027,7 +4104,11 @@ fn fuzz_column_remap() {
 
         for _ in 0..100 {
             let len = col.len();
-            let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
+            let pos = if len == 0 {
+                0
+            } else {
+                (xorshift(&mut rng) as usize) % (len + 1)
+            };
             let val = xorshift(&mut rng) % 50;
             col.insert(pos, val);
             mirror.insert(pos, val);
@@ -4040,7 +4121,11 @@ fn fuzz_column_remap() {
 
         let saved = col.save();
         let loaded = Column::<u64>::load(&saved).unwrap();
-        assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip after remap");
+        assert_eq!(
+            saved,
+            loaded.save(),
+            "trial={trial}: save/load roundtrip after remap"
+        );
     }
 }
 
@@ -4055,8 +4140,16 @@ fn fuzz_column_save_load_after_mutations() {
             let len = col.len();
             let r = xorshift(&mut rng);
             if len == 0 || r % 3 != 0 {
-                let pos = if len == 0 { 0 } else { (xorshift(&mut rng) as usize) % (len + 1) };
-                let val = if xorshift(&mut rng) % 5 == 0 { None } else { Some(xorshift(&mut rng) % 100) };
+                let pos = if len == 0 {
+                    0
+                } else {
+                    (xorshift(&mut rng) as usize) % (len + 1)
+                };
+                let val = if xorshift(&mut rng) % 5 == 0 {
+                    None
+                } else {
+                    Some(xorshift(&mut rng) % 100)
+                };
                 col.insert(pos, val);
             } else {
                 let pos = (xorshift(&mut rng) as usize) % len;
@@ -4067,7 +4160,11 @@ fn fuzz_column_save_load_after_mutations() {
         let vals_before = col.to_vec();
         let saved = col.save();
         let loaded = Column::<Option<u64>>::load(&saved).unwrap();
-        assert_eq!(loaded.to_vec(), vals_before, "trial={trial}: values after reload");
+        assert_eq!(
+            loaded.to_vec(),
+            vals_before,
+            "trial={trial}: values after reload"
+        );
         assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
     }
 }

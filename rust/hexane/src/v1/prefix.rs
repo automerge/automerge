@@ -125,13 +125,18 @@ pub trait PrefixValue: ColumnValueRef {
 /// This allows a single Fenwick tree to support both O(log S) position
 /// queries (via the `len` component) and O(log S) prefix-sum queries
 /// (via the `prefix` component).
-#[derive(Copy, Clone, Default, Debug)]
-pub struct PrefixSlabWeight<P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign> {
+#[derive(Clone, Default, Debug)]
+pub struct PrefixSlabWeight<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> {
     pub(crate) len: usize,
     pub(crate) prefix: P,
 }
 
-impl<P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign> AddAssign
+impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> Copy for PrefixSlabWeight<P> where
+    P: Copy
+{
+}
+
+impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> AddAssign
     for PrefixSlabWeight<P>
 {
     #[inline]
@@ -141,7 +146,7 @@ impl<P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign> AddAssign
     }
 }
 
-impl<P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign> SubAssign
+impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SubAssign
     for PrefixSlabWeight<P>
 {
     #[inline]
@@ -151,7 +156,7 @@ impl<P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign> SubAssign
     }
 }
 
-impl<P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
+impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
     for PrefixSlabWeight<P>
 {
     #[inline]
@@ -826,7 +831,6 @@ impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::v1::prefix::PrefixColumn;
 
     fn parity_check(values: Vec<u64>) {
