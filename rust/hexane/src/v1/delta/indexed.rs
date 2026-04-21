@@ -1,29 +1,26 @@
-//! `IndexedDeltaColumn`: a [`DeltaColumn`] flavour whose B-tree
-//! weight is [`SlabAgg`] (`len + total + min_offset + max_offset`)
-//! instead of the default `PrefixSlabWeight` (`len + prefix`).  Unlocks
-//! O(log n) `find_by_value` / `find_by_range` via min/max pruning.
+//! [`IndexedDeltaWeightFn`]: the default `WeightFn` for [`DeltaColumn`].
+//! Tracks `SlabAgg` (`len + total + min_offset + max_offset`) per slab
+//! so `find_by_value` / `find_by_range` can prune via min/max in O(log n).
 //!
 //! All delta-semantics — insert / remove / splice / null handling /
 //! iter — live in [`DeltaColumn`].  This module adds just:
 //!   * [`IndexedDeltaWeightFn`] — the `WeightFn` impl that walks the
 //!     RLE decoder and produces `SlabAgg`.
-//!   * The [`IndexedDeltaColumn`] type alias.
 //!   * A conditional `impl` block adding `find_by_value` /
 //!     `find_by_range` / `find_first` when `WF = IndexedDeltaWeightFn`.
 
 use std::marker::PhantomData;
 use std::ops::Range;
 
-use super::btree::SlabAgg;
-use super::column::{Slab, TailOf, WeightFn};
-use super::delta::DeltaColumn;
-use super::delta::DeltaValue;
-use super::encoding::{ColumnEncoding, RunDecoder};
-use super::{ColumnValueRef, RleValue};
+use super::super::btree::SlabAgg;
+use super::super::column::{Slab, TailOf, WeightFn};
+use super::super::encoding::{ColumnEncoding, RunDecoder};
+use super::super::{ColumnValueRef, RleValue};
+use super::{DeltaColumn, DeltaValue};
 
 // ── Weight function ─────────────────────────────────────────────────────────
 
-/// Per-slab weight: [`SlabAgg`] with `min_offset`/`max_offset` for
+/// Per-slab weight: `SlabAgg` with `min_offset`/`max_offset` for
 /// value-range pruning.
 pub struct IndexedDeltaWeightFn<T>(PhantomData<fn() -> T>);
 
@@ -44,7 +41,7 @@ where
     }
 }
 
-/// Compute a [`SlabAgg`] by walking the encoding's run decoder.
+/// Compute a `SlabAgg` by walking the encoding's run decoder.
 ///
 /// For a run of `count` items with delta `v`, the realized-prefix
 /// progression is monotonic: `partial + v`, `partial + 2v`, …,
@@ -88,12 +85,6 @@ where
         }
     }
 }
-
-// ── IndexedDeltaColumn type alias ─────────────────────────────────────────
-
-/// Delta-encoded column with `find_by_value` / `find_by_range` —
-/// `DeltaColumn` specialised to the [`SlabAgg`] weight.
-pub type IndexedDeltaColumn<T> = DeltaColumn<T, IndexedDeltaWeightFn<T>>;
 
 // ── Value-query methods (only when WF = IndexedDeltaWeightFn) ──────────────
 
@@ -235,12 +226,14 @@ fn div_ceil_i64(a: i64, b: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::DeltaColumn;
+    use super::super::super::prefix::PrefixWeightFn;
     use super::*;
+
+    type PrefixDeltaColumn<T> = DeltaColumn<T, PrefixWeightFn<<T as DeltaValue>::Inner>>;
 
     #[test]
     fn empty() {
-        let col = IndexedDeltaColumn::<u64>::new();
+        let col = DeltaColumn::<u64>::new();
         assert_eq!(col.len(), 0);
         assert!(col.is_empty());
         assert_eq!(col.find_first(0), None);
@@ -253,7 +246,7 @@ mod tests {
     #[test]
     fn unique_counters() {
         let vals: Vec<u64> = (1..=100).collect();
-        let col = IndexedDeltaColumn::<u64>::from_values(vals.clone());
+        let col = DeltaColumn::<u64>::from_values(vals.clone());
         for (i, &v) in vals.iter().enumerate() {
             assert_eq!(col.find_first(v), Some(i), "v={v}");
         }
@@ -263,7 +256,7 @@ mod tests {
     #[test]
     fn duplicates() {
         let vals = vec![1u64, 2, 2, 3, 2, 4];
-        let col = IndexedDeltaColumn::<u64>::from_values(vals);
+        let col = DeltaColumn::<u64>::from_values(vals);
         let twos: Vec<_> = col.find_by_value(2).collect();
         assert_eq!(twos, vec![1, 2, 4]);
     }
@@ -271,7 +264,7 @@ mod tests {
     #[test]
     fn range_basic() {
         let vals: Vec<u64> = (0..100).map(|i| i * 10).collect();
-        let col = IndexedDeltaColumn::<u64>::from_values(vals);
+        let col = DeltaColumn::<u64>::from_values(vals);
         // Half-open: realized in [200, 400) → indices 20..=39.
         let hits: Vec<_> = col.find_by_range(200..400).collect();
         assert_eq!(
@@ -283,7 +276,7 @@ mod tests {
     #[test]
     fn range_empty() {
         let vals: Vec<u64> = (0..10).collect();
-        let col = IndexedDeltaColumn::<u64>::from_values(vals);
+        let col = DeltaColumn::<u64>::from_values(vals);
         assert_eq!(col.find_by_range(5..5).count(), 0);
         // Reversed range → no hits.  Construct piecewise so clippy doesn't
         // lint the literal as an empty-range bug.
@@ -299,7 +292,7 @@ mod tests {
     #[test]
     fn range_shortcut_brute_force_parity() {
         let vals: Vec<i64> = (0..5_000).collect();
-        let col = IndexedDeltaColumn::<i64>::from_values(vals.clone());
+        let col = DeltaColumn::<i64>::from_values(vals.clone());
         for &(lo, hi) in &[
             (0i64, 1),
             (0, 100),
@@ -337,7 +330,7 @@ mod tests {
                 seed % 100
             })
             .collect();
-        let col = IndexedDeltaColumn::<u64>::from_values(vals);
+        let col = DeltaColumn::<u64>::from_values(vals);
         for t in 0u64..=110 {
             let v: Vec<usize> = col.find_by_value(t).collect();
             let r: Vec<usize> = col.find_by_range(t..t + 1).collect();
@@ -348,7 +341,7 @@ mod tests {
     #[test]
     fn nullable_values() {
         let vals = vec![Some(10i64), None, Some(20), None, None, Some(15)];
-        let col = IndexedDeltaColumn::<Option<i64>>::from_values(vals.clone());
+        let col = DeltaColumn::<Option<i64>>::from_values(vals.clone());
         assert_eq!(col.find_first(Some(10)), Some(0));
         assert_eq!(col.find_first(Some(20)), Some(2));
         assert_eq!(col.find_first(Some(15)), Some(5));
@@ -369,8 +362,8 @@ mod tests {
     #[test]
     fn mutations_match_delta_column() {
         let init: Vec<u64> = (1..=20).collect();
-        let mut a = DeltaColumn::<u64>::from_values(init.clone());
-        let mut b = IndexedDeltaColumn::<u64>::from_values(init);
+        let mut a = PrefixDeltaColumn::<u64>::from_values(init.clone());
+        let mut b = DeltaColumn::<u64>::from_values(init);
         a.insert(5, 999);
         b.insert(5, 999);
         a.remove(10);
@@ -384,8 +377,8 @@ mod tests {
     }
 
     fn parity_u64(values: Vec<u64>) {
-        let a = DeltaColumn::<u64>::from_values(values.clone());
-        let b = IndexedDeltaColumn::<u64>::from_values(values.clone());
+        let a = PrefixDeltaColumn::<u64>::from_values(values.clone());
+        let b = DeltaColumn::<u64>::from_values(values.clone());
         assert_eq!(a.save(), b.save(), "save bytes mismatch");
         assert_eq!(a.len(), b.len());
         for i in 0..values.len() {
@@ -433,8 +426,8 @@ mod tests {
         }
         let mut rng = Rng::new(0xBEEF);
         let init: Vec<u64> = (0..100).map(|i| i * 2 + 1).collect();
-        let mut a = DeltaColumn::<u64>::from_values(init.clone());
-        let mut b = IndexedDeltaColumn::<u64>::from_values(init);
+        let mut a = PrefixDeltaColumn::<u64>::from_values(init.clone());
+        let mut b = DeltaColumn::<u64>::from_values(init);
 
         for _ in 0..500 {
             let op = rng.next() % 3;

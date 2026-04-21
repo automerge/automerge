@@ -2,11 +2,10 @@
 //! implementing [`SlabAggregate`], so the same tree can back multiple
 //! column types:
 //!
-//! * `IndexedDeltaColumn2` uses `SlabBTree<SlabAgg>` with min/max
+//! * `DeltaColumn` uses `SlabBTree<SlabAgg>` with min/max
 //!   pruning for value queries.
-//! * `PrefixTree2` uses `SlabBTree<PrefixSlabWeight<P>>` as a direct
-//!   replacement for the Fenwick BIT in `PrefixColumn` — stores len +
-//!   prefix sum per slab.
+//! * `PrefixColumn` uses `SlabBTree<PrefixSlabWeight<P>>` as a direct
+//!   replacement for the Fenwick BIT — stores len + prefix sum per slab.
 //!
 //! Each leaf holds up to `B` slab aggregates in slab-index order.  Each
 //! internal node holds up to `B` child entries, where each entry carries
@@ -34,11 +33,11 @@ const B: usize = 64;
 /// associative and order-preserving.  Specifically, `merge(a, b) != merge(b, a)`
 /// is fine (e.g. delta-running-min semantics) as long as the tree
 /// always walks children left-to-right.
-pub trait SlabAggregate: Copy + Default + std::fmt::Debug {
+pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
     /// Combine two adjacent subtree aggregates into one.
     fn merge(l: &Self, r: &Self) -> Self;
     /// Number of items covered by this aggregate.  Used by generic
-    /// tree-walking helpers (e.g. [`find_by_prefix`]); concrete impls
+    /// tree-walking helpers (e.g. `find_by_prefix`); concrete impls
     /// typically access a `.len` field directly.
     fn len(&self) -> usize;
 }
@@ -59,7 +58,7 @@ pub trait PrefixAggregate: SlabAggregate {
 /// materialised as `i64` — the lingua franca of delta-column
 /// arithmetic.
 ///
-/// Lets [`DeltaColumn2`](super::delta2::DeltaColumn2) be generic over
+/// Lets [`DeltaColumn`](super::delta::DeltaColumn) be generic over
 /// any `WF::Weight` that tracks both items and a running delta sum.
 /// Both default weight choices qualify:
 ///   * [`PrefixSlabWeight<i128>`](super::prefix::PrefixSlabWeight) —
@@ -95,10 +94,11 @@ fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -
     acc
 }
 
-// ── SlabAgg (used by IndexedDeltaColumn2) ───────────────────────────────────
+// ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
 
 /// Running min/max of a delta column's prefix-sum range.  The specific
-/// aggregate used by `IndexedDeltaColumn2` for value-range pruning.
+/// aggregate used by `DeltaColumn`'s default `IndexedDeltaWeightFn` for
+/// value-range pruning.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct SlabAgg {
     pub len: usize,
@@ -334,10 +334,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 .map(|chunk| {
                     let children: Vec<ChildSlot<A>> = chunk
                         .iter()
-                        .map(|&(id, agg, slab_count)| ChildSlot {
-                            id,
-                            agg,
-                            slab_count,
+                        .map(|(id, agg, slab_count)| ChildSlot {
+                            id: *id,
+                            agg: agg.clone(),
+                            slab_count: *slab_count,
                         })
                         .collect();
                     let agg = merge_all(children.iter().map(|c| &c.agg));
@@ -452,7 +452,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let local_start = cursor - leaf_start;
             let count = (leaf_len - local_start).min(new.len() - i);
             if let Node::Leaf(l) = self.node_mut(leaf_id) {
-                l.aggs[local_start..local_start + count].copy_from_slice(&new[i..i + count]);
+                l.aggs[local_start..local_start + count].clone_from_slice(&new[i..i + count]);
             }
             self.update_ancestor_aggregates(&path, leaf_id);
             cursor += count;
@@ -503,7 +503,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             // Defensive: rebuild.
             let mut all: Vec<A> = Vec::with_capacity(self.total_slabs + new.len() - range.len());
             self.collect_into(self.root, &mut all);
-            all.splice(range.clone(), new.iter().copied());
+            all.splice(range.clone(), new.iter().cloned());
             *self = Self::from_iter(all);
             return;
         };
@@ -570,7 +570,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let local_start = range.start - combined_abs_start;
         let local_end = range.end - combined_abs_start;
         debug_assert!(local_end <= combined.len());
-        combined.splice(local_start..local_end, new.iter().copied());
+        combined.splice(local_start..local_end, new.iter().cloned());
 
         self.total_slabs = self.total_slabs + new.len() - range.len();
 
@@ -743,7 +743,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.total_slabs = new.len();
             return;
         }
-        *self = Self::from_iter(new.iter().copied());
+        *self = Self::from_iter(new.iter().cloned());
     }
 
     /// Try a single-leaf splice.  Returns `false` if `range` spans
@@ -785,7 +785,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 return false;
             }
             if let Node::Leaf(l) = self.node_mut(leaf_id) {
-                l.aggs.splice(local_start..local_end, new.iter().copied());
+                l.aggs.splice(local_start..local_end, new.iter().cloned());
             }
             self.update_ancestor_aggregates(&path, leaf_id);
             return true;
@@ -979,7 +979,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         match replacement.len() {
             0 => {}
             1 => {
-                let slot = replacement[0];
+                let slot = replacement[0].clone();
                 if slot.id != self.root {
                     self.free(self.root);
                     self.root = slot.id;
@@ -1634,5 +1634,318 @@ mod tests {
         assert_eq!(tree.find_slab_at_prefix(100), (3, 60, 15));
         // Target past total (sum = 550): one-past-end.
         assert_eq!(tree.find_slab_at_prefix(9999), (10, 550, 50));
+    }
+
+    // ── Fuzz: find_slab, find_slab_at_item, find_slab_at_prefix, root_agg ──
+
+    fn reference_find_by_prefix(aggs: &[SlabAgg], pos: usize) -> Option<(usize, usize)> {
+        let mut items_before = 0;
+        for (i, a) in aggs.iter().enumerate() {
+            if pos < items_before + a.len {
+                return Some((i, items_before));
+            }
+            items_before += a.len;
+        }
+        None
+    }
+
+    fn reference_find_slab_at_item(aggs: &[SlabAgg], item_idx: usize) -> (usize, i64, usize) {
+        let mut prefix: i64 = 0;
+        let mut items_before = 0;
+        for (i, a) in aggs.iter().enumerate() {
+            if item_idx < items_before + a.len {
+                return (i, prefix, items_before);
+            }
+            prefix += a.total;
+            items_before += a.len;
+        }
+        (aggs.len(), prefix, items_before)
+    }
+
+    fn reference_find_slab_at_prefix(aggs: &[SlabAgg], target: i64) -> (usize, i64, usize) {
+        let mut prefix: i64 = 0;
+        let mut items_before = 0;
+        for (i, a) in aggs.iter().enumerate() {
+            if prefix + a.total >= target {
+                return (i, prefix, items_before);
+            }
+            prefix += a.total;
+            items_before += a.len;
+        }
+        (aggs.len(), prefix, items_before)
+    }
+
+    fn reference_root_agg(aggs: &[SlabAgg]) -> SlabAgg {
+        aggs.iter()
+            .fold(SlabAgg::default(), |acc, a| SlabAgg::merge(&acc, a))
+    }
+
+    #[test]
+    fn fuzz_find_slab_and_prefix() {
+        let mut rng = Rng::new(0xDEADBEEF);
+
+        for trial in 0..500 {
+            let mut reference: Vec<SlabAgg> = (0..10)
+                .map(|_| simple_agg(rand_total(&mut rng), 1 + (rng.next() as usize) % 10))
+                .collect();
+            let mut tree = SlabBTree::<SlabAgg>::from_iter(reference.clone());
+
+            for step in 0..200 {
+                let len = reference.len();
+                let op = rng.next() % 3;
+                match op {
+                    0 => {
+                        let at = (rng.next() as usize) % (len + 1);
+                        let count = 1 + (rng.next() as usize) % 3;
+                        let new: Vec<_> = (0..count)
+                            .map(|_| {
+                                simple_agg(rand_total(&mut rng), 1 + (rng.next() as usize) % 10)
+                            })
+                            .collect();
+                        tree.splice(at..at, new.clone());
+                        reference.splice(at..at, new);
+                    }
+                    1 if len > 1 => {
+                        let at = (rng.next() as usize) % len;
+                        let count = 1 + (rng.next() as usize) % (len - at).min(3);
+                        tree.splice(at..at + count, std::iter::empty());
+                        reference.drain(at..at + count);
+                    }
+                    _ if len > 0 => {
+                        let at = (rng.next() as usize) % len;
+                        let new_agg =
+                            simple_agg(rand_total(&mut rng), 1 + (rng.next() as usize) % 10);
+                        tree.update_slab(at, new_agg);
+                        reference[at] = new_agg;
+                    }
+                    _ => {}
+                }
+
+                assert_eq!(
+                    tree.len(),
+                    reference.len(),
+                    "trial={trial} step={step}: slab count"
+                );
+
+                // Verify root_agg
+                let expected_root = reference_root_agg(&reference);
+                assert_eq!(
+                    tree.root_agg(),
+                    expected_root,
+                    "trial={trial} step={step}: root_agg"
+                );
+
+                let total_items: usize = reference.iter().map(|a| a.len).sum();
+
+                // find_by_prefix (positional slab lookup)
+                if total_items > 0 {
+                    for _ in 0..3 {
+                        let pos = (rng.next() as usize) % total_items;
+                        let got = tree.find_by_prefix(pos);
+                        let want = reference_find_by_prefix(&reference, pos);
+                        assert_eq!(
+                            got, want,
+                            "trial={trial} step={step}: find_by_prefix({pos})"
+                        );
+                    }
+                    // Edge: last item
+                    let got = tree.find_by_prefix(total_items - 1);
+                    let want = reference_find_by_prefix(&reference, total_items - 1);
+                    assert_eq!(got, want, "trial={trial} step={step}: find_by_prefix(last)");
+                    // Edge: past end
+                    assert_eq!(tree.find_by_prefix(total_items), None);
+                }
+
+                // find_slab_at_item (prefix-aware positional lookup)
+                if total_items > 0 {
+                    for _ in 0..3 {
+                        let idx = (rng.next() as usize) % total_items;
+                        let got = tree.find_slab_at_item(idx);
+                        let want = reference_find_slab_at_item(&reference, idx);
+                        assert_eq!(
+                            got, want,
+                            "trial={trial} step={step}: find_slab_at_item({idx})"
+                        );
+                    }
+                }
+
+                // find_slab_at_prefix (prefix-sum based lookup)
+                let total_prefix: i64 = reference.iter().map(|a| a.total).sum();
+                if total_prefix > 0 {
+                    for _ in 0..3 {
+                        let target = 1 + (rng.next() as i64).abs() % total_prefix;
+                        let got = tree.find_slab_at_prefix(target);
+                        let want = reference_find_slab_at_prefix(&reference, target);
+                        assert_eq!(
+                            got, want,
+                            "trial={trial} step={step}: find_slab_at_prefix({target})"
+                        );
+                    }
+                }
+
+                // find_by_value (existing fuzz coverage, but now also after
+                // update_slab which wasn't fuzzed before)
+                for _ in 0..2 {
+                    let t: i64 = (rng.next() as i64) % 500 - 250;
+                    let got: Vec<_> = tree.find_by_value(t).collect();
+                    let want = reference_find_by_value(&reference, t);
+                    assert_eq!(got, want, "trial={trial} step={step}: find_by_value({t})");
+                }
+
+                // find_by_value_range
+                {
+                    let lo: i64 = (rng.next() as i64) % 400 - 200;
+                    let hi = lo + (rng.next() as i64).abs() % 200;
+                    let got: Vec<_> = tree.find_by_value_range(lo, hi).collect();
+                    let want = reference_find_by_range(&reference, lo, hi);
+                    assert_eq!(
+                        got, want,
+                        "trial={trial} step={step}: find_by_value_range({lo}..{hi})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fuzz_btree_with_prefix_weights() {
+        use super::super::prefix::PrefixSlabWeight;
+        type W = PrefixSlabWeight<u64>;
+        type Tree = SlabBTree<W>;
+
+        let mut rng = Rng::new(0xCAFEBABE);
+
+        fn rand_weight(rng: &mut Rng) -> W {
+            let len = 1 + (rng.next() as usize) % 8;
+            let prefix = rng.next() % 50;
+            W { len, prefix }
+        }
+
+        for trial in 0..500 {
+            let mut reference: Vec<W> = (0..10).map(|_| rand_weight(&mut rng)).collect();
+            let mut tree = Tree::from_iter(reference.clone());
+
+            for step in 0..200 {
+                let len = reference.len();
+                let op = rng.next() % 4;
+                match op {
+                    0 => {
+                        let at = (rng.next() as usize) % (len + 1);
+                        let count = 1 + (rng.next() as usize) % 3;
+                        let new: Vec<_> = (0..count).map(|_| rand_weight(&mut rng)).collect();
+                        tree.splice(at..at, new.clone());
+                        reference.splice(at..at, new);
+                    }
+                    1 if len > 1 => {
+                        let at = (rng.next() as usize) % len;
+                        let count = 1 + (rng.next() as usize) % (len - at).min(3);
+                        tree.splice(at..at + count, std::iter::empty());
+                        reference.drain(at..at + count);
+                    }
+                    2 if len > 0 => {
+                        let at = (rng.next() as usize) % len;
+                        let new = rand_weight(&mut rng);
+                        tree.update_slab(at, new);
+                        reference[at] = new;
+                    }
+                    _ if len > 0 => {
+                        let at = (rng.next() as usize) % len;
+                        let del = 1 + (rng.next() as usize) % (len - at).min(2);
+                        let ins = 1 + (rng.next() as usize) % 3;
+                        let new: Vec<_> = (0..ins).map(|_| rand_weight(&mut rng)).collect();
+                        tree.splice(at..at + del, new.clone());
+                        reference.splice(at..at + del, new);
+                    }
+                    _ => {}
+                }
+
+                assert_eq!(
+                    tree.len(),
+                    reference.len(),
+                    "trial={trial} step={step}: len"
+                );
+
+                // Verify root aggregate matches
+                let expected_root = reference.iter().copied().fold(W::default(), |mut acc, w| {
+                    acc += w;
+                    acc
+                });
+                let root = tree.root_agg();
+                assert_eq!(
+                    root.len, expected_root.len,
+                    "trial={trial} step={step}: root_agg.len"
+                );
+                assert_eq!(
+                    root.prefix, expected_root.prefix,
+                    "trial={trial} step={step}: root_agg.prefix"
+                );
+
+                let total_items: usize = reference.iter().map(|w| w.len).sum();
+                let total_prefix: u64 = reference.iter().map(|w| w.prefix).sum();
+
+                // find_by_prefix (positional)
+                if total_items > 0 {
+                    let pos = (rng.next() as usize) % total_items;
+                    let got = tree.find_by_prefix(pos);
+                    let mut items = 0;
+                    let mut expected = None;
+                    for (i, w) in reference.iter().enumerate() {
+                        if pos < items + w.len {
+                            expected = Some((i, items));
+                            break;
+                        }
+                        items += w.len;
+                    }
+                    assert_eq!(
+                        got, expected,
+                        "trial={trial} step={step}: find_by_prefix({pos})"
+                    );
+                }
+
+                // find_slab_at_item
+                if total_items > 0 {
+                    let idx = (rng.next() as usize) % total_items;
+                    let (si, prefix_before, items_before) = tree.find_slab_at_item(idx);
+                    let mut exp_prefix = 0u64;
+                    let mut exp_items = 0;
+                    let mut exp_si = reference.len();
+                    for (i, w) in reference.iter().enumerate() {
+                        if idx < exp_items + w.len {
+                            exp_si = i;
+                            break;
+                        }
+                        exp_prefix += w.prefix;
+                        exp_items += w.len;
+                    }
+                    assert_eq!(
+                        (si, prefix_before, items_before),
+                        (exp_si, exp_prefix, exp_items),
+                        "trial={trial} step={step}: find_slab_at_item({idx})"
+                    );
+                }
+
+                // find_slab_at_prefix
+                if total_prefix > 0 {
+                    let target = 1 + (rng.next() % total_prefix);
+                    let (si, prefix_before, items_before) = tree.find_slab_at_prefix(target);
+                    let mut exp_prefix = 0u64;
+                    let mut exp_items = 0;
+                    let mut exp_si = reference.len();
+                    for (i, w) in reference.iter().enumerate() {
+                        if exp_prefix + w.prefix >= target {
+                            exp_si = i;
+                            break;
+                        }
+                        exp_prefix += w.prefix;
+                        exp_items += w.len;
+                    }
+                    assert_eq!(
+                        (si, prefix_before, items_before),
+                        (exp_si, exp_prefix, exp_items),
+                        "trial={trial} step={step}: find_slab_at_prefix({target})"
+                    );
+                }
+            }
+        }
     }
 }

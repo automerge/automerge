@@ -292,7 +292,7 @@ pub trait RunDecoder: Iterator {
 /// Metadata extracted from a validated slab encoding.
 ///
 /// Returned by [`ColumnEncoding::validate_encoding`] and
-/// [`Column::validate_encoding_info`](super::Column::validate_encoding_info).
+/// [`Column::validate_encoding`](super::Column::validate_encoding).
 pub struct SlabInfo<T> {
     /// Number of RLE/bool segments in the slab.
     pub segments: usize,

@@ -15,9 +15,12 @@
 
 use divan::counter::ItemsCount;
 use divan::Bencher;
-use hexane::v1::{Column, DeltaColumn, IndexedDeltaColumn};
+use hexane::v1::prefix::PrefixWeightFn;
+use hexane::v1::{Column, DeltaColumn, DeltaValue};
 use hexane::{ColumnData, DeltaCursor, IntCursor};
 use std::time::Duration;
+
+type PrefixDeltaColumn<T> = DeltaColumn<T, PrefixWeightFn<<T as DeltaValue>::Inner>>;
 
 fn main() {
     divan::main();
@@ -93,7 +96,7 @@ fn v0_column_build(b: Bencher) {
 #[divan::bench(max_time = Duration::from_secs(8))]
 fn v1_delta_build(b: Bencher) {
     let v = initial_values();
-    b.bench_local(|| divan::black_box(DeltaColumn::<i64>::from_values(v.clone())));
+    b.bench_local(|| divan::black_box(PrefixDeltaColumn::<i64>::from_values(v.clone())));
 }
 
 #[divan::bench(max_time = Duration::from_secs(8))]
@@ -109,7 +112,7 @@ fn v0_delta_build(b: Bencher) {
 #[divan::bench(max_time = Duration::from_secs(8))]
 fn v1_indexed_build(b: Bencher) {
     let v = initial_values();
-    b.bench_local(|| divan::black_box(IndexedDeltaColumn::<i64>::from_values(v.clone())));
+    b.bench_local(|| divan::black_box(DeltaColumn::<i64>::from_values(v.clone())));
 }
 
 // v0 IndexedDelta = same as v0 Delta (DeltaCursor already carries aggregates);
@@ -154,7 +157,7 @@ fn v0_column_get(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(6))]
 fn v1_delta_get(b: Bencher) {
-    let c = DeltaColumn::<i64>::from_values(initial_values());
+    let c = PrefixDeltaColumn::<i64>::from_values(initial_values());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = Rng::new(0xABCD);
         let mut acc: i64 = 0;
@@ -330,11 +333,11 @@ macro_rules! v0_replace {
 fn mk_column(v: Vec<i64>) -> Column<i64> {
     Column::from_values(v)
 }
-fn mk_delta(v: Vec<i64>) -> DeltaColumn<i64> {
-    DeltaColumn::from_values(v)
+fn mk_delta(v: Vec<i64>) -> PrefixDeltaColumn<i64> {
+    PrefixDeltaColumn::from_values(v)
 }
-fn mk_indexed(v: Vec<i64>) -> IndexedDeltaColumn<i64> {
-    IndexedDeltaColumn::from_values(v)
+fn mk_indexed(v: Vec<i64>) -> DeltaColumn<i64> {
+    DeltaColumn::from_values(v)
 }
 
 // insert
@@ -345,26 +348,16 @@ v0_insert!(v0_column_insert_1, IntCursor, 1);
 v0_insert!(v0_column_insert_10, IntCursor, 10);
 v0_insert!(v0_column_insert_100, IntCursor, 100);
 
-v1_insert!(v1_delta_insert_1, DeltaColumn<i64>, mk_delta, 1);
-v1_insert!(v1_delta_insert_10, DeltaColumn<i64>, mk_delta, 10);
-v1_insert!(v1_delta_insert_100, DeltaColumn<i64>, mk_delta, 100);
+v1_insert!(v1_delta_insert_1, PrefixDeltaColumn<i64>, mk_delta, 1);
+v1_insert!(v1_delta_insert_10, PrefixDeltaColumn<i64>, mk_delta, 10);
+v1_insert!(v1_delta_insert_100, PrefixDeltaColumn<i64>, mk_delta, 100);
 v0_insert!(v0_delta_insert_1, DeltaCursor, 1);
 v0_insert!(v0_delta_insert_10, DeltaCursor, 10);
 v0_insert!(v0_delta_insert_100, DeltaCursor, 100);
 
-v1_insert!(v1_indexed_insert_1, IndexedDeltaColumn<i64>, mk_indexed, 1);
-v1_insert!(
-    v1_indexed_insert_10,
-    IndexedDeltaColumn<i64>,
-    mk_indexed,
-    10
-);
-v1_insert!(
-    v1_indexed_insert_100,
-    IndexedDeltaColumn<i64>,
-    mk_indexed,
-    100
-);
+v1_insert!(v1_indexed_insert_1, DeltaColumn<i64>, mk_indexed, 1);
+v1_insert!(v1_indexed_insert_10, DeltaColumn<i64>, mk_indexed, 10);
+v1_insert!(v1_indexed_insert_100, DeltaColumn<i64>, mk_indexed, 100);
 
 // delete
 v1_delete!(v1_column_delete_1, Column<i64>, mk_column, 1);
@@ -374,26 +367,16 @@ v0_delete!(v0_column_delete_1, IntCursor, 1);
 v0_delete!(v0_column_delete_10, IntCursor, 10);
 v0_delete!(v0_column_delete_100, IntCursor, 100);
 
-v1_delete!(v1_delta_delete_1, DeltaColumn<i64>, mk_delta, 1);
-v1_delete!(v1_delta_delete_10, DeltaColumn<i64>, mk_delta, 10);
-v1_delete!(v1_delta_delete_100, DeltaColumn<i64>, mk_delta, 100);
+v1_delete!(v1_delta_delete_1, PrefixDeltaColumn<i64>, mk_delta, 1);
+v1_delete!(v1_delta_delete_10, PrefixDeltaColumn<i64>, mk_delta, 10);
+v1_delete!(v1_delta_delete_100, PrefixDeltaColumn<i64>, mk_delta, 100);
 v0_delete!(v0_delta_delete_1, DeltaCursor, 1);
 v0_delete!(v0_delta_delete_10, DeltaCursor, 10);
 v0_delete!(v0_delta_delete_100, DeltaCursor, 100);
 
-v1_delete!(v1_indexed_delete_1, IndexedDeltaColumn<i64>, mk_indexed, 1);
-v1_delete!(
-    v1_indexed_delete_10,
-    IndexedDeltaColumn<i64>,
-    mk_indexed,
-    10
-);
-v1_delete!(
-    v1_indexed_delete_100,
-    IndexedDeltaColumn<i64>,
-    mk_indexed,
-    100
-);
+v1_delete!(v1_indexed_delete_1, DeltaColumn<i64>, mk_indexed, 1);
+v1_delete!(v1_indexed_delete_10, DeltaColumn<i64>, mk_indexed, 10);
+v1_delete!(v1_indexed_delete_100, DeltaColumn<i64>, mk_indexed, 100);
 
 // replace
 v1_replace!(v1_column_replace_1, Column<i64>, mk_column, 1);
@@ -403,34 +386,24 @@ v0_replace!(v0_column_replace_1, IntCursor, 1);
 v0_replace!(v0_column_replace_10, IntCursor, 10);
 v0_replace!(v0_column_replace_100, IntCursor, 100);
 
-v1_replace!(v1_delta_replace_1, DeltaColumn<i64>, mk_delta, 1);
-v1_replace!(v1_delta_replace_10, DeltaColumn<i64>, mk_delta, 10);
-v1_replace!(v1_delta_replace_100, DeltaColumn<i64>, mk_delta, 100);
+v1_replace!(v1_delta_replace_1, PrefixDeltaColumn<i64>, mk_delta, 1);
+v1_replace!(v1_delta_replace_10, PrefixDeltaColumn<i64>, mk_delta, 10);
+v1_replace!(v1_delta_replace_100, PrefixDeltaColumn<i64>, mk_delta, 100);
 v0_replace!(v0_delta_replace_1, DeltaCursor, 1);
 v0_replace!(v0_delta_replace_10, DeltaCursor, 10);
 v0_replace!(v0_delta_replace_100, DeltaCursor, 100);
 
-v1_replace!(v1_indexed_replace_1, IndexedDeltaColumn<i64>, mk_indexed, 1);
-v1_replace!(
-    v1_indexed_replace_10,
-    IndexedDeltaColumn<i64>,
-    mk_indexed,
-    10
-);
-v1_replace!(
-    v1_indexed_replace_100,
-    IndexedDeltaColumn<i64>,
-    mk_indexed,
-    100
-);
+v1_replace!(v1_indexed_replace_1, DeltaColumn<i64>, mk_indexed, 1);
+v1_replace!(v1_indexed_replace_10, DeltaColumn<i64>, mk_indexed, 10);
+v1_replace!(v1_indexed_replace_100, DeltaColumn<i64>, mk_indexed, 100);
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ value queries — v0 DeltaCursor vs v1 IndexedDeltaColumn                  ║
+// ║ value queries — v0 DeltaCursor vs v1 DeltaColumn                  ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
 #[divan::bench(max_time = Duration::from_secs(8))]
 fn v1_indexed_find_by_value(b: Bencher) {
-    let c = IndexedDeltaColumn::<i64>::from_values(initial_values());
+    let c = DeltaColumn::<i64>::from_values(initial_values());
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = Rng::new(0xABCD);
         let mut acc: usize = 0;
@@ -463,7 +436,7 @@ fn v0_indexed_find_by_value(b: Bencher) {
 
 #[divan::bench(max_time = Duration::from_secs(8))]
 fn v1_indexed_find_by_range(b: Bencher) {
-    let c = IndexedDeltaColumn::<i64>::from_values(initial_values());
+    let c = DeltaColumn::<i64>::from_values(initial_values());
     let window = (N / 1000) as i64;
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = Rng::new(0xABCD);
@@ -481,7 +454,7 @@ fn v1_indexed_find_by_range(b: Bencher) {
 fn v0_indexed_find_by_range(b: Bencher) {
     let mut c = ColumnData::<DeltaCursor>::new();
     c.splice(0, 0, initial_values());
-    let window = (N / 1000) as usize;
+    let window = N / 1000;
     b.counter(ItemsCount::new(OPS as u64)).bench_local(|| {
         let mut rng = Rng::new(0xABCD);
         let mut acc: usize = 0;

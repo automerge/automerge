@@ -136,7 +136,7 @@ impl RawColumn {
     /// Non-panicking variant of [`splice_slice`](Self::splice_slice).
     ///
     /// Flow mirrors `Column`'s `Encoding::splice`: locate the target slab,
-    /// delegate to [`splice_slab`] which handles one slab plus any overflow,
+    /// delegate to `splice_slab` which handles one slab plus any overflow,
     /// then clean up cross-slab deletes, merge undersized neighbours, and
     /// update the BIT.
     pub fn try_splice_slice(
@@ -435,7 +435,7 @@ fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &[u8]) {
 
 /// Splice a single slab: delete up to `del` bytes at `index`, insert
 /// `values`.  Mirrors the shape of [`ColumnEncoding::splice_slab`] used by
-/// [`Column`] — `del` may exceed the slab's length, in which case the
+/// `Column` — `del` may exceed the slab's length, in which case the
 /// excess is returned as `overflow_del` for the caller to apply to the
 /// following slabs.
 ///

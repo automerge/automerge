@@ -47,7 +47,7 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
 /// For columns that track prefix sums, this is a compound value carrying
 /// both the item count and the slab's contribution to the prefix sum.
 #[doc(hidden)]
-pub trait SlabWeight: Copy + Default + std::fmt::Debug + AddAssign + SubAssign {
+pub trait SlabWeight: Clone + Default + std::fmt::Debug + AddAssign + SubAssign {
     /// The length (item count) component of this weight.
     fn len(&self) -> usize;
 
@@ -81,7 +81,7 @@ pub trait WeightFn<T: ColumnValueRef> {
     /// via `AddAssign`/`SubAssign`).  For the B-tree-backed path it only needs
     /// [`SlabAggregate`](super::btree::SlabAggregate), which permits
     /// non-invertible aggregates like min/max.
-    type Weight: Copy + Default + std::fmt::Debug;
+    type Weight: Clone + Default + std::fmt::Debug;
     fn compute(slab: &Slab<TailOf<T>>) -> Self::Weight;
 }
 
@@ -116,7 +116,7 @@ pub(crate) fn rebuild_bit<S, W: SlabWeight>(slabs: &[S], weight: impl Fn(&S) -> 
     for i in 1..=n {
         let parent = i + (i & i.wrapping_neg());
         if parent <= n {
-            let child = bit[i];
+            let child = bit[i].clone();
             bit[parent] += child;
         }
     }
@@ -130,8 +130,8 @@ pub(crate) fn rebuild_bit<S, W: SlabWeight>(slabs: &[S], weight: impl Fn(&S) -> 
 pub(crate) fn bit_point_update<W: SlabWeight>(bit: &mut [W], si: usize, old: W, new: W) {
     let mut i = si + 1; // BIT is 1-indexed
     while i < bit.len() {
-        bit[i] -= old;
-        bit[i] += new;
+        bit[i] -= old.clone();
+        bit[i] += new.clone();
         i += i & i.wrapping_neg();
     }
 }
@@ -209,9 +209,8 @@ pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) ->
 /// to skip directly to the target slab.
 pub(crate) trait ColumnRef<T: ColumnValueRef> {
     fn find_slab(&self, index: usize) -> (usize, usize);
-    fn scope_to_value_dyn(&self, target: T::Get<'_>, start: usize, end: usize) -> Range<usize>
-    where
-        for<'x> T::Get<'x>: Ord + AsColumnRef<T>;
+    fn slab_data(&self, index: usize) -> &[u8];
+    fn slab_start(&self, index: usize) -> usize;
 }
 
 impl<T, WF, Idx> ColumnRef<T> for Column<T, WF, Idx>
@@ -224,11 +223,12 @@ where
         self.index.find_slab(index)
     }
 
-    fn scope_to_value_dyn(&self, target: T::Get<'_>, start: usize, end: usize) -> Range<usize>
-    where
-        for<'x> T::Get<'x>: Ord + AsColumnRef<T>,
-    {
-        self.scope_to_value(target, start..end)
+    fn slab_start(&self, index: usize) -> usize {
+        self.slab_start(index)
+    }
+
+    fn slab_data(&self, index: usize) -> &[u8] {
+        &self.slabs[index].data
     }
 }
 
@@ -384,14 +384,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// beyond the column length, the iterator will cleanly return `None`
     /// when it reaches the end of the data.
     pub fn set_max(&mut self, pos: usize) {
-        if pos <= self.pos {
-            self.items_left = 0;
-            self.slab_remaining = 0;
-        } else {
-            self.items_left = pos - self.pos;
-            // slab_remaining may now be less than items_left — that's fine,
-            // the iterator will advance to the next slab when it runs out.
-        }
+        self.items_left = pos.saturating_sub(self.pos);
     }
 
     /// Returns the index of the current slab.
@@ -412,20 +405,14 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     }
 
     pub fn advance_to(&mut self, target: usize) {
-        assert!(
-            target >= self.pos,
-            "advance_to: target ({target}) < pos ({})",
-            self.pos
-        );
+        assert!(target >= self.pos);
         if target > self.pos {
             self.nth(target - self.pos - 1);
         }
     }
 
     pub fn advance_by(&mut self, amount: usize) {
-        if amount > 0 {
-            self.nth(amount - 1);
-        }
+        self.advance_to(self.pos + amount)
     }
 
     /// Narrow the iterator window to the contiguous run of `value` within a
@@ -446,8 +433,8 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         if self.items_left == 0 {
             return None;
         }
-        let max = self.items_left.min(self.slab_remaining);
         let run = loop {
+            let max = self.items_left.min(self.slab_remaining);
             if let Some(run) = self.decoder.next_run_max(max) {
                 break run;
             }
@@ -483,15 +470,14 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                     self.items_left -= c;
                     self.slab_remaining -= c;
                     self.pos += c;
+                    continue;
                 } else {
                     // Value doesn't match — reset decoder so the consumed
                     // run can be re-read by subsequent calls.
                     self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
-                    break;
                 }
-            } else {
-                break;
             }
+            break;
         }
 
         Some(super::Run {
@@ -500,23 +486,14 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         })
     }
 
-    fn unwrap_decoder(self) -> <T::Encoding as ColumnEncoding>::Decoder<'a> {
-        self.decoder
-    }
-
     /// Moves the iterator window to `range` and returns the item at `range.start`.
     ///
     /// # Panics
     ///
     /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
-        assert!(
-            range.start >= self.pos,
-            "shift_next: range.start ({}) < pos ({})",
-            range.start,
-            self.pos,
-        );
-        self.items_left = range.end.saturating_sub(self.pos);
+        assert!(range.start >= self.pos);
+        self.set_max(range.end);
         self.nth(range.start - self.pos)
     }
 }
@@ -617,47 +594,85 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         for<'x> T::Get<'x>: Ord + super::AsColumnRef<T>,
     {
         let (start, end) = crate::columndata::normalize_range_max(range, self.end_pos());
-        let start = start.max(self.pos);
 
         if start > self.pos {
             self.advance_to(start);
         }
 
-        let next_slab = self.slab_idx + 1;
-        if self.slab_remaining > 0 && next_slab < self.slabs.len() {
-            let mut peek = T::Encoding::decoder(&self.slabs[next_slab].data);
-            if let Some(head) = peek.next() {
-                if head > target {
-                    self.set_max(end);
-                    loop {
-                        let before = self.clone();
-                        match self.next_run() {
-                            Some(run) if run.value == target => {
-                                let match_start = self.pos - run.count;
-                                let match_end = self.pos;
-                                return match_start..match_end;
-                            }
-                            Some(run) if run.value > target => {
-                                *self = before;
-                                return self.pos..self.pos;
-                            }
-                            Some(_) => {}
-                            None => {
-                                return self.pos..self.pos;
-                            }
+        let mut checkpoint = self.clone();
+        checkpoint.set_max(end);
+        let range = checkpoint.scan_to_value(target);
+
+        self.advance_to(range.start);
+
+        range
+    }
+
+    fn scan_to_value(mut self, target: T::Get<'a>) -> Range<usize>
+    where
+        for<'x> T::Get<'x>: Ord,
+    {
+        let col = self.col.unwrap();
+        let start = self.pos();
+        let end = self.end_pos();
+
+        let first_run = match self.next_run() {
+            Some(r) => r,
+            None => return start..start,
+        };
+        let si_start = self.get_slab();
+
+        match first_run.value.cmp(&target) {
+            Ordering::Equal => {
+                assert!(start + first_run.count <= end);
+                start..start + first_run.count
+            }
+            Ordering::Greater => start..start,
+            Ordering::Less => {
+                let (si_end, _) = col.find_slab(end - 1);
+
+                // Binary search slabs si_start+1..=si_end by first element.
+                let mut lo = si_start + 1;
+                let mut hi = si_end + 1;
+                let mut candidate = None;
+
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let mut dec = T::Encoding::decoder(col.slab_data(mid));
+                    let head = dec.next_run().unwrap();
+                    match head.value.cmp(&target) {
+                        Ordering::Less => {
+                            candidate = Some(mid);
+                            lo = mid + 1;
                         }
+                        // there is a possible optimization here where
+                        // if equal we can call tail(previous_slab)
+                        // but is tricky bc if it has 1 segment we may need to
+                        // keep stepping back
+                        Ordering::Greater | Ordering::Equal => hi = mid,
                     }
                 }
+
+                // `candidate` is the last slab whose first element < target.
+                // The target (if present) is at the end of this slab.
+                if let Some(i) = candidate {
+                    let pos = col.slab_start(i);
+                    self.advance_to(pos);
+                };
+
+                let mut pos = self.pos();
+                while let Some(run) = self.next_run() {
+                    match run.value.cmp(&target) {
+                        Ordering::Less => {
+                            pos += run.count;
+                        }
+                        Ordering::Greater => return pos..pos,
+                        Ordering::Equal => return pos..pos + run.count,
+                    }
+                }
+                pos..pos
             }
         }
-
-        let col = self.col.expect("seek_to_value requires a column reference");
-        let range = col.scope_to_value_dyn(target, start, end);
-        if range.start > self.pos {
-            self.advance_to(range.start);
-        }
-        self.set_max(end);
-        range
     }
 }
 
@@ -1019,103 +1034,8 @@ where
         for<'x> T::Get<'x>: Ord,
     {
         let (start, end) = crate::columndata::normalize_range_max(range, self.total_len);
-
         let target = value.as_column_ref();
-
-        let mut iter = self.iter_range(start..end);
-        let si_start = iter.get_slab();
-        let first_run = match iter.next_run() {
-            Some(r) => r,
-            None => return start..start,
-        };
-
-        match first_run.value.cmp(&target) {
-            Ordering::Equal => {
-                assert!(start + first_run.count <= end);
-                start..start + first_run.count
-            }
-            Ordering::Greater => start..start,
-            Ordering::Less => {
-                let (si_end, _) = self.index.find_slab(end - 1);
-
-                // Binary search slabs si_start+1..=si_end by first element.
-                let mut lo = si_start + 1;
-                let mut hi = si_end + 1;
-                let mut candidate = None;
-
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    let mut dec = T::Encoding::decoder(&self.slabs[mid].data);
-                    let head = dec.next_run().unwrap();
-                    match head.value.cmp(&target) {
-                        Ordering::Less => {
-                            candidate = Some(mid);
-                            lo = mid + 1;
-                        }
-                        Ordering::Greater => hi = mid,
-                        Ordering::Equal => {
-                            let base = self.slab_start(mid);
-                            assert!(base < end);
-                            assert!(base >= start);
-                            let mut match_start = base;
-                            let mut prev = mid;
-                            while prev > 0 {
-                                prev -= 1;
-                                if let Some(tail) = T::Encoding::last_run(&self.slabs[prev]) {
-                                    if tail.value == target {
-                                        match_start =
-                                            match_start.saturating_sub(tail.count).max(start);
-                                        if tail.count < self.slabs[prev].len {
-                                            break;
-                                        }
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                            let mut match_end = (base + head.count).min(end);
-                            let mut fwd = mid + 1;
-                            while match_end < end && fwd < self.slabs.len() {
-                                let mut dec = T::Encoding::decoder(&self.slabs[fwd].data);
-                                if let Some(run) = dec.next_run() {
-                                    if run.value == target {
-                                        match_end = (match_end + run.count).min(end);
-                                        if run.count < self.slabs[fwd].len {
-                                            break;
-                                        }
-                                        fwd += 1;
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                            return match_start..match_end;
-                        }
-                    }
-                }
-
-                // `candidate` is the last slab whose first element < target.
-                // The target (if present) is at the end of this slab.
-                let (mut decoder, pos) = match candidate {
-                    Some(i) => {
-                        let pos = self.slab_start(i);
-                        let dec = T::Encoding::decoder(&self.slabs[i].data);
-                        (dec, pos)
-                    }
-                    None => {
-                        let pos = start + first_run.count;
-                        (iter.unwrap_decoder(), pos)
-                    }
-                };
-                let (skipped, count) = decoder.scan_for(target, end - pos);
-                let begin = pos + skipped;
-                begin..begin + count
-            }
-        }
+        self.iter_range(start..end).scan_to_value(target)
     }
 
     // ── Mutations ───────────────────────────────────────────────────────
@@ -1203,7 +1123,7 @@ where
         range
     }
 
-    /// Inlined body of [`ColumnEncoding::splice`]'s default, adapted to
+    /// Inlined body of [`ColumnEncoding::splice_slab`]'s default, adapted to
     /// `&mut Column`.  Mutates `self.slabs` + `self.total_len` + runs
     /// `try_merge_range`; leaves the index untouched (the outer
     /// `splice_inner` reconciles it).
@@ -1318,7 +1238,7 @@ where
 {
     /// Iterator over `(slab_idx, items_before_slab)` for slabs whose
     /// prefix-sum range covers `target`.  Passes through to
-    /// [`SlabBTree::find_by_value`] on the inner index.
+    /// `SlabBTree::find_by_value` on the inner index.
     pub fn find_by_value(&self, target: i64) -> FindByValue<'_> {
         self.index.find_by_value(target)
     }
