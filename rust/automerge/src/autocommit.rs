@@ -715,6 +715,14 @@ impl AutoCommit {
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
+        // Establish actor baseline in the patch log before logging events.
+        // Without this, if a new actor that sorts before existing actors is
+        // inserted later, migrate_actors() cannot properly migrate the events
+        // logged below (it early-returns when actors is empty). See issue #1270.
+        if self.patch_log.is_active() && self.patch_log.actors.is_empty() {
+            self.patch_log.actors = self.doc.ops().actors.clone();
+        }
+
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {

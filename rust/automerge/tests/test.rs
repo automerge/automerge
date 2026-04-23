@@ -1811,6 +1811,53 @@ fn can_isolate() -> Result<(), AutomergeError> {
     Ok(())
 }
 
+// Regression test for issue #1270:
+// When fork() + isolate() is used with a new actor ID that is lexicographically
+// smaller than the existing actor, the diff_incremental patches contain stale
+// actor indices, causing incorrect patches (e.g. duplicate splices).
+#[test]
+fn isolate_diff_incremental_patches_are_correct() -> Result<(), AutomergeError> {
+    let actor1 = ActorId::from(&b"2222"[..]);
+    let mut doc1 = AutoCommit::new().with_actor(actor1);
+    let txt = doc1.put_object(&ROOT, "text", ObjType::Text)?;
+    let heads = doc1.get_heads();
+    doc1.splice_text(&txt, 0, 0, "def")?;
+
+    let actor2 = ActorId::from(&b"1111"[..]);
+    let mut doc2 = doc1.fork().with_actor(actor2);
+
+    // Activate patch log — this is what the JS binding does after clone()
+    doc2.update_diff_cursor();
+
+    doc2.isolate(&heads);
+    doc2.splice_text(&txt, 0, 0, "abc")?;
+    doc2.integrate();
+
+    let patches = doc2.diff_incremental();
+
+    // Apply patches to "def" (the state at the diff cursor) — should give "abcdef"
+    let mut text = String::from("def");
+    for patch in &patches {
+        match &patch.action {
+            PatchAction::SpliceText { index, value, .. } => {
+                let s = value.make_string();
+                text.replace_range(*index..*index, &s);
+            }
+            PatchAction::DeleteSeq { index, length } => {
+                text.replace_range(*index..(*index + *length), "");
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        text, "abcdef",
+        "Applying diff_incremental patches to 'def' should give 'abcdef', got '{}'",
+        text
+    );
+    Ok(())
+}
+
 #[test]
 fn inserting_text_near_deleted_marks() {
     let mut doc = Automerge::new();
