@@ -2,12 +2,14 @@ pub mod indexed;
 
 use std::marker::PhantomData;
 use std::ops::Range;
+use std::fmt::Debug;
+
 
 use super::btree::DeltaAggregate;
 use super::column::{Column, WeightFn};
 use super::encoding::{ColumnEncoding, RunDecoder};
 use super::prefix::PrefixValue;
-use super::{ColumnValueRef, RleValue, TypedLoadOpts};
+use super::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
 use crate::PackError;
 pub use indexed::IndexedDeltaWeightFn;
 
@@ -28,9 +30,9 @@ pub use indexed::IndexedDeltaWeightFn;
 /// | `Option<u64>`   | `Option<i64>` |
 /// | `Option<i32>`   | `Option<i64>` |
 /// | `Option<i64>`   | `Option<i64>` |
-pub trait DeltaValue: Copy + PartialEq + Default {
+pub trait DeltaValue: Copy + PartialEq + Default + Debug {
     /// The inner column value type for storing deltas.
-    type Inner: PrefixValue + Copy;
+    type Inner: PrefixValue + Copy + Debug;
 
     /// Whether this type supports null values.
     const NULLABLE: bool;
@@ -40,6 +42,17 @@ pub trait DeltaValue: Copy + PartialEq + Default {
 
     /// Convert from an `i64` realized value back to this type.
     fn from_i64(v: i64) -> Self;
+
+    fn run_value(run: &Run<<Self::Inner as ColumnValueRef>::Get<'_>>) -> i64 {
+        Self::get_inner(run.value).unwrap_or(0) * run.count as i64
+    }
+
+    fn maybe_running(raw: <Self::Inner as ColumnValueRef>::Get<'_>, running: i64) -> Self {
+        match Self::get_inner(raw) {
+            None => Self::null_value(),
+            Some(_) => Self::from_i64(running),
+        }
+    }
 
     /// Checked conversion from `i64`.  Returns `Err` if the value is
     /// out of range for `Self` (e.g. negative for unsigned types, or
@@ -355,7 +368,7 @@ where
     }
 }
 
-impl<T: DeltaValue> std::fmt::Debug for DeltaEncoder<'_, T>
+impl<T: DeltaValue> Debug for DeltaEncoder<'_, T>
 where
     T::Inner: super::RleValue,
 {
@@ -529,7 +542,7 @@ fn _unused_values_to_deltas<T: DeltaValue>(values: &[T]) -> Vec<T::Inner> {
 mod tests {
     use super::*;
 
-    fn assert_col<T: DeltaValue + PartialEq + std::fmt::Debug>(col: &DeltaColumn<T>, expected: &[T])
+    fn assert_col<T: DeltaValue + PartialEq + Debug>(col: &DeltaColumn<T>, expected: &[T])
     where
         T::Inner: super::super::RleValue,
         super::super::prefix::PrefixSlabWeight<<T::Inner as super::super::PrefixValue>::Prefix>:
@@ -1310,7 +1323,7 @@ where
     }
 }
 
-impl<T, WF> std::fmt::Debug for DeltaColumn<T, WF>
+impl<T, WF> Debug for DeltaColumn<T, WF>
 where
     T: DeltaValue,
     T::Inner: RleValue,
@@ -1447,8 +1460,9 @@ where
     }
 
     pub fn iter(&self) -> DeltaIter<'_, T> {
+        let inner = self.col.iter();
         DeltaIter {
-            inner: self.col.iter(),
+            inner,
             running: 0,
             delta_col: Some(&self.col as &dyn DeltaPrefixLookup<T>),
             _phantom: PhantomData,
@@ -1457,10 +1471,12 @@ where
 
     pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T> {
         let running = self.col.delta_prefix_through::<T>(range.start);
+        let inner = self.col.iter_range(range.clone());
+        let delta_col = Some(&self.col as &dyn DeltaPrefixLookup<T>);
         DeltaIter {
-            inner: self.col.iter_range(range),
+            inner,
             running,
-            delta_col: Some(&self.col as &dyn DeltaPrefixLookup<T>),
+            delta_col,
             _phantom: PhantomData,
         }
     }
@@ -1712,6 +1728,7 @@ where
 /// running prefix in O(log n), avoiding an O(n) replay.
 pub(crate) trait DeltaPrefixLookup<T: DeltaValue> {
     fn prefix_through(&self, idx: usize) -> i64;
+    fn find_slab_at_item(&self, idx: usize) -> (usize, i64, usize);
 }
 
 impl<T, WF> DeltaPrefixLookup<T> for Column<T::Inner, WF>
@@ -1723,6 +1740,11 @@ where
 {
     fn prefix_through(&self, idx: usize) -> i64 {
         self.delta_prefix_through::<T>(idx)
+    }
+    fn find_slab_at_item(&self, idx: usize) -> (usize, i64, usize) {
+        let (si, prefix_before, items_before) = self.index.find_slab_at_item(idx);
+        let prefix_before = <WF::Weight>::prefix_to_i64(prefix_before);
+        (si, prefix_before, items_before)
     }
 }
 
@@ -1757,7 +1779,9 @@ where
     fn next(&mut self) -> Option<T> {
         let raw = self.inner.next()?;
         match T::get_inner(raw) {
-            None => Some(T::null_value()),
+            None => {
+              Some(T::null_value())
+            }
             Some(d) => {
                 self.running += d;
                 Some(T::from_i64(self.running))
@@ -1765,16 +1789,31 @@ where
         }
     }
 
-    fn nth(&mut self, n: usize) -> Option<T> {
-        let raw = self.inner.nth(n)?;
-        let col = self
-            .delta_col
-            .expect("DeltaIter::nth requires a column reference");
-        self.running = col.prefix_through(self.inner.pos);
-        match T::get_inner(raw) {
-            None => Some(T::null_value()),
-            Some(_) => Some(T::from_i64(self.running)),
+    fn nth(&mut self, mut n: usize) -> Option<T> {
+        if n >= self.inner.items_left {
+            if self.inner.items_left > 0 {
+              self.nth(self.inner.items_left - 1);
+            }
+            return None;
         }
+
+        if self.inner.slab_remaining <= n {
+            let pos = self.pos();
+            let (si, prefix_before, items_before) = self.delta_col?.find_slab_at_item(pos + n);
+            self.running = prefix_before;
+            if !self.inner.advance_to_slab(si, items_before) {
+                return None;
+            }
+            n -= self.pos() - pos;
+        }
+        while let Some(run) = self.inner.next_run_max(n + 1) {
+            self.running += T::run_value(&run);
+            if run.count > n {
+                return Some(T::maybe_running(run.value, self.running));
+            }
+            n -= run.count
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1782,7 +1821,7 @@ where
     }
 }
 
-impl<T: DeltaValue> std::fmt::Debug for DeltaIter<'_, T>
+impl<T: DeltaValue> Debug for DeltaIter<'_, T>
 where
     T::Inner: RleValue,
 {
@@ -1833,15 +1872,9 @@ where
     }
 
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T> {
-        let raw = self.inner.shift_next(range)?;
-        let col = self
-            .delta_col
-            .expect("DeltaIter::shift_next requires a column reference");
-        self.running = col.prefix_through(self.inner.pos);
-        match T::get_inner(raw) {
-            None => Some(T::null_value()),
-            Some(_) => Some(T::from_i64(self.running)),
-        }
+        assert!(range.start >= self.inner.pos);
+        self.inner.set_max(range.end);
+        self.nth(range.start - self.inner.pos)
     }
 
     pub fn suspend(&self) -> DeltaIterState {

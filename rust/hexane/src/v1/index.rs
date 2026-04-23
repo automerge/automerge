@@ -82,6 +82,7 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
         self.weights.len()
     }
 
+    #[inline(never)]
     fn find_slab(&self, index: usize) -> (usize, usize) {
         find_slab_bit(&self.bit, index, self.weights.len())
     }
@@ -109,6 +110,7 @@ impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
         SlabBTree::len(self)
     }
 
+    #[inline(never)]
     fn find_slab(&self, index: usize) -> (usize, usize) {
         match self.find_by_prefix(index) {
             Some((si, items_before)) => (si, index - items_before),
