@@ -286,8 +286,9 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     /// O(log S + runs_skipped) — uses the column's index for slab lookup.
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
         if n >= self.items_left {
-            self.pos += self.items_left;
-            self.items_left = 0;
+            if self.items_left > 0 {
+              self.nth(self.items_left - 1);
+            }
             return None;
         }
 
@@ -301,22 +302,15 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
 
         // Use the column's index for O(log S) slab lookup.
         let target_pos = self.pos + n;
-        let col = self
-            .col
-            .expect("nth past current slab requires a column reference");
+        let col = self.col.unwrap();
         let (si, offset) = col.find_slab(target_pos);
-        if si >= self.slabs.len() {
-            self.pos += self.items_left;
-            self.items_left = 0;
+        if !self.advance_to_slab(si, target_pos - offset) {
             return None;
         }
-        let skipped = n + 1;
-        self.slab_idx = si;
-        self.slab_remaining = self.slabs[si].len;
-        self.decoder = T::Encoding::decoder(&self.slabs[si].data);
-        self.items_left -= skipped;
         self.slab_remaining -= offset + 1;
-        self.pos = target_pos + 1;
+        self.items_left -= offset + 1;
+        self.pos += offset + 1;
+        assert_eq!(self.pos, target_pos + 1);
         self.decoder.nth(offset)
     }
 
@@ -430,12 +424,16 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// For repeat runs, returns the full count. For literal runs, returns
     /// count=1 per value. Null runs return the null value with the full count.
     pub fn next_run(&mut self) -> Option<super::Run<T::Get<'a>>> {
-        if self.items_left == 0 {
+        self.next_run_max(self.items_left)
+    }
+
+    pub(crate) fn next_run_max(&mut self, mut max: usize) -> Option<super::Run<T::Get<'a>>> {
+        if max == 0 {
             return None;
         }
         let run = loop {
-            let max = self.items_left.min(self.slab_remaining);
-            if let Some(run) = self.decoder.next_run_max(max) {
+            let _max = self.items_left.min(self.slab_remaining).min(max);
+            if let Some(run) = self.decoder.next_run_max(_max) {
                 break run;
             }
             self.slab_idx += 1;
@@ -449,6 +447,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 
         let value = run.value;
         let count = run.count;
+        max -= count;
         self.items_left -= count;
         self.slab_remaining -= count;
         self.pos += count;
@@ -462,11 +461,12 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             self.slab_remaining = self.slabs[self.slab_idx].len;
             self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
 
-            let max = self.items_left.min(self.slab_remaining);
-            if let Some(next_run) = self.decoder.next_run_max(max) {
+            let _max = self.items_left.min(self.slab_remaining).min(max);
+            if let Some(next_run) = self.decoder.next_run_max(_max) {
                 if next_run.value == value {
                     let c = next_run.count;
                     total_count += c;
+                    max -= c;
                     self.items_left -= c;
                     self.slab_remaining -= c;
                     self.pos += c;
@@ -495,6 +495,24 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         assert!(range.start >= self.pos);
         self.set_max(range.end);
         self.nth(range.start - self.pos)
+    }
+
+    pub(crate) fn advance_to_slab(&mut self, si: usize, pos: usize) -> bool {
+        if si >= self.slabs.len() {
+            self.slab_idx = si;
+            self.pos = pos;
+            self.items_left = 0;
+            false
+        } else {
+            assert!(pos >= self.pos);
+            let skipped = pos - self.pos;
+            self.pos = pos;
+            self.slab_idx = si;
+            self.slab_remaining = self.slabs[si].len;
+            self.decoder = T::Encoding::decoder(&self.slabs[si].data);
+            self.items_left -= skipped;
+            true
+        }
     }
 }
 

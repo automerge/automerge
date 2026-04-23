@@ -17,6 +17,7 @@
 
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
+use std::fmt::Debug;
 
 /// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
 /// larger = fewer nodes + more per-node cost.  `B = 16` gives height ≈ 5
@@ -50,7 +51,7 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
 /// Implemented by [`PrefixSlabWeight<P>`](super::prefix::PrefixSlabWeight)
 /// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
 pub trait PrefixAggregate: SlabAggregate {
-    type Prefix: Copy + Default + PartialOrd + Add<Output = Self::Prefix>;
+    type Prefix: Copy + Default + PartialOrd + Add<Output = Self::Prefix> + Debug;
     fn prefix(&self) -> Self::Prefix;
 }
 

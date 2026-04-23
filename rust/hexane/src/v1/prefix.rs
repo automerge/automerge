@@ -602,13 +602,15 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if n >= self.inner.items_left {
-            self.inner.pos += self.inner.items_left;
-            self.inner.items_left = 0;
+            if self.inner.items_left > 0 {
+              self.nth(self.inner.items_left - 1);
+            }
             return None;
         }
 
         // Fast path: within current slab — accumulate via next_run.
         if n < self.inner.slab_remaining {
+            // TODO just use next_run_max()
             let saved = self.inner.items_left;
             self.inner.items_left = n + 1;
             let mut val = None;
@@ -621,7 +623,7 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
         }
 
         // Cross-slab: jump via B-tree descent.
-        let col = self.col.expect("nth on default PrefixIter");
+        let col = self.col.unwrap();
         let target_pos = self.inner.pos + n;
         let (si, offset, prefix_before) = col.find_slab_with_prefix(target_pos);
         if si >= self.inner.slabs.len() {
