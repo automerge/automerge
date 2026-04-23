@@ -648,7 +648,10 @@ impl<'a> ChangeCollector<'a> {
         have_deps: &[ChangeHash],
     ) -> Vec<Change> {
         let changes = change_graph.get_build_metadata_clock(have_deps);
+        // Note: This unwrap maintains backward compatibility for the public get_changes() API.
+        // In the future, consider propagating errors through the public API.
         Self::from_build_meta(op_set, change_graph, changes)
+            .expect("Failed to collect changes - this may indicate internal state corruption")
     }
 
     pub(crate) fn exclude_hashes_meta(
@@ -715,15 +718,15 @@ impl<'a> ChangeCollector<'a> {
         I: IntoIterator<Item = ChangeHash>,
     {
         let changes = change_graph.get_build_metadata(hashes)?;
-        Ok(Self::from_build_meta(op_set, change_graph, changes))
+        Ok(Self::from_build_meta(op_set, change_graph, changes)?)
     }
 
     fn from_build_meta(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         changes: Vec<BuildChangeMetadata<'a>>,
-    ) -> Vec<Change> {
-        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
+    ) -> Result<Vec<Change>, Error> {
+        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone())?;
         debug_assert_eq!(
             r1,
             crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
@@ -731,14 +734,14 @@ impl<'a> ChangeCollector<'a> {
                 .to_changes()
                 .unwrap()
         );
-        r1
+        Ok(r1)
     }
 
     fn from_build_meta_inner(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         changes: Vec<BuildChangeMetadata<'a>>,
-    ) -> Vec<Change> {
+    ) -> Result<Vec<Change>, Error> {
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)
@@ -758,7 +761,7 @@ impl<'a> ChangeCollector<'a> {
             }
         }
 
-        collector.finish(change_graph).unwrap()
+        collector.finish(change_graph)
     }
 
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
