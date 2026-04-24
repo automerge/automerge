@@ -585,14 +585,12 @@ impl ColumnEncoding for BoolEncoding {
         max_segments: usize,
         validate: Option<F>,
     ) -> Result<Vec<Slab>, PackError>
-    //where F: Fn(P, usize, bool) -> Result<P, String>
-    //where F: Fn(P, usize, <Self::Value>::Get<'a>) -> Result<P, String>
     where
         F: Fn(
             P,
             usize,
             <<BoolEncoding as ColumnEncoding>::Value as super::ColumnValueRef>::Get<'a>,
-        ) -> Result<P, String>, //where F: Fn(P, usize, bool) -> Result<P, String>
+        ) -> Result<P, String>,
     {
         bool_load_and_verify(data, max_segments, validate.as_ref())
     }

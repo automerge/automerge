@@ -1,43 +1,34 @@
-//! [`IndexedDeltaWeightFn`]: the default `WeightFn` for [`DeltaColumn`].
+//! [`IndexedDeltaWeightFn`]: the `WeightFn` that backs [`DeltaColumn`].
 //! Tracks `SlabAgg` (`len + total + min_offset + max_offset`) per slab
 //! so `find_by_value` / `find_by_range` can prune via min/max in O(log n).
 //!
 //! All delta-semantics — insert / remove / splice / null handling /
-//! iter — live in [`DeltaColumn`].  This module adds just:
+//! iter — live in [`DeltaColumn`].  This module adds:
 //!   * [`IndexedDeltaWeightFn`] — the `WeightFn` impl that walks the
 //!     RLE decoder and produces `SlabAgg`.
-//!   * A conditional `impl` block adding `find_by_value` /
-//!     `find_by_range` / `find_first` when `WF = IndexedDeltaWeightFn`.
+//!   * Value-query methods (`find_by_value` / `find_by_range` /
+//!     `find_first`) on [`DeltaColumn`].
 
-use std::marker::PhantomData;
 use std::ops::Range;
 
 use super::super::btree::SlabAgg;
 use super::super::column::{Slab, TailOf, WeightFn};
 use super::super::encoding::{ColumnEncoding, RunDecoder};
-use super::super::{ColumnValueRef, RleValue};
+use super::super::ColumnValueRef;
 use super::{DeltaColumn, DeltaValue};
 
 // ── Weight function ─────────────────────────────────────────────────────────
 
 /// Per-slab weight: `SlabAgg` with `min_offset`/`max_offset` for
 /// value-range pruning.
-pub struct IndexedDeltaWeightFn<T>(PhantomData<fn() -> T>);
+#[derive(Copy, Clone, Debug, Default)]
+pub struct IndexedDeltaWeightFn;
 
-impl<T> Clone for IndexedDeltaWeightFn<T> {
-    fn clone(&self) -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T: DeltaValue> WeightFn<T::Inner> for IndexedDeltaWeightFn<T>
-where
-    T::Inner: RleValue,
-{
+impl WeightFn<Option<i64>> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
 
-    fn compute(slab: &Slab<TailOf<T::Inner>>) -> SlabAgg {
-        compute_slab_agg::<T>(&slab.data)
+    fn compute(slab: &Slab<TailOf<Option<i64>>>) -> SlabAgg {
+        compute_slab_agg(&slab.data)
     }
 }
 
@@ -47,11 +38,8 @@ where
 /// progression is monotonic: `partial + v`, `partial + 2v`, …,
 /// `partial + count·v`.  Min/max are at the endpoints — no need to
 /// visit each intermediate item.
-fn compute_slab_agg<T: DeltaValue>(data: &[u8]) -> SlabAgg
-where
-    T::Inner: RleValue,
-{
-    let mut decoder = <T::Inner as ColumnValueRef>::Encoding::decoder(data);
+fn compute_slab_agg(data: &[u8]) -> SlabAgg {
+    let mut decoder = <Option<i64> as ColumnValueRef>::Encoding::decoder(data);
     let mut partial = 0i64;
     let mut min_off = i64::MAX;
     let mut max_off = i64::MIN;
@@ -59,7 +47,7 @@ where
 
     while let Some(run) = decoder.next_run() {
         len += run.count;
-        match T::get_inner(run.value) {
+        match run.value {
             None => {
                 min_off = min_off.min(partial);
                 max_off = max_off.max(partial);
@@ -86,12 +74,9 @@ where
     }
 }
 
-// ── Value-query methods (only when WF = IndexedDeltaWeightFn) ──────────────
+// ── Value-query methods ────────────────────────────────────────────────────
 
-impl<T: DeltaValue> DeltaColumn<T, IndexedDeltaWeightFn<T>>
-where
-    T::Inner: RleValue,
-{
+impl<T: DeltaValue> DeltaColumn<T> {
     /// Iterator over all indices whose realized value equals `target`.
     ///
     /// Thin wrapper over [`find_by_range`](Self::find_by_range) — the
@@ -126,7 +111,7 @@ where
         Box::new(self.col.find_by_value_range(lo, hi_incl).flat_map(
             move |(slab_idx, items_before, prefix_before)| {
                 let mut hits = Vec::new();
-                scan_slab_range::<T>(
+                scan_slab_range(
                     &self.col.slabs[slab_idx].data,
                     lo,
                     hi,
@@ -143,23 +128,21 @@ where
 /// Scan a slab's RLE-encoded data for items whose realized value lies
 /// in `[lo, hi)`.  Uses the encoding's run decoder + O(1) arithmetic
 /// per repeat run (no per-item iteration).
-fn scan_slab_range<T: DeltaValue>(
+fn scan_slab_range(
     data: &[u8],
     lo: i64,
     hi: i64,
     items_before: usize,
     prefix_before: i64,
     results: &mut Vec<usize>,
-) where
-    T::Inner: RleValue,
-{
-    let mut decoder = <T::Inner as ColumnValueRef>::Encoding::decoder(data);
+) {
+    let mut decoder = <Option<i64> as ColumnValueRef>::Encoding::decoder(data);
     let mut partial = 0i64;
     let mut item_idx = 0usize;
 
     while let Some(run) = decoder.next_run() {
         let count = run.count;
-        match T::get_inner(run.value) {
+        match run.value {
             None => {} // null run contributes nothing to realized values
             Some(v) => {
                 let a = prefix_before + partial; // f(k) = a + v*k for k in [1, count]
@@ -226,10 +209,7 @@ fn div_ceil_i64(a: i64, b: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::prefix::PrefixWeightFn;
     use super::*;
-
-    type PrefixDeltaColumn<T> = DeltaColumn<T, PrefixWeightFn<<T as DeltaValue>::Inner>>;
 
     #[test]
     fn empty() {
@@ -265,7 +245,6 @@ mod tests {
     fn range_basic() {
         let vals: Vec<u64> = (0..100).map(|i| i * 10).collect();
         let col = DeltaColumn::<u64>::from_values(vals);
-        // Half-open: realized in [200, 400) → indices 20..=39.
         let hits: Vec<_> = col.find_by_range(200..400).collect();
         assert_eq!(
             hits,
@@ -278,8 +257,6 @@ mod tests {
         let vals: Vec<u64> = (0..10).collect();
         let col = DeltaColumn::<u64>::from_values(vals);
         assert_eq!(col.find_by_range(5..5).count(), 0);
-        // Reversed range → no hits.  Construct piecewise so clippy doesn't
-        // lint the literal as an empty-range bug.
         let mut reversed = std::ops::Range {
             start: 0u64,
             end: 0,
@@ -360,46 +337,9 @@ mod tests {
     }
 
     #[test]
-    fn mutations_match_delta_column() {
-        let init: Vec<u64> = (1..=20).collect();
-        let mut a = PrefixDeltaColumn::<u64>::from_values(init.clone());
-        let mut b = DeltaColumn::<u64>::from_values(init);
-        a.insert(5, 999);
-        b.insert(5, 999);
-        a.remove(10);
-        b.remove(10);
-        a.splice(3, 2, [100u64, 200]);
-        b.splice(3, 2, [100u64, 200]);
-        assert_eq!(a.save(), b.save());
-        for i in 0..a.len() {
-            assert_eq!(a.get(i), b.get(i));
-        }
-    }
-
-    fn parity_u64(values: Vec<u64>) {
-        let a = PrefixDeltaColumn::<u64>::from_values(values.clone());
-        let b = DeltaColumn::<u64>::from_values(values.clone());
-        assert_eq!(a.save(), b.save(), "save bytes mismatch");
-        assert_eq!(a.len(), b.len());
-        for i in 0..values.len() {
-            assert_eq!(a.get(i), b.get(i), "get({i})");
-        }
-        for &v in values.iter().take(20) {
-            let got: Vec<usize> = b.find_by_value(v).collect();
-            let want = reference_find(&values, v);
-            assert_eq!(got, want, "find_by_value({v})");
-        }
-    }
-
-    #[test]
-    fn parity_sequential() {
-        parity_u64((1..=500).collect());
-    }
-
-    #[test]
-    fn parity_scattered() {
+    fn find_by_value_fuzz() {
         let mut seed = 1u64;
-        let vals: Vec<u64> = (0..500)
+        let values: Vec<u64> = (0..500)
             .map(|_| {
                 seed ^= seed << 13;
                 seed ^= seed >> 7;
@@ -407,58 +347,11 @@ mod tests {
                 seed % 10_000
             })
             .collect();
-        parity_u64(vals);
-    }
-
-    #[test]
-    fn fuzz_splices() {
-        struct Rng(u64);
-        impl Rng {
-            fn new(s: u64) -> Self {
-                Self(s.max(1))
-            }
-            fn next(&mut self) -> u64 {
-                self.0 ^= self.0 << 13;
-                self.0 ^= self.0 >> 7;
-                self.0 ^= self.0 << 17;
-                self.0
-            }
-        }
-        let mut rng = Rng::new(0xBEEF);
-        let init: Vec<u64> = (0..100).map(|i| i * 2 + 1).collect();
-        let mut a = PrefixDeltaColumn::<u64>::from_values(init.clone());
-        let mut b = DeltaColumn::<u64>::from_values(init);
-
-        for _ in 0..500 {
-            let op = rng.next() % 3;
-            let len = a.len();
-            match op {
-                0 => {
-                    let at = (rng.next() as usize) % (len + 1);
-                    let v = rng.next() % 10_000;
-                    a.insert(at, v);
-                    b.insert(at, v);
-                }
-                1 if len > 0 => {
-                    let at = (rng.next() as usize) % len;
-                    a.remove(at);
-                    b.remove(at);
-                }
-                _ if len > 0 => {
-                    let at = (rng.next() as usize) % len;
-                    let del = (rng.next() as usize) % (len - at).min(3) + 1;
-                    let count = (rng.next() as usize) % 3 + 1;
-                    let vals: Vec<u64> = (0..count).map(|_| rng.next() % 10_000).collect();
-                    a.splice(at, del, vals.clone());
-                    b.splice(at, del, vals);
-                }
-                _ => {}
-            }
-            assert_eq!(a.len(), b.len());
-        }
-        assert_eq!(a.save(), b.save());
-        for i in 0..a.len() {
-            assert_eq!(a.get(i), b.get(i));
+        let col = DeltaColumn::<u64>::from_values(values.clone());
+        for &v in values.iter().take(20) {
+            let got: Vec<usize> = col.find_by_value(v).collect();
+            let want = reference_find(&values, v);
+            assert_eq!(got, want, "find_by_value({v})");
         }
     }
 }

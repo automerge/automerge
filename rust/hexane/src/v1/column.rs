@@ -287,7 +287,7 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
         if n >= self.items_left {
             if self.items_left > 0 {
-              self.nth(self.items_left - 1);
+                self.nth(self.items_left - 1);
             }
             return None;
         }
@@ -399,7 +399,6 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     }
 
     pub fn advance_to(&mut self, target: usize) {
-        assert!(target >= self.pos);
         if target > self.pos {
             self.nth(target - self.pos - 1);
         }

@@ -15,9 +15,9 @@
 //! `Column::splice_inner` produces: a slab-range to replace + a stream
 //! of new aggregates.
 
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
-use std::fmt::Debug;
 
 /// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
 /// larger = fewer nodes + more per-node cost.  `B = 16` gives height ≈ 5
@@ -53,38 +53,6 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
 pub trait PrefixAggregate: SlabAggregate {
     type Prefix: Copy + Default + PartialOrd + Add<Output = Self::Prefix> + Debug;
     fn prefix(&self) -> Self::Prefix;
-}
-
-/// A [`PrefixAggregate`] whose prefix is an integer that can be
-/// materialised as `i64` — the lingua franca of delta-column
-/// arithmetic.
-///
-/// Lets [`DeltaColumn`](super::delta::DeltaColumn) be generic over
-/// any `WF::Weight` that tracks both items and a running delta sum.
-/// Both default weight choices qualify:
-///   * [`PrefixSlabWeight<i128>`](super::prefix::PrefixSlabWeight) —
-///     used by the default `PrefixWeightFn` delta path.  `i128` → `i64`
-///     via truncating cast (realized values fit in `i64` by construction).
-///   * [`SlabAgg`] — used by `IndexedDeltaWeightFn` for value queries.
-///     `.total` is already `i64`.
-pub trait DeltaAggregate: PrefixAggregate {
-    /// Convert a bare prefix value (as returned by
-    /// [`SlabBTree::find_slab_at_item`]) to `i64`.
-    fn prefix_to_i64(p: Self::Prefix) -> i64;
-}
-
-impl DeltaAggregate for super::prefix::PrefixSlabWeight<i128> {
-    #[inline]
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
-}
-
-impl DeltaAggregate for SlabAgg {
-    #[inline]
-    fn prefix_to_i64(p: i64) -> i64 {
-        p
-    }
 }
 
 fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -> A {
@@ -357,11 +325,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     // ── Splice ──────────────────────────────────────────────────────────
 
-    /// Replace the aggregate at `slab_idx` with `new_agg`.  The slab count is
-    /// unchanged.  O(log n): walks the tree once to find the leaf, updates
-    /// the leaf, then walks back up updating cached aggregates along the
-    /// ancestor path.  Prefer this over [`splice`](Self::splice) for
-    /// single-slab updates — `splice` rebuilds the whole tree today.
     pub(crate) fn update_slab(&mut self, slab_idx: usize, new_agg: A) {
         assert!(slab_idx < self.total_slabs, "update_slab out of bounds");
         // Descend to the leaf, recording each (node, child_idx_taken).
@@ -1248,6 +1211,21 @@ impl Iterator for FindByValueRange<'_> {
 
 // ── Prefix-sum queries (generic over PrefixAggregate) ───────────────────────
 
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct FoundSlab<A: PrefixAggregate> {
+    pub(crate) index: usize,
+    pub(crate) prefix: A::Prefix,
+    //  pub(crate) weight: A,
+    pub(crate) pos: usize,
+}
+
+impl<A: PrefixAggregate> FoundSlab<A> {
+    #[cfg(test)]
+    pub(crate) fn decompose(&self) -> (usize, A::Prefix, usize) {
+        (self.index, self.prefix, self.pos)
+    }
+}
+
 impl<A: PrefixAggregate> SlabBTree<A> {
     /// Find the landing slab for `item_idx`: returns
     /// `(slab_idx, prefix_before_slab, items_before_slab)`.  The
@@ -1258,9 +1236,9 @@ impl<A: PrefixAggregate> SlabBTree<A> {
     /// O(log n) — descends the tree by `len`, accumulating `prefix`
     /// and `len` of children visited before the descent.
     #[inline(never)]
-    pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> (usize, A::Prefix, usize) {
-        let mut acc_prefix = A::Prefix::default();
-        let mut acc_items = 0usize;
+    pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> FoundSlab<A> {
+        let mut prefix = A::Prefix::default();
+        let mut pos = 0usize;
         let mut slab_base = 0usize;
         let mut remaining = item_idx;
         let mut node = self.root;
@@ -1270,13 +1248,21 @@ impl<A: PrefixAggregate> SlabBTree<A> {
                     for (i, a) in l.aggs.iter().enumerate() {
                         let l_len = a.len();
                         if remaining < l_len {
-                            return (slab_base + i, acc_prefix, acc_items);
+                            return FoundSlab {
+                                index: slab_base + i,
+                                prefix,
+                                pos,
+                            };
                         }
-                        acc_prefix = acc_prefix + a.prefix();
-                        acc_items += l_len;
+                        prefix = prefix + a.prefix();
+                        pos += l_len;
                         remaining -= l_len;
                     }
-                    return (slab_base + l.aggs.len(), acc_prefix, acc_items);
+                    return FoundSlab {
+                        index: slab_base + l.aggs.len(),
+                        prefix,
+                        pos,
+                    };
                 }
                 Node::Internal(n) => {
                     let mut descended = false;
@@ -1287,13 +1273,17 @@ impl<A: PrefixAggregate> SlabBTree<A> {
                             descended = true;
                             break;
                         }
-                        acc_prefix = acc_prefix + c.agg.prefix();
-                        acc_items += c_len;
+                        prefix = prefix + c.agg.prefix();
+                        pos += c_len;
                         slab_base += c.slab_count;
                         remaining -= c_len;
                     }
                     if !descended {
-                        return (slab_base, acc_prefix, acc_items);
+                        return FoundSlab {
+                            index: slab_base,
+                            prefix,
+                            pos,
+                        };
                     }
                 }
             }
@@ -1614,13 +1604,13 @@ mod tests {
         let tree = SlabBTree::from_iter(weights.clone());
         assert_eq!(tree.len(), 10);
         // Item 0 is in slab 0; nothing before → (0, 0, 0).
-        assert_eq!(tree.find_slab_at_item(0), (0, 0, 0));
+        assert_eq!(tree.find_slab_at_item(0).decompose(), (0, 0, 0));
         // Item 5 is the start of slab 1 → prefix = weights[0].prefix = 10,
         // items_before = 5.
-        assert_eq!(tree.find_slab_at_item(5), (1, 10, 5));
+        assert_eq!(tree.find_slab_at_item(5).decompose(), (1, 10, 5));
         // Item 24 is inside slab 4 → prefix = sum of slabs 0..=3 = 100,
         // items_before = 20.
-        assert_eq!(tree.find_slab_at_item(24), (4, 100, 20));
+        assert_eq!(tree.find_slab_at_item(24).decompose(), (4, 100, 20));
     }
 
     #[test]
@@ -1761,7 +1751,7 @@ mod tests {
                 if total_items > 0 {
                     for _ in 0..3 {
                         let idx = (rng.next() as usize) % total_items;
-                        let got = tree.find_slab_at_item(idx);
+                        let got = tree.find_slab_at_item(idx).decompose();
                         let want = reference_find_slab_at_item(&reference, idx);
                         assert_eq!(
                             got, want,
@@ -1906,7 +1896,7 @@ mod tests {
                 // find_slab_at_item
                 if total_items > 0 {
                     let idx = (rng.next() as usize) % total_items;
-                    let (si, prefix_before, items_before) = tree.find_slab_at_item(idx);
+                    let found = tree.find_slab_at_item(idx);
                     let mut exp_prefix = 0u64;
                     let mut exp_items = 0;
                     let mut exp_si = reference.len();
@@ -1919,7 +1909,7 @@ mod tests {
                         exp_items += w.len;
                     }
                     assert_eq!(
-                        (si, prefix_before, items_before),
+                        (found.index, found.prefix, found.pos),
                         (exp_si, exp_prefix, exp_items),
                         "trial={trial} step={step}: find_slab_at_item({idx})"
                     );
