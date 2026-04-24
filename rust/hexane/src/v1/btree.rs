@@ -371,7 +371,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_aggs: I) {
         assert!(range.end <= self.total_slabs, "splice out of bounds");
         assert!(range.start <= range.end, "invalid range");
@@ -994,7 +993,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// Find the slab index containing the `pos`-th item and the
     /// item-count of items strictly before that slab.  Returns `None`
     /// if `pos >= total_items`.
-    #[inline(never)]
     pub(crate) fn find_by_prefix(&self, pos: usize) -> Option<(usize, usize)> {
         let root_agg = self.root_agg();
         if pos >= root_agg.len() {
@@ -1035,12 +1033,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
 // ── Value-range queries (SlabAgg-specific) ──────────────────────────────────
 
 impl SlabBTree<SlabAgg> {
-    #[inline(never)]
     pub(crate) fn find_by_value(&self, target: i64) -> FindByValue<'_> {
         FindByValue::new(self, target)
     }
 
-    #[inline(never)]
     pub(crate) fn find_by_value_range(&self, lo: i64, hi: i64) -> FindByValueRange<'_> {
         FindByValueRange::new(self, lo, hi)
     }
@@ -1215,7 +1211,6 @@ impl Iterator for FindByValueRange<'_> {
 pub(crate) struct FoundSlab<A: PrefixAggregate> {
     pub(crate) index: usize,
     pub(crate) prefix: A::Prefix,
-    //  pub(crate) weight: A,
     pub(crate) pos: usize,
 }
 
@@ -1235,7 +1230,6 @@ impl<A: PrefixAggregate> SlabBTree<A> {
     ///
     /// O(log n) — descends the tree by `len`, accumulating `prefix`
     /// and `len` of children visited before the descent.
-    #[inline(never)]
     pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> FoundSlab<A> {
         let mut prefix = A::Prefix::default();
         let mut pos = 0usize;
@@ -1296,7 +1290,6 @@ impl<A: PrefixAggregate> SlabBTree<A> {
     ///
     /// O(log n) — descends by comparing `target` against running prefix
     /// sums of sibling subtrees.
-    #[inline(never)]
     pub(crate) fn find_slab_at_prefix(&self, target: A::Prefix) -> (usize, A::Prefix, usize) {
         let mut acc_prefix = A::Prefix::default();
         let mut acc_items = 0usize;

@@ -11,11 +11,16 @@
 
 use std::ops::Range;
 
-use super::super::btree::SlabAgg;
+use super::super::btree::{FindByValueRange, SlabAgg};
 use super::super::column::{Slab, TailOf, WeightFn};
 use super::super::encoding::{ColumnEncoding, RunDecoder};
 use super::super::ColumnValueRef;
 use super::{DeltaColumn, DeltaValue};
+
+// Type aliases to keep the decoder / slab types readable in struct fields.
+type OptI64Encoding = <Option<i64> as ColumnValueRef>::Encoding;
+type OptI64Decoder<'a> = <OptI64Encoding as ColumnEncoding>::Decoder<'a>;
+type OptI64Slab = Slab<TailOf<Option<i64>>>;
 
 // ── Weight function ─────────────────────────────────────────────────────────
 
@@ -78,86 +83,139 @@ fn compute_slab_agg(data: &[u8]) -> SlabAgg {
 
 impl<T: DeltaValue> DeltaColumn<T> {
     /// Iterator over all indices whose realized value equals `target`.
-    ///
-    /// Thin wrapper over [`find_by_range`](Self::find_by_range) — the
-    /// half-open range `[t, t+1)` is semantically "values equal to t".
-    pub fn find_by_value(&self, target: T) -> Box<dyn Iterator<Item = usize> + '_> {
-        let Some(lo) = target.to_i64() else {
-            return Box::new(std::iter::empty());
-        };
-        self.find_by_range_i64(lo..lo.saturating_add(1))
-    }
-
-    /// Iterator over indices whose realized value lies in the half-open
-    /// range `[range.start, range.end)` — matching Rust's `Range<T>`
-    /// and v0's `find_by_range` semantics.
-    pub fn find_by_range(&self, range: Range<T>) -> Box<dyn Iterator<Item = usize> + '_> {
-        let (Some(lo), Some(hi)) = (range.start.to_i64(), range.end.to_i64()) else {
-            return Box::new(std::iter::empty());
-        };
-        self.find_by_range_i64(lo..hi)
+    pub fn find_by_value(&self, target: T) -> FindByRange<'_> {
+        match target.to_i64() {
+            Some(v) => self.find_by_range(v..v + 1),
+            None => self.find_by_range(0i64..0i64),
+        }
     }
 
     pub fn find_first(&self, target: T) -> Option<usize> {
         self.find_by_value(target).next()
     }
 
-    fn find_by_range_i64(&self, range: Range<i64>) -> Box<dyn Iterator<Item = usize> + '_> {
-        let Range { start: lo, end: hi } = range;
-        if hi <= lo {
-            return Box::new(std::iter::empty());
+    /// Iterator over indices whose realized value lies in the half-open
+    /// range `[range.start, range.end)` — matching Rust's `Range<T>`
+    /// and v0's `find_by_range` semantics.  Generic over any `X` that
+    /// can be converted to `i64` so callers can pass `u32`, `i64`, or the
+    /// delta's native `T` interchangeably.
+    pub fn find_by_range<X>(&self, range: Range<X>) -> FindByRange<'_>
+    where
+        X: TryInto<i64>,
+    {
+        match (range.start.try_into(), range.end.try_into()) {
+            (Ok(lo), Ok(hi)) => FindByRange::new(lo, hi, self),
+            _ => FindByRange::default(),
         }
-        let hi_incl = hi - 1;
-        Box::new(self.col.find_by_value_range(lo, hi_incl).flat_map(
-            move |(slab_idx, items_before, prefix_before)| {
-                let mut hits = Vec::new();
-                scan_slab_range(
-                    &self.col.slabs[slab_idx].data,
-                    lo,
-                    hi,
-                    items_before,
-                    prefix_before,
-                    &mut hits,
-                );
-                hits.into_iter()
-            },
-        ))
     }
 }
 
-/// Scan a slab's RLE-encoded data for items whose realized value lies
-/// in `[lo, hi)`.  Uses the encoding's run decoder + O(1) arithmetic
-/// per repeat run (no per-item iteration).
-fn scan_slab_range(
-    data: &[u8],
+/// Iterator returned by [`DeltaColumn::find_by_range`] and
+/// [`DeltaColumn::find_by_value`].  Walks the B-tree's pruned slab
+/// iterator and, for each candidate slab, runs a [`SlabScan`] over its
+/// RLE-encoded data.
+#[derive(Default)]
+pub struct FindByRange<'a> {
+    lo: i64,
+    hi: i64,
+    slabs: &'a [OptI64Slab],
+    outer: Option<FindByValueRange<'a>>,
+    current: Option<SlabScan<'a>>,
+}
+
+impl<'a> FindByRange<'a> {
+    /// Build a `FindByRange` over `col` for the half-open range `[lo, hi)`.
+    /// If `hi <= lo` the returned iterator is empty.
+    pub fn new<T: DeltaValue>(lo: i64, hi: i64, col: &'a DeltaColumn<T>) -> Self {
+        if hi > lo {
+            Self {
+                lo,
+                hi,
+                slabs: &col.col.slabs,
+                outer: Some(col.col.find_by_value_range(lo, hi - 1)),
+                current: None,
+            }
+        } else {
+            Self::default()
+        }
+    }
+}
+
+impl Iterator for FindByRange<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        loop {
+            if let Some(scan) = self.current.as_mut() {
+                if let Some(i) = scan.next() {
+                    return Some(i);
+                }
+                self.current = None;
+            }
+            let (slab_idx, items_before, prefix_before) = self.outer.as_mut()?.next()?;
+            self.current = Some(SlabScan::new(
+                &self.slabs[slab_idx].data,
+                self.lo,
+                self.hi,
+                items_before,
+                prefix_before,
+            ));
+        }
+    }
+}
+
+/// Scan of a single slab's RLE-encoded data for items whose realized
+/// value lies in `[lo, hi)`.  Uses the encoding's run decoder + O(1)
+/// arithmetic per repeat run (no per-item iteration).
+struct SlabScan<'a> {
+    decoder: OptI64Decoder<'a>,
     lo: i64,
     hi: i64,
     items_before: usize,
     prefix_before: i64,
-    results: &mut Vec<usize>,
-) {
-    let mut decoder = <Option<i64> as ColumnValueRef>::Encoding::decoder(data);
-    let mut partial = 0i64;
-    let mut item_idx = 0usize;
+    partial: i64,
+    item_idx: usize,
+    /// Pending index range produced by the current matching run.  Drained
+    /// first on each `next` call before advancing to the next run.
+    pending: Range<usize>,
+}
 
-    while let Some(run) = decoder.next_run() {
-        let count = run.count;
-        match run.value {
-            None => {} // null run contributes nothing to realized values
-            Some(v) => {
-                let a = prefix_before + partial; // f(k) = a + v*k for k in [1, count]
+impl<'a> SlabScan<'a> {
+    fn new(data: &'a [u8], lo: i64, hi: i64, items_before: usize, prefix_before: i64) -> Self {
+        Self {
+            decoder: OptI64Encoding::decoder(data),
+            lo,
+            hi,
+            items_before,
+            prefix_before,
+            partial: 0,
+            item_idx: 0,
+            pending: 0..0,
+        }
+    }
+}
+
+impl Iterator for SlabScan<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        loop {
+            if let Some(i) = self.pending.next() {
+                return Some(i);
+            }
+            let run = self.decoder.next_run()?;
+            let count = run.count;
+            if let Some(v) = run.value {
+                let a = self.prefix_before + self.partial; // f(k) = a + v*k for k in [1, count]
                 if v == 0 {
-                    if a >= lo && a < hi {
-                        for k in 0..count {
-                            results.push(items_before + item_idx + k);
-                        }
+                    if a >= self.lo && a < self.hi {
+                        let start = self.items_before + self.item_idx;
+                        self.pending = start..start + count;
                     }
                 } else {
-                    // Half-open constraint on realized value: lo ≤ a + v·k < hi.
-                    // Translate to bounds on k (handling v sign).  i64 throughout —
+                    // Half-open constraint: lo ≤ a + v·k < hi.  Translate
+                    // to bounds on k (handling v sign).  i64 throughout —
                     // realized values fit by construction.
-                    let lo_diff = lo - a;
-                    let hi_diff = hi - a;
+                    let lo_diff = self.lo - a;
+                    let hi_diff = self.hi - a;
                     let (k_min, k_max) = if v > 0 {
                         (div_ceil_i64(lo_diff, v), div_ceil_i64(hi_diff, v) - 1)
                     } else {
@@ -166,22 +224,22 @@ fn scan_slab_range(
                     let k_start = k_min.max(1);
                     let k_end = k_max.min(count as i64);
                     if k_start <= k_end {
-                        let start = items_before + item_idx + (k_start as usize - 1);
+                        let start = self.items_before + self.item_idx + (k_start as usize - 1);
                         let len = (k_end - k_start + 1) as usize;
-                        for off in 0..len {
-                            results.push(start + off);
-                        }
+                        self.pending = start..start + len;
                     }
                 }
-                partial += v * count as i64;
+                self.partial += v * count as i64;
             }
+            self.item_idx += count;
         }
-        item_idx += count;
     }
 }
 
 /// Integer floor division for `i64` that handles mixed signs correctly
-/// (unlike Rust's `/` which truncates toward zero).
+/// (unlike Rust's `/` which truncates toward zero).  Rust's `i64::div_floor`
+/// and `i64::div_ceil` are both still nightly-only under `int_roundings`
+/// (tracking issue #88581), so we keep our own here.
 #[inline]
 fn div_floor_i64(a: i64, b: i64) -> i64 {
     let q = a / b;
@@ -193,7 +251,6 @@ fn div_floor_i64(a: i64, b: i64) -> i64 {
     }
 }
 
-/// Integer ceiling division for `i64` that handles mixed signs correctly.
 #[inline]
 fn div_ceil_i64(a: i64, b: i64) -> i64 {
     let q = a / b;

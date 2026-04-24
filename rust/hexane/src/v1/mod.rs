@@ -18,6 +18,7 @@ pub mod prefix;
 pub mod raw;
 pub mod rle;
 pub use column::{Column, Iter, IterState};
+pub use delta::indexed::FindByRange;
 pub use delta::{DeltaColumn, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
 pub use index::{BitIndex, ColumnIndex};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
