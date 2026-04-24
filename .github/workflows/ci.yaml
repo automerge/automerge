@@ -75,9 +75,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustup target add --toolchain nightly wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/wasm_tests
 
@@ -95,9 +97,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustup target add --toolchain nightly wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/js_tests
 
@@ -117,9 +121,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustup target add --toolchain nightly wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/node_18_packaging_test
 

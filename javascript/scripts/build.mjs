@@ -113,12 +113,19 @@ function isStep(stepStr) {
 function buildWasm(outputDir, gitHead) {
   const automergeWasmPath = path.join(rustProjectDir, "automerge-wasm")
   console.log("building automerge-wasm")
+  // Build with the nightly toolchain + panic=unwind so panics in exported
+  // Rust functions surface as `PanicError` exceptions at the JS boundary
+  // (wasm-bindgen 0.2.118+) instead of aborting the WASM module. This requires
+  // a nightly toolchain (for -Zbuild-std) and the `rust-src` rustup component.
+  const wasmRustflags = [process.env.RUSTFLAGS, "-C panic=unwind"]
+    .filter(Boolean)
+    .join(" ")
   execSync(
-    //"cargo build --target wasm32-unknown-unknown --profile dev",
-    "cargo build --target wasm32-unknown-unknown --release",
+    "cargo +nightly build --target wasm32-unknown-unknown --release " +
+      "-Zbuild-std=std,panic_unwind",
     {
       cwd: automergeWasmPath,
-      env: { ...process.env, GIT_HEAD: gitHead },
+      env: { ...process.env, GIT_HEAD: gitHead, RUSTFLAGS: wasmRustflags },
     },
   )
 

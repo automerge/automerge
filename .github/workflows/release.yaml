@@ -19,9 +19,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustup target add --toolchain nightly wasm32-unknown-unknown
       - name: npm install
         run: npm install
       - name: build js
@@ -51,9 +53,11 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli wasm-opt
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup component add rust-src --toolchain nightly
+          rustup target add --toolchain nightly wasm32-unknown-unknown
       - name: npm install
         run: npm install
       - name: build js
