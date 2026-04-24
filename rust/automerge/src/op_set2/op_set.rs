@@ -16,9 +16,10 @@ use super::op::{Op, OpLike, SuccCursors, SuccInsert, TxOp};
 
 use super::columns::Columns;
 
-use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
+use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 
-use hexane::{BooleanCursor, ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
+use hexane::PackError;
+use itertools::Itertools;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -52,7 +53,7 @@ pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{VisIter, VisibleOpIter};
 
-pub(crate) type InsertAcc<'a> = hexane::ColAccIter<'a, BooleanCursor>;
+pub(crate) type InsertAcc<'a> = hexane::v1::PrefixIter<'a, bool>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSet {
@@ -103,12 +104,8 @@ impl OpSet {
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
-        let top = self.cols.index.top.iter_range(range.clone());
+        let top = self.cols.index.top.values().iter_range(range.clone());
         let vis = self.cols.index.visible.iter_range(range.clone());
-
-        // convert Option<Cow<'_,bool>> into bool :(
-        let top = top.map(|b| b.as_deref().copied().unwrap_or(false));
-        let vis = vis.map(|b| b.as_deref().copied().unwrap_or(false));
 
         let mut conflicts = vec![];
         let mut expose = None;
@@ -171,7 +168,7 @@ impl OpSet {
         assert_eq!(_top.len(), _visible.len());
         assert_eq!(_top.len(), self.len());
 
-        let top_iter = _top.iter();
+        let top_iter = _top.values().iter();
         let vis_iter = _visible.iter();
         let op_iter = self.iter();
 
@@ -180,9 +177,6 @@ impl OpSet {
         let mut last_vis = None;
 
         for ((top, vis), op) in top_iter.zip(vis_iter).zip(op_iter) {
-            let vis = *vis.unwrap();
-            let top = *top.unwrap();
-
             let this_op = Some((op.obj, op.elemid_or_key()));
 
             if this_op != last_op {
@@ -241,13 +235,12 @@ impl OpSet {
             self.undo_succ(&op.undo);
         }
         self.cols.remove_ops(op.pos, &[op]);
-        if let Some(_) = op.obj_info() {
+        if op.obj_info().is_some() {
             self.obj_info.remove(op.id());
         }
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
-        const NONE: Option<u64> = None;
         let mut succ_inc = 0;
         let mut last_pos = None;
         for i in op_pos.iter().rev() {
@@ -257,20 +250,23 @@ impl OpSet {
                 last_pos = Some(i.pos);
                 succ_inc = 1;
             }
-            self.cols.succ_count.splice(i.pos, 1, [i.len + succ_inc]);
+            self.cols
+                .succ_count
+                .splice(i.pos, 1, [(i.len + succ_inc) as u32]);
             self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
-            self.cols.succ_ctr.splice(i.sub_pos, 0, [i.id.icounter()]);
+            self.cols
+                .succ_ctr
+                .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
             if i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
-                self.cols.index.text.splice(i.pos, 1, [NONE]);
+                self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
                 self.cols.index.top.splice(i.pos, 1, [false]);
             }
         }
     }
 
     pub(crate) fn add_succ_with_undo(&mut self, op_pos: &[SuccInsert]) -> Vec<SuccUndo> {
-        const NONE: Option<u64> = None;
         let mut undo = vec![];
         let mut succ_inc = 0;
         let mut last_pos = None;
@@ -283,22 +279,26 @@ impl OpSet {
                 last_pos = Some(i.pos);
                 succ_inc = 1;
             }
-            self.cols.succ_count.splice(i.pos, 1, [i.len + succ_inc]);
+            self.cols
+                .succ_count
+                .splice(i.pos, 1, [(i.len + succ_inc) as u32]);
             self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
-            self.cols.succ_ctr.splice(i.sub_pos, 0, [i.id.icounter()]);
+            self.cols
+                .succ_ctr
+                .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
             if i.inc.is_none() {
                 delete = true;
                 let visible = self.cols.index.visible.get(i.pos);
-                let text = self.cols.index.text.get(i.pos);
-                let top = self.cols.index.top.get(i.pos);
+                let text = self.cols.index.text.values().get(i.pos);
+                let top = self.cols.index.top.values().get(i.pos);
                 undo.push(SuccUndo::new(*i, visible, text, top));
                 self.cols.index.visible.splice(i.pos, 1, [false]);
-                self.cols.index.text.splice(i.pos, 1, [NONE]);
+                self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
                 self.cols.index.top.splice(i.pos, 1, [false]);
             } else if delete && !expose {
                 expose = true;
-                let top = self.cols.index.top.get(i.pos);
+                let top = self.cols.index.top.values().get(i.pos);
                 undo.push(SuccUndo::new(*i, None, None, top));
                 self.cols.index.top.splice(i.pos, 1, [true]);
             } else {
@@ -311,10 +311,17 @@ impl OpSet {
     pub(crate) fn undo_succ(&mut self, op_pos: &[SuccUndo]) {
         for undo in op_pos.iter().rev() {
             let i = undo.succ;
-            self.cols.succ_count.splice(i.pos, 1, [i.len]);
-            self.cols.succ_actor.splice::<ActorIdx, _>(i.sub_pos, 1, []);
-            self.cols.succ_ctr.splice::<i64, _>(i.sub_pos, 1, []);
-            self.cols.index.inc.splice::<i64, _>(i.sub_pos, 1, []);
+            self.cols.succ_count.splice(i.pos, 1, [i.len as u32]);
+            self.cols
+                .succ_actor
+                .splice(i.sub_pos, 1, std::iter::empty::<ActorIdx>());
+            self.cols
+                .succ_ctr
+                .splice(i.sub_pos, 1, std::iter::empty::<u32>());
+            self.cols
+                .index
+                .inc
+                .splice(i.sub_pos, 1, std::iter::empty::<Option<i64>>());
             if let Some(vis) = undo.visible {
                 self.cols.index.visible.splice(i.pos, 1, [vis]);
             }
@@ -379,36 +386,18 @@ impl OpSet {
     ) -> MapRange<'_> {
         let obj_range = self.scope_to_obj(obj);
 
+        let scope = |s: &str| self.cols.key_str.scope_to_value(Some(s), obj_range.clone());
+
         let start = match range.start_bound() {
             std::ops::Bound::Unbounded => obj_range.start,
-            std::ops::Bound::Included(s) => {
-                self.cols
-                    .key_str
-                    .scope_to_value(Some(s.as_str()), obj_range.clone())
-                    .start
-            }
-            std::ops::Bound::Excluded(s) => {
-                self.cols
-                    .key_str
-                    .scope_to_value(Some(s.as_str()), obj_range.clone())
-                    .end
-            }
+            std::ops::Bound::Included(s) => scope(s.as_str()).start,
+            std::ops::Bound::Excluded(s) => scope(s.as_str()).end,
         };
 
         let end = match range.end_bound() {
             std::ops::Bound::Unbounded => obj_range.end,
-            std::ops::Bound::Included(s) => {
-                self.cols
-                    .key_str
-                    .scope_to_value(Some(s.as_str()), obj_range)
-                    .end
-            }
-            std::ops::Bound::Excluded(s) => {
-                self.cols
-                    .key_str
-                    .scope_to_value(Some(s.as_str()), obj_range)
-                    .start
-            }
+            std::ops::Bound::Included(s) => scope(s.as_str()).end,
+            std::ops::Bound::Excluded(s) => scope(s.as_str()).start,
         };
 
         MapRange::new(self, start..end, clock)
@@ -433,10 +422,7 @@ impl OpSet {
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
             if clock.is_none() {
-                // TODO - this could be done faster with the index
-                let text = self.cols.index.text.iter_range(range.clone());
-                let iter = SkipIter::new(text.clone(), vis.clone());
-                iter.filter_map(|n| n.as_deref().copied()).sum::<u64>() as usize
+                self.cols.index.text.prefix_delta(range.clone()) as usize
             } else {
                 self.action_value_iter(range.clone(), clock.as_ref())
                     .map(|(action, value, _)| match (action, &value) {
@@ -447,21 +433,15 @@ impl OpSet {
                     .sum()
             }
         } else if typ == ObjType::List {
-            let insert = self.cols.insert.iter_range(range.clone()).as_acc();
-            SkipIter::new(insert, vis)
-                .fold((hexane::Acc::default(), 0), |(prev, count), curr| {
-                    let inc = if prev != curr { 1 } else { 0 };
-                    (curr, count + inc)
-                })
-                .1
+            let insert = self
+                .cols
+                .insert
+                .iter_range(range.clone())
+                .map(|(prefix, _)| prefix);
+            SkipIter::new(insert, vis).dedup().count()
         } else {
             let key = self.cols.key_str.iter_range(range.clone());
-            SkipIter::new(key, vis)
-                .fold((None, 0), |(prev, count), curr| {
-                    let inc = if prev.as_ref() != Some(&curr) { 1 } else { 0 };
-                    (Some(curr), count + inc)
-                })
-                .1
+            SkipIter::new(key, vis).dedup().count()
         }
     }
 
@@ -471,12 +451,14 @@ impl OpSet {
         index: NonZeroUsize,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
-        let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
-        let start_acc = iter.acc().as_usize();
-        let tx = iter.shift_acc(index.get() - 1)?;
-        let current_acc = tx.acc.as_usize();
-        let iter = self.iter_range(&(tx.pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
+
+        let mut text_iter = self.cols.index.text.iter_range(range.clone());
+        let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
+        let start_pos = tx.pos.min(range.end);
+        let current_acc = tx.delta as usize;
+
+        let iter = self.iter_range(&(start_pos..range.end));
+        let marks = self.cols.index.mark.rich_text_at(start_pos, None);
         let mut query = InsertQuery::new(
             iter,
             index.get(),
@@ -485,7 +467,7 @@ impl OpSet {
             None,
             marks,
         );
-        query.resolve(current_acc - start_acc).ok()
+        query.resolve(current_acc).ok()
     }
 
     pub(crate) fn query_insert_at_list(
@@ -495,11 +477,11 @@ impl OpSet {
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
-        let mut iter = self.cols.index.top.iter_range(range.clone());
-        iter.advance_acc_by(index.get() - 1);
-        let start_pos = iter.pos();
-        let iter = self.iter_range(&(start_pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(start_pos, None);
+        let mut top_iter = self.cols.index.top.iter_range(range.clone());
+        let tx = top_iter.advance_prefix(index.get() - 1)?;
+
+        let iter = self.iter_range(&(tx.pos..range.end));
+        let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
         let mut query = InsertQuery::new(
             iter,
             index.get(),
@@ -572,6 +554,8 @@ impl OpSet {
         }
     }
 
+    // TODO called only needs op ids, width, elemid,
+    // this could touch a lot less data
     pub(crate) fn seek_ops_by_index<'a>(
         &'a self,
         obj: &ObjId,
@@ -629,23 +613,20 @@ impl OpSet {
     }
 
     fn list_register_at_pos(&self, pos: usize, range: Range<usize>) -> Range<usize> {
-        let mut iter = self.cols.insert.iter_range(pos..range.end);
-        let acc = iter.calculate_acc().as_usize();
-        let insert_op = iter.next().flatten().as_deref().copied().unwrap_or(false);
-
-        if insert_op {
-            iter.advance_acc_by(0);
-            pos..iter.pos()
-        } else {
-            // ACC here represents the number of insert ops to come before pos
-            // as insert_op is false and this is a list we know there's at least one
-            // insert op before us and acc > 0
-            let mut iter = self.cols.insert.iter_range(0..range.end);
-            iter.advance_acc_by(acc - 1);
-            let start = iter.pos();
-            iter.advance_acc_by(1);
-            let end = iter.pos();
-            start..end
+        let mut iter = self.cols.insert.iter_range(0..range.end);
+        let at_pos = iter.nth(pos);
+        let next_run = iter.next_run();
+        match (at_pos, next_run) {
+            (Some((_, insert)), Some(run)) if insert && !run.value.1 => pos..pos + run.count + 1,
+            (Some((_, insert)), _) if insert => pos..pos + 1,
+            (Some((pre, _)), run) => {
+                let start = self.cols.insert.get_index_for_total(pre);
+                match run {
+                    Some(run) if !run.value.1 => start..pos + run.count + 1,
+                    _ => start..pos + 1,
+                }
+            }
+            _ => pos..pos,
         }
     }
 
@@ -656,12 +637,9 @@ impl OpSet {
     ) -> OpsFound<'a> {
         let range = self.scope_to_obj(obj);
 
-        let mut iter = self.cols.index.top.iter_range(range.clone());
-        iter.advance_acc_by(index);
-        let tx_pos = iter.pos();
-
-        if iter.next().is_some() {
-            let range = self.list_register_at_pos(tx_pos, range);
+        let mut top_iter = self.cols.index.top.iter_range(range.clone());
+        if let Some(tx) = top_iter.advance_prefix(index) {
+            let range = self.list_register_at_pos(tx.pos, range);
             let end_pos = range.end;
             let ops = self.iter_range(&range).visible(self, None).collect();
             OpsFound {
@@ -684,54 +662,26 @@ impl OpSet {
     pub(crate) fn seek_text_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
-        mut index: usize,
+        index: usize,
     ) -> OpsFound<'a> {
-        let mut range = self.scope_to_obj(obj);
-
-        let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
-
-        let mut ops = vec![];
-        let mut end_pos = range.end;
-        let obj_start = iter.acc();
-        if let Some(tx) = iter.shift_acc(index) {
-            assert!(tx.acc >= obj_start);
-            range.start = tx.pos;
-            index = (tx.acc - obj_start).as_usize();
-            // TODO
-            // could use a SkipIter here
-            // could grab only needed fields and not all ops
-            for op in self.iter_range(&range) {
-                if op.insert {
-                    if !ops.is_empty() {
-                        break;
-                    }
-                    range.start = op.pos;
-                }
-                end_pos = op.pos + 1;
-                range.end = op.pos + 1;
-                if op.succ().len() == 0 && op.action != Action::Mark {
-                    ops.push(op);
-                }
+        let range = self.scope_to_obj(obj);
+        let mut text_iter = self.cols.index.text.iter_range(range.clone());
+        let seek = text_iter.advance_prefix(index as u64);
+        if let Some(tx) = seek {
+            if let Some(op) = self.get(tx.pos) {
+                return OpsFound {
+                    index: tx.delta as usize,
+                    ops: vec![op],
+                    range: tx.pos..tx.pos + 1,
+                    end_pos: tx.pos + 1,
+                };
             }
-        } else {
-            // This is required for the returned FoundOps to have the same
-            // range as in the OpSet::seek_ops_by_index_slow function in
-            // the case where there are no ops in the object
-            range.start = range.end;
-        }
-
-        assert_eq!(range.end, end_pos);
-        if ops.is_empty() {
-            // As above, this line is needed to normalise the `range` produced to
-            // match that for the OpSet::seek_ops_by_index_slow function in the
-            // case where there are no ops
-            range = end_pos..end_pos;
         }
         OpsFound {
             index,
-            ops,
-            range,
-            end_pos,
+            ops: vec![],
+            range: range.end..range.end,
+            end_pos: range.end,
         }
     }
 
@@ -740,11 +690,10 @@ impl OpSet {
     }
 
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
-        let counters = &self.cols.id_ctr;
-        let actors = &self.cols.id_actor;
-        counters
-            .find_by_value(id.counter())
-            .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(id.actoridx()))))
+        self.cols
+            .id_ctr
+            .find_by_value(id.counter() as u32)
+            .find(|&pos| self.cols.id_actor.get(pos) == Some(id.actoridx()))
     }
 
     pub(crate) fn seek_list_opid(
@@ -769,19 +718,21 @@ impl OpSet {
         id: OpId,
         encoding: SequenceType,
     ) -> Option<FoundOpId<'_>> {
-        let ostart = self.scope_to_obj(obj).start;
+        let obj_range = self.scope_to_obj(obj);
         let pos = self.get_op_id_pos(id)?;
         let op = self.get(pos)?;
         let visible;
         let index;
         if encoding == SequenceType::List {
-            let (delta, item) = self.cols.index.top.get_acc_delta(ostart, pos);
-            visible = item.as_deref().copied().unwrap_or(false);
-            index = delta.as_usize();
+            assert!(obj_range.contains(&pos)); // safe to unwrap
+            let prefix = self.cols.index.top.delta(obj_range.start, pos).unwrap();
+            visible = prefix.value;
+            index = prefix.delta;
         } else {
-            let (delta, item) = self.cols.index.text.get_acc_delta(ostart, pos);
-            visible = item.is_some();
-            index = delta.as_usize();
+            assert!(obj_range.contains(&pos)); // safe to unwrap
+            let prefix = self.cols.index.text.delta(obj_range.start, pos).unwrap();
+            visible = prefix.value.is_some();
+            index = prefix.delta as usize;
         }
         Some(FoundOpId { op, index, visible })
     }
@@ -811,10 +762,13 @@ impl OpSet {
     }
 
     pub(crate) fn insert_acc_range(&self, range: &Range<usize>) -> InsertAcc<'_> {
-        self.cols.insert.iter_range(range.clone()).as_acc()
+        self.cols.insert.iter_range(range.clone())
     }
 
-    pub(crate) fn key_str_iter_range(&self, range: &Range<usize>) -> ColumnDataIter<'_, StrCursor> {
+    pub(crate) fn key_str_iter_range(
+        &self,
+        range: &Range<usize>,
+    ) -> hexane::v1::Iter<'_, Option<String>> {
         self.cols.key_str.iter_range(range.clone())
     }
 
@@ -850,18 +804,17 @@ impl OpSet {
     }
 
     pub(crate) fn iter_obj_ids(&self) -> IterObjIds<'_> {
-        let mut ctr = self.cols.obj_ctr.iter();
-        let mut actor = self.cols.obj_actor.iter();
-        let next_ctr = ctr.next_run();
-        let next_actor = actor.next_run();
-        let pos = 0;
+        let mut v1_ctr = self.cols.obj_ctr.iter();
+        let mut v1_actor = self.cols.obj_actor.iter();
+        let next_ctr = v1_ctr.next_run();
+        let next_actor = v1_actor.next_run();
 
         IterObjIds {
-            ctr,
-            actor,
+            v1_ctr,
+            v1_actor,
             next_ctr,
             next_actor,
-            pos,
+            pos: 0,
         }
     }
 
@@ -904,15 +857,7 @@ impl OpSet {
 
     pub(crate) fn find_op_by_id_and_vis_fast(&self, id: &OpId) -> Option<(Op<'_>, bool)> {
         let pos = self.get_op_id_pos(*id)?;
-        let visible = self
-            .cols
-            .index
-            .top
-            .get(pos)
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or(false);
+        let visible = self.cols.index.top.values().get(pos).unwrap_or(false);
         let op = self.get(pos)?;
         Some((op, visible))
     }
@@ -939,10 +884,10 @@ impl OpSet {
     }
 
     pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
-        if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
-            let start = val.acc.as_usize();
-            let len = *val.item.unwrap_or_default() as usize;
-            let end = start + len;
+        if let Some((prefix, count)) = self.cols.succ_count.get(pos) {
+            let start = (prefix - count as u64) as usize;
+            let len = count as usize;
+            let end = prefix as usize;
             let succ = SuccCursors {
                 len,
                 succ_actor: self.cols.succ_actor.iter_range(start..end),
@@ -1043,7 +988,10 @@ impl OpSet {
     }
 
     pub(crate) fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
-        let range = self.cols.obj_ctr.scope_to_value(obj.counter(), ..);
+        let range = self
+            .cols
+            .obj_ctr
+            .scope_to_value(obj.counter().map(|c| c as u32), ..);
         self.cols.obj_actor.scope_to_value(obj.actor(), range)
     }
 
@@ -1072,10 +1020,10 @@ impl OpSet {
     }
 
     pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
-        let value_meta = self.cols.value_meta.iter_range(range.clone());
-        let value_advance = value_meta.calculate_acc().as_usize();
-        let value_raw = self.cols.value.raw_reader(value_advance);
-        ValueIter::new(value_meta, value_raw)
+        let meta = self.cols.value_meta.iter_range(range.clone());
+        let value_advance = self.cols.value_meta.get_prefix(range.start) as usize;
+        let value_raw = self.cols.value.iter_at(value_advance);
+        ValueIter::new(meta, value_raw)
     }
 
     pub(crate) fn id_iter_range(&self, range: &Range<usize>) -> OpIdIter<'_> {
@@ -1093,11 +1041,21 @@ impl OpSet {
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
+        let succ_start = self.cols.succ_count.get_prefix(range.start) as usize;
         let succ_count = self.cols.succ_count.iter_range(range.clone());
-        let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
-        let succ_actor = self.cols.succ_actor.iter_range(succ_range.clone());
-        let succ_counter = self.cols.succ_ctr.iter_range(succ_range.clone());
-        let inc_values = self.cols.index.inc.iter_range(succ_range);
+        let succ_actor = self
+            .cols
+            .succ_actor
+            .iter_range(succ_start..self.cols.succ_actor.len());
+        let succ_counter = self
+            .cols
+            .succ_ctr
+            .iter_range(succ_start..self.cols.succ_ctr.len());
+        let inc_values = self
+            .cols
+            .index
+            .inc
+            .iter_range(succ_start..self.cols.index.inc.len());
         SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values)
     }
 
@@ -1108,7 +1066,7 @@ impl OpSet {
         OpIter {
             pos: range.start,
             id: self.id_iter_range(range),
-            obj: ObjIdIter::new(
+            obj: ObjIdIter::new_range(
                 self.cols.obj_actor.iter_range(range.clone()),
                 self.cols.obj_ctr.iter_range(range.clone()),
             ),
@@ -1118,7 +1076,7 @@ impl OpSet {
                 self.cols.key_ctr.iter_range(range.clone()),
             ),
             succ,
-            insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
+            insert: InsertIter::new(self.cols.insert.values().iter_range(range.clone())),
             action: ActionIter::new(self.cols.action.iter_range(range.clone())),
             value,
             marks: self.mark_info_iter_range(range),
@@ -1147,9 +1105,9 @@ impl OpSet {
                 self.cols.succ_ctr.iter(),
                 self.cols.index.inc.iter(),
             ),
-            insert: InsertIter::new(self.cols.insert.iter()),
+            insert: InsertIter::new(self.cols.insert.values().iter()),
             action: ActionIter::new(self.cols.action.iter()),
-            value: ValueIter::new(self.cols.value_meta.iter(), self.cols.value.raw_reader(0)),
+            value: ValueIter::new(self.cols.value_meta.iter(), self.cols.value.iter()),
             marks: MarkInfoIter::new(self.cols.mark_name.iter(), self.cols.expand.iter()),
             range: 0..self.len(),
             op_set: self,
@@ -1342,10 +1300,10 @@ impl ResolvedAction {
 }
 
 pub(crate) struct IterObjIds<'a> {
-    ctr: ColumnDataIter<'a, UIntCursor>,
-    actor: ColumnDataIter<'a, ActorCursor>,
-    next_ctr: Option<Run<'a, u64>>,
-    next_actor: Option<Run<'a, ActorIdx>>,
+    v1_ctr: hexane::v1::Iter<'a, Option<u32>>,
+    v1_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
+    next_ctr: Option<hexane::v1::Run<Option<u32>>>,
+    next_actor: Option<hexane::v1::Run<Option<ActorIdx>>>,
     pos: usize,
 }
 
@@ -1354,32 +1312,29 @@ impl Iterator for IterObjIds<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.pos;
-        match (self.next_ctr.clone(), self.next_actor.clone()) {
+        match (self.next_ctr, self.next_actor) {
             (Some(mut run1), Some(mut run2)) => {
                 match run1.count.cmp(&run2.count) {
                     Ordering::Less => {
                         run2.count -= run1.count;
-                        self.next_actor = Some(run2.clone());
+                        self.next_actor = Some(run2);
                         self.pos += run1.count;
-                        self.next_ctr = self.ctr.next_run();
+                        self.next_ctr = self.v1_ctr.next_run();
                     }
                     Ordering::Greater => {
                         run1.count -= run2.count;
-                        self.next_ctr = Some(run1.clone());
+                        self.next_ctr = Some(run1);
                         self.pos += run2.count;
-                        self.next_actor = self.actor.next_run();
+                        self.next_actor = self.v1_actor.next_run();
                     }
                     Ordering::Equal => {
                         self.pos += run1.count;
-                        self.next_ctr = self.ctr.next_run();
-                        self.next_actor = self.actor.next_run();
+                        self.next_ctr = self.v1_ctr.next_run();
+                        self.next_actor = self.v1_actor.next_run();
                     }
                 }
                 let end = self.pos;
-                let obj = ObjId::load(
-                    run1.value.as_deref().copied(),
-                    run2.value.as_deref().copied(),
-                )?;
+                let obj = ObjId::load(run1.value.map(|c| c as u64), run2.value)?;
                 Some((obj, start..end))
             }
             (None, None) => None,
@@ -1392,22 +1347,22 @@ impl Iterator for IterObjIds<'_> {
 pub(crate) struct SuccUndo {
     pub(crate) succ: SuccInsert,
     pub(crate) visible: Option<bool>,
-    pub(crate) text: Option<Option<u64>>,
+    pub(crate) text: Option<Option<u32>>,
     pub(crate) top: Option<bool>,
 }
 
 impl SuccUndo {
     fn new(
         succ: SuccInsert,
-        visible: Option<Option<Cow<'_, bool>>>,
-        text: Option<Option<Cow<'_, u64>>>,
-        top: Option<Option<Cow<'_, bool>>>,
+        visible: Option<bool>,
+        text: Option<Option<u32>>,
+        top: Option<bool>,
     ) -> Self {
         Self {
             succ,
-            visible: visible.flatten().as_deref().copied(),
-            text: text.map(|a| a.as_deref().copied()),
-            top: top.flatten().as_deref().copied(),
+            visible,
+            text,
+            top,
         }
     }
 }
@@ -1416,12 +1371,10 @@ impl SuccUndo {
 mod tests {
     use super::*;
 
-    use hexane::{ColumnData, DeltaCursor, IntCursor};
-
     use crate::{
         op_set2::{
             op::SuccCursors,
-            types::{Action, ActorCursor, ScalarValue},
+            types::{Action, ScalarValue},
             KeyRef,
         },
         storage::Document,
@@ -1531,7 +1484,7 @@ mod tests {
         insert: bool,
         succs: Vec<OpId>,
         expand: bool,
-        mark_name: Option<Cow<'static, str>>,
+        mark_name: Option<&'static str>,
     }
 
     impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
@@ -1555,45 +1508,30 @@ mod tests {
     {
         let mut ops = Vec::new();
 
-        let mut group_data = ColumnData::<UIntCursor>::new();
-        let mut succ_actor_data = ColumnData::<ActorCursor>::new();
-        let mut succ_counter_data = ColumnData::<DeltaCursor>::new();
-        group_data.splice(
-            0,
-            0,
-            test_ops
-                .iter()
-                .map(|o| o.succs.len() as u64)
-                .collect::<Vec<_>>(),
-        );
-        succ_actor_data.splice(
-            0,
-            0,
-            test_ops
-                .iter()
-                .flat_map(|o| o.succs.iter().map(|s| s.actoridx()))
-                .collect::<Vec<_>>(),
-        );
-        let inc_index = ColumnData::<IntCursor>::init_empty(succ_actor_data.len());
-        succ_counter_data.splice(
-            0,
-            0,
-            test_ops
-                .iter()
-                .flat_map(|o| o.succs.iter().map(|s| s.counter() as i64))
-                .collect::<Vec<_>>(),
-        );
+        let group_counts: Vec<u32> = test_ops.iter().map(|o| o.succs.len() as u32).collect();
+        let succ_actors: Vec<ActorIdx> = test_ops
+            .iter()
+            .flat_map(|o| o.succs.iter().map(|s| s.actoridx()))
+            .collect();
+        let succ_counters: Vec<u32> = test_ops
+            .iter()
+            .flat_map(|o| o.succs.iter().map(|s| s.counter() as u32))
+            .collect();
+        let group_col = hexane::v1::PrefixColumn::<u32>::from_values(group_counts);
+        let actor_col = hexane::v1::Column::<ActorIdx>::from_values(succ_actors);
+        let counter_col = hexane::v1::DeltaColumn::<u32>::from_values(succ_counters);
+        let inc_col = hexane::v1::Column::<Option<i64>>::fill(actor_col.len(), None);
 
-        let mut group_iter = group_data.iter();
-        let mut actor_iter = succ_actor_data.iter();
-        let mut counter_iter = succ_counter_data.iter();
-        let mut inc_values = inc_index.iter();
+        let mut group_iter = group_col.iter();
+        let mut actor_iter = actor_col.iter();
+        let mut counter_iter = counter_col.iter();
+        let mut inc_values = inc_col.iter();
 
         // first encode the succs
         for test_op in test_ops {
-            let group_count = group_iter.next().unwrap().unwrap();
+            let (_prefix, group_count) = group_iter.next().unwrap();
             let op = super::super::op::Op {
-                pos: 0, // not relevent for this equality test
+                pos: 0,
                 id: test_op.id,
                 obj: test_op.obj,
                 action: test_op.action,
@@ -1601,16 +1539,16 @@ mod tests {
                 key: test_op.key.clone(),
                 insert: test_op.insert,
                 expand: test_op.expand,
-                mark_name: test_op.mark_name.clone(),
+                mark_name: test_op.mark_name,
                 conflict: false,
                 succ_cursors: SuccCursors {
-                    len: *group_count as usize,
+                    len: group_count as usize,
                     succ_counter: counter_iter.clone(),
                     succ_actor: actor_iter.clone(),
                     inc_values: inc_values.clone(),
                 },
             };
-            for _ in 0..*group_count {
+            for _ in 0..group_count {
                 counter_iter.next();
                 actor_iter.next();
                 inc_values.next();

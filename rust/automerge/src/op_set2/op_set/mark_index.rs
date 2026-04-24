@@ -206,7 +206,7 @@ impl MarkIndexColumn {
         let del = values.len();
         for v in &values {
             if let Some(MarkIndexBuilder::Start(id, _)) = v {
-                self.cache.remove(&id);
+                self.cache.remove(id);
             }
         }
         self.data.splice::<MarkIndexValue, _>(index, del, []);
@@ -662,7 +662,7 @@ pub(crate) mod tests {
     #[test]
     #[ignore]
     fn large_column_multi_slab() {
-        use rand::{Rng, SeedableRng};
+        use rand::{RngExt, SeedableRng};
         let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
 
         let n = 100_000;
@@ -693,8 +693,7 @@ pub(crate) mod tests {
         let mut col = MarkIndexColumn::new();
         let builder_values: Vec<Option<MarkIndexBuilder>> = values
             .iter()
-            .enumerate()
-            .map(|(_i, v)| match v {
+            .map(|v| match v {
                 Some(MarkIndexValue::Start(id)) => {
                     let data = cache_entries
                         .iter()

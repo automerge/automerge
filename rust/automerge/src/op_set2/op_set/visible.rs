@@ -5,7 +5,7 @@ use crate::op_set2::op::SuccCursors;
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::OpSet;
 
-use hexane::{BooleanCursor, ColumnDataIter};
+use hexane::v1;
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -41,7 +41,7 @@ impl Shiftable for IndexedVisIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         let val = self.iter.shift_next(range)?;
         self.vis = 0;
-        if val.as_deref() == Some(&true) {
+        if val {
             Some(0)
         } else {
             Some(1 + self.next().unwrap_or(0))
@@ -88,7 +88,7 @@ impl Iterator for VisIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct IndexedVisIter<'a> {
-    iter: ColumnDataIter<'a, BooleanCursor>,
+    iter: v1::Iter<'a, bool>,
     vis: usize,
 }
 
@@ -108,10 +108,8 @@ impl Iterator for IndexedVisIter<'_> {
             Some(0)
         } else {
             let mut skip = 0;
-            // next_run can produce zero length runs so
-            // we loop
             while let Some(run) = self.iter.next_run() {
-                if run.value.as_deref() == Some(&true) && run.count > 0 {
+                if run.value && run.count > 0 {
                     self.vis = run.count - 1;
                     break;
                 } else {

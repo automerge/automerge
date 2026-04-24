@@ -4,16 +4,11 @@ use crate::{
     error::AutomergeError,
     op_set2,
     op_set2::{
-        meta::MetaCursor,
         op::SuccCursors,
-        types::{Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, ScalarValue},
+        types::{Action, ActorIdx, KeyRef, ScalarValue},
         OpSet,
     },
     types::{ElemId, ObjId, OpId},
-};
-use hexane::{
-    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, ColumnDataIterState, DeltaCursor,
-    IntCursor, RawReader, SlabWeight, StrCursor, UIntCursor,
 };
 
 use std::borrow::Cow;
@@ -240,6 +235,25 @@ impl ObjId {
         }
     }
 
+    fn from_v1(actor: Option<ActorIdx>, ctr: Option<u32>) -> Result<ObjId, ReadOpError> {
+        match (actor, ctr) {
+            (Some(actor_idx), Some(counter)) => {
+                if counter == 0 {
+                    Ok(ObjId::root())
+                } else {
+                    Ok(ObjId(OpId::new(
+                        counter as u64,
+                        u64::from(actor_idx) as usize,
+                    )))
+                }
+            }
+            (None, None) => Ok(ObjId::root()),
+            _ => Err(ReadOpError::InvalidOpId(
+                "missing actor or counter".to_string(),
+            )),
+        }
+    }
+
     pub(crate) fn try_load_i(
         actor: Option<Cow<'_, ActorIdx>>,
         ctr: Option<Cow<'_, i64>>,
@@ -263,10 +277,53 @@ impl ElemId {
             _ => Err(ReadOpError::InvalidKey),
         }
     }
+
+    fn from_v1(
+        key_actor: Option<ActorIdx>,
+        key_counter: Option<u32>,
+    ) -> Result<Option<ElemId>, ReadOpError> {
+        match (key_counter, key_actor) {
+            (None, None) => Ok(None),
+            (Some(0), None) => Ok(Some(ElemId(OpId::new(0, 0)))),
+            (Some(counter), Some(actor)) if counter > 0 => {
+                Ok(Some(ElemId(OpId::new(counter as u64, usize::from(actor)))))
+            }
+            _ => Err(ReadOpError::InvalidKey),
+        }
+    }
 }
 
 impl<'a> KeyRef<'a> {
+    #[allow(dead_code)]
     pub(crate) fn try_load(
+        key_str: Option<&'a str>,
+        key_actor: Option<Cow<'a, ActorIdx>>,
+        key_counter: Option<Cow<'a, i64>>,
+    ) -> Result<KeyRef<'a>, ReadOpError> {
+        let elemid = ElemId::try_load(key_actor, key_counter)?;
+        match (key_str, elemid) {
+            (Some(key_str), None) => Ok(KeyRef::Map(Cow::Borrowed(key_str))),
+            (None, Some(elemid)) => Ok(KeyRef::Seq(elemid)),
+            (None, None) => Err(ReadOpError::MissingKey),
+            (Some(_), Some(_)) => Err(ReadOpError::InvalidKey),
+        }
+    }
+
+    fn from_v1(
+        key_str: Option<&'a str>,
+        key_actor: Option<ActorIdx>,
+        key_counter: Option<u32>,
+    ) -> Result<KeyRef<'a>, ReadOpError> {
+        let elemid = ElemId::from_v1(key_actor, key_counter)?;
+        match (key_str, elemid) {
+            (Some(key_str), None) => Ok(KeyRef::Map(Cow::Borrowed(key_str))),
+            (None, Some(elemid)) => Ok(KeyRef::Seq(elemid)),
+            (None, None) => Err(ReadOpError::MissingKey),
+            (Some(_), Some(_)) => Err(ReadOpError::InvalidKey),
+        }
+    }
+
+    pub(crate) fn try_load_owned(
         key_str: Option<Cow<'a, str>>,
         key_actor: Option<Cow<'a, ActorIdx>>,
         key_counter: Option<Cow<'a, i64>>,
@@ -283,31 +340,31 @@ impl<'a> KeyRef<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct OpIdIter<'a> {
-    actor: ColumnDataIter<'a, ActorCursor>,
-    ctr: ColumnDataIter<'a, DeltaCursor>,
+    pub(super) actor: hexane::v1::Iter<'a, ActorIdx>,
+    ctr: hexane::v1::DeltaIter<'a, u32>,
 }
 
 impl OpIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<OpIdIter<'a>, AutomergeError> {
         Ok(OpIdIter {
-            actor: self.actor.try_resume(&op_set.cols.id_actor)?,
-            ctr: self.ctr.try_resume(&op_set.cols.id_ctr)?,
+            actor: self.actor_state.try_resume(&op_set.cols.id_actor)?,
+            ctr: self.ctr_state.try_resume(&op_set.cols.id_ctr)?,
         })
     }
 }
 
 pub(crate) struct OpIdIterState {
-    actor: ColumnDataIterState<ActorCursor>,
-    ctr: ColumnDataIterState<DeltaCursor>,
+    actor_state: hexane::v1::column::IterState,
+    ctr_state: hexane::v1::DeltaIterState,
 }
 
 pub(crate) struct CtrWalker<'a> {
-    ctr: Box<dyn Iterator<Item = usize> + 'a>,
+    ctr: hexane::v1::FindByRange<'a>,
 }
 
 impl<'a> CtrWalker<'a> {
-    pub(crate) fn new(col: &'a ColumnData<DeltaCursor>, range: Range<usize>) -> Self {
-        let ctr = Box::new(col.find_by_range(range));
+    pub(crate) fn new(col: &'a hexane::v1::DeltaColumn<u32>, range: Range<usize>) -> Self {
+        let ctr = col.find_by_range(range.start as u32..range.end as u32);
         Self { ctr }
     }
 }
@@ -324,14 +381,14 @@ impl Iterator for CtrWalker<'_> {
 
 pub(crate) struct SuccWalker<'a> {
     acc: usize,
-    count: ColGroupIter<'a, UIntCursor>,
+    count: hexane::v1::PrefixIter<'a, u32>,
     ctr: Peekable<CtrWalker<'a>>,
 }
 
 impl<'a> SuccWalker<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
         let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range).peekable();
-        let count = op_set.cols.succ_count.iter().with_acc();
+        let count = op_set.cols.succ_count.iter();
         Self { acc: 0, count, ctr }
     }
 }
@@ -342,17 +399,17 @@ impl Iterator for SuccWalker<'_> {
         while self.ctr.peek()? < &self.acc {
             self.ctr.next();
         }
-        let delta = self.ctr.peek()? - self.acc;
-        let c = self.count.shift_acc(delta)?;
-        self.acc = c.next_acc().as_usize();
+        let delta = *self.ctr.peek()? - self.acc;
+        let c = self.count.advance_prefix(delta as u64)?;
+        self.acc = c.total as usize;
         Some(c.pos)
     }
 }
 
 impl<'a> OpIdIter<'a> {
     pub(crate) fn new(
-        actor: ColumnDataIter<'a, ActorCursor>,
-        ctr: ColumnDataIter<'a, DeltaCursor>,
+        actor: hexane::v1::Iter<'a, ActorIdx>,
+        ctr: hexane::v1::DeltaIter<'a, u32>,
     ) -> Self {
         Self { actor, ctr }
     }
@@ -365,7 +422,10 @@ impl<'a> OpIdIter<'a> {
         let actor = self.actor.next();
         let ctr = self.ctr.next();
         match (actor, ctr) {
-            (Some(actor), Some(ctr)) => Ok(Some(OpId::try_load(actor, ctr)?)),
+            (Some(actor_idx), Some(counter)) => Ok(Some(OpId::new(
+                counter as u64,
+                u64::from(actor_idx) as usize,
+            ))),
             (None, _) => Ok(None),
             (Some(_), None) => Err(ReadOpError::MissingValue("id_counter")),
         }
@@ -375,7 +435,10 @@ impl<'a> OpIdIter<'a> {
         let actor = self.actor.nth(n);
         let ctr = self.ctr.nth(n);
         match (actor, ctr) {
-            (Some(actor), Some(ctr)) => Ok(Some(OpId::try_load(actor, ctr)?)),
+            (Some(actor_idx), Some(counter)) => Ok(Some(OpId::new(
+                counter as u64,
+                u64::from(actor_idx) as usize,
+            ))),
             (None, _) => Ok(None),
             (Some(_), None) => Err(ReadOpError::MissingValue("id_counter")),
         }
@@ -388,17 +451,17 @@ impl<'a> OpIdIter<'a> {
 
     fn suspend(&self) -> OpIdIterState {
         OpIdIterState {
-            actor: self.actor.suspend(),
-            ctr: self.ctr.suspend(),
+            actor_state: self.actor.suspend(),
+            ctr_state: self.ctr.suspend(),
         }
     }
 }
 
 impl Shiftable for OpIdIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<OpId> {
-        let actor = self.actor.shift_next(range.clone());
-        let ctr = self.ctr.shift_next(range.clone());
-        OpId::try_load(actor?, ctr?).ok()
+        let actor_idx = self.actor.shift_next(range.clone())?;
+        let counter = self.ctr.shift_next(range)?;
+        Some(OpId::new(counter as u64, u64::from(actor_idx) as usize))
     }
 }
 
@@ -416,38 +479,30 @@ impl Iterator for OpIdIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct InsertIter<'a> {
-    iter: ColumnDataIter<'a, BooleanCursor>,
+    iter: hexane::v1::Iter<'a, bool>,
 }
 
-pub(crate) struct InsertIterState(ColumnDataIterState<BooleanCursor>);
+pub(crate) struct InsertIterState(hexane::v1::column::IterState);
 
 impl InsertIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<InsertIter<'a>, AutomergeError> {
-        Ok(InsertIter::new(self.0.try_resume(&op_set.cols.insert)?))
+        Ok(InsertIter {
+            iter: self.0.try_resume(op_set.cols.insert.values())?,
+        })
     }
 }
 
 impl<'a> InsertIter<'a> {
-    pub(crate) fn new(iter: ColumnDataIter<'a, BooleanCursor>) -> Self {
+    pub(crate) fn new(iter: hexane::v1::Iter<'a, bool>) -> Self {
         Self { iter }
     }
 
     fn try_next(&mut self) -> Result<bool, ReadOpError> {
-        self.iter
-            .next()
-            .flatten()
-            .as_deref()
-            .copied()
-            .ok_or(ReadOpError::MissingValue("insert"))
+        self.iter.next().ok_or(ReadOpError::MissingValue("insert"))
     }
 
     fn try_nth(&mut self, n: usize) -> Result<bool, ReadOpError> {
-        self.iter
-            .nth(n)
-            .flatten()
-            .as_deref()
-            .copied()
-            .ok_or(ReadOpError::MissingValue("insert"))
+        self.iter.nth(n).ok_or(ReadOpError::MissingValue("insert"))
     }
 
     fn suspend(&self) -> InsertIterState {
@@ -469,15 +524,15 @@ impl Iterator for InsertIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a> {
-    key_str: ColumnDataIter<'a, StrCursor>,
-    key_actor: ColumnDataIter<'a, ActorCursor>,
-    key_ctr: ColumnDataIter<'a, DeltaCursor>,
+    key_str: hexane::v1::Iter<'a, Option<String>>,
+    key_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
+    key_ctr: hexane::v1::DeltaIter<'a, Option<u32>>,
 }
 
 pub(crate) struct KeyIterState {
-    key_str: ColumnDataIterState<StrCursor>,
-    key_actor: ColumnDataIterState<ActorCursor>,
-    key_ctr: ColumnDataIterState<DeltaCursor>,
+    key_str: hexane::v1::IterState,
+    key_actor: hexane::v1::column::IterState,
+    key_ctr: hexane::v1::DeltaIterState,
 }
 
 impl KeyIterState {
@@ -492,9 +547,9 @@ impl KeyIterState {
 
 impl<'a> KeyIter<'a> {
     pub(crate) fn new(
-        key_str: ColumnDataIter<'a, StrCursor>,
-        key_actor: ColumnDataIter<'a, ActorCursor>,
-        key_ctr: ColumnDataIter<'a, DeltaCursor>,
+        key_str: hexane::v1::Iter<'a, Option<String>>,
+        key_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
+        key_ctr: hexane::v1::DeltaIter<'a, Option<u32>>,
     ) -> Self {
         Self {
             key_str,
@@ -516,22 +571,7 @@ impl<'a> KeyIter<'a> {
             .key_ctr
             .next()
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        let result = KeyRef::try_load(key_str.clone(), key_actor.clone(), key_ctr.clone());
-        if result.is_err() {
-            log!(
-                "Key error key={:?} actor={:?} ctr={:?}",
-                key_str,
-                key_actor,
-                key_ctr
-            );
-            log!(
-                "str={} actor={} ctr={}",
-                self.key_str.pos(),
-                self.key_actor.pos(),
-                self.key_ctr.pos()
-            );
-        }
-        result
+        KeyRef::from_v1(key_str, key_actor, key_ctr)
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<KeyRef<'a>, ReadOpError> {
@@ -547,7 +587,7 @@ impl<'a> KeyIter<'a> {
             .key_ctr
             .nth(n)
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        KeyRef::try_load(key_str, key_actor, key_ctr)
+        KeyRef::from_v1(key_str, key_actor, key_ctr)
     }
 
     fn suspend(&self) -> KeyIterState {
@@ -573,73 +613,81 @@ impl<'a> Iterator for KeyIter<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ObjIdIter<'a> {
-    actor: ColumnDataIter<'a, ActorCursor>,
-    ctr: ColumnDataIter<'a, UIntCursor>,
+    obj_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::v1::Iter<'a, Option<u32>>,
 }
 
 pub(crate) struct ObjIdIterState {
-    actor: ColumnDataIterState<ActorCursor>,
-    ctr: ColumnDataIterState<UIntCursor>,
+    obj_actor: hexane::v1::column::IterState,
+    obj_ctr: hexane::v1::column::IterState,
 }
 
 impl ObjIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ObjIdIter<'a>, AutomergeError> {
         Ok(ObjIdIter {
-            actor: self.actor.try_resume(&op_set.cols.obj_actor)?,
-            ctr: self.ctr.try_resume(&op_set.cols.obj_ctr)?,
+            obj_actor: self.obj_actor.try_resume(&op_set.cols.obj_actor)?,
+            obj_ctr: self.obj_ctr.try_resume(&op_set.cols.obj_ctr)?,
         })
     }
 }
 
 impl<'a> ObjIdIter<'a> {
     pub(crate) fn new(
-        actor: ColumnDataIter<'a, ActorCursor>,
-        ctr: ColumnDataIter<'a, UIntCursor>,
+        obj_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
+        obj_ctr: hexane::v1::Iter<'a, Option<u32>>,
     ) -> Self {
-        Self { actor, ctr }
+        Self { obj_actor, obj_ctr }
+    }
+
+    pub(crate) fn new_range(
+        obj_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
+        obj_ctr: hexane::v1::Iter<'a, Option<u32>>,
+    ) -> Self {
+        Self { obj_actor, obj_ctr }
     }
 
     #[cfg(test)]
     pub(crate) fn pos(&self) -> usize {
-        debug_assert!(self.actor.pos() == self.ctr.pos());
-        self.actor.pos()
+        self.obj_actor.pos()
     }
 
     pub(crate) fn seek_to_value(&mut self, obj: ObjId) -> Range<usize> {
-        let cr = self.ctr.seek_to_value(obj.counter(), ..);
-        let range = self.actor.seek_to_value(obj.actor(), cr.clone());
-        self.ctr.advance_to(range.start);
+        let cr = self
+            .obj_ctr
+            .seek_to_value(obj.counter().map(|c| c as u32), ..);
+        let range = self.obj_actor.seek_to_value(obj.actor(), cr);
+        self.obj_ctr.advance_to(range.start);
         range
     }
 
     pub(crate) fn try_next(&mut self) -> Result<ObjId, ReadOpError> {
         let actor = self
-            .actor
+            .obj_actor
             .next()
             .ok_or(ReadOpError::MissingValue("obj_actor"))?;
         let ctr = self
-            .ctr
+            .obj_ctr
             .next()
             .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
-        ObjId::try_load(actor, ctr)
+        ObjId::from_v1(actor, ctr)
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<ObjId, ReadOpError> {
         let actor = self
-            .actor
+            .obj_actor
             .nth(n)
             .ok_or(ReadOpError::MissingValue("obj_actor"))?;
         let ctr = self
-            .ctr
+            .obj_ctr
             .nth(n)
             .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
-        ObjId::try_load(actor, ctr)
+        ObjId::from_v1(actor, ctr)
     }
 
     fn suspend(&self) -> ObjIdIterState {
         ObjIdIterState {
-            actor: self.actor.suspend(),
-            ctr: self.ctr.suspend(),
+            obj_actor: self.obj_actor.suspend(),
+            obj_ctr: self.obj_ctr.suspend(),
         }
     }
 }
@@ -656,15 +704,15 @@ impl Iterator for ObjIdIter<'_> {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct MarkInfoIter<'a> {
-    name: ColumnDataIter<'a, StrCursor>,
-    expand: ColumnDataIter<'a, BooleanCursor>,
+    name: hexane::v1::Iter<'a, Option<String>>,
+    expand: hexane::v1::Iter<'a, bool>,
 }
 
 pub(crate) struct MarkInfoIterState {
-    name: ColumnDataIterState<StrCursor>,
-    expand: ColumnDataIterState<BooleanCursor>,
+    name: hexane::v1::IterState,
+    expand: hexane::v1::column::IterState,
 }
 
 impl MarkInfoIterState {
@@ -679,16 +727,15 @@ impl MarkInfoIterState {
 impl Shiftable for MarkInfoIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let mark_name = self.name.shift_next(range.clone());
-        let expand = self.expand.shift_next(range)?;
-        let expand = expand.as_deref().cloned().unwrap_or(false);
+        let expand = self.expand.shift_next(range).unwrap_or(false);
         Some((mark_name?, expand))
     }
 }
 
 impl<'a> MarkInfoIter<'a> {
     pub(crate) fn new(
-        name: ColumnDataIter<'a, StrCursor>,
-        expand: ColumnDataIter<'a, BooleanCursor>,
+        name: hexane::v1::Iter<'a, Option<String>>,
+        expand: hexane::v1::Iter<'a, bool>,
     ) -> Self {
         Self { name, expand }
     }
@@ -702,14 +749,8 @@ impl<'a> MarkInfoIter<'a> {
         self.expand.pos()
     }
 
-    pub(crate) fn try_next(&mut self) -> Result<(Option<Cow<'a, str>>, bool), ReadOpError> {
-        let expand = self
-            .expand
-            .next()
-            .ok_or(ReadOpError::MissingValue("expand"))?
-            .as_deref()
-            .cloned()
-            .unwrap_or(false);
+    pub(crate) fn try_next(&mut self) -> Result<(Option<&'a str>, bool), ReadOpError> {
+        let expand = self.expand.next().unwrap_or(false);
         let mark_name = self
             .name
             .next()
@@ -717,17 +758,8 @@ impl<'a> MarkInfoIter<'a> {
         Ok((mark_name, expand))
     }
 
-    pub(crate) fn try_nth(
-        &mut self,
-        n: usize,
-    ) -> Result<(Option<Cow<'a, str>>, bool), ReadOpError> {
-        let expand = self
-            .expand
-            .nth(n)
-            .ok_or(ReadOpError::MissingValue("expand"))?
-            .as_deref()
-            .cloned()
-            .unwrap_or(false);
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<(Option<&'a str>, bool), ReadOpError> {
+        let expand = self.expand.nth(n).unwrap_or(false);
         let mark_name = self
             .name
             .nth(n)
@@ -744,7 +776,7 @@ impl<'a> MarkInfoIter<'a> {
 }
 
 impl<'a> Iterator for MarkInfoIter<'a> {
-    type Item = (Option<Cow<'a, str>>, bool);
+    type Item = (Option<&'a str>, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().ok()
@@ -796,48 +828,44 @@ impl Shiftable for ActionValueIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ActionIter<'a> {
-    iter: ColumnDataIter<'a, ActionCursor>,
+    iter: hexane::v1::Iter<'a, Action>,
 }
 
-pub(crate) struct ActionIterState(ColumnDataIterState<ActionCursor>);
+pub(crate) struct ActionIterState {
+    state: hexane::v1::column::IterState,
+}
 
 impl ActionIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ActionIter<'a>, AutomergeError> {
-        Ok(ActionIter::new(self.0.try_resume(&op_set.cols.action)?))
+        Ok(ActionIter {
+            iter: self.state.try_resume(&op_set.cols.action)?,
+        })
     }
 }
 
 impl Shiftable for ActionIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.iter.shift_next(range).flatten().as_deref().copied()
+        self.iter.shift_next(range)
     }
 }
 
 impl<'a> ActionIter<'a> {
-    pub(crate) fn new(iter: ColumnDataIter<'a, ActionCursor>) -> Self {
+    pub(crate) fn new(iter: hexane::v1::Iter<'a, Action>) -> Self {
         Self { iter }
     }
 
     fn try_next(&mut self) -> Result<Action, ReadOpError> {
-        self.iter
-            .next()
-            .flatten()
-            .as_deref()
-            .copied()
-            .ok_or(ReadOpError::MissingValue("action"))
+        self.iter.next().ok_or(ReadOpError::MissingValue("action"))
     }
 
     fn try_nth(&mut self, n: usize) -> Result<Action, ReadOpError> {
-        self.iter
-            .nth(n)
-            .flatten()
-            .as_deref()
-            .copied()
-            .ok_or(ReadOpError::MissingValue("action"))
+        self.iter.nth(n).ok_or(ReadOpError::MissingValue("action"))
     }
 
     fn suspend(&self) -> ActionIterState {
-        ActionIterState(self.iter.suspend())
+        ActionIterState {
+            state: self.iter.suspend(),
+        }
     }
 }
 
@@ -855,12 +883,12 @@ impl Iterator for ActionIter<'_> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValueIter<'a> {
-    meta: ColumnDataIter<'a, MetaCursor>,
-    raw: RawReader<'a, SlabWeight>,
+    meta: hexane::v1::PrefixIter<'a, op_set2::meta::ValueMeta>,
+    raw: hexane::v1::RawColumnIter<'a>,
 }
 
 pub(crate) struct ValueIterState {
-    meta: ColumnDataIterState<MetaCursor>,
+    meta: hexane::v1::PrefixIterState<op_set2::meta::ValueMeta>,
     raw: usize,
 }
 
@@ -868,58 +896,59 @@ impl ValueIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ValueIter<'a>, AutomergeError> {
         Ok(ValueIter {
             meta: self.meta.try_resume(&op_set.cols.value_meta)?,
-            raw: op_set.cols.value.raw_reader(self.raw),
+            raw: op_set.cols.value.iter_at(self.raw),
         })
     }
 }
 
 impl Shiftable for ValueIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let meta = self.meta.shift_next(range).flatten()?;
+        let (prefix, meta) = self.meta.shift_next(range)?;
         let length = meta.length();
-
-        let value_advance = self.meta.calculate_acc().as_usize() - length;
+        let value_advance = prefix as usize - length;
         self.raw.seek_to(value_advance);
-        let raw = self.raw.read_next(length).ok()?;
-
-        ScalarValue::from_raw(*meta, raw).ok()
+        let raw = self.raw.take(length);
+        ScalarValue::from_raw(meta, raw).ok()
     }
 }
 
 impl<'a> ValueIter<'a> {
     pub(crate) fn new(
-        meta: ColumnDataIter<'a, MetaCursor>,
-        raw: RawReader<'a, SlabWeight>,
+        meta: hexane::v1::PrefixIter<'a, op_set2::meta::ValueMeta>,
+        raw: hexane::v1::RawColumnIter<'a>,
     ) -> Self {
         Self { meta, raw }
     }
 
     pub(crate) fn try_next(&mut self) -> Result<ScalarValue<'a>, ReadOpError> {
-        let meta = self.meta.next().flatten();
-        let meta = meta.ok_or(ReadOpError::MissingValue("value_meta"))?;
-        let raw = self.raw.read_next(meta.length())?;
-        Ok(ScalarValue::from_raw(*meta, raw)?)
+        let (_prefix, meta) = self
+            .meta
+            .next()
+            .ok_or(ReadOpError::MissingValue("value_meta"))?;
+        let raw = self.raw.take(meta.length());
+        Ok(ScalarValue::from_raw(meta, raw)?)
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<ScalarValue<'a>, ReadOpError> {
         if n == 0 {
             self.try_next()
         } else {
-            let meta = self.meta.nth(n).flatten();
-            let meta = meta.ok_or(ReadOpError::MissingValue("value_meta"))?;
+            let (prefix, meta) = self
+                .meta
+                .nth(n)
+                .ok_or(ReadOpError::MissingValue("value_meta"))?;
             let raw_len = meta.length();
-            let raw_pos = self.meta.calculate_acc().as_usize();
+            let raw_pos = prefix as usize;
             self.raw.seek_to(raw_pos - raw_len);
-            let raw = self.raw.read_next(raw_len)?;
-            let value = ScalarValue::from_raw(*meta, raw)?;
-            Ok(value)
+            let raw = self.raw.take(raw_len);
+            Ok(ScalarValue::from_raw(meta, raw)?)
         }
     }
 
     fn suspend(&self) -> ValueIterState {
         ValueIterState {
             meta: self.meta.suspend(),
-            raw: self.raw.suspend(),
+            raw: self.raw.pos(),
         }
     }
 }
@@ -938,17 +967,17 @@ impl<'a> Iterator for ValueIter<'a> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct SuccIterIter<'a> {
-    count: ColumnDataIter<'a, UIntCursor>,
-    actor: ColumnDataIter<'a, ActorCursor>,
-    ctr: ColumnDataIter<'a, DeltaCursor>,
-    incs: ColumnDataIter<'a, IntCursor>,
+    count: hexane::v1::PrefixIter<'a, u32>,
+    actor: hexane::v1::Iter<'a, ActorIdx>,
+    ctr: hexane::v1::DeltaIter<'a, u32>,
+    incs: hexane::v1::Iter<'a, Option<i64>>,
 }
 
 pub(crate) struct SuccIterIterState {
-    count: ColumnDataIterState<UIntCursor>,
-    actor: ColumnDataIterState<ActorCursor>,
-    ctr: ColumnDataIterState<DeltaCursor>,
-    incs: ColumnDataIterState<IntCursor>,
+    count: hexane::v1::PrefixIterState<u32>,
+    actor: hexane::v1::column::IterState,
+    ctr: hexane::v1::DeltaIterState,
+    incs: hexane::v1::column::IterState,
 }
 
 impl SuccIterIterState {
@@ -964,8 +993,9 @@ impl SuccIterIterState {
 
 impl<'a> SuccIterIter<'a> {
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let num_succ = *self.count.shift_next(range.clone()).flatten()? as usize;
-        let sub_pos = self.count.calculate_acc().as_usize();
+        let (prefix, num_succ) = self.count.shift_next(range)?;
+        let num_succ = num_succ as usize;
+        let sub_pos = prefix as usize;
 
         self.actor.advance_to(sub_pos - num_succ);
         self.ctr.advance_to(sub_pos - num_succ);
@@ -986,10 +1016,10 @@ impl<'a> SuccIterIter<'a> {
     }
 
     pub(crate) fn new(
-        count: ColumnDataIter<'a, UIntCursor>,
-        actor: ColumnDataIter<'a, ActorCursor>,
-        ctr: ColumnDataIter<'a, DeltaCursor>,
-        incs: ColumnDataIter<'a, IntCursor>,
+        count: hexane::v1::PrefixIter<'a, u32>,
+        actor: hexane::v1::Iter<'a, ActorIdx>,
+        ctr: hexane::v1::DeltaIter<'a, u32>,
+        incs: hexane::v1::Iter<'a, Option<i64>>,
     ) -> Self {
         Self {
             count,
@@ -999,19 +1029,24 @@ impl<'a> SuccIterIter<'a> {
         }
     }
 
+    #[inline(never)]
     pub(crate) fn try_next(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let num_succ = self.count.next().flatten();
-        let num_succ = *num_succ.ok_or(ReadOpError::MissingValue("succ_count"))?;
+        let (_prefix, num_succ) = self
+            .count
+            .next()
+            .ok_or(ReadOpError::MissingValue("succ_count"))?;
+        let num_succ = num_succ as usize;
+
         let result = SuccCursors {
-            len: num_succ as usize,
+            len: num_succ,
             succ_actor: self.actor.clone(),
             succ_counter: self.ctr.clone(),
             inc_values: self.incs.clone(),
         };
 
-        self.actor.advance_by(num_succ as usize);
-        self.ctr.advance_by(num_succ as usize);
-        self.incs.advance_by(num_succ as usize);
+        self.actor.advance_by(num_succ);
+        self.ctr.advance_by(num_succ);
+        self.incs.advance_by(num_succ);
 
         Ok(result)
     }
@@ -1020,26 +1055,30 @@ impl<'a> SuccIterIter<'a> {
         if n == 0 {
             self.try_next()
         } else {
-            let sub_pos1 = self.count.calculate_acc().as_u64();
-            let num_succ = self.count.nth(n).flatten();
-            let sub_pos2 = self.count.calculate_acc().as_u64();
-            let num_succ = *num_succ.ok_or(ReadOpError::MissingValue("succ_count"))?;
+            let (prefix, num_succ) = self
+                .count
+                .nth(n)
+                .ok_or(ReadOpError::MissingValue("succ_count"))?;
+            let num_succ = num_succ as usize;
+            let sub_pos = prefix as usize;
+            let items_before = sub_pos - num_succ;
+            let actor_pos = self.actor.pos();
+            let seek = items_before - actor_pos;
 
-            let seek = sub_pos2 - sub_pos1 - num_succ;
-            self.actor.advance_by(seek as usize);
-            self.ctr.advance_by(seek as usize);
-            self.incs.advance_by(seek as usize);
+            self.actor.advance_by(seek);
+            self.ctr.advance_by(seek);
+            self.incs.advance_by(seek);
 
             let result = SuccCursors {
-                len: num_succ as usize,
+                len: num_succ,
                 succ_actor: self.actor.clone(),
                 succ_counter: self.ctr.clone(),
                 inc_values: self.incs.clone(),
             };
 
-            self.actor.advance_by(num_succ as usize);
-            self.ctr.advance_by(num_succ as usize);
-            self.incs.advance_by(num_succ as usize);
+            self.actor.advance_by(num_succ);
+            self.ctr.advance_by(num_succ);
+            self.incs.advance_by(num_succ);
 
             Ok(result)
         }
@@ -1074,7 +1113,6 @@ mod tests {
     use crate::transaction::Transactable;
     use crate::types::{ActorId, OpId};
     use crate::{Automerge, ROOT};
-    use hexane::ColumnData;
 
     #[test]
     fn skip_op_ids() {
@@ -1200,11 +1238,17 @@ mod tests {
         let o31 = ObjId(OpId::new(3, 1));
         let o32 = ObjId(OpId::new(3, 2));
         let objs = [r, r, r, r, o11, o11, o12, o21, o21, o21, o22, o22, o32, o32];
-        let actor: ColumnData<ActorCursor> = objs.iter().map(|o| o.actor()).collect();
-        let ctr: ColumnData<UIntCursor> = objs.iter().map(|o| o.counter()).collect();
+        let v1_actor = hexane::v1::Column::<Option<ActorIdx>>::from_values(
+            objs.iter().map(|o| o.actor()).collect::<Vec<_>>(),
+        );
+        let v1_ctr = hexane::v1::Column::<Option<u32>>::from_values(
+            objs.iter()
+                .map(|o| o.counter().map(|c| c as u32))
+                .collect::<Vec<_>>(),
+        );
 
         // seek each element and read it
-        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
@@ -1242,7 +1286,7 @@ mod tests {
         assert_eq!(iter.next(), Some(o32));
 
         // seek each element and DONT read it
-        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
@@ -1266,7 +1310,7 @@ mod tests {
         assert_eq!(iter.pos(), 12);
 
         // seek only odd items
-        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
         let range = iter.seek_to_value(o11);
         assert_eq!(range, 4..6);
         assert_eq!(iter.pos(), 4);
@@ -1278,7 +1322,7 @@ mod tests {
         assert_eq!(iter.pos(), 12);
 
         // seek only even items
-        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
