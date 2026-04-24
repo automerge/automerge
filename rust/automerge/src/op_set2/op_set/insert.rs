@@ -30,7 +30,6 @@ impl<'a> InsertQuery<'a> {
         clock: Option<Clock>,
         marks: RichTextQueryState<'a>,
     ) -> Self {
-        //let marks = RichTextQueryState::default();
         let mut candidates = vec![];
         let last_visible_cursor = None;
         if target == 0 {
@@ -47,6 +46,18 @@ impl<'a> InsertQuery<'a> {
             last_visible_cursor,
         }
     }
+
+    //------------------//
+    // op.pos           //
+    // op.insert        //
+    // op.elemid        //
+    // op.id            //
+    // op.action        //
+    // op.mark_name     //
+    // op.expand        //
+    // op.width         //
+    // op.succ(maybe)   //
+    //------------------//
 
     fn identify_valid_insertion_spot(&mut self, op: &Op<'a>, cursor: ElemId) {
         // first insert we see after list_state.done()

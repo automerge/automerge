@@ -151,7 +151,7 @@ impl<'a> OpType<'a> {
     pub(crate) fn from_action_and_value(
         action: Action,
         value: &ScalarValue<'a>,
-        mark_name: &Option<Cow<'a, str>>,
+        mark_name: Option<&'a str>,
         expand: bool,
     ) -> OpType<'a> {
         match action {
@@ -170,7 +170,7 @@ impl<'a> OpType<'a> {
                 Some(name) => Self::MarkBegin(
                     expand,
                     MarkData {
-                        name: name.clone(),
+                        name: Cow::Borrowed(name),
                         value: value.clone(),
                     },
                 ),
@@ -733,6 +733,41 @@ impl Packable for ActorIdx {
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
         let (len, result) = u64::unpack(buff)?;
         Ok((len, Cow::Owned(ActorIdx::from(*result))))
+    }
+}
+
+impl hexane::v1::ColumnValue for ActorIdx {
+    type Encoding = hexane::v1::RleEncoding<ActorIdx>;
+}
+
+impl hexane::v1::RleValue for ActorIdx {
+    fn try_unpack(data: &[u8]) -> Result<(usize, ActorIdx), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        Ok((start - buf.len(), ActorIdx::from(v)))
+    }
+    fn pack(value: ActorIdx, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, u64::from(value)).unwrap();
+        true
+    }
+}
+
+impl hexane::v1::ColumnValue for Action {
+    type Encoding = hexane::v1::RleEncoding<Action>;
+}
+
+impl hexane::v1::RleValue for Action {
+    fn try_unpack(data: &[u8]) -> Result<(usize, Action), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        let action = Action::try_from(v)?;
+        Ok((start - buf.len(), action))
+    }
+    fn pack(value: Action, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, u64::from(value)).unwrap();
+        true
     }
 }
 

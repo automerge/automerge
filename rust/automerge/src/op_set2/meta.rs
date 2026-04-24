@@ -121,6 +121,30 @@ impl Packable for ValueMeta {
     }
 }
 
+impl hexane::v1::ColumnValue for ValueMeta {
+    type Encoding = hexane::v1::RleEncoding<ValueMeta>;
+}
+
+impl hexane::v1::RleValue for ValueMeta {
+    fn try_unpack(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        Ok((start - buf.len(), ValueMeta(v)))
+    }
+    fn pack(value: ValueMeta, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, value.0).unwrap();
+        true
+    }
+}
+
+impl hexane::v1::PrefixValue for ValueMeta {
+    type Prefix = u64;
+    fn to_prefix(val: ValueMeta) -> u64 {
+        val.length() as u64
+    }
+}
+
 pub(crate) type MetaCursor = RleCursor<64, ValueMeta>;
 
 #[cfg(test)]
