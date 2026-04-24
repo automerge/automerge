@@ -6,8 +6,6 @@ use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::patches::PatchLog;
 use crate::types::{ObjId, OpId, TextEncoding};
 
-use hexane::{ColumnDataIter, StrCursor};
-
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -44,7 +42,7 @@ impl MapRangeItem<'_> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MapDiffItem<'a> {
     pub(crate) diff: Diff,
-    pub(crate) key: Cow<'a, str>,
+    pub(crate) key: &'a str,
     pub(crate) value: ValueRef<'a>,
     pub(crate) inc: i64,
     pub(crate) conflict: bool,
@@ -57,7 +55,7 @@ impl<'a> MapDiffItem<'a> {
     pub(crate) fn export(self, op_set: &'a OpSet) -> MapRangeItem<'a> {
         let maybe_exid = ExIdPromise::new(op_set, self.id);
         MapRangeItem {
-            key: self.key,
+            key: Cow::Borrowed(self.key),
             value: self.value,
             conflict: self.conflict,
             pos: self.pos,
@@ -75,7 +73,7 @@ impl<'a> MapDiffItem<'a> {
         match self.diff {
             Diff::Add => log.put_map(
                 obj,
-                &self.key,
+                self.key,
                 self.value.hydrate(encoding),
                 self.id,
                 self.conflict,
@@ -83,12 +81,12 @@ impl<'a> MapDiffItem<'a> {
             ),
             Diff::Same => {
                 if self.inc != 0 {
-                    log.increment_map(obj, &self.key, self.inc, self.id);
+                    log.increment_map(obj, self.key, self.inc, self.id);
                 } else if self.conflict {
-                    log.flag_conflict_map(obj, &self.key);
+                    log.flag_conflict_map(obj, self.key);
                 }
             }
-            Diff::Del => log.delete_map(obj, &self.key),
+            Diff::Del => log.delete_map(obj, self.key),
         }
     }
 }
@@ -109,7 +107,7 @@ impl<'a> Iterator for MapRange<'a> {
 #[derive(Clone, Default, Debug)]
 struct MapIter<'a> {
     id: OpIdIter<'a>,
-    key_str: ColumnDataIter<'a, StrCursor>,
+    key_str: hexane::v1::Iter<'a, Option<String>>,
     action: ActionIter<'a>,
     value: ValueIter<'a>,
 }
@@ -135,7 +133,7 @@ impl Shiftable for MapIter<'_> {
 struct MapEntry<'a> {
     id: OpId,
     pos: usize,
-    key: Cow<'a, str>,
+    key: &'a str,
     action: Action,
     value: ScalarValue<'a>,
 }

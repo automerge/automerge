@@ -11,7 +11,7 @@ use super::super::types::{ActionCursor, ActorCursor, ActorIdx};
 use super::{length_prefixed_bytes, shift_range};
 use super::{ActorMapper, ChangeOpsColumns};
 
-use hexane::{BooleanCursor, DeltaCursor, Encoder, StrCursor, UIntCursor};
+use hexane::{BooleanCursor, Encoder, StrCursor, UIntCursor};
 
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::error::AutomergeError;
@@ -128,7 +128,7 @@ pub(crate) struct ChangeBuilder<'a> {
     encoder: OpEncoderStrategy<'a>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 enum OpEncoderStrategy<'a> {
     Ops(VecEncoder<'a>),
     Enc(Box<ProgressiveEncoder<'a>>),
@@ -335,7 +335,7 @@ impl<'a> VecEncoder<'a> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ProgressiveEncoder<'a> {
     pub(crate) len: usize,
     pub(crate) start_op: Option<u64>,
@@ -345,7 +345,7 @@ pub(crate) struct ProgressiveEncoder<'a> {
     obj_actor: Encoder<'a, ActorCursor>,
     obj_ctr: Encoder<'a, UIntCursor>,
     key_actor: Encoder<'a, ActorCursor>,
-    key_ctr: Encoder<'a, DeltaCursor>,
+    key_ctr: hexane::v1::DeltaEncoder<'a, Option<i64>>,
     key_str: Encoder<'a, StrCursor>,
     insert: Encoder<'a, BooleanCursor>,
     action: Encoder<'a, ActionCursor>,
@@ -353,7 +353,7 @@ pub(crate) struct ProgressiveEncoder<'a> {
     value: Vec<u8>,
     pred_count: Encoder<'a, UIntCursor>,
     pred_actor: Encoder<'a, ActorCursor>,
-    pred_ctr: Encoder<'a, DeltaCursor>,
+    pred_ctr: hexane::v1::DeltaEncoder<'a, i64>,
     expand: Encoder<'a, BooleanCursor>,
     mark_name: Encoder<'a, StrCursor>,
 }
@@ -469,7 +469,7 @@ impl<'a> ProgressiveEncoder<'a> {
         let obj_actor = self.obj_actor.save_to_and_remap_unless_empty(data, &remap);
         let obj_ctr = self.obj_ctr.save_to_unless_empty(data);
         let key_actor = self.key_actor.save_to_and_remap_unless_empty(data, &remap);
-        let key_ctr = self.key_ctr.save_to_unless_empty(data);
+        let key_ctr = self.key_ctr.save_to_unless(data, None);
         let key_str = self.key_str.save_to_unless_empty(data);
         let insert = self.insert.save_to(data);
         let action = self.action.save_to_unless_empty(data);
@@ -481,7 +481,7 @@ impl<'a> ProgressiveEncoder<'a> {
         };
         let pred_count = self.pred_count.save_to_unless_empty(data);
         let pred_actor = self.pred_actor.save_to_and_remap_unless_empty(data, &remap);
-        let pred_ctr = self.pred_ctr.save_to_unless_empty(data);
+        let pred_ctr = self.pred_ctr.save_to(data);
         let expand = self.expand.save_to_unless_empty(data);
         let mark_name = self.mark_name.save_to_unless_empty(data);
 

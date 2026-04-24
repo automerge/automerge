@@ -158,7 +158,7 @@ mod tests {
         let (doc, hash, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
         assert!(hash.is_some());
         let change = doc.get_change_by_hash(&hash.unwrap()).unwrap();
-        assert_eq!(change.message().map(|s| s.as_str()), Some("test commit"));
+        assert_eq!(change.message(), Some("test commit"));
     }
 
     #[test]

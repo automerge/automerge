@@ -1,7 +1,6 @@
 use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction, SuccUndo};
-use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
+use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
 use super::{ValueMeta, ValueRef};
-use hexane::{ColumnDataIter, DeltaCursor, IntCursor};
 
 use crate::clock::Clock;
 use crate::error::AutomergeError;
@@ -542,8 +541,8 @@ impl OpLike for &TxOp {
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
-    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
-        o.as_builder().mark_name.as_deref().map(Cow::Borrowed)
+    fn mark_name(o: &Self) -> Option<&str> {
+        o.as_builder().mark_name.as_deref()
     }
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
@@ -621,8 +620,8 @@ impl OpLike for TxOp {
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
-    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
-        o.as_builder().mark_name.as_deref().map(Cow::Borrowed)
+    fn mark_name(o: &Self) -> Option<&str> {
+        o.as_builder().mark_name.as_deref()
     }
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
@@ -707,8 +706,8 @@ impl OpLike for ChangeOp {
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
-    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
-        o.as_builder().mark_name.as_deref().map(Cow::Borrowed)
+    fn mark_name(o: &Self) -> Option<&str> {
+        o.as_builder().mark_name.as_deref()
     }
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
@@ -814,8 +813,8 @@ impl<'a> OpLike for Op<'a> {
         o.expand
     }
 
-    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
-        o.mark_name.clone()
+    fn mark_name(o: &Self) -> Option<&str> {
+        o.mark_name
     }
 }
 
@@ -830,16 +829,16 @@ pub(crate) struct Op<'a> {
     pub(crate) insert: bool,
     pub(crate) value: ScalarValue<'a>,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<Cow<'a, str>>,
+    pub(crate) mark_name: Option<&'a str>,
     pub(super) succ_cursors: SuccCursors<'a>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
-    pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
-    pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
-    pub(super) inc_values: ColumnDataIter<'a, IntCursor>,
+    pub(super) succ_actor: hexane::v1::Iter<'a, super::types::ActorIdx>,
+    pub(super) succ_counter: hexane::v1::DeltaIter<'a, u32>,
+    pub(super) inc_values: hexane::v1::Iter<'a, Option<i64>>,
 }
 
 impl<'a> SuccCursors<'a> {
@@ -870,10 +869,10 @@ impl Iterator for SuccCursors<'_> {
         if self.len == 0 {
             None
         } else {
-            let counter = self.succ_counter.next()??;
-            let actor = self.succ_actor.next()??;
+            let counter = self.succ_counter.next()?;
+            let actor = self.succ_actor.next()?;
             self.len -= 1;
-            Some(OpId::new(*counter as u64, u64::from(*actor) as usize))
+            Some(OpId::new(counter as u64, u64::from(actor) as usize))
         }
     }
 }
@@ -891,11 +890,11 @@ impl Iterator for SuccIncCursors<'_> {
         if self.0.len == 0 {
             None
         } else {
-            let counter = self.0.succ_counter.next()??;
-            let actor = self.0.succ_actor.next()??;
+            let counter = self.0.succ_counter.next()?;
+            let actor = self.0.succ_actor.next()?;
             self.0.len -= 1;
-            let inc = self.0.inc_values.next()?.as_deref().copied();
-            let id = OpId::new(*counter as u64, u64::from(*actor) as usize);
+            let inc = self.0.inc_values.next()?;
+            let id = OpId::new(counter as u64, u64::from(actor) as usize);
             Some((id, inc))
         }
     }
@@ -909,7 +908,7 @@ impl Iterator for IncCursors<'_> {
             None
         } else {
             self.0.len -= 1;
-            let inc = self.0.inc_values.next()?.as_deref().copied();
+            let inc = self.0.inc_values.next()?;
             Some(inc)
         }
     }
@@ -1004,7 +1003,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn op_type(&self) -> OpType<'a> {
-        OpType::from_action_and_value(self.action, &self.value, &self.mark_name, self.expand)
+        OpType::from_action_and_value(self.action, &self.value, self.mark_name, self.expand)
     }
 
     pub(crate) fn succ(&self) -> SuccCursors<'a> {
@@ -1131,7 +1130,7 @@ impl<'a> Op<'a> {
             key: self.key,
             insert: self.insert,
             expand: self.expand,
-            mark_name: self.mark_name,
+            mark_name: self.mark_name.map(Cow::Borrowed),
             pred,
         }
     }
@@ -1197,65 +1196,61 @@ impl Eq for Op<'_> {}
 // TODO - AS ChangeOp and OpLike fill almost the exact same function
 
 pub(crate) trait AsChangeOp {
-    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>>;
-    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>>;
-    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>>;
+    fn obj_actor(op: &Self) -> Option<ActorIdx>;
+    fn obj_ctr(op: &Self) -> Option<u64>;
+    fn key_actor(op: &Self) -> Option<ActorIdx>;
     fn key_ctr(op: &Self) -> Option<Cow<'_, i64>>;
-    fn key_str(op: &Self) -> Option<Cow<'_, str>>;
-    fn insert(op: &Self) -> Option<Cow<'_, bool>>;
-    fn action(op: &Self) -> Option<Cow<'_, Action>>;
+    fn key_str(op: &Self) -> Option<&str>;
+    fn insert(op: &Self) -> bool;
+    fn action(op: &Self) -> Action;
     fn value(op: &Self) -> Option<Cow<'_, [u8]>>;
-    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>>;
-    fn pred_count(op: &Self) -> Option<Cow<'_, u64>>;
-    fn expand(op: &Self) -> Option<Cow<'_, bool>>;
-    fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
+    fn value_meta(op: &Self) -> ValueMeta;
+    fn pred_count(op: &Self) -> u32;
+    fn expand(op: &Self) -> bool;
+    fn mark_name(op: &Self) -> Option<&str>;
     fn op_id_ctr(op: &Self) -> u64;
     fn pred(op: &Self) -> &[OpId];
 
-    fn id_actor(id: &OpId) -> Option<Cow<'_, ActorIdx>> {
-        Some(Cow::Owned(id.actoridx()))
-    }
-
-    fn id_ctr(id: &OpId) -> Option<Cow<'_, i64>> {
-        Some(Cow::Owned(id.icounter()))
+    fn id_actor(id: &OpId) -> ActorIdx {
+        id.actoridx()
     }
 }
 
 impl<T: AsChangeOp> AsChangeOp for Option<T> {
-    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+    fn obj_actor(op: &Self) -> Option<ActorIdx> {
         T::obj_actor(op.as_ref()?)
     }
-    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
+    fn obj_ctr(op: &Self) -> Option<u64> {
         T::obj_ctr(op.as_ref()?)
     }
-    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+    fn key_actor(op: &Self) -> Option<ActorIdx> {
         T::key_actor(op.as_ref()?)
     }
     fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
         T::key_ctr(op.as_ref()?)
     }
-    fn key_str(op: &Self) -> Option<Cow<'_, str>> {
+    fn key_str(op: &Self) -> Option<&str> {
         T::key_str(op.as_ref()?)
     }
-    fn insert(op: &Self) -> Option<Cow<'_, bool>> {
-        T::insert(op.as_ref()?)
+    fn insert(op: &Self) -> bool {
+        op.as_ref().map(T::insert).unwrap_or(false)
     }
-    fn action(op: &Self) -> Option<Cow<'_, Action>> {
-        T::action(op.as_ref()?)
+    fn action(op: &Self) -> Action {
+        op.as_ref().map(T::action).unwrap_or(Action::Set)
     }
     fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
         T::value(op.as_ref()?)
     }
-    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
-        T::value_meta(op.as_ref()?)
+    fn value_meta(op: &Self) -> ValueMeta {
+        op.as_ref().map(T::value_meta).unwrap_or_default()
     }
-    fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
-        T::pred_count(op.as_ref()?)
+    fn pred_count(op: &Self) -> u32 {
+        op.as_ref().map(T::pred_count).unwrap_or(0)
     }
-    fn expand(op: &Self) -> Option<Cow<'_, bool>> {
-        T::expand(op.as_ref()?)
+    fn expand(op: &Self) -> bool {
+        op.as_ref().map(T::expand).unwrap_or(false)
     }
-    fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
+    fn mark_name(op: &Self) -> Option<&str> {
         T::mark_name(op.as_ref()?)
     }
     fn op_id_ctr(op: &Self) -> u64 {
@@ -1267,43 +1262,46 @@ impl<T: AsChangeOp> AsChangeOp for Option<T> {
 }
 
 impl<B: AsBuilder> AsChangeOp for B {
-    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
-        op.as_builder().obj.actor().map(Cow::Owned)
+    fn obj_actor(op: &Self) -> Option<ActorIdx> {
+        op.as_builder().obj.actor()
     }
 
-    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
-        op.as_builder().obj.counter().map(Cow::Owned)
+    fn obj_ctr(op: &Self) -> Option<u64> {
+        op.as_builder().obj.counter()
     }
 
-    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
-        op.as_builder().key.actor().map(Cow::Owned)
+    fn key_actor(op: &Self) -> Option<ActorIdx> {
+        op.as_builder().key.actor()
     }
     fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
         op.as_builder().key.icounter().map(Cow::Owned)
     }
-    fn key_str(op: &Self) -> Option<Cow<'_, str>> {
-        op.as_builder().key.key_str()
+    fn key_str(op: &Self) -> Option<&str> {
+        match &op.as_builder().key {
+            crate::op_set2::types::KeyRef::Map(s) => Some(s.as_ref()),
+            crate::op_set2::types::KeyRef::Seq(_) => None,
+        }
     }
-    fn insert(op: &Self) -> Option<Cow<'_, bool>> {
-        Some(Cow::Owned(op.as_builder().insert))
+    fn insert(op: &Self) -> bool {
+        op.as_builder().insert
     }
-    fn action(op: &Self) -> Option<Cow<'_, Action>> {
-        Some(Cow::Owned(op.as_builder().action))
+    fn action(op: &Self) -> Action {
+        op.as_builder().action
     }
     fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
         op.as_builder().value.as_raw()
     }
-    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
-        Some(Cow::Owned(ValueMeta::from(&op.as_builder().value)))
+    fn value_meta(op: &Self) -> ValueMeta {
+        ValueMeta::from(&op.as_builder().value)
     }
-    fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
-        Some(Cow::Owned(op.as_builder().pred.len() as u64))
+    fn pred_count(op: &Self) -> u32 {
+        op.as_builder().pred.len() as u32
     }
-    fn expand(op: &Self) -> Option<Cow<'_, bool>> {
-        Some(Cow::Owned(op.as_builder().expand))
+    fn expand(op: &Self) -> bool {
+        op.as_builder().expand
     }
-    fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
-        op.as_builder().mark_name.clone()
+    fn mark_name(op: &Self) -> Option<&str> {
+        op.as_builder().mark_name.as_deref()
     }
     fn op_id_ctr(op: &Self) -> u64 {
         op.as_builder().id.counter()
@@ -1342,7 +1340,7 @@ pub(crate) trait OpLike: Debug {
     fn expand(op: &Self) -> bool;
     fn succ(&self) -> Self::SuccIter<'_>;
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
-    fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
+    fn mark_name(op: &Self) -> Option<&str>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64;
     fn visible(op: &Self) -> bool;
