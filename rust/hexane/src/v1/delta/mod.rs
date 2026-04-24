@@ -1,15 +1,11 @@
 pub mod indexed;
 
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Range;
-use std::fmt::Debug;
 
-
-use super::btree::DeltaAggregate;
-use super::column::{Column, WeightFn};
-use super::encoding::{ColumnEncoding, RunDecoder};
-use super::prefix::PrefixValue;
-use super::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
+use super::column::Column;
+use super::TypedLoadOpts;
 use crate::PackError;
 pub use indexed::IndexedDeltaWeightFn;
 
@@ -17,23 +13,9 @@ pub use indexed::IndexedDeltaWeightFn;
 
 /// Trait for value types that can be stored in a delta-encoded column.
 ///
-/// All types store deltas internally using `Self::Inner` — `i64` for
-/// non-nullable types, `Option<i64>` for nullable types.
-///
-/// | External type   | `Inner`       |
-/// |-----------------|---------------|
-/// | `u32`           | `i64`         |
-/// | `u64`           | `i64`         |
-/// | `i32`           | `i64`         |
-/// | `i64`           | `i64`         |
-/// | `Option<u32>`   | `Option<i64>` |
-/// | `Option<u64>`   | `Option<i64>` |
-/// | `Option<i32>`   | `Option<i64>` |
-/// | `Option<i64>`   | `Option<i64>` |
+/// All `DeltaColumn`s store deltas internally as `Option<i64>` regardless
+/// of `T`; this trait maps `T` to and from that inner representation.
 pub trait DeltaValue: Copy + PartialEq + Default + Debug {
-    /// The inner column value type for storing deltas.
-    type Inner: PrefixValue + Copy + Debug;
-
     /// Whether this type supports null values.
     const NULLABLE: bool;
 
@@ -42,17 +24,6 @@ pub trait DeltaValue: Copy + PartialEq + Default + Debug {
 
     /// Convert from an `i64` realized value back to this type.
     fn from_i64(v: i64) -> Self;
-
-    fn run_value(run: &Run<<Self::Inner as ColumnValueRef>::Get<'_>>) -> i64 {
-        Self::get_inner(run.value).unwrap_or(0) * run.count as i64
-    }
-
-    fn maybe_running(raw: <Self::Inner as ColumnValueRef>::Get<'_>, running: i64) -> Self {
-        match Self::get_inner(raw) {
-            None => Self::null_value(),
-            Some(_) => Self::from_i64(running),
-        }
-    }
 
     /// Checked conversion from `i64`.  Returns `Err` if the value is
     /// out of range for `Self` (e.g. negative for unsigned types, or
@@ -63,23 +34,11 @@ pub trait DeltaValue: Copy + PartialEq + Default + Debug {
 
     /// Create a null value. Panics for non-nullable types.
     fn null_value() -> Self;
-
-    /// Create an inner delta value from an `Option<i64>` delta.
-    /// For non-nullable types, `None` input panics.
-    fn make_inner(delta: Option<i64>) -> Self::Inner;
-
-    /// Extract `Option<i64>` from an inner column get result.
-    /// Returns `None` for null deltas, `Some(d)` for non-null.
-    fn get_inner(inner: <Self::Inner as ColumnValueRef>::Get<'_>) -> Option<i64>;
-
-    /// Convert the prefix sum type to `i64`.
-    fn prefix_to_i64(p: <Self::Inner as PrefixValue>::Prefix) -> i64;
 }
 
 // ── Non-nullable impls ──────────────────────────────────────────────────────
 
 impl DeltaValue for u32 {
-    type Inner = i64;
     const NULLABLE: bool = false;
     fn to_i64(self) -> Option<i64> {
         Some(self as i64)
@@ -93,19 +52,9 @@ impl DeltaValue for u32 {
     fn null_value() -> Self {
         panic!("non-nullable u32")
     }
-    fn make_inner(delta: Option<i64>) -> i64 {
-        delta.expect("non-nullable u32")
-    }
-    fn get_inner(inner: i64) -> Option<i64> {
-        Some(inner)
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for u64 {
-    type Inner = i64;
     const NULLABLE: bool = false;
     fn to_i64(self) -> Option<i64> {
         Some(self as i64)
@@ -116,19 +65,9 @@ impl DeltaValue for u64 {
     fn null_value() -> Self {
         panic!("non-nullable u64")
     }
-    fn make_inner(delta: Option<i64>) -> i64 {
-        delta.expect("non-nullable u64")
-    }
-    fn get_inner(inner: i64) -> Option<i64> {
-        Some(inner)
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for i32 {
-    type Inner = i64;
     const NULLABLE: bool = false;
     fn to_i64(self) -> Option<i64> {
         Some(self as i64)
@@ -139,19 +78,9 @@ impl DeltaValue for i32 {
     fn null_value() -> Self {
         panic!("non-nullable i32")
     }
-    fn make_inner(delta: Option<i64>) -> i64 {
-        delta.expect("non-nullable i32")
-    }
-    fn get_inner(inner: i64) -> Option<i64> {
-        Some(inner)
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for i64 {
-    type Inner = i64;
     const NULLABLE: bool = false;
     fn to_i64(self) -> Option<i64> {
         Some(self)
@@ -162,19 +91,9 @@ impl DeltaValue for i64 {
     fn null_value() -> Self {
         panic!("non-nullable i64")
     }
-    fn make_inner(delta: Option<i64>) -> i64 {
-        delta.expect("non-nullable i64")
-    }
-    fn get_inner(inner: i64) -> Option<i64> {
-        Some(inner)
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for usize {
-    type Inner = i64;
     const NULLABLE: bool = false;
     fn to_i64(self) -> Option<i64> {
         Some(self as i64)
@@ -185,21 +104,11 @@ impl DeltaValue for usize {
     fn null_value() -> Self {
         panic!("non-nullable usize")
     }
-    fn make_inner(delta: Option<i64>) -> i64 {
-        delta.expect("non-nullable usize")
-    }
-    fn get_inner(inner: i64) -> Option<i64> {
-        Some(inner)
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 // ── Nullable impls ──────────────────────────────────────────────────────────
 
 impl DeltaValue for Option<u32> {
-    type Inner = Option<i64>;
     const NULLABLE: bool = true;
     fn to_i64(self) -> Option<i64> {
         self.map(|v| v as i64)
@@ -215,19 +124,9 @@ impl DeltaValue for Option<u32> {
     fn null_value() -> Self {
         None
     }
-    fn make_inner(delta: Option<i64>) -> Option<i64> {
-        delta
-    }
-    fn get_inner(inner: Option<i64>) -> Option<i64> {
-        inner
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for Option<u64> {
-    type Inner = Option<i64>;
     const NULLABLE: bool = true;
     fn to_i64(self) -> Option<i64> {
         self.map(|v| v as i64)
@@ -238,19 +137,9 @@ impl DeltaValue for Option<u64> {
     fn null_value() -> Self {
         None
     }
-    fn make_inner(delta: Option<i64>) -> Option<i64> {
-        delta
-    }
-    fn get_inner(inner: Option<i64>) -> Option<i64> {
-        inner
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for Option<i32> {
-    type Inner = Option<i64>;
     const NULLABLE: bool = true;
     fn to_i64(self) -> Option<i64> {
         self.map(|v| v as i64)
@@ -261,19 +150,9 @@ impl DeltaValue for Option<i32> {
     fn null_value() -> Self {
         None
     }
-    fn make_inner(delta: Option<i64>) -> Option<i64> {
-        delta
-    }
-    fn get_inner(inner: Option<i64>) -> Option<i64> {
-        inner
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for Option<i64> {
-    type Inner = Option<i64>;
     const NULLABLE: bool = true;
     fn to_i64(self) -> Option<i64> {
         self
@@ -284,19 +163,9 @@ impl DeltaValue for Option<i64> {
     fn null_value() -> Self {
         None
     }
-    fn make_inner(delta: Option<i64>) -> Option<i64> {
-        delta
-    }
-    fn get_inner(inner: Option<i64>) -> Option<i64> {
-        inner
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
-    }
 }
 
 impl DeltaValue for Option<usize> {
-    type Inner = Option<i64>;
     const NULLABLE: bool = true;
     fn to_i64(self) -> Option<i64> {
         self.map(|v| v as i64)
@@ -306,15 +175,6 @@ impl DeltaValue for Option<usize> {
     }
     fn null_value() -> Self {
         None
-    }
-    fn make_inner(delta: Option<i64>) -> Option<i64> {
-        delta
-    }
-    fn get_inner(inner: Option<i64>) -> Option<i64> {
-        inner
-    }
-    fn prefix_to_i64(p: i128) -> i64 {
-        p as i64
     }
 }
 
@@ -339,11 +199,8 @@ impl DeltaValue for Option<usize> {
 /// enc.append(30);
 /// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
 /// ```
-pub struct DeltaEncoder<'a, T: DeltaValue>
-where
-    T::Inner: super::RleValue,
-{
-    inner: super::encoder::RleEncoder<'a, T::Inner>,
+pub struct DeltaEncoder<'a, T: DeltaValue> {
+    inner: super::encoder::RleEncoder<'a, Option<i64>>,
     abs: i64,
     /// Tracks whether every appended value has been equal so far.
     ///
@@ -359,19 +216,13 @@ where
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaEncoder<'_, T>
-where
-    T::Inner: super::RleValue,
-{
+impl<T: DeltaValue> Default for DeltaEncoder<'_, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaEncoder<'_, T>
-where
-    T::Inner: super::RleValue,
-{
+impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaEncoder")
             .field("len", &self.inner.len())
@@ -380,10 +231,7 @@ where
     }
 }
 
-impl<'a, T: DeltaValue> DeltaEncoder<'a, T>
-where
-    T::Inner: super::RleValue,
-{
+impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
     /// Create a new empty delta encoder.
     pub fn new() -> Self {
         Self {
@@ -432,14 +280,13 @@ where
             Some(v) => {
                 let first_delta = v - self.abs;
                 self.abs = v;
-                self.inner
-                    .append_n_owned(T::make_inner(Some(first_delta)), 1);
+                self.inner.append_n_owned(Some(first_delta), 1);
                 if n > 1 {
-                    self.inner.append_n_owned(T::make_inner(Some(0)), n - 1);
+                    self.inner.append_n_owned(Some(0), n - 1);
                 }
             }
             None => {
-                self.inner.append_n_owned(T::make_inner(None), n);
+                self.inner.append_n_owned(None, n);
             }
         }
     }
@@ -516,38 +363,13 @@ where
     }
 }
 
-// ── (old values_to_deltas helpers removed — see pub(crate) copies below) ──
-
-#[doc(hidden)]
-#[allow(dead_code)]
-fn _unused_values_to_deltas<T: DeltaValue>(values: &[T]) -> Vec<T::Inner> {
-    let _ = values;
-    let mut deltas: Vec<T::Inner> = Vec::new();
-    let mut prev = 0i64;
-    for v in values {
-        match v.to_i64() {
-            None => deltas.push(T::make_inner(None)),
-            Some(r) => {
-                deltas.push(T::make_inner(Some(r - prev)));
-                prev = r;
-            }
-        }
-    }
-    deltas
-}
-
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn assert_col<T: DeltaValue + PartialEq + Debug>(col: &DeltaColumn<T>, expected: &[T])
-    where
-        T::Inner: super::super::RleValue,
-        super::super::prefix::PrefixSlabWeight<<T::Inner as super::super::PrefixValue>::Prefix>:
-            super::super::btree::DeltaAggregate,
-    {
+    fn assert_col<T: DeltaValue + PartialEq + Debug>(col: &DeltaColumn<T>, expected: &[T]) {
         assert_eq!(col.len(), expected.len(), "length mismatch");
         for (i, exp) in expected.iter().enumerate() {
             assert_eq!(col.get(i).as_ref(), Some(exp), "mismatch at index {i}");
@@ -1286,35 +1108,21 @@ mod tests {
         }
     }
 }
-// ── DeltaColumn (B-tree backed, generic over weight fn) ────────────────────
-//
-// Default WF = IndexedDeltaWeightFn<T> — `SlabAgg` aggregate (len + total +
-// min/max offsets) that unlocks `find_by_value` / `find_by_range` via
-// min/max pruning.  For a smaller per-slab aggregate without value
-// queries, use `PrefixWeightFn<T::Inner>` (`len + prefix`).
-
 // ── DeltaColumn ────────────────────────────────────────────────────────────
+//
+// Deltas are always stored as `Column<Option<i64>, IndexedDeltaWeightFn>`
+// regardless of `T`.  `T` only affects how realized values are materialized
+// on read (and validated on load).  The `SlabAgg` aggregate (len + total +
+// min/max offsets) unlocks `find_by_value` / `find_by_range` via min/max
+// pruning.
 
-/// A delta-encoded column.  Generic over the per-slab aggregate: any
-/// [`WeightFn`] whose weight satisfies `DeltaAggregate` plugs in.
-pub struct DeltaColumn<T, WF = IndexedDeltaWeightFn<T>>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
-    pub(crate) col: Column<T::Inner, WF>,
+/// A delta-encoded column.
+pub struct DeltaColumn<T: DeltaValue> {
+    pub(crate) col: Column<Option<i64>, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
 }
 
-impl<T, WF> Clone for DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<T: DeltaValue> Clone for DeltaColumn<T> {
     fn clone(&self) -> Self {
         Self {
             col: self.col.clone(),
@@ -1323,13 +1131,7 @@ where
     }
 }
 
-impl<T, WF> Debug for DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<T: DeltaValue> Debug for DeltaColumn<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaColumn")
             .field("len", &self.col.len())
@@ -1338,25 +1140,13 @@ where
     }
 }
 
-impl<T, WF> Default for DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<T: DeltaValue> Default for DeltaColumn<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, WF> DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<T: DeltaValue> DeltaColumn<T> {
     pub fn new() -> Self {
         Self {
             col: Column::new(),
@@ -1372,33 +1162,36 @@ where
     }
 
     pub fn from_values(values: Vec<T>) -> Self {
-        if values.is_empty() {
-            return Self::new();
-        }
-        let deltas = values_to_deltas::<T>(&values);
+        let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
+        let mut col = Column::new();
+        col.splice(0, 0, deltas_from(&inner, 0));
         Self {
-            col: Column::from_values(deltas),
+            col,
             _phantom: PhantomData,
         }
     }
 
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T::Inner>) -> Result<Self, PackError> {
+    pub fn load_with(data: &[u8], opts: TypedLoadOpts<Option<i64>>) -> Result<Self, PackError> {
         if data.is_empty() {
-            // Delegate fill/length to Column::load_with for empty data.
             let col = Column::load_with(data, opts)?;
             return Ok(Self {
                 col,
                 _phantom: PhantomData,
             });
         }
-        let validate = |running: i64, count: usize, val: <T::Inner as ColumnValueRef>::Get<'_>| {
+        let validate = |running: i64, count: usize, val: Option<i64>| {
             if let Some(f) = opts.validate {
                 if let Some(msg) = f(val) {
                     return Err(msg);
                 }
             }
-            match T::get_inner(val) {
-                None => Ok(running),
+            match val {
+                None => {
+                    if !T::NULLABLE {
+                        return Err("unexpected null in non-nullable delta column".into());
+                    }
+                    Ok(running)
+                }
                 Some(d) => {
                     let new_running = running + d * count as i64;
                     T::try_from_i64(new_running)?;
@@ -1442,11 +1235,7 @@ where
         self.col.save_to(out)
     }
 
-    pub fn save_to_unless(
-        &self,
-        out: &mut Vec<u8>,
-        value: <T::Inner as ColumnValueRef>::Get<'_>,
-    ) -> std::ops::Range<usize> {
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: Option<i64>) -> std::ops::Range<usize> {
         self.col.save_to_unless(out, value)
     }
 
@@ -1460,81 +1249,30 @@ where
     }
 
     pub fn iter(&self) -> DeltaIter<'_, T> {
-        let inner = self.col.iter();
         DeltaIter {
-            inner,
+            inner: self.col.iter(),
             running: 0,
-            delta_col: Some(&self.col as &dyn DeltaPrefixLookup<T>),
+            col: Some(&self.col),
             _phantom: PhantomData,
         }
     }
 
     pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T> {
-        let running = self.col.delta_prefix_through::<T>(range.start);
-        let inner = self.col.iter_range(range.clone());
-        let delta_col = Some(&self.col as &dyn DeltaPrefixLookup<T>);
-        DeltaIter {
-            inner,
-            running,
-            delta_col,
-            _phantom: PhantomData,
-        }
+        let start = range.start.min(self.col.len());
+        let end = range.end.min(self.col.len());
+        let mut iter = self.iter();
+        iter.set_max(end);
+        iter.advance_by(start);
+        iter
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
-        let len = self.col.len();
-        assert!(index <= len, "insert index out of bounds");
-
-        match value.to_i64() {
-            None => {
-                self.col.insert(index, T::make_inner(None));
-            }
-            Some(v) => {
-                let prev = self.prev_realized(index);
-                let new_delta = v - prev;
-
-                if index >= len {
-                    self.col.insert(index, T::make_inner(Some(new_delta)));
-                    return;
-                }
-
-                let current = T::get_inner(self.col.get(index).unwrap());
-                match current {
-                    Some(d) => {
-                        self.col.splice(
-                            index,
-                            1,
-                            [
-                                T::make_inner(Some(new_delta)),
-                                T::make_inner(Some(d - new_delta)),
-                            ],
-                        );
-                    }
-                    None => {
-                        self.insert_before_null_run(index, new_delta);
-                    }
-                }
-            }
-        }
+        self.splice(index, 0, [value]);
     }
 
     pub fn remove(&mut self, index: usize) {
-        let len = self.col.len();
-        if index >= len {
-            return;
-        }
-        let delta = T::get_inner(self.col.get(index).unwrap());
-        match delta {
-            None => {
-                self.col.remove(index);
-            }
-            Some(d) => {
-                if index + 1 >= len {
-                    self.col.remove(index);
-                    return;
-                }
-                self.remove_and_absorb(index, d);
-            }
+        if index < self.col.total_len {
+            self.splice(index, 1, std::iter::empty());
         }
     }
 
@@ -1588,137 +1326,81 @@ where
         let len = self.col.len();
         assert!(index + del <= len, "splice range out of bounds");
 
-        let values: Vec<T> = values.into_iter().collect();
+        let mut values: Vec<_> = values.into_iter().map(|t| t.to_i64()).collect();
         if del == 0 && values.is_empty() {
             return 0..0;
         }
 
-        let prev = self.prev_realized(index);
-        let new_deltas = values_to_deltas_from::<T>(&values, prev);
-
-        let new_prefix_end = {
-            let mut p = prev;
-            for v in &values {
-                if let Some(r) = v.to_i64() {
-                    p = r;
-                }
+        match self.find_boundaries(index, del) {
+            (prev, _, None) => {
+                // End of column — nothing after the splice to preserve.
+                let all = deltas_from(&values, prev);
+                self.col.splice_inner(index, del, all)
             }
-            p
-        };
-
-        let splice_end = index + del;
-        if splice_end < len {
-            let old_prefix_at_end = self.prefix_sum(splice_end);
-            let adjustment = old_prefix_at_end - new_prefix_end;
-
-            let (extra_del, mut boundary_deltas) = self.find_nonnull_from(splice_end, adjustment);
-
-            let mut all_deltas: Vec<T::Inner> = new_deltas;
-            all_deltas.append(&mut boundary_deltas);
-            self.col.splice_inner(index, del + extra_del, all_deltas)
-        } else {
-            self.col.splice_inner(index, del, new_deltas)
+            (prev, skip, Some(next_val)) if skip < 10 => {
+                // Small null run (or none) — rewrite everything in one splice:
+                // [new values, `skip` nulls, Some(next_val)].
+                values.extend(std::iter::repeat(None).take(skip));
+                values.push(Some(next_val));
+                let all = deltas_from(&values, prev);
+                self.col.splice_inner(index, del + skip + 1, all)
+            }
+            (prev, skip, Some(next_val)) => {
+                // Large null run — leave the nulls in place and do two splices:
+                //   1. Rewrite the boundary non-null's delta relative to the
+                //      last non-null in the new values (which will be the
+                //      running after splice #2 lands).
+                //   2. Replace the deleted range with the new values.
+                // Ordering matters: the postfix delta is computed against the
+                // *future* running established by splice #2.
+                let last_value = values
+                    .iter()
+                    .rev()
+                    .copied()
+                    .flatten()
+                    .next()
+                    .unwrap_or(prev);
+                let new_postfix = next_val - last_value;
+                // TODO: this could be done as a single splice if splice_inner took `postfix: [Run<T>]` as an argument
+                // could have meaningful impact on delta performance
+                self.col
+                    .splice_inner(index + del + skip, 1, [Some(new_postfix)]);
+                let all = deltas_from(&values, prev);
+                self.col.splice_inner(index, del, all)
+            }
         }
     }
 
-    // ── Prefix sum (O(log n) via the B-tree + decoder partial walk) ─────────
+    /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
+    ///
+    /// Returns `(prev, skip, next_val)` where:
+    /// - `prev` is the realized prefix at `index` (running before position `index`).
+    /// - `skip` is the number of null entries between `index + del` and the
+    ///   next non-null (or the end of the column).
+    /// - `next_val` is the realized value of that next non-null (or `None` if
+    ///   there isn't one).  Subsequent deltas decode against this value, so
+    ///   fix-ups must re-establish it to preserve the column's realized values.
+    fn find_boundaries(&self, index: usize, del: usize) -> (i64, usize, Option<i64>) {
+        let mut iter = self.iter();
+        iter.advance_by(index);
+        let prev = iter.running;
+        iter.advance_by(del);
 
-    pub(crate) fn prefix_sum(&self, count: usize) -> i64 {
-        self.col.delta_prefix_through::<T>(count)
-    }
-
-    fn prev_realized(&self, index: usize) -> i64 {
-        self.prefix_sum(index)
-    }
-
-    // ── Null-aware helpers ──────────────────────────────────────────────────
-
-    fn insert_before_null_run(&mut self, index: usize, new_delta: i64) {
-        let len = self.col.len();
-        let mut j = index;
-        while j < len {
-            if T::get_inner(self.col.get(j).unwrap()).is_some() {
-                break;
+        // RLE merges consecutive null runs, so at most one null run sits
+        // between `index + del` and the next non-null — no loop needed.
+        match iter.inner.next_run() {
+            None => (prev, 0, None),
+            Some(run) if run.value.is_none() => {
+                (prev, run.count, iter.next().map(|_| iter.running))
             }
-            j += 1;
+            Some(run) => (prev, 0, Some(iter.running + run.value.unwrap())),
         }
-        if j < len {
-            let d_j = T::get_inner(self.col.get(j).unwrap()).unwrap();
-            let adjusted = d_j - new_delta;
-            let null_count = j - index;
-            let mut vals: Vec<T::Inner> = Vec::with_capacity(null_count + 2);
-            vals.push(T::make_inner(Some(new_delta)));
-            for _ in 0..null_count {
-                vals.push(T::make_inner(None));
-            }
-            vals.push(T::make_inner(Some(adjusted)));
-            self.col.splice(index, j - index + 1, vals);
-        } else {
-            self.col.insert(index, T::make_inner(Some(new_delta)));
-        }
-    }
-
-    fn remove_and_absorb(&mut self, index: usize, delta: i64) {
-        let len = self.col.len();
-        debug_assert!(index + 1 < len);
-
-        if !T::NULLABLE {
-            let d_next = T::get_inner(self.col.get(index + 1).unwrap()).unwrap();
-            self.col
-                .splice(index, 2, [T::make_inner(Some(delta + d_next))]);
-            return;
-        }
-
-        let mut j = index + 1;
-        while j < len {
-            if let Some(d_j) = T::get_inner(self.col.get(j).unwrap()) {
-                let adjusted = delta + d_j;
-                let null_count = j - index - 1;
-                let mut vals: Vec<T::Inner> = Vec::with_capacity(null_count + 1);
-                for _ in 0..null_count {
-                    vals.push(T::make_inner(None));
-                }
-                vals.push(T::make_inner(Some(adjusted)));
-                self.col.splice(index, j - index + 1, vals);
-                return;
-            }
-            j += 1;
-        }
-        self.col.remove(index);
-    }
-
-    fn find_nonnull_from(&self, from: usize, adjustment: i64) -> (usize, Vec<T::Inner>) {
-        if adjustment == 0 && !T::NULLABLE {
-            let d = T::get_inner(self.col.get(from).unwrap()).unwrap();
-            return (1, vec![T::make_inner(Some(d))]);
-        }
-        if adjustment == 0 {
-            return (0, vec![]);
-        }
-        let len = self.col.len();
-        if !T::NULLABLE {
-            let d = T::get_inner(self.col.get(from).unwrap()).unwrap();
-            return (1, vec![T::make_inner(Some(d + adjustment))]);
-        }
-        let mut j = from;
-        while j < len {
-            if let Some(d) = T::get_inner(self.col.get(j).unwrap()) {
-                let adjusted = d + adjustment;
-                let null_count = j - from;
-                let mut vals: Vec<T::Inner> = Vec::with_capacity(null_count + 1);
-                for _ in 0..null_count {
-                    vals.push(T::make_inner(None));
-                }
-                vals.push(T::make_inner(Some(adjusted)));
-                return (j - from + 1, vals);
-            }
-            j += 1;
-        }
-        (0, vec![])
     }
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
+
+type InnerColumn = Column<Option<i64>, IndexedDeltaWeightFn>;
 
 /// Iterator over realized values in a [`DeltaColumn`].
 ///
@@ -1726,62 +1408,31 @@ where
 /// accumulates a running `i64` prefix.  `nth(n)` uses the column's
 /// B-tree to jump directly to the target position and reset the
 /// running prefix in O(log n), avoiding an O(n) replay.
-pub(crate) trait DeltaPrefixLookup<T: DeltaValue> {
-    fn prefix_through(&self, idx: usize) -> i64;
-    fn find_slab_at_item(&self, idx: usize) -> (usize, i64, usize);
-}
-
-impl<T, WF> DeltaPrefixLookup<T> for Column<T::Inner, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue + super::ColumnValueRef,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
-    fn prefix_through(&self, idx: usize) -> i64 {
-        self.delta_prefix_through::<T>(idx)
-    }
-    fn find_slab_at_item(&self, idx: usize) -> (usize, i64, usize) {
-        let (si, prefix_before, items_before) = self.index.find_slab_at_item(idx);
-        let prefix_before = <WF::Weight>::prefix_to_i64(prefix_before);
-        (si, prefix_before, items_before)
-    }
-}
-
 pub struct DeltaIter<'a, T: DeltaValue> {
-    inner: super::column::Iter<'a, T::Inner>,
+    inner: super::column::Iter<'a, Option<i64>>,
     running: i64,
-    delta_col: Option<&'a dyn DeltaPrefixLookup<T>>,
+    col: Option<&'a InnerColumn>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaIter<'_, T>
-where
-    T::Inner: RleValue,
-{
+impl<T: DeltaValue> Default for DeltaIter<'_, T> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
             running: 0,
-            delta_col: None,
+            col: None,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<T: DeltaValue> Iterator for DeltaIter<'_, T>
-where
-    T::Inner: RleValue,
-{
+impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
     type Item = T;
 
     #[inline]
     fn next(&mut self) -> Option<T> {
-        let raw = self.inner.next()?;
-        match T::get_inner(raw) {
-            None => {
-              Some(T::null_value())
-            }
+        match self.inner.next()? {
+            None => Some(T::null_value()),
             Some(d) => {
                 self.running += d;
                 Some(T::from_i64(self.running))
@@ -1790,26 +1441,35 @@ where
     }
 
     fn nth(&mut self, mut n: usize) -> Option<T> {
+        if n == 0 {
+            return self.next();
+        }
         if n >= self.inner.items_left {
             if self.inner.items_left > 0 {
-              self.nth(self.inner.items_left - 1);
+                self.nth(self.inner.items_left - 1);
             }
             return None;
         }
 
         if self.inner.slab_remaining <= n {
             let pos = self.pos();
-            let (si, prefix_before, items_before) = self.delta_col?.find_slab_at_item(pos + n);
-            self.running = prefix_before;
-            if !self.inner.advance_to_slab(si, items_before) {
+            let col = self.col?;
+            let found = col.index.find_slab_at_item(pos + n);
+            self.running = found.prefix;
+            if !self.inner.advance_to_slab(found.index, found.pos) {
                 return None;
             }
             n -= self.pos() - pos;
         }
         while let Some(run) = self.inner.next_run_max(n + 1) {
-            self.running += T::run_value(&run);
+            if let Some(delta) = run.value {
+                self.running += delta * run.count as i64;
+            }
             if run.count > n {
-                return Some(T::maybe_running(run.value, self.running));
+                return Some(match run.value {
+                    None => T::null_value(),
+                    Some(_) => T::from_i64(self.running),
+                });
             }
             n -= run.count
         }
@@ -1821,10 +1481,7 @@ where
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaIter<'_, T>
-where
-    T::Inner: RleValue,
-{
+impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaIter")
             .field("pos", &self.inner.pos())
@@ -1834,12 +1491,9 @@ where
     }
 }
 
-impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> where T::Inner: RleValue {}
+impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
 
-impl<'a, T: DeltaValue> DeltaIter<'a, T>
-where
-    T::Inner: RleValue,
-{
+impl<'a, T: DeltaValue> DeltaIter<'a, T> {
     #[inline]
     pub fn pos(&self) -> usize {
         self.inner.pos()
@@ -1891,136 +1545,59 @@ pub struct DeltaIterState {
 }
 
 impl DeltaIterState {
-    pub fn try_resume<'a, T, WF>(
+    pub fn try_resume<'a, T: DeltaValue>(
         &self,
-        column: &'a DeltaColumn<T, WF>,
-    ) -> Result<DeltaIter<'a, T>, crate::PackError>
-    where
-        T: DeltaValue,
-        T::Inner: RleValue,
-        WF: WeightFn<T::Inner>,
-        WF::Weight: DeltaAggregate,
-    {
+        column: &'a DeltaColumn<T>,
+    ) -> Result<DeltaIter<'a, T>, crate::PackError> {
         let inner = self.inner.try_resume(&column.col)?;
         Ok(DeltaIter {
             inner,
             running: self.running,
-            delta_col: Some(&column.col as &dyn DeltaPrefixLookup<T>),
+            col: Some(&column.col),
             _phantom: PhantomData,
         })
     }
 }
 
-impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T>
-where
-    T::Inner: RleValue,
-{
+impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
             running: self.running,
-            delta_col: self.delta_col,
+            col: self.col,
             _phantom: PhantomData,
         }
     }
 }
 
-// ── Column extension: prefix + partial-sum helpers ─────────────────────────
-
-impl<T, WF> Column<T, WF>
-where
-    T: ColumnValueRef + RleValue,
-    WF: WeightFn<T>,
-    WF::Weight: DeltaAggregate,
-{
-    /// Exclusive prefix sum of realized deltas at item `idx` — the
-    /// sum of non-null deltas over `0..idx`, as `i64`.
-    ///
-    /// O(log n) via `find_slab_at_item` on the B-tree + a decoder walk
-    /// of the landing slab.
-    pub(crate) fn delta_prefix_through<D>(&self, idx: usize) -> i64
-    where
-        D: DeltaValue<Inner = T>,
-    {
-        if idx == 0 || self.is_empty() {
-            return 0;
-        }
-        let idx = idx.min(self.len());
-        let (si, prefix_before, items_before) = self.index.find_slab_at_item(idx - 1);
-        let si = si.min(self.slab_count() - 1);
-        let items_in_slab = idx - items_before;
-        let partial = partial_sum_in_slab::<D>(&self.slabs[si].data, items_in_slab);
-        <WF::Weight as DeltaAggregate>::prefix_to_i64(prefix_before) + partial
-    }
-}
-
 // ── Free helpers ────────────────────────────────────────────────────────────
 
-/// Running prefix sum of realized deltas over the first `n` items of
-/// `data`.  Uses `next_run_max(n - items)` so the decoder stops the
-/// instant we've counted `n` items.
-pub(crate) fn partial_sum_in_slab<T: DeltaValue>(data: &[u8], n: usize) -> i64
-where
-    T::Inner: RleValue,
-{
-    let mut decoder = <T::Inner as ColumnValueRef>::Encoding::decoder(data);
-    let mut items = 0usize;
-    let mut sum = 0i64;
-    while items < n {
-        let Some(run) = decoder.next_run_max(n - items) else {
-            break;
-        };
-        if let Some(v) = T::get_inner(run.value) {
-            sum += v * run.count as i64;
+/// Iterator that maps realized values to their delta encoding relative to
+/// a running `prev_realized`.  Null values pass through as `None` and leave
+/// `prev_realized` untouched.  No allocation.
+pub(crate) fn deltas_from<'a>(
+    values: &'a [Option<i64>],
+    mut prev_realized: i64,
+) -> impl Iterator<Item = Option<i64>> + 'a {
+    values.iter().map(move |v| match v {
+        None => None,
+        Some(r) => {
+            let d = *r - prev_realized;
+            prev_realized = *r;
+            Some(d)
         }
-        items += run.count;
-    }
-    sum
-}
-
-pub(crate) fn values_to_deltas<T: DeltaValue>(values: &[T]) -> Vec<T::Inner> {
-    values_to_deltas_from::<T>(values, 0)
-}
-
-pub(crate) fn values_to_deltas_from<T: DeltaValue>(
-    values: &[T],
-    prev_realized: i64,
-) -> Vec<T::Inner> {
-    let mut deltas = Vec::with_capacity(values.len());
-    let mut prev = prev_realized;
-    for v in values {
-        match v.to_i64() {
-            None => deltas.push(T::make_inner(None)),
-            Some(r) => {
-                deltas.push(T::make_inner(Some(r - prev)));
-                prev = r;
-            }
-        }
-    }
-    deltas
+    })
 }
 
 // ── FromIterator / Extend / IntoIterator ────────────────────────────────────
 
-impl<T, WF> FromIterator<T> for DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<T: DeltaValue> FromIterator<T> for DeltaColumn<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
     }
 }
 
-impl<T, WF> Extend<T> for DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let vals: Vec<T> = iter.into_iter().collect();
         if !vals.is_empty() {
@@ -2030,13 +1607,7 @@ where
     }
 }
 
-impl<'a, T, WF> IntoIterator for &'a DeltaColumn<T, WF>
-where
-    T: DeltaValue,
-    T::Inner: RleValue,
-    WF: WeightFn<T::Inner>,
-    WF::Weight: DeltaAggregate,
-{
+impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
     type Item = T;
     type IntoIter = DeltaIter<'a, T>;
 

@@ -54,10 +54,6 @@ name = "profile_bool_replace"
 harness = false
 
 [[bench]]
-name = "v1_vs_v0"
-harness = false
-
-[[bench]]
 name = "column_u64_mutations"
 harness = false
 
