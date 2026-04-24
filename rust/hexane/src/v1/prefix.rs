@@ -4,7 +4,7 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 use super::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use super::encoding::{ColumnEncoding, RunDecoder};
-use super::{ColumnValueRef, TypedLoadOpts};
+use super::{ColumnValueRef, Run, TypedLoadOpts};
 use crate::PackError;
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ pub trait PrefixValue: ColumnValueRef {
 
     /// Prefix contribution of an entire run.
     #[inline]
-    fn run_prefix(run: &super::Run<Self::Get<'_>>) -> Self::Prefix {
+    fn run_prefix(run: &Run<Self::Get<'_>>) -> Self::Prefix {
         Self::to_prefix(run.value) * Self::Prefix::try_from(run.count).unwrap_or_default()
     }
 
@@ -279,9 +279,9 @@ pub struct PrefixSeek<P, V> {
     /// Position of the item.
     pub pos: usize,
     /// Inclusive prefix sum through this item (absolute).
-    pub prefix: P,
+    pub total: P,
     /// Prefix sum consumed since the iterator's range start.
-    pub prefix_delta: P,
+    pub delta: P,
     /// The value at this position.
     pub value: V,
 }
@@ -403,32 +403,30 @@ impl<T: PrefixValue> PrefixColumn<T> {
     /// Exclusive prefix sum at `index` — sum of values at indices
     /// `0..index`.  Matches [`PrefixColumn::get_prefix`] semantics.
     pub fn get_prefix(&self, index: usize) -> T::Prefix {
-        if index == 0 || self.col.is_empty() {
-            return T::Prefix::default();
-        }
-        let index = index.min(self.col.len());
-
-        // `Column`'s inner btree already carries per-slab
-        // `PrefixSlabWeight<T::Prefix>`.  Find the landing slab + its
-        // prefix_before directly from the tree.
-        let (si, prefix_before, items_before) = self.col.index.find_slab_at_item(index - 1);
-        let si = si.min(self.col.slab_count() - 1);
-        let items_in_slab = index - items_before;
-        let partial = T::partial_sum(&self.col.slabs[si], items_in_slab);
-        prefix_before + partial
+        self.iter_range(index..self.len()).total
     }
 
     pub fn get_total(&self, index: usize) -> T::Prefix {
         self.get_prefix(index + 1)
     }
 
+    pub fn delta(&self, from: usize, to: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+        assert!(to >= from);
+        let mut iter = self.iter();
+        iter.advance_to(from);
+        iter.delta_nth(to - from)
+    }
+
     pub fn prefix_delta(&self, range: std::ops::Range<usize>) -> T::Prefix {
         if range.start >= range.end || self.col.is_empty() {
-            return T::Prefix::default();
+            T::Prefix::default()
+        } else {
+            let mut iter = self.iter();
+            iter.advance_to(range.start);
+            let base = iter.total;
+            iter.advance_to(range.end);
+            iter.total - base
         }
-        let p_end = self.get_prefix(range.end);
-        let p_start = self.get_prefix(range.start);
-        p_end - p_start
     }
 }
 
@@ -439,12 +437,7 @@ where
     T::Prefix: UnsignedPrefix,
 {
     pub fn get_index_for_total(&self, target: T::Prefix) -> usize {
-        let idx = self.get_index_for_prefix(target);
-        if idx > 0 {
-            idx - 1
-        } else {
-            0
-        }
+        self.get_index_for_prefix(target).saturating_sub(1)
     }
 
     pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
@@ -509,23 +502,10 @@ impl<T: PrefixValue> PrefixColumn<T> {
     pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T> {
         let start = range.start.min(self.col.len());
         let end = range.end.min(self.col.len());
-        let prefix_before = self.get_prefix(start);
-        PrefixIter {
-            col: Some(self),
-            inner: self.col.iter_range(start..end),
-            total: prefix_before,
-            base: prefix_before,
-        }
-    }
-
-    /// `(slab_idx, offset_within_slab, prefix_before_slab)` for item `index`.
-    /// O(log S) via the B-tree.  Used by [`PrefixIter::nth`].
-    pub(crate) fn find_slab_with_prefix(&self, index: usize) -> (usize, usize, T::Prefix) {
-        if index >= self.col.len() {
-            return (self.col.slab_count(), 0, self.get_prefix(self.col.len()));
-        }
-        let (si, prefix_before, items_before) = self.col.index.find_slab_at_item(index);
-        (si, index - items_before, prefix_before)
+        let mut iter = self.iter();
+        iter.set_max(end);
+        iter.advance_by(start);
+        iter
     }
 }
 
@@ -537,12 +517,17 @@ where
     ///
     /// Shorthand for `self.iter_range(start..).advance_prefix(n)`.
     pub fn seek(&self, start: usize, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+        // FIXME
         self.iter_range(start..self.col.len()).advance_prefix(n)
     }
 
-    /// Shorthand for `self.iter_range(start..).advance_to(pos)`.
     pub fn get_delta(&self, start: usize, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
-        self.iter_range(start..self.col.len()).advance_to(pos)
+        if pos >= start {
+            self.iter_range(start..self.col.len())
+                .delta_nth(pos - start)
+        } else {
+            None
+        }
     }
 }
 
@@ -603,49 +588,27 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if n >= self.inner.items_left {
             if self.inner.items_left > 0 {
-              self.nth(self.inner.items_left - 1);
+                self.nth(self.inner.items_left - 1);
             }
             return None;
         }
 
         // Fast path: within current slab — accumulate via next_run.
         if n < self.inner.slab_remaining {
-            // TODO just use next_run_max()
-            let saved = self.inner.items_left;
-            self.inner.items_left = n + 1;
-            let mut val = None;
-            while let Some(run) = self.inner.next_run() {
-                self.total += T::run_prefix(&run);
-                val = Some(run.value);
-            }
-            self.inner.items_left = saved - (n + 1);
-            return val.map(|v| (self.total, v));
+            return Some(self.same_slab_nth(n));
         }
 
-        // Cross-slab: jump via B-tree descent.
-        let col = self.col.unwrap();
         let target_pos = self.inner.pos + n;
-        let (si, offset, prefix_before) = col.find_slab_with_prefix(target_pos);
-        if si >= self.inner.slabs.len() {
-            self.inner.pos += self.inner.items_left;
-            self.inner.items_left = 0;
+
+        let found = self.col.unwrap().col.index.find_slab_at_item(target_pos);
+
+        if !self.inner.advance_to_slab(found.index, found.pos) {
             return None;
         }
 
-        let slab = &self.inner.slabs[si];
-        let mut decoder = T::Encoding::decoder(&slab.data);
-        let val = decoder.nth(offset)?;
-        let partial = T::partial_sum(slab, offset + 1);
+        self.total = found.prefix;
 
-        let skipped = n + 1;
-        self.inner.slab_idx = si;
-        self.inner.decoder = decoder;
-        self.inner.items_left -= skipped;
-        self.inner.slab_remaining = slab.len - offset - 1;
-        self.inner.pos = target_pos + 1;
-        self.total = prefix_before + partial;
-
-        Some((self.total, val))
+        Some(self.same_slab_nth(target_pos - found.pos))
     }
 
     #[inline]
@@ -657,6 +620,18 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
 impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
 
 impl<'a, T: PrefixValue> PrefixIter<'a, T> {
+    fn same_slab_nth(&mut self, mut n: usize) -> (T::Prefix, T::Get<'a>) {
+        while let Some(run) = self.inner.next_run_max(n + 1) {
+            let run_prefix = T::run_prefix(&run);
+            self.total += run_prefix;
+            if run.count > n {
+                return (self.total, run.value);
+            }
+            n -= run.count;
+        }
+        panic!("same_slab_nth called with n > slab len");
+    }
+
     #[inline]
     pub fn pos(&self) -> usize {
         self.inner.pos
@@ -697,32 +672,17 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     ///
     /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: std::ops::Range<usize>) -> Option<(T::Prefix, T::Get<'a>)> {
-        if range.is_empty() {
-            return None;
-        }
-        let col = self.col.expect("shift_next on default PrefixIter");
-        let pos = self.inner.pos;
-        assert!(
-            range.start >= pos,
-            "shift_next: range.start ({}) < pos ({})",
-            range.start,
-            pos,
-        );
-        let prefix_before = col.get_prefix(range.start);
-        self.total = prefix_before;
-        self.base = prefix_before;
-        self.inner = col.values().iter_range(range);
-        let val = self.inner.next()?;
-        self.total += T::to_prefix(val);
-        Some((self.total, val))
+        assert!(range.start >= self.pos());
+        self.set_max(range.end);
+        self.nth(range.start - self.pos())
     }
 
     /// Next run of identical values, paired with the inclusive total at
     /// the *end* of the run.
-    pub fn next_run(&mut self) -> Option<super::Run<(T::Prefix, T::Get<'a>)>> {
+    pub fn next_run(&mut self) -> Option<Run<(T::Prefix, T::Get<'a>)>> {
         let run = self.inner.next_run()?;
         self.total += T::run_prefix(&run);
-        Some(super::Run {
+        Some(Run {
             count: run.count,
             value: (self.total, run.value),
         })
@@ -730,24 +690,21 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
 
     /// Advance to position `pos` (must be ≥ current pos and < end) and
     /// return the item there with absolute prefix + delta since base.
-    pub fn advance_to(&mut self, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
-        if pos < self.inner.pos || self.inner.items_left == 0 {
-            return None;
+    pub fn advance_to(&mut self, target: usize) {
+        if target > self.pos() {
+            self.nth(target - self.pos() - 1);
         }
-        let skip = pos - self.inner.pos;
-        if skip >= self.inner.items_left {
-            return None;
-        }
-        let (total, value) = if skip == 0 {
-            self.next()?
-        } else {
-            self.nth(skip)?
-        };
-        let exclusive = total - T::to_prefix(value);
+    }
+
+    pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
+        let base = self.total;
+        let (total, value) = self.nth(n)?;
+        let pos = self.pos() - 1;
+        let delta = total - base - T::to_prefix(value); // prefix change : exclusive
         Some(PrefixSeek {
             pos,
-            prefix: total,
-            prefix_delta: exclusive - self.base,
+            total,
+            delta,
             value,
         })
     }
@@ -760,6 +717,11 @@ where
     /// Advance past `n` prefix units (cumulative sum) and return the
     /// item landed on.
     pub fn advance_prefix(&mut self, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
+        // this does an O(slabs) lookup even if the destination is on the current slab
+        // if we stored slab_prefix on the iterator we could avoid that
+        // but doing so would require an O(slab) lookup on each slab change
+        // unless we had an Iterator<Item=(slab,prefix)> instead of doing a slab_index +=1
+        // currently this isnt a bottleneck anywhere so not a big deal
         let col = self.col.expect("advance_prefix on default PrefixIter");
         let target = self.total + n;
         let one = T::Prefix::try_from(1).unwrap_or_default();
@@ -767,15 +729,13 @@ where
         let target_pos = col.get_index_for_total(seek_target);
 
         if target_pos < self.inner.pos || target_pos >= self.inner.pos + self.inner.items_left {
-            let remaining = self.inner.items_left;
-            if remaining > 0 {
-                let _ = self.inner.nth(remaining - 1);
+            if self.inner.items_left > 0 {
+                self.nth(self.inner.items_left - 1);
             }
-            self.total = col.get_prefix(self.inner.pos);
             return None;
         }
 
-        self.advance_to(target_pos)
+        self.delta_nth(target_pos - self.inner.pos)
     }
 }
 

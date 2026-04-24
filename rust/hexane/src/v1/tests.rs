@@ -1990,8 +1990,8 @@ fn prefix_shift_next_empty_range() {
     let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3]);
     let mut iter = col.iter();
     assert!(iter.shift_next(2..2).is_none());
-    // Iterator state unchanged — can still iterate
-    assert_eq!(iter.next().unwrap().1, 1);
+    // iterator now spent
+    assert!(iter.next().is_none());
 }
 
 /// shift_next: branch 2 — normal case, from start.
@@ -3947,7 +3947,7 @@ fn fuzz_prefix_column() {
             let mut iter = col.iter();
             if let Some(seek) = iter.advance_prefix(target_prefix) {
                 assert!(
-                    seek.prefix >= target_prefix,
+                    seek.total >= target_prefix,
                     "trial={trial}: advance_prefix undershoot"
                 );
             }
@@ -3957,10 +3957,10 @@ fn fuzz_prefix_column() {
         if col.len() > 5 {
             let target_pos = (xorshift(&mut rng) as usize) % col.len();
             let mut iter = col.iter();
-            if let Some(seek) = iter.advance_to(target_pos) {
+            if let Some(seek) = iter.delta_nth(target_pos) {
                 assert_eq!(seek.pos, target_pos, "trial={trial}: advance_to pos");
                 assert_eq!(
-                    seek.prefix,
+                    seek.total,
                     col.get_total(target_pos),
                     "trial={trial}: advance_to prefix"
                 );
@@ -3976,6 +3976,7 @@ fn fuzz_prefix_column() {
                 let pos =
                     start + 1 + (xorshift(&mut rng) as usize) % (col.len() - start - 1).max(1);
                 col.get_delta(start, pos)
+                //col.prefix_delta(start.. pos)
             } else {
                 None
             };
