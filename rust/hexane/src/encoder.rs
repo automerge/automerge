@@ -443,7 +443,6 @@ where
         }
     }
 
-    #[inline(never)]
     pub(crate) fn append_chunk(&mut self, run: Run<'a, C::Item>) -> usize {
         self.len += run.count;
         self.state.append_chunk(&mut self.writer, run)
@@ -593,7 +592,6 @@ impl<'a, C: ColumnCursor> SpliceEncoder<'a, C> {
         self.encoder.append(v)
     }
 
-    #[inline(never)]
     pub(crate) fn finish(mut self) -> Vec<Slab> {
         if let Some(cursor) =
             C::finalize_state(self.slab, &mut self.encoder, self.post, self.cursor)

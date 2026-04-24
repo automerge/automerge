@@ -176,7 +176,6 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
     type SlabIndex: Debug + Clone + HasPos + HasAcc + SpanWeight<Slab>;
 
     // TODO: needs a test
-    #[inline(never)]
     fn encode<'a, M, I>(out: &mut Vec<u8>, values: I) -> Range<usize>
     where
         M: MaybePackable<'a, Self::Item>,

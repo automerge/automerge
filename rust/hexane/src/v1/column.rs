@@ -1085,7 +1085,6 @@ where
         }
     }
 
-    #[inline(never)]
     pub fn splice<V, I>(&mut self, index: usize, del: usize, values: I)
     where
         V: AsColumnRef<T>,
@@ -1096,7 +1095,6 @@ where
 
     /// Returns the affected slab range (post-merge), mirroring
     /// `Column::splice_inner`.
-    #[inline(never)]
     pub(crate) fn splice_inner<V, I>(&mut self, index: usize, del: usize, values: I) -> Range<usize>
     where
         V: AsColumnRef<T>,
@@ -1144,7 +1142,6 @@ where
     /// `&mut Column`.  Mutates `self.slabs` + `self.total_len` + runs
     /// `try_merge_range`; leaves the index untouched (the outer
     /// `splice_inner` reconciles it).
-    #[inline(never)]
     fn encoder_splice<V, I>(
         &mut self,
         si: usize,
@@ -1224,7 +1221,6 @@ where
         self.try_merge_range(range)
     }
 
-    #[inline(never)]
     fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
         let max = self.max_segments;
         let min = self.max_segments / 4;
@@ -1240,7 +1236,6 @@ where
         false
     }
 
-    #[inline(never)]
     fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
         super::column::try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
     }
