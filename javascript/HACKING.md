@@ -26,6 +26,15 @@ npm run build
 npm test
 ```
 
+The wasm build requires the nightly Rust toolchain plus the `rust-src`
+component, since we rebuild std with the unwind panic runtime so Rust panics
+surface as JS exceptions instead of aborting the WASM module:
+
+```
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+```
+
 Any time you change the rust code in `../rust/*` you'll need to re-run the
 `npm run build` command.
 

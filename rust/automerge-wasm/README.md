@@ -439,16 +439,29 @@ Object Ids uniquely identify an object within a document.  They are represented 
 
 ### Appendix: Building
 
-  The following steps should allow you to build the package
+The wasm package is built with the nightly toolchain and the `panic=unwind`
+strategy so that Rust panics in exported functions are caught at the JS
+boundary by wasm-bindgen 0.2.118+ and thrown as `PanicError` exceptions
+(async exports reject the returned promise) rather than aborting the WASM
+module. This requires the nightly toolchain (for `-Zbuild-std`) and the
+`rust-src` rustup component.
 
   ```
    $ rustup target add wasm32-unknown-unknown
+   $ rustup toolchain install nightly
+   $ rustup component add rust-src --toolchain nightly
    $ cargo install wasm-bindgen-cli
    $ cargo install wasm-opt
    $ npm install
    $ npm run release
    $ npm pack
   ```
+
+Under the hood `npm run release` invokes
+`cargo +nightly build … -Zbuild-std=std,panic_unwind` with
+`RUSTFLAGS="-C panic=unwind"`. The rest of the workspace still builds with
+the pinned stable toolchain in `rust/rust-toolchain.toml`; the nightly
+toolchain is only used for this wasm build.
 
 ### Appendix: WASM and Memory Allocation
 

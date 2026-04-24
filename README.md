@@ -84,7 +84,7 @@ You will also need to install the following with `cargo install`
 - `wasm-opt`
 - `cargo-deny`
 
-And ensure you have added the `wasm32-unknown-unknown` target for rust cross-compilation.
+And ensure you have added the `wasm32-unknown-unknown` target for rust cross-compilation. The wasm build also requires the nightly toolchain and the `rust-src` component (see the macOS instructions below for the exact commands); these are used by `automerge-wasm` and the JS package to build std with `panic=unwind` so panics surface as JS exceptions.
 
 The various subprojects (the rust code, the wrapper projects) have their own
 build instructions, but to run the tests that will be run in CI you can run
