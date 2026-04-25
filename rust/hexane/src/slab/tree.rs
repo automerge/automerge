@@ -350,6 +350,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         }
     }
 
+    #[cfg(debug_assertions)]
     fn check_weight(&self) -> Option<W> {
         self.root_node.as_ref().map(|root| root.check_weight())
     }

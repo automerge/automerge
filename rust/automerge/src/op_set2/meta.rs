@@ -140,8 +140,11 @@ impl hexane::v1::RleValue for ValueMeta {
 
 impl hexane::v1::PrefixValue for ValueMeta {
     type Prefix = u64;
-    fn to_prefix(val: ValueMeta) -> u64 {
-        val.length() as u64
+    fn accumulate(target: &mut u64, val: ValueMeta) {
+        *target += val.length() as u64;
+    }
+    fn accumulate_run(target: &mut u64, run: &hexane::v1::Run<ValueMeta>) {
+        *target += run.value.length() as u64 * run.count as u64;
     }
 }
 

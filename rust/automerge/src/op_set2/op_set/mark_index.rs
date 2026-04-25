@@ -1,15 +1,15 @@
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
-use hexane::{
-    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, PackError, Packable, RleCursor, Slab, SpanWeight,
-};
+use hexane::v1::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
+use hexane::PackError;
 
-use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use rustc_hash::FxHashSet;
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub(crate) enum MarkIndexValue {
     Start(OpId),
     End(OpId),
@@ -22,7 +22,7 @@ pub(crate) enum MarkIndexBuilder {
 }
 
 impl MarkIndexValue {
-    fn as_i64(&self) -> i64 {
+    pub(super) fn as_i64(&self) -> i64 {
         match self {
             MarkIndexValue::Start(id) => {
                 let tmp = ((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff);
@@ -37,7 +37,7 @@ impl MarkIndexValue {
         }
     }
 
-    fn load(v: i64) -> Self {
+    pub(super) fn load(v: i64) -> Self {
         if v < 0 {
             let v = -v as u64;
             let actor = (v >> 32) as usize;
@@ -51,7 +51,7 @@ impl MarkIndexValue {
         }
     }
 
-    fn with_new_actor(self, idx: usize) -> Self {
+    pub(super) fn with_new_actor(self, idx: usize) -> Self {
         match self {
             Self::Start(id) => Self::Start(id.with_new_actor(idx)),
             Self::End(id) => Self::End(id.with_new_actor(idx)),
@@ -59,137 +59,194 @@ impl MarkIndexValue {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
-pub(crate) struct MarkIndexSpanner {
-    pub(crate) pos: usize,
-    /// Net mark counts: +1 for each Start, -1 for each End.
-    /// Positive = net open (in `start` set), negative = net close (in `end` set).
-    marks: HashMap<OpId, i32>,
+// ── v1 hexane column-value traits ────────────────────────────────────────────
+
+impl ColumnValue for MarkIndexValue {
+    type Encoding = RleEncoding<MarkIndexValue>;
 }
 
-impl MarkIndexSpanner {
-    /// Marks that are net-open in this range (have Start but no matching End).
-    pub(crate) fn start_set(&self) -> HashSet<OpId> {
-        self.marks
-            .iter()
-            .filter(|(_, &v)| v > 0)
-            .map(|(&id, _)| id)
-            .collect()
+impl RleValue for MarkIndexValue {
+    fn try_unpack(data: &[u8]) -> Result<(usize, MarkIndexValue), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::signed(&mut buf)?;
+        Ok((start - buf.len(), MarkIndexValue::load(v)))
     }
 
-    /// Marks that are net-closed in this range (have End but no matching Start).
-    pub(crate) fn end_set(&self) -> HashSet<OpId> {
-        self.marks
-            .iter()
-            .filter(|(_, &v)| v < 0)
-            .map(|(&id, _)| id)
-            .collect()
-    }
-}
-
-impl SpanWeight<Slab> for MarkIndexSpanner {
-    fn alloc(slab: &Slab) -> Self {
-        let pos = slab.len();
-        let mut marks = HashMap::default();
-        let mut cursor = MarkIndex::default();
-        let bytes = slab.as_slice();
-        while let Some(run) = cursor.next(bytes) {
-            match run.value.as_deref() {
-                Some(MarkIndexValue::Start(id)) => {
-                    *marks.entry(*id).or_insert(0) += 1;
-                }
-                Some(MarkIndexValue::End(id)) => {
-                    *marks.entry(*id).or_insert(0) -= 1;
-                }
-                None => {}
-            }
-        }
-        // Remove zero entries to keep map compact.
-        marks.retain(|_, v| *v != 0);
-        Self { pos, marks }
-    }
-
-    fn and(mut self, other: &Self) -> Self {
-        self.union(other);
-        self
-    }
-
-    fn union(&mut self, other: &Self) {
-        self.pos += other.pos;
-        for (&id, &count) in &other.marks {
-            let entry = self.marks.entry(id).or_insert(0);
-            *entry += count;
-            if *entry == 0 {
-                self.marks.remove(&id);
-            }
-        }
-    }
-
-    fn maybe_sub(&mut self, other: &Self) -> bool {
-        self.pos -= other.pos;
-        for (&id, &count) in &other.marks {
-            let entry = self.marks.entry(id).or_insert(0);
-            *entry -= count;
-            if *entry == 0 {
-                self.marks.remove(&id);
-            }
-        }
+    fn pack(value: MarkIndexValue, out: &mut Vec<u8>) -> bool {
+        leb128::write::signed(out, value.as_i64()).unwrap();
         true
     }
 }
 
-impl HasAcc for MarkIndexSpanner {
-    fn acc(&self) -> Acc {
-        Acc::new()
+// ── MarkAcc: prefix-sum accumulator over Option<MarkIndexValue> ──────────────
+//
+// Each `OpId` appears at most once as a `Start` and at most once as an
+// `End` per column (uniqueness guarantee).  So the net count for any
+// `OpId` in any aggregate is always one of `{-1, 0, +1}` — and `0` is
+// never stored (it cancels out).  Instead of a `HashMap<OpId, i32>` we
+// keep two sets:
+//
+//   * `opens`  — `+1` entries: `Start` seen, `End` not yet matched.
+//   * `closes` — `-1` entries: `End` seen, `Start` not yet matched.
+//
+// `FxHashSet` (vs the default `RandomState`) gives a 3–5× speedup per
+// hash on the small, two-word `OpId` keys.
+//
+// For the **running prefix** during a left-to-right descent over a
+// well-formed column, `closes` stays empty (every `End` cancels with a
+// `Start` from an earlier subtree).  Per-subtree aggregates may have
+// non-empty `closes` when a span crosses a subtree boundary.
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub(crate) struct MarkAcc {
+    opens: FxHashSet<OpId>,
+    closes: FxHashSet<OpId>,
+}
+
+impl MarkAcc {
+    /// Flip a single `Start`/`End` delta into the accumulator.
+    #[inline]
+    fn apply_one(&mut self, val: MarkIndexValue) {
+        match val {
+            // Start cancels a prior dangling End; otherwise opens.
+            MarkIndexValue::Start(id) => {
+                if !self.closes.remove(&id) {
+                    self.opens.insert(id);
+                }
+            }
+            // End cancels a prior open; otherwise records a dangling close.
+            MarkIndexValue::End(id) => {
+                if !self.opens.remove(&id) {
+                    self.closes.insert(id);
+                }
+            }
+        }
     }
 }
 
-impl HasPos for MarkIndexSpanner {
-    fn pos(&self) -> usize {
-        self.pos
+impl AddAssign for MarkAcc {
+    fn add_assign(&mut self, rhs: Self) {
+        for id in rhs.opens {
+            if !self.closes.remove(&id) {
+                self.opens.insert(id);
+            }
+        }
+        for id in rhs.closes {
+            if !self.opens.remove(&id) {
+                self.closes.insert(id);
+            }
+        }
     }
 }
 
-pub(crate) type MarkIndexInternal<const B: usize> = RleCursor<B, MarkIndexValue, MarkIndexSpanner>;
+/// Hot path: `SlabBTree::find_slab_at_item` descends a level by adding
+/// each visited sibling's stored aggregate into the running prefix.
+/// Borrowed RHS avoids cloning the child set; one HashSet op per entry.
+impl AddAssign<&MarkAcc> for MarkAcc {
+    fn add_assign(&mut self, rhs: &MarkAcc) {
+        for &id in &rhs.opens {
+            if !self.closes.remove(&id) {
+                self.opens.insert(id);
+            }
+        }
+        for &id in &rhs.closes {
+            if !self.opens.remove(&id) {
+                self.closes.insert(id);
+            }
+        }
+    }
+}
 
-pub(crate) type MarkIndex = MarkIndexInternal<64>;
+impl SubAssign for MarkAcc {
+    fn sub_assign(&mut self, rhs: Self) {
+        // Inverse of `add_assign`: an `open` from `rhs` either had merged
+        // into `self.opens` (remove it) or had cancelled a prior dangling
+        // close (restore it).  Symmetric for `closes`.
+        for id in rhs.opens {
+            if !self.opens.remove(&id) {
+                self.closes.insert(id);
+            }
+        }
+        for id in rhs.closes {
+            if !self.closes.remove(&id) {
+                self.opens.insert(id);
+            }
+        }
+    }
+}
+
+impl Add for MarkAcc {
+    type Output = Self;
+    fn add(mut self, rhs: Self) -> Self {
+        self += rhs;
+        self
+    }
+}
+
+impl Sub for MarkAcc {
+    type Output = Self;
+    fn sub(mut self, rhs: Self) -> Self {
+        self -= rhs;
+        self
+    }
+}
+
+impl PrefixValue for MarkIndexValue {
+    type Prefix = MarkAcc;
+
+    #[inline]
+    fn accumulate(target: &mut MarkAcc, val: MarkIndexValue) {
+        target.apply_one(val);
+    }
+
+    /// `OpId`s are unique per `Start`/`End`, so a multi-row RLE run of
+    /// the same `MarkIndexValue` cannot occur in a well-formed column —
+    /// `run.count` is always 1.  Treat any count as 1; the column's
+    /// uniqueness invariant makes this correct.
+    #[inline]
+    fn accumulate_run(target: &mut MarkAcc, run: &Run<MarkIndexValue>) {
+        target.apply_one(run.value);
+    }
+}
+
+// ── MarkIndexColumn ──────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MarkIndexColumn {
-    data: ColumnData<MarkIndex>,
+    data: PrefixColumn<Option<MarkIndexValue>>,
     cache: HashMap<OpId, MarkData<'static>>,
 }
 
 impl MarkIndexColumn {
+    pub(crate) fn new() -> Self {
+        Self {
+            data: PrefixColumn::new(),
+            cache: HashMap::new(),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.data.len()
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        // FIXME - would be much better to do this by run instead of by value
-        let new_data = self
+        let new_values: Vec<Option<MarkIndexValue>> = self
             .data
-            .iter()
-            .map(|m| m.map(|n| n.with_new_actor(idx)))
+            .value_iter()
+            .map(|v| v.map(|m| m.with_new_actor(idx)))
             .collect();
         let new_cache = self
             .cache
             .iter()
             .map(|(key, val)| (key.with_new_actor(idx), val.clone()))
             .collect();
-        self.data = new_data;
+        self.data = PrefixColumn::from_values(new_values);
         self.cache = new_cache;
     }
 
-    pub(crate) fn new() -> Self {
-        Self {
-            data: ColumnData::new(),
-            cache: HashMap::new(),
-        }
-    }
-
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let values = values
+        let mark_values: Vec<Option<MarkIndexValue>> = values
             .into_iter()
             .map(|v| match v? {
                 MarkIndexBuilder::Start(id, mark) => {
@@ -198,8 +255,8 @@ impl MarkIndexColumn {
                 }
                 MarkIndexBuilder::End(id) => Some(MarkIndexValue::End(id)),
             })
-            .collect::<Vec<_>>();
-        self.data.splice(index, 0, values);
+            .collect();
+        self.data.splice(index, 0, mark_values);
     }
 
     pub(crate) fn undo(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
@@ -209,7 +266,8 @@ impl MarkIndexColumn {
                 self.cache.remove(id);
             }
         }
-        self.data.splice::<MarkIndexValue, _>(index, del, []);
+        let empty: Vec<Option<MarkIndexValue>> = Vec::new();
+        self.data.splice(index, del, empty);
     }
 
     pub(crate) fn rich_text_at(
@@ -230,33 +288,16 @@ impl MarkIndexColumn {
         target: usize,
         clock: Option<&'a Clock>,
     ) -> impl Iterator<Item = OpId> + 'a {
-        let sub = self
-            .data
-            .slabs
-            .get_where_or_last(|acc, next| target < acc.pos() + next.pos());
-        let mut start = sub.weight.start_set().into_iter().collect::<BTreeSet<_>>();
-        let mut end = sub.weight.end_set();
-        let mut pos = sub.weight.pos;
-        let mut cursor = MarkIndex::default();
-        let bytes = sub.element.as_slice();
-        while let Some(run) = cursor.next(bytes) {
-            pos += run.count;
-            match run.value.as_deref() {
-                Some(MarkIndexValue::Start(id)) => {
-                    start.insert(*id);
-                }
-                Some(MarkIndexValue::End(id)) => {
-                    if !start.remove(id) {
-                        end.insert(*id);
-                    }
-                }
-                None => {}
-            }
-            if pos > target {
-                break;
-            }
-        }
-        start
+        // For a well-formed mark column the running prefix at `target` has
+        // an empty `closes` set — every `End` has cancelled with a prior
+        // `Start`.  `opens` is the active mark set; iterate it directly.
+        let acc = self.data.get_total(target);
+        debug_assert!(
+            acc.closes.is_empty(),
+            "running prefix at marks_at({target}) has dangling closes — \
+             malformed mark column?"
+        );
+        acc.opens
             .into_iter()
             .filter(move |id| clock.map(|c| c.covers(id)).unwrap_or(true))
     }
@@ -267,30 +308,12 @@ impl MarkIndexColumn {
     }
 }
 
-impl Packable for MarkIndexValue {
-    fn width(item: &MarkIndexValue) -> usize {
-        hexane::lebsize(item.as_i64()) as usize
-    }
-
-    fn pack(item: &MarkIndexValue, out: &mut Vec<u8>) {
-        leb128::write::signed(out, item.as_i64()).unwrap();
-    }
-
-    fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, MarkIndexValue>), PackError> {
-        let start_len = buff.len();
-        let val = leb128::read::signed(&mut buff)?;
-        assert_eq!(MarkIndexValue::load(val).as_i64(), val);
-        Ok((
-            start_len - buff.len(),
-            Cow::Owned(MarkIndexValue::load(val)),
-        ))
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::op_set2::types::ScalarValue;
+    use std::borrow::Cow;
+    use std::collections::{BTreeSet, HashSet};
 
     fn mk_mark(name: &str) -> MarkData<'static> {
         MarkData {
@@ -307,7 +330,6 @@ pub(crate) mod tests {
     /// Start and End occupy existing positions (they don't insert new entries).
     fn build_column(n: usize, marks: &[(usize, usize, usize, u64, &str)]) -> MarkIndexColumn {
         let mut col = MarkIndexColumn::new();
-        // Build the full column as a single extend.
         let mut values: Vec<Option<MarkIndexBuilder>> = vec![None; n];
         for &(start, end, actor, counter, name) in marks {
             let op_id = id(actor, counter);
@@ -327,6 +349,22 @@ pub(crate) mod tests {
         let mut names: Vec<String> = rt.map.values().map(|m| m.name.to_string()).collect();
         names.sort();
         names
+    }
+
+    /// Find the column positions of Start and End entries for a given OpId.
+    fn find_mark_positions(col: &MarkIndexColumn, target: OpId) -> Vec<usize> {
+        col.data
+            .value_iter()
+            .enumerate()
+            .filter_map(|(pos, val)| match val {
+                Some(MarkIndexValue::Start(idv)) | Some(MarkIndexValue::End(idv))
+                    if idv == target =>
+                {
+                    Some(pos)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     // ── Basic tests ─────────────────────────────────────────────────────
@@ -437,8 +475,6 @@ pub(crate) mod tests {
         }
 
         // Italic should still be active in its range.
-        // The italic range shifted because we removed 2 entries.
-        // Just check that italic exists somewhere.
         let any_italic =
             (0..col.len()).any(|i| active_mark_names(&col, i).contains(&"italic".to_string()));
         assert!(any_italic, "italic should still be active somewhere");
@@ -476,7 +512,6 @@ pub(crate) mod tests {
             );
         }
 
-        // "a" and "c" should still be active in their (shifted) ranges.
         let any_a = (0..col.len()).any(|i| active_mark_names(&col, i).contains(&"a".to_string()));
         let any_c = (0..col.len()).any(|i| active_mark_names(&col, i).contains(&"c".to_string()));
         assert!(any_a, "mark 'a' should still exist");
@@ -536,7 +571,6 @@ pub(crate) mod tests {
             );
         }
 
-        // Bold and underline should still be active.
         let has_bold =
             (0..col.len()).any(|i| active_mark_names(&col, i).contains(&"bold".to_string()));
         let has_underline =
@@ -580,32 +614,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// Find the column positions of Start and End entries for a given OpId.
-    fn find_mark_positions(col: &MarkIndexColumn, target: OpId) -> Vec<usize> {
-        let mut positions = Vec::new();
-        let mut pos = 0;
-        for slab in col.data.slabs.iter() {
-            let mut cursor = MarkIndex::default();
-            let bytes = slab.as_slice();
-            while let Some(run) = cursor.next(bytes) {
-                for _ in 0..run.count {
-                    if let Some(val) = run.value.as_deref() {
-                        match val {
-                            MarkIndexValue::Start(id) | MarkIndexValue::End(id)
-                                if *id == target =>
-                            {
-                                positions.push(pos);
-                            }
-                            _ => {}
-                        }
-                    }
-                    pos += 1;
-                }
-            }
-        }
-        positions
-    }
-
     #[test]
     fn rich_text_at_every_position() {
         // Comprehensive check: 3 marks, verify every position.
@@ -619,17 +627,13 @@ pub(crate) mod tests {
             ],
         );
 
-        // The column has extra entries from Start/End insertions.
-        // Check every position for correct marks.
         for i in 0..col.len() {
             let names = active_mark_names(&col, i);
             let ids: BTreeSet<OpId> = active_mark_ids(&col, i);
 
-            // Each mark in rich_text_at should have a corresponding cache entry.
             let rt = col.rich_text_at(i, None);
             assert_eq!(rt.map.len(), names.len(), "pos {i}: map len != names len");
 
-            // Every id from marks_at should appear in rich_text_at.
             for mid in &ids {
                 assert!(
                     rt.map.contains_key(mid),
@@ -669,15 +673,13 @@ pub(crate) mod tests {
         let mut values: Vec<Option<MarkIndexValue>> = vec![None; n];
         let mut cache_entries: Vec<(OpId, MarkData<'static>)> = Vec::new();
 
-        // Place ~2500 mark pairs (5% non-null = ~5000 entries in 100k).
         let num_marks = 2500;
-        let mut mark_ids: Vec<(OpId, usize, usize)> = Vec::new(); // (id, start, end)
+        let mut mark_ids: Vec<(OpId, usize, usize)> = Vec::new();
 
         for i in 0..num_marks {
             let op_id = id(0, i as u64 + 1);
             let start = rng.random_range(0..n - 2);
             let end = rng.random_range(start + 1..n);
-            // Only place if slots are free.
             if values[start].is_none() && values[end].is_none() {
                 values[start] = Some(MarkIndexValue::Start(op_id));
                 values[end] = Some(MarkIndexValue::End(op_id));
@@ -689,7 +691,6 @@ pub(crate) mod tests {
         let placed = mark_ids.len();
         assert!(placed > 100, "need enough marks placed, got {placed}");
 
-        // Build the column.
         let mut col = MarkIndexColumn::new();
         let builder_values: Vec<Option<MarkIndexBuilder>> = values
             .iter()
@@ -711,12 +712,11 @@ pub(crate) mod tests {
 
         assert_eq!(col.len(), n);
         assert!(
-            col.data.slabs.len() > 1,
+            col.data.slab_count() > 1,
             "need multiple slabs, got {}",
-            col.data.slabs.len()
+            col.data.slab_count()
         );
 
-        // Verify marks_at matches oracle at sampled positions.
         let check_positions: Vec<usize> = (0..200)
             .map(|_| rng.random_range(0..n))
             .chain([0, 1, n / 4, n / 2, 3 * n / 4, n - 2, n - 1])
@@ -737,7 +737,6 @@ pub(crate) mod tests {
             .collect();
 
         for &(op_id, _start, _end) in marks_to_undo.iter().rev() {
-            // Find current positions (they shift as we remove entries).
             let positions = find_mark_positions(&col, op_id);
             assert_eq!(
                 positions.len(),
@@ -760,7 +759,6 @@ pub(crate) mod tests {
             );
         }
 
-        // Update the oracle: remove undone marks.
         let undone_ids: HashSet<OpId> = marks_to_undo.iter().map(|(id, _, _)| *id).collect();
         let remaining_values: Vec<Option<MarkIndexValue>> = values
             .iter()
@@ -779,7 +777,6 @@ pub(crate) mod tests {
             "column length after undo"
         );
 
-        // Verify marks_at matches oracle at sampled positions (adjusted for new length).
         let new_len = col.len();
         let check_positions: Vec<usize> = (0..200)
             .map(|_| rng.random_range(0..new_len))
