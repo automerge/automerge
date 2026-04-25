@@ -1,10 +1,9 @@
-use std::iter::Sum;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 
 use super::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use super::encoding::{ColumnEncoding, RunDecoder};
-use super::{ColumnValueRef, Run, TypedLoadOpts};
+use super::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
 use crate::PackError;
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
@@ -15,7 +14,11 @@ use crate::PackError;
 /// and `advance_prefix` rely on monotonically increasing prefix sums.
 /// Signed prefix types (e.g. `i128`) can decrease, making these operations
 /// incorrect. This trait gates those methods at compile time.
-pub trait UnsignedPrefix {}
+///
+/// `Copy` is a supertrait — the inverse-prefix search uses scalar
+/// arithmetic (`Add`/`Sub`/`Div`) by-value many times per iteration, and
+/// every concrete `UnsignedPrefix` type (u32/u64/u128/usize) is `Copy`.
+pub trait UnsignedPrefix: Copy {}
 impl UnsignedPrefix for u32 {}
 impl UnsignedPrefix for u64 {}
 impl UnsignedPrefix for usize {}
@@ -37,28 +40,42 @@ impl UnsignedPrefix for u128 {}
 /// | `Option<i64>`    | `i128`   |
 pub trait PrefixValue: ColumnValueRef {
     /// The accumulator type for prefix sums.
-    type Prefix: Copy
-        + Default
-        + Ord
+    ///
+    /// The bounds here cover only what's needed for forward queries
+    /// (accumulating left-to-right, computing deltas).  Inverse queries —
+    /// "find the row where the running sum reaches `target`" — additionally
+    /// require `Ord + Div + TryFrom<usize> + TryInto<usize>` and are gated
+    /// behind `T::Prefix: UnsignedPrefix` on the relevant impl blocks.
+    ///
+    /// Bounded on `Clone` (not `Copy`) so non-scalar prefix types — e.g.
+    /// a `HashMap`-backed mark set — can serve as the accumulator.  For
+    /// scalar `Copy` types, `Clone` inlines to a memcpy, so there is no
+    /// runtime cost.
+    type Prefix: Default
+        + Clone
         + std::fmt::Debug
         + Add<Output = Self::Prefix>
         + Sub<Output = Self::Prefix>
-        + Mul<Output = Self::Prefix>
-        + Div<Output = Self::Prefix>
         + AddAssign
         + SubAssign
-        + Sum
-        + TryInto<usize>
-        + TryFrom<usize>;
+        + for<'a> AddAssign<&'a Self::Prefix>;
 
-    /// Convert one column value to its prefix contribution.
-    fn to_prefix(val: Self::Get<'_>) -> Self::Prefix;
+    /// Accumulate one value into `target` in place.  Required.
+    ///
+    /// In-place is the hot path for non-scalar prefixes (HashMap-backed
+    /// `MarkAcc`, etc.) — implementations mutate `target` directly rather
+    /// than allocating a fresh `Prefix` per value and merging.  For Copy
+    /// scalars this is a single `*target += val.into()`.
+    fn accumulate(target: &mut Self::Prefix, val: Self::Get<'_>);
 
-    /// Prefix contribution of an entire run.
-    #[inline]
-    fn run_prefix(run: &Run<Self::Get<'_>>) -> Self::Prefix {
-        Self::to_prefix(run.value) * Self::Prefix::try_from(run.count).unwrap_or_default()
-    }
+    /// Accumulate an entire run into `target` in place.  Required.
+    ///
+    /// The run-shaped form lets RLE-friendly impls scale by `run.count`
+    /// in a single op (`*target += val * count`) instead of looping;
+    /// non-scalar impls typically just do the same single-entry update
+    /// scaled by `count` (Start/End OpIds are unique, so runs of length
+    /// > 1 are rare in practice but still cheap).
+    fn accumulate_run(target: &mut Self::Prefix, run: &Run<Self::Get<'_>>);
 
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
@@ -66,7 +83,7 @@ pub trait PrefixValue: ColumnValueRef {
         let mut decoder = Self::Encoding::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         while let Some(run) = decoder.next_run() {
-            acc += Self::run_prefix(&run);
+            Self::accumulate_run(&mut acc, &run);
         }
         acc
     }
@@ -79,7 +96,7 @@ pub trait PrefixValue: ColumnValueRef {
         let mut items = 0;
         while let Some(mut run) = decoder.next_run() {
             run.count = run.count.min(count - items);
-            acc += Self::run_prefix(&run);
+            Self::accumulate_run(&mut acc, &run);
             items += run.count;
             if items >= count {
                 break;
@@ -87,35 +104,44 @@ pub trait PrefixValue: ColumnValueRef {
         }
         acc
     }
+}
 
-    /// Find the first index within a slab where the running sum reaches or
-    /// exceeds `target`.  Returns items consumed.
-    ///
-    /// Only correct for unsigned prefix types where sums are monotonically
-    /// increasing.  Callers are gated by `T::Prefix: UnsignedPrefix`.
-    fn find_prefix_in_slab(slab: &Slab<TailOf<Self>>, target: Self::Prefix) -> usize {
-        let zero = Self::Prefix::default();
-        let one_p = Self::Prefix::try_from(1).unwrap_or_default();
-        let mut decoder = Self::Encoding::decoder(&slab.data);
-        let mut acc = zero;
-        let mut items = 0;
-        while let Some(run) = decoder.next_run() {
-            let run_total = Self::run_prefix(&run);
-            if acc + run_total >= target {
-                // Target is within this run — ceiling division.
-                let p = Self::to_prefix(run.value);
-                let remaining = target - acc;
-                let needed = (remaining + p - one_p) / p;
-                let needed_usize: usize = needed.try_into().unwrap_or(run.count);
-                assert!(needed_usize <= run.count);
-                items += needed_usize;
-                break;
-            }
-            acc += run_total;
-            items += run.count;
+/// Find the first index within a slab where the running sum reaches or
+/// exceeds `target`.  Returns items consumed.
+///
+/// Only correct for unsigned prefix types where sums are monotonically
+/// increasing.  Callers are gated by `T::Prefix: UnsignedPrefix`.
+fn find_prefix_in_slab<T: PrefixValue>(slab: &Slab<TailOf<T>>, target: T::Prefix) -> usize
+where
+    T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
+{
+    let zero = T::Prefix::default();
+    let one_p = T::Prefix::try_from(1).unwrap_or_default();
+    let mut decoder = T::Encoding::decoder(&slab.data);
+    let mut acc = zero;
+    let mut items = 0;
+    while let Some(run) = decoder.next_run() {
+        // Peek at the run's contribution without losing `acc`.  This
+        // function is bounded on `UnsignedPrefix` which implies `Copy`,
+        // so the assignment is a memcpy rather than a clone.
+        let mut peek = acc;
+        T::accumulate_run(&mut peek, &run);
+        if peek >= target {
+            // Target is within this run — ceiling division by the
+            // single-value contribution `p`.
+            let mut p = T::Prefix::default();
+            T::accumulate(&mut p, run.value);
+            let remaining = target - acc;
+            let needed: T::Prefix = (remaining + p - one_p) / p;
+            let needed_usize: usize = needed.try_into().unwrap_or(run.count);
+            assert!(needed_usize <= run.count);
+            items += needed_usize;
+            break;
         }
-        items
+        acc = peek;
+        items += run.count;
     }
+    items
 }
 
 // ── Compound weight ──────────────────────────────────────────────────────────
@@ -188,57 +214,76 @@ impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
 
 impl PrefixValue for u64 {
     type Prefix = u128;
-    fn to_prefix(val: u64) -> u128 {
-        val as u128
+    fn accumulate(target: &mut u128, val: u64) {
+        *target += val as u128;
     }
-}
-
-impl PrefixValue for Option<u64> {
-    type Prefix = u128;
-    fn to_prefix(val: Option<u64>) -> u128 {
-        val.unwrap_or(0) as u128
+    fn accumulate_run(target: &mut u128, run: &Run<u64>) {
+        *target += run.value as u128 * run.count as u128;
     }
 }
 
 impl PrefixValue for i64 {
     type Prefix = i128;
-    fn to_prefix(val: i64) -> i128 {
-        val as i128
+    fn accumulate(target: &mut i128, val: i64) {
+        *target += val as i128;
     }
-}
-
-impl PrefixValue for Option<i64> {
-    type Prefix = i128;
-    fn to_prefix(val: Option<i64>) -> i128 {
-        val.unwrap_or(0) as i128
+    fn accumulate_run(target: &mut i128, run: &Run<i64>) {
+        *target += run.value as i128 * run.count as i128;
     }
 }
 
 impl PrefixValue for u32 {
     type Prefix = u64;
-    fn to_prefix(val: u32) -> u64 {
-        val as u64
+    fn accumulate(target: &mut u64, val: u32) {
+        *target += val as u64;
     }
-}
-
-impl PrefixValue for Option<u32> {
-    type Prefix = u64;
-    fn to_prefix(val: Option<u32>) -> u64 {
-        val.unwrap_or(0) as u64
+    fn accumulate_run(target: &mut u64, run: &Run<u32>) {
+        *target += run.value as u64 * run.count as u64;
     }
 }
 
 impl PrefixValue for std::num::NonZeroU32 {
     type Prefix = u64;
-    fn to_prefix(val: std::num::NonZeroU32) -> u64 {
-        val.get() as u64
+    fn accumulate(target: &mut u64, val: std::num::NonZeroU32) {
+        *target += val.get() as u64;
+    }
+    fn accumulate_run(target: &mut u64, run: &Run<std::num::NonZeroU32>) {
+        *target += run.value.get() as u64 * run.count as u64;
     }
 }
 
-impl PrefixValue for Option<std::num::NonZeroU32> {
-    type Prefix = u64;
-    fn to_prefix(val: Option<std::num::NonZeroU32>) -> u64 {
-        val.map_or(0, |v| v.get() as u64)
+// ── Blanket Option<T> impl ──────────────────────────────────────────────────
+//
+// Any RLE-encoded `T: PrefixValue` automatically yields a nullable
+// `Option<T>: PrefixValue`, where `None` contributes the prefix identity
+// and `Some(v)` delegates to `T`.  This is also the workaround for the
+// orphan rule: downstream crates that define a local `T: PrefixValue +
+// RleValue` get `Option<T>: PrefixValue` for free.
+
+impl<T> PrefixValue for Option<T>
+where
+    T: PrefixValue + RleValue,
+{
+    type Prefix = T::Prefix;
+
+    #[inline]
+    fn accumulate(target: &mut T::Prefix, val: Option<T::Get<'_>>) {
+        if let Some(v) = val {
+            T::accumulate(target, v);
+        }
+    }
+
+    #[inline]
+    fn accumulate_run(target: &mut T::Prefix, run: &Run<Option<T::Get<'_>>>) {
+        if let Some(v) = run.value {
+            T::accumulate_run(
+                target,
+                &Run {
+                    count: run.count,
+                    value: v,
+                },
+            );
+        }
     }
 }
 
@@ -247,8 +292,11 @@ impl PrefixValue for Option<std::num::NonZeroU32> {
 impl PrefixValue for bool {
     type Prefix = usize;
 
-    fn to_prefix(val: bool) -> usize {
-        val as usize
+    fn accumulate(target: &mut usize, val: bool) {
+        *target += val as usize;
+    }
+    fn accumulate_run(target: &mut usize, run: &Run<bool>) {
+        *target += run.value as usize * run.count;
     }
 }
 
@@ -423,7 +471,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
         } else {
             let mut iter = self.iter();
             iter.advance_to(range.start);
-            let base = iter.total;
+            let base = iter.total.clone();
             iter.advance_to(range.end);
             iter.total - base
         }
@@ -434,7 +482,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
 impl<T: PrefixValue> PrefixColumn<T>
 where
-    T::Prefix: UnsignedPrefix,
+    T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
     pub fn get_index_for_total(&self, target: T::Prefix) -> usize {
         self.get_index_for_prefix(target).saturating_sub(1)
@@ -456,8 +504,25 @@ where
 
         let remaining = target - prefix_before;
         let slab = &self.col.slabs[si];
-        let idx_in_slab = T::find_prefix_in_slab(slab, remaining);
+        let idx_in_slab = find_prefix_in_slab::<T>(slab, remaining);
         items_before + idx_in_slab
+    }
+
+    /// Seek forward from `start`, advancing past `n` prefix units.
+    ///
+    /// Shorthand for `self.iter_range(start..).advance_prefix(n)`.
+    pub fn seek(&self, start: usize, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+        // FIXME
+        self.iter_range(start..self.col.len()).advance_prefix(n)
+    }
+
+    pub fn get_delta(&self, start: usize, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+        if pos >= start {
+            self.iter_range(start..self.col.len())
+                .delta_nth(pos - start)
+        } else {
+            None
+        }
     }
 }
 
@@ -509,28 +574,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 }
 
-impl<T: PrefixValue> PrefixColumn<T>
-where
-    T::Prefix: UnsignedPrefix,
-{
-    /// Seek forward from `start`, advancing past `n` prefix units.
-    ///
-    /// Shorthand for `self.iter_range(start..).advance_prefix(n)`.
-    pub fn seek(&self, start: usize, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
-        // FIXME
-        self.iter_range(start..self.col.len()).advance_prefix(n)
-    }
-
-    pub fn get_delta(&self, start: usize, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
-        if pos >= start {
-            self.iter_range(start..self.col.len())
-                .delta_nth(pos - start)
-        } else {
-            None
-        }
-    }
-}
-
 // ── PrefixIter ──────────────────────────────────────────────────────────────
 
 /// Forward iterator over a [`PrefixColumn`] that yields `(prefix_sum, value)`.
@@ -560,8 +603,8 @@ impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
         Self {
             col: self.col,
             inner: self.inner.clone(),
-            total: self.total,
-            base: self.base,
+            total: self.total.clone(),
+            base: self.base.clone(),
         }
     }
 }
@@ -581,8 +624,8 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let val = self.inner.next()?;
-        self.total += T::to_prefix(val);
-        Some((self.total, val))
+        T::accumulate(&mut self.total, val);
+        Some((self.total.clone(), val))
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -622,10 +665,9 @@ impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
 impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     fn same_slab_nth(&mut self, mut n: usize) -> (T::Prefix, T::Get<'a>) {
         while let Some(run) = self.inner.next_run_max(n + 1) {
-            let run_prefix = T::run_prefix(&run);
-            self.total += run_prefix;
+            T::accumulate_run(&mut self.total, &run);
             if run.count > n {
-                return (self.total, run.value);
+                return (self.total.clone(), run.value);
             }
             n -= run.count;
         }
@@ -660,8 +702,8 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     pub fn suspend(&self) -> PrefixIterState<T> {
         PrefixIterState {
             inner: self.inner.suspend(),
-            total: self.total,
-            base: self.base,
+            total: self.total.clone(),
+            base: self.base.clone(),
         }
     }
 
@@ -681,10 +723,10 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     /// the *end* of the run.
     pub fn next_run(&mut self) -> Option<Run<(T::Prefix, T::Get<'a>)>> {
         let run = self.inner.next_run()?;
-        self.total += T::run_prefix(&run);
+        T::accumulate_run(&mut self.total, &run);
         Some(Run {
             count: run.count,
-            value: (self.total, run.value),
+            value: (self.total.clone(), run.value),
         })
     }
 
@@ -697,10 +739,13 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     }
 
     pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
-        let base = self.total;
+        let base = self.total.clone();
         let (total, value) = self.nth(n)?;
         let pos = self.pos() - 1;
-        let delta = total - base - T::to_prefix(value); // prefix change : exclusive
+        // Single-value contribution as a fresh `Prefix`, then subtract.
+        let mut single = T::Prefix::default();
+        T::accumulate(&mut single, value);
+        let delta = total.clone() - base - single; // prefix change : exclusive
         Some(PrefixSeek {
             pos,
             total,
@@ -712,7 +757,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
 
 impl<'a, T: PrefixValue> PrefixIter<'a, T>
 where
-    T::Prefix: UnsignedPrefix,
+    T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
     /// Advance past `n` prefix units (cumulative sum) and return the
     /// item landed on.
@@ -737,6 +782,7 @@ where
 
         self.delta_nth(target_pos - self.inner.pos)
     }
+
 }
 
 // ── PrefixIterState ────────────────────────────────────────────────────────
@@ -756,8 +802,8 @@ impl<T: PrefixValue> PrefixIterState<T> {
         Ok(PrefixIter {
             col: Some(column),
             inner,
-            total: self.total,
-            base: self.base,
+            total: self.total.clone(),
+            base: self.base.clone(),
         })
     }
 }
