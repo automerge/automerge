@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::fmt;
 
 use super::meta::{ValueMeta, ValueType};
-use hexane::{PackError, Packable, RleCursor};
+use hexane::PackError;
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
@@ -703,37 +703,6 @@ impl<'a> ValueRef<'a> {
     }
 }
 
-impl Packable for Action {
-    fn width(item: &Action) -> usize {
-        hexane::ulebsize(u64::from(*item)) as usize
-    }
-
-    fn pack(item: &Action, out: &mut Vec<u8>) {
-        leb128::write::unsigned(out, u64::from(*item)).unwrap();
-    }
-
-    fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
-        let (len, result) = u64::unpack(buff)?;
-        let action = Action::try_from(*result)?;
-        Ok((len, Cow::Owned(action)))
-    }
-}
-
-impl Packable for ActorIdx {
-    fn width(item: &ActorIdx) -> usize {
-        hexane::ulebsize(u64::from(*item)) as usize
-    }
-
-    fn pack(item: &ActorIdx, out: &mut Vec<u8>) {
-        leb128::write::unsigned(out, u64::from(*item)).unwrap();
-    }
-
-    fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
-        let (len, result) = u64::unpack(buff)?;
-        Ok((len, Cow::Owned(ActorIdx::from(*result))))
-    }
-}
-
 impl hexane::v1::ColumnValue for ActorIdx {
     type Encoding = hexane::v1::RleEncoding<ActorIdx>;
 }
@@ -768,9 +737,6 @@ impl hexane::v1::RleValue for Action {
         true
     }
 }
-
-pub(crate) type ActorCursor = RleCursor<64, ActorIdx>;
-pub(crate) type ActionCursor = RleCursor<64, Action>;
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct ChangeMetadata<'a> {

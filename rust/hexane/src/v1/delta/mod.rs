@@ -1365,8 +1365,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
                 let new_postfix = next_val - last_value;
                 // TODO: this could be done as a single splice if splice_inner took `postfix: [Run<T>]` as an argument
                 // could have meaningful impact on delta performance
-                self.col
-                    .splice_inner(index + del + skip, 1, [Some(new_postfix)]);
+                self.col.splice_inner(index + del + skip, 1, [Some(new_postfix)]);
                 let all = deltas_from(&values, prev);
                 self.col.splice_inner(index, del, all)
             }
