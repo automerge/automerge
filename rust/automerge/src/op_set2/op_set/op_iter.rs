@@ -196,18 +196,15 @@ impl<'a> Iterator for OpIter<'a> {
 }
 
 impl OpId {
-    pub(crate) fn try_load<'a>(
-        id_actor: Option<Cow<'a, ActorIdx>>,
-        id_counter: Option<Cow<'a, i64>>,
+    pub(crate) fn try_load(
+        actor: Option<ActorIdx>,
+        ctr: Option<i64>,
     ) -> Result<OpId, ReadOpError> {
-        match (id_actor, id_counter) {
-            (Some(actor_idx), Some(counter)) => {
-                if *counter < 0 {
-                    Err(ReadOpError::InvalidOpId("negative counter".to_string()))
-                } else {
-                    Ok(OpId::new(*counter as u64, u64::from(*actor_idx) as usize))
-                }
+        match (actor, ctr) {
+            (Some(actor_idx), Some(counter)) if counter >= 0 => {
+                Ok(OpId::new(counter as u64, u64::from(actor_idx) as usize))
             }
+            (Some(_), Some(_)) => Err(ReadOpError::InvalidOpId("negative counter".to_string())),
             _ => Err(ReadOpError::InvalidOpId(
                 "missing actor or counter".to_string(),
             )),
@@ -217,27 +214,11 @@ impl OpId {
 
 impl ObjId {
     pub(crate) fn try_load(
-        actor: Option<Cow<'_, ActorIdx>>,
-        ctr: Option<Cow<'_, u64>>,
+        actor: Option<ActorIdx>,
+        ctr: Option<i64>,
     ) -> Result<ObjId, ReadOpError> {
         match (actor, ctr) {
-            (Some(actor_idx), Some(counter)) => {
-                if *counter == 0 {
-                    Ok(ObjId::root())
-                } else {
-                    Ok(ObjId(OpId::new(*counter, u64::from(*actor_idx) as usize)))
-                }
-            }
-            (None, None) => Ok(ObjId::root()),
-            _ => Err(ReadOpError::InvalidOpId(
-                "missing actor or counter".to_string(),
-            )),
-        }
-    }
-
-    fn from_v1(actor: Option<ActorIdx>, ctr: Option<u32>) -> Result<ObjId, ReadOpError> {
-        match (actor, ctr) {
-            (Some(actor_idx), Some(counter)) => {
+            (Some(actor_idx), Some(counter)) if counter >= 0 => {
                 if counter == 0 {
                     Ok(ObjId::root())
                 } else {
@@ -247,90 +228,41 @@ impl ObjId {
                     )))
                 }
             }
+            (Some(_), Some(_)) => Err(ReadOpError::InvalidOpId("negative counter".to_string())),
             (None, None) => Ok(ObjId::root()),
             _ => Err(ReadOpError::InvalidOpId(
                 "missing actor or counter".to_string(),
             )),
         }
     }
-
-    pub(crate) fn try_load_i(
-        actor: Option<Cow<'_, ActorIdx>>,
-        ctr: Option<Cow<'_, i64>>,
-    ) -> Result<ObjId, ReadOpError> {
-        Self::try_load(actor, ctr.map(|c| Cow::Owned(*c as u64)))
-    }
 }
 
 impl ElemId {
     fn try_load(
-        key_actor: Option<Cow<'_, ActorIdx>>,
-        key_counter: Option<Cow<'_, i64>>,
-    ) -> Result<Option<ElemId>, ReadOpError> {
-        match (key_counter, key_actor) {
-            (None, None) => Ok(None),
-            (Some(Cow::Owned(0)), None) => Ok(Some(ElemId(OpId::new(0, 0)))),
-            (Some(counter), Some(actor)) if *counter > 0 => Ok(Some(ElemId(OpId::new(
-                *counter as u64,
-                usize::from(*actor),
-            )))),
-            _ => Err(ReadOpError::InvalidKey),
-        }
-    }
-
-    fn from_v1(
         key_actor: Option<ActorIdx>,
-        key_counter: Option<u32>,
+        key_counter: Option<i64>,
     ) -> Result<Option<ElemId>, ReadOpError> {
         match (key_counter, key_actor) {
             (None, None) => Ok(None),
             (Some(0), None) => Ok(Some(ElemId(OpId::new(0, 0)))),
-            (Some(counter), Some(actor)) if counter > 0 => {
-                Ok(Some(ElemId(OpId::new(counter as u64, usize::from(actor)))))
-            }
+            (Some(counter), Some(actor)) if counter > 0 => Ok(Some(ElemId(OpId::new(
+                counter as u64,
+                usize::from(actor),
+            )))),
             _ => Err(ReadOpError::InvalidKey),
         }
     }
 }
 
 impl<'a> KeyRef<'a> {
-    #[allow(dead_code)]
     pub(crate) fn try_load(
         key_str: Option<&'a str>,
-        key_actor: Option<Cow<'a, ActorIdx>>,
-        key_counter: Option<Cow<'a, i64>>,
-    ) -> Result<KeyRef<'a>, ReadOpError> {
-        let elemid = ElemId::try_load(key_actor, key_counter)?;
-        match (key_str, elemid) {
-            (Some(key_str), None) => Ok(KeyRef::Map(Cow::Borrowed(key_str))),
-            (None, Some(elemid)) => Ok(KeyRef::Seq(elemid)),
-            (None, None) => Err(ReadOpError::MissingKey),
-            (Some(_), Some(_)) => Err(ReadOpError::InvalidKey),
-        }
-    }
-
-    fn from_v1(
-        key_str: Option<&'a str>,
         key_actor: Option<ActorIdx>,
-        key_counter: Option<u32>,
-    ) -> Result<KeyRef<'a>, ReadOpError> {
-        let elemid = ElemId::from_v1(key_actor, key_counter)?;
-        match (key_str, elemid) {
-            (Some(key_str), None) => Ok(KeyRef::Map(Cow::Borrowed(key_str))),
-            (None, Some(elemid)) => Ok(KeyRef::Seq(elemid)),
-            (None, None) => Err(ReadOpError::MissingKey),
-            (Some(_), Some(_)) => Err(ReadOpError::InvalidKey),
-        }
-    }
-
-    pub(crate) fn try_load_owned(
-        key_str: Option<Cow<'a, str>>,
-        key_actor: Option<Cow<'a, ActorIdx>>,
-        key_counter: Option<Cow<'a, i64>>,
+        key_counter: Option<i64>,
     ) -> Result<KeyRef<'a>, ReadOpError> {
         let elemid = ElemId::try_load(key_actor, key_counter)?;
         match (key_str, elemid) {
-            (Some(key_str), None) => Ok(KeyRef::Map(key_str)),
+            (Some(key_str), None) => Ok(KeyRef::Map(Cow::Borrowed(key_str))),
             (None, Some(elemid)) => Ok(KeyRef::Seq(elemid)),
             (None, None) => Err(ReadOpError::MissingKey),
             (Some(_), Some(_)) => Err(ReadOpError::InvalidKey),
@@ -571,7 +503,7 @@ impl<'a> KeyIter<'a> {
             .key_ctr
             .next()
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        KeyRef::from_v1(key_str, key_actor, key_ctr)
+        KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from))
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<KeyRef<'a>, ReadOpError> {
@@ -587,7 +519,7 @@ impl<'a> KeyIter<'a> {
             .key_ctr
             .nth(n)
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        KeyRef::from_v1(key_str, key_actor, key_ctr)
+        KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from))
     }
 
     fn suspend(&self) -> KeyIterState {
@@ -669,7 +601,7 @@ impl<'a> ObjIdIter<'a> {
             .obj_ctr
             .next()
             .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
-        ObjId::from_v1(actor, ctr)
+        ObjId::try_load(actor, ctr.map(i64::from))
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<ObjId, ReadOpError> {
@@ -681,7 +613,7 @@ impl<'a> ObjIdIter<'a> {
             .obj_ctr
             .nth(n)
             .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
-        ObjId::from_v1(actor, ctr)
+        ObjId::try_load(actor, ctr.map(i64::from))
     }
 
     fn suspend(&self) -> ObjIdIterState {

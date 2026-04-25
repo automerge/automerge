@@ -1,4 +1,6 @@
+mod decoder;
 pub mod indexed;
+pub use decoder::DeltaDecoder;
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
