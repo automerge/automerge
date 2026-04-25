@@ -4,13 +4,13 @@ use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
 use std::ops::Add;
 
-use hexane::{v1, ColumnCursor, DeltaCursor, PackError, UIntCursor};
+use hexane::v1;
 
 use crate::storage::BundleMetadata;
 use crate::{
     clock::{Clock, SeqClock},
     error::AutomergeError,
-    op_set2::{change::BuildChangeMetadata, ActorCursor, ActorIdx, ValueMeta},
+    op_set2::{change::BuildChangeMetadata, ActorIdx, ValueMeta},
     storage::columns::compression::Uncompressed,
     storage::columns::BadColumnLayout,
     storage::document::ReconstructError as LoadError,
@@ -777,16 +777,10 @@ impl ChangeGraphCols {
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
-        let actors = hexane::v1::Column::<ActorIdx>::load(actor_bytes)?.to_vec();
-        let actors2 = to_vec(ActorCursor::iter(actor_bytes))?;
-        assert_eq!(actors, actors2);
-        let max_ops = hexane::v1::DeltaColumn::<u32>::load(max_op_bytes)?.to_vec();
-        let max_ops2 = to_u32_vec(DeltaCursor::iter(max_op_bytes))?;
-        assert_eq!(max_ops, max_ops2);
+        let actors: Vec<ActorIdx> = v1::decoder::<ActorIdx>(actor_bytes).collect();
+        let max_ops: Vec<u32> = v1::DeltaDecoder::<u32>::new(max_op_bytes).collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
-        let seq = hexane::v1::DeltaColumn::<u32>::load(seq_bytes)?.to_vec();
-        let seq2 = to_u32_vec(DeltaCursor::iter(seq_bytes))?;
-        assert_eq!(seq, seq2);
+        let seq: Vec<u32> = v1::DeltaDecoder::<u32>::new(seq_bytes).collect();
 
         if let Some(a) = actors.iter().copied().map(usize::from).max() {
             if a >= num_actors {
@@ -825,17 +819,11 @@ impl ChangeGraphCols {
         let mut parents = Vec::with_capacity(len);
         let mut edges = vec![];
 
-        let deps_count =
-            hexane::v1::Column::<u32>::load_with(deps_count_bytes, opts.into())?.to_vec();
-        let mut deps_count2 = UIntCursor::iter(deps_count_bytes).map(to_u32);
-        let deps_val = hexane::v1::DeltaColumn::<u32>::load(deps_val_bytes)?.to_vec();
-        let mut deps_val2 = DeltaCursor::iter(deps_val_bytes).map(to_u32);
-        let mut deps_val_iter = deps_val.iter();
+        let deps_count: Vec<u32> = v1::decoder::<u32>(deps_count_bytes).collect();
+        let mut deps_val_iter = v1::DeltaDecoder::<u32>::new(deps_val_bytes);
 
         let mut num_ops_vec = Vec::with_capacity(len);
         for (i, d) in deps_count.iter().enumerate() {
-            let d2 = deps_count2.next().unwrap();
-            assert_eq!(Some(*d), d2.ok());
             let d = *d as usize;
             if d == 0 {
                 num_ops_vec.push(max_ops[i] as u64);
@@ -846,11 +834,9 @@ impl ChangeGraphCols {
             parents.push(Some(EdgeIdx::new(edges.len())));
             let mut last_max_op = 0;
             for e in 0..d {
-                let dep = *deps_val_iter
+                let dep = deps_val_iter
                     .next()
                     .ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))?;
-                let dep2 = deps_val2.next().unwrap();
-                assert_eq!(Some(dep), dep2.ok());
                 let target = NodeIdx(dep);
                 let next = EdgeIdx::new(edges.len() + 1);
                 let next = if e + 1 == d { None } else { Some(next) };
@@ -1063,44 +1049,6 @@ mod tests {
             graph
         }
     }
-}
-
-fn to_vec<'a, I, T>(iter: I) -> Result<Vec<T>, PackError>
-where
-    I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
-    T: Copy + Default + 'a,
-{
-    iter.map(squish).collect()
-}
-
-fn squish<T>(i: Result<Option<Cow<'_, T>>, PackError>) -> Result<T, PackError>
-where
-    T: Copy + Default,
-{
-    match i {
-        Err(e) => Err(e),
-        Ok(Some(i)) => Ok(*i),
-        Ok(None) => Ok(T::default()),
-    }
-}
-
-fn to_u32<T>(i: Result<Option<Cow<'_, T>>, PackError>) -> Result<u32, PackError>
-where
-    T: TryInto<u32> + Copy + Default,
-{
-    match i {
-        Err(e) => Err(e),
-        Ok(Some(i)) => Ok((*i).try_into().unwrap_or(0)),
-        Ok(None) => Ok(0),
-    }
-}
-
-fn to_u32_vec<'a, I, T>(iter: I) -> Result<Vec<u32>, PackError>
-where
-    I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
-    T: TryInto<u32> + Copy + Default + 'a,
-{
-    iter.map(to_u32).collect()
 }
 
 pub(crate) struct ChangeIter<'a> {

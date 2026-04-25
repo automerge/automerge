@@ -19,13 +19,30 @@ pub mod raw;
 pub mod rle;
 pub use column::{Column, Iter, IterState};
 pub use delta::indexed::FindByRange;
-pub use delta::{DeltaColumn, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
+pub use delta::{
+    DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue,
+};
 pub use index::{BitIndex, ColumnIndex};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.
 /// For bool this resolves to `BoolEncoder`.
 pub type Encoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Encoder<'a>;
+
+/// Streaming decoder for column type `T`, resolved via `T::Encoding`.
+///
+/// Symmetric with [`Encoder`]: yields `T::Get<'a>` items from raw bytes
+/// without allocating a `Column`.  Construct via [`decoder`].
+pub type Decoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Decoder<'a>;
+
+/// Construct a streaming [`Decoder`] over raw column bytes.
+///
+/// ```ignore
+/// for v in hexane::v1::decoder::<Option<u64>>(&bytes) { ... }
+/// ```
+pub fn decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Decoder<'a, T> {
+    <T::Encoding as ColumnEncoding>::decoder(data)
+}
 pub use encoding::ColumnEncoding;
 pub use encoding::EncoderApi;
 pub use encoding::RunDecoder;

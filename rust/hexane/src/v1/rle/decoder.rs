@@ -28,6 +28,15 @@ impl<T: RleValue> Clone for RleDecoder<'_, T> {
     }
 }
 
+impl<T: RleValue> std::fmt::Debug for RleDecoder<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RleDecoder")
+            .field("byte_pos", &self.byte_pos)
+            .field("remaining", &self.remaining)
+            .finish()
+    }
+}
+
 enum RleDecoderState<'a, T: RleValue> {
     /// Repeat run: yield the same cached value.
     Repeat(<T as ColumnValueRef>::Get<'a>),

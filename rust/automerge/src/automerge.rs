@@ -671,8 +671,6 @@ impl Automerge {
                     log!(" s={:?}|{:?} ", s.id(), s.col_type());
                     log!(" {:?} ", d1);
                     log!(" {:?} ", d2);
-                    OpSet::decode(s, d1);
-                    OpSet::decode(s, d2);
                 }
             }
         }

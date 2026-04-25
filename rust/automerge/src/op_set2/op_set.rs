@@ -4,7 +4,7 @@ use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::storage::columns::BadColumnLayout;
-use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
+use crate::storage::{columns::compression::Uncompressed, Document, RawColumns};
 use crate::types;
 use crate::types::{
     ActorId, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
@@ -469,6 +469,40 @@ impl OpSet {
         );
         query.resolve(current_acc).ok()
     }
+
+    // WIP: commented out to unblock the build.  See conversation context.
+    // pub(crate) fn query_insert_at_text2(
+    //     &self,
+    //     obj: &ObjId,
+    //     index: NonZeroUsize,
+    // ) -> Option<QueryNth> {
+    //     let range = self.scope_to_obj(obj);
+    //
+    //     let mut text_iter = self.cols.index.text.iter_range(range.clone());
+    //     let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
+    //     let start_pos = tx1.pos.min(range.end);
+    //     let current_acc = tx1.delta as usize;
+    //
+    //     while let Some(run) = text_iter.next_run() {
+    //       match run.value {
+    //         (prefix, Some(0)) => (), // mark
+    //         (prefix, Some(w)) => break; // end
+    //         (prefix, None => (), // deleted char
+    //       }
+    //     }
+    //
+    //     let iter = self.iter_range(&(start_pos..range.end));
+    //     let marks = self.cols.index.mark.rich_text_at(start_pos, None);
+    //     let mut query = InsertQuery::new(
+    //         iter,
+    //         index.get(),
+    //         SequenceType::Text,
+    //         self.text_encoding,
+    //         None,
+    //         marks,
+    //     );
+    //     query.resolve(current_acc).ok()
+    // }
 
     pub(crate) fn query_insert_at_list(
         &self,
@@ -1140,21 +1174,6 @@ impl OpSet {
     //    MaybePackable allowing you to pass in Item or Option<Item> to splice
     // * maybe do something with types to make scan required to get
     //    validated bytes
-
-    pub(crate) fn decode(_spec: ColumnSpec, _data: &[u8]) {
-        /*
-                match spec.col_type() {
-                    ColumnType::Actor => ActorCursor::decode(data),
-                    ColumnType::String => StrCursor::decode(data),
-                    ColumnType::Integer => UIntCursor::decode(data),
-                    ColumnType::DeltaInteger => DeltaCursor::decode(data),
-                    ColumnType::Boolean => BooleanCursor::decode(data),
-                    ColumnType::Group => UIntCursor::decode(data),
-                    ColumnType::ValueMetadata => MetaCursor::decode(data),
-                    ColumnType::Value => log!("raw :: {:?}", data),
-                }
-        */
-    }
 
     pub(crate) fn insert_actor(&mut self, idx: usize, actor: ActorId) {
         if self.actors.len() != idx {

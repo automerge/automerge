@@ -12,8 +12,6 @@ use std::fmt;
 use super::meta::{ValueMeta, ValueType};
 use hexane::{PackError, Packable, RleCursor};
 
-pub(crate) use super::meta::MetaCursor;
-
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
 pub(crate) struct ActorIdx(pub(crate) u32); // FIXME - shouldnt this be usize? (wasm is 32bit)
