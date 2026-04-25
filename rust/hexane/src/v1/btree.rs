@@ -20,8 +20,9 @@ use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
 
 /// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
-/// larger = fewer nodes + more per-node cost.  `B = 16` gives height ≈ 5
-/// for 1 M slabs.
+/// larger = fewer nodes + more per-node cost.  64 is empirically a good
+/// compromise across the `marks_at` (query-heavy) and `insert_null`
+/// (mutation-heavy) workloads.
 const B: usize = 64;
 
 // ── SlabAggregate trait ─────────────────────────────────────────────────────
@@ -51,8 +52,28 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
 /// Implemented by [`PrefixSlabWeight<P>`](super::prefix::PrefixSlabWeight)
 /// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
 pub trait PrefixAggregate: SlabAggregate {
-    type Prefix: Copy + Default + PartialOrd + Add<Output = Self::Prefix> + Debug;
-    fn prefix(&self) -> Self::Prefix;
+    /// `Ord` is not required here — only forward accumulation needs `Add`.
+    /// The "find slab whose prefix reaches target" search is provided in a
+    /// separate impl block bounded on `Self::Prefix: Ord`.
+    ///
+    /// `Clone` (not `Copy`) so non-scalar prefixes (e.g. a `HashMap`-backed
+    /// mark set) can serve as the per-slab aggregate.
+    ///
+    /// `for<'a> AddAssign<&'a Self::Prefix>` lets the B-tree descent
+    /// accumulate prefixes via `+=` against the stored aggregate by
+    /// reference — avoiding a per-level clone of large non-scalar
+    /// prefixes (the dominant cost for `MarkAcc`-style HashMap prefixes).
+    /// All scalar primitives (`u128`, `i128`, `u64`, etc.) impl this in
+    /// `core` already.
+    type Prefix: Clone
+        + Default
+        + Add<Output = Self::Prefix>
+        + Debug
+        + for<'a> AddAssign<&'a Self::Prefix>;
+    /// Borrow-typed accessor — the B-tree descent reads prefixes many
+    /// times per query and aggregates by reference, so cloning here would
+    /// be wasted work for non-scalar prefixes.
+    fn prefix(&self) -> &Self::Prefix;
 }
 
 fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -> A {
@@ -99,8 +120,8 @@ impl SlabAggregate for SlabAgg {
 
 impl PrefixAggregate for SlabAgg {
     type Prefix = i64;
-    fn prefix(&self) -> i64 {
-        self.total
+    fn prefix(&self) -> &i64 {
+        &self.total
     }
 }
 
@@ -133,11 +154,11 @@ impl SlabAggregate for usize {
 
 impl<P> SlabAggregate for super::prefix::PrefixSlabWeight<P>
 where
-    P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign,
+    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
 {
     fn merge(l: &Self, r: &Self) -> Self {
-        let mut out = *l;
-        out += *r;
+        let mut out = l.clone();
+        out += r.clone();
         out
     }
 
@@ -148,11 +169,17 @@ where
 
 impl<P> PrefixAggregate for super::prefix::PrefixSlabWeight<P>
 where
-    P: Copy + Default + std::fmt::Debug + AddAssign + SubAssign + PartialOrd + Add<Output = P>,
+    P: Clone
+        + Default
+        + std::fmt::Debug
+        + AddAssign
+        + SubAssign
+        + Add<Output = P>
+        + for<'a> AddAssign<&'a P>,
 {
     type Prefix = P;
-    fn prefix(&self) -> P {
-        self.prefix
+    fn prefix(&self) -> &P {
+        &self.prefix
     }
 }
 
@@ -186,12 +213,14 @@ struct Internal<A: SlabAggregate> {
 /// subtree's aggregate and slab count (redundant with what the child
 /// root could recompute, but cached here so top-down walks are
 /// constant-time per node).
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct ChildSlot<A: SlabAggregate> {
     id: NodeId,
     agg: A,
     slab_count: usize,
 }
+
+impl<A: SlabAggregate + Copy> Copy for ChildSlot<A> {}
 
 // ── Tree ────────────────────────────────────────────────────────────────────
 
@@ -1217,7 +1246,7 @@ pub(crate) struct FoundSlab<A: PrefixAggregate> {
 impl<A: PrefixAggregate> FoundSlab<A> {
     #[cfg(test)]
     pub(crate) fn decompose(&self) -> (usize, A::Prefix, usize) {
-        (self.index, self.prefix, self.pos)
+        (self.index, self.prefix.clone(), self.pos)
     }
 }
 
@@ -1248,7 +1277,7 @@ impl<A: PrefixAggregate> SlabBTree<A> {
                                 pos,
                             };
                         }
-                        prefix = prefix + a.prefix();
+                        prefix += a.prefix();
                         pos += l_len;
                         remaining -= l_len;
                     }
@@ -1267,7 +1296,7 @@ impl<A: PrefixAggregate> SlabBTree<A> {
                             descended = true;
                             break;
                         }
-                        prefix = prefix + c.agg.prefix();
+                        prefix += c.agg.prefix();
                         pos += c_len;
                         slab_base += c.slab_count;
                         remaining -= c_len;
@@ -1283,7 +1312,9 @@ impl<A: PrefixAggregate> SlabBTree<A> {
             }
         }
     }
+}
 
+impl<A: PrefixAggregate> SlabBTree<A> where A::Prefix: Ord {
     /// Find the slab whose prefix sum first reaches or exceeds `target`.
     /// Returns `(slab_idx, prefix_before_slab, items_before_slab)`.  If
     /// `target` exceeds the total prefix, returns one-past-the-end.
@@ -1299,7 +1330,8 @@ impl<A: PrefixAggregate> SlabBTree<A> {
             match self.node(node) {
                 Node::Leaf(l) => {
                     for (i, a) in l.aggs.iter().enumerate() {
-                        let after = acc_prefix + a.prefix();
+                        let mut after = acc_prefix.clone();
+                        after += a.prefix();
                         if target <= after {
                             return (slab_base + i, acc_prefix, acc_items);
                         }
@@ -1311,7 +1343,8 @@ impl<A: PrefixAggregate> SlabBTree<A> {
                 Node::Internal(n) => {
                     let mut descended = false;
                     for c in &n.children {
-                        let after = acc_prefix + c.agg.prefix();
+                        let mut after = acc_prefix.clone();
+                        after += c.agg.prefix();
                         if target <= after {
                             node = c.id;
                             descended = true;
