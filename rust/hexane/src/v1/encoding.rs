@@ -94,13 +94,15 @@ pub trait ColumnEncoding: Default {
     ) -> (usize, Self::Tail);
 
     /// Splice a single slab: delete `del` items at `index`, insert values.
+    /// Each iterator item is `(value, count)` — pass `count = 1` for a single
+    /// value, or a larger count to insert a run of identical values in bulk.
     /// `del` may exceed the slab length — the excess is returned as `overflow_del`.
     /// Returns `(overflow_slabs, overflow_del)`.
     fn splice_slab<V: AsColumnRef<Self::Value>>(
         slab: &mut Slab<Self::Tail>,
         index: usize,
         del: usize,
-        values: impl Iterator<Item = V>,
+        values: impl Iterator<Item = (V, usize)>,
         max_segments: usize,
     ) -> (Vec<Slab<Self::Tail>>, usize);
 
@@ -145,7 +147,7 @@ pub trait ColumnEncoding: Default {
 
     fn encode<V: AsColumnRef<Self::Value>>(values: impl Iterator<Item = V>) -> Slab<Self::Tail> {
         let mut slab = Self::empty_slab();
-        Self::splice_slab(&mut slab, 0, 0, values, usize::MAX);
+        Self::splice_slab(&mut slab, 0, 0, values.map(|v| (v, 1)), usize::MAX);
         slab
     }
 }

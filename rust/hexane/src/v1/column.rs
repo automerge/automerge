@@ -1090,15 +1090,18 @@ where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = V>,
     {
-        let _ = self.splice_inner(index, del, values);
+        let _ = self.splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
     /// Returns the affected slab range (post-merge), mirroring
     /// `Column::splice_inner`.
+    ///
+    /// Each iterator item is `(value, count)` — pass `count = 1` for a single
+    /// value, or a larger count to insert a run of identical values in bulk.
     pub(crate) fn splice_inner<V, I>(&mut self, index: usize, del: usize, values: I) -> Range<usize>
     where
         V: AsColumnRef<T>,
-        I: IntoIterator<Item = V>,
+        I: IntoIterator<Item = (V, usize)>,
     {
         self.counter += 1;
         assert!(index + del <= self.total_len, "splice range out of bounds");
@@ -1151,7 +1154,7 @@ where
     ) -> Range<usize>
     where
         V: AsColumnRef<T>,
-        I: Iterator<Item = V>,
+        I: Iterator<Item = (V, usize)>,
     {
         let mut range = si..(si + 1);
         let mut old_slab_len = self.slabs[si].len;
@@ -1180,7 +1183,7 @@ where
                     &mut self.slabs[consume_end],
                     0,
                     remaining,
-                    std::iter::empty::<V>(),
+                    std::iter::empty::<(V, usize)>(),
                     self.max_segments,
                 );
                 consume_end += 1;

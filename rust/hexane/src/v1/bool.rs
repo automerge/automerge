@@ -150,7 +150,7 @@ pub(crate) fn splice_slab(
     slab: &mut Slab,
     index: usize,
     del: usize,
-    values: impl Iterator<Item = bool>,
+    values: impl Iterator<Item = (bool, usize)>,
     max_segments: usize,
 ) -> Vec<Slab> {
     let end_index = index + del;
@@ -183,10 +183,13 @@ pub(crate) fn splice_slab(
     let mut cur_count = prefix.count;
     let mut tail = prefix.pos as u8;
 
-    for val in values {
-        items_inserted += 1;
+    for (val, count) in values {
+        if count == 0 {
+            continue;
+        }
+        items_inserted += count;
         if val == cur_value {
-            cur_count += 1;
+            cur_count += count;
         } else {
             // Flush current run.
             let c = encode_count(cur_count);
@@ -195,7 +198,7 @@ pub(crate) fn splice_slab(
             len += cur_count;
             segments += 1;
             cur_value = !cur_value;
-            cur_count = 1;
+            cur_count = count;
 
             // Check if we've hit the segment budget.
             if segments >= target_segments {
@@ -613,12 +616,12 @@ impl ColumnEncoding for BoolEncoding {
         slab: &mut Slab,
         index: usize,
         del: usize,
-        values: impl Iterator<Item = V>,
+        values: impl Iterator<Item = (V, usize)>,
         max_segments: usize,
     ) -> (Vec<Slab>, usize) {
         let slab_del = del.min(slab.len - index);
         let overflow_del = del - slab_del;
-        let bools = values.map(|v| v.as_column_ref());
+        let bools = values.map(|(v, count)| (v.as_column_ref(), count));
         let overflow_slabs = splice_slab(slab, index, slab_del, bools, max_segments);
         (overflow_slabs, overflow_del)
     }
