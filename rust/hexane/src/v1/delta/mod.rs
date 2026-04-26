@@ -1328,48 +1328,19 @@ impl<T: DeltaValue> DeltaColumn<T> {
         let len = self.col.len();
         assert!(index + del <= len, "splice range out of bounds");
 
-        let mut values: Vec<_> = values.into_iter().map(|t| t.to_i64()).collect();
-        if del == 0 && values.is_empty() {
+        let mut values = values.into_iter().map(|t| t.to_i64()).peekable();
+        if del == 0 && values.peek().is_none() {
             return 0..0;
         }
 
-        match self.find_boundaries(index, del) {
-            (prev, _, None) => {
-                // End of column — nothing after the splice to preserve.
-                let all = deltas_from(&values, prev);
-                self.col.splice_inner(index, del, all)
-            }
-            (prev, skip, Some(next_val)) if skip < 10 => {
-                // Small null run (or none) — rewrite everything in one splice:
-                // [new values, `skip` nulls, Some(next_val)].
-                values.extend(std::iter::repeat(None).take(skip));
-                values.push(Some(next_val));
-                let all = deltas_from(&values, prev);
-                self.col.splice_inner(index, del + skip + 1, all)
-            }
-            (prev, skip, Some(next_val)) => {
-                // Large null run — leave the nulls in place and do two splices:
-                //   1. Rewrite the boundary non-null's delta relative to the
-                //      last non-null in the new values (which will be the
-                //      running after splice #2 lands).
-                //   2. Replace the deleted range with the new values.
-                // Ordering matters: the postfix delta is computed against the
-                // *future* running established by splice #2.
-                let last_value = values
-                    .iter()
-                    .rev()
-                    .copied()
-                    .flatten()
-                    .next()
-                    .unwrap_or(prev);
-                let new_postfix = next_val - last_value;
-                // TODO: this could be done as a single splice if splice_inner took `postfix: [Run<T>]` as an argument
-                // could have meaningful impact on delta performance
-                self.col.splice_inner(index + del + skip, 1, [Some(new_postfix)]);
-                let all = deltas_from(&values, prev);
-                self.col.splice_inner(index, del, all)
-            }
-        }
+        let (prev, skip, next_val) = self.find_boundaries(index, del);
+        // When a boundary non-null follows the splice, replace `del` original
+        // items + `skip` preserved nulls + 1 boundary, and inline the bulk
+        // null run + a recomputed boundary delta to keep the realized value
+        // of `next_val` intact.
+        let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
+        let iter = SpliceDeltaIter::new(values, prev, skip, next_val);
+        self.col.splice_inner(index, total_del, iter)
     }
 
     /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
@@ -1588,6 +1559,76 @@ pub(crate) fn deltas_from<'a>(
             Some(d)
         }
     })
+}
+
+/// Streaming iterator that turns realized `Option<i64>` values + the result
+/// of `find_boundaries` into the `(delta, count)` pairs that
+/// `Column::splice_inner` consumes.  Avoids allocating the values into a
+/// `Vec`: emits each delta in lockstep with the input iterator, then —
+/// when a boundary non-null follows the splice — emits a bulk
+/// `(None, skip)` and a recomputed boundary delta against the post-splice
+/// running.
+struct SpliceDeltaIter<I> {
+    iter: I,
+    running: i64,
+    skip: usize,
+    next_val: Option<i64>,
+    phase: SplicePhase,
+}
+
+enum SplicePhase {
+    Values,
+    NullRun,
+    Boundary,
+    Done,
+}
+
+impl<I: Iterator<Item = Option<i64>>> SpliceDeltaIter<I> {
+    fn new(iter: I, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
+        Self {
+            iter,
+            running: prev,
+            skip,
+            next_val,
+            phase: SplicePhase::Values,
+        }
+    }
+}
+
+impl<I: Iterator<Item = Option<i64>>> Iterator for SpliceDeltaIter<I> {
+    type Item = (Option<i64>, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.phase {
+                SplicePhase::Values => match self.iter.next() {
+                    Some(None) => return Some((None, 1)),
+                    Some(Some(r)) => {
+                        let d = r - self.running;
+                        self.running = r;
+                        return Some((Some(d), 1));
+                    }
+                    None => {
+                        self.phase = if self.next_val.is_some() {
+                            SplicePhase::NullRun
+                        } else {
+                            SplicePhase::Done
+                        };
+                    }
+                },
+                SplicePhase::NullRun => {
+                    self.phase = SplicePhase::Boundary;
+                    return Some((None, self.skip));
+                }
+                SplicePhase::Boundary => {
+                    self.phase = SplicePhase::Done;
+                    let next = self.next_val.expect("boundary phase requires next_val");
+                    return Some((Some(next - self.running), 1));
+                }
+                SplicePhase::Done => return None,
+            }
+        }
+    }
 }
 
 // ── FromIterator / Extend / IntoIterator ────────────────────────────────────
