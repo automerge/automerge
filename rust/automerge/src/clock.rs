@@ -54,6 +54,15 @@ impl SeqClock {
             }
         }
     }
+
+    pub(crate) fn covers(&self, other: &SeqClock) -> bool {
+        assert_eq!(self.0.len(), other.0.len());
+        std::iter::zip(self.0.iter(), other.0.iter()).all(|(a, b)| match (a, b) {
+            (_, None) => true,
+            (Some(s1), Some(s2)) => s1 >= s2,
+            _ => false,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

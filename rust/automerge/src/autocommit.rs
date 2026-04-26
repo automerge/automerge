@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
+use crate::change_graph::Fragment;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
@@ -608,6 +609,10 @@ impl AutoCommit {
     pub fn dump(&mut self) {
         self.ensure_transaction_closed();
         self.doc.dump()
+    }
+
+    pub fn fragments(&self) -> Vec<Fragment> {
+        self.doc.fragments()
     }
 
     /// Get the current heads of the document.

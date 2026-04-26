@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+pub(crate) use crate::change_graph::Fragment;
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -1248,6 +1249,10 @@ impl Automerge {
         DiffIter::log(self, obj, clock, &mut patch_log, recursive);
         patch_log.heads = Some(after_heads.to_vec());
         Ok(patch_log.make_patches(self))
+    }
+
+    pub fn fragments(&self) -> Vec<Fragment> {
+        self.change_graph.fragments(&self.get_heads()).collect()
     }
 
     /// Get the heads of this document.
