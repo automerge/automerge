@@ -3,7 +3,6 @@ use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, Prop
 use super::{ValueMeta, ValueRef};
 use hexane::{ColumnDataIter, DeltaCursor, IntCursor};
 
-use crate::clock::Clock;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::types;
@@ -50,10 +49,11 @@ impl AsBuilder for &TxOp {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
-    pub(crate) succ: Vec<(OpId, Option<i64>)>,
+    pub(crate) succ: Vec<(OpId, Option<i64>, bool)>,
     pub(crate) pos: Option<usize>,
     pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
+    pub(crate) revoked: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -89,7 +89,11 @@ impl ChangeOp {
     ) -> hydrate::Value {
         if self.bld.action == Action::Set {
             if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self.succ.iter().filter_map(|(_, inc)| *inc).sum();
+                let inc: i64 = self
+                    .succ
+                    .iter()
+                    .filter_map(|(_, inc, rev)| (*inc).filter(|_| !rev))
+                    .sum();
                 hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
             } else {
                 hydrate::Value::Scalar(self.bld.value.to_owned())
@@ -104,11 +108,11 @@ impl ChangeOp {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+        !(self.revoked || self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
 
     pub(crate) fn has_succ(&self) -> bool {
-        self.succ.iter().any(|(_, inc)| inc.is_none())
+        self.succ.iter().any(|(_, inc, rev)| inc.is_none() && !rev)
     }
 
     pub(crate) fn insert(&self) -> bool {
@@ -626,11 +630,15 @@ impl OpLike for ChangeOp {
     type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        if op.revoked {
+            None
+        } else {
+            op.bld.mark_index()
+        }
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
-        if Self::visible(op) {
+        if op.visible() {
             op.bld.width(seq_type, text_encoding) as u64
         } else {
             0
@@ -638,11 +646,11 @@ impl OpLike for ChangeOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+        op.visible()
     }
 
     fn top(op: &Self) -> bool {
-        !op.conflicted && Self::visible(op)
+        !op.conflicted && op.visible()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -920,6 +928,7 @@ pub(crate) struct SuccInsert {
     pub(crate) pos: usize,
     pub(crate) inc: Option<i64>,
     pub(crate) len: u64,
+    pub(crate) rev: bool,
     pub(crate) sub_pos: usize,
 }
 
@@ -937,7 +946,11 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
+        self.add_succ_w_rev(id, inc, false)
+    }
+
+    pub(crate) fn add_succ_w_rev(&self, id: OpId, mut inc: Option<i64>, rev: bool) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
         if inc.is_some() && !self.is_counter() {
@@ -956,25 +969,8 @@ impl<'a> Op<'a> {
             pos,
             inc,
             len,
+            rev,
             sub_pos,
-        }
-    }
-
-    pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
-        if let ScalarValue::Counter(n) = self.value {
-            let mut inc = 0;
-            for (i, val) in self.succ_inc() {
-                if let Some(v) = val {
-                    if let Some(c) = clock {
-                        if c.covers(&i) {
-                            inc += v;
-                        }
-                    } else {
-                        inc += v;
-                    }
-                }
-            }
-            self.value = ScalarValue::Counter(n + inc);
         }
     }
 
@@ -1335,6 +1331,9 @@ pub(crate) trait OpLike: Debug {
     fn expand(op: &Self) -> bool;
     fn succ(&self) -> Self::SuccIter<'_>;
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
+    fn counter(op: &Self) -> i64 {
+        Self::succ_inc(op).map(|i| i.unwrap_or(0)).sum()
+    }
     fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64;

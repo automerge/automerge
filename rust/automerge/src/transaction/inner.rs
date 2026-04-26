@@ -8,12 +8,15 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::change::Footer;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
 use crate::patches::PatchLog;
-use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
+use crate::types::{
+    Author, Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD,
+};
 use crate::Automerge;
 use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
@@ -29,6 +32,7 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<TxOp>,
+    author: Option<Author>,
 }
 
 /// Arguments required to create a new transaction
@@ -46,6 +50,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
+    /// The author of the change
+    pub(crate) author: Option<Author>,
 }
 
 impl TransactionInner {
@@ -57,6 +63,7 @@ impl TransactionInner {
             checkpoint,
             deps,
             scope,
+            author,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -69,6 +76,7 @@ impl TransactionInner {
             deps,
             pending: vec![],
             scope,
+            author,
         }
     }
 
@@ -147,9 +155,22 @@ impl TransactionInner {
             max_op: self.start_op.get() + self.pending.len() as u64 - 1,
             timestamp: self.time,
             message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
-            extra: Cow::Borrowed(&[]),
+            extra: self.extra_bytes(),
             builder: 0,
             deps,
+        }
+    }
+
+    fn extra_bytes<'a>(&self) -> Cow<'a, [u8]> {
+        if let Some(author) = self.author.as_ref() {
+            assert_eq!(self.seq, 1);
+            let mut buf = vec![];
+            leb128::write::unsigned(&mut buf, Footer::Author as u64).unwrap();
+            leb128::write::unsigned(&mut buf, author.as_bytes().len() as u64).unwrap();
+            buf.extend_from_slice(author.as_bytes());
+            Cow::Owned(buf)
+        } else {
+            Cow::Borrowed(&[])
         }
     }
 

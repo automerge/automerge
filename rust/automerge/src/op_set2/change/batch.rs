@@ -16,14 +16,12 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 
-type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
+type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>, bool)>>;
 
 #[derive(Debug, Clone, Default)]
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
-    actor_seq: HashMap<ActorId, HashSet<u64>>,
-    hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
 }
@@ -68,9 +66,9 @@ impl<'a> Untangler<'a> {
     fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
         let mut deleted = false;
         if let Some(v) = self.pred.remove(&doc_op.id) {
-            for (id, inc) in v {
-                deleted |= inc.is_none();
-                succ.push(doc_op.add_succ(id, inc));
+            for (id, inc, rev) in v {
+                deleted |= inc.is_none() && !rev;
+                succ.push(doc_op.add_succ_w_rev(id, inc, rev));
             }
         }
 
@@ -222,24 +220,28 @@ impl<'a> Untangler<'a> {
         if let Some(p) = vis {
             let op = &mut self.change_ops[p];
             if self.seq_type == SequenceType::List {
-                let value = op.hydrate_value_and_fix_counters(self.text_encoding);
-                log.insert(op.bld.obj, self.index, value, op.id(), conflict);
+                if !op.revoked {
+                    let value = op.hydrate_value_and_fix_counters(self.text_encoding);
+                    log.insert(op.bld.obj, self.index, value, op.id(), conflict);
+                }
                 self.index += 1;
             } else {
-                let marks = self.value.marks.after.current().cloned();
-                match op.bld.action {
-                    Action::MakeMap => {
-                        // Block markers
-                        log.insert(
-                            op.bld.obj,
-                            self.index,
-                            Value::map(),
-                            op.bld.id,
-                            op.conflicted,
-                        );
-                    }
-                    _ => {
-                        log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
+                if !op.revoked {
+                    let marks = self.value.marks.after.current().cloned();
+                    match op.bld.action {
+                        Action::MakeMap => {
+                            // Block markers
+                            log.insert(
+                                op.bld.obj,
+                                self.index,
+                                Value::map(),
+                                op.bld.id,
+                                op.conflicted,
+                            );
+                        }
+                        _ => {
+                            log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
+                        }
                     }
                 }
                 self.index += op.width(self.seq_type, self.text_encoding);
@@ -482,9 +484,9 @@ fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<Su
     if let Some(d) = doc_op {
         let mut deleted = false;
         if let Some(v) = pred.remove(&d.id) {
-            for (id, inc) in v {
-                deleted |= inc.is_none();
-                succ.push(d.add_succ(id, inc));
+            for (id, inc, rev) in v {
+                deleted |= inc.is_none() && !rev;
+                succ.push(d.add_succ_w_rev(id, inc, rev));
             }
         }
         deleted
@@ -629,6 +631,7 @@ impl<'a> ValueState<'a> {
 
     fn process_change_op(&mut self, op: &ChangeOp) {
         match op.action() {
+            _ if op.revoked => {}
             Action::Delete => {}
             Action::Increment => self.do_increment(op),
             Action::Mark => self.process_mark(op.id(), op.mark_data()),
@@ -762,34 +765,15 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 
 impl BatchApply {
     fn push(&mut self, c: Change) {
-        assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
-
-        assert!(!self.hashes.contains(&c.hash()));
-        self.hashes.insert(c.hash());
-
         self.changes.push(c);
-    }
-
-    fn record_actor_seq(&mut self, c: &Change) {
-        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
-            set.insert(c.seq());
-        } else {
-            self.actor_seq
-                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
-        }
-    }
-
-    fn has_actor_seq(&self, c: &Change) -> bool {
-        self.actor_seq
-            .get(c.actor_id())
-            .map(|set| set.contains(&c.seq()))
-            .unwrap_or(false)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
-            doc.put_actor_ref(c.actor_id());
+            let actor_idx = doc.put_actor_ref(c.actor_id());
+            if let Some(a) = c.author() {
+                doc.change_graph.assign_author(a.into(), actor_idx);
+            }
         }
     }
 
@@ -926,7 +910,7 @@ impl BatchApply {
                 self.pred
                     .entry(*p)
                     .or_default()
-                    .push((o.id(), o.get_increment_value()));
+                    .push((o.id(), o.get_increment_value(), o.revoked));
             }
             if let Some(info) = o.obj_info() {
                 obj_info.insert(o.id(), info)
@@ -986,13 +970,20 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         // Pool all incoming changes together with any previously queued orphans.
         let mut pool: Vec<Change> = self.queue.take();
+        let queue_len = pool.len();
         let mut seen: HashSet<ChangeHash> = pool.iter().map(|c| c.hash()).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
+        let mut actor_author: HashSet<ActorId> = HashSet::new();
+        let mut err = None;
+
         for c in &pool {
             actor_seqs
                 .entry(c.actor_id().clone())
                 .or_default()
                 .insert(c.seq());
+            if c.author().is_some() {
+                actor_author.insert(c.actor_id().clone());
+            }
         }
 
         // Add new changes, deduplicating and checking for duplicate seq numbers.
@@ -1006,21 +997,32 @@ impl Automerge {
                     .get(c.actor_id())
                     .is_some_and(|s| s.contains(&c.seq()))
             {
-                // Put pool back as queue before returning error
-                for pc in pool {
-                    self.queue.push(pc);
-                }
-                return Err(AutomergeError::DuplicateSeqNumber(
-                    c.seq(),
-                    c.actor_id().clone(),
-                ));
+                err = Some(AutomergeError::duplicate_seq(&c));
+                break;
+            }
+            if c.author().is_some()
+                && (self.has_actor_author(&c) || actor_author.contains(c.actor_id()))
+            {
+                err = Some(AutomergeError::duplicate_author(&c));
+                break;
             }
             seen.insert(hash);
             actor_seqs
                 .entry(c.actor_id().clone())
                 .or_default()
                 .insert(c.seq());
+            if c.author().is_some() {
+                actor_author.insert(c.actor_id().clone());
+            }
             pool.push(c);
+        }
+
+        if let Some(e) = err {
+            // Put pool back as queue before returning error
+            for pc in pool.into_iter().take(queue_len) {
+                self.queue.push(pc);
+            }
+            return Err(e);
         }
 
         if pool.is_empty() {
@@ -1081,6 +1083,7 @@ impl Automerge {
         }
 
         chap.apply(self, log);
+
         Ok(())
     }
 
@@ -1099,6 +1102,8 @@ impl Automerge {
             .actors()
             .map(|a| self.ops.lookup_actor(a).unwrap())
             .collect();
+
+        let revoked = self.change_graph.is_revoked(actors[0].into(), change.seq());
 
         change
             .iter_ops()
@@ -1126,6 +1131,7 @@ impl Automerge {
                 let change = ChangeOp {
                     pos: None,
                     subsort: 0,
+                    revoked,
                     conflicted: false,
                     succ: vec![],
                     bld,
@@ -1994,5 +2000,22 @@ mod tests {
 
             doc.validate_top_index();
         }
+    }
+
+    #[test]
+    fn batch_multiple_changes_same_author() {
+        let author = crate::Author::try_from("aabbccdd").unwrap();
+        let mut doc1 = AutoCommit::new().with_author(Some(author.clone()));
+        doc1.put(&ROOT, "key1", "value1").unwrap();
+        doc1.commit();
+        doc1.put(&ROOT, "key2", "value2").unwrap();
+        doc1.commit();
+
+        let heads0 = [];
+        let changes = doc1.get_changes(&heads0);
+        assert_eq!(changes.len(), 2);
+
+        let mut doc2 = AutoCommit::new();
+        doc2.apply_changes_batch(changes).unwrap();
     }
 }
