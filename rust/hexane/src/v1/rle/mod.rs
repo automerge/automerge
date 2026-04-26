@@ -187,7 +187,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         slab: &mut Slab,
         index: usize,
         del: usize,
-        values: impl Iterator<Item = V>,
+        values: impl Iterator<Item = (V, usize)>,
         max_segments: usize,
     ) -> (Vec<Slab>, usize) {
         let slab_del = del.min(slab.len - index);

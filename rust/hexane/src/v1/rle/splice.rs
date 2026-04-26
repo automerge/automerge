@@ -333,7 +333,7 @@ mod partition_tests {
             &slab,
             start,
             end - start,
-            &mut vals[start..end].iter().copied(),
+            vals[start..end].iter().copied().map(|v| (v, 1)),
             usize::MAX,
         );
 
@@ -443,8 +443,13 @@ mod partition_tests {
     /// that decode to the expected values.
     fn overflow_insert_check(initial: &[u64], index: usize, new_vals: &[u64], max_seg: usize) {
         let slab = encode_u64_slab(initial);
-        let result =
-            build_splice_buf::<u64, u64>(&slab, index, 0, new_vals.iter().copied(), max_seg);
+        let result = build_splice_buf::<u64, u64>(
+            &slab,
+            index,
+            0,
+            new_vals.iter().copied().map(|v| (v, 1)),
+            max_seg,
+        );
 
         // Decode all slabs: first slab (after splice) + overflow slabs.
         let mut first = slab.data.to_vec();
@@ -614,7 +619,7 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     slab: &Slab,
     index: usize,
     del: usize,
-    values: impl Iterator<Item = V>,
+    values: impl Iterator<Item = (V, usize)>,
     max_segments: usize,
 ) -> SpliceBuf {
     assert!(slab.segments <= max_segments);
@@ -634,8 +639,10 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     let mut starting_segments = p.prefix.segments;
     let postfix_bytes = &slab.data[result.range.end..];
 
-    // 1. Feed new values.
-    for v in values {
+    // 1. Feed new values.  Each item is `(value, count)` — count > 1 inserts
+    //    a run of identical values in bulk via `append_n`.  Count == 0 is a
+    //    no-op (handled by `append_n`).
+    for (val, count) in values {
         if starting_segments + f.segments + state.pending_segments() >= target_segments {
             f += state.flush(&mut buf);
             if !overflowed {
@@ -663,8 +670,8 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
             inserted = 0;
             starting_segments = 0;
         }
-        inserted += 1;
-        f += state.append(&mut buf, v);
+        inserted += count;
+        f += state.append_n(&mut buf, val, count);
     }
 
     // 2. Feed postfix + flush.
@@ -739,7 +746,7 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
     slab: &mut Slab,
     index: usize,
     del: usize,
-    values: impl Iterator<Item = V>,
+    values: impl Iterator<Item = (V, usize)>,
     max_segments: usize,
 ) -> Vec<Slab> {
     assert!(index + del <= slab.len, "del extends beyond slab");
