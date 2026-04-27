@@ -1708,6 +1708,26 @@ impl Automerge {
     }
 }
 
+// Runs once at module instantiation (wasm-bindgen's `start` function). We
+// install a console-logging hook for hard aborts (instance termination) so
+// that even when wasm traps and the module is permanently torn down, the
+// failure is visible in the console rather than just surfacing as the
+// generic "Module terminated" error on every subsequent export call.
+//
+// Recoverable Rust panics still go through `console_error_panic_hook` (set
+// in `create` below) and surface as `PanicError` exceptions at the JS
+// boundary thanks to the `panic=unwind` build.
+#[wasm_bindgen(start)]
+fn on_start() {
+    fn log_abort() {
+        web_sys::console::error_1(
+            &"automerge-wasm: WASM instance aborted; subsequent calls will throw \"Module terminated\""
+                .into(),
+        );
+    }
+    let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
