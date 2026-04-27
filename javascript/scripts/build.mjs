@@ -117,11 +117,13 @@ function buildWasm(outputDir, gitHead) {
   // Rust functions surface as `PanicError` exceptions at the JS boundary
   // (wasm-bindgen 0.2.118+) instead of aborting the WASM module. This requires
   // a nightly toolchain (for -Zbuild-std) and the `rust-src` rustup component.
+  // CI sets WASM_TOOLCHAIN to a pinned dated nightly for reproducible builds.
   const wasmRustflags = [process.env.RUSTFLAGS, "-C panic=unwind"]
     .filter(Boolean)
     .join(" ")
+  const toolchain = process.env.WASM_TOOLCHAIN ?? "nightly"
   execSync(
-    "cargo +nightly build --target wasm32-unknown-unknown --release " +
+    `cargo +${toolchain} build --target wasm32-unknown-unknown --release ` +
       "-Zbuild-std=std,panic_unwind",
     {
       cwd: automergeWasmPath,
