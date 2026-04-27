@@ -20,11 +20,10 @@ crate-type = ["cdylib", "rlib"]
 bench = false
 
 [features]
-# default = ["console_error_panic_hook", "wee_alloc"]
-default = ["console_error_panic_hook"]
+# default = ["wee_alloc"]
+default = []
 
 [dependencies]
-console_error_panic_hook = { version = "^0.1", optional = true }
 # wee_alloc = { version = "^0.4", optional = true }
 automerge = { path = "../automerge", features = ["wasm", "utf16-indexing"] }
 js-sys = "^0.3"
