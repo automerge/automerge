@@ -6,13 +6,18 @@
 // rustup component. The nightly toolchain is selected here via rustup's
 // "+toolchain" argument so the workspace's pinned stable toolchain (see
 // rust/rust-toolchain.toml) is left untouched for everything else.
+//
+// CI overrides WASM_TOOLCHAIN with a pinned dated nightly (e.g.
+// `nightly-2026-04-25`) for reproducible builds. Local dev defaults to
+// `nightly`.
 
 import { spawnSync } from "node:child_process"
 
 const profile = process.env.PROFILE ?? "dev"
+const toolchain = process.env.WASM_TOOLCHAIN ?? "nightly"
 
 const args = [
-  "+nightly",
+  `+${toolchain}`,
   "build",
   "--target",
   "wasm32-unknown-unknown",
