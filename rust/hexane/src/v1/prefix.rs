@@ -782,7 +782,6 @@ where
 
         self.delta_nth(target_pos - self.inner.pos)
     }
-
 }
 
 // ── PrefixIterState ────────────────────────────────────────────────────────
