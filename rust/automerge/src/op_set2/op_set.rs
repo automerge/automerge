@@ -43,7 +43,7 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
-pub(crate) use mark_index::{MarkIndexBuilder, MarkIndexColumn};
+pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
@@ -454,55 +454,68 @@ impl OpSet {
 
         let mut text_iter = self.cols.index.text.iter_range(range.clone());
         let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
-        let start_pos = tx.pos.min(range.end);
-        let current_acc = tx.delta as usize;
 
-        let iter = self.iter_range(&(start_pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(start_pos, None);
-        let mut query = InsertQuery::new(
-            iter,
-            index.get(),
-            SequenceType::Text,
-            self.text_encoding,
-            None,
-            marks,
-        );
-        query.resolve(current_acc).ok()
+        let index = tx.delta as usize + tx.value.unwrap_or(0) as usize;
+
+        let pos = self
+            .scan_for_sticky_marks(text_iter, tx.pos)
+            .unwrap_or(tx.pos);
+
+        let marks = self.cols.index.mark.rich_text_at(pos, None);
+
+        let elemid = ElemId(self.get_opid(pos)?);
+
+        Some(QueryNth {
+            marks: MarkSet::from_query_state(&marks),
+            pos: pos + 1,
+            index,
+            elemid,
+        })
     }
 
-    // WIP: commented out to unblock the build.  See conversation context.
-    // pub(crate) fn query_insert_at_text2(
-    //     &self,
-    //     obj: &ObjId,
-    //     index: NonZeroUsize,
-    // ) -> Option<QueryNth> {
-    //     let range = self.scope_to_obj(obj);
-    //
-    //     let mut text_iter = self.cols.index.text.iter_range(range.clone());
-    //     let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
-    //     let start_pos = tx1.pos.min(range.end);
-    //     let current_acc = tx1.delta as usize;
-    //
-    //     while let Some(run) = text_iter.next_run() {
-    //       match run.value {
-    //         (prefix, Some(0)) => (), // mark
-    //         (prefix, Some(w)) => break; // end
-    //         (prefix, None => (), // deleted char
-    //       }
-    //     }
-    //
-    //     let iter = self.iter_range(&(start_pos..range.end));
-    //     let marks = self.cols.index.mark.rich_text_at(start_pos, None);
-    //     let mut query = InsertQuery::new(
-    //         iter,
-    //         index.get(),
-    //         SequenceType::Text,
-    //         self.text_encoding,
-    //         None,
-    //         marks,
-    //     );
-    //     query.resolve(current_acc).ok()
-    // }
+    fn scan_for_sticky_marks(
+        &self,
+        mut text_iter: hexane::v1::PrefixIter<'_, Option<u32>>,
+        mut pos: usize,
+    ) -> Option<usize> {
+        let end = text_iter.end_pos();
+        let mut expand = self.cols.expand.iter();
+        let mut marks = self.cols.index.mark.iter();
+        let mut found: Vec<(MarkIdx, usize)> = vec![];
+
+        while let Some(run) = text_iter.next_run() {
+            match run.value {
+                (_prefix, None) => (), // deleted chars
+                (_prefix, Some(0)) => {
+                    for i in 0..run.count {
+                        let p = pos + i + 1;
+                        let e = expand.shift_next(p..end)?;
+                        if let Some(Some(m)) = marks.shift_next(p..end) {
+                            // can't insert between mark start/end pair
+                            if let MarkIdx::End(id) = m {
+                                if let Some(j) =
+                                    found.iter().position(|m| m.0 == MarkIdx::Start(id))
+                                {
+                                    found.truncate(j);
+                                    continue;
+                                }
+                            }
+                            if matches!(
+                                (m, e),
+                                (MarkIdx::Start(_), true) | (MarkIdx::End(_), false)
+                            ) {
+                                found.push((m, p));
+                            }
+                        }
+                    }
+                }
+                _ => break, // end
+            }
+            pos += run.count;
+        }
+
+        found.last().map(|p| p.1)
+    }
 
     pub(crate) fn query_insert_at_list(
         &self,
@@ -717,6 +730,12 @@ impl OpSet {
             range: range.end..range.end,
             end_pos: range.end,
         }
+    }
+
+    fn get_opid(&self, pos: usize) -> Option<OpId> {
+        let id_ctr = self.cols.id_ctr.get(pos)?;
+        let id_actor = self.cols.id_actor.get(pos)?;
+        Some(OpId::new(id_ctr.into(), id_actor.into()))
     }
 
     fn get(&self, pos: usize) -> Option<Op<'_>> {

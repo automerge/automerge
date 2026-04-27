@@ -136,11 +136,11 @@ mod tests {
         // byte offset into the value blob.  Types 0–3 (Null/False/True/Uleb)
         // have length 0; types 6+ encode an explicit length in the upper bits.
         let data = vec![
-            ValueMeta(1),              // length 0
-            ValueMeta(6 + (30 << 4)),  // length 30
-            ValueMeta(6 + (10 << 4)),  // length 10
-            ValueMeta(3),              // length 0
-            ValueMeta(4),              // length 0
+            ValueMeta(1),             // length 0
+            ValueMeta(6 + (30 << 4)), // length 30
+            ValueMeta(6 + (10 << 4)), // length 10
+            ValueMeta(3),             // length 0
+            ValueMeta(4),             // length 0
         ];
         let col = PrefixColumn::<ValueMeta>::from_values(data);
 
