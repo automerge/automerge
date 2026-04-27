@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
-pub(crate) enum MarkIndexValue {
+pub(crate) enum MarkIdx {
     Start(OpId),
     End(OpId),
 }
@@ -21,17 +21,17 @@ pub(crate) enum MarkIndexBuilder {
     End(OpId),
 }
 
-impl MarkIndexValue {
+impl MarkIdx {
     pub(super) fn as_i64(&self) -> i64 {
         match self {
-            MarkIndexValue::Start(id) => {
+            MarkIdx::Start(id) => {
                 let tmp = ((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff);
-                debug_assert_eq!(self, &MarkIndexValue::load(tmp));
+                debug_assert_eq!(self, &MarkIdx::load(tmp));
                 tmp
             }
-            MarkIndexValue::End(id) => {
+            MarkIdx::End(id) => {
                 let tmp = -(((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
-                debug_assert_eq!(self, &MarkIndexValue::load(tmp));
+                debug_assert_eq!(self, &MarkIdx::load(tmp));
                 tmp
             }
         }
@@ -61,25 +61,25 @@ impl MarkIndexValue {
 
 // ── v1 hexane column-value traits ────────────────────────────────────────────
 
-impl ColumnValue for MarkIndexValue {
-    type Encoding = RleEncoding<MarkIndexValue>;
+impl ColumnValue for MarkIdx {
+    type Encoding = RleEncoding<MarkIdx>;
 }
 
-impl RleValue for MarkIndexValue {
-    fn try_unpack(data: &[u8]) -> Result<(usize, MarkIndexValue), PackError> {
+impl RleValue for MarkIdx {
+    fn try_unpack(data: &[u8]) -> Result<(usize, MarkIdx), PackError> {
         let mut buf = data;
         let start = buf.len();
         let v = leb128::read::signed(&mut buf)?;
-        Ok((start - buf.len(), MarkIndexValue::load(v)))
+        Ok((start - buf.len(), MarkIdx::load(v)))
     }
 
-    fn pack(value: MarkIndexValue, out: &mut Vec<u8>) -> bool {
+    fn pack(value: MarkIdx, out: &mut Vec<u8>) -> bool {
         leb128::write::signed(out, value.as_i64()).unwrap();
         true
     }
 }
 
-// ── MarkAcc: prefix-sum accumulator over Option<MarkIndexValue> ──────────────
+// ── MarkAcc: prefix-sum accumulator over Option<MarkIdx> ──────────────
 //
 // Each `OpId` appears at most once as a `Start` and at most once as an
 // `End` per column (uniqueness guarantee).  So the net count for any
@@ -107,16 +107,16 @@ pub(crate) struct MarkAcc {
 impl MarkAcc {
     /// Flip a single `Start`/`End` delta into the accumulator.
     #[inline]
-    fn apply_one(&mut self, val: MarkIndexValue) {
+    fn apply_one(&mut self, val: MarkIdx) {
         match val {
             // Start cancels a prior dangling End; otherwise opens.
-            MarkIndexValue::Start(id) => {
+            MarkIdx::Start(id) => {
                 if !self.closes.remove(&id) {
                     self.opens.insert(id);
                 }
             }
             // End cancels a prior open; otherwise records a dangling close.
-            MarkIndexValue::End(id) => {
+            MarkIdx::End(id) => {
                 if !self.opens.remove(&id) {
                     self.closes.insert(id);
                 }
@@ -192,20 +192,20 @@ impl Sub for MarkAcc {
     }
 }
 
-impl PrefixValue for MarkIndexValue {
+impl PrefixValue for MarkIdx {
     type Prefix = MarkAcc;
 
     #[inline]
-    fn accumulate(target: &mut MarkAcc, val: MarkIndexValue) {
+    fn accumulate(target: &mut MarkAcc, val: MarkIdx) {
         target.apply_one(val);
     }
 
     /// `OpId`s are unique per `Start`/`End`, so a multi-row RLE run of
-    /// the same `MarkIndexValue` cannot occur in a well-formed column —
+    /// the same `MarkIdx` cannot occur in a well-formed column —
     /// `run.count` is always 1.  Treat any count as 1; the column's
     /// uniqueness invariant makes this correct.
     #[inline]
-    fn accumulate_run(target: &mut MarkAcc, run: &Run<MarkIndexValue>) {
+    fn accumulate_run(target: &mut MarkAcc, run: &Run<MarkIdx>) {
         target.apply_one(run.value);
     }
 }
@@ -214,7 +214,7 @@ impl PrefixValue for MarkIndexValue {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MarkIndexColumn {
-    data: PrefixColumn<Option<MarkIndexValue>>,
+    data: PrefixColumn<Option<MarkIdx>>,
     cache: HashMap<OpId, MarkData<'static>>,
 }
 
@@ -230,8 +230,12 @@ impl MarkIndexColumn {
         self.data.len()
     }
 
+    pub(crate) fn iter(&self) -> hexane::v1::Iter<'_, Option<MarkIdx>> {
+        self.data.values().iter()
+    }
+
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        let new_values: Vec<Option<MarkIndexValue>> = self
+        let new_values: Vec<Option<MarkIdx>> = self
             .data
             .value_iter()
             .map(|v| v.map(|m| m.with_new_actor(idx)))
@@ -246,14 +250,14 @@ impl MarkIndexColumn {
     }
 
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let mark_values: Vec<Option<MarkIndexValue>> = values
+        let mark_values: Vec<Option<MarkIdx>> = values
             .into_iter()
             .map(|v| match v? {
                 MarkIndexBuilder::Start(id, mark) => {
                     self.cache.insert(id, mark);
-                    Some(MarkIndexValue::Start(id))
+                    Some(MarkIdx::Start(id))
                 }
-                MarkIndexBuilder::End(id) => Some(MarkIndexValue::End(id)),
+                MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
             })
             .collect();
         self.data.splice(index, 0, mark_values);
@@ -266,7 +270,7 @@ impl MarkIndexColumn {
                 self.cache.remove(id);
             }
         }
-        let empty: Vec<Option<MarkIndexValue>> = Vec::new();
+        let empty: Vec<Option<MarkIdx>> = Vec::new();
         self.data.splice(index, del, empty);
     }
 
@@ -357,11 +361,7 @@ pub(crate) mod tests {
             .value_iter()
             .enumerate()
             .filter_map(|(pos, val)| match val {
-                Some(MarkIndexValue::Start(idv)) | Some(MarkIndexValue::End(idv))
-                    if idv == target =>
-                {
-                    Some(pos)
-                }
+                Some(MarkIdx::Start(idv)) | Some(MarkIdx::End(idv)) if idv == target => Some(pos),
                 _ => None,
             })
             .collect()
@@ -644,17 +644,17 @@ pub(crate) mod tests {
     }
 
     /// Brute-force oracle: scan linearly to compute which marks are active at `pos`.
-    fn oracle_marks_at(values: &[Option<MarkIndexValue>], pos: usize) -> BTreeSet<OpId> {
+    fn oracle_marks_at(values: &[Option<MarkIdx>], pos: usize) -> BTreeSet<OpId> {
         let mut open = BTreeSet::new();
         for (i, v) in values.iter().enumerate() {
             if i > pos {
                 break;
             }
             match v {
-                Some(MarkIndexValue::Start(id)) => {
+                Some(MarkIdx::Start(id)) => {
                     open.insert(*id);
                 }
-                Some(MarkIndexValue::End(id)) => {
+                Some(MarkIdx::End(id)) => {
                     open.remove(id);
                 }
                 None => {}
@@ -670,7 +670,7 @@ pub(crate) mod tests {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
 
         let n = 100_000;
-        let mut values: Vec<Option<MarkIndexValue>> = vec![None; n];
+        let mut values: Vec<Option<MarkIdx>> = vec![None; n];
         let mut cache_entries: Vec<(OpId, MarkData<'static>)> = Vec::new();
 
         let num_marks = 2500;
@@ -681,8 +681,8 @@ pub(crate) mod tests {
             let start = rng.random_range(0..n - 2);
             let end = rng.random_range(start + 1..n);
             if values[start].is_none() && values[end].is_none() {
-                values[start] = Some(MarkIndexValue::Start(op_id));
-                values[end] = Some(MarkIndexValue::End(op_id));
+                values[start] = Some(MarkIdx::Start(op_id));
+                values[end] = Some(MarkIdx::End(op_id));
                 mark_ids.push((op_id, start, end));
                 cache_entries.push((op_id, mk_mark(&format!("m{i}"))));
             }
@@ -695,7 +695,7 @@ pub(crate) mod tests {
         let builder_values: Vec<Option<MarkIndexBuilder>> = values
             .iter()
             .map(|v| match v {
-                Some(MarkIndexValue::Start(id)) => {
+                Some(MarkIdx::Start(id)) => {
                     let data = cache_entries
                         .iter()
                         .find(|(cid, _)| cid == id)
@@ -704,7 +704,7 @@ pub(crate) mod tests {
                         .clone();
                     Some(MarkIndexBuilder::Start(*id, data))
                 }
-                Some(MarkIndexValue::End(id)) => Some(MarkIndexBuilder::End(*id)),
+                Some(MarkIdx::End(id)) => Some(MarkIndexBuilder::End(*id)),
                 None => None,
             })
             .collect();
@@ -760,12 +760,10 @@ pub(crate) mod tests {
         }
 
         let undone_ids: HashSet<OpId> = marks_to_undo.iter().map(|(id, _, _)| *id).collect();
-        let remaining_values: Vec<Option<MarkIndexValue>> = values
+        let remaining_values: Vec<Option<MarkIdx>> = values
             .iter()
             .filter(|v| match v {
-                Some(MarkIndexValue::Start(id)) | Some(MarkIndexValue::End(id)) => {
-                    !undone_ids.contains(id)
-                }
+                Some(MarkIdx::Start(id)) | Some(MarkIdx::End(id)) => !undone_ids.contains(id),
                 None => true,
             })
             .cloned()
