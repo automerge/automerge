@@ -69,17 +69,21 @@ jobs:
 
   build_wasm:
     runs-on: ubuntu-latest
+    env:
+      # Pinned for reproducible wasm builds; the wasm build needs nightly for
+      # -Zbuild-std (panic=unwind). Bump deliberately when needed.
+      WASM_TOOLCHAIN: nightly-2026-04-25
     steps:
       - uses: actions/checkout@v6
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install nightly + wasm32 target + rust-src
+      - name: Install pinned nightly + wasm32 target + rust-src
         run: |
-          rustup toolchain install nightly --profile minimal
-          rustup component add rust-src --toolchain nightly
-          rustup target add --toolchain nightly wasm32-unknown-unknown
+          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
+          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
+          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/wasm_tests
 
@@ -87,6 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build_wasm
+    env:
+      WASM_TOOLCHAIN: nightly-2026-04-25
 
     steps:
       - uses: actions/checkout@v6
@@ -97,11 +103,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install nightly + wasm32 target + rust-src
+      - name: Install pinned nightly + wasm32 target + rust-src
         run: |
-          rustup toolchain install nightly --profile minimal
-          rustup component add rust-src --toolchain nightly
-          rustup target add --toolchain nightly wasm32-unknown-unknown
+          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
+          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
+          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/js_tests
 
@@ -111,6 +117,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build_wasm
+    env:
+      WASM_TOOLCHAIN: nightly-2026-04-25
 
     steps:
       - uses: actions/checkout@v6
@@ -121,11 +129,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install nightly + wasm32 target + rust-src
+      - name: Install pinned nightly + wasm32 target + rust-src
         run: |
-          rustup toolchain install nightly --profile minimal
-          rustup component add rust-src --toolchain nightly
-          rustup target add --toolchain nightly wasm32-unknown-unknown
+          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
+          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
+          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/node_18_packaging_test
 
