@@ -276,32 +276,10 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         }
 
         let mut flushed = FlushState::default();
-        let old = std::mem::replace(self, RleState::Empty);
-        *self = match old {
-            RleState::Empty if n == 1 => RleState::Lone(value),
-            RleState::Empty => RleState::Run(n, value),
-            RleState::Lone(prev) if value == prev => RleState::Run(n + 1, value),
-            RleState::Lone(prev) if n == 1 => {
-                let (header_pos, bytes) = emit_lit(buf, &prev);
-                RleState::Lit {
-                    count: 1,
-                    local: 1,
-                    header_pos,
-                    bytes,
-                    current: value,
-                }
-            }
-            RleState::Lone(prev) => {
-                let (pos, bytes) = emit_lit(buf, &prev);
-                flushed.wpos = WPos::lit(pos, bytes, true);
-                flushed.segments = 1;
-                RleState::Run(n, value)
-            }
-            RleState::Run(count, prev) if value == prev => RleState::Run(count + n, value),
-            RleState::Run(count, prev) => {
-                flushed.wpos = emit_run(buf, count, &prev);
-                flushed.segments = 1;
-                Self::make_run(n, value)
+        let next_state = match self {
+            RleState::Run(count, prev) if value == *prev => {
+                *count += n;
+                None
             }
             RleState::Lit {
                 count,
@@ -309,31 +287,28 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 header_pos,
                 current,
                 bytes,
-            } if value == current => {
-                if local == count {
-                    rewrite_lit_header(buf, header_pos, count);
+            } if &value == current => {
+                if *local == *count {
+                    rewrite_lit_header(buf, *header_pos, *count);
                 } else {
-                    flushed.rewrite = Some(RewriteHeader::new(count, header_pos));
+                    flushed.rewrite = Some(RewriteHeader::new(*count, *header_pos));
                 }
-                flushed.wpos = WPos::trunc(count, header_pos, bytes, local == count);
-                flushed.segments = local;
-                RleState::Run(n + 1, value)
+                flushed.wpos = WPos::trunc(*count, *header_pos, *bytes, *local == *count);
+                flushed.segments = *local;
+                Some(RleState::Run(n + 1, value))
             }
             RleState::Lit {
                 count,
                 local,
-                header_pos,
                 current,
+                bytes,
                 ..
             } if n == 1 => {
-                let bytes = current.pack(buf);
-                RleState::Lit {
-                    count: count + 1,
-                    local: local + 1,
-                    header_pos,
-                    current: value,
-                    bytes,
-                }
+                *bytes = current.pack(buf);
+                *count += 1;
+                *local += 1;
+                *current = value;
+                None
             }
             RleState::Lit {
                 count,
@@ -343,21 +318,48 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 ..
             } => {
                 let bytes = current.pack(buf);
-                flushed.wpos = WPos::lit(header_pos, bytes, count == local);
-                if local == count {
-                    rewrite_lit_header(buf, header_pos, count + 1);
+                flushed.wpos = WPos::lit(*header_pos, bytes, *count == *local);
+                if *local == *count {
+                    rewrite_lit_header(buf, *header_pos, *count + 1);
                 } else {
-                    flushed.rewrite = Some(RewriteHeader::new(count + 1, header_pos));
+                    flushed.rewrite = Some(RewriteHeader::new(*count + 1, *header_pos));
                 }
-                flushed.segments = local + 1;
-                RleState::Run(n, value)
+                flushed.segments = *local + 1;
+                Some(RleState::Run(n, value))
+            }
+            RleState::Empty if n == 1 => Some(RleState::Lone(value)),
+            RleState::Empty => Some(RleState::Run(n, value)),
+            RleState::Lone(prev) if &value == prev => Some(RleState::Run(n + 1, value)),
+            RleState::Lone(prev) if n == 1 => {
+                let (header_pos, bytes) = emit_lit(buf, prev);
+                Some(RleState::Lit {
+                    count: 1,
+                    local: 1,
+                    header_pos,
+                    bytes,
+                    current: value,
+                })
+            }
+            RleState::Lone(prev) => {
+                let (pos, bytes) = emit_lit(buf, prev);
+                flushed.wpos = WPos::lit(pos, bytes, true);
+                flushed.segments = 1;
+                Some(RleState::Run(n, value))
+            }
+            RleState::Run(count, prev) => {
+                flushed.wpos = emit_run(buf, *count, prev);
+                flushed.segments = 1;
+                Some(Self::make_run(n, value))
             }
             RleState::Null(count) => {
-                flushed.wpos = emit_null(buf, count);
+                flushed.wpos = emit_null(buf, *count);
                 flushed.segments = 1;
-                Self::make_run(n, value)
+                Some(Self::make_run(n, value))
             }
         };
+        if let Some(s) = next_state {
+            *self = s;
+        }
         flushed
     }
 
