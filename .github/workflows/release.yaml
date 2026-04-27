@@ -6,6 +6,9 @@ on:
 jobs:
   publish-js:
     runs-on: ubuntu-latest
+    env:
+      # Pinned for reproducible wasm builds; bump deliberately when needed.
+      WASM_TOOLCHAIN: nightly-2026-04-25
     defaults:
       run:
         working-directory: ./javascript
@@ -19,9 +22,11 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install pinned nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
+          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
+          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
       - name: npm install
         run: npm install
       - name: build js
@@ -40,6 +45,8 @@ jobs:
   publish-js-docs:
     runs-on: ubuntu-latest
     if: "!github.event.release.prerelease"
+    env:
+      WASM_TOOLCHAIN: nightly-2026-04-25
     defaults:
       run:
         working-directory: ./javascript
@@ -51,9 +58,11 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli wasm-opt
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install pinned nightly + wasm32 target + rust-src
+        run: |
+          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
+          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
+          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
       - name: npm install
         run: npm install
       - name: build js
