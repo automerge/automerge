@@ -13,7 +13,6 @@ use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{ChunkType, Header, RawColumn, RawColumns};
 use crate::types::{ChangeHash, ObjId, OpId};
 
-
 use super::{Bundle, BundleChange, BundleMetadata, BundleStorage, ParseError};
 
 /// Apply the actor remap inline to a nullable actor encoder and write the
@@ -817,11 +816,15 @@ impl<'a> OpIterInner<'a> {
             let d = &data[col.data()];
             type C = ColumnType;
             match (col.spec().id(), col.spec().col_type()) {
-                (ops::OBJ_COL_ID, C::Actor) => obj_actor = hexane::v1::decoder::<Option<ActorIdx>>(d),
+                (ops::OBJ_COL_ID, C::Actor) => {
+                    obj_actor = hexane::v1::decoder::<Option<ActorIdx>>(d)
+                }
                 (ops::OBJ_COL_ID, C::DeltaInteger) => {
                     obj_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
                 }
-                (ops::KEY_COL_ID, C::Actor) => key_actor = hexane::v1::decoder::<Option<ActorIdx>>(d),
+                (ops::KEY_COL_ID, C::Actor) => {
+                    key_actor = hexane::v1::decoder::<Option<ActorIdx>>(d)
+                }
                 (ops::KEY_COL_ID, C::DeltaInteger) => {
                     key_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
                 }
@@ -831,8 +834,12 @@ impl<'a> OpIterInner<'a> {
                     id_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
                 }
                 (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::v1::decoder::<bool>(d),
-                (ops::ACTION_COL_ID, C::Integer) => action = hexane::v1::decoder::<Option<Action>>(d),
-                (ops::VAL_COL_ID, C::ValueMetadata) => meta = hexane::v1::decoder::<Option<ValueMeta>>(d),
+                (ops::ACTION_COL_ID, C::Integer) => {
+                    action = hexane::v1::decoder::<Option<Action>>(d)
+                }
+                (ops::VAL_COL_ID, C::ValueMetadata) => {
+                    meta = hexane::v1::decoder::<Option<ValueMeta>>(d)
+                }
                 (ops::VAL_COL_ID, C::Value) => value = d,
                 (ops::PRED_COL_ID, C::Group) => pred_count = hexane::v1::decoder::<Option<u64>>(d),
                 (ops::PRED_COL_ID, C::Actor) => {

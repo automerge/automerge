@@ -196,10 +196,7 @@ impl<'a> Iterator for OpIter<'a> {
 }
 
 impl OpId {
-    pub(crate) fn try_load(
-        actor: Option<ActorIdx>,
-        ctr: Option<i64>,
-    ) -> Result<OpId, ReadOpError> {
+    pub(crate) fn try_load(actor: Option<ActorIdx>, ctr: Option<i64>) -> Result<OpId, ReadOpError> {
         match (actor, ctr) {
             (Some(actor_idx), Some(counter)) if counter >= 0 => {
                 Ok(OpId::new(counter as u64, u64::from(actor_idx) as usize))
@@ -238,17 +235,16 @@ impl ObjId {
 }
 
 impl ElemId {
-    fn try_load(
+    pub(crate) fn try_load(
         key_actor: Option<ActorIdx>,
         key_counter: Option<i64>,
     ) -> Result<Option<ElemId>, ReadOpError> {
         match (key_counter, key_actor) {
             (None, None) => Ok(None),
             (Some(0), None) => Ok(Some(ElemId(OpId::new(0, 0)))),
-            (Some(counter), Some(actor)) if counter > 0 => Ok(Some(ElemId(OpId::new(
-                counter as u64,
-                usize::from(actor),
-            )))),
+            (Some(counter), Some(actor)) if counter > 0 => {
+                Ok(Some(ElemId(OpId::new(counter as u64, usize::from(actor)))))
+            }
             _ => Err(ReadOpError::InvalidKey),
         }
     }
