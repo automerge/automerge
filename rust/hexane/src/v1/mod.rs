@@ -19,9 +19,7 @@ pub mod raw;
 pub mod rle;
 pub use column::{Column, Iter, IterState};
 pub use delta::indexed::FindByRange;
-pub use delta::{
-    DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue,
-};
+pub use delta::{DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
 pub use index::{BitIndex, ColumnIndex};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
@@ -376,6 +374,17 @@ impl RleValue for u64 {
         let v = leb128::read::unsigned(&mut buf)?;
         Ok((start - buf.len(), v))
     }
+    /// Fast path: count terminator bytes without doing leb128 arithmetic.
+    /// Used by `RleDecoder::nth` when skipping past values whose value the
+    /// caller will discard.
+    fn value_len(data: &[u8]) -> Option<usize> {
+        for (i, &b) in data.iter().enumerate().take(10) {
+            if b & 0x80 == 0 {
+                return Some(i + 1);
+            }
+        }
+        None
+    }
     fn pack(value: u64, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value).unwrap();
         true
@@ -392,6 +401,15 @@ impl RleValue for i64 {
         let start = buf.len();
         let v = leb128::read::signed(&mut buf)?;
         Ok((start - buf.len(), v))
+    }
+    /// Fast path — same byte structure as unsigned LEB128.
+    fn value_len(data: &[u8]) -> Option<usize> {
+        for (i, &b) in data.iter().enumerate().take(10) {
+            if b & 0x80 == 0 {
+                return Some(i + 1);
+            }
+        }
+        None
     }
     fn pack(value: i64, out: &mut Vec<u8>) -> bool {
         leb128::write::signed(out, value).unwrap();
@@ -482,14 +500,20 @@ impl RleValue for String {
         let s = std::str::from_utf8(&buf[..len]).map_err(|_| PackError::InvalidUtf8)?;
         Ok((hdr + len, s))
     }
-    /// Data was validated during load — UTF-8 was checked by try_unpack,
-    /// so the unwrap never fires.
+    /// Data was validated during load — UTF-8 was checked by `try_unpack`,
+    /// so we skip re-validation on this hot path.  The byte slice was either
+    /// produced by `pack` (which only writes valid UTF-8) or validated when
+    /// the column was loaded from external bytes.
     fn unpack(data: &[u8]) -> (usize, &str) {
         let mut cursor = data;
         let start = cursor.len();
         let len = leb128::read::unsigned(&mut cursor).unwrap() as usize;
         let hdr = start - cursor.len();
-        let s = std::str::from_utf8(&cursor[..len]).unwrap();
+        // Safety: hexane only writes valid UTF-8 via `pack` (extends from
+        // `&str::as_bytes`), and `Column::load` calls `try_unpack` on every
+        // value during validation — see `Column::load`'s validate-on-load
+        // path.  Internal column manipulation never produces invalid UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(&cursor[..len]) };
         (hdr + len, s)
     }
 

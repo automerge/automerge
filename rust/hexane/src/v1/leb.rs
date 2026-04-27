@@ -114,8 +114,7 @@ pub(crate) fn encode_unsigned(n: u64) -> Leb128Buf {
 }
 
 /// Decode one signed LEB128 value from `data`. Returns `(bytes_read, value)`.
-pub(crate) fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
-    let mut buf = data;
+pub(crate) fn read_signed(mut buf: &[u8]) -> Option<(usize, i64)> {
     let start = buf.len();
     let v = leb128::read::signed(&mut buf).ok()?;
     Some((start - buf.len(), v))

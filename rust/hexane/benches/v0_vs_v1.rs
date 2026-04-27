@@ -1588,42 +1588,66 @@ mod nth_10k_runs {
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v0_nth_10k(bencher: Bencher) {
         let col = build_v0_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(10_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(10_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_10k(bencher: Bencher) {
         let col = build_v1_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(10_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(10_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v0_nth_100k(bencher: Bencher) {
         let col = build_v0_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(100_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(100_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_100k(bencher: Bencher) {
         let col = build_v1_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(100_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(100_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v0_nth_500k(bencher: Bencher) {
         let col = build_v0_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(500_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(500_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_500k(bencher: Bencher) {
         let col = build_v1_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(500_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(500_000)
+        });
     }
 }
 
@@ -1779,42 +1803,66 @@ mod prefix_nth_runs {
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v0_nth_10k(bencher: Bencher) {
         let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).with_acc().nth(10_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len()).with_acc();
+            let _ = iter.next();
+            iter.nth(10_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_10k(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(10_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(10_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v0_nth_100k(bencher: Bencher) {
         let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).with_acc().nth(100_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len()).with_acc();
+            let _ = iter.next();
+            iter.nth(100_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_100k(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(100_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(100_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v0_nth_500k(bencher: Bencher) {
         let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).with_acc().nth(500_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len()).with_acc();
+            let _ = iter.next();
+            iter.nth(500_000)
+        });
     }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_500k(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(500_000));
+        bencher.bench_local(|| {
+            let mut iter = col.iter_range(20_000..col.len());
+            let _ = iter.next();
+            iter.nth(500_000)
+        });
     }
 }
 

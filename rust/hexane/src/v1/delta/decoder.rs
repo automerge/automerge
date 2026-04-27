@@ -2,7 +2,7 @@
 //!
 //! Counterpart to [`DeltaEncoder`](super::DeltaEncoder).  Reads raw
 //! `Option<i64>` deltas from a byte slice and accumulates them into
-//! realised `T` values, without allocating a [`DeltaColumn`] or its
+//! realised `T` values, without allocating a [`DeltaColumn`](super::DeltaColumn) or its
 //! slab/B-tree index.  Use this when a single linear pass is all you
 //! need — `DeltaColumn::load` + [`DeltaIter`](super::DeltaIter) is the
 //! heavier alternative for when you also want random access.
@@ -60,8 +60,8 @@ impl<T: DeltaValue> Debug for DeltaDecoder<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::DeltaDecoder;
     use super::super::DeltaColumn;
+    use super::DeltaDecoder;
 
     /// Round-trip parity: bytes saved by `DeltaColumn::save` should
     /// decode to the same sequence via `DeltaDecoder` as via

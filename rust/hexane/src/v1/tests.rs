@@ -3662,7 +3662,7 @@ fn fuzz_scope_to_value_nullable() {
 
 fn check_slab_merge_invariant<T: ColumnValueRef>(col: &Column<T>, context: &str) {
     let segs = col.slab_segments();
-    let max = 64; // DEFAULT_MAX_SEG
+    let max = crate::v1::column::DEFAULT_MAX_SEG;
     let min = max / 4;
     for i in 0..segs.len() {
         if segs[i] < min {

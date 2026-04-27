@@ -166,7 +166,6 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
 
 impl<'a, T: RleValue> RleDecoder<'a, T> {
     /// Skip `n` literal values by advancing `byte_pos` without decoding.
-    #[inline]
     fn skip_literals(&mut self, n: usize) {
         for _ in 0..n {
             let vlen = T::value_len(&self.data[self.byte_pos..]).unwrap();
@@ -178,7 +177,6 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
 impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
     type Item = <T as ColumnValueRef>::Get<'a>;
 
-    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.remaining > 0 {
@@ -204,29 +202,83 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
     /// O(runs_skipped) skip — repeat and null runs are skipped in O(1) each,
     /// literal runs advance `byte_pos` via `value_len` without full decoding.
     fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
-        loop {
-            if self.remaining == 0 {
-                self.advance_run();
-                if self.remaining == 0 {
-                    return None;
-                }
-            }
-
+        // Consume the current run (if any) before walking byte-by-byte.
+        if self.remaining > 0 {
             if n < self.remaining {
-                // Target is within this run — skip n items, return the next.
                 if let RleDecoderState::Literal = self.state {
                     self.skip_literals(n);
                 }
                 self.remaining -= n;
                 return self.next();
             }
-
-            // Skip past the entire run.
             if let RleDecoderState::Literal = self.state {
                 self.skip_literals(self.remaining);
             }
             n -= self.remaining;
             self.remaining = 0;
+        }
+
+        // Inline `advance_run` for skipped runs, avoiding self.state writes
+        // and using `value_len` instead of full `unpack` until we land on
+        // the target run.  This is the hot path for `nth(N)` on slabs with
+        // many short runs.
+        loop {
+            if self.byte_pos >= self.data.len() {
+                self.state = RleDecoderState::Idle;
+                return None;
+            }
+            let (count_bytes, count_raw) =
+                read_signed(&self.data[self.byte_pos..]).expect("validated slab");
+            match count_raw {
+                c if c > 0 => {
+                    let count = c as usize;
+                    let value_start = self.byte_pos + count_bytes;
+                    if n < count {
+                        // Land on this run — full unpack for the value.
+                        let (vlen, value) = T::unpack(&self.data[value_start..]);
+                        self.byte_pos = value_start + vlen;
+                        self.remaining = count - n - 1;
+                        self.state = RleDecoderState::Repeat(value);
+                        return Some(value);
+                        //return self.next();
+                    }
+                    // Skip past — only need byte length of the value.
+                    let vlen = T::value_len(&self.data[value_start..]).expect("validated slab");
+                    self.byte_pos = value_start + vlen;
+                    n -= count;
+                }
+                c if c < 0 => {
+                    let total = (-c) as usize;
+                    self.byte_pos += count_bytes;
+                    if n < total {
+                        // Land within a literal run.
+                        self.remaining = total - n - 1;
+                        self.state = RleDecoderState::Literal;
+                        self.skip_literals(n);
+                        let (vlen, value) = T::unpack(&self.data[self.byte_pos..]);
+                        self.byte_pos += vlen;
+                        return Some(value);
+                    }
+                    // Skip whole literal run — must walk `value_len` per
+                    // literal since they're packed back-to-back.
+                    self.skip_literals(total);
+                    n -= total;
+                }
+                _ => {
+                    // Null run.
+                    let (ncb, null_count) =
+                        read_unsigned(&self.data[self.byte_pos + count_bytes..])
+                            .expect("validated slab");
+                    let total = null_count as usize;
+                    self.byte_pos += count_bytes + ncb;
+                    if n < total {
+                        self.remaining = total - n - 1;
+                        self.state = RleDecoderState::Null;
+                        return Some(T::get_null());
+                    }
+                    n -= total;
+                }
+            }
         }
     }
 }

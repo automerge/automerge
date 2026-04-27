@@ -1314,7 +1314,10 @@ impl<A: PrefixAggregate> SlabBTree<A> {
     }
 }
 
-impl<A: PrefixAggregate> SlabBTree<A> where A::Prefix: Ord {
+impl<A: PrefixAggregate> SlabBTree<A>
+where
+    A::Prefix: Ord,
+{
     /// Find the slab whose prefix sum first reaches or exceeds `target`.
     /// Returns `(slab_idx, prefix_before_slab, items_before_slab)`.  If
     /// `target` exceeds the total prefix, returns one-past-the-end.

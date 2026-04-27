@@ -112,7 +112,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
 /// Iterator returned by [`DeltaColumn::find_by_range`] and
 /// [`DeltaColumn::find_by_value`].  Walks the B-tree's pruned slab
-/// iterator and, for each candidate slab, runs a [`SlabScan`] over its
+/// iterator and, for each candidate slab, runs a slab scan over its
 /// RLE-encoded data.
 #[derive(Default)]
 pub struct FindByRange<'a> {
