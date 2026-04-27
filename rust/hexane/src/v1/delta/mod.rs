@@ -201,8 +201,13 @@ impl DeltaValue for Option<usize> {
 /// enc.append(30);
 /// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
 /// ```
-pub struct DeltaEncoder<'a, T: DeltaValue> {
-    inner: super::encoder::RleEncoder<'a, Option<i64>>,
+/// State half of [`DeltaEncoder`] — owns delta tracking and inner-RLE
+/// state but **not** the output buffer.  Every mutating method takes a
+/// `&mut Vec<u8>` so the caller decides where bytes land.  Used by the
+/// fast-path `encode_to_unless` static path to avoid a per-call heap
+/// allocation in the change-encoding loop.
+pub struct DeltaEncoderState<'a, T: DeltaValue> {
+    inner: super::encoder::RleEncoderState<'a, Option<i64>>,
     abs: i64,
     /// Tracks whether every appended value has been equal so far.
     ///
@@ -210,7 +215,7 @@ pub struct DeltaEncoder<'a, T: DeltaValue> {
     ///   values are not all equal (i.e. the column is "mixed").
     /// - `Some(v)` — every appended value has been equal to `v`.
     ///
-    /// Used by [`save_to_unless`](Self::save_to_unless) to match v0's
+    /// Used by [`save_to_unless`](DeltaEncoder::save_to_unless) to match v0's
     /// `encode_unless_empty` semantics for nullable columns (where
     /// `v == null`) and to provide RleEncoder-style single-run-of-value
     /// elision for non-nullable columns.
@@ -218,57 +223,35 @@ pub struct DeltaEncoder<'a, T: DeltaValue> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaEncoder<'_, T> {
+impl<T: DeltaValue> Default for DeltaEncoderState<'_, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeltaEncoder")
-            .field("len", &self.inner.len())
-            .field("abs", &self.abs)
-            .finish()
-    }
-}
-
-impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
-    /// Create a new empty delta encoder.
+impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
     pub fn new() -> Self {
         Self {
-            inner: super::encoder::RleEncoder::new(),
+            inner: super::encoder::RleEncoderState::new(),
             abs: 0,
             uniform: None,
             _phantom: PhantomData,
         }
     }
 
-    /// Number of items appended so far.
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
-    /// Returns `true` if no items have been appended.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
-    /// Append a single (absolute) value.
-    ///
-    /// For non-nullable types the value is always stored.  For nullable
-    /// types, a `null` value does not advance the running absolute — it's
-    /// emitted as a null entry in the inner column.
-    pub fn append(&mut self, value: T) {
-        self.append_n(value, 1);
+    pub fn append(&mut self, buf: &mut Vec<u8>, value: T) {
+        self.append_n(buf, value, 1);
     }
 
-    /// Append `n` copies of the same (absolute) `value`.
-    ///
-    /// The first copy is encoded as `value - prev_abs`; subsequent copies
-    /// are encoded as `0` (since the absolute hasn't changed).  For a null
-    /// value, `n` null entries are emitted and `abs` is unchanged.
-    pub fn append_n(&mut self, value: T, n: usize) {
+    pub fn append_n(&mut self, buf: &mut Vec<u8>, value: T, n: usize) {
         if n == 0 {
             return;
         }
@@ -282,15 +265,91 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
             Some(v) => {
                 let first_delta = v - self.abs;
                 self.abs = v;
-                self.inner.append_n_owned(Some(first_delta), 1);
+                self.inner.append_n_owned(buf, Some(first_delta), 1);
                 if n > 1 {
-                    self.inner.append_n_owned(Some(0), n - 1);
+                    self.inner.append_n_owned(buf, Some(0), n - 1);
                 }
             }
             None => {
-                self.inner.append_n_owned(None, n);
+                self.inner.append_n_owned(buf, None, n);
             }
         }
+    }
+
+    pub fn extend<I: IntoIterator<Item = T>>(&mut self, buf: &mut Vec<u8>, iter: I) {
+        for v in iter {
+            self.append(buf, v);
+        }
+    }
+
+    /// Flush any pending run into `buf`.
+    pub fn finish(&mut self, buf: &mut Vec<u8>) {
+        self.inner.finish(buf);
+    }
+
+    /// True if every appended value equals `value` (or no values have been
+    /// appended at all).  Caller is responsible for not having flushed yet
+    /// when this is used to drive elision.
+    pub fn is_uniform(&self, value: T) -> bool {
+        self.inner.is_empty() || self.uniform == Some(value)
+    }
+}
+
+pub struct DeltaEncoder<'a, T: DeltaValue> {
+    data: Vec<u8>,
+    state: DeltaEncoderState<'a, T>,
+}
+
+impl<T: DeltaValue> Default for DeltaEncoder<'_, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeltaEncoder")
+            .field("len", &self.state.inner.len())
+            .field("abs", &self.state.abs)
+            .finish()
+    }
+}
+
+impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
+    /// Create a new empty delta encoder.
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            state: DeltaEncoderState::new(),
+        }
+    }
+
+    /// Number of items appended so far.
+    pub fn len(&self) -> usize {
+        self.state.len()
+    }
+
+    /// Returns `true` if no items have been appended.
+    pub fn is_empty(&self) -> bool {
+        self.state.is_empty()
+    }
+
+    /// Append a single (absolute) value.
+    ///
+    /// For non-nullable types the value is always stored.  For nullable
+    /// types, a `null` value does not advance the running absolute — it's
+    /// emitted as a null entry in the inner column.
+    pub fn append(&mut self, value: T) {
+        self.state.append(&mut self.data, value);
+    }
+
+    /// Append `n` copies of the same (absolute) `value`.
+    ///
+    /// The first copy is encoded as `value - prev_abs`; subsequent copies
+    /// are encoded as `0` (since the absolute hasn't changed).  For a null
+    /// value, `n` null entries are emitted and `abs` is unchanged.
+    pub fn append_n(&mut self, value: T, n: usize) {
+        self.state.append_n(&mut self.data, value, n);
     }
 
     /// Alias for [`append`](Self::append) — provided so call sites that
@@ -302,20 +361,26 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 
     /// Append all values from an iterator.
     pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        for v in iter {
-            self.append(v);
-        }
+        self.state.extend(&mut self.data, iter);
+    }
+
+    fn finish(&mut self) {
+        self.state.finish(&mut self.data);
     }
 
     /// Flush and return the encoded bytes.  Consumes the encoder.
-    pub fn save(self) -> Vec<u8> {
-        self.inner.save()
+    pub fn save(mut self) -> Vec<u8> {
+        self.finish();
+        self.data
     }
 
     /// Flush and append the encoded bytes to `out`.  Consumes the encoder.
     /// Returns the byte range written.
-    pub fn save_to(self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
-        self.inner.save_to(out)
+    pub fn save_to(mut self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
+        self.finish();
+        let start = out.len();
+        out.extend_from_slice(&self.data);
+        start..out.len()
     }
 
     /// Flush and append the encoded bytes to `out`, returning an empty
@@ -327,10 +392,10 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
     /// pass `None` to get v0's `encode_unless_empty` semantics (elide on
     /// empty or all-null).
     pub fn save_to_unless(self, out: &mut Vec<u8>, value: T) -> std::ops::Range<usize> {
-        if self.inner.is_empty() || self.uniform == Some(value) {
+        if self.state.is_uniform(value) {
             return out.len()..out.len();
         }
-        self.inner.save_to(out)
+        self.save_to(out)
     }
 
     /// Encode values from an iterator and return the raw bytes.
@@ -342,26 +407,41 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 
     /// Encode values from an iterator and append the bytes to `out`.
     /// Returns the byte range written.
+    ///
+    /// Fast-path: writes through to `out` via [`DeltaEncoderState`] without
+    /// allocating an inner `Vec<u8>`.
     pub fn encode_to<I: IntoIterator<Item = T>>(
         out: &mut Vec<u8>,
         iter: I,
     ) -> std::ops::Range<usize> {
-        let mut enc = Self::new();
-        enc.extend(iter);
-        enc.save_to(out)
+        let start = out.len();
+        let mut state = DeltaEncoderState::<'a, T>::new();
+        state.extend(out, iter);
+        state.finish(out);
+        start..out.len()
     }
 
     /// Encode values from an iterator and append the bytes to `out`,
     /// eliding the column if it's empty or every value equals `value`.
     /// See [`save_to_unless`](Self::save_to_unless).
+    ///
+    /// Fast-path: writes through to `out` via [`DeltaEncoderState`].  When
+    /// the uniform check passes we truncate `out` back to `start` to undo
+    /// any in-progress writes from `extend`.
     pub fn encode_to_unless<I: IntoIterator<Item = T>>(
         out: &mut Vec<u8>,
         iter: I,
         value: T,
     ) -> std::ops::Range<usize> {
-        let mut enc = Self::new();
-        enc.extend(iter);
-        enc.save_to_unless(out, value)
+        let start = out.len();
+        let mut state = DeltaEncoderState::<'a, T>::new();
+        state.extend(out, iter);
+        if state.is_uniform(value) {
+            out.truncate(start);
+            return start..start;
+        }
+        state.finish(out);
+        start..out.len()
     }
 }
 

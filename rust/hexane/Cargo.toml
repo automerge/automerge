@@ -61,6 +61,10 @@ harness = false
 name = "btree_b_sweep"
 harness = false
 
+[[bench]]
+name = "encode_unless"
+harness = false
+
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]
