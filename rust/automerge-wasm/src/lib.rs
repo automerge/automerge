@@ -1714,9 +1714,10 @@ impl Automerge {
 // failure is visible in the console rather than just surfacing as the
 // generic "Module terminated" error on every subsequent export call.
 //
-// Recoverable Rust panics still go through `console_error_panic_hook` (set
-// in `create` below) and surface as `PanicError` exceptions at the JS
-// boundary thanks to the `panic=unwind` build.
+// Recoverable Rust panics surface as `PanicError` exceptions at the JS
+// boundary thanks to the `panic=unwind` build, so we don't install
+// `console_error_panic_hook`: the panic info already reaches the caller as
+// a thrown exception and there's no need to additionally log it.
 #[wasm_bindgen(start)]
 fn on_start() {
     fn log_abort() {
@@ -1732,7 +1733,6 @@ fn on_start() {
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
-    console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     Automerge::new(actor)
 }
