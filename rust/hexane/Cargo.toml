@@ -1,6 +1,6 @@
 [package]
 name = "hexane"
-version = "0.2.1"
+version = "1.0.0-alpha.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -39,6 +39,30 @@ harness = false
 
 [[bench]]
 name = "seek"
+harness = false
+
+[[bench]]
+name = "v0_vs_v1"
+harness = false
+
+[[bench]]
+name = "max_segments"
+harness = false
+
+[[bench]]
+name = "profile_bool_replace"
+harness = false
+
+[[bench]]
+name = "column_u64_mutations"
+harness = false
+
+[[bench]]
+name = "btree_b_sweep"
+harness = false
+
+[[bench]]
+name = "encode_unless"
 harness = false
 
 [dependencies.web-sys]

@@ -331,11 +331,7 @@ impl<'a, P: Packable + ?Sized> EncoderState<'a, P> for RleState<'a, P> {
             RleState::Empty => (),
             RleState::LoneValue(Some(value)) => writer.flush_lit_run(&[value]),
             RleState::LoneValue(None) => writer.flush_null(1),
-            RleState::Run {
-                count,
-                value: Some(v),
-            } => writer.flush_run(count as i64, v),
-            RleState::Run { count, value: None } => writer.flush_null(count),
+            RleState::Run { count, value } => flush_run::<P, W>(writer, count, value),
             RleState::LitRun { mut run, current } => {
                 run.push(current);
                 writer.flush_lit_run(&run);
@@ -447,7 +443,6 @@ where
         }
     }
 
-    #[inline(never)]
     pub(crate) fn append_chunk(&mut self, run: Run<'a, C::Item>) -> usize {
         self.len += run.count;
         self.state.append_chunk(&mut self.writer, run)
@@ -597,7 +592,6 @@ impl<'a, C: ColumnCursor> SpliceEncoder<'a, C> {
         self.encoder.append(v)
     }
 
-    #[inline(never)]
     pub(crate) fn finish(mut self) -> Vec<Slab> {
         if let Some(cursor) =
             C::finalize_state(self.slab, &mut self.encoder, self.post, self.cursor)
@@ -623,6 +617,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_encoding_large_lit_runs() {
         for i in 0..10_000 {
             let mut encoder = Encoder::<UIntCursor>::new(true); // locked

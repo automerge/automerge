@@ -145,7 +145,7 @@ impl<'a> SpansDiff<'a> {
     fn next_mark_name(&mut self) -> Option<Cow<'a, str>> {
         let mark_pos = self.mark_info.pos();
         let (mark_name, _expand) = self.mark_info.nth(self.pos - mark_pos)?;
-        mark_name
+        mark_name.map(Cow::Borrowed)
     }
 
     fn process_mark(&mut self, diff: Diff, value: ScalarValue<'a>) {

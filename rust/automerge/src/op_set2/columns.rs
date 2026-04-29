@@ -1,60 +1,55 @@
-use super::meta::MetaCursor;
+use super::meta::ValueMeta;
 use super::op::OpLike;
 use super::op_set::MarkIndexColumn;
-use super::types::{Action, ActionCursor, ActorCursor, ActorIdx, ScalarValue};
+use super::types::{Action, ActorIdx, ScalarValue};
 use crate::storage::columns::compression::Uncompressed;
-use crate::storage::columns::ColumnId;
 use crate::storage::columns::{BadColumnLayout, Columns as ColumnFormat};
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ActorId, SequenceType, TextEncoding};
-use hexane::{
-    BooleanCursor, ColumnCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor,
-    StrCursor, UIntCursor,
-};
+use hexane::{v1, PackError};
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::ops::Range;
 
 #[derive(Debug, Clone)]
 pub(super) struct Columns {
-    pub(super) id_actor: ColumnData<ActorCursor>,
-    pub(super) id_ctr: ColumnData<DeltaCursor>,
-    pub(super) obj_actor: ColumnData<ActorCursor>,
-    pub(super) obj_ctr: ColumnData<UIntCursor>,
-    pub(super) key_actor: ColumnData<ActorCursor>,
-    pub(super) key_ctr: ColumnData<DeltaCursor>,
-    pub(super) key_str: ColumnData<StrCursor>,
-    pub(super) succ_count: ColumnData<UIntCursor>,
-    pub(super) succ_actor: ColumnData<ActorCursor>,
-    pub(super) succ_ctr: ColumnData<DeltaCursor>,
-    pub(super) insert: ColumnData<BooleanCursor>,
-    pub(super) action: ColumnData<ActionCursor>,
-    pub(super) value_meta: ColumnData<MetaCursor>,
-    pub(super) value: ColumnData<RawCursor>,
-    pub(super) mark_name: ColumnData<StrCursor>,
-    pub(super) expand: ColumnData<BooleanCursor>,
+    pub(super) id_actor: v1::Column<ActorIdx>,
+    pub(super) id_ctr: v1::DeltaColumn<u32>,
+    pub(super) obj_actor: v1::Column<Option<ActorIdx>>,
+    pub(super) obj_ctr: v1::Column<Option<u32>>,
+    pub(super) key_actor: v1::Column<Option<ActorIdx>>,
+    pub(super) key_ctr: v1::DeltaColumn<Option<u32>>,
+    pub(super) key_str: v1::Column<Option<String>>,
+    pub(super) succ_count: v1::PrefixColumn<u32>,
+    pub(super) succ_actor: v1::Column<ActorIdx>,
+    pub(super) succ_ctr: v1::DeltaColumn<u32>,
+    pub(super) insert: v1::PrefixColumn<bool>,
+    pub(super) action: v1::Column<Action>,
+    pub(super) value_meta: v1::PrefixColumn<ValueMeta>,
+    pub(super) value: v1::RawColumn,
+    pub(super) mark_name: v1::Column<Option<String>>,
+    pub(super) expand: v1::Column<bool>,
     pub(super) index: Indexes,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct Indexes {
-    pub(super) text: ColumnData<UIntCursor>,
-    pub(super) top: ColumnData<BooleanCursor>,
-    pub(super) visible: ColumnData<BooleanCursor>,
-    pub(super) inc: ColumnData<IntCursor>,
+    pub(super) text: v1::PrefixColumn<Option<u32>>,
+    pub(super) top: v1::PrefixColumn<bool>,
+    pub(super) visible: v1::Column<bool>,
+    pub(super) inc: v1::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
 }
 
 impl Default for Indexes {
     fn default() -> Self {
         Self {
-            text: ColumnData::new(),
-            top: ColumnData::new(),
-            visible: ColumnData::new(),
-            inc: ColumnData::new(),
+            text: v1::PrefixColumn::new(),
+            top: v1::PrefixColumn::new(),
+            visible: v1::Column::new(),
+            inc: v1::Column::new(),
             mark: MarkIndexColumn::new(),
         }
     }
@@ -63,22 +58,22 @@ impl Default for Indexes {
 impl Default for Columns {
     fn default() -> Self {
         Self {
-            id_actor: ColumnData::new(),
-            id_ctr: ColumnData::new(),
-            obj_actor: ColumnData::new(),
-            obj_ctr: ColumnData::new(),
-            key_actor: ColumnData::new(),
-            key_ctr: ColumnData::new(),
-            key_str: ColumnData::new(),
-            succ_count: ColumnData::new(),
-            succ_actor: ColumnData::new(),
-            succ_ctr: ColumnData::new(),
-            insert: ColumnData::new(),
-            action: ColumnData::new(),
-            value_meta: ColumnData::new(),
-            value: ColumnData::new(),
-            mark_name: ColumnData::new(),
-            expand: ColumnData::new(),
+            id_actor: v1::Column::new(),
+            id_ctr: v1::DeltaColumn::new(),
+            obj_actor: v1::Column::new(),
+            obj_ctr: v1::Column::new(),
+            key_actor: v1::Column::new(),
+            key_ctr: v1::DeltaColumn::new(),
+            key_str: v1::Column::new(),
+            succ_count: v1::PrefixColumn::new(),
+            succ_actor: v1::Column::new(),
+            succ_ctr: v1::DeltaColumn::new(),
+            insert: v1::PrefixColumn::new(),
+            action: v1::Column::new(),
+            value_meta: v1::PrefixColumn::new(),
+            value: v1::RawColumn::new(),
+            mark_name: v1::Column::new(),
+            expand: v1::Column::new(),
             index: Indexes::default(),
         }
     }
@@ -121,7 +116,10 @@ impl Columns {
         log!("MARK_NAME");
         assert_eq!(self.mark_name.to_vec(), other.mark_name.to_vec());
         log!("EXPAND");
-        assert_eq!(self.expand.to_vec(), other.expand.to_vec());
+        assert_eq!(
+            self.expand.iter().collect::<Vec<_>>(),
+            other.expand.iter().collect::<Vec<_>>()
+        );
         log!("SUCC_COUNT");
         assert_eq!(self.succ_count.to_vec(), other.succ_count.to_vec());
         log!("SUCC_ACTOR");
@@ -131,21 +129,7 @@ impl Columns {
         log!("META");
         assert_eq!(self.value_meta.to_vec(), other.value_meta.to_vec());
         log!("VALUE");
-        assert_eq!(self.value.to_vec(), other.value.to_vec());
-    }
-
-    fn write_unless_empty<C: ColumnCursor>(
-        spec: &ColumnSpec,
-        c: &ColumnData<C>,
-        data: &mut Vec<u8>,
-    ) -> Option<RawColumn<Uncompressed>> {
-        if !c.is_empty() || spec.id() == ColumnId::new(3) {
-            let range = c.save_to(data);
-            if !range.is_empty() {
-                return Some(RawColumn::new(*spec, range));
-            }
-        }
-        None
+        assert_eq!(self.value.save(), other.value.save());
     }
 
     fn export_column(
@@ -154,22 +138,33 @@ impl Columns {
         data: &mut Vec<u8>,
     ) -> Option<RawColumn<Uncompressed>> {
         match *spec {
-            ID_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.id_actor, data),
-            ID_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.id_ctr, data),
-            OBJ_ID_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.obj_actor, data),
-            OBJ_ID_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.obj_ctr, data),
-            KEY_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.key_actor, data),
-            KEY_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.key_ctr, data),
-            KEY_STR_COL_SPEC => Self::write_unless_empty(spec, &self.key_str, data),
-            INSERT_COL_SPEC => Self::write_unless_empty(spec, &self.insert, data),
-            ACTION_COL_SPEC => Self::write_unless_empty(spec, &self.action, data),
-            MARK_NAME_COL_SPEC => Self::write_unless_empty(spec, &self.mark_name, data),
-            EXPAND_COL_SPEC => Self::write_unless_empty(spec, &self.expand, data),
-            SUCC_COUNT_COL_SPEC => Self::write_unless_empty(spec, &self.succ_count, data),
-            SUCC_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.succ_actor, data),
-            SUCC_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.succ_ctr, data),
-            VALUE_META_COL_SPEC => Self::write_unless_empty(spec, &self.value_meta, data),
-            VALUE_COL_SPEC => Self::write_unless_empty(spec, &self.value, data),
+            ID_ACTOR_COL_SPEC => RawColumn::try_new(*spec, self.id_actor.save_to(data)),
+            ID_COUNTER_COL_SPEC => RawColumn::try_new(*spec, self.id_ctr.save_to(data)),
+            OBJ_ID_ACTOR_COL_SPEC => {
+                RawColumn::try_new(*spec, self.obj_actor.save_to_unless(data, None))
+            }
+            OBJ_ID_COUNTER_COL_SPEC => {
+                RawColumn::try_new(*spec, self.obj_ctr.save_to_unless(data, None))
+            }
+            KEY_ACTOR_COL_SPEC => {
+                RawColumn::try_new(*spec, self.key_actor.save_to_unless(data, None))
+            }
+            KEY_COUNTER_COL_SPEC => {
+                RawColumn::try_new(*spec, self.key_ctr.save_to_unless(data, None))
+            }
+            KEY_STR_COL_SPEC => RawColumn::try_new(*spec, self.key_str.save_to_unless(data, None)),
+            // insert is a special case - it will save even if empty for backward compatibility
+            INSERT_COL_SPEC => RawColumn::try_new(*spec, self.insert.save_to(data)),
+            ACTION_COL_SPEC => RawColumn::try_new(*spec, self.action.save_to(data)),
+            MARK_NAME_COL_SPEC => {
+                RawColumn::try_new(*spec, self.mark_name.save_to_unless(data, None))
+            }
+            EXPAND_COL_SPEC => RawColumn::try_new(*spec, self.expand.save_to_unless(data, false)),
+            SUCC_COUNT_COL_SPEC => RawColumn::try_new(*spec, self.succ_count.save_to(data)),
+            SUCC_ACTOR_COL_SPEC => RawColumn::try_new(*spec, self.succ_actor.save_to(data)),
+            SUCC_COUNTER_COL_SPEC => RawColumn::try_new(*spec, self.succ_ctr.save_to(data)),
+            VALUE_META_COL_SPEC => RawColumn::try_new(*spec, self.value_meta.save_to(data)),
+            VALUE_COL_SPEC => RawColumn::try_new(*spec, self.value.save_to(data)),
             _ => None,
         }
     }
@@ -180,12 +175,45 @@ impl Columns {
         let mut cols = ALL_COLUMN_SPECS;
         cols.sort();
 
-        let raw = cols
+        let raw: RawColumns<Uncompressed> = cols
             .iter()
             .filter_map(|spec| self.export_column(spec, &mut data))
             .collect();
 
         (raw, data)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
+        [
+            // op
+            ("id_actor", self.id_actor.save()),
+            ("id_ctr", self.id_ctr.save()),
+            ("obj_actor", self.obj_actor.save()),
+            ("obj_ctr", self.obj_ctr.save()),
+            ("key_actor", self.key_actor.save()),
+            ("key_ctr", self.key_ctr.save()),
+            ("key_str", self.key_str.save()),
+            ("insert", self.insert.save()),
+            ("action", self.action.save()),
+            ("value_meta", self.value_meta.save()),
+            ("value", self.value.save()),
+            ("mark_name", self.mark_name.save()),
+            ("expand", self.expand.save()),
+            // succ
+            ("succ_count", self.succ_count.save()),
+            ("succ_actor", self.succ_actor.save()),
+            ("succ_ctr", self.succ_ctr.save()),
+            // indexes
+            ("visible", self.index.visible.save()),
+            ("inc", self.index.inc.save()),
+            ("mark", self.index.mark.save()),
+            ("text", self.index.text.save()),
+            ("top", self.index.top.save()),
+            ("visible", self.index.visible.save()),
+        ]
+        .into_iter()
+        .collect()
     }
 
     pub(crate) fn validate(
@@ -221,54 +249,60 @@ impl Columns {
             .collect())
     }
 
-    fn load_column<C, T>(
-        spec: ColumnSpec,
-        cols: &BTreeMap<ColumnSpec, Range<usize>>,
-        data: &[u8],
-        test: &T,
-        len: usize,
-    ) -> Result<ColumnData<C>, PackError>
-    where
-        C: ColumnCursor,
-        T: Fn(Option<&C::Item>) -> Option<String>,
-    {
-        if let Some(range) = cols.get(&spec) {
-            ColumnData::load_with(&data[range.clone()], test)
-        } else {
-            Ok(ColumnData::init_empty(len))
-        }
-    }
-
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
-        actors: &[ActorId],
+        _actors: &[ActorId],
     ) -> Result<Self, PackError> {
-        use crate::validation::{ivalid_u32 as ictr, nil, valid_actors, valid_u32 as ctr};
-        let act = valid_actors(actors.len());
+        let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 
-        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, data, &act, 0)?;
+        let id_actor = v1::Column::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
 
-        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, data, &ictr, len)?;
-        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, data, &act, len)?;
-        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, data, &ctr, len)?;
-        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, data, &act, len)?;
-        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, data, &ictr, len)?;
-        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, data, &nil, len)?;
-        let insert = Self::load_column(INSERT_COL_SPEC, &cols, data, &nil, len)?;
-        let action = Self::load_column(ACTION_COL_SPEC, &cols, data, &nil, len)?;
-        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, data, &nil, len)?;
-        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, data, &nil, len)?;
+        let opts = v1::LoadOpts::new().with_length(len);
 
-        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, data, &nil, len)?;
-        let succ_len = succ_count.acc().as_usize();
-        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, data, &act, succ_len)?;
-        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, data, &ictr, succ_len)?;
+        let id_ctr = v1::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts.into())?;
 
-        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, data, &nil, len)?;
-        let value_len = value_meta.acc().as_usize();
-        let value = Self::load_column(VALUE_COL_SPEC, &cols, data, &nil, value_len)?;
+        let obj_actor = v1::Column::<Option<ActorIdx>>::load_with(
+            data_for(OBJ_ID_ACTOR_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+
+        let obj_ctr = v1::Column::<Option<u32>>::load_with(
+            data_for(OBJ_ID_COUNTER_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+
+        let key_actor = v1::Column::<Option<ActorIdx>>::load_with(
+            data_for(KEY_ACTOR_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+
+        let key_ctr = v1::DeltaColumn::<Option<u32>>::load_with(
+            data_for(KEY_COUNTER_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+        let key_str = v1::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
+        let insert = v1::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
+        let action = v1::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts.into())?;
+        let mark_name = v1::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+
+        let expand = v1::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
+
+        let succ_count =
+            v1::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts.into())?;
+
+        let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
+        let succ_opts = v1::LoadOpts::new().with_length(succ_len);
+        let succ_actor =
+            v1::Column::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts.into())?;
+
+        let succ_ctr =
+            v1::DeltaColumn::<u32>::load_with(data_for(SUCC_COUNTER_COL_SPEC), succ_opts.into())?;
+
+        let value_meta =
+            v1::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts.into())?;
+        let value = v1::RawColumn::load(data_for(VALUE_COL_SPEC))?;
 
         let index = Indexes::default();
 
@@ -293,33 +327,91 @@ impl Columns {
         })
     }
 
-    fn remap_actors<F>(&mut self, f: F)
+    fn remap_actors<F>(&mut self, f: &F)
     where
-        F: Fn(Option<Cow<'_, ActorIdx>>) -> Option<Cow<'_, ActorIdx>>,
+        F: Fn(ActorIdx) -> ActorIdx,
     {
-        self.id_actor.remap(&f);
-        self.obj_actor.remap(&f);
-        self.key_actor.remap(&f);
-        self.succ_actor.remap(&f);
+        self.id_actor.remap(f);
+        self.succ_actor.remap(f);
+        self.obj_actor.remap(&|a: Option<ActorIdx>| a.map(f));
+        self.key_actor.remap(&|a: Option<ActorIdx>| a.map(f));
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         let idx = idx as u32;
-        self.remap_actors(move |a| match a.as_deref() {
-            Some(&ActorIdx(actor)) if actor >= idx => Some(Cow::Owned(ActorIdx(actor + 1))),
+        self.remap_actors(&move |a| match a {
+            ActorIdx(actor) if actor >= idx => ActorIdx(actor + 1),
             _ => a,
         });
     }
 
     pub(crate) fn rewrite_without_actor(&mut self, idx: usize) {
         let idx = idx as u32;
-        self.remap_actors(move |a| match a.as_deref() {
-            Some(&ActorIdx(id)) if id > idx => Some(Cow::Owned(ActorIdx(id - 1))),
-            Some(&ActorIdx(id)) if id == idx => {
+        self.remap_actors(&move |a| match a {
+            ActorIdx(id) if id > idx => ActorIdx(id - 1),
+            ActorIdx(id) if id == idx => {
                 panic!("cant rewrite - actor is present")
             }
             _ => a,
         });
+    }
+
+    pub(crate) fn remove_ops<O>(&mut self, pos: usize, ops: &[O]) -> usize
+    where
+        O: OpLike,
+    {
+        let ops = ops.iter().filter(|o| O::action(o) != Action::Delete);
+        let del = ops.clone().count();
+
+        let value_pos = self.value_meta.get_prefix(pos) as usize;
+        let succ_pos = self.succ_count.get_prefix(pos) as usize;
+
+        self.id_actor
+            .splice(pos, del, std::iter::empty::<ActorIdx>());
+        self.id_ctr.splice(pos, del, std::iter::empty::<u32>());
+        self.obj_actor
+            .splice(pos, del, std::iter::empty::<Option<ActorIdx>>());
+        self.obj_ctr
+            .splice(pos, del, std::iter::empty::<Option<u32>>());
+        self.key_actor
+            .splice(pos, del, std::iter::empty::<Option<ActorIdx>>());
+        self.key_ctr
+            .splice(pos, del, std::iter::empty::<Option<u32>>());
+        self.key_str.splice(pos, del, [] as [Option<&str>; 0]);
+        self.insert.splice(pos, del, std::iter::empty::<bool>());
+        self.action.splice(pos, del, std::iter::empty::<Action>());
+        self.expand.splice(pos, del, std::iter::empty::<bool>());
+        self.mark_name.splice(pos, del, [] as [Option<&str>; 0]);
+
+        self.value_meta
+            .splice(pos, del, std::iter::empty::<ValueMeta>());
+
+        let raw_len = ops
+            .clone()
+            .filter_map(|o| o.raw_value().map(|r| r.len()))
+            .sum();
+        self.value.splice_slice(value_pos, raw_len, &[]);
+
+        self.succ_count.splice(pos, del, std::iter::empty::<u32>());
+        let succ_del = ops.clone().flat_map(|o| o.succ()).count();
+
+        if succ_del > 0 {
+            self.succ_actor
+                .splice(succ_pos, succ_del, std::iter::empty::<ActorIdx>());
+            self.succ_ctr
+                .splice(succ_pos, succ_del, std::iter::empty::<u32>());
+            self.index
+                .inc
+                .splice(succ_pos, succ_del, std::iter::empty::<Option<i64>>());
+        }
+
+        let marks = ops.clone().map(O::mark_index).collect();
+        self.index.mark.undo(pos, marks);
+        self.index.text.splice(pos, del, [] as [Option<u32>; 0]);
+        self.index.top.splice(pos, del, [] as [bool; 0]);
+        self.index.visible.splice(pos, del, [] as [bool; 0]);
+
+        ops.count()
     }
 
     pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O], text_encoding: TextEncoding) -> usize
@@ -327,44 +419,49 @@ impl Columns {
         O: OpLike,
     {
         let ops = ops.iter().filter(|o| O::action(o) != Action::Delete);
+
+        let value_pos = self.value_meta.get_prefix(pos) as usize;
+        let succ_pos = self.succ_count.get_prefix(pos) as usize;
+
         self.id_actor.splice(pos, 0, ops.clone().map(O::id_actor));
-        self.id_ctr.splice(pos, 0, ops.clone().map(O::id_ctr));
+        self.id_ctr
+            .splice(pos, 0, ops.clone().map(|o| O::id_ctr(o) as u32));
         self.obj_actor.splice(pos, 0, ops.clone().map(O::obj_actor));
-        self.obj_ctr.splice(pos, 0, ops.clone().map(O::obj_ctr));
+        self.obj_ctr
+            .splice(pos, 0, ops.clone().map(|o| O::obj_ctr(o).map(|v| v as u32)));
         self.key_actor.splice(pos, 0, ops.clone().map(O::key_actor));
-        self.key_ctr.splice(pos, 0, ops.clone().map(O::key_ctr));
+        self.key_ctr
+            .splice(pos, 0, ops.clone().map(|o| O::key_ctr(o).map(|v| v as u32)));
         self.key_str.splice(pos, 0, ops.clone().map(O::key_str));
         self.insert.splice(pos, 0, ops.clone().map(O::insert));
         self.action.splice(pos, 0, ops.clone().map(O::action));
         self.expand.splice(pos, 0, ops.clone().map(O::expand));
         self.mark_name.splice(pos, 0, ops.clone().map(O::mark_name));
 
-        let value_pos = self
-            .value_meta
-            .splice(pos, 0, ops.clone().map(|o| o.meta_value()))
-            .as_usize();
+        self.value_meta
+            .splice(pos, 0, ops.clone().map(|o| o.meta_value()));
 
         self.value
             .splice(value_pos, 0, ops.clone().filter_map(|o| o.raw_value()));
 
-        let succ_pos = self
-            .succ_count
-            .splice(pos, 0, ops.clone().map(|o| o.succ().len() as u64))
-            .as_usize();
+        self.succ_count
+            .splice(pos, 0, ops.clone().map(|o| o.succ().len() as u32));
 
         let succ_actor = ops
             .clone()
             .flat_map(|o| o.succ().map(|id| id.actoridx()))
             .collect::<Vec<_>>();
 
-        self.succ_actor.splice(succ_pos, 0, &succ_actor);
+        self.succ_actor
+            .splice(succ_pos, 0, succ_actor.iter().copied());
 
         let succ_ctr = ops
             .clone()
             .flat_map(|o| o.succ().map(|id| id.icounter()))
             .collect::<Vec<_>>();
 
-        self.succ_ctr.splice(succ_pos, 0, succ_ctr);
+        self.succ_ctr
+            .splice(succ_pos, 0, succ_ctr.iter().map(|&v| v as u32));
 
         self.index
             .inc
@@ -372,12 +469,12 @@ impl Columns {
 
         self.index
             .mark
-            .splice(pos, 0, ops.clone().map(O::mark_index).collect());
+            .extend(pos, ops.clone().map(O::mark_index).collect());
         self.index.text.splice(
             pos,
             0,
             ops.clone()
-                .map(|s| O::width(s, SequenceType::Text, text_encoding)),
+                .map(|s| Some(O::width(s, SequenceType::Text, text_encoding) as u32)),
         );
         self.index.top.splice(pos, 0, ops.clone().map(O::top));
         self.index
@@ -414,52 +511,56 @@ impl Columns {
         let mut key_str = self.key_str.iter();
         let mut key_a = self.key_actor.iter();
         let mut key_c = self.key_ctr.iter();
-        let mut meta = self.value_meta.iter();
-        let mut value = self.value.raw_reader(0);
-        let mut succ = self.succ_count.iter();
-        let mut insert = self.insert.iter();
-        let mut text = self.index.text.iter();
+        let mut meta = self.value_meta.values().iter();
+        let mut value = self.value.iter();
+        let mut succ = self.succ_count.values().iter();
+        let mut insert = self.insert.values().iter();
+        let mut text = self.index.text.values().iter();
         let mut vis = self.index.visible.iter();
-        let mut top = self.index.top.iter();
+        let mut top = self.index.top.values().iter();
         let mut pos = 0;
         log!("::::: id       obj      key        elem     i v t tx act suc value");
         loop {
-            let id_a = fmt(id_a.next());
-            let id_c = fmt(id_c.next());
-            let obj_a = fmt(obj_a.next());
-            let obj_c = fmt(obj_c.next());
-            let act = fmt(act.next());
-            let insert = fmt_bool(insert.next());
-            let text = fmt(text.next());
-            let vis = fmt_bool(vis.next());
-            let top = fmt_bool(top.next());
-            let key_s = fmt(key_str.next());
-            let key_a = fmt(key_a.next());
-            let key_c = fmt(key_c.next());
-            let succ = fmt(succ.next());
+            let id_a_n = id_a.next();
+            let id_c_n = id_c.next();
+            let obj_a_n = obj_a.next();
+            let obj_c_n = obj_c.next();
+            if id_a_n.is_none() && id_c_n.is_none() && obj_a_n.is_none() && obj_c_n.is_none() {
+                break;
+            }
+            let id_a_s = fmt_display(id_a_n);
+            let id_c_s = fmt_display(id_c_n);
+            let obj_a_s = fmt_opt_display(obj_a_n);
+            let obj_c_s = fmt_opt_display(obj_c_n);
+            let act_s = fmt_display(act.next());
+            let insert_s = fmt_bool(insert.next());
+            let text_s = fmt_opt_debug(text.next());
+            let vis_s = fmt_bool(vis.next());
+            let top_s = fmt_bool(top.next());
+            let key_s = fmt_opt_debug(key_str.next());
+            let key_a_s = fmt_opt_display(key_a.next());
+            let key_c_s = fmt_opt_display(key_c.next());
+            let succ_s = fmt_display(succ.next());
             let m = meta.next();
-            let v = if let Some(Some(m)) = m {
-                let raw_data = value.read_next(m.length()).unwrap_or(&[]);
-                ScalarValue::from_raw(*m, raw_data).unwrap()
+            let v = if let Some(m) = m {
+                let raw_data = value.take(m.length());
+                ScalarValue::from_raw(m, raw_data).unwrap()
             } else {
                 ScalarValue::Null
             };
-            if id_a == NONE && id_c == NONE && obj_a == NONE && obj_c == NONE {
-                break;
-            }
             log!(
                 "{:4}: {:8} {:8} {:10} {:8} {:1} {:1} {:1} {:2} {:3} {:1}   {}",
                 pos,
-                format!("({}, {})", id_c, id_a),
-                format!("({}, {})", obj_c, obj_a),
+                format!("({}, {})", id_c_s, id_a_s),
+                format!("({}, {})", obj_c_s, obj_a_s),
                 key_s,
-                format!("({}, {})", key_c, key_a),
-                insert,
-                vis,
-                top,
-                text,
-                act,
-                succ,
+                format!("({}, {})", key_c_s, key_a_s),
+                insert_s,
+                vis_s,
+                top_s,
+                text_s,
+                act_s,
+                succ_s,
                 v,
             );
             pos += 1;
@@ -469,192 +570,34 @@ impl Columns {
 
 const NONE: &str = ".";
 
-fn fmt<T: std::fmt::Display + hexane::Packable + ?Sized>(t: Option<Option<Cow<'_, T>>>) -> String {
+fn fmt_display<T: std::fmt::Display>(t: Option<T>) -> String {
+    match t {
+        None => NONE.to_owned(),
+        Some(t) => format!("{}", t),
+    }
+}
+
+fn fmt_opt_display<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
     match t {
         None => NONE.to_owned(),
         Some(None) => "-".to_owned(),
-        Some(Some(t)) => format!("{}", t.as_ref()).to_owned(),
+        Some(Some(t)) => format!("{}", t),
     }
 }
 
-/*
-#[derive(Debug, Clone)]
-pub(crate) enum Column {
-    Actor(ColumnData<ActorCursor>),
-    Str(ColumnData<StrCursor>),
-    Integer(ColumnData<UIntCursor>),
-    Action(ColumnData<ActionCursor>),
-    Delta(ColumnData<DeltaCursor>),
-    Bool(ColumnData<BooleanCursor>),
-    ValueMeta(ColumnData<MetaCursor>),
-    Value(ColumnData<RawCursor>),
-    Group(ColumnData<UIntCursor>),
-}
-
-impl Column {
-    // FIXME
-    /*
-        pub(crate) fn splice(&mut self, mut index: usize, op: &OpBuilder) {
-            todo!()
-            match self {
-                Self::Actor(col) => col.write(out),
-                Self::Str(col) => col.write(out),
-                Self::Integer(col) => col.write(out),
-                Self::Delta(col) => col.write(out),
-                Self::Bool(col) => col.write(out),
-                Self::ValueMeta(col) => col.write(out),
-                Self::Value(col) => col.write(out),
-                Self::Group(col) => col.write(out),
-                Self::Action(col) => col.write(out),
-            }
-        }
-    */
-
-    pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
-        match self {
-            Self::Actor(col) => col.write(out),
-            Self::Str(col) => col.write(out),
-            Self::Integer(col) => col.write(out),
-            Self::Delta(col) => col.write(out),
-            Self::Bool(col) => col.write(out),
-            Self::ValueMeta(col) => col.write(out),
-            Self::Value(col) => col.write(out),
-            Self::Group(col) => col.write(out),
-            Self::Action(col) => col.write(out),
-        }
-    }
-
-    pub(crate) fn slabs(&self) -> &SlabTree<SlabWeight> {
-        match self {
-            Self::Actor(col) => &col.slabs,
-            Self::Str(col) => &col.slabs,
-            Self::Integer(col) => &col.slabs,
-            Self::Delta(col) => &col.slabs,
-            Self::Bool(col) => &col.slabs,
-            Self::ValueMeta(col) => &col.slabs,
-            Self::Value(col) => &col.slabs,
-            Self::Group(col) => &col.slabs,
-            Self::Action(col) => &col.slabs,
-        }
-    }
-
-    #[allow(unused)]
-    pub(crate) fn dump(&self) {
-        match self {
-            Self::Actor(col) => col.dump(),
-            Self::Str(col) => col.dump(),
-            Self::Integer(col) => col.dump(),
-            Self::Delta(col) => col.dump(),
-            Self::Bool(col) => col.dump(),
-            Self::ValueMeta(col) => col.dump(),
-            Self::Value(col) => col.dump(),
-            Self::Group(col) => col.dump(),
-            Self::Action(col) => col.dump(),
-        }
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        match self {
-            Self::Actor(col) => col.is_empty(),
-            Self::Str(col) => col.is_empty(),
-            Self::Integer(col) => col.is_empty(),
-            Self::Delta(col) => col.is_empty(),
-            Self::Bool(col) => col.is_empty(),
-            Self::ValueMeta(col) => col.is_empty(),
-            Self::Value(col) => col.is_empty(),
-            Self::Group(col) => col.is_empty(),
-            Self::Action(col) => col.is_empty(),
-        }
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            Self::Actor(col) => col.len,
-            Self::Str(col) => col.len,
-            Self::Integer(col) => col.len,
-            Self::Delta(col) => col.len,
-            Self::Bool(col) => col.len,
-            Self::ValueMeta(col) => col.len,
-            Self::Value(col) => col.len,
-            Self::Group(col) => col.len,
-            Self::Action(col) => col.len,
-        }
-    }
-
-    pub(crate) fn new(spec: ColumnSpec) -> Self {
-        match spec.col_type() {
-            ColumnType::Actor => Column::Actor(ColumnData::new()),
-            ColumnType::String => Column::Str(ColumnData::new()),
-            ColumnType::Integer => {
-                if spec.id() == super::op_set::ACTION_COL_ID {
-                    Column::Action(ColumnData::new())
-                } else {
-                    Column::Integer(ColumnData::new())
-                }
-            }
-            ColumnType::DeltaInteger => Column::Delta(ColumnData::new()),
-            ColumnType::Boolean => Column::Bool(ColumnData::new()),
-            ColumnType::Group => Column::Group(ColumnData::new()),
-            ColumnType::ValueMetadata => Column::ValueMeta(ColumnData::new()),
-            ColumnType::Value => Column::Value(ColumnData::new()),
-        }
-    }
-
-    pub(crate) fn external(
-        spec: ColumnSpec,
-        data: Arc<Vec<u8>>,
-        range: Range<usize>,
-        actors: &[ActorId],
-    ) -> Result<Self, PackError> {
-        let m = ScanMeta {
-            actors: actors.len(),
-        };
-        match spec.col_type() {
-            ColumnType::Actor => Ok(Column::Actor(ColumnData::external(data, range, &m)?)),
-            ColumnType::String => Ok(Column::Str(ColumnData::external(data, range, &m)?)),
-            ColumnType::Integer => {
-                if spec.id() == super::op_set::ACTION_COL_ID {
-                    Ok(Column::Action(ColumnData::external(data, range, &m)?))
-                } else {
-                    Ok(Column::Integer(ColumnData::external(data, range, &m)?))
-                }
-            }
-            ColumnType::DeltaInteger => Ok(Column::Delta(ColumnData::external(data, range, &m)?)),
-            ColumnType::Boolean => Ok(Column::Bool(ColumnData::external(data, range, &m)?)),
-            ColumnType::Group => Ok(Column::Group(ColumnData::external(data, range, &m)?)),
-            ColumnType::ValueMetadata => {
-                Ok(Column::ValueMeta(ColumnData::external(data, range, &m)?))
-            }
-            ColumnType::Value => Ok(Column::Value(ColumnData::external(data, range, &m)?)),
-        }
-    }
-
-    pub(crate) fn init_empty(spec: ColumnSpec, len: usize) -> Self {
-        match spec.col_type() {
-            ColumnType::Actor => Column::Actor(ColumnData::init_empty(len)),
-            ColumnType::String => Column::Str(ColumnData::init_empty(len)),
-            ColumnType::Integer => {
-                if spec.id() == super::op_set::ACTION_COL_ID {
-                    Column::Action(ColumnData::init_empty(len))
-                } else {
-                    Column::Integer(ColumnData::init_empty(len))
-                }
-            }
-            ColumnType::DeltaInteger => Column::Delta(ColumnData::init_empty(len)),
-            ColumnType::Boolean => Column::Bool(ColumnData::init_empty(len)),
-            ColumnType::Group => Column::Group(ColumnData::init_empty(len)),
-            ColumnType::ValueMetadata => Column::ValueMeta(ColumnData::init_empty(len)),
-            ColumnType::Value => Column::Value(ColumnData::init_empty(len)),
-        }
+fn fmt_opt_debug<T: std::fmt::Debug>(t: Option<Option<T>>) -> String {
+    match t {
+        None => NONE.to_owned(),
+        Some(None) => "-".to_owned(),
+        Some(Some(t)) => format!("{:?}", t),
     }
 }
-*/
 
-fn fmt_bool(val: Option<Option<Cow<'_, bool>>>) -> &'static str {
-    if val.flatten().as_deref() == Some(&true) {
-        "t"
-    } else {
-        "-"
+fn fmt_bool(t: Option<bool>) -> String {
+    match t {
+        None => NONE.to_owned(),
+        Some(true) => "t".to_string(),
+        Some(false) => "f".to_string(),
     }
 }
 
