@@ -168,6 +168,10 @@ pub(crate) struct TxOp {
     pub(crate) noop: bool,
     pub(crate) bld: OpBuilder<'static>,
     pub(crate) undo: Vec<SuccUndo>,
+    // Pre-insert register range for scoped transactions. When present,
+    // rollback re-runs reset_top over this range to undo the conflict
+    // reordering that reset_top performed at insert time.
+    pub(crate) reset_range: Option<std::ops::Range<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -274,6 +278,7 @@ impl TxOp {
             index,
             noop,
             undo: vec![],
+            reset_range: None,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -307,6 +312,7 @@ impl TxOp {
             pos,
             noop,
             undo: vec![],
+            reset_range: None,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -336,6 +342,7 @@ impl TxOp {
             index,
             noop: false,
             undo: vec![],
+            reset_range: None,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -365,6 +372,7 @@ impl TxOp {
             obj_type: obj.typ,
             noop: false,
             undo: vec![],
+            reset_range: None,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -395,6 +403,7 @@ impl TxOp {
             index,
             noop: false,
             undo: vec![],
+            reset_range: None,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -424,6 +433,7 @@ impl TxOp {
             index,
             noop: false,
             undo: vec![],
+            reset_range: None,
             bld: OpBuilder {
                 id,
                 obj: obj.id,

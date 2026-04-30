@@ -238,6 +238,9 @@ impl OpSet {
         if op.obj_info().is_some() {
             self.obj_info.remove(op.id());
         }
+        if let Some(range) = &op.reset_range {
+            self.reset_top(range.clone());
+        }
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
