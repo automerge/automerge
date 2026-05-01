@@ -1,5 +1,5 @@
 use crate::transaction::Transactable;
-use crate::{ActorId, Automerge, ObjType, ReadDoc, ScalarValue, ROOT};
+use crate::{ActorId, Automerge, ObjType, PatchLog, ReadDoc, ScalarValue, ROOT};
 
 fn assert_checkpoint_eq(
     a: &std::collections::HashMap<&'static str, Vec<u8>>,
@@ -328,6 +328,65 @@ fn rollback_delete_object() {
             .unwrap(),
         "nested_value"
     );
+}
+
+#[test]
+fn rollback_scoped_transaction_on_conflicted_register() {
+    // When we insert an op into the opset we pass an array of op IDs which the
+    // new operation succeeds. Overwriting these operation IDs can modify the
+    // "top" and "visible" indexes, so we record the changes to those indexes
+    // so that when we later want to undo the operation we know what changes to
+    // make to the indexes.
+    //
+    // In the case of a scoped transaction the predecessor op IDs which we pass
+    // to the OpSet are not all the predecessor ops in the OpSet, just the ones
+    // which are visible at the heads we are scoped to. This means that when we
+    // record the changes to the indexes which need to be undone we don't
+    // record enough information to maintain the invariant that there must be
+    // only one "top" entry per register. This means that when we rollback we
+    // need to rewrite the "top" index.
+    //
+    // This test exercises the logic required by ensuring that the checkpoints
+    // before and after a rollback of a scoped transaction are the same.
+    let mut doc1 = Automerge::new();
+    doc1.set_actor(ActorId::from(b"aaaa"));
+    let mut doc2 = Automerge::new();
+    doc2.set_actor(ActorId::from(b"bbbb"));
+
+    {
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "field", "original").unwrap();
+        tx.commit();
+    }
+    let scoped_heads = doc1.get_heads();
+    doc2.merge(&mut doc1).unwrap();
+
+    {
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "field", "from_a").unwrap();
+        tx.commit();
+    }
+    {
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "field", "from_b").unwrap();
+        tx.commit();
+    }
+    doc1.merge(&mut doc2).unwrap();
+
+    let conflict_count = doc1.get_all(ROOT, "field").unwrap().len();
+    assert!(conflict_count >= 2, "expected conflict");
+
+    let before = doc1.save_checkpoint();
+
+    {
+        let mut tx = doc1.transaction_at(PatchLog::null(), &scoped_heads);
+        tx.put(ROOT, "field", "scoped_value").unwrap();
+        tx.rollback();
+    }
+
+    let after = doc1.save_checkpoint();
+    assert_checkpoint_eq(&before, &after);
+    assert_eq!(doc1.get_all(ROOT, "field").unwrap().len(), conflict_count);
 }
 
 #[test]

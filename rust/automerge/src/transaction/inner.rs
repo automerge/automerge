@@ -278,6 +278,7 @@ impl TransactionInner {
 
         if self.scope.is_some() {
             doc.ops_mut().reset_top(range.start..(range.end + added));
+            op.reset_range = Some(range);
         }
 
         self.finalize_op(doc.text_encoding(), patch_log, &op, None);
