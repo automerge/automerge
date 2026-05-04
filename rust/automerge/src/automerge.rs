@@ -181,8 +181,13 @@ impl std::default::Default for LoadOptions<'static> {
 /// [`Self::merge()`] or [`Self::merge_and_log_patches()`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
-/// [`Self::fork()`]. If you want to split a document from ealier in its history you can use
-/// [`Self::fork_at()`].
+/// [`Self::fork()`]. If you want to split a document from earlier in its history you can use
+/// [`Self::fork_at()`]. Both methods give the fork a new random actor ID because an actor ID
+/// identifies a single linear sequence of changes. If the original document and a fork can both
+/// write before being merged, do not reset them to the same actor ID; the merge may fail with
+/// [`AutomergeError::DuplicateSeqNumber`]. To make historical writes against a full document while
+/// keeping one logical actor, use [`Self::transaction_at()`] or [`Self::into_transaction()`] with
+/// isolated heads so Automerge can choose an internal concurrent actor when needed.
 ///
 /// ## Reading values
 ///
@@ -282,13 +287,21 @@ impl Automerge {
         }
     }
 
-    /// Set the actor id for this document.
+    /// Set the actor ID for this document.
+    ///
+    /// Actor IDs identify linear change sequences. Do not use the same actor ID for documents that
+    /// may write concurrently and later merge, unless you are using one of the isolated-transaction
+    /// APIs to let Automerge choose an internal concurrent actor when needed.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.set_actor(actor);
         self
     }
 
-    /// Set the actor id for this document.
+    /// Set the actor ID for this document.
+    ///
+    /// Actor IDs identify linear change sequences. Do not use the same actor ID for documents that
+    /// may write concurrently and later merge, unless you are using one of the isolated-transaction
+    /// APIs to let Automerge choose an internal concurrent actor when needed.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => self.actor = Actor::Cached(idx),
@@ -364,7 +377,10 @@ impl Automerge {
         Transaction::new(self, args, patch_log)
     }
 
-    /// Start a transaction isolated at a given heads
+    /// Start a transaction isolated at a given heads.
+    ///
+    /// If `heads` do not include the current actor's latest change, Automerge will use an internal
+    /// concurrent actor for new changes so the current actor's sequence remains linear.
     pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
         let args = self.transaction_args(Some(heads));
         Transaction::new(self, args, patch_log)
@@ -379,7 +395,8 @@ impl Automerge {
     /// # Arguments
     /// * `patch_log` - An optional [`PatchLog`] to log the changes in this transaction to
     /// * `heads` - An optional set of heads to isolate this transaction at, or `None` to use the
-    ///   current heads of the document
+    ///   current heads of the document. If these heads do not include the current actor's latest
+    ///   change, Automerge will use an internal concurrent actor for new changes.
     pub fn into_transaction(
         self,
         patch_log: Option<PatchLog>,
@@ -540,18 +557,25 @@ impl Automerge {
         Transaction::empty(self, args, opts)
     }
 
-    /// Fork this document at the current point for use by a different actor.
+    /// Fork this document at the current heads for use by a different actor.
     ///
-    /// This will create a new actor ID for the forked document
+    /// The fork receives a new random actor ID. Keep that actor, or another actor that will not be
+    /// used concurrently elsewhere, if both documents may write before they are merged. Actor IDs
+    /// are linear change streams, so forcing the original and fork to share an actor ID after both
+    /// have written can make [`Self::merge()`] return [`AutomergeError::DuplicateSeqNumber`].
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
         f.set_actor(ActorId::random());
         f
     }
 
-    /// Fork this document at the given heads
+    /// Fork this document at the given heads for use by a different actor.
     ///
-    /// This will create a new actor ID for the forked document
+    /// The fork contains only changes reachable from `heads` and receives a new random actor ID. It
+    /// does not know about later changes in the source document, so resetting it to the source
+    /// document's actor and then writing can collide when merged into a newer source document. For
+    /// same-logical-actor historical writes on a full document, prefer [`Self::transaction_at()`]
+    /// or [`Self::into_transaction()`] with `Some(heads)`.
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
         let mut heads = heads.to_vec();

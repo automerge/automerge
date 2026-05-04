@@ -31,8 +31,13 @@ use crate::{LoadOptions, VerificationMode};
 /// [`Self::merge()`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
-/// [`Self::fork()`]. If you want to split a document from ealier in its history you can use
-/// [`Self::fork_at()`].
+/// [`Self::fork()`]. If you want to split a document from earlier in its history you can use
+/// [`Self::fork_at()`]. Both methods give the fork a new random actor ID because an actor ID
+/// identifies a single linear sequence of changes. If the original document and a fork can both
+/// write before being merged, do not reset them to the same actor ID; the merge may fail with
+/// [`AutomergeError::DuplicateSeqNumber`]. To make historical writes against a full document while
+/// keeping one logical actor, use [`Self::isolate()`] before writing and [`Self::integrate()`] when
+/// returning to the current heads.
 ///
 /// ## Reading values
 ///
@@ -334,6 +339,12 @@ impl AutoCommit {
         patches
     }
 
+    /// Fork this document at the current heads for use by a different actor.
+    ///
+    /// The fork receives a new random actor ID. Keep that actor, or another actor that will not be
+    /// used concurrently elsewhere, if both documents may write before they are merged. Actor IDs
+    /// are linear change streams, so forcing the original and fork to share an actor ID after both
+    /// have written can make [`Self::merge()`] return [`AutomergeError::DuplicateSeqNumber`].
     pub fn fork(&mut self) -> Self {
         self.ensure_transaction_closed();
         Self {
@@ -347,6 +358,13 @@ impl AutoCommit {
         }
     }
 
+    /// Fork this document at the given heads for use by a different actor.
+    ///
+    /// The fork contains only changes reachable from `heads` and receives a new random actor ID. It
+    /// does not know about later changes in the source document, so resetting it to the source
+    /// document's actor and then writing can collide when merged into a newer source document. For
+    /// same-logical-actor historical writes on a full document, prefer [`Self::fork()`] followed by
+    /// [`Self::isolate()`] with the historical heads before writing.
     pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         self.ensure_transaction_closed();
         Ok(Self {
@@ -367,12 +385,22 @@ impl AutoCommit {
         &self.doc
     }
 
+    /// Set the actor ID for this document.
+    ///
+    /// Actor IDs identify linear change sequences. Do not use the same actor ID for documents that
+    /// may write concurrently and later merge, unless you are using [`Self::isolate()`] to let
+    /// Automerge choose an internal concurrent actor when needed.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.ensure_transaction_closed();
         self.doc.set_actor(actor);
         self
     }
 
+    /// Set the actor ID for this document.
+    ///
+    /// Actor IDs identify linear change sequences. Do not use the same actor ID for documents that
+    /// may write concurrently and later merge, unless you are using [`Self::isolate()`] to let
+    /// Automerge choose an internal concurrent actor when needed.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         self.ensure_transaction_closed();
         self.doc.set_actor(actor);
@@ -383,12 +411,22 @@ impl AutoCommit {
         self.doc.get_actor()
     }
 
+    /// View and write this document as of `heads`.
+    ///
+    /// If `heads` do not include the current actor's latest change, new changes are assigned to an
+    /// internal concurrent actor derived from the current actor. This preserves the invariant that
+    /// each actor ID has one linear change sequence while still allowing historical async work from
+    /// one logical actor.
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
         self.patch_to(heads);
         self.isolation = Some(heads.to_vec());
     }
 
+    /// Return an isolated document to its current heads.
+    ///
+    /// Use this after [`Self::isolate()`] when subsequent reads and writes should operate on the
+    /// document's full current state again.
     pub fn integrate(&mut self) {
         self.ensure_transaction_closed();
         self.patch_to(self.doc.get_heads().as_slice());
