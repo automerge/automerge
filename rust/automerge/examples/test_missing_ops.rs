@@ -8,8 +8,7 @@
 // generate_sync_message calls in between, triggers the bug.
 
 use automerge::{
-    sync, sync::SyncDoc, ActorId, AutoCommit, ObjType, ReadDoc, ROOT,
-    transaction::Transactable,
+    sync, sync::SyncDoc, transaction::Transactable, ActorId, AutoCommit, ObjType, ReadDoc, ROOT,
 };
 
 fn main() {
@@ -56,14 +55,16 @@ fn test_char_splices_with_fork_merge_sync() {
         // Frontend char (simulated on same doc, different actor temporarily)
         let saved_actor = doc.get_actor().clone();
         doc.set_actor(ActorId::from(b"frontend" as &[u8]));
-        doc.splice_text(&text, i, 0, &format!("{}", (b'a' + (i % 26) as u8) as char)).unwrap();
+        doc.splice_text(&text, i, 0, &format!("{}", (b'a' + (i % 26) as u8) as char))
+            .unwrap();
         doc.commit();
         doc.set_actor(saved_actor);
 
         // Daemon fork+merge (output write)
         let mut fork = doc.fork();
         fork.set_actor(ActorId::from(format!("daemon:fork-{}", i).as_bytes()));
-        fork.put(ROOT, "output_hash", format!("hash-{}", i)).unwrap();
+        fork.put(ROOT, "output_hash", format!("hash-{}", i))
+            .unwrap();
         fork.commit();
         doc.merge(&mut fork).unwrap();
 
@@ -95,7 +96,8 @@ fn test_wasm_typing_with_daemon_fork_merge() {
     // 200 rounds of typing + daemon fork+merge + sync
     for i in 0..200 {
         // WASM types one character
-        wasm.splice_text(&text, i, 0, &format!("{}", (b'a' + (i % 26) as u8) as char)).unwrap();
+        wasm.splice_text(&text, i, 0, &format!("{}", (b'a' + (i % 26) as u8) as char))
+            .unwrap();
         wasm.commit();
 
         // Sync wasm -> daemon (one round)
@@ -104,7 +106,8 @@ fn test_wasm_typing_with_daemon_fork_merge() {
         // Daemon fork+merge (simulating output write or format)
         let mut fork = daemon.fork();
         fork.set_actor(ActorId::from(format!("daemon:op-{}", i).as_bytes()));
-        fork.put(ROOT, &format!("key_{}", i % 10), i as i64).unwrap();
+        fork.put(ROOT, &format!("key_{}", i % 10), i as i64)
+            .unwrap();
         fork.commit();
         daemon.merge(&mut fork).unwrap();
 
@@ -137,7 +140,8 @@ fn test_interleaved_typing_fork_at() {
     // WASM types 50 characters (each is a separate change)
     for i in 0..50 {
         let pos = 15 + i; // after "initial content"
-        wasm.splice_text(&text, pos, 0, &format!("{}", i % 10)).unwrap();
+        wasm.splice_text(&text, pos, 0, &format!("{}", i % 10))
+            .unwrap();
         wasm.commit();
 
         // Partial sync every 5 chars
@@ -154,7 +158,9 @@ fn test_interleaved_typing_fork_at() {
         Ok(mut file_fork) => {
             file_fork.set_actor(ActorId::from(b"filesystem" as &[u8]));
             let len = file_fork.text(&text).unwrap().len() as isize;
-            file_fork.splice_text(&text, 0, len, "disk content replaces everything").unwrap();
+            file_fork
+                .splice_text(&text, 0, len, "disk content replaces everything")
+                .unwrap();
             file_fork.commit();
             daemon.merge(&mut file_fork).unwrap();
         }
@@ -207,7 +213,8 @@ fn test_many_actors_partial_sync() {
         if round % 3 == 0 {
             let mut fork = daemon.fork();
             fork.set_actor(ActorId::from(b"daemon:status" as &[u8]));
-            fork.put(ROOT, "status", if round % 6 == 0 { "idle" } else { "busy" }).unwrap();
+            fork.put(ROOT, "status", if round % 6 == 0 { "idle" } else { "busy" })
+                .unwrap();
             fork.commit();
             daemon.merge(&mut fork).unwrap();
         }
@@ -242,7 +249,8 @@ fn test_fork_merge_during_sync() {
     for i in 0..50 {
         // Peer types
         let len = peer.text(&text).unwrap().len();
-        peer.splice_text(&text, len, 0, &format!("{}", i % 10)).unwrap();
+        peer.splice_text(&text, len, 0, &format!("{}", i % 10))
+            .unwrap();
         peer.commit();
 
         // Partial sync (just one direction)
@@ -287,7 +295,8 @@ fn test_typing_outputs_sync() {
         // Peer types 3 chars rapidly
         for j in 0..3 {
             let pos = peer.text(&text).unwrap().len();
-            peer.splice_text(&text, pos, 0, &format!("{}", (i * 3 + j) % 10)).unwrap();
+            peer.splice_text(&text, pos, 0, &format!("{}", (i * 3 + j) % 10))
+                .unwrap();
         }
         peer.commit();
 
@@ -297,7 +306,12 @@ fn test_typing_outputs_sync() {
         // Daemon writes output (fork+merge)
         let mut fork = daemon.fork();
         fork.set_actor(ActorId::from(b"daemon:output" as &[u8]));
-        fork.put(&outputs, &format!("cell_{}", i % 5), format!("result_{}", i)).unwrap();
+        fork.put(
+            &outputs,
+            &format!("cell_{}", i % 5),
+            format!("result_{}", i),
+        )
+        .unwrap();
         fork.commit();
         daemon.merge(&mut fork).unwrap();
 
@@ -323,7 +337,9 @@ fn test_deletion_with_fork_merge() {
 
     // Type 200 characters
     for i in 0..200 {
-        daemon.splice_text(&text, i, 0, &format!("{}", i % 10)).unwrap();
+        daemon
+            .splice_text(&text, i, 0, &format!("{}", i % 10))
+            .unwrap();
     }
     daemon.commit();
 
@@ -375,7 +391,9 @@ fn test_stress_splices_fork_sync() {
     daemon.set_actor(ActorId::from(b"daemon" as &[u8]));
 
     let text = daemon.put_object(ROOT, "source", ObjType::Text).unwrap();
-    daemon.splice_text(&text, 0, 0, "# notebook cell\n").unwrap();
+    daemon
+        .splice_text(&text, 0, 0, "# notebook cell\n")
+        .unwrap();
     daemon.commit();
 
     let initial_heads = daemon.get_heads();
@@ -391,7 +409,13 @@ fn test_stress_splices_fork_sync() {
     for i in 0..1000 {
         // Peer types one character
         let pos = peer.text(&text).unwrap().len();
-        peer.splice_text(&text, pos, 0, &format!("{}", (b'a' + (i % 26) as u8) as char)).unwrap();
+        peer.splice_text(
+            &text,
+            pos,
+            0,
+            &format!("{}", (b'a' + (i % 26) as u8) as char),
+        )
+        .unwrap();
         peer.commit();
 
         // Sync every 10 chars
@@ -420,7 +444,8 @@ fn test_stress_splices_fork_sync() {
             match daemon.fork_at(old_heads) {
                 Ok(mut fork) => {
                     fork.set_actor(ActorId::from(b"filesystem" as &[u8]));
-                    fork.put(ROOT, "disk_marker", format!("save-{}", i)).unwrap();
+                    fork.put(ROOT, "disk_marker", format!("save-{}", i))
+                        .unwrap();
                     fork.commit();
                     daemon.merge(&mut fork).unwrap();
                 }
@@ -443,10 +468,7 @@ fn test_stress_splices_fork_sync() {
     println!("  PASS");
 }
 
-fn sync_docs(
-    a: &mut AutoCommit, sa: &mut sync::State,
-    b: &mut AutoCommit, sb: &mut sync::State,
-) {
+fn sync_docs(a: &mut AutoCommit, sa: &mut sync::State, b: &mut AutoCommit, sb: &mut sync::State) {
     for _ in 0..20 {
         let mut progressed = false;
         if let Some(msg) = a.sync().generate_sync_message(sa) {
@@ -457,13 +479,17 @@ fn sync_docs(
             a.sync().receive_sync_message(sa, msg).unwrap();
             progressed = true;
         }
-        if !progressed { break; }
+        if !progressed {
+            break;
+        }
     }
 }
 
 fn sync_one(
-    from: &mut AutoCommit, sf: &mut sync::State,
-    to: &mut AutoCommit, st: &mut sync::State,
+    from: &mut AutoCommit,
+    sf: &mut sync::State,
+    to: &mut AutoCommit,
+    st: &mut sync::State,
 ) {
     if let Some(msg) = from.sync().generate_sync_message(sf) {
         to.sync().receive_sync_message(st, msg).unwrap();

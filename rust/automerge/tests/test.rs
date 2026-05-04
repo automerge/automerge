@@ -2641,3 +2641,91 @@ fn test_fork_at_multiple_merges() {
     let mut sync_state = automerge::sync::State::new();
     let _ = doc.sync().generate_sync_message(&mut sync_state);
 }
+
+#[test]
+fn test_fork_at_historical_heads_after_sync_no_panic() {
+    let mut daemon = AutoCommit::new();
+    daemon.set_actor(ActorId::from(b"daemon" as &[u8]));
+
+    let text = daemon.put_object(ROOT, "source", ObjType::Text).unwrap();
+    daemon
+        .splice_text(&text, 0, 0, "# notebook cell\n")
+        .unwrap();
+    daemon.commit();
+
+    let mut peer = AutoCommit::new();
+    peer.set_actor(ActorId::from(b"wasm" as &[u8]));
+    let mut peer_sync = automerge::sync::State::new();
+    let mut daemon_sync = automerge::sync::State::new();
+    sync_docs_until_quiet(&mut daemon, &mut daemon_sync, &mut peer, &mut peer_sync);
+
+    let mut checkpoint_heads = Vec::new();
+
+    for i in 0..=200 {
+        let pos = peer.text(&text).unwrap().len();
+        peer.splice_text(
+            &text,
+            pos,
+            0,
+            &format!("{}", (b'a' + (i % 26) as u8) as char),
+        )
+        .unwrap();
+        peer.commit();
+
+        if i % 10 == 0 {
+            sync_one_message(&mut peer, &mut peer_sync, &mut daemon, &mut daemon_sync);
+
+            let mut fork = daemon.fork();
+            fork.set_actor(ActorId::from(format!("d:f{}", i).as_bytes()));
+            fork.put(ROOT, "exec_count", (i / 10) as i64).unwrap();
+            fork.commit();
+            daemon.merge(&mut fork).unwrap();
+
+            sync_one_message(&mut daemon, &mut daemon_sync, &mut peer, &mut peer_sync);
+        }
+
+        if i == 100 {
+            checkpoint_heads.push(daemon.get_heads());
+        }
+    }
+
+    let old_heads = checkpoint_heads.pop().unwrap();
+    let fork_result = daemon.fork_at(&old_heads);
+    assert!(fork_result.is_err());
+}
+
+fn sync_docs_until_quiet(
+    left: &mut AutoCommit,
+    left_sync: &mut automerge::sync::State,
+    right: &mut AutoCommit,
+    right_sync: &mut automerge::sync::State,
+) {
+    for _ in 0..20 {
+        let mut progressed = false;
+        if let Some(msg) = left.sync().generate_sync_message(left_sync) {
+            right.sync().receive_sync_message(right_sync, msg).unwrap();
+            progressed = true;
+        }
+        if let Some(msg) = right.sync().generate_sync_message(right_sync) {
+            left.sync().receive_sync_message(left_sync, msg).unwrap();
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
+    }
+}
+
+fn sync_one_message(
+    from: &mut AutoCommit,
+    from_sync: &mut automerge::sync::State,
+    to: &mut AutoCommit,
+    to_sync: &mut automerge::sync::State,
+) {
+    if let Some(msg) = from.sync().generate_sync_message(from_sync) {
+        to.sync().receive_sync_message(to_sync, msg).unwrap();
+    }
+    if let Some(msg) = to.sync().generate_sync_message(to_sync) {
+        from.sync().receive_sync_message(from_sync, msg).unwrap();
+    }
+}
