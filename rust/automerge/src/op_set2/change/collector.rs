@@ -868,8 +868,8 @@ impl<'a> ChangeCollector<'a> {
             }
 
             let all_deps = BundleDeps::new(num_changes, &changes, deps);
-            let change = self.builders[change.builder]
-                .finish(&change, &all_deps, &mut self.mapper)?;
+            let change =
+                self.builders[change.builder].finish(&change, &all_deps, &mut self.mapper)?;
 
             changes.push(Change::from(change));
         }
@@ -963,6 +963,67 @@ pub(crate) struct ChangeCols {
     pub(crate) actor: ActorId,
     pub(crate) other_actors: Vec<ActorId>,
     pub(crate) data: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn change_with_missing_dep() -> BuildChangeMetadata<'static> {
+        BuildChangeMetadata {
+            actor: 0,
+            seq: 1,
+            max_op: 0,
+            timestamp: 0,
+            message: None,
+            deps: vec![1],
+            extra: Cow::Borrowed(&[]),
+            start_op: 1,
+            builder: 0,
+        }
+    }
+
+    fn change_with_missing_ops() -> BuildChangeMetadata<'static> {
+        BuildChangeMetadata {
+            actor: 0,
+            seq: 1,
+            max_op: 1,
+            timestamp: 0,
+            message: None,
+            deps: Vec::new(),
+            extra: Cow::Borrowed(&[]),
+            start_op: 1,
+            builder: 0,
+        }
+    }
+
+    #[test]
+    fn finish_returns_error_for_missing_dep_index() {
+        let actors = vec![ActorId::from(&[1][..])];
+        let collector = ChangeCollector::from_change_meta(vec![change_with_missing_dep()], &actors);
+        let graph = ChangeGraph::new(actors.len());
+        let err = collector.finish(&graph).unwrap_err();
+
+        assert!(matches!(err, Error::ChangesOutOfOrder));
+    }
+
+    #[test]
+    fn unbundle_returns_error_for_missing_dep_index() {
+        let actors = vec![ActorId::from(&[1][..])];
+        let collector = ChangeCollector::from_change_meta(vec![change_with_missing_dep()], &actors);
+        let err = collector.unbundle(&actors, &[]).unwrap_err();
+
+        assert!(matches!(err, Error::ChangesOutOfOrder));
+    }
+
+    #[test]
+    fn unbundle_returns_error_for_missing_ops() {
+        let actors = vec![ActorId::from(&[1][..])];
+        let collector = ChangeCollector::from_change_meta(vec![change_with_missing_ops()], &actors);
+        let err = collector.unbundle(&actors, &[]).unwrap_err();
+
+        assert!(matches!(err, Error::MissingOps));
+    }
 }
 
 #[cfg(all(feature = "wasm", target_family = "wasm"))]

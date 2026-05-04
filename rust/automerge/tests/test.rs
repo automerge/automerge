@@ -2608,4 +2608,10 @@ fn import_obj_with_bad_hex_returns_err_not_panic() {
         err,
         automerge::AutomergeError::InvalidObjIdFormat(_)
     ));
+
+    let err = doc.import_obj("1@a").unwrap_err();
+    assert!(matches!(
+        err,
+        automerge::AutomergeError::InvalidObjIdFormat(_)
+    ));
 }
