@@ -151,6 +151,12 @@ function buildWasm(outputDir, gitHead) {
         cwd: __dirname,
       },
     )
+    execSync(
+      `wasm-opt -Oz --converge --strip-debug --strip-dwarf --strip-producers --enable-bulk-memory --enable-nontrapping-float-to-int ${path.join(outputPath, "automerge_wasm_bg.wasm")} -o ${path.join(outputPath, "automerge_wasm_bg.wasm")}`,
+      {
+        cwd: __dirname,
+      },
+    )
 
     // Patch `automerge_wasm.js` to prevent Vite from bundling multiple `automerge_wasm_bg.wasm` files
     //
