@@ -801,10 +801,14 @@ impl BatchApply {
         doc.remove_unused_actors(true);
     }
 
-    pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {
+    pub(crate) fn apply(
+        &mut self,
+        doc: &mut Automerge,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
         self.insert_new_actors(doc);
 
-        log.migrate_actors(&doc.ops().actors).unwrap();
+        log.migrate_actors(&doc.ops().actors)?;
 
         self.import_ops(doc);
 
@@ -882,6 +886,7 @@ impl BatchApply {
         self.insert_runs_of_ops(doc);
 
         debug_assert!(doc.ops.validate_op_order());
+        Ok(())
     }
 
     fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
@@ -1080,8 +1085,7 @@ impl Automerge {
             self.queue.push(c);
         }
 
-        chap.apply(self, log);
-        Ok(())
+        chap.apply(self, log)
     }
 
     fn import_ops_to(

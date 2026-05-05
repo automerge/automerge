@@ -456,6 +456,10 @@ impl PatchLog {
     // for every objid and opid
     pub(crate) fn migrate_actors(&mut self, others: &Vec<ActorId>) -> Result<(), AutomergeError> {
         if &self.actors != others {
+            if !self.active && self.events.is_empty() && self.expose.is_empty() {
+                self.actors = others.clone();
+                return Ok(());
+            }
             if self.actors.is_empty() {
                 self.actors = others.clone();
                 return Ok(());

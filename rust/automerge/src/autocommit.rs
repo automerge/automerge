@@ -1274,11 +1274,52 @@ impl OpRange {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        sync::SyncDoc, transaction::Transactable, ActorId, AutoCommit, ReadDoc, ScalarValue, Value,
+        ROOT,
+    };
 
     fn is_send<S: Send>() {}
 
     #[test]
     fn test_autocommit_is_send() {
         is_send::<super::AutoCommit>();
+    }
+
+    #[test]
+    fn sync_receive_with_stale_inactive_patch_log_does_not_fail() {
+        let mut receiver = AutoCommit::new();
+        receiver.patch_log.actors = vec![ActorId::from(b"stale-actor" as &[u8])];
+
+        let mut donor = AutoCommit::new();
+        donor.set_actor(ActorId::from(b"donor" as &[u8]));
+        donor.put(ROOT, "key", "value").unwrap();
+
+        let mut receiver_sync = crate::sync::State::new();
+        let mut donor_sync = crate::sync::State::new();
+
+        if let Some(handshake) = receiver.sync().generate_sync_message(&mut receiver_sync) {
+            donor
+                .sync()
+                .receive_sync_message(&mut donor_sync, handshake)
+                .unwrap();
+        }
+
+        let message = donor
+            .sync()
+            .generate_sync_message(&mut donor_sync)
+            .expect("donor should advertise its change");
+
+        receiver
+            .sync()
+            .receive_sync_message(&mut receiver_sync, message)
+            .unwrap();
+
+        match receiver.get(ROOT, "key").unwrap() {
+            Some((Value::Scalar(value), _)) => {
+                assert_eq!(value.as_ref(), &ScalarValue::Str("value".into()));
+            }
+            other => panic!("expected synced scalar value, got {other:?}"),
+        }
     }
 }
