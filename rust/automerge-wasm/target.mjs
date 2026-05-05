@@ -6,6 +6,7 @@ const target = process.env.TARGET
 const profile = process.env.PROFILE ?? "dev"
 const targetDir = process.env.TARGET_DIR ?? profile
 const command = process.argv[2] ?? "target"
+const smallest = process.env.WASM_SMALLEST === "1"
 
 if (!target && command !== "compile") {
   throw new Error("TARGET must be set before running target.mjs")
@@ -16,10 +17,27 @@ if (command === "target") {
 }
 
 if (command === "target" || command === "compile") {
+  const cargoArgs = ["build", "--target", "wasm32-unknown-unknown", "--profile", profile]
+  const env = { ...process.env }
+
+  if (smallest) {
+    cargoArgs.unshift("+nightly")
+    cargoArgs.splice(2, 0, "-Z", "build-std=std,panic_abort")
+    env.RUSTFLAGS = [
+      env.RUSTFLAGS,
+      "-Zunstable-options",
+      "-Cpanic=immediate-abort",
+      "-Zlocation-detail=none",
+    ]
+      .filter(Boolean)
+      .join(" ")
+  }
+
   execFileSync(
     "cargo",
-    ["build", "--target", "wasm32-unknown-unknown", "--profile", profile],
+    cargoArgs,
     {
+      env,
       stdio: "inherit",
     },
   )
