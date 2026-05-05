@@ -113,13 +113,36 @@ function isStep(stepStr) {
 function buildWasm(outputDir, gitHead) {
   const automergeWasmPath = path.join(rustProjectDir, "automerge-wasm")
   const wasmProfile = process.env.WASM_PROFILE ?? "wasm-release"
+  const smallestWasm = process.env.WASM_SMALLEST === "1"
+  const cargoArgs = [
+    "build",
+    "--target",
+    "wasm32-unknown-unknown",
+    "--profile",
+    wasmProfile,
+  ]
+  const cargoEnv = { ...process.env, GIT_HEAD: gitHead }
+
+  if (smallestWasm) {
+    cargoArgs.unshift("+nightly")
+    cargoArgs.splice(2, 0, "-Z", "build-std=std,panic_abort")
+    cargoEnv.RUSTFLAGS = [
+      cargoEnv.RUSTFLAGS,
+      "-Zunstable-options",
+      "-Cpanic=immediate-abort",
+      "-Zlocation-detail=none",
+    ]
+      .filter(Boolean)
+      .join(" ")
+  }
+
   console.log("building automerge-wasm")
   execSync(
     //"cargo build --target wasm32-unknown-unknown --profile dev",
-    `cargo build --target wasm32-unknown-unknown --profile ${wasmProfile}`,
+    `cargo ${cargoArgs.join(" ")}`,
     {
       cwd: automergeWasmPath,
-      env: { ...process.env, GIT_HEAD: gitHead },
+      env: cargoEnv,
     },
   )
 

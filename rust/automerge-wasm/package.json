@@ -36,6 +36,7 @@
     "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs npm run target && node -e \"require('fs').cpSync('./nodejs/automerge_wasm.d.ts', './index.d.ts')\" && node ./fixup-node-cjs.mjs",
     "build": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' npm run buildall",
     "release": "cross-env PROFILE=wasm-release TARGET_DIR=wasm-release npm run buildall",
+    "release:smallest": "cross-env PROFILE=wasm-release TARGET_DIR=wasm-release WASM_SMALLEST=1 npm run buildall",
     "buildall": "cross-env TARGET=nodejs npm run target && cross-env TARGET=bundler npm run target && cross-env TARGET=deno npm run target && TARGET=web npm run target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node -e \"require('fs').cpSync('./nodejs/automerge_wasm.d.ts', './index.d.ts')\" && node ./fixup-node-cjs.mjs",
     "target": "node ./target.mjs",
     "compile": "node ./target.mjs compile",
