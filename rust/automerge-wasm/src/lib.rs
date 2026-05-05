@@ -407,7 +407,9 @@ export type UpdateSpansConfig = {
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
-          web_sys::console::log_1(&format!( $( $t )* ).into());
+        if false {
+            let _ = format_args!( $( $t )* );
+        }
     };
 }
 
@@ -1712,6 +1714,7 @@ impl Automerge {
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
+    #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     Automerge::new(actor)

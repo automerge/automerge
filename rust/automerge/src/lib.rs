@@ -241,13 +241,28 @@ macro_rules! log {
      }
  }
 
-#[cfg(all(feature = "wasm", target_family = "wasm"))]
+#[cfg(all(feature = "wasm-debug-log", target_family = "wasm"))]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
          web_sys::console::log_1(&format!( $( $t )* ).into());
      }
+ }
+
+#[cfg(all(
+    feature = "wasm",
+    not(feature = "wasm-debug-log"),
+    target_family = "wasm"
+))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __log {
+     ( $( $t:tt )* ) => {
+         if false {
+             let _ = format_args!( $( $t )* );
+         }
+     };
  }
 
 #[cfg(not(all(feature = "wasm", target_family = "wasm")))]

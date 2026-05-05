@@ -10,7 +10,9 @@ readme = "./README.md"
 
 [features]
 optree-visualisation = ["dot"]
-wasm = ["js-sys", "wasm-bindgen", "web-sys", "getrandom/wasm_js", "hexane/wasm"]
+wasm = ["js-sys", "wasm-bindgen", "getrandom/wasm_js", "hexane/wasm"]
+wasm-debug-log = ["web-sys", "hexane/wasm-debug-log"]
+wasm-release-tracing-off = ["tracing/release_max_level_off"]
 utf8-indexing = []
 utf16-indexing = []
 # Whether to enable "slow path" assertions which check that various invariants hold
