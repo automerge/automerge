@@ -1589,7 +1589,6 @@ impl Automerge {
                             .collect::<Vec<_>>(),
                     ))
                 } else {
-                    web_sys::console::log_2(&"Invalid value".into(), value);
                     Err(error::InvalidValue)
                 }
             }

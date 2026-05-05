@@ -13,7 +13,8 @@ bench = false
 
 
 [features]
-wasm = ["web-sys"]
+wasm = []
+wasm-debug-log = ["web-sys"]
 slow_path_assertions = []
 
 
