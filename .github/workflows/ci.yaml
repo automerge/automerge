@@ -75,6 +75,8 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
+      - name: Install wasm-opt
+        run: sudo apt-get update && sudo apt-get install -y binaryen
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
@@ -95,6 +97,8 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
+      - name: Install wasm-opt
+        run: sudo apt-get update && sudo apt-get install -y binaryen
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
@@ -117,6 +121,8 @@ jobs:
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: "0.2.118"
+      - name: Install wasm-opt
+        run: sudo apt-get update && sudo apt-get install -y binaryen
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
