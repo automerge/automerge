@@ -58,6 +58,7 @@ impl<'a> OpQueryTerm<'a> for OpIter<'a> {
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQuery<'a> for I {}
 
+#[derive(Clone, Debug)]
 pub(crate) struct FixCounters<'a, T: OpQuery<'a>> {
     iter: SkipIter<T, VisIter<'a>>,
     counter: hexane::v1::Iter<'a, i64>,
@@ -71,6 +72,16 @@ impl<'a, T: OpQuery<'a>> FixCounters<'a, T> {
             counter: op_set.cols.index.counter.iter(),
             clock: clock.cloned(),
         }
+    }
+}
+
+impl<'a, T: OpQuery<'a>> OpQueryTerm<'a> for FixCounters<'a, T> {
+    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+        self.iter.inner().get_marks()
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.iter.inner().range()
     }
 }
 

@@ -49,6 +49,7 @@ pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
     OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
+pub(crate) use op_query::FixCounters;
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{VisIter, VisibleOpIter};
@@ -933,8 +934,8 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         clock: Option<Cow<'a, Clock>>,
-    ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>> {
-        self.iter_obj(obj).visible_slow(clock).top_ops()
+    ) -> TopOpIter<'a, FixCounters<'a, OpIter<'a>>> {
+        self.iter_obj(obj).visible(self, clock.as_deref()).top_ops()
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
