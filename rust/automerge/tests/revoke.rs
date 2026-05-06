@@ -824,3 +824,40 @@ fn revocation_mask_survives_actor_reordering() {
         keys
     );
 }
+
+#[test]
+fn values_filters_revoked_ops() {
+    let bad = Author::try_from("ffff").unwrap();
+
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "good_key", "good_val").unwrap();
+
+    let pre_change = doc.get_heads();
+
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.put(ROOT, "bad_key", "bad_val").unwrap();
+    doc.merge(&mut fork).unwrap();
+
+    doc.revoke(&bad, &pre_change);
+
+    // get() and keys() correctly hide the revoked op.
+    assert!(doc.get(ROOT, "bad_key").unwrap().is_none());
+    let keys: Vec<String> = doc.keys(ROOT).collect();
+    assert!(!keys.contains(&"bad_key".to_string()));
+
+    // values() must agree.
+    let values: Vec<_> = doc
+        .values(ROOT)
+        .map(|(v, _)| v.into_string().unwrap_or_default())
+        .collect();
+    assert!(
+        values.contains(&"good_val".to_string()),
+        "good_val should be visible; got values={:?}",
+        values
+    );
+    assert!(
+        !values.contains(&"bad_val".to_string()),
+        "bad_val should be filtered by values(); got values={:?}",
+        values
+    );
+}

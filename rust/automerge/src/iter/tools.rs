@@ -107,6 +107,10 @@ impl<I: Iterator + Debug + Clone, S: Skipper> SkipIter<I, S> {
     pub(crate) fn new(iter: I, skip: S) -> Self {
         Self { iter, skip }
     }
+
+    pub(crate) fn inner(&self) -> &I {
+        &self.iter
+    }
 }
 
 impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable for SkipIter<I, S> {
