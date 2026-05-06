@@ -676,7 +676,6 @@ fn revoke_then_load_incremental() {
 // `clock_at(heads)` which goes through `to_op_clock` and converts seq → max
 // op counter correctly.
 #[test]
-#[ignore = "known bug: rebuild_revocation_clock stores seq numbers as op counters"]
 fn revocation_cached_clock_handles_multi_op_changes() {
     let bad = Author::try_from("ffff").unwrap();
 
