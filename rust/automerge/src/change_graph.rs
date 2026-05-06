@@ -292,6 +292,17 @@ impl ChangeGraph {
                     actor_index.0 += 1;
                 }
             }
+            self.revocations_mask = std::mem::take(&mut self.revocations_mask)
+                .into_iter()
+                .map(|(a, v)| {
+                    let shifted = if a.0 >= idx as u32 {
+                        ActorIdx(a.0 + 1)
+                    } else {
+                        a
+                    };
+                    (shifted, v)
+                })
+                .collect();
         }
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
@@ -316,6 +327,14 @@ impl ChangeGraph {
             self.seq_index.remove(idx);
             self.actor_author.remove(idx);
             self.revocation_cached_clock.0.remove(idx);
+            self.revocations_mask = std::mem::take(&mut self.revocations_mask)
+                .into_iter()
+                .filter_map(|(a, v)| match a.0.cmp(&(idx as u32)) {
+                    std::cmp::Ordering::Less => Some((a, v)),
+                    std::cmp::Ordering::Equal => None,
+                    std::cmp::Ordering::Greater => Some((ActorIdx(a.0 - 1), v)),
+                })
+                .collect();
         }
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
