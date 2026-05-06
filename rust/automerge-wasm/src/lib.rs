@@ -2000,7 +2000,7 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    #[error("could not parse Actor ID as a hex string: {0}")]
+    #[error(transparent)]
     pub struct BadAuthor(#[from] automerge::error::InvalidAuthor);
 
     impl From<BadAuthor> for JsValue {
