@@ -750,7 +750,6 @@ fn revocation_cached_clock_handles_multi_op_changes() {
 // the wrong actors as revoked. The slow query path that consults the active
 // revocation clock then filters incorrectly.
 #[test]
-#[ignore = "known bug: insert_actor does not re-key revocations_mask"]
 fn revocation_mask_survives_actor_reordering() {
     let bad = Author::try_from("ffff").unwrap();
 
