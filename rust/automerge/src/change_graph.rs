@@ -207,11 +207,21 @@ impl ChangeGraph {
     }
 
     fn rebuild_revocation_clock(&mut self) {
+        // `revocations_mask` is keyed by actor and holds the largest unrevoked
+        // *seq* for each actor. The cached clock indexes ops by their global
+        // op counter, so we have to convert the seq into the max op counter of
+        // the change at that seq (just like `to_op_clock` does).
         self.revocation_cached_clock = (0_u32..self.num_actors() as u32)
-            .map(|actor_idx| {
-                let actor_idx = ActorIdx(actor_idx);
-                if let Some(mask) = self.revocations_mask.get(&actor_idx) {
-                    mask.map(|c| c.into())
+            .map(|actor| {
+                let actor_usize = actor as usize;
+                if let Some(mask) = self.revocations_mask.get(&ActorIdx(actor)) {
+                    mask.and_then(|seq| {
+                        self.seq_index
+                            .get(actor_usize)
+                            .and_then(|v| v.get(seq.get() as usize - 1))
+                            .and_then(|n| self.max_ops.get(n.0 as usize))
+                            .copied()
+                    })
                 } else {
                     Some(u32::MAX)
                 }
@@ -286,11 +296,10 @@ impl ChangeGraph {
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
-        // The new actor has no revocations recorded, so admit all of its ops
-        // until `rebuild_revocation_clock` runs again. NOTE: this preserves the
-        // invariant `revocation_cached_clock.len() == num_actors()`; it does
-        // NOT propagate the author's existing revocation onto the new actor
-        // index — see the ignored test `revocation_mask_survives_actor_reordering`.
+        // Keep `revocation_cached_clock` length in sync with the new actor
+        // count. The new actor has no entry in `revocations_mask` yet, so
+        // `assign_author` will rebuild later if it adds one; for now the new
+        // slot stays unrevoked.
         self.revocation_cached_clock.0.insert(idx, u32::MAX);
         self.seq_index.insert(idx, vec![]);
         self.actor_author.insert(idx, None);
