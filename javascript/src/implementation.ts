@@ -5,7 +5,7 @@ import {
   validateForBatchInsert,
 } from "./proxies.js"
 export { isImmutableString, isCounter } from "./proxies.js"
-import { STATE } from "./constants.js"
+import { OBJECT_ID, STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
@@ -87,6 +87,96 @@ const _SyncStateSymbol = Symbol("_syncstate")
 type SyncState = JsSyncState & {
   /** @hidden */
   _opaque: typeof _SyncStateSymbol
+}
+
+function materializeFromCompactTape<T>(
+  handle: Automerge,
+  obj: ObjID = "/",
+  heads?: Heads,
+  meta?: unknown,
+): T {
+  const tape = handle.materializeCompactTape(obj, heads) as {
+    ops: Uint32Array
+    strings: string[]
+    values: unknown[]
+  }
+  const objects: unknown[] = []
+  const objectMeta: Array<{ type: number; parent?: number; propKind?: number; prop?: number }> = []
+  const ops = tape.ops
+  const strings = tape.strings
+  const values = tape.values
+
+  for (let offset = 0; offset < ops.length; offset += 8) {
+    const op = ops[offset]
+    if (op === 0) {
+      const index = ops[offset + 1]
+      const type = ops[offset + 2]
+      objects[index] = makeCompactMaterializedObject(type)
+      objectMeta[index] = { type }
+      setAutomergeMetadata(objects[index], strings[ops[offset + 3]], meta)
+    } else if (op === 1) {
+      const parent = ops[offset + 1]
+      const propKind = ops[offset + 2]
+      const prop = ops[offset + 3]
+      const type = ops[offset + 4]
+      const index = ops[offset + 5]
+      objects[index] = makeCompactMaterializedObject(type)
+      objectMeta[index] = { type, parent, propKind, prop }
+      setAutomergeMetadata(objects[index], strings[ops[offset + 6]], meta)
+      if (type !== 2) {
+        setCompactMaterializedValue(objects[parent], propKind, prop, objects[index], strings)
+      }
+    } else if (op === 2) {
+      setCompactMaterializedValue(
+        objects[ops[offset + 1]],
+        ops[offset + 2],
+        ops[offset + 3],
+        values[ops[offset + 5]],
+        strings,
+      )
+    } else if (op === 3) {
+      ;(objects[ops[offset + 1]] as string[]).push(strings[ops[offset + 2]])
+    }
+  }
+
+  for (let index = 0; index < objects.length; index++) {
+    const meta = objectMeta[index]
+    if (meta?.type === 2) {
+      const value = (objects[index] as string[]).join("")
+      objects[index] = value
+      if (meta.parent != null && meta.propKind != null && meta.prop != null) {
+        setCompactMaterializedValue(objects[meta.parent], meta.propKind, meta.prop, value, strings)
+      }
+    }
+  }
+
+  return objects[0] as T
+}
+
+function makeCompactMaterializedObject(type: number): unknown {
+  if (type === 1 || type === 2) {
+    return []
+  }
+  return {}
+}
+
+function setCompactMaterializedValue(
+  target: unknown,
+  propKind: number,
+  prop: number,
+  value: unknown,
+  strings: string[],
+) {
+  ;(target as Record<string | number, unknown>)[propKind === 0 ? strings[prop] : prop] = value
+}
+
+function setAutomergeMetadata(target: unknown, objectId: ObjID, meta: unknown) {
+  if (target && typeof target === "object") {
+    Object.defineProperties(target, {
+      [OBJECT_ID]: { value: objectId },
+      [STATE]: { value: meta },
+    })
+  }
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
@@ -267,7 +357,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const handle = ApiHandler.create({ actor })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
-  const doc = handle.materialize("/", undefined, {
+  const doc = materializeFromCompactTape<T>(handle, "/", undefined, {
     handle,
     heads: undefined,
     freeze,
@@ -294,7 +384,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
 export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
   const state = _state(doc)
   const handle = state.handle
-  return state.handle.materialize("/", heads, {
+  return materializeFromCompactTape<T>(state.handle, "/", heads, {
     ...state,
     handle,
     heads,
@@ -330,7 +420,10 @@ export function clone<T>(
   // set it to undefined to indicate that this is a full fat document
   const { heads: _oldHeads, ...stateSansHeads } = state
   stateSansHeads.patchCallback = opts.patchCallback
-  return handle.applyPatches(doc, { ...stateSansHeads, handle })
+  return materializeFromCompactTape<T>(handle, "/", undefined, {
+    ...stateSansHeads,
+    handle,
+  }) as Doc<T>
 }
 
 /** Explicity free the memory backing a document. Note that this is note
@@ -546,10 +639,13 @@ function progressDocument<T>(
   const state = _state(doc)
   const nextState = { ...state, heads: undefined }
 
-  const { value: nextDoc, patches } = state.handle.applyAndReturnPatches(
-    doc,
+  const nextDoc = materializeFromCompactTape<T>(
+    state.handle,
+    "/",
+    undefined,
     nextState,
-  )
+  ) as Doc<T>
+  const patches: Patch[] = []
 
   if (patches.length > 0) {
     if (callback != null) {
@@ -715,7 +811,7 @@ export function load<T>(
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
-  const doc = handle.materialize("/", undefined, {
+  const doc = materializeFromCompactTape<T>(handle, "/", undefined, {
     handle,
     heads: undefined,
     patchCallback,
@@ -1283,7 +1379,12 @@ export function dump<T>(doc: Doc<T>) {
 export function toJS<T>(doc: Doc<T>): T {
   const state = _state(doc)
   const enabled = state.handle.enableFreeze(false)
-  const result = state.handle.materialize("/", state.heads)
+  const result = materializeFromCompactTape<T>(
+    state.handle,
+    "/",
+    state.heads,
+    undefined,
+  )
   state.handle.enableFreeze(enabled)
   return result as T
 }
