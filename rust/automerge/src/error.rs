@@ -15,6 +15,8 @@ pub enum AutomergeError {
     DuplicateSeqNumber(u64, ActorId),
     #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
     DuplicateAuthor(Author, ActorId, u64),
+    #[error("change for actor {1} has an author footer but seq is {0}, expected 1")]
+    AuthorOnNonInitialSeq(u64, ActorId),
     #[error("duplicate actor {0}: possible document clone")]
     DuplicateActorId(ActorId),
     #[error("general failure")]
@@ -87,6 +89,10 @@ impl AutomergeError {
             c.actor_id().clone(),
             c.seq(),
         )
+    }
+
+    pub(crate) fn author_on_non_initial_seq(c: &Change) -> Self {
+        Self::AuthorOnNonInitialSeq(c.seq(), c.actor_id().clone())
     }
 }
 

@@ -1006,6 +1006,14 @@ impl Automerge {
                 err = Some(AutomergeError::duplicate_author(&c));
                 break;
             }
+            // The encoder only emits an author footer on seq=1 (the actor's
+            // first change). A footer at seq > 1 is malformed (and would
+            // panic in change_graph::add_changes). Reject it explicitly so
+            // crafted peer changes can't crash the document.
+            if c.author().is_some() && c.seq() != 1 {
+                err = Some(AutomergeError::author_on_non_initial_seq(&c));
+                break;
+            }
             seen.insert(hash);
             actor_seqs
                 .entry(c.actor_id().clone())

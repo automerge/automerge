@@ -725,8 +725,11 @@ impl ChangeGraph {
             self.update_heads(change);
 
             if let Some(a) = change.author() {
+                // This is validated in Automerge::apply_changes_batch_log_patches
                 assert!(change.seq() == 1);
-                self.assign_author(a.into(), actor)
+                if change.seq() == 1 {
+                    self.assign_author(a.into(), actor)
+                }
             }
 
             assert!(actor < self.seq_index.len());
@@ -947,7 +950,12 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
             if let Some(author) = c.author() {
-                graph.assign_author(author.into(), graph.actors[idx].into())
+                // Saved documents written by an honest encoder only carry the
+                // author footer on seq=1. Skip rather than panic on bad data
+                // — any further validation is the apply path's job.
+                if c.seq() == 1 {
+                    graph.assign_author(author.into(), graph.actors[idx].into())
+                }
             }
         }
 
