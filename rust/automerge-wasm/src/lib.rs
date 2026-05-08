@@ -292,7 +292,6 @@ interface Automerge {
     objInfo(obj: ObjID, heads?: Heads): ObjInfo;
 
     materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
-    materializeTape(obj?: ObjID, heads?: Heads): unknown[];
     materializeCompactTape(obj?: ObjID, heads?: Heads): { ops: Uint32Array; strings: string[]; values: unknown[] };
 
     push(obj: ObjID, value: Value, datatype?: Datatype): void;
@@ -1494,123 +1493,6 @@ impl Automerge {
         self.doc.update_diff_cursor();
         let mut cache = interop::ExportCache::new(self)?;
         Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
-    }
-
-    #[wasm_bindgen(js_name = materializeTape, skip_typescript)]
-    #[cfg(feature = "old-js-export")]
-    pub fn materialize_tape(
-        &mut self,
-        obj: JsValue,
-        heads: JsValue,
-    ) -> Result<Array, error::Materialize> {
-        let (root, root_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
-        let heads = get_heads(heads)?;
-        self.doc.update_diff_cursor();
-
-        let tape = Array::new();
-        let mut obj_indexes = HashMap::<am::ObjId, f64>::default();
-        let mut list_indexes = HashMap::<am::ObjId, usize>::default();
-        let mut next_obj_index = 0_f64;
-
-        obj_indexes.insert(root.clone(), next_obj_index);
-        let root_entry = Array::new();
-        root_entry.push(&0.into());
-        root_entry.push(&next_obj_index.into());
-        root_entry.push(&root_type.to_string().into());
-        root_entry.push(&root.to_string().into());
-        tape.push(&root_entry);
-        next_obj_index += 1.0;
-
-        let iter = self.doc.iter_at(root, heads.as_deref());
-        for DocObjItem { obj, item } in iter {
-            let Some(parent_index) = obj_indexes.get(obj.as_ref()).copied() else {
-                continue;
-            };
-
-            match item {
-                DocItem::Text(span) => {
-                    let entry = Array::new();
-                    entry.push(&3.into());
-                    entry.push(&parent_index.into());
-                    entry.push(&span.as_str().into());
-                    tape.push(&entry);
-                }
-                DocItem::Map(map) => {
-                    let prop = JsValue::from_str(map.key.as_ref());
-                    match map.value {
-                        ValueRef::Object(obj_type) => {
-                            let child_id = map.id();
-                            let child_index = if let Some(index) = obj_indexes.get(&child_id) {
-                                *index
-                            } else {
-                                let index = next_obj_index;
-                                obj_indexes.insert(child_id.clone(), index);
-                                next_obj_index += 1.0;
-                                index
-                            };
-                            let entry = Array::new();
-                            entry.push(&1.into());
-                            entry.push(&parent_index.into());
-                            entry.push(&prop);
-                            entry.push(&obj_type.to_string().into());
-                            entry.push(&child_index.into());
-                            entry.push(&child_id.to_string().into());
-                            tape.push(&entry);
-                        }
-                        ValueRef::Scalar(value) => {
-                            let value = ValueRef::Scalar(value).into_value();
-                            let (datatype, value) = alloc(&value);
-                            let entry = Array::new();
-                            entry.push(&2.into());
-                            entry.push(&parent_index.into());
-                            entry.push(&prop);
-                            entry.push(&datatype.into());
-                            entry.push(&value);
-                            tape.push(&entry);
-                        }
-                    }
-                }
-                DocItem::List(list) => {
-                    let index = list_indexes.entry((*obj).clone()).or_default();
-                    let prop = JsValue::from_f64(*index as f64);
-                    *index += 1;
-                    match list.value {
-                        ValueRef::Object(obj_type) => {
-                            let child_id = list.id();
-                            let child_index = if let Some(index) = obj_indexes.get(&child_id) {
-                                *index
-                            } else {
-                                let index = next_obj_index;
-                                obj_indexes.insert(child_id.clone(), index);
-                                next_obj_index += 1.0;
-                                index
-                            };
-                            let entry = Array::new();
-                            entry.push(&1.into());
-                            entry.push(&parent_index.into());
-                            entry.push(&prop);
-                            entry.push(&obj_type.to_string().into());
-                            entry.push(&child_index.into());
-                            entry.push(&child_id.to_string().into());
-                            tape.push(&entry);
-                        }
-                        ValueRef::Scalar(value) => {
-                            let value = ValueRef::Scalar(value).into_value();
-                            let (datatype, value) = alloc(&value);
-                            let entry = Array::new();
-                            entry.push(&2.into());
-                            entry.push(&parent_index.into());
-                            entry.push(&prop);
-                            entry.push(&datatype.into());
-                            entry.push(&value);
-                            tape.push(&entry);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(tape)
     }
 
     #[wasm_bindgen(js_name = materializeCompactTape, skip_typescript)]
