@@ -292,7 +292,7 @@ interface Automerge {
     objInfo(obj: ObjID, heads?: Heads): ObjInfo;
 
     materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
-    materializeCompactTape(obj?: ObjID, heads?: Heads): { ops: Uint32Array; strings: string[]; values: unknown[] };
+    materializeTape(obj?: ObjID, heads?: Heads): { ops: Uint32Array; strings: string[]; values: unknown[] };
 
     push(obj: ObjID, value: Value, datatype?: Datatype): void;
 
@@ -1495,8 +1495,8 @@ impl Automerge {
         Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
     }
 
-    #[wasm_bindgen(js_name = materializeCompactTape, skip_typescript)]
-    pub fn materialize_compact_tape(
+    #[wasm_bindgen(js_name = materializeTape, skip_typescript)]
+    pub fn materialize_tape(
         &mut self,
         obj: JsValue,
         heads: JsValue,

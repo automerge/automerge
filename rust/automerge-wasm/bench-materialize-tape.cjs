@@ -56,8 +56,8 @@ function materializeValueFromReads(handle, obj, prop, heads, meta) {
   return raw
 }
 
-function materializeFromCompactTape(handle, obj = "/", heads, meta) {
-  const tape = handle.materializeCompactTape(obj, heads)
+function materializeFromTape(handle, obj = "/", heads, meta) {
+  const tape = handle.materializeTape(obj, heads)
   const objects = []
   const objectMeta = []
   const ops = tape.ops
@@ -68,7 +68,7 @@ function materializeFromCompactTape(handle, obj = "/", heads, meta) {
     if (op === 0) {
       const index = ops[offset + 1]
       const type = ops[offset + 2]
-      objects[index] = makeCompactMaterializedObject(type)
+      objects[index] = makeTapeMaterializedObject(type)
       objectMeta[index] = { type }
       setMeta(objects[index], strings[ops[offset + 3]], meta)
     } else if (op === 1) {
@@ -77,14 +77,14 @@ function materializeFromCompactTape(handle, obj = "/", heads, meta) {
       const prop = ops[offset + 3]
       const type = ops[offset + 4]
       const index = ops[offset + 5]
-      objects[index] = makeCompactMaterializedObject(type)
+      objects[index] = makeTapeMaterializedObject(type)
       objectMeta[index] = { type, parent, propKind, prop }
       setMeta(objects[index], strings[ops[offset + 6]], meta)
       if (type !== 4) {
-        setCompactMaterializedValue(objects[parent], propKind, prop, objects[index], strings)
+        setTapeMaterializedValue(objects[parent], propKind, prop, objects[index], strings)
       }
     } else if (op === 2) {
-      setCompactMaterializedValue(
+      setTapeMaterializedValue(
         objects[ops[offset + 1]],
         ops[offset + 2],
         ops[offset + 3],
@@ -101,19 +101,19 @@ function materializeFromCompactTape(handle, obj = "/", heads, meta) {
       const value = objects[index].join("")
       objects[index] = value
       if (meta.parent != null && meta.propKind != null && meta.prop != null) {
-        setCompactMaterializedValue(objects[meta.parent], meta.propKind, meta.prop, value, strings)
+        setTapeMaterializedValue(objects[meta.parent], meta.propKind, meta.prop, value, strings)
       }
     }
   }
   return objects[0]
 }
 
-function makeCompactMaterializedObject(type) {
+function makeTapeMaterializedObject(type) {
   if (type === 2 || type === 4) return []
   return {}
 }
 
-function setCompactMaterializedValue(target, propKind, prop, value, strings) {
+function setTapeMaterializedValue(target, propKind, prop, value, strings) {
   target[propKind === 0 ? strings[prop] : prop] = value
 }
 
@@ -150,15 +150,15 @@ const doc = makeDoc()
 const meta = { handle: doc, heads: undefined }
 const rust = doc.materialize("/", undefined, meta)
 const reads = materializeFromWasmReads(doc, "/", undefined, meta)
-const compactTape = materializeFromCompactTape(doc, "/", undefined, meta)
+const tape = materializeFromTape(doc, "/", undefined, meta)
 
 if (JSON.stringify(canonical(rust)) !== JSON.stringify(canonical(reads))) {
   throw new Error("per-read materialization did not match Rust materialization")
 }
-if (JSON.stringify(canonical(rust)) !== JSON.stringify(canonical(compactTape))) {
-  throw new Error("compact tape materialization did not match Rust materialization")
+if (JSON.stringify(canonical(rust)) !== JSON.stringify(canonical(tape))) {
+  throw new Error("tape materialization did not match Rust materialization")
 }
 
 bench("rust_materialize", () => doc.materialize("/", undefined, meta), 100)
 bench("js_per_read_materialize", () => materializeFromWasmReads(doc, "/", undefined, meta), 100)
-bench("compact_tape_materialize", () => materializeFromCompactTape(doc, "/", undefined, meta), 100)
+bench("tape_materialize", () => materializeFromTape(doc, "/", undefined, meta), 100)
