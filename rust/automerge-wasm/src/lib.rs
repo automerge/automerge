@@ -1561,8 +1561,9 @@ impl Automerge {
                             );
                         }
                         ValueRef::Scalar(value) => {
+                            let datatype = scalar_value_ref_code(&value);
                             let value = ValueRef::Scalar(value).into_value();
-                            let (datatype, value) = alloc(&value);
+                            let (_, value) = alloc(&value);
                             let value_index = values.length();
                             values.push(&value);
                             push_op(
@@ -1571,7 +1572,7 @@ impl Automerge {
                                 parent_index,
                                 0,
                                 prop,
-                                datatype_code(datatype),
+                                datatype,
                                 value_index,
                                 0,
                                 0,
@@ -1603,8 +1604,9 @@ impl Automerge {
                             );
                         }
                         ValueRef::Scalar(value) => {
+                            let datatype = scalar_value_ref_code(&value);
                             let value = ValueRef::Scalar(value).into_value();
-                            let (datatype, value) = alloc(&value);
+                            let (_, value) = alloc(&value);
                             let value_index = values.length();
                             values.push(&value);
                             push_op(
@@ -1613,7 +1615,7 @@ impl Automerge {
                                 parent_index,
                                 1,
                                 prop,
-                                datatype_code(datatype),
+                                datatype,
                                 value_index,
                                 0,
                                 0,
@@ -1917,29 +1919,28 @@ fn intern_string(strings: &Array, indexes: &mut HashMap<String, u32>, value: Str
 
 fn obj_type_code(obj_type: am::ObjType) -> u32 {
     match obj_type {
+        // Match the storage action codes for object creation.
         am::ObjType::Map => 0,
-        am::ObjType::List => 1,
-        am::ObjType::Text => 2,
-        am::ObjType::Table => 3,
+        am::ObjType::List => 2,
+        am::ObjType::Text => 4,
+        am::ObjType::Table => 6,
     }
 }
 
-fn datatype_code(datatype: Datatype) -> u32 {
-    match datatype {
-        Datatype::Map => 0,
-        Datatype::List => 1,
-        Datatype::Text => 2,
-        Datatype::Table => 3,
-        Datatype::Str => 4,
-        Datatype::Int => 5,
-        Datatype::Uint => 6,
-        Datatype::F64 => 7,
-        Datatype::Boolean => 8,
-        Datatype::Timestamp => 9,
-        Datatype::Counter => 10,
-        Datatype::Bytes => 11,
-        Datatype::Null => 12,
-        Datatype::Unknown(_) => 13,
+fn scalar_value_ref_code(value: &am::ScalarValueRef<'_>) -> u32 {
+    match value {
+        // Match the low-nibble ValueMeta codes used by storage.
+        am::ScalarValueRef::Null => 0,
+        am::ScalarValueRef::Boolean(false) => 1,
+        am::ScalarValueRef::Boolean(true) => 2,
+        am::ScalarValueRef::Uint(_) => 3,
+        am::ScalarValueRef::Int(_) => 4,
+        am::ScalarValueRef::F64(_) => 5,
+        am::ScalarValueRef::Str(_) => 6,
+        am::ScalarValueRef::Bytes(_) => 7,
+        am::ScalarValueRef::Counter(_) => 8,
+        am::ScalarValueRef::Timestamp(_) => 9,
+        am::ScalarValueRef::Unknown { type_code, .. } => (*type_code).into(),
     }
 }
 

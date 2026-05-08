@@ -123,7 +123,7 @@ function materializeFromCompactTape<T>(
       objects[index] = makeCompactMaterializedObject(type)
       objectMeta[index] = { type, parent, propKind, prop }
       setAutomergeMetadata(objects[index], strings[ops[offset + 6]], meta)
-      if (type !== 2) {
+      if (type !== 4) {
         setCompactMaterializedValue(objects[parent], propKind, prop, objects[index], strings)
       }
     } else if (op === 2) {
@@ -141,7 +141,7 @@ function materializeFromCompactTape<T>(
 
   for (let index = 0; index < objects.length; index++) {
     const meta = objectMeta[index]
-    if (meta?.type === 2) {
+    if (meta?.type === 4) {
       const value = (objects[index] as string[]).join("")
       objects[index] = value
       if (meta.parent != null && meta.propKind != null && meta.prop != null) {
@@ -154,7 +154,7 @@ function materializeFromCompactTape<T>(
 }
 
 function makeCompactMaterializedObject(type: number): unknown {
-  if (type === 1 || type === 2) {
+  if (type === 2 || type === 4) {
     return []
   }
   return {}
