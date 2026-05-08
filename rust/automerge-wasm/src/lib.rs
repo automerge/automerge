@@ -31,12 +31,14 @@ use am::OnPartialLoad;
 use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
+use am::ValueRef;
 use automerge as am;
+use automerge::iter::{DocItem, DocObjItem};
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use interop::import_scalar;
 use js_sys::Reflect;
-use js_sys::{Array, Function, Object, Uint8Array};
+use js_sys::{Array, Function, Object, Uint32Array, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -290,6 +292,7 @@ interface Automerge {
     objInfo(obj: ObjID, heads?: Heads): ObjInfo;
 
     materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
+    materializeTape(obj?: ObjID, heads?: Heads): { ops: Uint32Array; strings: string[]; values: unknown[] };
 
     push(obj: ObjID, value: Value, datatype?: Datatype): void;
 
@@ -556,6 +559,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed
     #[wasm_bindgen(skip_typescript)]
+    #[cfg(feature = "old-js-export")]
     pub fn spans(&self, obj: JsValue, heads: JsValue) -> Result<Array, error::GetSpans> {
         let (obj, _) = self.import(obj)?;
         let spans = if let Some(heads) = get_heads(heads)? {
@@ -755,6 +759,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed here
     #[wasm_bindgen(js_name = getBlock, skip_typescript)]
+    #[cfg(feature = "old-js-export")]
     pub fn get_block(
         &mut self,
         text: JsValue,
@@ -1103,6 +1108,7 @@ impl Automerge {
 
     // skip_typescript as the function can only by typed in the custom section
     #[wasm_bindgen(js_name = applyPatches, skip_typescript)]
+    #[cfg(feature = "old-js-export")]
     pub fn apply_patches(&mut self, object: JsValue, meta: JsValue) -> Result<JsValue, JsValue> {
         let (value, _patches) = self.apply_patches_impl(object, meta)?;
         Ok(value)
@@ -1110,6 +1116,7 @@ impl Automerge {
 
     // skip_typescript as the function can only by typed in the custom section
     #[wasm_bindgen(js_name = applyAndReturnPatches, skip_typescript)]
+    #[cfg(feature = "old-js-export")]
     pub fn apply_and_return_patches(
         &mut self,
         object: JsValue,
@@ -1125,6 +1132,7 @@ impl Automerge {
         Ok(result.into())
     }
 
+    #[cfg(feature = "old-js-export")]
     fn apply_patches_impl(
         &mut self,
         object: JsValue,
@@ -1139,6 +1147,7 @@ impl Automerge {
 
         let mut cache = interop::ExportCache::new(self)?;
 
+        #[cfg(feature = "rust-materialize")]
         if shortcut {
             let value = cache.materialize(ROOT, Datatype::Map, None, &meta)?;
             return Ok((value, patches));
@@ -1163,6 +1172,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = diffIncremental, unchecked_return_type="Patch[]")]
+    #[cfg(feature = "old-js-export")]
     pub fn diff_incremental(&mut self) -> Result<Array, error::PopPatches> {
         // transactions send out observer updates as they occur, not waiting for them to be
         // committed.
@@ -1184,6 +1194,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(unchecked_return_type = "Patch[]")]
+    #[cfg(feature = "old-js-export")]
     pub fn diff(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
@@ -1202,6 +1213,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = diffPath, skip_typescript)]
+    #[cfg(feature = "old-js-export")]
     pub fn diff_path(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Prop[] | string")] path: JsValue,
@@ -1460,6 +1472,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = toJS, unchecked_return_type="MaterializeValue")]
+    #[cfg(feature = "rust-materialize")]
     pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, interop::error::Export> {
         let mut cache = interop::ExportCache::new(self)?;
         cache.materialize(ROOT, Datatype::Map, None, &meta)
@@ -1468,6 +1481,7 @@ impl Automerge {
     // Skip typescript as the arguments are all optional which can only be typed
     // in the typescript custom section
     #[wasm_bindgen(skip_typescript)]
+    #[cfg(feature = "rust-materialize")]
     pub fn materialize(
         &mut self,
         obj: JsValue,
@@ -1479,6 +1493,149 @@ impl Automerge {
         self.doc.update_diff_cursor();
         let mut cache = interop::ExportCache::new(self)?;
         Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
+    }
+
+    #[wasm_bindgen(js_name = materializeTape, skip_typescript)]
+    pub fn materialize_tape(
+        &mut self,
+        obj: JsValue,
+        heads: JsValue,
+    ) -> Result<Object, error::Materialize> {
+        let (root, root_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
+        let heads = get_heads(heads)?;
+        self.doc.update_diff_cursor();
+
+        let mut obj_indexes = HashMap::<am::ObjId, u32>::default();
+        let mut string_indexes = HashMap::<String, u32>::default();
+        let mut list_indexes = HashMap::<am::ObjId, usize>::default();
+        let mut ops = Vec::<u32>::new();
+        let strings = Array::new();
+        let values = Array::new();
+        let mut next_obj_index = 0_u32;
+
+        obj_indexes.insert(root.clone(), next_obj_index);
+        let root_id = intern_string(&strings, &mut string_indexes, root.to_string());
+        push_op(
+            &mut ops,
+            0,
+            next_obj_index,
+            obj_type_code(root_type),
+            root_id,
+            0,
+            0,
+            0,
+            0,
+        );
+        next_obj_index += 1;
+
+        let iter = self.doc.iter_at(root, heads.as_deref());
+        for DocObjItem { obj, item } in iter {
+            let Some(parent_index) = obj_indexes.get(obj.as_ref()).copied() else {
+                continue;
+            };
+
+            match item {
+                DocItem::Text(span) => {
+                    let text = intern_string(&strings, &mut string_indexes, span.as_str().to_owned());
+                    push_op(&mut ops, 3, parent_index, text, 0, 0, 0, 0, 0);
+                }
+                DocItem::Map(map) => {
+                    let prop = intern_string(&strings, &mut string_indexes, map.key.to_string());
+                    match map.value {
+                        ValueRef::Object(obj_type) => {
+                            let child_id = map.id();
+                            let child_index =
+                                ensure_obj_index(&mut obj_indexes, &mut next_obj_index, &child_id);
+                            let child_id =
+                                intern_string(&strings, &mut string_indexes, child_id.to_string());
+                            push_op(
+                                &mut ops,
+                                1,
+                                parent_index,
+                                0,
+                                prop,
+                                obj_type_code(obj_type),
+                                child_index,
+                                child_id,
+                                0,
+                            );
+                        }
+                        ValueRef::Scalar(value) => {
+                            let datatype = scalar_value_ref_code(&value);
+                            let value = ValueRef::Scalar(value).into_value();
+                            let (_, value) = alloc(&value);
+                            let value_index = values.length();
+                            values.push(&value);
+                            push_op(
+                                &mut ops,
+                                2,
+                                parent_index,
+                                0,
+                                prop,
+                                datatype,
+                                value_index,
+                                0,
+                                0,
+                            );
+                        }
+                    }
+                }
+                DocItem::List(list) => {
+                    let index = list_indexes.entry((*obj).clone()).or_default();
+                    let prop = *index as u32;
+                    *index += 1;
+                    match list.value {
+                        ValueRef::Object(obj_type) => {
+                            let child_id = list.id();
+                            let child_index =
+                                ensure_obj_index(&mut obj_indexes, &mut next_obj_index, &child_id);
+                            let child_id =
+                                intern_string(&strings, &mut string_indexes, child_id.to_string());
+                            push_op(
+                                &mut ops,
+                                1,
+                                parent_index,
+                                1,
+                                prop,
+                                obj_type_code(obj_type),
+                                child_index,
+                                child_id,
+                                0,
+                            );
+                        }
+                        ValueRef::Scalar(value) => {
+                            let datatype = scalar_value_ref_code(&value);
+                            let value = ValueRef::Scalar(value).into_value();
+                            let (_, value) = alloc(&value);
+                            let value_index = values.length();
+                            values.push(&value);
+                            push_op(
+                                &mut ops,
+                                2,
+                                parent_index,
+                                1,
+                                prop,
+                                datatype,
+                                value_index,
+                                0,
+                                0,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = Object::new();
+        Reflect::set(
+            &result,
+            &"ops".into(),
+            &Uint32Array::from(ops.as_slice()).into(),
+        )
+        .unwrap();
+        Reflect::set(&result, &"strings".into(), &strings).unwrap();
+        Reflect::set(&result, &"values".into(), &values).unwrap();
+        Ok(result)
     }
 
     // skip_typescript as the heads and move_cursor arguments are optional which
@@ -1718,6 +1875,73 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
     console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     Automerge::new(actor)
+}
+
+fn push_op(
+    ops: &mut Vec<u32>,
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
+    e: u32,
+    f: u32,
+    g: u32,
+    h: u32,
+) {
+    ops.extend_from_slice(&[a, b, c, d, e, f, g, h]);
+}
+
+fn ensure_obj_index(
+    indexes: &mut HashMap<am::ObjId, u32>,
+    next_index: &mut u32,
+    obj: &am::ObjId,
+) -> u32 {
+    if let Some(index) = indexes.get(obj) {
+        *index
+    } else {
+        let index = *next_index;
+        indexes.insert(obj.clone(), index);
+        *next_index += 1;
+        index
+    }
+}
+
+fn intern_string(strings: &Array, indexes: &mut HashMap<String, u32>, value: String) -> u32 {
+    if let Some(index) = indexes.get(&value) {
+        *index
+    } else {
+        let index = strings.length();
+        strings.push(&value.clone().into());
+        indexes.insert(value, index);
+        index
+    }
+}
+
+fn obj_type_code(obj_type: am::ObjType) -> u32 {
+    match obj_type {
+        // Match the storage action codes for object creation.
+        am::ObjType::Map => 0,
+        am::ObjType::List => 2,
+        am::ObjType::Text => 4,
+        am::ObjType::Table => 6,
+    }
+}
+
+fn scalar_value_ref_code(value: &am::ScalarValueRef<'_>) -> u32 {
+    match value {
+        // Match the low-nibble ValueMeta codes used by storage.
+        am::ScalarValueRef::Null => 0,
+        am::ScalarValueRef::Boolean(false) => 1,
+        am::ScalarValueRef::Boolean(true) => 2,
+        am::ScalarValueRef::Uint(_) => 3,
+        am::ScalarValueRef::Int(_) => 4,
+        am::ScalarValueRef::F64(_) => 5,
+        am::ScalarValueRef::Str(_) => 6,
+        am::ScalarValueRef::Bytes(_) => 7,
+        am::ScalarValueRef::Counter(_) => 8,
+        am::ScalarValueRef::Timestamp(_) => 9,
+        am::ScalarValueRef::Unknown { type_code, .. } => (*type_code).into(),
+    }
 }
 
 // skip_typescript as the options argument is optional which can only be typed

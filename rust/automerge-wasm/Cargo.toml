@@ -22,6 +22,8 @@ bench = false
 [features]
 # default = ["console_error_panic_hook", "wee_alloc"]
 default = []
+rust-materialize = []
+old-js-export = []
 
 [dependencies]
 console_error_panic_hook = { version = "^0.1", optional = true }
