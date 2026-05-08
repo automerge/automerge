@@ -131,7 +131,7 @@ function materializeFromCompactTape<T>(
         objects[ops[offset + 1]],
         ops[offset + 2],
         ops[offset + 3],
-        values[ops[offset + 5]],
+        reifyCompactScalar(ops[offset + 4], values[ops[offset + 5]]),
         strings,
       )
     } else if (op === 3) {
@@ -151,6 +151,19 @@ function materializeFromCompactTape<T>(
   }
 
   return objects[0] as T
+}
+
+function reifyCompactScalar(datatype: number, value: unknown): unknown {
+  if (datatype === 6) {
+    return new ImmutableString(value as string)
+  }
+  if (datatype === 8) {
+    return new Counter(value as number)
+  }
+  if (datatype === 9 && !(value instanceof Date)) {
+    return new Date(value as number)
+  }
+  return value
 }
 
 function makeCompactMaterializedObject(type: number): unknown {
