@@ -295,6 +295,7 @@ pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, S
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
+pub use change_graph::{DepthFragment, Fragment};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;

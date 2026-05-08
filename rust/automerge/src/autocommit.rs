@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
-use crate::change_graph::Fragment;
+use crate::change_graph::{DepthFragment, Fragment};
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
@@ -613,6 +613,12 @@ impl AutoCommit {
 
     pub fn fragments(&self) -> Vec<Fragment> {
         self.doc.fragments()
+    }
+
+    /// Spec-correct, depth-stratified fragments. See
+    /// [`Automerge::depth_fragments`] for the algorithm.
+    pub fn depth_fragments(&self) -> Vec<DepthFragment> {
+        self.doc.depth_fragments()
     }
 
     /// Get the current heads of the document.

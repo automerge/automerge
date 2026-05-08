@@ -76,3 +76,7 @@ harness = false
 [[bench]]
 name = "load_save"
 harness = false
+
+[[bench]]
+name = "fragments"
+harness = false

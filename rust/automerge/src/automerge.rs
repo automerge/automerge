@@ -7,7 +7,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
-pub(crate) use crate::change_graph::Fragment;
+pub(crate) use crate::change_graph::{DepthFragment, Fragment};
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -1253,6 +1253,20 @@ impl Automerge {
 
     pub fn fragments(&self) -> Vec<Fragment> {
         self.change_graph.fragments(&self.get_heads()).collect()
+    }
+
+    /// Spec-correct, depth-stratified fragments.
+    ///
+    /// Recomputes on demand by walking the change graph from the document's
+    /// heads. Each fragment is built by a depth-stratified BFS that stops at
+    /// ancestors whose `ChangeHash::fragment_level()` is `>=` the head's
+    /// level, classifying every other ancestor as either a member or a
+    /// checkpoint. See [`DepthFragment`] for the result shape.
+    ///
+    /// Coexists with [`Automerge::fragments`] (the clock-based prototype) so
+    /// the two strategies can be benchmarked head-to-head.
+    pub fn depth_fragments(&self) -> Vec<DepthFragment> {
+        self.change_graph.depth_fragments(&self.get_heads())
     }
 
     /// Get the heads of this document.

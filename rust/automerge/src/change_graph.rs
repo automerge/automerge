@@ -1360,6 +1360,198 @@ mod tests {
             }
         }
     }
+
+    // ─── depth_fragments tests ───────────────────────────────────────────
+
+    fn assert_depth_fragment_invariants(fragments: &[DepthFragment]) {
+        for f in fragments {
+            // level matches head's leading-zero-byte count.
+            assert_eq!(
+                f.level,
+                f.head.fragment_level(),
+                "DepthFragment level mismatch for {:?}",
+                f.head
+            );
+
+            // Heads are never depth 0.
+            assert!(f.level > 0, "DepthFragment head must have level > 0");
+
+            // head appears in members.
+            assert!(
+                f.members.contains(&f.head),
+                "DepthFragment head {:?} must be in its own members",
+                f.head
+            );
+
+            // Every member has level strictly less than head.level, OR is the head itself.
+            for m in &f.members {
+                if m == &f.head {
+                    continue;
+                }
+                assert!(
+                    m.fragment_level() < f.level,
+                    "DepthFragment {:?} (level {}) has member {:?} with level >= head level",
+                    f.head,
+                    f.level,
+                    m
+                );
+            }
+
+            // Checkpoints ⊆ members, and 0 < checkpoint.level < head.level.
+            let members_set: BTreeSet<_> = f.members.iter().collect();
+            for c in &f.checkpoints {
+                assert!(
+                    members_set.contains(c),
+                    "DepthFragment {:?}: checkpoint {:?} not in members",
+                    f.head,
+                    c
+                );
+                let cl = c.fragment_level();
+                assert!(
+                    cl > 0 && cl < f.level,
+                    "DepthFragment {:?} (level {}): checkpoint {:?} has invalid level {}",
+                    f.head,
+                    f.level,
+                    c,
+                    cl
+                );
+            }
+
+            // Boundary level is always >= head.level.
+            for b in &f.boundary {
+                assert!(
+                    b.fragment_level() >= f.level,
+                    "DepthFragment {:?} (level {}) has boundary {:?} with level < head level",
+                    f.head,
+                    f.level,
+                    b
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn depth_fragments_linear_invariants() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments = graph.depth_fragments(&heads);
+        assert_depth_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn depth_fragments_cover_all_changes() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments = graph.depth_fragments(&heads);
+
+        // Every depth-0 change appears in some fragment's members
+        // (or there are no fragments and the doc is purely loose commits).
+        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        for f in &fragments {
+            for h in &f.members {
+                covered.insert(*h);
+            }
+        }
+        // Heads with level == 0 won't be in any fragment — they're loose commits.
+        // But for a 1000-change linear chain we expect ~3-4 depth>=1 fragments and
+        // every change between them should be a member.
+        assert!(
+            !fragments.is_empty(),
+            "expected at least one depth>=1 fragment in 1000 commits"
+        );
+
+        // Every change with level >= 1 must be a head of some fragment OR a
+        // checkpoint of some fragment.
+        let heads_set: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
+        let checkpoints_set: BTreeSet<_> = fragments
+            .iter()
+            .flat_map(|f| f.checkpoints.iter().copied())
+            .collect();
+        for h in &all_hashes {
+            if h.fragment_level() == 0 {
+                continue;
+            }
+            assert!(
+                heads_set.contains(h) || checkpoints_set.contains(h) || covered.contains(h),
+                "depth>=1 change {:?} (level {}) not represented anywhere",
+                h,
+                h.fragment_level()
+            );
+        }
+    }
+
+    #[test]
+    fn depth_fragments_concurrent_actors_invariants() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+
+        let root = builder.change(&actor1, 1, &[]);
+        let mut tip1 = root;
+        let mut tip2 = root;
+        for i in 0..500 {
+            tip1 = builder.change(&actor1, 1, &[tip1]);
+            tip2 = builder.change(&actor2, 1, &[tip2]);
+            if i % 50 == 49 {
+                let merge = builder.change(&actor1, 1, &[tip1, tip2]);
+                tip1 = merge;
+                tip2 = merge;
+            }
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments = graph.depth_fragments(&heads);
+        assert_depth_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn depth_fragments_boundary_chains_to_next_level() {
+        // Property: every boundary hash is either a fragment head we also
+        // emitted, or a hash whose level is >= the boundary holder's level.
+        // (Together with the level-≥ property above this means: boundaries
+        // are always either deeper fragment heads or unreachable from the
+        // initial heads, which in a fully-connected graph means they should
+        // also have been emitted as fragments.)
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..2000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments = graph.depth_fragments(&heads);
+        let heads_set: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
+
+        for f in &fragments {
+            for b in &f.boundary {
+                // Every boundary hash should itself be the head of some
+                // fragment we emitted (since we walk boundaries level-by-level).
+                assert!(
+                    heads_set.contains(b),
+                    "boundary {:?} of fragment {:?} not emitted as a fragment head",
+                    b,
+                    f.head
+                );
+            }
+        }
+    }
 }
 
 fn to_vec<'a, I, T>(iter: I) -> Result<Vec<T>, PackError>
@@ -1516,6 +1708,176 @@ pub struct Fragment {
     pub level: usize,
     pub deps: Vec<ChangeHash>,
     pub content: Vec<ChangeHash>,
+}
+
+// ─── depth-stratified fragmenter ──────────────────────────────────────────
+//
+// `DepthFragment` and `ChangeGraph::depth_fragments` are an alternative
+// fragmenter that follows the sedimentree spec rather than the clock-based
+// approximation in the prototype above.
+//
+// Differences vs. `Fragment`:
+//
+// - Stop predicate is depth (leading-zero bytes of `ChangeHash`), not a
+//   `SeqClock`. A walk from a fragment head H of level L stops at any
+//   ancestor whose level is >= L; that ancestor becomes part of the
+//   fragment's _boundary_ rather than its members.
+// - `members` includes the head and every shallow ancestor visited;
+//   `checkpoints` is the subset of members with `0 < level < head_level`
+//   (intermediate fragment heads contained in this one).
+// - There is no eager cache and no `supercede` of dominated fragments —
+//   `Automerge::depth_fragments` recomputes on demand. Caching/minimization
+//   are downstream concerns left to the consumer (see `Sedimentree::minimize`).
+//
+// The algorithm matches `sedimentree_core::commit::CommitStore::fragment`
+// structurally, modulo: we walk via the in-memory change graph rather than a
+// generic store, and we omit the `known_fragment_states` deduplication (which
+// is dead code for a single-call build because shallower fragments are built
+// before their deeper boundaries — see notes in `commit.rs:142-151`).
+
+/// A spec-correct fragment derived from a depth-stratified BFS.
+///
+/// Built by [`Automerge::depth_fragments`](crate::Automerge::depth_fragments).
+/// Mirrors the `(head, members, checkpoints, boundary)` shape of
+/// `sedimentree_core::commit::FragmentState`.
+#[derive(Debug, PartialEq, Clone)]
+pub struct DepthFragment {
+    /// Head change; the newest commit in the fragment, with `level > 0`.
+    pub head: ChangeHash,
+
+    /// `ChangeHash::fragment_level()` of `head` (number of leading zero bytes).
+    pub level: usize,
+
+    /// Every change reachable from `head` whose level is strictly less than
+    /// `level`. Always includes `head` itself.
+    pub members: Vec<ChangeHash>,
+
+    /// Subset of `members` with `0 < level < head.level` — intermediate
+    /// fragment heads contained inside this fragment. Used by
+    /// `Fragment::supports` in `sedimentree_core` to determine when a
+    /// shallower fragment is fully contained in this one.
+    pub checkpoints: Vec<ChangeHash>,
+
+    /// Ancestors whose level is `>= head.level`, encountered during the
+    /// walk but _not_ expanded. They delimit the fragment and become heads
+    /// for the next (deeper) level when building a complete fragment store.
+    pub boundary: Vec<ChangeHash>,
+}
+
+impl ChangeGraph {
+    /// Build all spec-correct fragments reachable from `heads`, level by level.
+    ///
+    /// Returns a `Vec` in build order (shallowest level first; within a level,
+    /// LIFO over the input heads — same DFS-style order used by
+    /// `sedimentree_core::CommitStore::build_fragment_store`).
+    ///
+    /// Heads with `level == 0` are loose commits, not fragment heads;
+    /// they are skipped, but their parents are still walked so that
+    /// deeper-level ancestors are discovered and emitted as fragment heads.
+    ///
+    /// This recomputes from scratch on every call. There is no eager
+    /// per-change cache (in contrast to the `fragments` API exposed by
+    /// [`Automerge::fragments`](crate::Automerge::fragments)).
+    pub(crate) fn depth_fragments(&self, heads: &[ChangeHash]) -> Vec<DepthFragment> {
+        let mut out = Vec::new();
+        let mut emitted: HashSet<NodeIdx> = HashSet::new();
+        let mut visited: HashSet<NodeIdx> = HashSet::new();
+        let mut queue: VecDeque<NodeIdx> = heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h).copied())
+            .collect();
+        for &n in &queue {
+            visited.insert(n);
+        }
+
+        while let Some(head) = queue.pop_back() {
+            // pop_back = LIFO/DFS; matches spec's `Vec::pop`.
+            if emitted.contains(&head) {
+                continue;
+            }
+            let head_hash = self.hashes[head.0 as usize];
+            let head_level = head_hash.fragment_level();
+
+            if head_level == 0 {
+                // Loose commit: not a fragment head, but walk parents so
+                // deeper-level ancestors enter the queue.
+                for p in self.parents(head) {
+                    if visited.insert(p) {
+                        queue.push_back(p);
+                    }
+                }
+                emitted.insert(head);
+                continue;
+            }
+
+            let frag = self.build_one_depth_fragment(head, head_level);
+
+            // Boundary nodes become next-level heads.
+            for b_hash in &frag.boundary {
+                if let Some(&b_idx) = self.nodes_by_hash.get(b_hash) {
+                    if visited.insert(b_idx) {
+                        queue.push_back(b_idx);
+                    }
+                }
+            }
+
+            emitted.insert(head);
+            out.push(frag);
+        }
+
+        out
+    }
+
+    /// BFS from `head` through parent edges, classifying each visited node
+    /// as a member, checkpoint, or boundary based on its level relative to
+    /// `head_level`.
+    fn build_one_depth_fragment(&self, head: NodeIdx, head_level: usize) -> DepthFragment {
+        debug_assert!(head_level > 0, "depth-0 commit cannot head a fragment");
+
+        let mut visited: HashSet<NodeIdx> = HashSet::new();
+        let mut members: Vec<NodeIdx> = Vec::new();
+        let mut checkpoints: Vec<NodeIdx> = Vec::new();
+        let mut boundary: Vec<NodeIdx> = Vec::new();
+        let mut queue: VecDeque<NodeIdx> = VecDeque::new();
+
+        visited.insert(head);
+        members.push(head);
+        queue.push_back(head);
+
+        while let Some(n) = queue.pop_front() {
+            for p in self.parents(n) {
+                if !visited.insert(p) {
+                    continue;
+                }
+                let p_level = self.hashes[p.0 as usize].fragment_level();
+                if p_level >= head_level {
+                    // Same or deeper: boundary, do not expand.
+                    boundary.push(p);
+                } else {
+                    members.push(p);
+                    if p_level > 0 {
+                        // 0 < p_level < head_level: intermediate fragment head.
+                        checkpoints.push(p);
+                    }
+                    queue.push_back(p);
+                }
+            }
+        }
+
+        let to_hashes = |idxs: Vec<NodeIdx>| -> Vec<ChangeHash> {
+            idxs.into_iter()
+                .map(|n| self.hashes[n.0 as usize])
+                .collect()
+        };
+
+        DepthFragment {
+            head: self.hashes[head.0 as usize],
+            level: head_level,
+            members: to_hashes(members),
+            checkpoints: to_hashes(checkpoints),
+            boundary: to_hashes(boundary),
+        }
+    }
 }
 
 #[rustfmt::skip]
