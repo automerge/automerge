@@ -1,3 +1,16 @@
+## Unreleased
+
+### Breaking Changes
+
+* `Automerge::transaction_log_patches`, `Automerge::transaction_at`, and
+  `Automerge::into_transaction` now fail (return `Result<_, PatchLogMismatch>`)
+  when supplied with a patch log from another document.
+
+### Fixed
+
+* Return `PatchLogMismatch` instead of panicking when batch change application or
+  transaction creation is given a patch log from another document.
+
 ## 0.9.0
 
 ### Added

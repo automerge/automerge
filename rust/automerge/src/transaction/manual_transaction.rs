@@ -1,7 +1,7 @@
 use crate::exid::ExId;
 use crate::patches::PatchLog;
 use crate::ChangeHash;
-use crate::{automerge::Automerge, AutomergeError};
+use crate::{automerge::Automerge, AutomergeError, PatchLogMismatch};
 
 use super::{CommitOptions, TransactionArgs, TransactionInner};
 
@@ -31,13 +31,15 @@ impl<'a> Transaction<'a> {
         doc: &'a mut Automerge,
         args: TransactionArgs,
         mut patch_log: PatchLog,
-    ) -> Self {
-        patch_log.migrate_actors(&doc.ops().actors).unwrap(); // we forked and merged so there will be no mismatch
-        Self {
+    ) -> Result<Self, PatchLogMismatch> {
+        patch_log
+            .migrate_actors(&doc.ops().actors)
+            .map_err(|_| PatchLogMismatch)?;
+        Ok(Self {
             inner: Some(TransactionInner::new(args)),
             doc,
             patch_log,
-        }
+        })
     }
 
     /// Get the hash of the change that contains the given opid.

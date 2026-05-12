@@ -356,16 +356,32 @@ impl Automerge {
     pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args(None);
         Transaction::new(self, args, PatchLog::inactive())
+            .expect("inactive patch log should not mismatch")
     }
 
     /// Start a transaction which records changes in a [`PatchLog`]
-    pub fn transaction_log_patches(&mut self, patch_log: PatchLog) -> Transaction<'_> {
+    ///
+    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if `patch_log` does not belong to
+    /// this document. This probably means a patch log created for one document was reused with
+    /// another document.
+    pub fn transaction_log_patches(
+        &mut self,
+        patch_log: PatchLog,
+    ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
         let args = self.transaction_args(None);
         Transaction::new(self, args, patch_log)
     }
 
     /// Start a transaction isolated at a given heads
-    pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
+    ///
+    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if `patch_log` does not belong to
+    /// this document. This probably means a patch log created for one document was reused with
+    /// another document.
+    pub fn transaction_at(
+        &mut self,
+        patch_log: PatchLog,
+        heads: &[ChangeHash],
+    ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
         let args = self.transaction_args(Some(heads));
         Transaction::new(self, args, patch_log)
     }
@@ -380,11 +396,15 @@ impl Automerge {
     /// * `patch_log` - An optional [`PatchLog`] to log the changes in this transaction to
     /// * `heads` - An optional set of heads to isolate this transaction at, or `None` to use the
     ///   current heads of the document
+    ///
+    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if `patch_log` does not belong to
+    /// this document. This probably means a patch log created for one document was reused with
+    /// another document.
     pub fn into_transaction(
         self,
         patch_log: Option<PatchLog>,
         heads: Option<&[ChangeHash]>,
-    ) -> OwnedTransaction {
+    ) -> Result<OwnedTransaction, crate::PatchLogMismatch> {
         OwnedTransaction::new(self, patch_log, heads)
     }
 
@@ -508,7 +528,9 @@ impl Automerge {
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
-        let mut tx = self.transaction_log_patches(PatchLog::active());
+        let mut tx = self
+            .transaction_log_patches(PatchLog::active())
+            .expect("new patch log should not mismatch");
         let result = f(&mut tx);
         match result {
             Ok(result) => {

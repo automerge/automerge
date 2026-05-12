@@ -1,5 +1,4 @@
 use crate::automerge::Automerge;
-use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
@@ -454,7 +453,10 @@ impl PatchLog {
     // if a new actor is added to an opset, the id's inside the patch log need to be re-ordered
     // this is an uncommon operation so this seems preferable to storing ExId's in place
     // for every objid and opid
-    pub(crate) fn migrate_actors(&mut self, others: &Vec<ActorId>) -> Result<(), AutomergeError> {
+    pub(crate) fn migrate_actors(
+        &mut self,
+        others: &Vec<ActorId>,
+    ) -> Result<(), crate::PatchLogMismatch> {
         if &self.actors != others {
             if self.actors.is_empty() {
                 self.actors = others.clone();
@@ -470,7 +472,7 @@ impl PatchLog {
                     (None, Some(b)) => {
                         self.actors.insert(i, b.clone());
                     }
-                    _ => return Err(AutomergeError::PatchLogMismatch),
+                    _ => return Err(crate::PatchLogMismatch),
                 }
             }
         }
