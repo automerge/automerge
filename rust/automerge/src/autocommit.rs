@@ -400,6 +400,8 @@ impl AutoCommit {
             let args = self.doc.transaction_args(self.isolation.as_deref());
             self.patch_log
                 .migrate_actors(&self.doc.ops().actors)
+                // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
+                // should always belong to this document.
                 .unwrap();
             let inner = TransactionInner::new(args);
             let branch = self.patch_log.branch();
