@@ -1275,8 +1275,8 @@ impl OpRange {
 #[cfg(test)]
 mod tests {
     use crate::{
-        sync::SyncDoc, transaction::Transactable, ActorId, AutoCommit, ReadDoc, ScalarValue, Value,
-        ROOT,
+        patches::PatchLog, sync::SyncDoc, transaction::Transactable, ActorId, AutoCommit, ReadDoc,
+        ScalarValue, Value, ROOT,
     };
 
     fn is_send<S: Send>() {}
@@ -1289,10 +1289,14 @@ mod tests {
     #[test]
     fn sync_receive_with_stale_inactive_patch_log_does_not_fail() {
         let mut receiver = AutoCommit::new();
-        receiver.patch_log.actors = vec![ActorId::from(b"stale-actor" as &[u8])];
+        receiver.set_actor(ActorId::from(b"receiver" as &[u8]));
+        receiver.put(ROOT, "starter", "ready").unwrap();
+
+        let mut patch_log = PatchLog::inactive();
+        patch_log.actors = vec![ActorId::from(b"aaa-stale-actor" as &[u8])];
 
         let mut donor = AutoCommit::new();
-        donor.set_actor(ActorId::from(b"donor" as &[u8]));
+        donor.set_actor(ActorId::from(b"zzz-donor" as &[u8]));
         donor.put(ROOT, "key", "value").unwrap();
 
         let mut receiver_sync = crate::sync::State::new();
@@ -1312,7 +1316,7 @@ mod tests {
 
         receiver
             .sync()
-            .receive_sync_message(&mut receiver_sync, message)
+            .receive_sync_message_log_patches(&mut receiver_sync, message, &mut patch_log)
             .unwrap();
 
         match receiver.get(ROOT, "key").unwrap() {
