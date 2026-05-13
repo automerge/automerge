@@ -11,7 +11,7 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::{ObjId, ObjMeta};
+use crate::types::{Author, ObjId, ObjMeta};
 use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -379,8 +379,50 @@ impl AutoCommit {
         self
     }
 
+    pub fn with_author(mut self, author: Option<Author>) -> Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
+    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+        self.doc.get_actors_for_author(author)
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+        self.doc.get_author_for_actor(actor)
+    }
+
+    pub fn get_author(&self) -> Option<&Author> {
+        self.doc.get_author()
+    }
+
+    pub fn get_authors(&self) -> Vec<Author> {
+        self.doc.get_authors()
+    }
+
+    pub fn revoke(&mut self, author: &Author, heads: &[ChangeHash]) -> Vec<Patch> {
+        self.ensure_transaction_closed();
+        let mut patch_log = PatchLog::active();
+        self.doc.revoke(author, heads, &mut patch_log);
+        patch_log.make_patches(&self.doc)
+    }
+
+    pub fn unrevoke(&mut self, author: &Author) -> Vec<Patch> {
+        self.ensure_transaction_closed();
+        let mut patch_log = PatchLog::active();
+        self.doc.unrevoke(author, &mut patch_log);
+        patch_log.make_patches(&self.doc)
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {

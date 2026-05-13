@@ -2693,4 +2693,96 @@ describe("Automerge", () => {
       }
     });
   });
+  describe("author", () => {
+    it("author can be assigned", () => {
+      const doc = create();
+      doc.put("/", "key", "val1");
+      doc.commit();
+      const actor1 = doc.getActorId();
+      doc.setAuthor("ffff");
+      const actor2 = doc.getActorId();
+      assert.notEqual(actor1, actor2)
+      doc.put("/", "key", "val2");
+      doc.commit();
+      let change1 = decodeChange(doc.getLastLocalChange() as Uint8Array)
+      assert.equal(change1.author, "ffff");
+      doc.put("/", "key", "val3");
+      doc.commit();
+      let change2 = decodeChange(doc.getLastLocalChange() as Uint8Array)
+      assert.equal(change2.author, undefined);
+      assert.deepEqual(doc.getAuthors(),["ffff"]);
+      assert.equal(doc.getAuthorForActor(actor2),"ffff");
+      assert.deepEqual(doc.getActorsForAuthor("ffff"),[actor2]);
+    });
+
+    it("authors can be revoked", () => {
+      const doc = create();
+      doc.setAuthor("ffff");
+      doc.put("/", "key1", "val1");
+
+      doc.setAuthor("aaaa");
+      doc.put("/", "key2", "val2");
+      let heads1 = doc.getHeads();
+      doc.put("/", "key3", "val3");
+
+      let patches1 = doc.revoke("aaaa", heads1);
+      assert.deepEqual(patches1, [{action:'del',path:['key3']}]);
+
+      let patches2 = doc.unrevoke("aaaa");
+      assert.deepEqual(patches2, [{action:'put',path:['key3'],value:'val3'}])
+
+      let heads2 = doc.getHeads();
+      doc.setAuthor("bbbb");
+      doc.put("/", "key2", "val2a");
+      doc.put("/", "key3", "val3a");
+
+      let patches3 = doc.revoke("aaaa", heads1);
+      assert.deepEqual(patches3, []);
+
+      let patches4 = doc.unrevoke("aaaa");
+      assert.deepEqual(patches4, [])
+
+      let patches5 = doc.revoke("bbbb", heads2);
+      assert.deepEqual(patches5, [{action:'put',path:['key2'],value:'val2'},
+                                  {action:'put',path:['key3'],value:'val3'}]);
+
+      let patches6 = doc.unrevoke("bbbb");
+      assert.deepEqual(patches6, [{action:'put',path:['key2'],value:'val2a'},
+                                  {action:'put',path:['key3'],value:'val3a'}]);
+    })
+
+    it("revoked values are reflected in materialize", () => {
+      let d1 = {
+        counter: 11, key1: 'val1', list: [ 1, 2, 3, 4 ], text: 'hello world'
+      }
+      let d2 = {
+        counter: 13, key1: 'val2', list: [ 1, 2, 3, 'cat', 4 ], text: 'hello big world'
+      }
+
+      const doc = create();
+      doc.setAuthor("ffff");
+      doc.put("/", "key1", "val1");
+      doc.put("/", "counter", 10, "counter");
+      doc.increment("/", "counter", 1);
+      let list = doc.putObject("/", "list", [1,2,3,4]);
+      let text = doc.putObject("/", "text", "hello world");
+      let heads1 = doc.getHeads();
+
+      assert.deepEqual(doc.materialize(), d1);
+
+      doc.setAuthor("aaaa");
+      doc.put("/", "key1", "val2");
+      doc.increment("/", "counter", 2);
+      doc.insert(list, 3, "cat");
+      doc.splice(text, 6, 0, "big ");
+
+      assert.deepEqual(doc.materialize(), d2);
+
+      let patches1 = doc.revoke("aaaa", heads1);
+      assert.deepEqual(doc.materialize(), d1);
+
+      let patches2 = doc.unrevoke("aaaa");
+      assert.deepEqual(doc.materialize(), d2);
+    })
+  });
 });

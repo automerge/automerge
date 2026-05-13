@@ -44,6 +44,7 @@ pub(super) struct Indexes {
     pub(super) text: ColumnData<UIntCursor>,
     pub(super) top: ColumnData<BooleanCursor>,
     pub(super) visible: ColumnData<BooleanCursor>,
+    pub(super) counter: ColumnData<IntCursor>,
     pub(super) inc: ColumnData<IntCursor>,
     pub(super) mark: MarkIndexColumn,
 }
@@ -54,6 +55,7 @@ impl Default for Indexes {
             text: ColumnData::new(),
             top: ColumnData::new(),
             visible: ColumnData::new(),
+            counter: ColumnData::new(),
             inc: ColumnData::new(),
             mark: MarkIndexColumn::new(),
         }
@@ -373,6 +375,7 @@ impl Columns {
         self.index
             .mark
             .splice(pos, 0, ops.clone().map(O::mark_index).collect());
+
         self.index.text.splice(
             pos,
             0,
@@ -383,6 +386,10 @@ impl Columns {
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+
+        self.index
+            .counter
+            .splice(pos, 0, ops.clone().map(O::counter));
 
         ops.count()
     }

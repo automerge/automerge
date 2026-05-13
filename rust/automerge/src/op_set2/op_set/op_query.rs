@@ -1,12 +1,14 @@
 use super::visible::VisIter;
-use super::{MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
+use super::{MarkIter, NoMarkIter, Op, OpIter, OpSet, ScalarValue, TopOpIter, VisibleOpIter};
 use crate::iter::tools::SkipIter;
 use crate::marks::MarkSet;
 use crate::types::Clock;
+use hexane::{ColumnDataIter, IntCursor};
 
 #[cfg(test)]
 use crate::iter::KeyOpIter;
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -35,13 +37,13 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
         KeyOpIter::new(self)
     }
 
-    fn visible_slow(self, clock: Option<Clock>) -> VisibleOpIter<'a, Self> {
+    fn visible_slow(self, clock: Option<Cow<'a, Clock>>) -> VisibleOpIter<'a, Self> {
         VisibleOpIter::new(self, clock)
     }
 
     fn visible(self, op_set: &'a OpSet, clock: Option<&Clock>) -> FixCounters<'a, Self> {
         let vis = VisIter::new(op_set, clock, self.range());
-        FixCounters::new(SkipIter::new(self, vis), clock)
+        FixCounters::new(op_set, SkipIter::new(self, vis), clock)
     }
 }
 
@@ -57,17 +59,30 @@ impl<'a> OpQueryTerm<'a> for OpIter<'a> {
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQuery<'a> for I {}
 
+#[derive(Clone, Debug)]
 pub(crate) struct FixCounters<'a, T: OpQuery<'a>> {
     iter: SkipIter<T, VisIter<'a>>,
+    counter: ColumnDataIter<'a, IntCursor>,
     clock: Option<Clock>,
 }
 
 impl<'a, T: OpQuery<'a>> FixCounters<'a, T> {
-    fn new(iter: SkipIter<T, VisIter<'a>>, clock: Option<&Clock>) -> Self {
+    fn new(op_set: &'a OpSet, iter: SkipIter<T, VisIter<'a>>, clock: Option<&Clock>) -> Self {
         Self {
             iter,
+            counter: op_set.cols.index.counter.iter(),
             clock: clock.cloned(),
         }
+    }
+}
+
+impl<'a, T: OpQuery<'a>> OpQueryTerm<'a> for FixCounters<'a, T> {
+    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+        self.iter.inner().get_marks()
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.iter.inner().range()
     }
 }
 
@@ -76,7 +91,17 @@ impl<'a, T: OpQuery<'a>> Iterator for FixCounters<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut op = self.iter.next()?;
-        op.fix_counter(self.clock.as_ref());
+        if let ScalarValue::Counter(n) = &op.value {
+            let inc = if let Some(c) = self.clock.as_ref() {
+                op.succ_inc()
+                    .filter_map(|(i, val)| val.filter(|_| c.covers(&i)))
+                    .sum()
+            } else {
+                self.counter.advance_to(op.pos);
+                *self.counter.next().flatten().unwrap_or_default()
+            };
+            op.value = ScalarValue::Counter(*n + inc);
+        }
         Some(op)
     }
 }

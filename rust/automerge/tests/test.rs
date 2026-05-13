@@ -2,8 +2,9 @@ use automerge::marks::{ExpandMark, Mark};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
-    ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
+    sync::SyncDoc, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
+    ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value,
+    ROOT,
 };
 
 const B: usize = 16;
@@ -2665,4 +2666,128 @@ fn reproduce_clock_cache_bug() {
     let heads = base.get_heads();
 
     assert!(base.get_changes(&heads).is_empty());
+}
+
+#[test]
+fn authorship() {
+    let author1 = Author::from(vec![1, 1, 1]);
+    let author2 = Author::from(vec![2, 2, 2]);
+    let mut doc1 = AutoCommit::new();
+    doc1.put(ROOT, "key", "value1").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), None);
+    assert!(change.extra_bytes().is_empty());
+
+    let mut doc2 = doc1.fork();
+
+    doc1.set_author(Some(author1.clone()));
+    doc2.set_author(Some(author2.clone()));
+
+    doc1.put(ROOT, "key", "value2").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), Some(author1.as_bytes()));
+    assert_eq!(change.extra_bytes(), &[1, 3, 1, 1, 1]);
+
+    doc1.put(ROOT, "key", "value3").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 2);
+    assert_eq!(change.author(), None);
+    assert!(change.extra_bytes().is_empty());
+
+    doc2.put(ROOT, "key", "value4").unwrap();
+    let change = doc2.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), Some(author2.as_bytes()));
+    assert_eq!(change.extra_bytes(), &[1, 3, 2, 2, 2]);
+
+    doc1.merge(&mut doc2).unwrap();
+
+    let authors = doc1.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc1.get_actors_for_author(&author1);
+    let actors2 = doc1.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(doc1.get_author_for_actor(&actors1[0]), Some(&author1));
+    assert_eq!(doc1.get_author_for_actor(&actors2[0]), Some(&author2));
+
+    let doc3 = AutoCommit::load(&doc1.save()).unwrap();
+
+    let authors = doc3.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc3.get_actors_for_author(&author1);
+    let actors2 = doc3.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(doc3.get_author_for_actor(&actors1[0]), Some(&author1));
+    assert_eq!(doc3.get_author_for_actor(&actors2[0]), Some(&author2));
+}
+
+// Regression test: a peer-supplied change carrying an author footer at
+// seq != 1 must be rejected as a normal AutomergeError, not a panic.
+// extra_bytes is opaque user-controllable wire data; without explicit
+// validation, the change_graph's `assert!(change.seq() == 1)` would
+// crash any node ingesting the change via apply_changes / sync /
+// load_incremental.
+#[test]
+fn rejects_change_with_author_footer_at_non_initial_seq() {
+    // Encode an author footer the same way the encoder does in
+    // transaction/inner.rs::extra_bytes — Footer::Author (=1) is pub(crate)
+    // so we hard-code its discriminant here.
+    fn author_footer(author_bytes: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        leb128::write::unsigned(&mut buf, 1).unwrap(); // Footer::Author
+        leb128::write::unsigned(&mut buf, author_bytes.len() as u64).unwrap();
+        buf.extend_from_slice(author_bytes);
+        buf
+    }
+
+    let author = Author::try_from("ffff").unwrap();
+
+    // Build a real, well-formed seq=2 change from a single actor.
+    let mut doc = AutoCommit::new();
+    doc.put(automerge::ROOT, "k1", "v1").unwrap();
+    doc.commit();
+    doc.put(automerge::ROOT, "k2", "v2").unwrap();
+    doc.commit();
+
+    let changes = doc.get_changes(&[]);
+    let seq2 = changes
+        .iter()
+        .find(|c| c.seq() == 2)
+        .expect("expected a seq=2 change");
+    assert!(seq2.author().is_none(), "test setup: seq=2 should be clean");
+
+    // Forge: re-encode the seq=2 change with an author footer in
+    // extra_bytes. The hash will recompute, so the resulting Change is
+    // structurally valid in every other respect.
+    let mut expanded: ExpandedChange = seq2.into();
+    expanded.extra_bytes = author_footer(author.as_bytes());
+    expanded.hash = None;
+    let forged: Change = expanded.into();
+    assert_eq!(forged.seq(), 2);
+    assert!(forged.author().is_some());
+
+    // The seq=1 change is needed first so the seq=2 forgery isn't
+    // rejected as an orphan.
+    let seq1 = changes
+        .iter()
+        .find(|c| c.seq() == 1)
+        .expect("expected a seq=1 change")
+        .clone();
+
+    let mut victim = AutoCommit::new();
+    let result = victim.apply_changes([seq1, forged]);
+    assert!(
+        result.is_err(),
+        "apply_changes should reject author footer at seq != 1, got Ok"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, AutomergeError::AuthorOnNonInitialSeq(2, _)),
+        "expected AuthorOnNonInitialSeq(2, _), got {:?}",
+        err
+    );
 }

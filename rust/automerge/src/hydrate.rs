@@ -244,7 +244,7 @@ impl OpSet {
         encoding: TextEncoding,
     ) -> Value {
         let mut map = Map::new();
-        for top in self.top_ops(obj, clock.cloned()) {
+        for top in self.top_ops(obj, clock.map(Cow::Borrowed)) {
             let key = self.to_string(top.elemid_or_key());
             let id = self.id_to_exid(top.id);
             let conflict = top.conflict;
@@ -261,7 +261,7 @@ impl OpSet {
         encoding: TextEncoding,
     ) -> Value {
         let mut list = List::new();
-        for top in self.top_ops(obj, clock.cloned()) {
+        for top in self.top_ops(obj, clock.map(Cow::Borrowed)) {
             //let id = top.exid();
             let id = self.id_to_exid(top.id);
             let conflict = top.conflict;
