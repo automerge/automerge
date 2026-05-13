@@ -613,8 +613,16 @@ impl AutoCommit {
         self.doc.dump()
     }
 
-    pub fn fragments(&self) -> Vec<Fragment> {
-        self.doc.fragments()
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.doc.fragments(levels)
+    }
+
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.doc.get_fragment(head)
+    }
+
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        self.doc.bundle_fragments(fragments)
     }
 
     /// Get the current heads of the document.
