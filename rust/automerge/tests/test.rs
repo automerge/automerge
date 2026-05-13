@@ -2666,3 +2666,21 @@ fn reproduce_clock_cache_bug() {
 
     assert!(base.get_changes(&heads).is_empty());
 }
+
+#[test]
+fn import_obj_with_bad_hex_returns_err_not_panic() {
+    // Regression: import_obj() called hex::decode().unwrap() on the actor
+    // suffix, so any non-hex string after `@` crashed the process.
+    let doc = new_doc();
+    let err = doc.import_obj("1@notvalidhex").unwrap_err();
+    assert!(matches!(
+        err,
+        automerge::AutomergeError::InvalidObjIdFormat(_)
+    ));
+
+    let err = doc.import_obj("1@a").unwrap_err();
+    assert!(matches!(
+        err,
+        automerge::AutomergeError::InvalidObjIdFormat(_)
+    ));
+}
