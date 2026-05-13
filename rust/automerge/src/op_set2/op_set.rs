@@ -101,13 +101,13 @@ impl OpSet {
         &'a self,
         obj: ObjId,
         clock: Option<Clock>,
-        revocations: Option<&'a Clock>,
+        filter_clock: Option<&'a Clock>,
     ) -> Parents<'a> {
         Parents {
             obj,
             ops: self,
             clock,
-            revocations,
+            filter_clock,
         }
     }
 
@@ -292,9 +292,9 @@ impl OpSet {
         &self,
         child: &ObjId,
         clock: Option<&Clock>,
-        revocations: Option<&Clock>,
+        filter_clock: Option<&Clock>,
     ) -> Option<Parent> {
-        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock, revocations)?;
+        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock, filter_clock)?;
         let obj = op.obj;
         let typ = self.object_type(&obj)?;
         let prop = match op.key {
@@ -306,7 +306,7 @@ impl OpSet {
                     _ => panic!("unexpected object type {:?} for seq key {:?}", typ, op.key),
                 };
                 let index = self
-                    .seek_list_opid(&op.obj, op.id, seq_type, clock, revocations)?
+                    .seek_list_opid(&op.obj, op.id, seq_type, clock, filter_clock)?
                     .index;
                 Prop::Seq(index)
             }
@@ -485,10 +485,10 @@ impl OpSet {
         index: usize,
         seq_type: SequenceType,
         clock: Option<&Clock>,
-        // See `seek_ops_by_index` for the meaning of `revocations`. Used only
+        // See `seek_ops_by_index` for the meaning of `filter_clock`. Used only
         // by the slow_path debug-assert below to verify the index-based fast
-        // path filters revoked ops the same way a slow walk would.
-        #[cfg_attr(not(debug_assertions), allow(unused_variables))] revocations: Option<&Clock>,
+        // path filters out the same ops a slow walk would.
+        #[cfg_attr(not(debug_assertions), allow(unused_variables))] filter_clock: Option<&Clock>,
     ) -> Result<QueryNth, AutomergeError> {
         if clock.is_none() && index > 0 {
             let index = NonZeroUsize::new(index).unwrap();
@@ -505,7 +505,7 @@ impl OpSet {
                         index.get(),
                         seq_type,
                         self.text_encoding,
-                        revocations,
+                        filter_clock,
                         Default::default()
                     )
                     .resolve(0)
@@ -551,10 +551,10 @@ impl OpSet {
         seq_type: SequenceType,
         clock: Option<&Clock>,
         // Used only by slow_path_assertions to verify the fast (index-based)
-        // path. The fast path's index already accounts for revocations; the
-        // slow walk needs the revocation clock to filter equivalently.
+        // path. The fast path's index already accounts for filter_clock; the
+        // slow walk needs it as an explicit argument to filter equivalently.
         #[cfg_attr(not(feature = "slow_path_assertions"), allow(unused_variables))]
-        revocations: Option<&Clock>,
+        filter_clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         if clock.is_none() {
             let found = if seq_type == SequenceType::List {
@@ -564,7 +564,7 @@ impl OpSet {
             };
             #[cfg(feature = "slow_path_assertions")]
             {
-                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, revocations);
+                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, filter_clock);
                 assert_eq!(found, slow, "fast != slow");
             }
             found
@@ -730,16 +730,16 @@ impl OpSet {
         opid: OpId,
         seq_type: SequenceType,
         clock: Option<&Clock>,
-        // See `seek_ops_by_index` for the meaning of `revocations`.
+        // See `seek_ops_by_index` for the meaning of `filter_clock`.
         #[cfg_attr(not(feature = "slow_path_assertions"), allow(unused_variables))]
-        revocations: Option<&Clock>,
+        filter_clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
         if clock.is_none() {
             let found = self.seek_list_opid_fast(obj, opid, seq_type);
             #[cfg(feature = "slow_path_assertions")]
             debug_assert_eq!(
                 found,
-                self.seek_list_opid_slow(obj, opid, seq_type, revocations)
+                self.seek_list_opid_slow(obj, opid, seq_type, filter_clock)
             );
             found
         } else {
@@ -876,14 +876,14 @@ impl OpSet {
         &self,
         id: &OpId,
         clock: Option<&Clock>,
-        // See `seek_ops_by_index` for the meaning of `revocations`.
+        // See `seek_ops_by_index` for the meaning of `filter_clock`.
         #[cfg_attr(not(feature = "slow_path_assertions"), allow(unused_variables))]
-        revocations: Option<&Clock>,
+        filter_clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
         if clock.is_none() {
             let result = self.find_op_by_id_and_vis_fast(id);
             #[cfg(feature = "slow_path_assertions")]
-            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, revocations));
+            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, filter_clock));
             result
         } else {
             self.find_op_by_id_and_vis_slow(id, clock)

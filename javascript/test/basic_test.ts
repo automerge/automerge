@@ -761,7 +761,7 @@ describe("Automerge", () => {
     })
   })
 
-  describe("the stats function", () => {
+  ;(describe("the stats function", () => {
     it("should return stats about the document", () => {
       let doc = Automerge.init<{ a: number }>()
       doc = Automerge.change(doc, d => (d.a = 1))
@@ -786,7 +786,7 @@ describe("Automerge", () => {
         assert.deepStrictEqual(Automerge.toJS(doc), { x: 1 })
         assert.deepStrictEqual(Automerge.toJS(doc1), { a: 123, b: 456, x: 1 })
       })
-    })
+    }))
 
   describe("When handling ImmutableString", () => {
     it("should treat any class which has the correct symbol as a ImmutableString", () => {
@@ -858,19 +858,19 @@ describe("Automerge", () => {
     let umax = BigInt("18446744073709551615")
     let inf = Infinity
     let ninf = -Infinity
-    let nan = NaN;
+    let nan = NaN
     let base = { nan, inf, ninf, imax, imin, umax }
     let doc1 = Automerge.from<any>(base)
     assert.deepEqual(doc1, base)
-    let doc2 = Automerge.load<any>(Automerge.save(doc1));
+    let doc2 = Automerge.load<any>(Automerge.save(doc1))
     assert.deepEqual(doc2, base)
     let doc3 = Automerge.change(Automerge.init<any>(), d => {
-        d.imax = imax;
-        d.umax = umax;
-        d.imin = imin;
-        d.nan = nan;
-        d.inf = inf;
-        d.ninf = ninf;
+      d.imax = imax
+      d.umax = umax
+      d.imin = imin
+      d.nan = nan
+      d.inf = inf
+      d.ninf = ninf
     })
     assert.deepEqual(doc3, base)
     assert.throws(() => {
@@ -890,11 +890,136 @@ describe("Automerge", () => {
     let doc4 = Automerge.clone(doc2, { author: "ffaa00" })
     assert.equal(Automerge.getAuthor(doc4), "ffaa00")
     let doc5 = Automerge.change(doc4, d => (d.foo = "bar"))
-    let doc6 = Automerge.merge(doc5,doc2)
+    let doc6 = Automerge.merge(doc5, doc2)
     assert.equal(Automerge.getAuthor(doc6), "ffaa00")
     assert.deepEqual(Automerge.getAuthors(doc6), ["aabbcc", "ffaa00"])
-    let actor = Automerge.getActorId(doc6);
+    let actor = Automerge.getActorId(doc6)
     assert.equal(Automerge.getAuthorForActor(doc6, actor), "ffaa00")
     assert.deepEqual(Automerge.getActorsForAuthor(doc6, "ffaa00"), [actor])
+  })
+
+  describe("filter", () => {
+    type Doc = { [key: string]: string }
+
+    it("defaults to an empty filter", () => {
+      const doc = Automerge.init<Doc>()
+      const filter = Automerge.getFilter(doc)
+      assert.deepEqual(filter, {
+        default: "allow",
+        authors: {},
+        actors: {},
+      })
+    })
+
+    it("hides an author's changes after a head with allowUpTo", () => {
+      let alice = Automerge.init<Doc>({ author: "aaaa" })
+      alice = Automerge.change(alice, d => (d.before = "a"))
+      const trusted = Automerge.getHeads(alice)
+      alice = Automerge.change(alice, d => (d.after = "a"))
+
+      let bob = Automerge.merge(Automerge.init<Doc>(), alice)
+      bob = Automerge.updateFilter(bob, f => {
+        f.authors!["aaaa"] = Automerge.allowUpTo(trusted)
+      })
+
+      assert.equal(bob.before, "a")
+      assert.equal(bob.after, undefined)
+    })
+
+    it("deny rejects every matching change", () => {
+      let alice = Automerge.init<Doc>({ author: "aaaa" })
+      alice = Automerge.change(alice, d => (d.alice_key = "a"))
+
+      let bob = Automerge.from<Doc>({ bob_key: "b" }, { author: "bbbb" })
+      let merged = Automerge.merge(Automerge.clone(alice), bob)
+
+      merged = Automerge.setFilter(merged, {
+        authors: { bbbb: Automerge.deny },
+      })
+      assert.equal(merged.alice_key, "a")
+      assert.equal(merged.bob_key, undefined)
+
+      // Clearing the filter brings Bob's changes back.
+      merged = Automerge.setFilter(merged, {})
+      assert.equal(merged.bob_key, "b")
+    })
+
+    it("actor rule overrides author rule", () => {
+      // Two actors share an author. Deny the author globally, then allow
+      // one specific actor — the per-actor rule should win.
+      //
+      // Setting an `author` on a document forces a fresh randomly-chosen
+      // actor ID, so we have to look up the resulting actor IDs after
+      // each document is constructed.
+      let actor1Doc = Automerge.init<Doc>({ author: "aaaa" })
+      actor1Doc = Automerge.change(actor1Doc, d => (d.from_actor1 = "v1"))
+      const actor1 = Automerge.getActorId(actor1Doc)
+
+      let actor2Doc = Automerge.from<Doc>(
+        { from_actor2: "v2" },
+        {
+          author: "aaaa",
+        },
+      )
+      const actor2 = Automerge.getActorId(actor2Doc)
+      assert.notEqual(actor1, actor2)
+
+      let doc = Automerge.merge(Automerge.clone(actor1Doc), actor2Doc)
+      doc = Automerge.setFilter(doc, {
+        authors: { aaaa: Automerge.deny },
+        actors: { [actor1]: Automerge.allow },
+      })
+
+      assert.equal(doc.from_actor1, "v1")
+      assert.equal(doc.from_actor2, undefined)
+    })
+
+    it("updateFilter observes the live rule set", () => {
+      let doc = Automerge.init<Doc>()
+      doc = Automerge.setFilter(doc, {
+        authors: { aaaa: Automerge.deny },
+      })
+
+      doc = Automerge.updateFilter(doc, f => {
+        assert.equal(f.authors!.aaaa, "deny")
+        f.authors!.bbbb = "deny"
+      })
+
+      const filter = Automerge.getFilter(doc)
+      assert.equal(filter.authors!.aaaa, "deny")
+      assert.equal(filter.authors!.bbbb, "deny")
+    })
+
+    it("setFilter invokes the patch callback for newly hidden changes", () => {
+      let alice = Automerge.init<Doc>({ author: "aaaa" })
+      alice = Automerge.change(alice, d => (d.before = "a"))
+      const trusted = Automerge.getHeads(alice)
+      alice = Automerge.change(alice, d => (d.after = "a"))
+
+      let received: PatchSource | null = null
+      let patches: Automerge.Patch[] = []
+      alice = Automerge.setFilter(
+        alice,
+        { authors: { aaaa: Automerge.allowUpTo(trusted) } },
+        {
+          patchCallback: (p, info) => {
+            received = info.source
+            patches = p
+          },
+        },
+      )
+      assert.equal(received, "setFilter")
+      // Hiding Alice's post-trusted change deletes `after`.
+      assert.deepEqual(
+        patches.map(p => p.action),
+        ["del"],
+      )
+    })
+
+    it("throws when called on an outdated document handle", () => {
+      let doc = Automerge.init<Doc>()
+      let _next = Automerge.change(doc, d => (d.key = "v"))
+      assert.throws(() => Automerge.setFilter(doc, {}), /outdated document/)
+    })
   })
 })

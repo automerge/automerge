@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -314,16 +314,43 @@ impl Automerge {
         self
     }
 
-    /// Set the revocations for this document.
-    pub fn with_revocations(mut self, revocations: HashMap<Author, Vec<ChangeHash>>) -> Self {
-        self.set_revocations(revocations);
+    /// Replace the visibility filter for this document.
+    ///
+    /// Changes the filter accepts are rendered; rejected changes are still
+    /// stored and synced to peers but are absent from the rendered state.
+    /// Setting the filter rebuilds the op-set index in one O(n) pass; reads
+    /// stay at full speed afterwards.
+    ///
+    /// Heads referenced by an [`AllowUpTo`](crate::Rule::AllowUpTo) rule do
+    /// not need to be present in the document yet — the rule takes effect
+    /// for those heads as soon as they arrive.
+    ///
+    /// Use [`with_filter`](Self::with_filter) for the consuming builder
+    /// form on a freshly-constructed document, where there is no rendered
+    /// state to diff against.
+    pub fn set_filter(&mut self, filter: crate::Filter, patch_log: &mut PatchLog) {
+        let heads = self.get_heads();
+        let before = self.clock_at(&heads);
+        self.change_graph.set_filter(filter, &self.ops.actors);
+        let after = self.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    }
+
+    /// Builder-style version of [`set_filter`](Self::set_filter) for use
+    /// while constructing a document. Skips patch logging because there is
+    /// no caller observing the rendered state yet.
+    pub fn with_filter(mut self, filter: crate::Filter) -> Self {
+        self.change_graph.set_filter(filter, &self.ops.actors);
+        self.ops
+            .recompute_indexes(&self.clock_at(&self.get_heads()));
         self
     }
 
-    pub fn set_revocations(&mut self, revocations: HashMap<Author, Vec<ChangeHash>>) {
-        self.change_graph.set_revocations(revocations);
-        self.ops
-            .recompute_indexes(&self.clock_at(&self.get_heads()));
+    /// The current visibility filter.
+    pub fn filter(&self) -> &crate::Filter {
+        self.change_graph.filter()
     }
 
     /// Set the author for this document.
@@ -344,32 +371,6 @@ impl Automerge {
     /// Get the current author of this document.
     pub fn get_author(&self) -> Option<&Author> {
         self.author.as_ref()
-    }
-
-    /// Revoke all changes made by author after heads
-    /// Errors if given a heads not in the document yet
-    pub fn revoke(&mut self, author: &Author, from: &[ChangeHash], patch_log: &mut PatchLog) {
-        let heads = self.get_heads();
-        let before = self.clock_at(&heads);
-        self.change_graph.revoke(author.clone(), from.to_vec());
-        let after = self.clock_at(&heads);
-        self.ops.recompute_indexes(&after);
-        let clock = ClockRange::Diff(before, after);
-        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
-    }
-
-    pub fn unrevoke(&mut self, author: &Author, patch_log: &mut PatchLog) {
-        let heads = self.get_heads();
-        let before = self.clock_at(&heads);
-        self.change_graph.unrevoke(author);
-        let after = self.clock_at(&heads);
-        self.ops.recompute_indexes(&after);
-        let clock = ClockRange::Diff(before, after);
-        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
-    }
-
-    pub fn get_revocations(&self) -> HashMap<Author, Vec<ChangeHash>> {
-        self.change_graph.get_revocations().clone()
     }
 
     pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
@@ -971,7 +972,10 @@ impl Automerge {
             // in the file to be loaded is copied here
             doc.set_actor(self.actor_id().clone());
             doc.set_author(self.author.clone());
-            doc.set_revocations(self.get_revocations());
+            doc.change_graph
+                .set_filter(self.filter().clone(), &doc.ops.actors);
+            doc.ops
+                .recompute_indexes(&doc.clock_at(&doc.get_heads()));
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
@@ -1220,8 +1224,11 @@ impl Automerge {
     }
 
     fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
+        // The change-graph only needs the new actor's `ActorId` to check
+        // whether the filter has a rule keyed on it; it does not need the
+        // whole `ops.actors` table.
+        self.change_graph.insert_actor(index, &actor);
         self.ops.insert_actor(index, actor);
-        self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
         index
     }
@@ -1441,12 +1448,12 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
         // This function uses the slow path, but it still needs to filter out
-        // revoked / not-yet-visible ops. When the caller passed an explicit
-        // clock, it already has revocations folded in; otherwise consult the
-        // change graph for the active revocation clock.
+        // ops the visibility filter rejects. When the caller passed an
+        // explicit clock it already has the filter folded in; otherwise
+        // consult the change graph's active filter clock.
         let clock = clock.map(Cow::Owned).or_else(|| {
             self.change_graph
-                .active_revocation_clock()
+                .active_filter_clock()
                 .map(Cow::Borrowed)
         });
         let obj = self.exid_to_obj(obj.as_ref())?;
@@ -1515,19 +1522,19 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let revocations = self.change_graph.active_revocation_clock();
+        let filter_clock = self.change_graph.active_filter_clock();
         // FIXME - now that we have blocks a correct text_rep is relevent
-        Ok(self.ops.parents(obj.id, clock, revocations))
+        Ok(self.ops.parents(obj.id, clock, filter_clock))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
-        // `ops.keys` always uses the slow path (no index for keys), so it must
-        // filter revoked ops itself. An explicit clock already has revocations
-        // folded in via `clock_at`; otherwise fall through to the change
-        // graph's active revocation clock.
+        // `ops.keys` always uses the slow path (no index for keys), so it
+        // must apply the visibility filter itself. An explicit clock already
+        // has the filter folded in via `clock_at`; otherwise fall through to
+        // the change graph's active filter clock.
         let clock = clock.map(Cow::Owned).or_else(|| {
             self.change_graph
-                .active_revocation_clock()
+                .active_filter_clock()
                 .map(Cow::Borrowed)
         });
         self.exid_to_obj(obj)
@@ -1619,7 +1626,7 @@ impl Automerge {
                     i,
                     seq_type,
                     clock.as_ref(),
-                    self.change_graph.active_revocation_clock(),
+                    self.change_graph.active_filter_clock(),
                 );
 
                 if let Some(op) = found.ops.last() {
@@ -1656,7 +1663,7 @@ impl Automerge {
                         opid,
                         seq_type,
                         clock.as_ref(),
-                        self.change_graph.active_revocation_clock(),
+                        self.change_graph.active_filter_clock(),
                     )
                     .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
 
@@ -1700,7 +1707,7 @@ impl Automerge {
                                     key,
                                     seq_type,
                                     clock.as_ref(),
-                                    self.change_graph.active_revocation_clock(),
+                                    self.change_graph.active_filter_clock(),
                                 );
 
                                 match f {
@@ -1763,7 +1770,7 @@ impl Automerge {
                         i,
                         seq_type,
                         clock.as_ref(),
-                        self.change_graph.active_revocation_clock(),
+                        self.change_graph.active_filter_clock(),
                     )
                     .ops
                     .into_iter()
@@ -1802,7 +1809,7 @@ impl Automerge {
                         i,
                         seq_type,
                         clock.as_ref(),
-                        self.change_graph.active_revocation_clock(),
+                        self.change_graph.active_filter_clock(),
                     )
                     .ops
                     .into_iter()
@@ -1826,10 +1833,10 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         // This function uses the slow path, but it still needs to filter out
-        // revoked / not-yet-visible ops. When the caller passed an explicit
-        // clock, it already has revocations folded in; otherwise consult the
-        // change graph for the active revocation clock.
-        let clock = clock.or_else(|| self.change_graph.active_revocation_clock().cloned());
+        // ops the visibility filter rejects. When the caller passed an
+        // explicit clock it already has the filter folded in; otherwise
+        // consult the change graph's active filter clock.
+        let clock = clock.or_else(|| self.change_graph.active_filter_clock().cloned());
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut iter = self
             .ops
@@ -1867,7 +1874,7 @@ impl Automerge {
                                         op.id,
                                         SequenceType::List,
                                         None,
-                                        self.change_graph.active_revocation_clock(),
+                                        self.change_graph.active_filter_clock(),
                                     ) else {
                                         continue;
                                     };

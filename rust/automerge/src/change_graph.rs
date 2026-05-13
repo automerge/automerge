@@ -9,6 +9,7 @@ use hexane::{
     UIntCursor,
 };
 
+use crate::filter::{Filter, ResolvedRule, Rule};
 use crate::storage::BundleMetadata;
 use crate::{
     clock::{Clock as OpClock, SeqClock},
@@ -18,7 +19,7 @@ use crate::{
     storage::columns::BadColumnLayout,
     storage::document::ReconstructError as LoadError,
     storage::{Columns, Document, RawColumn, RawColumns},
-    types::{Author, AuthorIdx, OpId},
+    types::{ActorId, Author, AuthorIdx, OpId},
     Change, ChangeHash,
 };
 
@@ -35,12 +36,14 @@ pub(crate) struct ChangeGraph {
     actors: Vec<ActorIdx>,
     authors: Vec<Author>,
     author: Option<AuthorIdx>,
-    pub(crate) revocations: HashMap<Author, Vec<ChangeHash>>,
-    revocations_mask: HashMap<ActorIdx, Option<NonZeroU32>>,
-    /// Precomputed clock used by slow paths (which bypass the index) to
-    /// filter out revoked ops. Rebuilt whenever revocations change.
-    revocation_cached_clock: OpClock,
-    pending_revoke: HashSet<ChangeHash>,
+    /// The visibility filter: which changes the document is willing to
+    /// render. The rule set is the user-facing source of truth; whenever
+    /// it changes the resolved per-actor mask in `resolved` is recomputed.
+    rules: Filter,
+    /// Materialised form of `rules`. Driven entirely by `rules` plus the
+    /// graph's own state (which actors exist, which authors they carry,
+    /// which heads have arrived); never mutated independently.
+    resolved: ResolvedFilter,
     actor_author: Vec<Option<AuthorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
@@ -55,6 +58,112 @@ pub(crate) struct ChangeGraph {
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
     clock_cache: HashMap<NodeIdx, SeqClock>,
     seq_index: Vec<Vec<NodeIdx>>,
+}
+
+/// Materialised form of [`Filter`]. The user-facing rule set lives on
+/// [`ChangeGraph::rules`]; this struct carries the derived state that the
+/// op-set index and slow read paths actually consume.
+///
+/// * `actor_rules` — the public filter's `actors: BTreeMap<ActorId, Rule>`
+///   compiled to use [`ActorIdx`] keys. The change graph never needs the
+///   `ActorId` table again after `set_filter`/`insert_actor` have run.
+/// * `actor_mask` — for each actor, the largest seq that is still visible
+///   (`None` means nothing visible). Missing keys mean the actor is
+///   unrestricted. Drives the apply-time `filtered_out` flag on incoming
+///   ops.
+/// * `cached_clock` — the same information re-keyed from seq to op-counter,
+///   ready to be passed to `OpSet::recompute_indexes` and to slow-path read
+///   helpers that bypass the op-set index.
+/// * `pending_heads` — heads referenced by an `AllowUpTo` rule that aren't
+///   in the graph yet. Once such a head lands we re-derive the mask.
+#[derive(Debug, PartialEq, Default, Clone)]
+struct ResolvedFilter {
+    actor_rules: HashMap<ActorIdx, Rule>,
+    actor_mask: HashMap<ActorIdx, Option<NonZeroU32>>,
+    cached_clock: OpClock,
+    pending_heads: HashSet<ChangeHash>,
+}
+
+impl ResolvedFilter {
+    fn new(num_actors: usize) -> Self {
+        Self {
+            actor_rules: HashMap::new(),
+            actor_mask: HashMap::new(),
+            cached_clock: OpClock(vec![u32::MAX; num_actors]),
+            pending_heads: HashSet::new(),
+        }
+    }
+
+    /// Whether `(actor, seq)` is rejected by the filter. Used at apply time
+    /// to stamp the `filtered_out` flag on freshly-imported ops, and on
+    /// slow read paths that have an `OpId` rather than a position.
+    fn is_filtered_out(&self, actor: ActorIdx, seq: u64) -> bool {
+        match self.actor_mask.get(&actor) {
+            Some(Some(v)) if (v.get() as u64) < seq => true,
+            Some(None) => true,
+            _ => false,
+        }
+    }
+
+    /// Per-actor mask iterator. Used when composing a head-derived clock
+    /// with the filter's restrictions.
+    fn iter_mask(&self) -> impl Iterator<Item = (ActorIdx, Option<NonZeroU32>)> + '_ {
+        self.actor_mask.iter().map(|(a, v)| (*a, *v))
+    }
+
+    /// Take a head out of the pending set if it was waiting for it. Returns
+    /// true when the caller needs to re-derive the mask because a previously
+    /// unknown head just became known.
+    fn take_pending(&mut self, hash: &ChangeHash) -> bool {
+        self.pending_heads.remove(hash)
+    }
+
+    /// Adjust the per-actor maps and the cached clock when a new actor
+    /// slot is inserted at `idx`. The new slot starts unrestricted; the
+    /// caller (`ChangeGraph::insert_actor`) writes its rule and mask
+    /// entries afterwards if needed.
+    fn insert_actor(&mut self, idx: usize) {
+        shift_keys_up(&mut self.actor_rules, idx);
+        shift_keys_up(&mut self.actor_mask, idx);
+        self.cached_clock.0.insert(idx, u32::MAX);
+    }
+
+    /// Adjust the per-actor maps and the cached clock when actor slot
+    /// `idx` is removed.
+    fn remove_actor(&mut self, idx: usize) {
+        self.cached_clock.0.remove(idx);
+        shift_keys_down(&mut self.actor_rules, idx);
+        shift_keys_down(&mut self.actor_mask, idx);
+    }
+}
+
+/// Shift every `ActorIdx` key in `map` that is `>= idx` up by one, in
+/// place. Used when a new actor slot is inserted at `idx`.
+fn shift_keys_up<V>(map: &mut HashMap<ActorIdx, V>, idx: usize) {
+    *map = std::mem::take(map)
+        .into_iter()
+        .map(|(a, v)| {
+            let shifted = if a.0 >= idx as u32 {
+                ActorIdx(a.0 + 1)
+            } else {
+                a
+            };
+            (shifted, v)
+        })
+        .collect();
+}
+
+/// Drop the entry at `idx` and shift every key `> idx` down by one.
+/// Used when an actor slot is removed.
+fn shift_keys_down<V>(map: &mut HashMap<ActorIdx, V>, idx: usize) {
+    *map = std::mem::take(map)
+        .into_iter()
+        .filter_map(|(a, v)| match a.0.cmp(&(idx as u32)) {
+            std::cmp::Ordering::Less => Some((a, v)),
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => Some((ActorIdx(a.0 - 1), v)),
+        })
+        .collect();
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -102,10 +211,8 @@ impl ChangeGraph {
             authors: Vec::new(),
             actor_author: Vec::new(),
             author: None,
-            revocations: HashMap::new(),
-            revocations_mask: HashMap::new(),
-            revocation_cached_clock: OpClock(vec![u32::MAX; num_actors]),
-            pending_revoke: HashSet::new(),
+            rules: Filter::default(),
+            resolved: ResolvedFilter::new(num_actors),
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: ColumnData::new(),
@@ -153,68 +260,123 @@ impl ChangeGraph {
         self.seq_index.len()
     }
 
-    pub(crate) fn revoke(&mut self, author: Author, heads: Vec<ChangeHash>) {
-        // save for later if unknown
-        for h in &heads {
+    /// Replace the visibility filter and re-derive the per-actor mask.
+    ///
+    /// `actor_ids` is the op-set's `ActorId` table. We consult it once
+    /// here to compile the public filter's `actors: BTreeMap<ActorId, _>`
+    /// down to an `ActorIdx`-keyed map; from then on every internal path
+    /// that resolves a rule for an actor works in `ActorIdx` space and
+    /// never needs the `ActorId` table again.
+    ///
+    /// Heads referenced by a rule but not yet in the graph are remembered
+    /// in `pending_heads`; the rule takes effect for those heads as soon
+    /// as they arrive (see `add_changes`).
+    pub(crate) fn set_filter(&mut self, filter: Filter, actor_ids: &[ActorId]) {
+        self.rules = filter;
+
+        // Compile `rules.actors` (keyed by ActorId) into an ActorIdx-keyed
+        // map. ActorIds in `rules.actors` that aren't in the document yet
+        // are simply ignored — if such an actor arrives later,
+        // `insert_actor` will pick the rule up.
+        self.resolved.actor_rules.clear();
+        for (actor_id, rule) in &self.rules.actors {
+            if let Ok(idx) = actor_ids.binary_search(actor_id) {
+                self.resolved.actor_rules.insert(idx.into(), rule.clone());
+            }
+        }
+
+        // Note which `AllowUpTo` heads we don't yet have so they can be
+        // re-resolved when they arrive.
+        self.resolved.pending_heads.clear();
+        for h in self.rules.referenced_heads() {
             if !self.nodes_by_hash.contains_key(h) {
-                self.pending_revoke.insert(*h);
+                self.resolved.pending_heads.insert(*h);
             }
         }
-        let clock = self.calculate_clock(self.heads_to_nodes(&heads));
-        for a in get_actors_for_author(&self.authors, &self.actor_author, &author) {
-            self.revocations_mask
-                .insert(a.into(), clock.get_for_actor(&a));
-        }
-        self.revocations.insert(author, heads);
-        self.rebuild_revocation_clock();
+
+        self.recomp_actor_masks();
     }
 
-    pub(crate) fn set_revocations(&mut self, revocations: HashMap<Author, Vec<ChangeHash>>) {
-        self.pending_revoke.clear();
-        self.revocations_mask.clear();
-        self.revocations.clear();
-        for (author, heads) in revocations {
-            self.revoke(author, heads)
-        }
-        self.rebuild_revocation_clock();
+    /// The current filter rule set.
+    pub(crate) fn filter(&self) -> &Filter {
+        &self.rules
     }
 
-    fn recomp_revocations(&mut self) {
-        for (author, heads) in &self.revocations {
-            let clock = self.calculate_clock(self.heads_to_nodes(heads));
-            for a in get_actors_for_author(&self.authors, &self.actor_author, author) {
-                self.revocations_mask
-                    .insert(a.into(), clock.get_for_actor(&a));
+    /// Re-derive every actor's mask entry from the already-compiled
+    /// `resolved.actor_rules`, the per-actor author assignments, and the
+    /// `default` rule. Callers that only need to refresh one actor (e.g.
+    /// `assign_author`, `insert_actor`) call `recomp_actor_mask` directly.
+    fn recomp_actor_masks(&mut self) {
+        self.resolved.actor_mask.clear();
+        for actor_idx in 0..self.num_actors() {
+            self.recomp_actor_mask(actor_idx);
+        }
+        self.rebuild_filter_cached_clock();
+    }
+
+    /// Resolve the rule for one actor and write its mask entry. Does *not*
+    /// rebuild the cached op-counter clock; callers are expected to do
+    /// that afterwards (often after multiple actors have been
+    /// recomputed). Most-specific-wins: actor rule → author rule →
+    /// default.
+    fn recomp_actor_mask(&mut self, actor_idx: usize) {
+        let rule: ResolvedRule<'_> =
+            if let Some(r) = self.resolved.actor_rules.get(&actor_idx.into()) {
+                r.into()
+            } else {
+                let author = self
+                    .actor_author
+                    .get(actor_idx)
+                    .and_then(|a| a.as_ref())
+                    .and_then(|a| self.authors.get(a.as_usize()));
+                match author.and_then(|a| self.rules.authors.get(a)) {
+                    Some(r) => r.into(),
+                    None => (&self.rules.default).into(),
+                }
+            };
+        // The mask entry has three states:
+        //   missing key       -> actor is unrestricted (Allow)
+        //   Some(None)        -> actor has nothing visible (Deny)
+        //   Some(Some(seq))   -> actor visible up to seq inclusive (AllowUpTo)
+        match rule {
+            ResolvedRule::Allow => {
+                self.resolved.actor_mask.remove(&actor_idx.into());
+            }
+            ResolvedRule::Deny => {
+                self.resolved.actor_mask.insert(actor_idx.into(), None);
+            }
+            ResolvedRule::AllowUpTo(heads) => {
+                let clock = self.calculate_clock(self.heads_to_nodes(heads));
+                self.resolved
+                    .actor_mask
+                    .insert(actor_idx.into(), clock.get_for_actor(&actor_idx));
             }
         }
-        self.rebuild_revocation_clock();
     }
 
-    pub(crate) fn unrevoke(&mut self, author: &Author) {
-        for a in get_actors_for_author(&self.authors, &self.actor_author, author) {
-            self.revocations_mask.remove(&a.into());
+    /// The clock used to filter rejected ops on slow paths that bypass the
+    /// op-set index (e.g. `visible_slow`). `None` when the filter is not
+    /// rejecting anything — slow paths can then skip clock-based filtering.
+    /// Borrowed callers do not have to copy the clock.
+    pub(crate) fn active_filter_clock(&self) -> Option<&OpClock> {
+        if self.rules.is_noop() {
+            None
+        } else {
+            Some(&self.resolved.cached_clock)
         }
-        self.revocations.remove(author);
-        self.rebuild_revocation_clock();
     }
 
-    /// The clock used to filter revoked ops on slow paths that bypass the
-    /// op-set index (e.g. `visible_slow`). `None` when no actors are
-    /// currently revoked — in which case slow paths can skip clock-based
-    /// filtering. Borrowed callers do not have to copy the clock.
-    pub(crate) fn active_revocation_clock(&self) -> Option<&OpClock> {
-        (!self.revocations.is_empty()).then_some(&self.revocation_cached_clock)
-    }
-
-    fn rebuild_revocation_clock(&mut self) {
-        // `revocations_mask` is keyed by actor and holds the largest unrevoked
-        // *seq* for each actor. The cached clock indexes ops by their global
-        // op counter, so we have to convert the seq into the max op counter of
-        // the change at that seq (just like `to_op_clock` does).
-        self.revocation_cached_clock = (0_u32..self.num_actors() as u32)
+    /// Rebuild `ResolvedFilter::cached_clock` from
+    /// `ResolvedFilter::actor_mask`. The mask is keyed by actor and stores
+    /// the largest accepted *seq* for each actor; the cached clock indexes
+    /// ops by their global op counter, so we have to convert the seq into
+    /// the max op counter of the change at that seq (just like
+    /// `to_op_clock` does).
+    fn rebuild_filter_cached_clock(&mut self) {
+        self.resolved.cached_clock = (0_u32..self.num_actors() as u32)
             .map(|actor| {
                 let actor_usize = actor as usize;
-                if let Some(mask) = self.revocations_mask.get(&ActorIdx(actor)) {
+                if let Some(mask) = self.resolved.actor_mask.get(&ActorIdx(actor)) {
                     mask.and_then(|seq| {
                         self.seq_index
                             .get(actor_usize)
@@ -229,16 +391,11 @@ impl ChangeGraph {
             .collect();
     }
 
-    pub(crate) fn is_revoked(&self, actor: ActorIdx, seq: u64) -> bool {
-        match self.revocations_mask.get(&actor) {
-            Some(Some(v)) if (v.get() as u64) < seq => true,
-            Some(None) => true,
-            _ => false,
-        }
-    }
-
-    pub(crate) fn get_revocations(&self) -> &HashMap<Author, Vec<ChangeHash>> {
-        &self.revocations
+    /// Whether `(actor, seq)` is rejected by the current filter. Used at
+    /// apply time to stamp the `filtered_out` flag on freshly-imported
+    /// ops.
+    pub(crate) fn is_filtered_out(&self, actor: ActorIdx, seq: u64) -> bool {
+        self.resolved.is_filtered_out(actor, seq)
     }
 
     pub(crate) fn get_authors(&self) -> &[Author] {
@@ -258,15 +415,13 @@ impl ChangeGraph {
     }
 
     pub(crate) fn assign_author(&mut self, author: Author, actor: usize) {
-        if let Some(heads) = self.revocations.get(&author) {
-            let clock = self.calculate_clock(self.heads_to_nodes(heads));
-            self.revocations_mask
-                .insert(actor.into(), clock.get_for_actor(&actor));
-            // Mask changed for this actor, so the cached clock is now stale.
-            self.rebuild_revocation_clock();
-        }
         let author_id = self.put_author(author);
         self.actor_author[actor] = Some(author_id);
+        // The author rule (if any) may now apply to this actor. Resolution
+        // is `ActorIdx`-only because `actor_rules` is already compiled,
+        // so we don't need the op-set's `ActorId` table here.
+        self.recomp_actor_mask(actor);
+        self.rebuild_filter_cached_clock();
     }
 
     pub(crate) fn put_author(&mut self, author: Author) -> AuthorIdx {
@@ -285,35 +440,38 @@ impl ChangeGraph {
         }
     }
 
-    pub(crate) fn insert_actor(&mut self, idx: usize) {
+    /// Insert a new actor slot at `idx`. `actor_id` is consulted *only*
+    /// to check whether the public filter has an `actors`-keyed rule for
+    /// the new actor; the resolved state is otherwise driven entirely by
+    /// `ActorIdx`.
+    pub(crate) fn insert_actor(&mut self, idx: usize, actor_id: &ActorId) {
         if self.seq_index.len() != idx {
             for actor_index in &mut self.actors {
                 if actor_index.0 >= idx as u32 {
                     actor_index.0 += 1;
                 }
             }
-            self.revocations_mask = std::mem::take(&mut self.revocations_mask)
-                .into_iter()
-                .map(|(a, v)| {
-                    let shifted = if a.0 >= idx as u32 {
-                        ActorIdx(a.0 + 1)
-                    } else {
-                        a
-                    };
-                    (shifted, v)
-                })
-                .collect();
+            // Shift the per-actor maps to make room for the new slot.
+            self.resolved.insert_actor(idx);
+        } else {
+            // Even when no existing actor needs reindexing, the cached clock
+            // length must stay in lockstep with the actor count.
+            self.resolved.cached_clock.0.insert(idx, u32::MAX);
         }
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
-        // Keep `revocation_cached_clock` length in sync with the new actor
-        // count. The new actor has no entry in `revocations_mask` yet, so
-        // `assign_author` will rebuild later if it adds one; for now the new
-        // slot stays unrevoked.
-        self.revocation_cached_clock.0.insert(idx, u32::MAX);
         self.seq_index.insert(idx, vec![]);
         self.actor_author.insert(idx, None);
+        // If the public filter has a rule keyed on this actor's `ActorId`,
+        // record it now so future resolution stays in `ActorIdx` space.
+        if let Some(rule) = self.rules.actors.get(actor_id) {
+            self.resolved
+                .actor_rules
+                .insert(idx.into(), rule.clone());
+        }
+        self.recomp_actor_mask(idx);
+        self.rebuild_filter_cached_clock();
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
@@ -326,15 +484,7 @@ impl ChangeGraph {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(idx);
             self.actor_author.remove(idx);
-            self.revocation_cached_clock.0.remove(idx);
-            self.revocations_mask = std::mem::take(&mut self.revocations_mask)
-                .into_iter()
-                .filter_map(|(a, v)| match a.0.cmp(&(idx as u32)) {
-                    std::cmp::Ordering::Less => Some((a, v)),
-                    std::cmp::Ordering::Equal => None,
-                    std::cmp::Ordering::Greater => Some((ActorIdx(a.0 - 1), v)),
-                })
-                .collect();
+            self.resolved.remove_actor(idx);
         }
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
@@ -710,7 +860,7 @@ impl ChangeGraph {
         iter: I,
     ) -> Result<(), MissingDep> {
         let node = NodeIdx(self.hashes.len() as u32);
-        let mut recomp_revocations = false;
+        let mut recomp_filter = false;
 
         self.add_nodes(iter.clone());
 
@@ -720,7 +870,7 @@ impl ChangeGraph {
             self.max_op = std::cmp::max(self.max_op, change.max_op() as u32);
             self.hashes.push(hash);
             debug_assert!(!self.nodes_by_hash.contains_key(&hash));
-            recomp_revocations = recomp_revocations || self.pending_revoke.remove(&hash);
+            recomp_filter = recomp_filter || self.resolved.take_pending(&hash);
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
 
@@ -745,14 +895,22 @@ impl ChangeGraph {
             }
         }
 
-        if recomp_revocations {
-            self.recomp_revocations();
+        if recomp_filter {
+            // A pending head just landed: every `AllowUpTo` rule that
+            // referenced it may now resolve to a different mask entry.
+            // `actor_rules` doesn't depend on heads, so no recompilation
+            // is needed — just refresh the per-actor masks.
+            self.recomp_actor_masks();
         }
 
         Ok(())
     }
 
-    pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
+    pub(crate) fn add_change(
+        &mut self,
+        change: &Change,
+        actor: usize,
+    ) -> Result<(), MissingDep> {
         let hash = change.hash();
 
         if self.nodes_by_hash.contains_key(&hash) {
@@ -834,8 +992,8 @@ impl ChangeGraph {
     pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> OpClock {
         let nodes = self.heads_to_nodes(heads);
         let mut clock = self.calculate_clock(nodes);
-        for (actor, seq) in self.revocations_mask.iter() {
-            clock.mask(usize::from(*actor), *seq);
+        for (actor, seq) in self.resolved.iter_mask() {
+            clock.mask(usize::from(actor), seq);
         }
         self.to_op_clock(clock)
     }
@@ -1069,10 +1227,6 @@ impl ChangeGraphCols {
         let author = None;
         let authors = vec![];
         let actor_author = vec![None; num_actors];
-        let revocations = HashMap::default();
-        let revocations_mask = HashMap::default();
-        let revocation_cached_clock = OpClock(vec![u32::MAX; num_actors]);
-        let pending_revoke = HashSet::default();
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -1081,10 +1235,8 @@ impl ChangeGraphCols {
             authors,
             author,
             actor_author,
-            revocations,
-            revocations_mask,
-            revocation_cached_clock,
-            pending_revoke,
+            rules: Filter::default(),
+            resolved: ResolvedFilter::new(num_actors),
             parents,
             seq,
             max_ops,
@@ -1205,7 +1357,8 @@ mod tests {
 
         fn actor(&mut self) -> ActorId {
             let actor = ActorId::random();
-            self.graph.insert_actor(self.actors.len());
+            let idx = self.actors.len();
+            self.graph.insert_actor(idx, &actor);
             self.actors.push(actor.clone());
             actor
         }

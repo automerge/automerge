@@ -2715,7 +2715,7 @@ describe("Automerge", () => {
       assert.deepEqual(doc.getActorsForAuthor("ffff"),[actor2]);
     });
 
-    it("authors can be revoked", () => {
+    it("authors can be filtered out", () => {
       const doc = create();
       doc.setAuthor("ffff");
       doc.put("/", "key1", "val1");
@@ -2725,33 +2725,50 @@ describe("Automerge", () => {
       let heads1 = doc.getHeads();
       doc.put("/", "key3", "val3");
 
-      let patches1 = doc.revoke("aaaa", heads1);
-      assert.deepEqual(patches1, [{action:'del',path:['key3']}]);
+      // `setFilter` writes its patches into the document's diff log.
+      // Drain them with `diffIncremental` between calls so each
+      // assertion observes only the patches caused by that one
+      // `setFilter` invocation.
+      doc.updateDiffCursor();
 
-      let patches2 = doc.unrevoke("aaaa");
-      assert.deepEqual(patches2, [{action:'put',path:['key3'],value:'val3'}])
+      // Reject everything aaaa wrote after heads1.
+      doc.setFilter({
+        authors: { aaaa: { allowUpTo: heads1 } },
+      });
+      assert.deepEqual(doc.diffIncremental(), [{action:'del',path:['key3']}]);
+
+      // Drop the rule — all aaaa changes are visible again.
+      doc.setFilter({});
+      assert.deepEqual(doc.diffIncremental(), [{action:'put',path:['key3'],value:'val3'}])
 
       let heads2 = doc.getHeads();
       doc.setAuthor("bbbb");
       doc.put("/", "key2", "val2a");
       doc.put("/", "key3", "val3a");
+      // Drain the patches caused by the `put` calls above so the next
+      // `diffIncremental` only reports the filter's effect.
+      doc.updateDiffCursor();
 
-      let patches3 = doc.revoke("aaaa", heads1);
-      assert.deepEqual(patches3, []);
+      doc.setFilter({
+        authors: { aaaa: { allowUpTo: heads1 } },
+      });
+      assert.deepEqual(doc.diffIncremental(), []);
 
-      let patches4 = doc.unrevoke("aaaa");
-      assert.deepEqual(patches4, [])
+      doc.setFilter({});
+      assert.deepEqual(doc.diffIncremental(), [])
 
-      let patches5 = doc.revoke("bbbb", heads2);
-      assert.deepEqual(patches5, [{action:'put',path:['key2'],value:'val2'},
+      doc.setFilter({
+        authors: { bbbb: { allowUpTo: heads2 } },
+      });
+      assert.deepEqual(doc.diffIncremental(), [{action:'put',path:['key2'],value:'val2'},
                                   {action:'put',path:['key3'],value:'val3'}]);
 
-      let patches6 = doc.unrevoke("bbbb");
-      assert.deepEqual(patches6, [{action:'put',path:['key2'],value:'val2a'},
+      doc.setFilter({});
+      assert.deepEqual(doc.diffIncremental(), [{action:'put',path:['key2'],value:'val2a'},
                                   {action:'put',path:['key3'],value:'val3a'}]);
     })
 
-    it("revoked values are reflected in materialize", () => {
+    it("filtered-out values are reflected in materialize", () => {
       let d1 = {
         counter: 11, key1: 'val1', list: [ 1, 2, 3, 4 ], text: 'hello world'
       }
@@ -2778,10 +2795,10 @@ describe("Automerge", () => {
 
       assert.deepEqual(doc.materialize(), d2);
 
-      let patches1 = doc.revoke("aaaa", heads1);
+      doc.setFilter({ authors: { aaaa: { allowUpTo: heads1 } } });
       assert.deepEqual(doc.materialize(), d1);
 
-      let patches2 = doc.unrevoke("aaaa");
+      doc.setFilter({});
       assert.deepEqual(doc.materialize(), d2);
     })
   });

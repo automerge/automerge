@@ -113,6 +113,16 @@ import {
 
 export { applyPatch, applyPatches } from "./apply_patches.js"
 
+export {
+  allow,
+  allowUpTo,
+  deny,
+  getFilter,
+  setFilter,
+  updateFilter,
+} from "./filter.js"
+export type { Filter, Rule } from "./filter.js"
+
 import { conflictAt } from "./conflicts.js"
 
 /** Options passed to {@link change}, and {@link emptyChange}
@@ -543,7 +553,17 @@ export function changeAt<T>(
   }
 }
 
-function progressDocument<T>(
+/**
+ * Apply outstanding wasm-side state to the document and surface the
+ * resulting patches.
+ *
+ * Used internally by every API that mutates document state. Exposed as
+ * a crate-internal helper for sibling modules (`filter.ts`) that need
+ * the same plumbing; not part of the public surface.
+ *
+ * @hidden
+ */
+export function progressDocument<T>(
   doc: Doc<T>,
   source: PatchSource,
   heads: Heads | null,
