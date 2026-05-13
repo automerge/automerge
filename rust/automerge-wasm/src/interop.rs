@@ -1732,6 +1732,131 @@ pub(super) fn export_hydrate(
     }
 }
 
+/// Convert a JS `Filter` value (see the `Filter` typescript type) into
+/// the Rust [`am::Filter`] used by the document.
+pub(crate) fn import_filter(value: &JsValue) -> Result<am::Filter, error::BadFilter> {
+    use error::BadFilter;
+    if value.is_undefined() || value.is_null() {
+        return Ok(am::Filter::default());
+    }
+    if !value.is_object() {
+        return Err(BadFilter::NotObject);
+    }
+    let mut filter = am::Filter::default();
+
+    let default = Reflect::get(value, &"default".into())
+        .map_err(|_| BadFilter::GetProp("default"))?;
+    if !default.is_undefined() {
+        filter.default = import_rule(&default).map_err(BadFilter::BadDefault)?;
+    }
+
+    let authors =
+        Reflect::get(value, &"authors".into()).map_err(|_| BadFilter::GetProp("authors"))?;
+    if !authors.is_undefined() && !authors.is_null() {
+        let entries = Object::entries(
+            &authors
+                .dyn_into::<Object>()
+                .map_err(|_| BadFilter::AuthorsNotObject)?,
+        );
+        for entry in entries.iter() {
+            let pair: Array = entry.dyn_into().map_err(|_| BadFilter::AuthorsNotObject)?;
+            let key: String = pair
+                .get(0)
+                .as_string()
+                .ok_or(BadFilter::AuthorKeyNotString)?;
+            let author = am::Author::try_from(key.clone()).map_err(|_| {
+                BadFilter::BadAuthorKey(key.clone())
+            })?;
+            let rule = import_rule(&pair.get(1)).map_err(|e| BadFilter::BadAuthorRule(key, e))?;
+            filter.authors.insert(author, rule);
+        }
+    }
+
+    let actors =
+        Reflect::get(value, &"actors".into()).map_err(|_| BadFilter::GetProp("actors"))?;
+    if !actors.is_undefined() && !actors.is_null() {
+        let entries = Object::entries(
+            &actors
+                .dyn_into::<Object>()
+                .map_err(|_| BadFilter::ActorsNotObject)?,
+        );
+        for entry in entries.iter() {
+            let pair: Array = entry.dyn_into().map_err(|_| BadFilter::ActorsNotObject)?;
+            let key: String = pair
+                .get(0)
+                .as_string()
+                .ok_or(BadFilter::ActorKeyNotString)?;
+            let bytes = hex::decode(&key).map_err(|_| BadFilter::BadActorKey(key.clone()))?;
+            let actor = am::ActorId::from(bytes);
+            let rule = import_rule(&pair.get(1)).map_err(|e| BadFilter::BadActorRule(key, e))?;
+            filter.actors.insert(actor, rule);
+        }
+    }
+
+    Ok(filter)
+}
+
+fn import_rule(value: &JsValue) -> Result<am::Rule, error::BadRule> {
+    use error::BadRule;
+    if let Some(s) = value.as_string() {
+        return match s.as_str() {
+            "allow" => Ok(am::Rule::Allow),
+            "deny" => Ok(am::Rule::Deny),
+            other => Err(BadRule::UnknownString(other.to_string())),
+        };
+    }
+    if !value.is_object() {
+        return Err(BadRule::NotStringOrObject);
+    }
+    let allow_up_to = Reflect::get(value, &"allowUpTo".into())
+        .map_err(|_| BadRule::GetProp("allowUpTo"))?;
+    if !allow_up_to.is_undefined() {
+        let heads = get_heads(allow_up_to)
+            .map_err(BadRule::BadHeads)?
+            .unwrap_or_default();
+        return Ok(am::Rule::AllowUpTo { heads });
+    }
+    Err(BadRule::MissingAllowUpTo)
+}
+
+/// Convert a Rust [`am::Filter`] back into a JS `Filter` object.
+pub(crate) fn export_filter(filter: &am::Filter) -> Result<JsValue, JsValue> {
+    let out = Object::new();
+    Reflect::set(&out, &"default".into(), &export_rule(&filter.default))
+        .map_err(|_| JsValue::from_str("failed to set default"))?;
+    let authors = Object::new();
+    for (author, rule) in &filter.authors {
+        Reflect::set(&authors, &author.to_string().into(), &export_rule(rule))
+            .map_err(|_| JsValue::from_str("failed to set author rule"))?;
+    }
+    Reflect::set(&out, &"authors".into(), &authors)
+        .map_err(|_| JsValue::from_str("failed to set authors"))?;
+    let actors = Object::new();
+    for (actor, rule) in &filter.actors {
+        Reflect::set(&actors, &actor.to_string().into(), &export_rule(rule))
+            .map_err(|_| JsValue::from_str("failed to set actor rule"))?;
+    }
+    Reflect::set(&out, &"actors".into(), &actors)
+        .map_err(|_| JsValue::from_str("failed to set actors"))?;
+    Ok(out.into())
+}
+
+fn export_rule(rule: &am::Rule) -> JsValue {
+    match rule {
+        am::Rule::Allow => JsValue::from_str("allow"),
+        am::Rule::Deny => JsValue::from_str("deny"),
+        am::Rule::AllowUpTo { heads } => {
+            let arr = Array::new();
+            for h in heads {
+                arr.push(&JsValue::from_str(&h.to_string()));
+            }
+            let obj = Object::new();
+            let _ = Reflect::set(&obj, &"allowUpTo".into(), &arr);
+            obj.into()
+        }
+    }
+}
+
 pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
     externals: &HashMap<Datatype, ExternalTypeConstructor>,
     patches: I,
@@ -1973,6 +2098,58 @@ pub(crate) mod error {
     use automerge::{AutomergeError, LoadChangeError};
     use js_sys::BigInt;
     use wasm_bindgen::JsValue;
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadFilter {
+        #[error("filter must be an object")]
+        NotObject,
+        #[error("failed to read property `{0}`")]
+        GetProp(&'static str),
+        #[error("bad default rule: {0}")]
+        BadDefault(BadRule),
+        #[error("`authors` must be an object whose values are rules")]
+        AuthorsNotObject,
+        #[error("`authors` keys must be strings")]
+        AuthorKeyNotString,
+        #[error("`actors` must be an object whose values are rules")]
+        ActorsNotObject,
+        #[error("`actors` keys must be strings")]
+        ActorKeyNotString,
+        #[error("invalid author key {0:?}")]
+        BadAuthorKey(String),
+        #[error("invalid actor key {0:?}")]
+        BadActorKey(String),
+        #[error("bad rule for author {0:?}: {1}")]
+        BadAuthorRule(String, BadRule),
+        #[error("bad rule for actor {0:?}: {1}")]
+        BadActorRule(String, BadRule),
+    }
+
+    impl From<BadFilter> for JsValue {
+        fn from(e: BadFilter) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadRule {
+        #[error("a rule must be either a string or an object")]
+        NotStringOrObject,
+        #[error("unknown rule {0:?} (expected `allow` or `deny`)")]
+        UnknownString(String),
+        #[error("failed to read property `{0}`")]
+        GetProp(&'static str),
+        #[error("`allowUpTo` heads were invalid: {0}")]
+        BadHeads(BadChangeHashes),
+        #[error("object rule must contain `allowUpTo`")]
+        MissingAllowUpTo,
+    }
+
+    impl From<BadRule> for JsValue {
+        fn from(e: BadRule) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
 
     #[derive(Debug, thiserror::Error)]
     pub enum BadJSChanges {

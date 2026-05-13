@@ -37,6 +37,7 @@ export type PatchSource =
   | "loadIncremental"
   | "applyChanges"
   | "receiveSyncMessage"
+  | "setFilter"
 export type PatchInfo<T> = {
   before: Doc<T>
   after: Doc<T>

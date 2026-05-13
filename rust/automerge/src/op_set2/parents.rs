@@ -15,7 +15,7 @@ pub struct Parents<'a> {
     pub(crate) obj: ObjId,
     pub(crate) ops: &'a OpSet,
     pub(crate) clock: Option<Clock>,
-    pub(crate) revocations: Option<&'a Clock>,
+    pub(crate) filter_clock: Option<&'a Clock>,
 }
 
 impl Parents<'_> {
@@ -62,7 +62,7 @@ impl Iterator for Parents<'_> {
             ..
         } = self
             .ops
-            .parent_object(&self.obj, self.clock.as_ref(), self.revocations)
+            .parent_object(&self.obj, self.clock.as_ref(), self.filter_clock)
             .unwrap();
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);

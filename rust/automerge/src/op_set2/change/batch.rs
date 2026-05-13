@@ -220,13 +220,13 @@ impl<'a> Untangler<'a> {
         if let Some(p) = vis {
             let op = &mut self.change_ops[p];
             if self.seq_type == SequenceType::List {
-                if !op.revoked {
+                if !op.filtered_out {
                     let value = op.hydrate_value_and_fix_counters(self.text_encoding);
                     log.insert(op.bld.obj, self.index, value, op.id(), conflict);
                 }
                 self.index += 1;
             } else {
-                if !op.revoked {
+                if !op.filtered_out {
                     let marks = self.value.marks.after.current().cloned();
                     match op.bld.action {
                         Action::MakeMap => {
@@ -631,7 +631,7 @@ impl<'a> ValueState<'a> {
 
     fn process_change_op(&mut self, op: &ChangeOp) {
         match op.action() {
-            _ if op.revoked => {}
+            _ if op.filtered_out => {}
             Action::Delete => {}
             Action::Increment => self.do_increment(op),
             Action::Mark => self.process_mark(op.id(), op.mark_data()),
@@ -915,7 +915,7 @@ impl BatchApply {
                 self.pred
                     .entry(*p)
                     .or_default()
-                    .push((o.id(), o.get_increment_value(), o.revoked));
+                    .push((o.id(), o.get_increment_value(), o.filtered_out));
             }
             if let Some(info) = o.obj_info() {
                 obj_info.insert(o.id(), info)
@@ -1114,7 +1114,9 @@ impl Automerge {
             .map(|a| self.ops.lookup_actor(a).unwrap())
             .collect();
 
-        let revoked = self.change_graph.is_revoked(actors[0].into(), change.seq());
+        let filtered_out = self
+            .change_graph
+            .is_filtered_out(actors[0].into(), change.seq());
 
         change
             .iter_ops()
@@ -1142,7 +1144,7 @@ impl Automerge {
                 let change = ChangeOp {
                     pos: None,
                     subsort: 0,
-                    revoked,
+                    filtered_out,
                     conflicted: false,
                     succ: vec![],
                     bld,

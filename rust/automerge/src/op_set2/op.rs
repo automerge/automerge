@@ -53,7 +53,11 @@ pub(crate) struct ChangeOp {
     pub(crate) pos: Option<usize>,
     pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
-    pub(crate) revoked: bool,
+    /// True when the document's visibility filter rejects the change this
+    /// op belongs to. Stamped on import and consulted from the apply path
+    /// and from `OpLike` impls; rendered ops with this flag set are
+    /// treated as if they were already deleted.
+    pub(crate) filtered_out: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -108,7 +112,7 @@ impl ChangeOp {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.revoked || self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+        !(self.filtered_out || self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
 
     pub(crate) fn has_succ(&self) -> bool {
@@ -630,7 +634,7 @@ impl OpLike for ChangeOp {
     type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        if op.revoked {
+        if op.filtered_out {
             None
         } else {
             op.bld.mark_index()

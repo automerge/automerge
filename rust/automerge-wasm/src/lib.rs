@@ -66,6 +66,21 @@ export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
+
+/// A rule in a [`Filter`]. Strings `"allow"` / `"deny"` mean every
+/// matching change is rendered or hidden respectively. The object form
+/// `{ allowUpTo: heads }` accepts only changes that are ancestors of
+/// `heads`; heads do not have to be present in the document yet.
+export type Rule = "allow" | "deny" | { allowUpTo: Heads };
+
+/// A persistent visibility filter applied to the rendered state of a
+/// document. Rejected changes are still stored and synced. See
+/// `Automerge::setFilter`.
+export type Filter = {
+  default?: Rule;
+  authors?: { [author: string]: Rule };
+  actors?: { [actor: string]: Rule };
+};
 export type ScalarValue = string | number | boolean | null | Date | Uint8Array;
 export type Value = ScalarValue | object;
 export type MaterializeValue =
@@ -1415,21 +1430,19 @@ impl Automerge {
         Some(self.doc.get_author()?.to_string())
     }
 
-    #[wasm_bindgen(js_name = revoke, unchecked_return_type="Patch[]")]
-    pub fn revoke(&mut self, author: String, heads: JsValue) -> Result<Array, JsValue> {
-        let heads = get_heads(heads)?.unwrap_or_default();
-        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
-        let patches = self.doc.revoke(&author, &heads);
-        let result = interop::export_patches(&self.external_types, patches)?;
-        Ok(result)
+    #[wasm_bindgen(js_name = setFilter)]
+    pub fn set_filter(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Filter")] filter: JsValue,
+    ) -> Result<(), JsValue> {
+        let filter = interop::import_filter(&filter)?;
+        self.doc.set_filter(filter);
+        Ok(())
     }
 
-    #[wasm_bindgen(js_name = unrevoke, unchecked_return_type="Patch[]")]
-    pub fn unrevoke(&mut self, author: String) -> Result<Array, JsValue> {
-        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
-        let patches = self.doc.unrevoke(&author);
-        let result = interop::export_patches(&self.external_types, patches)?;
-        Ok(result)
+    #[wasm_bindgen(js_name = getFilter, unchecked_return_type="Filter")]
+    pub fn get_filter(&self) -> Result<JsValue, JsValue> {
+        interop::export_filter(self.doc.filter())
     }
 
     #[wasm_bindgen(js_name = getAuthors, unchecked_return_type="Author[]")]
