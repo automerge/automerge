@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroU32;
 use std::ops::Add;
+use std::ops::RangeBounds;
 
 use hexane::{
     ColGroupIter, ColumnCursor, ColumnData, ColumnDataIter, DeltaCursor, PackError, StrCursor,
@@ -572,12 +573,48 @@ impl ChangeGraph {
         Ok(())
     }
 
-    pub(crate) fn fragments<'a>(
+    pub(crate) fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        let n = self.nodes_by_hash.get(&head).copied()?;
+        if head.fragment_level() == 0 {
+            self.loose_commit(n)
+        } else {
+            assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
+            self.fragments
+                .binary_search_by_key(&n.0, |f| f.head.0)
+                .ok()
+                .map(|i| self.fragments[i].export(self))
+        }
+    }
+
+    fn loose_commit(&self, n: NodeIdx) -> Option<Fragment> {
+        let head = self.hashes.get(n.0 as usize).copied()?;
+        assert_eq!(head.fragment_level(), 0);
+        let boundary = self.parents(n).map(|p| self.hashes[p.0 as usize]).collect();
+        let members = vec![head];
+        let checkpoints = vec![];
+        let level = head.fragment_level();
+        Some(Fragment {
+            head,
+            level,
+            boundary,
+            checkpoints,
+            members,
+        })
+    }
+
+    pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         heads: &'a [ChangeHash],
+        levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        self.loose_fragments(heads)
-            .chain(self.fragments.iter().rev().map(|f| f.export(self)))
+        let heads = if levels.contains(&0) { heads } else { &[] };
+        self.loose_fragments(heads).chain(
+            self.fragments
+                .iter()
+                .rev()
+                .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
+                .map(|f| f.export(self)),
+        )
     }
 
     fn loose_fragments<'a>(
@@ -589,19 +626,7 @@ impl ChangeGraph {
             .filter(|h| h.fragment_level() == 0)
             .filter_map(|h| self.nodes_by_hash.get(h).copied());
         self.bfs_until_clock(nodes, &self.fragment_top)
-            .map(move |n| {
-                let id = self.hashes[n.0 as usize];
-                assert_eq!(id.fragment_level(), 0);
-                let deps = self.parents(n).map(|p| self.hashes[p.0 as usize]).collect();
-                let content = vec![id];
-                let level = id.fragment_level();
-                Fragment {
-                    id,
-                    level,
-                    deps,
-                    content,
-                }
-            })
+            .filter_map(|n| self.loose_commit(n))
     }
 
     fn fragment_content<'a>(
@@ -646,19 +671,19 @@ impl ChangeGraph {
         }
     }
 
-    fn cache_fragment(&mut self, id: NodeIdx) {
-        let hash = &self.hashes[id.0 as usize];
+    fn cache_fragment(&mut self, head: NodeIdx) {
+        let hash = &self.hashes[head.0 as usize];
         let level = hash.fragment_level();
         if level == 0 {
             return;
         }
         let mut deps = vec![];
         let mut supercede = vec![];
-        let clock = self.calculate_clock(vec![id]);
+        let clock = self.calculate_clock(vec![head]);
         for (i, f) in self.fragments.iter().enumerate().rev() {
             if clock.covers(&f.clock) {
-                if self.hashes[f.id.0 as usize].fragment_level() >= level {
-                    deps.push(f.id);
+                if self.hashes[f.head.0 as usize].fragment_level() >= level {
+                    deps.push(f.head);
                 } else {
                     supercede.push(i);
                 }
@@ -668,7 +693,7 @@ impl ChangeGraph {
             self.fragments.remove(i);
         }
         SeqClock::merge(&mut self.fragment_top, &clock);
-        self.fragments.push(FragmentNode { id, deps, clock });
+        self.fragments.push(FragmentNode { head, deps, clock });
     }
 
     pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
@@ -1028,10 +1053,13 @@ mod tests {
     };
 
     use crate::{
+        make_rng,
         op_set2::{change::build_change, op_set::ResolvedAction, OpSet, TxOp},
+        transaction::Transactable,
         types::{ObjMeta, OpId, OpType},
-        ActorId, TextEncoding,
+        ActorId, Automerge, AutoCommit, TextEncoding, ROOT,
     };
+    use rand::RngExt;
 
     use super::*;
 
@@ -1203,13 +1231,13 @@ mod tests {
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
 
-        let fragments: Vec<_> = graph.fragments(&heads).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
 
-        // Collect all content hashes across all fragments
+        // Collect all members hashes across all fragments
         // (hashes may appear in multiple fragments — this is expected)
         let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
         for f in &fragments {
-            for h in &f.content {
+            for h in &f.members {
                 covered.insert(*h);
             }
         }
@@ -1228,36 +1256,36 @@ mod tests {
             // level must match the fragment_level of the id hash
             assert_eq!(
                 f.level,
-                f.id.fragment_level(),
+                f.head.fragment_level(),
                 "fragment level mismatch for {:?}",
-                f.id
+                f.head
             );
 
-            // id must be in content
+            // id must be in members
             assert!(
-                f.content.contains(&f.id),
-                "fragment id {:?} not found in its own content",
-                f.id
+                f.members.contains(&f.head),
+                "fragment id {:?} not found in its own members",
+                f.head
             );
 
             // deps must be equal or higher level than the fragment
-            for dep in &f.deps {
+            for dep in &f.boundary {
                 assert!(
                     dep.fragment_level() >= f.level,
                     "fragment {:?} (level {}) has dep {:?} with lower level {}",
-                    f.id,
+                    f.head,
                     f.level,
                     dep,
                     dep.fragment_level(),
                 );
             }
 
-            // content must not contain a hash with a higher level than the id
-            for h in &f.content {
+            // members must not contain a hash with a higher level than the id
+            for h in &f.members {
                 assert!(
                     h.fragment_level() <= f.level,
                     "fragment {:?} (level {}) contains {:?} with higher level {}",
-                    f.id,
+                    f.head,
                     f.level,
                     h,
                     h.fragment_level(),
@@ -1277,7 +1305,7 @@ mod tests {
         }
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
 
         assert_fragment_invariants(&fragments);
     }
@@ -1305,11 +1333,11 @@ mod tests {
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
 
         let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
         for f in &fragments {
-            for h in &f.content {
+            for h in &f.members {
                 covered.insert(*h);
             }
         }
@@ -1336,15 +1364,15 @@ mod tests {
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads).collect();
-        let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.id).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
 
         for f in &fragments {
-            for dep in &f.deps {
+            for dep in &f.boundary {
                 assert!(
                     all_hashes.contains(dep),
                     "fragment {:?} has dep {:?} not in change graph",
-                    f.id,
+                    f.head,
                     dep
                 );
                 // Deps of cached fragments (level > 0) should point to other fragment ids
@@ -1353,12 +1381,109 @@ mod tests {
                     assert!(
                         fragment_ids.contains(dep) || dep.fragment_level() == 0,
                         "cached fragment {:?} has dep {:?} that is not a fragment id",
-                        f.id,
+                        f.head,
                         dep
                     );
                 }
             }
         }
+    }
+
+    #[test]
+    fn fragments_filtered_by_levels() {
+        // 5000 changes gives ~20 expected level-1 fragments (1 hash in 256)
+        // so seeing zero cached fragments would be extraordinarily unlikely.
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..5000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+
+        let all: Vec<_> = graph.fragments(&heads, ..).collect();
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
+        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+
+        // loose + cached partition the full range
+        assert_eq!(loose.len() + cached.len(), all.len());
+        assert!(!loose.is_empty());
+        assert!(
+            !cached.is_empty(),
+            "expected at least one cached fragment from 5000 changes",
+        );
+
+        for f in &loose {
+            assert_eq!(f.level, 0, "0..=0 returned a non-zero level fragment");
+        }
+        for f in &cached {
+            assert!(f.level >= 1, "1.. returned a level-0 fragment");
+        }
+
+        // empty range yields nothing
+        assert_eq!(graph.fragments(&heads, 0..0).count(), 0);
+    }
+
+    #[test]
+    fn get_fragment_returns_loose_and_cached() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..5000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
+        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+        assert!(!loose.is_empty());
+        assert!(!cached.is_empty(), "expected at least one cached fragment");
+
+        // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
+        let l = &loose[0];
+        let got = graph.get_fragment(l.head).expect("loose fragment exists");
+        assert_eq!(got, *l);
+
+        // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
+        let c = &cached[0];
+        let got = graph.get_fragment(c.head).expect("cached fragment exists");
+        assert_eq!(got, *c);
+
+        // unknown hash returns None
+        assert!(graph.get_fragment(ChangeHash([0xff; 32])).is_none());
+    }
+
+    #[test]
+    fn bundle_fragments_roundtrips_through_load_incremental() {
+        let mut rng = make_rng();
+        let mut doc = Automerge::new();
+
+        for _ in 0..1_000 {
+            let key = format!("k{}", rng.random::<u32>() % 32);
+            let value = (rng.random::<u32>() % 1000) as i64;
+            let mut tx = doc.transaction();
+            tx.put(ROOT, key, value).unwrap();
+            tx.commit();
+        }
+
+        let fragments = doc.fragments(..);
+
+        let bundles = doc.bundle_fragments(fragments);
+
+        let joined: Vec<u8> = bundles.into_iter().flatten().collect();
+
+        let mut loaded = AutoCommit::new();
+        loaded.load_incremental(&joined).unwrap();
+
+        assert_eq!(doc.get_heads(), loaded.get_heads());
+
+        let a = doc.save();
+        let b = loaded.save();
+        assert_eq!(a, b);
     }
 }
 
@@ -1485,37 +1610,44 @@ impl<'a> Iterator for ChangeIter<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 struct FragmentNode {
-    id: NodeIdx,
+    head: NodeIdx,
     deps: Vec<NodeIdx>,
     clock: SeqClock,
 }
 
 impl FragmentNode {
     fn export(&self, graph: &ChangeGraph) -> Fragment {
-        let id = graph.hashes[self.id.0 as usize];
-        let level = id.fragment_level();
-        let deps = self
+        let head = graph.hashes[self.head.0 as usize];
+        let level = head.fragment_level();
+        let boundary = self
             .deps
             .iter()
             .map(|d| graph.hashes[d.0 as usize])
             .collect();
         let clock = graph.calculate_clock(self.deps.clone());
-        let content = graph.fragment_content(self.id, &clock).collect();
+        let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
+        let checkpoints = members
+            .iter()
+            .copied()
+            .filter(|h| h.fragment_level() > 0)
+            .collect();
         Fragment {
-            id,
+            head,
             level,
-            deps,
-            content,
+            boundary,
+            checkpoints,
+            members,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Fragment {
-    pub id: ChangeHash,
+    pub head: ChangeHash,
     pub level: usize,
-    pub deps: Vec<ChangeHash>,
-    pub content: Vec<ChangeHash>,
+    pub boundary: Vec<ChangeHash>,
+    pub checkpoints: Vec<ChangeHash>,
+    pub members: Vec<ChangeHash>,
 }
 
 #[rustfmt::skip]
