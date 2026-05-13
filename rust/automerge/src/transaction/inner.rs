@@ -349,7 +349,7 @@ impl TransactionInner {
             index,
             seq_type,
             self.scope.as_ref(),
-            doc.change_graph.active_revocation_clock(),
+            doc.change_graph.active_filter_clock(),
         )?;
 
         let marks = query.marks;
@@ -436,7 +436,7 @@ impl TransactionInner {
             index,
             seq_type,
             self.scope.as_ref(),
-            doc.change_graph.active_revocation_clock(),
+            doc.change_graph.active_filter_clock(),
         );
         let id = self.next_id();
         let eid = query
@@ -604,7 +604,7 @@ impl TransactionInner {
                 index,
                 seq_type,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.change_graph.active_filter_clock(),
             )?;
 
             index = query.index;
@@ -674,7 +674,7 @@ impl TransactionInner {
                 delete_index,
                 seq_type,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.change_graph.active_filter_clock(),
             );
 
             let step = if let Some(op) = query.ops.last() {
@@ -786,7 +786,7 @@ impl TransactionInner {
             index,
             SequenceType::Text,
             self.scope.as_ref(),
-            doc.change_graph.active_revocation_clock(),
+            doc.change_graph.active_filter_clock(),
         )?;
 
         let pos = query.pos;
@@ -835,7 +835,7 @@ impl TransactionInner {
                 index,
                 SequenceType::Text,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.change_graph.active_filter_clock(),
             )
             .ops
             .into_iter()
@@ -853,7 +853,7 @@ impl TransactionInner {
                 block_id,
                 SequenceType::Text,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.change_graph.active_filter_clock(),
             )
             .unwrap();
 

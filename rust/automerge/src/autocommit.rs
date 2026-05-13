@@ -411,18 +411,39 @@ impl AutoCommit {
         self.doc.get_authors()
     }
 
-    pub fn revoke(&mut self, author: &Author, heads: &[ChangeHash]) -> Vec<Patch> {
+    /// Replace the visibility filter for this document. See
+    /// [`Automerge::set_filter`] for details.
+    ///
+    /// Patches caused by changes that were previously visible becoming
+    /// hidden, and vice versa, are written into this autocommit's
+    /// internal patch log; call
+    /// [`diff_incremental`](Self::diff_incremental) (or
+    /// [`diff`](Self::diff) with the appropriate cursor) afterwards to
+    /// observe them, exactly like every other state mutation on this
+    /// type.
+    pub fn set_filter(&mut self, filter: crate::Filter) {
         self.ensure_transaction_closed();
-        let mut patch_log = PatchLog::active();
-        self.doc.revoke(author, heads, &mut patch_log);
-        patch_log.make_patches(&self.doc)
+        self.doc.set_filter(filter, &mut self.patch_log);
+        // The cached diff result is keyed only on `(range, obj, recursive)`
+        // and a filter change keeps `range` (heads don't move), so the
+        // cache would otherwise return stale patches the next time
+        // `diff_incremental` runs.
+        self.diff_cache = None;
     }
 
-    pub fn unrevoke(&mut self, author: &Author) -> Vec<Patch> {
-        self.ensure_transaction_closed();
-        let mut patch_log = PatchLog::active();
-        self.doc.unrevoke(author, &mut patch_log);
-        patch_log.make_patches(&self.doc)
+    /// Replace the visibility filter via a closure that receives the
+    /// current rule set and may mutate it. Convenient for adding or
+    /// removing a single rule without having to call [`filter`](Self::filter)
+    /// and then [`set_filter`](Self::set_filter) explicitly.
+    pub fn update_filter<F: FnOnce(&mut crate::Filter)>(&mut self, f: F) {
+        let mut filter = self.doc.filter().clone();
+        f(&mut filter);
+        self.set_filter(filter);
+    }
+
+    /// The current visibility filter.
+    pub fn filter(&self) -> &crate::Filter {
+        self.doc.filter()
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {

@@ -1,11 +1,215 @@
+//! Tests for the visibility filter API.
+//!
+//! The first group covers the general shapes of the [`Filter`] API:
+//! [`Rule::Deny`], [`Rule::AllowUpTo`] used as the *default* rule
+//! ("schema validation" pattern), `actors`-keyed rules overriding
+//! `authors`-keyed rules, and `update_filter` / save-load round-trips.
+//!
+//! The second group focuses on the `authors`-keyed [`Rule::AllowUpTo`]
+//! pattern — "render the document as it was before this author started
+//! editing" — across the various op kinds (lists, text, marks, counters,
+//! nested objects).
+
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    ActorId, Author, AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, ROOT,
+    ActorId, Author, AutoCommit, ChangeHash, Filter, ObjType, PatchAction, ReadDoc, Rule,
+    ScalarValue, ROOT,
 };
 
+/// Install an `AllowUpTo` rule for `author`. Captures the recurring
+/// "hide everything this author wrote after `heads`" pattern these tests
+/// exercise.
+fn hide_author_after(doc: &mut AutoCommit, author: &Author, heads: &[ChangeHash]) {
+    doc.update_filter(|f| {
+        f.authors.insert(
+            author.clone(),
+            Rule::AllowUpTo {
+                heads: heads.to_vec(),
+            },
+        );
+    });
+}
+
+/// Drop any existing rule for `author`, restoring full visibility for
+/// their changes.
+fn unhide_author(doc: &mut AutoCommit, author: &Author) {
+    doc.update_filter(|f| {
+        f.authors.remove(author);
+    });
+}
+
+/// Convenience: install a fresh empty filter, used to clear all rules.
+#[allow(dead_code)]
+fn clear_filter(doc: &mut AutoCommit) {
+    doc.set_filter(Filter::default());
+}
+
+// ---------------------------------------------------------------------------
+// General filter API
+// ---------------------------------------------------------------------------
+
 #[test]
-fn revoke_apply_changes() {
+fn deny_rule_hides_authors_changes() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let bob = Author::try_from("bbbb").unwrap();
+
+    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "alice_key", "alice_value").unwrap();
+
+    let mut fork = doc.fork().with_author(Some(bob.clone()));
+    fork.put(ROOT, "bob_key", "bob_value").unwrap();
+    doc.merge(&mut fork).unwrap();
+
+    // Hide every change made by Bob.
+    doc.set_filter(Filter::default().with_author(bob.clone(), Rule::Deny));
+
+    assert!(doc.get(ROOT, "bob_key").unwrap().is_none());
+    assert_eq!(
+        doc.get(ROOT, "alice_key").unwrap().unwrap().0,
+        "alice_value".into()
+    );
+
+    // Restoring an empty filter brings Bob's changes back.
+    doc.set_filter(Filter::default());
+    assert_eq!(
+        doc.get(ROOT, "bob_key").unwrap().unwrap().0,
+        "bob_value".into()
+    );
+}
+
+#[test]
+fn default_allow_up_to_acts_as_validated_prefix() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let bob = Author::try_from("bbbb").unwrap();
+
+    // Build a "validated" prefix.
+    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "validated", "yes").unwrap();
+    let validated_heads = doc.get_heads();
+
+    // Both authors keep editing past the validated prefix.
+    doc.put(ROOT, "alice_late", "late").unwrap();
+    let mut fork = doc.fork().with_author(Some(bob.clone()));
+    fork.put(ROOT, "bob_late", "late").unwrap();
+    doc.merge(&mut fork).unwrap();
+
+    // Apply the schema-validation pattern: render only the validated
+    // prefix by default.
+    doc.set_filter(Filter::default().with_default(Rule::AllowUpTo {
+        heads: validated_heads.clone(),
+    }));
+
+    assert_eq!(
+        doc.get(ROOT, "validated").unwrap().unwrap().0,
+        "yes".into()
+    );
+    assert!(doc.get(ROOT, "alice_late").unwrap().is_none());
+    assert!(doc.get(ROOT, "bob_late").unwrap().is_none());
+
+    // Bring Alice's late changes back without affecting Bob's.
+    doc.update_filter(|f| {
+        f.authors.insert(alice.clone(), Rule::Allow);
+    });
+
+    assert_eq!(
+        doc.get(ROOT, "alice_late").unwrap().unwrap().0,
+        "late".into()
+    );
+    assert!(doc.get(ROOT, "bob_late").unwrap().is_none());
+}
+
+#[test]
+fn actor_rule_overrides_author_rule() {
+    // Two actors share an author. We deny the author globally but allow
+    // one specific actor — the per-actor rule should win.
+    let shared = Author::try_from("aaaa").unwrap();
+
+    let mut doc = AutoCommit::new().with_author(Some(shared.clone()));
+    doc.put(ROOT, "shared_actor1", "v1").unwrap();
+    let actor1 = doc.get_actor().clone();
+
+    // A second actor under the same author. `set_author` to the same
+    // value is a no-op, so we use a fork to spawn a fresh actor that the
+    // existing author rule still covers.
+    let mut fork = doc.fork().with_author(Some(shared.clone()));
+    fork.put(ROOT, "shared_actor2", "v2").unwrap();
+    let actor2 = fork.get_actor().clone();
+    doc.merge(&mut fork).unwrap();
+    assert_ne!(actor1, actor2);
+
+    // Deny the author wholesale, then allow actor1 specifically.
+    doc.set_filter(
+        Filter::default()
+            .with_author(shared.clone(), Rule::Deny)
+            .with_actor(actor1.clone(), Rule::Allow),
+    );
+
+    assert_eq!(
+        doc.get(ROOT, "shared_actor1").unwrap().unwrap().0,
+        "v1".into()
+    );
+    assert!(doc.get(ROOT, "shared_actor2").unwrap().is_none());
+}
+
+#[test]
+fn update_filter_reads_current_state() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let bob = Author::try_from("bbbb").unwrap();
+
+    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "k", "v").unwrap();
+
+    doc.set_filter(Filter::default().with_author(alice.clone(), Rule::Deny));
+
+    // `update_filter` should observe the existing rule rather than start
+    // from a default-constructed `Filter`.
+    doc.update_filter(|f| {
+        assert_eq!(f.authors.get(&alice), Some(&Rule::Deny));
+        f.authors.insert(bob.clone(), Rule::Deny);
+    });
+
+    let current = doc.filter();
+    assert_eq!(current.authors.get(&alice), Some(&Rule::Deny));
+    assert_eq!(current.authors.get(&bob), Some(&Rule::Deny));
+}
+
+#[test]
+fn filter_survives_save_load_round_trip() {
+    let alice = Author::try_from("aaaa").unwrap();
+
+    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "before", "1").unwrap();
+    let heads = doc.get_heads();
+    doc.put(ROOT, "after", "2").unwrap();
+
+    doc.set_filter(Filter::default().with_author(
+        alice.clone(),
+        Rule::AllowUpTo {
+            heads: heads.clone(),
+        },
+    ));
+
+    // The filter should be stable across an in-place reload (which is the
+    // path used by `Automerge::clone`-via-load and by some sync
+    // bookkeeping paths in autocommit).
+    let bytes = doc.save();
+    let mut reloaded = AutoCommit::load(&bytes).unwrap();
+    reloaded.set_filter(doc.filter().clone());
+
+    assert!(reloaded.get(ROOT, "after").unwrap().is_none());
+    assert_eq!(
+        reloaded.get(ROOT, "before").unwrap().unwrap().0,
+        "1".into()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Author-keyed AllowUpTo across op kinds
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hidden_author_changes_have_no_effect_on_apply() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
     let mut doc = AutoCommit::new().with_author(Some(good.clone()));
@@ -32,7 +236,7 @@ fn revoke_apply_changes() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoc);
+    hide_author_after(&mut remote, &bad, &epoc);
     remote.update_diff_cursor();
 
     doc.increment(ROOT, "counter", 8).unwrap();
@@ -96,7 +300,7 @@ fn revoke_apply_changes() {
 }
 
 #[test]
-fn unrevoke_restores_changes() {
+fn unhiding_author_restores_changes() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -113,9 +317,9 @@ fn unrevoke_restores_changes() {
     fork.put(ROOT, "new_key", "new_bad_value").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    // Revoke bad author
-    doc.revoke(&bad, &epoch);
-    // The revoke should undo the post-epoch put
+    // Hide bad author
+    hide_author_after(&mut doc, &bad, &epoch);
+    // The filter should undo the post-epoch put
     assert!(doc.get(ROOT, "new_key").unwrap().is_none());
     // value2 was set before epoch so it should still be there
     let all = doc.get_all(ROOT, "key").unwrap();
@@ -128,13 +332,15 @@ fn unrevoke_restores_changes() {
     assert!(iter_keys.contains(&"key".to_string()));
     assert!(!iter_keys.contains(&"new_key".to_string()));
 
-    // Unrevoke should restore it
-    let patches = doc.unrevoke(&bad);
+    // Unhiding should restore it
+    doc.update_diff_cursor();
+    unhide_author(&mut doc, &bad);
+    let patches = doc.diff_incremental();
     assert_eq!(
         doc.get(ROOT, "new_key").unwrap().unwrap().0,
         "new_bad_value".into()
     );
-    // iter() should show both "key" and "new_key" after unrevoke
+    // iter() should show both "key" and "new_key" after unhiding
     let iter_keys: Vec<_> = doc
         .iter()
         .filter_map(|item| item.key().map(String::from))
@@ -146,7 +352,7 @@ fn unrevoke_restores_changes() {
 }
 
 #[test]
-fn revoke_list_insert_delete() {
+fn list_insert_delete_by_hidden_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -170,9 +376,9 @@ fn revoke_list_insert_delete() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
 
-    // Bad's insert of 99 should be revoked, bad's delete of 3 should be revoked
+    // Bad's insert of 99 should be filtered out, bad's delete of 3 should be filtered out
     assert_eq!(remote.length(&list), 4);
     assert_eq!(remote.get(&list, 0).unwrap().unwrap().0, 0.into());
     assert_eq!(remote.get(&list, 1).unwrap().unwrap().0, 1.into());
@@ -181,7 +387,7 @@ fn revoke_list_insert_delete() {
 }
 
 #[test]
-fn revoke_map_put_conflict() {
+fn map_put_conflict_with_hidden_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -201,9 +407,9 @@ fn revoke_map_put_conflict() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
 
-    // Good author's value should win since bad's is revoked
+    // Good author's value should win since bad's is filtered out
     assert_eq!(
         remote.get(ROOT, "key").unwrap().unwrap().0,
         "good_update".into()
@@ -211,7 +417,7 @@ fn revoke_map_put_conflict() {
 }
 
 #[test]
-fn revoke_text_splice() {
+fn text_splice_by_hidden_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -235,16 +441,16 @@ fn revoke_text_splice() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
 
-    // Bad's splice should be revoked: the delete of " world" and insert of " everyone"
+    // Bad's splice should be filtered out: the delete of " world" and insert of " everyone"
     // Good's "say " prefix should remain
     let result = remote.text(&text).unwrap();
     assert_eq!(result, "say hello world");
 }
 
 #[test]
-fn revoke_text_mark() {
+fn text_mark_by_hidden_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -276,7 +482,9 @@ fn revoke_text_mark() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    let patches = remote.revoke(&bad, &epoch);
+    remote.update_diff_cursor();
+    hide_author_after(&mut remote, &bad, &epoch);
+    let patches = remote.diff_incremental();
 
     // Patches should reflect the removal of bad's bold mark but not italic
     let mark_patches: Vec<_> = patches
@@ -303,7 +511,7 @@ fn revoke_text_mark() {
         "expected no patch touching italic"
     );
 
-    // Bad's mark should be revoked
+    // Bad's mark should be filtered out
     let marks = remote.marks(&text).unwrap();
     assert!(marks.iter().all(|m| m.name() != "bold"));
 
@@ -319,7 +527,7 @@ fn revoke_text_mark() {
             false
         }
     });
-    assert!(has_italic, "italic mark should survive revoke");
+    assert!(has_italic, "italic mark should survive filtering");
     let has_bold = spans.iter().any(|s| {
         if let automerge::Span::Text { marks: Some(m), .. } = s {
             m.iter().any(|(name, _)| name == "bold")
@@ -327,11 +535,11 @@ fn revoke_text_mark() {
             false
         }
     });
-    assert!(!has_bold, "bold mark should be revoked");
+    assert!(!has_bold, "bold mark should be filtered out");
 }
 
 #[test]
-fn revoke_counter_increment() {
+fn counter_increment_by_hidden_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -351,7 +559,7 @@ fn revoke_counter_increment() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
 
     // Only good's increment should count: 10 + 5 = 15
     assert_eq!(
@@ -361,7 +569,7 @@ fn revoke_counter_increment() {
 }
 
 #[test]
-fn revoke_valid_put_in_revoked_object() {
+fn valid_put_in_object_created_by_hidden_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -382,15 +590,15 @@ fn revoke_valid_put_in_revoked_object() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
 
-    // The bad_map itself was created by bad, so it should be revoked
+    // The bad_map itself was created by bad, so it should be filtered out
     // Good author's put into it won't be visible since the parent is gone
     assert!(remote.get(ROOT, "bad_map").unwrap().is_none());
 }
 
 #[test]
-fn revoke_valid_insert_after_revoked_insert() {
+fn valid_insert_after_hidden_authors_insert() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -413,7 +621,7 @@ fn revoke_valid_insert_after_revoked_insert() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
 
     // Bad's insert should be gone, good's should remain
     assert_eq!(remote.length(&list), 2);
@@ -425,7 +633,7 @@ fn revoke_valid_insert_after_revoked_insert() {
 }
 
 #[test]
-fn revoke_valid_delete_of_insert() {
+fn valid_delete_of_hidden_authors_insert() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -448,7 +656,7 @@ fn revoke_valid_delete_of_insert() {
     doc.insert(&list, 0, "zero").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
     remote.merge(&mut doc).unwrap();
 
     // Both the insert and delete target the same element; result should be just "first"
@@ -460,7 +668,7 @@ fn revoke_valid_delete_of_insert() {
 }
 
 #[test]
-fn revoke_with_new_actor_same_author() {
+fn hide_with_new_actor_same_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -480,10 +688,10 @@ fn revoke_with_new_actor_same_author() {
     doc.merge(&mut fork).unwrap();
 
     let mut remote = AutoCommit::new();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
     remote.merge(&mut doc).unwrap();
 
-    // new actor already revoked
+    // new actor already filtered out
     remote.update_diff_cursor();
     remote.merge(&mut fork2).unwrap();
     let patches = remote.diff_incremental();
@@ -495,7 +703,7 @@ fn revoke_with_new_actor_same_author() {
         }
     }
 
-    // Both actors under the bad author should be revoked
+    // Both actors under the bad author should be filtered out
     assert!(remote.get(ROOT, "key1").unwrap().is_none());
     assert!(remote.get(ROOT, "key2").unwrap().is_none());
     assert_eq!(
@@ -513,7 +721,7 @@ fn revoke_with_new_actor_same_author() {
 }
 
 #[test]
-fn revoke_only_after_epoch() {
+fn hide_only_after_epoch() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -527,22 +735,22 @@ fn revoke_only_after_epoch() {
     let epoch = doc.get_heads();
 
     // Bad author makes changes after epoch
-    fork.put(ROOT, "after_epoch", "revoked").unwrap();
+    fork.put(ROOT, "after_epoch", "filtered_out").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    doc.revoke(&bad, &epoch);
+    hide_author_after(&mut doc, &bad, &epoch);
 
     // Pre-epoch changes should remain
     assert_eq!(
         doc.get(ROOT, "before_epoch").unwrap().unwrap().0,
         "allowed".into()
     );
-    // Post-epoch changes should be revoked
+    // Post-epoch changes should be filtered out
     assert!(doc.get(ROOT, "after_epoch").unwrap().is_none());
 }
 
 #[test]
-fn revoke_patches_reflect_undo() {
+fn hide_patches_reflect_undo() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
@@ -556,13 +764,15 @@ fn revoke_patches_reflect_undo() {
     fork.put(ROOT, "key", "bad_override").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    // Verify bad's value is visible before revoke
+    // Verify bad's value is visible before filtering
     assert_eq!(
         doc.get(ROOT, "key").unwrap().unwrap().0,
         "bad_override".into()
     );
 
-    let patches = doc.revoke(&bad, &epoch);
+    doc.update_diff_cursor();
+    hide_author_after(&mut doc, &bad, &epoch);
+    let patches = doc.diff_incremental();
 
     // Should get a patch restoring "original"
     assert!(!patches.is_empty());
@@ -573,14 +783,14 @@ fn revoke_patches_reflect_undo() {
 }
 
 #[test]
-fn revoke_then_load_incremental() {
+fn hide_then_load_incremental() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
     let mut doc = AutoCommit::new().with_author(Some(good.clone()));
     doc.put(ROOT, "key", "original").unwrap();
 
-    // Bad author must make a change before epoch so its actor is known at revoke time
+    // Bad author must make a change before epoch so its actor is known at filter time
     let mut fork = doc.fork().with_author(Some(bad.clone()));
     fork.put(ROOT, "pre_epoch", "pre_val").unwrap();
     doc.merge(&mut fork).unwrap();
@@ -588,7 +798,7 @@ fn revoke_then_load_incremental() {
     fork.put(ROOT, "post_epoch", "post_val").unwrap();
 
     let mut remote = AutoCommit::new();
-    remote.revoke(&bad, &epoch);
+    hide_author_after(&mut remote, &bad, &epoch);
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
@@ -603,7 +813,7 @@ fn revoke_then_load_incremental() {
         matches!(&p.action, PatchAction::PutMap { key, .. } if key.as_str() == "pre_epoch")
     }));
 
-    // Bad author makes changes after the revocation point
+    // Bad author makes changes after the filter point
     fork.put(ROOT, "bad_key", "bad_val").unwrap();
     fork.put(ROOT, "key", "bad_override").unwrap();
 
@@ -611,12 +821,12 @@ fn revoke_then_load_incremental() {
     doc.merge(&mut fork).unwrap();
     doc.put(ROOT, "good_key", "good_val").unwrap();
 
-    // Load new changes into the doc with revocation
+    // Load new changes into the doc with filter
     remote
         .load_incremental(&[doc.save_incremental(), fork.save_incremental()].concat())
         .unwrap();
 
-    // Bad's post-epoch changes should be revoked
+    // Bad's post-epoch changes should be filtered out
     assert!(remote.get(ROOT, "bad_key").unwrap().is_none());
     assert_eq!(
         remote.get(ROOT, "key").unwrap().unwrap().0,
@@ -660,23 +870,23 @@ fn revoke_then_load_incremental() {
     );
 }
 
-// Regression test for a bug in `change_graph::rebuild_revocation_clock`.
+// Regression test for a bug in `change_graph::rebuild_filter_cached_clock`.
 //
-// `revocation_cached_clock` is an `OpClock` (indexed by actor, values are op
-// counters), but `rebuild_revocation_clock` populates it directly from
-// `revocations_mask`, whose values are *seq numbers* (not op counters). When a
-// revoked actor's last pre-revoke change has multiple ops, the seq number
-// (e.g. `1`) is much smaller than the op counters of those ops (e.g. `2`,
-// `3`, ...), so `Clock::covers` returns `false` for ops that should be
-// visible.
+// `ResolvedFilter::cached_clock` is an `OpClock` (indexed by actor, values
+// are op counters), but `rebuild_filter_cached_clock` populates it directly
+// from `ResolvedFilter::actor_mask`, whose values are *seq numbers* (not op
+// counters). When a filtered-out actor's last accepted change has multiple
+// ops, the seq number (e.g. `1`) is much smaller than the op counters of
+// those ops (e.g. `2`, `3`, ...), so `Clock::covers` returns `false` for
+// ops that should be visible.
 //
-// The bug surfaces on the slow query path that consults the active revocation
+// The bug surfaces on the slow query path that consults the active filter
 // clock (e.g. `keys()`, `marks()`); the indexed fast path (e.g. `get()`,
 // `iter()`, `length()`) is unaffected because the index is built from
 // `clock_at(heads)` which goes through `to_op_clock` and converts seq → max
 // op counter correctly.
 #[test]
-fn revocation_cached_clock_handles_multi_op_changes() {
+fn cached_filter_clock_handles_multi_op_changes() {
     let bad = Author::try_from("ffff").unwrap();
 
     let mut doc = AutoCommit::new();
@@ -691,48 +901,48 @@ fn revocation_cached_clock_handles_multi_op_changes() {
     fork.put(ROOT, "k3", "v3").unwrap();
     fork.commit();
 
-    let pre_revoke_heads = fork.get_heads();
+    let pre_filter_heads = fork.get_heads();
 
-    // A second change which should actually be revoked.
-    fork.put(ROOT, "post_revoke", "post").unwrap();
+    // A second change which should actually be filtered out.
+    fork.put(ROOT, "post_filter", "post").unwrap();
     fork.commit();
 
     doc.merge(&mut fork).unwrap();
 
-    // Revoke at heads after the multi-op change, so k1/k2/k3 stay; post_revoke
-    // goes.
-    doc.revoke(&bad, &pre_revoke_heads);
+    // Filter at heads after the multi-op change, so k1/k2/k3 stay;
+    // post_filter goes.
+    hide_author_after(&mut doc, &bad, &pre_filter_heads);
 
     // Sanity check: the indexed fast path correctly preserves k1/k2/k3.
     assert_eq!(doc.get(ROOT, "k1").unwrap().unwrap().0, "v1".into());
     assert_eq!(doc.get(ROOT, "k2").unwrap().unwrap().0, "v2".into());
     assert_eq!(doc.get(ROOT, "k3").unwrap().unwrap().0, "v3".into());
-    assert!(doc.get(ROOT, "post_revoke").unwrap().is_none());
+    assert!(doc.get(ROOT, "post_filter").unwrap().is_none());
 
-    // The slow path (keys → visible_slow → revocation cached clock) should
-    // agree. With the bug, `revocation_cached_clock[bad-actor] = 1` (the seq)
-    // but bad's ops have op-counters 2, 3, 4 — so `covers` returns false for
+    // The slow path (keys → visible_slow → filter cached clock) should
+    // agree. With the bug, `cached_clock[bad-actor] = 1` (the seq) but
+    // bad's ops have op-counters 2, 3, 4 — so `covers` returns false for
     // all of them and they all disappear from `keys()`.
     let keys: Vec<String> = doc.keys(ROOT).collect();
     assert!(keys.contains(&"good_key".to_string()));
     assert!(
         keys.contains(&"k1".to_string()),
-        "k1 should be visible (before revoke point); got keys={:?}",
+        "k1 should be visible (before filter point); got keys={:?}",
         keys
     );
     assert!(
         keys.contains(&"k2".to_string()),
-        "k2 should be visible (before revoke point); got keys={:?}",
+        "k2 should be visible (before filter point); got keys={:?}",
         keys
     );
     assert!(
         keys.contains(&"k3".to_string()),
-        "k3 should be visible (before revoke point); got keys={:?}",
+        "k3 should be visible (before filter point); got keys={:?}",
         keys
     );
     assert!(
-        !keys.contains(&"post_revoke".to_string()),
-        "post_revoke should be filtered; got keys={:?}",
+        !keys.contains(&"post_filter".to_string()),
+        "post_filter should be filtered; got keys={:?}",
         keys
     );
 }
@@ -742,15 +952,15 @@ fn revocation_cached_clock_handles_multi_op_changes() {
 // When a new actor is inserted at a sorted position lower than existing
 // actors, all existing actor indices shift up. `insert_actor` updates
 // `self.actors`, `self.seq_index`, `self.actor_author`, and the per-node
-// clocks in `clock_cache`, but it does **not** re-key `revocations_mask`.
-// After a shift, the mask still has entries keyed at the old (now stale)
-// indices.
+// clocks in `clock_cache`, but it must also re-key the per-actor maps in
+// `ResolvedFilter` (`actor_rules` and `actor_mask`). If it doesn't, the
+// mask still has entries keyed at the old (now stale) indices.
 //
-// As a result, `revocation_cached_clock` (rebuilt from the stale mask) marks
-// the wrong actors as revoked. The slow query path that consults the active
-// revocation clock then filters incorrectly.
+// As a result, `cached_clock` (rebuilt from the stale mask) marks the wrong
+// actors as filtered out. The slow query path that consults the active
+// filter clock then filters incorrectly.
 #[test]
-fn revocation_mask_survives_actor_reordering() {
+fn filter_mask_survives_actor_reordering() {
     let bad = Author::try_from("ffff").unwrap();
 
     // Two actor IDs with deterministic sort order: `actor_late` sorts AFTER
@@ -773,9 +983,10 @@ fn revocation_mask_survives_actor_reordering() {
 
     doc.merge(&mut fork_late).unwrap();
 
-    // Revoke bad at `pre_change` — bad has no pre-change history, so all of
-    // bad's changes (current and future) should be revoked.
-    doc.revoke(&bad, &pre_change);
+    // Filter out bad after `pre_change` — bad has no pre-change history,
+    // so all of bad's changes (current and future) should be filtered
+    // out.
+    hide_author_after(&mut doc, &bad, &pre_change);
 
     // Sanity check: the late-actor key is correctly hidden.
     assert!(doc.get(ROOT, "late_actor_key").unwrap().is_none());
@@ -792,21 +1003,21 @@ fn revocation_mask_survives_actor_reordering() {
     doc.merge(&mut fork_early).unwrap();
 
     // After the actor reordering, both bad-actor keys should still be
-    // revoked (same author).
+    // filtered out (same author).
     assert!(
         doc.get(ROOT, "late_actor_key").unwrap().is_none(),
-        "late_actor_key should remain revoked after actor reordering"
+        "late_actor_key should remain filtered out after actor reordering"
     );
     assert!(
         doc.get(ROOT, "early_actor_key").unwrap().is_none(),
-        "early_actor_key should be revoked (same author)"
+        "early_actor_key should be filtered out (same author)"
     );
 
-    // The slow path consults `revocation_cached_clock`, which is rebuilt
-    // from the stale `revocations_mask`. With the bug, the mask is keyed at
+    // The slow path consults `ResolvedFilter::cached_clock`, which is
+    // rebuilt from the per-actor mask. With the bug the mask is keyed at
     // the old indices: the actor at the *new* position 1 (the doc's own
-    // actor) ends up flagged as revoked, while the actor at the *new*
-    // position that previously belonged to `actor_late` does not.
+    // actor) ends up flagged as filtered out, while the actor at the
+    // *new* position that previously belonged to `actor_late` does not.
     let keys: Vec<String> = doc.keys(ROOT).collect();
     assert!(
         keys.contains(&"good_key".to_string()),
@@ -826,7 +1037,7 @@ fn revocation_mask_survives_actor_reordering() {
 }
 
 #[test]
-fn values_filters_revoked_ops() {
+fn values_skip_filtered_out_ops() {
     let bad = Author::try_from("ffff").unwrap();
 
     let mut doc = AutoCommit::new();
@@ -838,9 +1049,9 @@ fn values_filters_revoked_ops() {
     fork.put(ROOT, "bad_key", "bad_val").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    doc.revoke(&bad, &pre_change);
+    hide_author_after(&mut doc, &bad, &pre_change);
 
-    // get() and keys() correctly hide the revoked op.
+    // get() and keys() correctly hide the filtered-out op.
     assert!(doc.get(ROOT, "bad_key").unwrap().is_none());
     let keys: Vec<String> = doc.keys(ROOT).collect();
     assert!(!keys.contains(&"bad_key".to_string()));
