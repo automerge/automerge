@@ -312,3 +312,16 @@ pub use value::{ScalarValue, Value};
 
 /// The object ID for the root map of a document
 pub const ROOT: ObjId = ObjId::Root;
+
+#[cfg(test)]
+fn make_rng() -> rand::rngs::SmallRng {
+    // use rand::RngExt;
+    use rand::SeedableRng;
+
+    let seed = std::env::var("AUTOMERGE_TEST_SEED")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or_else(rand::random::<u64>);
+    log!("SEED: {}", seed);
+    rand::rngs::SmallRng::seed_from_u64(seed)
+}

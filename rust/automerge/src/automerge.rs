@@ -1281,8 +1281,33 @@ impl Automerge {
         Ok(patch_log.make_patches(self))
     }
 
-    pub fn fragments(&self) -> Vec<Fragment> {
-        self.change_graph.fragments(&self.get_heads()).collect()
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        // these produce fragments newest to oldest
+        let mut fragments: Vec<_> = self
+            .change_graph
+            .fragments(&self.get_heads(), levels)
+            .collect();
+        // but we want to return them oldest to newest
+        fragments.reverse();
+        fragments
+    }
+
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.change_graph.get_fragment(head)
+    }
+
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        fragments
+            .into_iter()
+            .filter_map(|f| {
+                if f.head.fragment_level() == 0 && f.members.len() == 1 {
+                    // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
+                    Some(self.get_change_by_hash(&f.head)?.bytes().to_vec())
+                } else {
+                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
+                }
+            })
+            .collect()
     }
 
     /// Get the heads of this document.
