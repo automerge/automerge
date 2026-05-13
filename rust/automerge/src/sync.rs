@@ -296,7 +296,6 @@ impl SyncDoc for Automerge {
 }
 
 impl Automerge {
-    #[inline(never)]
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
         let hashes = self.change_graph.get_hashes(&last_sync);
         Have {
@@ -305,7 +304,6 @@ impl Automerge {
         }
     }
 
-    #[inline(never)]
     fn get_hashes_to_send(
         &self,
         have: &[Have],
@@ -369,7 +367,6 @@ impl Automerge {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn receive_sync_message_inner(
         &mut self,
         sync_state: &mut State,

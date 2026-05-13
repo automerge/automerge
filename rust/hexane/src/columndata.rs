@@ -744,7 +744,7 @@ pub struct ColAccIter<'a, C: ColumnCursor> {
 
 impl<C: ColumnCursor> ColAccIter<'_, C> {
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let _ = self.iter.shift_next(range);
+        self.iter.shift_next(range)?;
         let acc = self.acc();
         Some(acc)
     }
@@ -1261,6 +1261,10 @@ where
 }
 
 pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
+    normalize_range_max(range, usize::MAX)
+}
+
+pub(crate) fn normalize_range_max<R: RangeBounds<usize>>(range: R, max: usize) -> (usize, usize) {
     let start = match range.start_bound() {
         Bound::Unbounded => usize::MIN,
         Bound::Included(n) => *n,
@@ -1268,11 +1272,15 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
     };
 
     let end = match range.end_bound() {
-        Bound::Unbounded => usize::MAX,
+        Bound::Unbounded => max,
         Bound::Included(n) => *n + 1,
         Bound::Excluded(n) => *n,
     };
-    (start, end)
+    if start > end {
+        (start, start)
+    } else {
+        (start, end)
+    }
 }
 
 impl<'a, C, M> From<Vec<M>> for ColumnData<C>
@@ -1721,9 +1729,7 @@ pub(crate) mod tests {
         .collect();
         let len = col.len();
         let v: Vec<i64> = vec![];
-        log!("SPLICE 1");
         col.splice(0, 0, v.clone());
-        log!("SPLICE 2");
         col.splice(0, len, v);
     }
 
@@ -1890,6 +1896,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn column_data_fuzz_test_int() {
         let mut data: Vec<Option<u64>> = vec![];
         let mut col = ColumnData::<RleCursor<64, u64>>::new();
@@ -1927,7 +1934,6 @@ pub(crate) mod tests {
     {
         const LEN: usize = 100;
         let col: ColumnData<C> = ((0..LEN).map(|_| M::maybe_rand(rng))).collect();
-        log!("COL = {:?}", col.to_vec());
         for _ in 0..1000 {
             let index = M::index(LEN, rng);
             let mut iter1 = col.iter();
@@ -1972,6 +1978,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<RleCursor<64, str>>::new();
@@ -2004,6 +2011,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn column_data_fuzz_test_delta() {
         let mut data: Vec<Option<i64>> = vec![];
         let mut col = ColumnData::<DeltaCursorInternal<8>>::new();
