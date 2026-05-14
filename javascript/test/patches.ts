@@ -532,6 +532,27 @@ describe("patches", () => {
         Automerge.applyPatches(doc, [patch])
       })
 
+      it("should apply an object insert patch", () => {
+        let doc: Record<string, any> = { foo: { bar: "baz" } }
+        const patch: Patch = {
+          action: "insert",
+          path: ["foo", "qux"],
+          values: ["quux"],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo.qux, "quux")
+      })
+
+      it("should apply an object delete patch", () => {
+        let doc = { foo: { bar: "baz", qux: "quux" } }
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", "qux"],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, { bar: "baz" })
+      })
+
       it("should apply a map update to a map in a list in a map in a list", () => {
         let doc = Automerge.from<{ foo: { bar: { foo: string }[] }[] }>({
           foo: [{ bar: [{ foo: "hehe" }] }],
