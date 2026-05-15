@@ -575,20 +575,24 @@ impl Automerge {
     ///
     /// This will create a new actor ID for the forked document
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
-        let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
-        let mut heads = heads.to_vec();
+        let mut seen = HashSet::new();
+        let mut stack = Vec::new();
+        for head in heads {
+            if seen.insert(*head) {
+                stack.push(*head);
+            }
+        }
         let mut hashes = vec![];
-        while let Some(hash) = heads.pop() {
+        while let Some(hash) = stack.pop() {
             if !self.change_graph.has_change(&hash) {
                 return Err(AutomergeError::InvalidHash(hash));
             }
             for dep in self.change_graph.deps_for_hash(&hash) {
-                if !seen.contains(&dep) {
-                    heads.push(dep);
+                if seen.insert(dep) {
+                    stack.push(dep);
                 }
             }
             hashes.push(hash);
-            seen.insert(hash);
         }
         let mut f = Self::new();
         f.set_actor(ActorId::random());
