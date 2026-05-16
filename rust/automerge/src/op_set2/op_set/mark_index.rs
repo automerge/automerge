@@ -1,12 +1,10 @@
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
-use hexane::{
-    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, PackError, Packable, RleCursor, Slab, SpanWeight,
-};
+use hexane::{ColumnData, PackError, Packable, RleCursor};
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -59,97 +57,7 @@ impl MarkIndexValue {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
-pub(crate) struct MarkIndexSpanner {
-    pub(crate) pos: usize,
-    pub(crate) start: HashSet<OpId>,
-    pub(crate) end: HashSet<OpId>,
-}
-
-impl SpanWeight<Slab> for MarkIndexSpanner {
-    fn alloc(slab: &Slab) -> Self {
-        // FIXME - need to keep a summary on the slab
-        let pos = slab.len();
-        let mut start = HashSet::default();
-        let mut end = HashSet::default();
-        let mut cursor = MarkIndex::default();
-        let bytes = slab.as_slice();
-        while let Some(run) = cursor.next(bytes) {
-            match run.value.as_deref() {
-                Some(MarkIndexValue::Start(id)) => {
-                    start.insert(*id);
-                }
-                Some(MarkIndexValue::End(id)) => {
-                    if !start.remove(id) {
-                        end.insert(*id);
-                    }
-                }
-                None => {}
-            }
-        }
-        Self { pos, end, start }
-    }
-    fn and(mut self, other: &Self) -> Self {
-        self.union(other);
-        self
-    }
-    fn union(&mut self, other: &Self) {
-        self.pos += other.pos;
-        //let x = self.clone();
-        for id in &other.start {
-            if !self.end.remove(id) {
-                self.start.insert(*id);
-            }
-        }
-        for id in &other.end {
-            if !self.start.remove(id) {
-                self.end.insert(*id);
-            }
-        }
-    }
-
-    fn maybe_sub(&mut self, other: &Self) -> bool {
-        if other.start.is_empty() && other.end.is_empty() {
-            self.pos -= other.pos;
-            true
-        } else {
-            false
-        }
-        // FIXME - this worked when I put ops in one at a time but now it doesnt?
-        /*
-                assert!(self.pos > other.pos);
-                log!(" -- SUB ");
-                log!(" -- :: A {:?}", self);
-                log!(" -- :: B {:?}", other);
-                self.pos -= other.pos;
-                for id in &other.start {
-                    if !self.start.remove(id) {
-                        self.end.insert(*id);
-                    }
-                }
-                for id in &other.end {
-                    if !self.end.remove(id) {
-                        self.start.insert(*id);
-                    }
-                }
-                true
-        */
-    }
-}
-
-impl HasAcc for MarkIndexSpanner {
-    fn acc(&self) -> Acc {
-        Acc::new()
-    }
-}
-
-impl HasPos for MarkIndexSpanner {
-    fn pos(&self) -> usize {
-        self.pos
-    }
-}
-
-pub(crate) type MarkIndexInternal<const B: usize> = RleCursor<B, MarkIndexValue, MarkIndexSpanner>;
+pub(crate) type MarkIndexInternal<const B: usize> = RleCursor<B, MarkIndexValue>;
 
 pub(crate) type MarkIndex = MarkIndexInternal<64>;
 
@@ -231,30 +139,16 @@ impl MarkIndexColumn {
         target: usize,
         clock: Option<&'a Clock>,
     ) -> impl Iterator<Item = OpId> + 'a {
-        let sub = self
-            .data
-            .slabs
-            .get_where_or_last(|acc, next| target < acc.pos() + next.pos());
-        let mut start = sub.weight.start.into_iter().collect::<BTreeSet<_>>();
-        let mut end = sub.weight.end;
-        let mut pos = sub.weight.pos;
-        let mut cursor = MarkIndex::default();
-        let bytes = sub.element.as_slice();
-        while let Some(run) = cursor.next(bytes) {
-            pos += run.count;
-            match run.value.as_deref() {
+        let mut start = BTreeSet::new();
+        for mark in self.data.iter_range(0..target.saturating_add(1)) {
+            match mark.as_deref() {
                 Some(MarkIndexValue::Start(id)) => {
                     start.insert(*id);
                 }
                 Some(MarkIndexValue::End(id)) => {
-                    if !start.remove(id) {
-                        end.insert(*id);
-                    }
+                    start.remove(id);
                 }
                 None => {}
-            }
-            if pos > target {
-                break;
             }
         }
         start
