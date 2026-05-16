@@ -112,10 +112,11 @@ function isStep(stepStr) {
  */
 function buildWasm(outputDir, gitHead) {
   const automergeWasmPath = path.join(rustProjectDir, "automerge-wasm")
+  const wasmProfile = process.env.WASM_PROFILE ?? "wasm-release"
   console.log("building automerge-wasm")
   execSync(
     //"cargo build --target wasm32-unknown-unknown --profile dev",
-    "cargo build --target wasm32-unknown-unknown --release",
+    `cargo build --target wasm32-unknown-unknown --profile ${wasmProfile}`,
     {
       cwd: automergeWasmPath,
       env: { ...process.env, GIT_HEAD: gitHead },
@@ -126,7 +127,7 @@ function buildWasm(outputDir, gitHead) {
     rustProjectDir,
     "target",
     "wasm32-unknown-unknown",
-    "release",
+    wasmProfile,
     //"debug",
     "automerge_wasm.wasm",
   )

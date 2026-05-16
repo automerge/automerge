@@ -14,5 +14,12 @@ resolver = "2"
 lto = true
 codegen-units = 1
 
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
+strip = true
+debug = 0
+
 [profile.bench]
 debug = true
