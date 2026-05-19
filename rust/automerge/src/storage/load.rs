@@ -15,6 +15,9 @@ pub enum VerificationMode {
     DontCheck,
 }
 
+mod load_state;
+pub use load_state::{LoadState, StepResult};
+
 #[derive(Debug, thiserror::Error)]
 #[allow(unreachable_pub)]
 pub enum Error {
@@ -120,7 +123,7 @@ fn load_next_change<'a>(
             let bundle = Bundle::new_from_unverified(bundle.into_owned())
                 .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
             let bundle_changes = bundle
-                .to_changes()
+                .into_changes()
                 .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
             changes.extend(bundle_changes);
         }

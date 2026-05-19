@@ -3,6 +3,7 @@ use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
+use crate::op_set2::op_set::op_iter::{InsertIter, KeyIter};
 use crate::storage::columns::BadColumnLayout;
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
 use crate::types;
@@ -45,8 +46,8 @@ pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
-    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    ActionIter, ActionValueIter, CtrWalker, MarkInfoIter, ObjIdIter, OpIdIter, OpIter, OpIterState,
+    ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
@@ -105,7 +106,7 @@ impl OpSet {
     }
 
     pub(crate) fn index_builder(&self) -> IndexBuilder {
-        IndexBuilder::new(self, self.text_encoding)
+        IndexBuilder::new(&self.cols, self.text_encoding)
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
@@ -354,10 +355,6 @@ impl OpSet {
 
     pub(crate) fn len(&self) -> usize {
         self.cols.len()
-    }
-
-    pub(crate) fn sub_len(&self) -> usize {
-        self.cols.sub_len()
     }
 
     pub(crate) fn seq_length(
@@ -938,7 +935,8 @@ impl OpSet {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
         let actors = doc.actors().to_vec();
-        Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
+        let cols = Columns::load(doc.op_metadata.as_map(), data, &actors)?;
+        Ok(Self::from_parts(cols, actors, text_encoding))
     }
 
     #[cfg(test)]
@@ -958,22 +956,17 @@ impl OpSet {
         }
     }
 
-    fn from_parts(
-        cols: RawColumns<Uncompressed>,
-        data: &[u8],
+    pub(crate) fn from_parts(
+        cols: Columns,
         actors: Vec<ActorId>,
         text_encoding: TextEncoding,
-    ) -> Result<Self, PackError> {
-        let cols = Columns::load(cols.as_map(), data, &actors)?;
-
-        let op_set = OpSet {
+    ) -> Self {
+        OpSet {
             actors,
             cols,
             obj_info: ObjIndex::default(),
             text_encoding,
-        };
-
-        Ok(op_set)
+        }
     }
 
     pub(crate) fn export(&self) -> (RawColumns<Uncompressed>, Vec<u8>) {
@@ -1040,9 +1033,6 @@ impl OpSet {
     }
 
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
-        let value = self.value_iter_range(range);
-        let succ = self.succ_iter_range(range);
-
         OpIter {
             pos: range.start,
             id: self.id_iter_range(range),
@@ -1055,10 +1045,10 @@ impl OpSet {
                 self.cols.key_actor.iter_range(range.clone()),
                 self.cols.key_ctr.iter_range(range.clone()),
             ),
-            succ,
+            succ: self.cols.succ_iter_range(range),
             insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
             action: ActionIter::new(self.cols.action.iter_range(range.clone())),
-            value,
+            value: self.cols.value_iter_range(range),
             marks: self.mark_info_iter_range(range),
             range: range.clone(),
             op_set: self,
