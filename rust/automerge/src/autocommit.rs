@@ -1,7 +1,6 @@
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
-use crate::change_graph::Fragment;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
@@ -13,6 +12,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
+use crate::Fragment;
 use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
