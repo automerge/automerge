@@ -1057,7 +1057,7 @@ mod tests {
         op_set2::{change::build_change, op_set::ResolvedAction, OpSet, TxOp},
         transaction::Transactable,
         types::{ObjMeta, OpId, OpType},
-        ActorId, Automerge, AutoCommit, TextEncoding, ROOT,
+        ActorId, AutoCommit, Automerge, TextEncoding, ROOT,
     };
     use rand::RngExt;
 
