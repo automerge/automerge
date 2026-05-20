@@ -7,7 +7,6 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
-pub(crate) use crate::change_graph::Fragment;
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -31,7 +30,7 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
+use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 
 pub(crate) mod current_state;
 
