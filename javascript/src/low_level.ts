@@ -12,8 +12,18 @@ import type {
   InitOptions,
   DecodedBundle,
   WasmReleaseInfo,
+  FragmentMeta,
+  Commit,
+  Fragment,
+  FragmentLevelRange,
 } from "./wasm_types.js"
-export type { ChangeToEncode } from "./wasm_types.js"
+export type {
+  ChangeToEncode,
+  FragmentMeta,
+  Commit,
+  Fragment,
+  FragmentLevelRange,
+} from "./wasm_types.js"
 import { default as initWasm } from "./wasm_bindgen_output/web/automerge_wasm.js"
 import * as WasmApi from "./wasm_bindgen_output/web/automerge_wasm.js"
 
