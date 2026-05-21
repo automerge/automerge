@@ -51,7 +51,21 @@ impl Bundle {
         Ok(Self::from_meta(op_set, changes))
     }
 
-    fn from_meta(op_set: &OpSet, changes: Vec<BundleMetadata<'_>>) -> Bundle {
+    fn from_meta(op_set: &OpSet, mut changes: Vec<BundleMetadata<'_>>) -> Bundle {
+        // Sort changes by start_op before encoding the change columns.
+        // This is a valid topological sort (a change's start_op is strictly
+        // greater than the max_op of any of its deps, which is in turn ≥ those
+        // deps' start_ops) so the bundle's "internal deps come first" invariant
+        // is preserved. Without this, change columns are encoded in whatever
+        // order callers happened to provide hashes — which for fragment
+        // bundling (topological/iteration order) thrashes the delta-encoded
+        // start_op / max_op / seq / timestamp columns and inflates output by
+        // 10–20× on common workloads.
+        changes.sort_by(|a, b| {
+            a.start_op
+                .cmp(&b.start_op)
+                .then_with(|| a.actor.cmp(&b.actor))
+        });
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)

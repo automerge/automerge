@@ -1485,6 +1485,60 @@ mod tests {
         let b = loaded.save();
         assert_eq!(a, b);
     }
+
+    /// Regression test: `bundle()` must be insensitive to the order in which
+    /// callers provide change hashes. The change-metadata columns inside a
+    /// bundle are RLE/delta encoded, so if `from_meta` didn't sort its input
+    /// the column data would thrash and the bundle would inflate 10–20× on
+    /// common workloads (this is what `bundle_fragments` was hitting because
+    /// `Fragment::members` is in topological iteration order, not start_op
+    /// order).
+    #[test]
+    fn bundle_size_is_independent_of_input_hash_order() {
+        use crate::transaction::Transactable;
+        use crate::ROOT;
+
+        let mut doc = Automerge::new();
+        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]));
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "counter", 0i64).unwrap();
+        tx.commit();
+        for i in 1..=1_000_i64 {
+            let mut tx = doc.transaction();
+            tx.put(ROOT, "counter", i).unwrap();
+            tx.commit();
+        }
+
+        let hashes: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+
+        let sorted_bytes = doc.bundle(hashes.iter().copied()).unwrap().bytes().len();
+
+        let mut reversed = hashes.clone();
+        reversed.reverse();
+        let reversed_bytes = doc.bundle(reversed).unwrap().bytes().len();
+
+        // Implementation must internally sort; the two bundles' sizes should
+        // be identical (or at worst within a handful of bytes from differing
+        // varint widths). They must NOT differ by an order of magnitude.
+        assert_eq!(
+            sorted_bytes, reversed_bytes,
+            "bundle size depends on input hash order (sorted={}, reversed={}). \
+             from_meta must sort by start_op before encoding columns.",
+            sorted_bytes, reversed_bytes
+        );
+
+        // Sanity: the bundle should be within a small constant factor of the
+        // doc's save_nocompress() size — the underlying columnar encoding is
+        // the same, just without DEFLATE.
+        let snc = doc.save_nocompress().len();
+        assert!(
+            sorted_bytes < snc * 2,
+            "bundle of all changes ({} B) is suspiciously larger than \
+             save_nocompress() ({} B); columns may not be packing.",
+            sorted_bytes,
+            snc
+        );
+    }
 }
 
 fn to_vec<'a, I, T>(iter: I) -> Result<Vec<T>, PackError>
