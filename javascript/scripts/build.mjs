@@ -188,6 +188,39 @@ function buildWasm(outputDir, gitHead) {
   runWasmBindgen("bundler")
   runWasmBindgen("web")
   runWasmBindgen("nodejs")
+
+  // Opt-in 64-bit memory build. Requires nightly Rust + rust-src.
+  // Enable with BUILD_MEMORY64=1 npm run build. Produces an additional
+  // "nodejs-memory64" target alongside the default 32-bit outputs.
+  if (process.env.BUILD_MEMORY64 === "1") {
+    console.log("building automerge-wasm for wasm64-unknown-unknown")
+    execSync(
+      "cargo +nightly build -Z build-std=std,panic_abort " +
+        "--target wasm64-unknown-unknown --release",
+      {
+        cwd: automergeWasmPath,
+        env: { ...process.env, GIT_HEAD: gitHead },
+      },
+    )
+
+    const wasm64BlobPath = path.join(
+      rustProjectDir,
+      "target",
+      "wasm64-unknown-unknown",
+      "release",
+      "automerge_wasm.wasm",
+    )
+
+    const target = "nodejs"
+    const outDirName = "nodejs-memory64"
+    const outputPath = path.join(outputDir, outDirName)
+    fs.mkdirSync(outputPath, { recursive: true })
+    console.log(`running wasm-bindgen for '${outDirName}' (memory64) target`)
+    execSync(
+      `wasm-bindgen ${wasm64BlobPath} --out-dir ${outputPath} --target ${target} --weak-refs`,
+      { cwd: __dirname },
+    )
+  }
 }
 
 /**
@@ -241,6 +274,22 @@ function copyAndFixupWasm(wasmBuildTarball, gitHead) {
   // Note: if you change this logic please update the note in `javascript/HACKING.md#getrandom-support`
   console.log("prepending webcrypto polyfill to 'automerge_wasm.cjs'")
   prependWebcryptoPolyfill(cjsWasmWrapperPath)
+
+  // Same treatment for the optional memory64 node target, if it was built.
+  const node64OutputPath = path.join(
+    jsProjectDir,
+    "src",
+    "wasm_bindgen_output",
+    "nodejs-memory64",
+  )
+  if (fs.existsSync(path.join(node64OutputPath, "automerge_wasm.js"))) {
+    console.log(
+      "renaming 'automerge_wasm.js' to 'automerge_wasm.cjs' in the nodejs-memory64 target",
+    )
+    const cjs64Path = path.join(node64OutputPath, "automerge_wasm.cjs")
+    fs.cpSync(path.join(node64OutputPath, "automerge_wasm.js"), cjs64Path)
+    prependWebcryptoPolyfill(cjs64Path)
+  }
 
   console.log("copying the 'web' target to 'workerd' directory")
   const webOutputPath = path.join(
@@ -383,6 +432,36 @@ async function transpileCjs() {
     platform: "node",
     outExtension: { ".js": ".cjs" },
   })
+
+  // The memory64 CJS bundle needs its own subdirectory because the wasm-bindgen
+  // generated nodejs glue looks up `${__dirname}/automerge_wasm_bg.wasm`, and
+  // dist/cjs/ already holds the 32-bit wasm for fullfat_node.cjs.
+  if (fs.existsSync(`${inDir}/entrypoints/fullfat_node_memory64.js`)) {
+    const memory64OutDir = path.join(outDir, "memory64")
+    console.log("building memory64 node CommonJS module")
+    await build({
+      absWorkingDir: distDir,
+      entryPoints: [`${inDir}/entrypoints/fullfat_node_memory64.js`],
+      outdir: memory64OutDir,
+      bundle: true,
+      packages: "external",
+      format: "cjs",
+      target: "node14",
+      platform: "node",
+      outExtension: { ".js": ".cjs" },
+    })
+    const memory64WasmSrc = path.join(
+      jsProjectDir,
+      "src",
+      "wasm_bindgen_output",
+      "nodejs-memory64",
+      "automerge_wasm_bg.wasm",
+    )
+    fs.copyFileSync(
+      memory64WasmSrc,
+      path.join(memory64OutDir, "automerge_wasm_bg.wasm"),
+    )
+  }
 
   const iifeDir = path.join(distDir, "iife")
   await build({

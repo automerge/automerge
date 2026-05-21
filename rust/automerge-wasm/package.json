@@ -24,7 +24,11 @@
     "bundler/automerge_wasm_bg.wasm",
     "web/automerge_wasm_bg.wasm",
     "web/automerge_wasm.js",
-    "web/index.js"
+    "web/index.js",
+    "nodejs-memory64/automerge_wasm.cjs",
+    "nodejs-memory64/automerge_wasm_bg.wasm",
+    "web-memory64/automerge_wasm.js",
+    "web-memory64/automerge_wasm_bg.wasm"
   ],
   "private": false,
   "types": "index.d.ts",
@@ -41,6 +45,10 @@
     "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
     "bindgen": "wasm-bindgen --omit-default-module-path --weak-refs --typescript --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
+    "compile:memory64": "cargo +nightly build -Z build-std=std,panic_abort --target wasm64-unknown-unknown --profile $PROFILE",
+    "bindgen:memory64": "wasm-bindgen --omit-default-module-path --weak-refs --typescript --target $BINDGEN_TARGET --out-dir $OUT_DIR ../target/wasm64-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
+    "target:memory64": "rimraf ./$OUT_DIR && npm run compile:memory64 && npm run bindgen:memory64",
+    "release:memory64": "cross-env PROFILE=release TARGET_DIR=release OUT_DIR=nodejs-memory64 BINDGEN_TARGET=nodejs npm run target:memory64 && node ./fixup-node-memory64-cjs.mjs && cross-env PROFILE=release TARGET_DIR=release OUT_DIR=web-memory64 BINDGEN_TARGET=web npm run target:memory64",
     "test": "tsc --noEmit && mocha --loader=ts-node/esm test/**/*.mts"
   },
   "devDependencies": {
@@ -62,10 +70,19 @@
     "uuid": "^9.0.0"
   },
   "exports": {
-    "types": "./index.d.ts",
-    "workerd": "./web/index.js",
-    "browser": "./bundler/automerge_wasm.js",
-    "require": "./nodejs/automerge_wasm.cjs",
-    "import": "./nodejs/automerge_wasm.cjs"
+    ".": {
+      "types": "./index.d.ts",
+      "workerd": "./web/index.js",
+      "browser": "./bundler/automerge_wasm.js",
+      "require": "./nodejs/automerge_wasm.cjs",
+      "import": "./nodejs/automerge_wasm.cjs"
+    },
+    "./memory64": {
+      "types": "./index.d.ts",
+      "workerd": "./web-memory64/automerge_wasm.js",
+      "browser": "./web-memory64/automerge_wasm.js",
+      "require": "./nodejs-memory64/automerge_wasm.cjs",
+      "import": "./nodejs-memory64/automerge_wasm.cjs"
+    }
   }
 }

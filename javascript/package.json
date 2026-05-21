@@ -16,6 +16,7 @@
     "dist/cjs/**/*.js",
     "dist/cjs/**/*.cjs",
     "dist/cjs/**/*.wasm",
+    "dist/cjs/memory64/**/*",
     "dist/iife/**/*.js",
     "dist/mjs/**/*.js",
     "dist/mjs/**/*.cjs",
@@ -57,6 +58,15 @@
       },
       "import": "./dist/mjs/entrypoints/slim.js",
       "require": "./dist/cjs/slim.cjs"
+    },
+    "./memory64": {
+      "types": "./dist/index.d.ts",
+      "node": {
+        "import": "./dist/mjs/entrypoints/fullfat_node_memory64.js",
+        "require": "./dist/cjs/memory64/fullfat_node_memory64.cjs"
+      },
+      "import": "./dist/mjs/entrypoints/fullfat_node_memory64.js",
+      "require": "./dist/cjs/memory64/fullfat_node_memory64.cjs"
     },
     "./automerge.wasm": "./dist/automerge.wasm",
     "./automerge.wasm.base64": {

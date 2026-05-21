@@ -2,6 +2,34 @@
 
 This package is a low level interface to the [automerge rust](https://github.com/automerge/automerge/tree/main/rust/automerge) CRDT.  The api is intended to be as "close to the metal" as possible with only a few ease of use accommodations.  This library is used as the underpinnings for the [Automerge JS wrapper](https://github.com/automerge/automerge/tree/main/javascript) and can be used as is or as a basis for another higher level expression of a CRDT.
 
+### Memory64 build (experimental)
+
+The default build targets `wasm32-unknown-unknown`, which caps a single
+document/repo at 4 GB of linear memory. For sync servers and other workloads
+that exceed that limit, an opt-in **Memory64** build is also published at the
+`@automerge/automerge-wasm/memory64` sub-path.
+
+Runtime requirements:
+
+- Node 24+ (V8 13.6+), Chrome 133+, Firefox 134+. Older runtimes cannot
+  instantiate memory64 modules.
+- Some early Node 24.x releases require `--experimental-wasm-memory64`.
+  Recent V8 (Node 24.15+) loads it natively.
+
+Building the memory64 artifact locally requires **nightly Rust** with the
+`rust-src` component, because `wasm64-unknown-unknown` is a Tier 3 target with
+no precompiled `std`:
+
+```sh
+rustup toolchain install nightly --component rust-src
+cd rust/automerge-wasm
+npm ci
+npm run release:memory64
+```
+
+This produces additional `nodejs-memory64/` and `web-memory64/` outputs
+alongside the default 32-bit targets.
+
 All example code can be found in `test/readme.ts`
 
 ### Why CRDT?
