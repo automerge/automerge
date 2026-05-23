@@ -54,17 +54,9 @@ impl<'a> BundleBuilder<'a> {
         mut changes: Vec<BundleMetadata<'a>>,
         mut mapper: ActorMapper<'a>,
     ) -> BundleBuilder<'a> {
-        // At entry, `changes[i].builder` is the change graph NodeIdx (set by
-        // `ChangeGraph::get_bundle_metadata`). NodeIdx is assigned in load
-        // order, which is topological — every change is loaded after its
-        // deps. Capture this topological ordering before the actor+seq sort
-        // overwrites `builder` with a column index, so we can iterate
-        // changes in dep-before-dependent order when populating the bundle
-        // (this keeps the `external` deps list small: only deps that point
-        // outside the bundle's member set become external, instead of every
-        // not-yet-added member dep).
-        let mut topo_order: Vec<usize> = (0..changes.len()).collect();
-        topo_order.sort_by_key(|&i| changes[i].builder);
+        // change[n].builder starts off as NodeIdx which is topo order
+        // writing the changes in topo order prevents un-needed hashes in the external buffer
+        changes.sort_by(|a, b| a.builder.cmp(&b.builder));
 
         let mut builders: Vec<_> = changes
             .iter()
@@ -86,8 +78,8 @@ impl<'a> BundleBuilder<'a> {
             .for_each(|(index, b)| changes[b.change].builder = index);
 
         let mut change_writer = BundleChangeWriter::new(changes.len());
-        for &i in &topo_order {
-            change_writer.add(&changes[i], &mut mapper);
+        for c in &changes {
+            change_writer.add(c, &mut mapper);
         }
 
         let op_writer = BundleOpWriter::default();
@@ -175,7 +167,7 @@ impl<'a> BundleBuilder<'a> {
         let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
         let changes_meta = change_cols.raw_columns();
         let mut ops_data_buf = Vec::new();
-        let (ops_cols, id_ctr_values) = self.op_writer.finish(&mapper, &mut ops_data_buf);
+        let (ops_cols, id_ctr) = self.op_writer.finish(&mapper, &mut ops_data_buf);
         let ops_meta = ops_cols.raw_columns();
 
         // ---- Uncompressed assembly (used in-memory for iteration) ----
@@ -230,7 +222,7 @@ impl<'a> BundleBuilder<'a> {
             actors,
             changes_meta,
             changes_data: changes_data_u_range,
-            id_ctr_values,
+            id_ctr,
             _phantom: PhantomData,
         };
 
