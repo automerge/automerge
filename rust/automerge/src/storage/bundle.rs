@@ -51,7 +51,7 @@ impl Bundle {
         Ok(Self::from_meta(op_set, changes))
     }
 
-    fn from_meta(op_set: &OpSet, mut changes: Vec<BundleMetadata<'_>>) -> Bundle {
+    fn from_meta(op_set: &OpSet, changes: Vec<BundleMetadata<'_>>) -> Bundle {
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)

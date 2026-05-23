@@ -42,7 +42,7 @@ pub(crate) struct BundleStorage<'a, OpReadState> {
     /// wire's `ID_CTR_INVERSE` column plus the change metadata, then
     /// handed to `OpIter` as a plain slice — no columnar encoding round
     /// trip.
-    pub(crate) id_ctr_values: Vec<i64>,
+    pub(crate) id_ctr: Vec<i64>,
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
@@ -58,7 +58,7 @@ impl<O: OpReadState> BundleStorage<'_, O> {
             ops_data: self.ops_data,
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
-            id_ctr_values: self.id_ctr_values,
+            id_ctr: self.id_ctr,
             _phantom: self._phantom,
         }
     }
@@ -188,20 +188,14 @@ impl<'a> BundleStorage<'a, Unverified> {
         let ops_data_range = ops.range.clone();
 
         // Fast path: nothing is compressed — keep input bytes as-is.
-        if let (Some(changes_meta), Some(ops_meta)) = (
-            changes_meta_raw.uncompressed(),
-            ops_meta_raw.uncompressed(),
-        ) {
+        if let (Some(changes_meta), Some(ops_meta)) =
+            (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
+        {
             BundleChangeIterUnverified::try_new(&changes_meta, changes.value)
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-            let id_ctr_values = extract_id_ctr_values(
-                &changes_meta,
-                changes.value,
-                &ops_meta,
-                ops.value,
-            )
-            .map_err(parse::ParseError::Error)?;
-            OpIterUnverified::try_new(&ops_meta, ops.value, &id_ctr_values)
+            let id_ctr = extract_id_ctr_values(&changes_meta, changes.value, &ops_meta, ops.value)
+                .map_err(parse::ParseError::Error)?;
+            OpIterUnverified::try_new(&ops_meta, ops.value, &id_ctr)
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
             return Ok((
                 parse::Input::empty(),
@@ -215,7 +209,7 @@ impl<'a> BundleStorage<'a, Unverified> {
                     ops_data: ops_data_range,
                     changes_meta,
                     changes_data: changes_data_range,
-                    id_ctr_values,
+                    id_ctr,
                     _phantom: PhantomData,
                 },
             ));
@@ -233,7 +227,10 @@ impl<'a> BundleStorage<'a, Unverified> {
 
         let mut changes_data_buf = Vec::new();
         let changes_meta = changes_meta_raw
-            .uncompress(&full_bytes[changes_data_range.clone()], &mut changes_data_buf)
+            .uncompress(
+                &full_bytes[changes_data_range.clone()],
+                &mut changes_data_buf,
+            )
             .map_err(|_| parse::ParseError::Error(ParseError::CompressedChangeCols))?;
         changes_meta.write(&mut out);
         let new_changes_start = out.len();
@@ -254,14 +251,14 @@ impl<'a> BundleStorage<'a, Unverified> {
             &out[new_changes_start..new_changes_end],
         )
         .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-        let id_ctr_values = extract_id_ctr_values(
+        let id_ctr = extract_id_ctr_values(
             &changes_meta,
             &out[new_changes_start..new_changes_end],
             &ops_meta,
             &out[new_ops_start..new_ops_end],
         )
         .map_err(parse::ParseError::Error)?;
-        OpIterUnverified::try_new(&ops_meta, &out[new_ops_start..new_ops_end], &id_ctr_values)
+        OpIterUnverified::try_new(&ops_meta, &out[new_ops_start..new_ops_end], &id_ctr)
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
 
         Ok((
@@ -276,7 +273,7 @@ impl<'a> BundleStorage<'a, Unverified> {
                 ops_data: new_ops_start..new_ops_end,
                 changes_meta,
                 changes_data: new_changes_start..new_changes_end,
-                id_ctr_values,
+                id_ctr,
                 _phantom: PhantomData,
             },
         ))
@@ -299,14 +296,14 @@ impl<'a> BundleStorage<'a, Unverified> {
             ops_data: self.ops_data,
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
-            id_ctr_values: self.id_ctr_values,
+            id_ctr: self.id_ctr,
             _phantom: PhantomData,
         })
     }
 
     pub(crate) fn iter_ops(&self) -> OpIterUnverified<'_> {
         let bytes = &self.bytes[self.ops_data.clone()];
-        OpIterUnverified::new(&self.ops_meta, bytes, &self.id_ctr_values)
+        OpIterUnverified::new(&self.ops_meta, bytes, &self.id_ctr)
     }
 
     fn iter_change_meta(&self) -> BundleChangeIterUnverified<'_> {
@@ -330,7 +327,7 @@ impl BundleStorage<'_, Verified> {
 
     pub(crate) fn iter_ops(&self) -> OpIter<'_> {
         let bytes = &self.bytes[self.ops_data.clone()];
-        OpIter::new(&self.ops_meta, bytes, &self.id_ctr_values)
+        OpIter::new(&self.ops_meta, bytes, &self.id_ctr)
     }
 
     pub(crate) fn iter_change_meta(&self) -> BundleChangeIter<'_> {
