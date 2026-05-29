@@ -3,6 +3,7 @@ use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
+use crate::transaction::TransactionArgs;
 use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
 use crate::{ChangeHash, Patch};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -47,6 +48,10 @@ pub struct PatchLog {
     path_hint: usize,
     pub(crate) heads: Option<Vec<ChangeHash>>,
     pub(crate) actors: Vec<ActorId>,
+    /// Actors which were speculatively added to `actors` when a transaction was opened. If the
+    /// transaction produces no ops the actor is removed from the document again on commit/rollback,
+    /// so these must be removed from the patch log too (see [`PatchLog::finish_transaction`]).
+    speculative_actor: Option<ActorId>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -151,6 +156,60 @@ impl Event {
             event => event,
         }
     }
+
+    // Re-index this event after the actor at `idx` has been removed from the actor list.
+    //
+    // This may only be called for actors which are not referenced by the event (e.g. an actor
+    // which was speculatively added when opening a transaction but ended up making no ops). If the
+    // event _does_ reference the removed actor this returns `None`.
+    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+        Some(match self {
+            Self::PutMap {
+                key,
+                value,
+                id,
+                conflict,
+            } => Self::PutMap {
+                key,
+                value,
+                id: id.without_actor(idx)?,
+                conflict,
+            },
+            Self::PutSeq {
+                index,
+                value,
+                id,
+                conflict,
+            } => Self::PutSeq {
+                index,
+                value,
+                id: id.without_actor(idx)?,
+                conflict,
+            },
+            Self::Insert {
+                index,
+                value,
+                id,
+                conflict,
+            } => Self::Insert {
+                index,
+                value,
+                id: id.without_actor(idx)?,
+                conflict,
+            },
+            Self::IncrementMap { key, n, id } => Self::IncrementMap {
+                key,
+                n,
+                id: id.without_actor(idx)?,
+            },
+            Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
+                index,
+                n,
+                id: id.without_actor(idx)?,
+            },
+            event => event,
+        })
+    }
 }
 
 impl PatchLog {
@@ -173,6 +232,7 @@ impl PatchLog {
             path_map: Default::default(),
             path_hint: 0,
             actors: vec![],
+            speculative_actor: None,
         }
     }
 
@@ -433,6 +493,7 @@ impl PatchLog {
             path_hint: 0,
             heads: None,
             actors: self.actors.clone(),
+            speculative_actor: None,
         }
     }
 
@@ -450,30 +511,95 @@ impl PatchLog {
             .collect();
     }
 
-    // if a new actor is added to an opset, the id's inside the patch log need to be re-ordered
-    // this is an uncommon operation so this seems preferable to storing ExId's in place
-    // for every objid and opid
+    fn remove_actor(&mut self, index: usize) {
+        self.actors.remove(index);
+
+        let dirty = std::mem::take(&mut self.events);
+        self.events = dirty
+            .into_iter()
+            .filter_map(|(o, e)| Some((o.without_actor(index)?, e.without_actor(index)?)))
+            .collect();
+
+        let dirty = std::mem::take(&mut self.expose);
+        self.expose = dirty
+            .into_iter()
+            .filter_map(|id| id.without_actor(index))
+            .collect();
+    }
+
+    /// Notify the patch log that we are beginning a new transaction
+    ///
+    /// This is necessary because the transaction may be creating a new actor,
+    /// which needs to be tracked as speculative until the transaction is
+    /// committed or rolled back so that if the transaction produces no ops the
+    /// actor can be removed from the document in [`Self::finish_transaction`]
+    pub(crate) fn begin_transaction(
+        &mut self,
+        doc: &Automerge,
+        args: &TransactionArgs,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.migrate_actors(&doc.ops.actors)?;
+        // If this is the actor's first change then the actor was (potentially)
+        // just added to the document. It should be removed again on
+        // commit/rollback if the transaction produces no ops, so flag it as
+        // speculative.
+        if let Some(speculative_actor) =
+            (args.seq == 1).then(|| doc.ops.actors[args.actor_index].clone())
+        {
+            assert!(
+                self.speculative_actor.is_none(),
+                "beginning a transaction when a speculative actor is already present"
+            );
+            self.speculative_actor = Some(speculative_actor);
+        }
+        Ok(())
+    }
+
+    /// Notify the patch log that the transaction has finished
+    ///
+    /// This allows the patch log to clean up any speculative actors that were added
+    /// when the transaction began. This method should be called after the transaction
+    /// has been committed or rolled back.
+    pub(crate) fn finish_transaction(&mut self, doc_actors: &[ActorId]) {
+        let Some(speculative_actor) = self.speculative_actor.take() else {
+            return;
+        };
+        if !doc_actors.contains(&speculative_actor) {
+            if let Ok(index) = self.actors.binary_search(&speculative_actor) {
+                self.remove_actor(index);
+            }
+        }
+        debug_assert_eq!(self.actors.as_slice(), doc_actors);
+    }
+
+    // Re-align this patch log's actor list (and the event indices into it) with the document's
+    // actor list (`others`).
+    //
+    // The document's actor list can grow between uses of a patch log (e.g. applying changes adds
+    // new actors). Because actor lists are sorted, inserting a new actor shifts the indices of the
+    // actors after it, so the event ids stored in the patch log have to be re-indexed to match.
     pub(crate) fn migrate_actors(
         &mut self,
-        others: &Vec<ActorId>,
+        others: &[ActorId],
     ) -> Result<(), crate::PatchLogMismatch> {
-        if &self.actors != others {
-            if self.actors.is_empty() {
-                self.actors = others.clone();
-                return Ok(());
-            }
-            for i in 0..others.len() {
-                match (self.actors.get(i), others.get(i)) {
-                    (Some(a), Some(b)) if a == b => {}
-                    (Some(a), Some(b)) if b < a => {
-                        self.actors.insert(i, b.clone());
-                        self.migrate_actor(i);
-                    }
-                    (None, Some(b)) => {
-                        self.actors.insert(i, b.clone());
-                    }
-                    _ => return Err(crate::PatchLogMismatch),
+        if self.actors.as_slice() == others {
+            return Ok(());
+        }
+        if self.actors.is_empty() {
+            self.actors = others.to_vec();
+            return Ok(());
+        }
+        for i in 0..others.len() {
+            match (self.actors.get(i), others.get(i)) {
+                (Some(a), Some(b)) if a == b => {}
+                (Some(a), Some(b)) if b < a => {
+                    self.actors.insert(i, b.clone());
+                    self.migrate_actor(i);
                 }
+                (None, Some(b)) => {
+                    self.actors.insert(i, b.clone());
+                }
+                _ => return Err(crate::PatchLogMismatch),
             }
         }
         Ok(())

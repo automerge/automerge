@@ -1,7 +1,7 @@
 use crate::exid::ExId;
 use crate::patches::PatchLog;
 use crate::ChangeHash;
-use crate::{automerge::Automerge, AutomergeError, PatchLogMismatch};
+use crate::{automerge::Automerge, AutomergeError};
 
 use super::{CommitOptions, TransactionArgs, TransactionInner};
 
@@ -27,19 +27,12 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    pub(crate) fn new(
-        doc: &'a mut Automerge,
-        args: TransactionArgs,
-        mut patch_log: PatchLog,
-    ) -> Result<Self, PatchLogMismatch> {
-        patch_log
-            .migrate_actors(&doc.ops().actors)
-            .map_err(|_| PatchLogMismatch)?;
-        Ok(Self {
+    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, patch_log: PatchLog) -> Self {
+        Self {
             inner: Some(TransactionInner::new(args)),
             doc,
             patch_log,
-        })
+        }
     }
 
     /// Get the hash of the change that contains the given opid.
@@ -74,6 +67,7 @@ impl Transaction<'_> {
     pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, None, None);
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         // TODO - remove this clone
         (hash, self.patch_log.clone())
     }
@@ -97,6 +91,7 @@ impl Transaction<'_> {
     pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, options.message, options.time);
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         // TODO - remove this clone
         (hash, self.patch_log.clone())
     }
@@ -104,6 +99,7 @@ impl Transaction<'_> {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(mut self) -> usize {
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         self.inner.take().unwrap().rollback(self.doc)
     }
 

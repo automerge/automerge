@@ -354,9 +354,9 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
+        let patch_log = PatchLog::inactive();
         let args = self.transaction_args(None);
-        Transaction::new(self, args, PatchLog::inactive())
-            .expect("inactive patch log should not mismatch")
+        Transaction::new(self, args, patch_log)
     }
 
     /// Start a transaction which records changes in a [`PatchLog`]
@@ -366,10 +366,11 @@ impl Automerge {
     /// another document.
     pub fn transaction_log_patches(
         &mut self,
-        patch_log: PatchLog,
+        mut patch_log: PatchLog,
     ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
         let args = self.transaction_args(None);
-        Transaction::new(self, args, patch_log)
+        patch_log.begin_transaction(self, &args)?;
+        Ok(Transaction::new(self, args, patch_log))
     }
 
     /// Start a transaction isolated at a given heads
@@ -379,11 +380,12 @@ impl Automerge {
     /// another document.
     pub fn transaction_at(
         &mut self,
-        patch_log: PatchLog,
+        mut patch_log: PatchLog,
         heads: &[ChangeHash],
     ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
         let args = self.transaction_args(Some(heads));
-        Transaction::new(self, args, patch_log)
+        patch_log.begin_transaction(self, &args)?;
+        Ok(Transaction::new(self, args, patch_log))
     }
 
     /// Start a transaction that owns the document, consuming `self`.
@@ -438,6 +440,7 @@ impl Automerge {
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
         let checkpoint = self.ops.save_checkpoint();
+
         TransactionArgs {
             actor_index,
             seq,
@@ -558,6 +561,7 @@ impl Automerge {
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
     pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
+        // No patch log is recorded for an empty change, so migrate a throwaway one.
         let args = self.transaction_args(None);
         Transaction::empty(self, args, opts)
     }

@@ -41,9 +41,7 @@ impl OwnedTransaction {
     ) -> Result<Self, PatchLogMismatch> {
         let args = doc.transaction_args(heads);
         let mut patch_log = patch_log.unwrap_or_else(PatchLog::inactive);
-        patch_log
-            .migrate_actors(&doc.ops().actors)
-            .map_err(|_| PatchLogMismatch)?;
+        patch_log.begin_transaction(&doc, &args)?;
         Ok(Self {
             inner: Some(TransactionInner::new(args)),
             patch_log,
@@ -72,6 +70,7 @@ impl OwnedTransaction {
     pub fn commit(mut self) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(&mut self.doc, None, None);
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         (self.doc, hash, self.patch_log)
     }
 
@@ -82,12 +81,14 @@ impl OwnedTransaction {
     ) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(&mut self.doc, options.message, options.time);
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         (self.doc, hash, self.patch_log)
     }
 
     /// Rollback the transaction, returning the document and number of cancelled ops.
     pub fn rollback(mut self) -> (Automerge, usize) {
         let cancelled = self.inner.take().unwrap().rollback(&mut self.doc);
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         (self.doc, cancelled)
     }
 

@@ -2666,3 +2666,59 @@ fn reproduce_clock_cache_bug() {
 
     assert!(base.get_changes(&heads).is_empty());
 }
+
+#[test]
+fn merge_panic_after_putting_value_equal_to_initial_value() {
+    // Regression test for https://github.com/automerge/automerge/issues/1390
+    //
+    // Putting a value equal to the existing value is a no-op, so the transaction produces no ops
+    // and the actor that was speculatively added when the transaction was opened is removed again
+    // on commit. This used to leave the AutoCommit's internal patch log with an actor that the
+    // document no longer had, causing a panic (later a `PatchLogMismatch`) on the next merge.
+    let mut base = AutoCommit::new().with_actor(ActorId::from(b"base".as_slice()));
+    base.put(ROOT, "a", 1i64).unwrap();
+
+    let mut left = base.fork().with_actor(ActorId::from(b"left".as_slice()));
+    let mut right = base.fork().with_actor(ActorId::from(b"right".as_slice()));
+
+    // Equal to the initial value -> no-op
+    left.put(ROOT, "a", 1i64).unwrap();
+    right.put(ROOT, "a", 0i64).unwrap();
+
+    left.merge(&mut right).unwrap();
+
+    // "right" wins the conflict (higher actor id), so "a" should be 0.
+    assert_eq!(left.get(ROOT, "a").unwrap().unwrap().0, Value::int(0));
+
+    // Diffing produces a consistent set of patches without panicking and the document state
+    // matches a freshly loaded copy.
+    left.diff_incremental();
+    let reloaded = AutoCommit::load(&left.save()).unwrap();
+    assert_eq!(reloaded.get(ROOT, "a").unwrap().unwrap().0, Value::int(0));
+}
+
+#[test]
+fn merge_after_noop_then_real_put() {
+    // A no-op transaction followed by a real transaction must leave the patch log's actor list
+    // consistent with the document so that a subsequent merge does not error.
+    // Related to https://github.com/automerge/automerge/issues/1390
+    let mut base = AutoCommit::new().with_actor(ActorId::from(b"base".as_slice()));
+    base.put(ROOT, "a", 1i64).unwrap();
+
+    let mut left = base.fork().with_actor(ActorId::from(b"left".as_slice()));
+    let mut right = base.fork().with_actor(ActorId::from(b"right".as_slice()));
+
+    // No-op (equal value) then a real change in a separate commit on the same actor.
+    left.put(ROOT, "a", 1i64).unwrap();
+    left.commit();
+    left.put(ROOT, "b", "hello").unwrap();
+    left.commit();
+
+    right.put(ROOT, "a", 0i64).unwrap();
+
+    left.merge(&mut right).unwrap();
+    left.diff_incremental();
+
+    assert_eq!(left.get(ROOT, "a").unwrap().unwrap().0, Value::int(0));
+    assert_eq!(left.get(ROOT, "b").unwrap().unwrap().0, Value::str("hello"));
+}
