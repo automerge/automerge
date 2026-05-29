@@ -89,7 +89,7 @@ impl TransactionInner {
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
     ///
-    /// Returns `None` if there were no operations to commit
+    /// Returns `None` if there were no operations to commit.
     #[tracing::instrument(skip(self, doc))]
     pub(crate) fn commit(
         self,

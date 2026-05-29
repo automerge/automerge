@@ -398,11 +398,11 @@ impl AutoCommit {
     pub(crate) fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args(self.isolation.as_deref());
+            // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
+            // always belongs to this document and can never mismatch.
             self.patch_log
-                .migrate_actors(&self.doc.ops().actors)
-                // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
-                // should always belong to this document.
-                .unwrap();
+                .begin_transaction(&self.doc, &args)
+                .expect("AutoCommit's patch log always belongs to its document");
             let inner = TransactionInner::new(args);
             let branch = self.patch_log.branch();
             self.transaction = Some((branch, inner));
@@ -413,6 +413,7 @@ impl AutoCommit {
         if let Some((patch_log, tx)) = self.transaction.take() {
             self.patch_log.merge(patch_log);
             let hash = tx.commit(&mut self.doc, None, None);
+            self.patch_log.finish_transaction(&self.doc.ops().actors);
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
@@ -654,6 +655,7 @@ impl AutoCommit {
         let (patch_log, tx) = self.transaction.take().unwrap();
         self.patch_log.merge(patch_log);
         let hash = tx.commit(&mut self.doc, options.message, options.time);
+        self.patch_log.finish_transaction(&self.doc.ops().actors);
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
         }
@@ -664,7 +666,11 @@ impl AutoCommit {
     pub fn rollback(&mut self) -> usize {
         self.transaction
             .take()
-            .map(|(_, tx)| tx.rollback(&mut self.doc))
+            .map(|(_, tx)| {
+                let num = tx.rollback(&mut self.doc);
+                self.patch_log.finish_transaction(&self.doc.ops().actors);
+                num
+            })
             .unwrap_or(0)
     }
 
@@ -680,7 +686,14 @@ impl AutoCommit {
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_closed();
         let args = self.doc.transaction_args(None);
-        TransactionInner::empty(&mut self.doc, args, options.message, options.time)
+        // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
+        // always belongs to this document and can never mismatch.
+        self.patch_log
+            .begin_transaction(&self.doc, &args)
+            .expect("AutoCommit's patch log always belongs to its document");
+        let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
+        self.patch_log.finish_transaction(&self.doc.ops.actors);
+        result
     }
 
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
