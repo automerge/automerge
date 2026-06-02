@@ -1,12 +1,12 @@
-use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef};
 use crate::op_set2::SuccInsert;
+use crate::patches::PatchAccumulator;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
-use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
+use crate::{Automerge, Change, ChangeHash};
 use crate::{AutomergeError, TextEncoding};
 
 use super::super::op::{ChangeOp, Op, OpBuilder};
@@ -14,7 +14,7 @@ use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
@@ -56,19 +56,32 @@ struct Untangler<'a> {
     index: usize,
     max: usize,
     width: usize,
+    dirty_sequence_registers: &'a mut Vec<(ObjId, ElemId)>,
 }
 
 impl<'a> Untangler<'a> {
-    fn flush(&mut self, log: &mut PatchLog) {
+    fn mark_doc_op_register_dirty(&mut self, doc_op: &Op<'_>) {
+        if let Some(elemid) = sequence_register_elemid(doc_op) {
+            self.dirty_sequence_registers.push((self.value.obj, elemid));
+        }
+    }
+
+    fn flush(&mut self, log: &mut PatchAccumulator) {
         self.value.list_flush(self.index, log);
         self.top.reset(self.conflicts);
         self.index += self.width;
         self.width = 0;
     }
 
-    fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
+    fn handle_doc_op(
+        &mut self,
+        doc_op: &Op<'a>,
+        succ: &mut Vec<SuccInsert>,
+        log: &mut PatchAccumulator,
+    ) {
         let mut deleted = false;
         if let Some(v) = self.pred.remove(&doc_op.id) {
+            self.mark_doc_op_register_dirty(doc_op);
             for (id, inc) in v {
                 deleted |= inc.is_none();
                 succ.push(doc_op.add_succ(id, inc));
@@ -92,6 +105,9 @@ impl<'a> Untangler<'a> {
             if doc_op.insert || doc_op.id > self.change_ops[last].id() {
                 self.updates_stack.pop();
                 self.change_ops[last].pos = Some(doc_op.pos);
+                if !self.change_ops[last].pred().is_empty() {
+                    self.mark_doc_op_register_dirty(doc_op);
+                }
                 self.change_ops[last].subsort = self.count;
                 if self.change_ops[last].visible() {
                     self.width = self.change_ops[last].width(self.seq_type, self.text_encoding);
@@ -123,13 +139,13 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    fn finish_inserts(&mut self, log: &mut PatchLog) {
+    fn finish_inserts(&mut self, log: &mut PatchAccumulator) {
         while !self.stack.is_empty() {
             self.untangle_inner(self.max, log);
         }
     }
 
-    fn finish(mut self, log: &mut PatchLog) {
+    fn finish(mut self, log: &mut PatchAccumulator) {
         self.finish_updates();
 
         self.flush(log);
@@ -150,7 +166,7 @@ impl<'a> Untangler<'a> {
         });
     }
 
-    fn untangle_inserts(&mut self, id: OpId, insert_pos: usize, log: &mut PatchLog) {
+    fn untangle_inserts(&mut self, id: OpId, insert_pos: usize, log: &mut PatchAccumulator) {
         self.flush(log);
 
         if let Err(n) = self
@@ -165,11 +181,13 @@ impl<'a> Untangler<'a> {
             self.stack.extend(v);
         }
         if let Some(u) = self.updates.get(&ElemId(id)) {
+            self.dirty_sequence_registers
+                .push((self.value.obj, ElemId(id)));
             self.updates_stack.extend(u.iter().rev());
         }
     }
 
-    fn untangle_inner(&mut self, insert_pos: usize, log: &mut PatchLog) -> Option<()> {
+    fn untangle_inner(&mut self, insert_pos: usize, log: &mut PatchAccumulator) -> Option<()> {
         let mut pos = self.stack.pop()?;
         let op = self.change_ops.get_mut(pos)?;
 
@@ -258,6 +276,7 @@ impl<'a> Untangler<'a> {
         change_ops: &'a mut [ChangeOp],
         pred: &'a mut PredCache,
         max: usize,
+        dirty_sequence_registers: &'a mut Vec<(ObjId, ElemId)>,
     ) -> Self {
         let mut e_to_i = SmallHashMap::default();
         let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
@@ -280,6 +299,7 @@ impl<'a> Untangler<'a> {
                         entry.entry(e.0).or_default().push(i);
                     }
                 } else if last_e != Some(*e) {
+                    dirty_sequence_registers.push((obj, *e));
                     updates.entry(*e).or_default().push(i);
                 }
                 if op.insert() {
@@ -307,6 +327,7 @@ impl<'a> Untangler<'a> {
             width: 0,
             value,
             max,
+            dirty_sequence_registers,
         }
     }
 }
@@ -315,7 +336,7 @@ fn walk_list<'a>(
     mut ut: Untangler<'a>,
     doc_ops: OpIter<'a>,
     succ: &mut Vec<SuccInsert>,
-    log: &mut PatchLog,
+    log: &mut PatchAccumulator,
 ) {
     for op in doc_ops {
         ut.element_update(&op);
@@ -332,7 +353,7 @@ fn walk_list<'a>(
 
 struct MapWalker<'a, 'b> {
     ops: OpIter<'a>,
-    log: &'b mut PatchLog,
+    log: &'b mut PatchAccumulator,
     pred: &'b mut PredCache,
     succ: &'b mut Vec<SuccInsert>,
     value: ValueState<'a>,
@@ -340,6 +361,11 @@ struct MapWalker<'a, 'b> {
     doc_op: Option<Op<'a>>,
     conflicts: &'b mut Vec<Adjust>,
     top: Top,
+    dirty_logical_ranges: &'b mut Vec<Range<usize>>,
+    current_doc_key: Option<KeyRef<'static>>,
+    current_key_start: Option<usize>,
+    current_key_end: usize,
+    dirty_key_start: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -398,8 +424,9 @@ impl<'a, 'b> MapWalker<'a, 'b> {
         text_encoding: TextEncoding,
         pred: &'b mut PredCache,
         succ: &'b mut Vec<SuccInsert>,
-        log: &'b mut PatchLog,
+        log: &'b mut PatchAccumulator,
         conflicts: &'b mut Vec<Adjust>,
+        dirty_logical_ranges: &'b mut Vec<Range<usize>>,
     ) -> Self {
         let pos = ops.pos();
         let doc_op = ops.next();
@@ -415,6 +442,33 @@ impl<'a, 'b> MapWalker<'a, 'b> {
             value,
             conflicts,
             top,
+            dirty_logical_ranges,
+            current_doc_key: None,
+            current_key_start: None,
+            current_key_end: pos,
+            dirty_key_start: None,
+        }
+    }
+
+    fn begin_doc_key(&mut self, doc_op: &Op<'_>) {
+        let key = key_ref_static(doc_op.elemid_or_key());
+        if self.current_doc_key.as_ref() != Some(&key) {
+            self.finish_dirty_key();
+            self.current_doc_key = Some(key);
+            self.current_key_start = Some(doc_op.pos);
+        }
+    }
+
+    fn mark_current_key_dirty(&mut self) {
+        if self.dirty_key_start.is_none() {
+            self.dirty_key_start = self.current_key_start;
+        }
+    }
+
+    fn finish_dirty_key(&mut self) {
+        if let Some(start) = self.dirty_key_start.take() {
+            self.dirty_logical_ranges
+                .push(start..self.current_key_end.max(start + 1));
         }
     }
 
@@ -443,20 +497,29 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 
     fn advance_doc_op(&mut self, pos: usize, ops: &mut [ChangeOp]) {
-        while let Some(d) = self.doc_op.as_ref() {
+        while let Some(d) = self.doc_op.clone() {
             // TODO - sometimes we can fast forward to the next property
             match d.key.partial_cmp(ops[pos].key()) {
-                Some(Ordering::Greater) => break,
+                Some(Ordering::Greater) => {
+                    self.finish_dirty_key();
+                    break;
+                }
                 Some(Ordering::Equal) if d.id > ops[pos].id() => break,
                 _ => {
-                    let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
+                    self.begin_doc_key(&d);
+                    let pred = process_pred(Some(&d), self.pred, self.succ);
+                    if pred.changed {
+                        self.mark_current_key_dirty();
+                    }
+                    let deleted = pred.deleted;
                     if d.prop() != self.value.key {
                         self.value.map_flush(self.log);
                         self.value.key = d.prop();
                         self.top.reset(self.conflicts);
                     }
-                    self.value.process_doc_op(d, deleted);
-                    self.top.process_doc_op(ops, d, deleted);
+                    self.value.process_doc_op(&d, deleted);
+                    self.top.process_doc_op(ops, &d, deleted);
+                    self.current_key_end = d.pos + 1;
                 }
             }
             self.next_doc_op();
@@ -464,33 +527,67 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 
     fn finish(&mut self, ops: &mut [ChangeOp]) {
-        while let Some(d) = self.doc_op.as_ref() {
-            let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
+        while let Some(d) = self.doc_op.clone() {
+            self.begin_doc_key(&d);
+            let pred = process_pred(Some(&d), self.pred, self.succ);
+            if pred.changed {
+                self.mark_current_key_dirty();
+            }
+            let deleted = pred.deleted;
             if d.prop() == self.value.key {
-                self.top.process_doc_op(ops, d, deleted);
-                self.value.process_doc_op(d, deleted);
+                self.top.process_doc_op(ops, &d, deleted);
+                self.value.process_doc_op(&d, deleted);
+                self.current_key_end = d.pos + 1;
                 self.next_doc_op();
             } else {
+                self.finish_dirty_key();
                 break;
             }
         }
+        self.finish_dirty_key();
         self.value.map_flush(self.log);
         self.top.reset(self.conflicts);
     }
 }
 
-fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
+#[derive(Debug, Clone, Copy, Default)]
+struct PredEffect {
+    changed: bool,
+    deleted: bool,
+}
+
+fn process_pred(
+    doc_op: Option<&Op<'_>>,
+    pred: &mut PredCache,
+    succ: &mut Vec<SuccInsert>,
+) -> PredEffect {
+    let mut effect = PredEffect::default();
     if let Some(d) = doc_op {
-        let mut deleted = false;
         if let Some(v) = pred.remove(&d.id) {
+            effect.changed = true;
             for (id, inc) in v {
-                deleted |= inc.is_none();
+                effect.deleted |= inc.is_none();
                 succ.push(d.add_succ(id, inc));
             }
         }
-        deleted
+    }
+    effect
+}
+
+fn key_ref_static(key: KeyRef<'_>) -> KeyRef<'static> {
+    match key {
+        KeyRef::Map(key) => KeyRef::Map(Cow::Owned(key.into_owned())),
+        KeyRef::Seq(elem) => KeyRef::Seq(elem),
+    }
+}
+
+fn sequence_register_elemid(op: &Op<'_>) -> Option<ElemId> {
+    if op.action == Action::Mark {
+        None
+    } else if let KeyRef::Seq(elemid) = op.elemid_or_key() {
+        Some(elemid)
     } else {
-        false
+        None
     }
 }
 
@@ -642,7 +739,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn map_flush(&mut self, log: &mut PatchLog) {
+    fn map_flush(&mut self, log: &mut PatchAccumulator) {
         let obj = self.obj;
         let change = self.change.take();
         let doc = self.doc.take();
@@ -651,7 +748,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
+    fn list_flush(&mut self, index: usize, log: &mut PatchAccumulator) {
         if self.key.take().is_none() {
             return;
         }
@@ -721,7 +818,7 @@ impl<'a> ValueState<'a> {
         key: &str,
         doc: OpValueOption,
         change: OpValueOption,
-        log: &mut PatchLog,
+        log: &mut PatchAccumulator,
     ) {
         match (doc.into_value(), change.into_value()) {
             (None, Some(c)) => {
@@ -802,14 +899,11 @@ impl BatchApply {
         doc.remove_unused_actors(true);
     }
 
-    pub(crate) fn apply(
-        &mut self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
+    pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchAccumulator) {
         self.insert_new_actors(doc);
 
-        log.migrate_actors(&doc.ops().actors)?;
+        log.migrate_actors(&doc.ops().actors)
+            .expect("inactive patch log cannot mismatch");
 
         self.import_ops(doc);
 
@@ -822,6 +916,9 @@ impl BatchApply {
         let mut walker = ObjWalker::new(doc.ops());
 
         let mut conflicts = vec![];
+        let mut dirty_ranges = vec![];
+        let mut dirty_logical_ranges = vec![];
+        let mut dirty_sequence_registers = vec![];
 
         for os in &self.obj_spans {
             let obj_range = walker.seek_to_obj(os.obj);
@@ -836,6 +933,7 @@ impl BatchApply {
                         &mut succ,
                         log,
                         &mut conflicts,
+                        &mut dirty_logical_ranges,
                     );
                     let change_ops = &mut self.ops[os.span.clone()];
                     walk_map(&mut walker, change_ops);
@@ -846,6 +944,13 @@ impl BatchApply {
                         ObjType::List => SequenceType::List,
                         _ => unreachable!(),
                     };
+                    if otype == ObjType::Text
+                        && self.ops[os.span.clone()]
+                            .iter()
+                            .any(|op| op.action() == Action::Mark)
+                    {
+                        dirty_ranges.push(obj_range.clone());
+                    }
                     let ut = Untangler::new(
                         os.obj,
                         sequence_type,
@@ -854,6 +959,7 @@ impl BatchApply {
                         &mut self.ops[os.span.clone()],
                         &mut self.pred,
                         doc_ops.end_pos(),
+                        &mut dirty_sequence_registers,
                     );
                     walk_list(ut, doc_ops, &mut succ, log);
                 }
@@ -884,10 +990,15 @@ impl BatchApply {
 
         doc.ops.add_succ(&succ);
 
+        dirty_logical_ranges.extend(dirty_ranges);
+        doc.ops_mut().mark_dirty_ranges(dirty_logical_ranges);
+
         self.insert_runs_of_ops(doc);
 
+        doc.ops_mut()
+            .mark_dirty_sequence_registers(dirty_sequence_registers);
+
         debug_assert!(doc.ops.validate_op_order());
-        Ok(())
     }
 
     fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
@@ -978,49 +1089,111 @@ struct ObjSpan {
 }
 
 impl Automerge {
-    pub fn apply_changes_batch(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
-    }
-
-    pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
+    pub fn apply_changes_batch<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
-        log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        let mut log = PatchAccumulator::inactive();
+
+        // Pool all incoming changes together with any previously queued orphans.
+        let mut pool: Vec<Change> = self.queue.take();
+        let mut seen: HashSet<ChangeHash> = pool.iter().map(|c| c.hash()).collect();
+        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
+        for c in &pool {
+            actor_seqs
+                .entry(c.actor_id().clone())
+                .or_default()
+                .insert(c.seq());
+        }
+
         // Add new changes, deduplicating and checking for duplicate seq numbers.
-        let mut batch = ChangeBatch::new();
         for c in changes {
             let hash = c.hash();
-            if self.change_graph.has_change(&hash) {
+            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
                 continue;
             }
-            if self.queue.has_hash(&c.hash()) {
-                continue;
-            }
-            if self.has_actor_seq(&c) || self.queue.has_actor_seq(&c) {
+            if self.has_actor_seq(&c)
+                || actor_seqs
+                    .get(c.actor_id())
+                    .is_some_and(|s| s.contains(&c.seq()))
+            {
+                // Put pool back as queue before returning error
+                for pc in pool {
+                    self.queue.push(pc);
+                }
                 return Err(AutomergeError::DuplicateSeqNumber(
                     c.seq(),
                     c.actor_id().clone(),
                 ));
             }
-            batch.push(c)?;
+            seen.insert(hash);
+            actor_seqs
+                .entry(c.actor_id().clone())
+                .or_default()
+                .insert(c.seq());
+            pool.push(c);
         }
 
-        self.queue.extend(batch);
-
-        if self.queue.is_empty() {
+        if pool.is_empty() {
             return Ok(());
         }
 
-        let mut chap = BatchApply::default();
-        for c in self.queue.pop_topo_sorted_ready(&self.change_graph) {
-            chap.push(c);
+        // Kahn's algorithm: topological sort of the pool.
+        let n = pool.len();
+        let mut unsatisfied = vec![0u32; n];
+        let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
+
+        for (i, c) in pool.iter().enumerate() {
+            for dep in c.deps() {
+                if !self.change_graph.has_change(dep) {
+                    unsatisfied[i] += 1;
+                    waiting_on.entry(*dep).or_default().push(i);
+                }
+            }
         }
 
-        Ok(chap.apply(self, log)?)
+        let mut ready: VecDeque<usize> = VecDeque::new();
+        for (i, &count) in unsatisfied.iter().enumerate() {
+            if count == 0 {
+                ready.push_back(i);
+            }
+        }
+
+        let mut topo_order: Vec<usize> = Vec::new();
+        while let Some(idx) = ready.pop_front() {
+            let hash = pool[idx].hash();
+            topo_order.push(idx);
+            if let Some(dependents) = waiting_on.remove(&hash) {
+                for dep_idx in dependents {
+                    unsatisfied[dep_idx] -= 1;
+                    if unsatisfied[dep_idx] == 0 {
+                        ready.push_back(dep_idx);
+                    }
+                }
+            }
+        }
+
+        // Split pool into ready (topo-sorted) and orphaned.
+        let mut consumed = vec![false; n];
+        for &idx in &topo_order {
+            consumed[idx] = true;
+        }
+        let mut slots: Vec<Option<Change>> = pool.into_iter().map(Some).collect();
+
+        let mut chap = BatchApply::default();
+        for idx in topo_order {
+            if let Some(c) = slots[idx].take() {
+                chap.push(c);
+            }
+        }
+
+        for c in slots.into_iter().flatten() {
+            self.queue.push(c);
+        }
+
+        chap.apply(self, &mut log);
+
+        Ok(())
     }
 
     fn import_ops_to(

@@ -230,6 +230,10 @@ impl MarkIndexColumn {
         self.data.len()
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>> {
         self.data.values().iter()
     }

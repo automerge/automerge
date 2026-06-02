@@ -173,17 +173,17 @@ mod test {
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "aaa", "aaa").unwrap();
-        let (Some(h0), _) = tx.commit() else { panic!() };
+        let Some(h0) = tx.commit() else { panic!() };
 
         let mut d2 = doc.fork();
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "bbb", "bbb").unwrap();
-        let (Some(h1), _) = tx.commit() else { panic!() };
+        let Some(h1) = tx.commit() else { panic!() };
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "ccc", "ccc").unwrap();
-        let (Some(h2), _) = tx.commit() else { panic!() };
+        let Some(h2) = tx.commit() else { panic!() };
 
         let bundle = doc.bundle([h0, h1, h2]).unwrap();
         let changes = bundle.to_changes().unwrap();

@@ -1,5 +1,5 @@
 use crate::transaction::Transactable;
-use crate::{ActorId, Automerge, ObjType, PatchLog, ReadDoc, ScalarValue, ROOT};
+use crate::{ActorId, Automerge, ObjType, ReadDoc, ScalarValue, ROOT};
 
 fn assert_checkpoint_eq(
     a: &std::collections::HashMap<&'static str, Vec<u8>>,
@@ -379,9 +379,7 @@ fn rollback_scoped_transaction_on_conflicted_register() {
     let before = doc1.save_checkpoint();
 
     {
-        let mut tx = doc1
-            .transaction_at(PatchLog::null(), &scoped_heads)
-            .unwrap();
+        let mut tx = doc1.transaction_at(&scoped_heads);
         tx.put(ROOT, "field", "scoped_value").unwrap();
         tx.rollback();
     }

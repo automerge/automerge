@@ -4,24 +4,11 @@ use automerge::sync::{Message, MessageVersion, State};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
-    LoadOptions, ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue,
-    SequenceTree, TextEncoding, Value, ROOT,
+    LoadOptions, ObjId, ObjType, Patch, PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree,
+    TextEncoding, Value, ROOT,
 };
 
 const B: usize = 16;
-
-fn patch_log_from_actor(actor: &[u8]) -> PatchLog {
-    let mut source = AutoCommit::new();
-    source.set_actor(ActorId::from(actor));
-    source.put(ROOT, "source", "value").unwrap();
-    let source_changes = source.get_changes(&[]);
-
-    let mut patch_log = PatchLog::active();
-    let mut doc = Automerge::new();
-    doc.apply_changes_log_patches(source_changes, &mut patch_log)
-        .unwrap();
-    patch_log
-}
 
 fn doc_with_actor(actor: &[u8]) -> Automerge {
     let mut source = AutoCommit::new();
@@ -32,51 +19,6 @@ fn doc_with_actor(actor: &[u8]) -> Automerge {
     let mut doc = Automerge::new();
     doc.apply_changes(changes).unwrap();
     doc
-}
-
-#[test]
-fn applying_changes_with_patch_log_from_another_document_returns_error_not_panic() {
-    let mut patch_log = patch_log_from_actor(b"bbbbbb");
-    let mut source = AutoCommit::new();
-    source.set_actor(ActorId::from(b"cccccc" as &[u8]));
-    source.put(ROOT, "source", "value").unwrap();
-    let changes = source.get_changes(&[]);
-
-    let mut doc = Automerge::new();
-    let result = doc.apply_changes_log_patches(changes, &mut patch_log);
-
-    assert!(matches!(result, Err(AutomergeError::PatchLogMismatch(_))));
-}
-
-#[test]
-fn transaction_with_patch_log_from_another_document_does_not_panic() {
-    let patch_log = patch_log_from_actor(b"bbbbbb");
-    let mut doc = doc_with_actor(b"cccccc");
-
-    let result = doc.transaction_log_patches(patch_log);
-
-    assert!(matches!(result, Err(automerge::PatchLogMismatch)));
-}
-
-#[test]
-fn transaction_at_with_patch_log_from_another_document_does_not_panic() {
-    let patch_log = patch_log_from_actor(b"bbbbbb");
-    let mut doc = doc_with_actor(b"cccccc");
-    let heads = doc.get_heads();
-
-    let result = doc.transaction_at(patch_log, &heads);
-
-    assert!(matches!(result, Err(automerge::PatchLogMismatch)));
-}
-
-#[test]
-fn owned_transaction_with_patch_log_from_another_document_does_not_panic() {
-    let patch_log = patch_log_from_actor(b"bbbbbb");
-    let doc = doc_with_actor(b"cccccc");
-
-    let result = doc.into_transaction(Some(patch_log), None);
-
-    assert!(matches!(result, Err(automerge::PatchLogMismatch)));
 }
 
 use std::fs;
@@ -2115,13 +2057,9 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active();
-    new_doc
-        .apply_changes_log_patches(vec![change1], &mut patch_log)
-        .unwrap();
-    new_doc
-        .apply_changes_log_patches(vec![change2], &mut patch_log)
-        .unwrap();
+    let before = new_doc.get_heads();
+    new_doc.apply_changes(vec![change1]).unwrap();
+    new_doc.apply_changes(vec![change2]).unwrap();
 
     for i in 0..=N {
         let (doc_val, _) = doc.get(&list_id, i).unwrap().unwrap();
@@ -2137,7 +2075,7 @@ fn regression_insert_opid() {
         );
     }
 
-    let patches = new_doc.make_patches(&mut patch_log);
+    let patches = new_doc.diff(&before, &new_doc.get_heads());
     let mut values = SequenceTree::new();
     for i in 0..=N {
         values.push((
@@ -2189,15 +2127,11 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active();
-    new_doc
-        .apply_changes_log_patches(vec![change1], &mut patch_log)
-        .unwrap();
-    new_doc
-        .apply_changes_log_patches(vec![change2], &mut patch_log)
-        .unwrap();
+    let before = new_doc.get_heads();
+    new_doc.apply_changes(vec![change1]).unwrap();
+    new_doc.apply_changes(vec![change2]).unwrap();
 
-    let patches = new_doc.make_patches(&mut patch_log);
+    let patches = new_doc.diff(&before, &new_doc.get_heads());
     println!("PATCH = {:?}", patches.last());
     let matches = match &patches.last().unwrap().action {
         PatchAction::PutSeq { index: N, .. } => true,
@@ -2255,7 +2189,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
     tx.commit();
 
-    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1)?;
+    let mut tx = doc1.transaction_at(&heads1);
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "ZZZ")?;
@@ -2266,7 +2200,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
 
-    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1)?;
+    let mut tx = doc1.transaction_at(&heads1);
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "TTT")?;
@@ -3142,7 +3076,7 @@ fn merge_panic_after_putting_value_equal_to_initial_value() {
     // Putting a value equal to the existing value is a no-op, so the transaction produces no ops
     // and the actor that was speculatively added when the transaction was opened is removed again
     // on commit. This used to leave the AutoCommit's internal patch log with an actor that the
-    // document no longer had, causing a panic (later a `PatchLogMismatch`) on the next merge.
+    // document no longer had, causing a panic on the next merge.
     let mut base = AutoCommit::new().with_actor(ActorId::from(b"base".as_slice()));
     base.put(ROOT, "a", 1i64).unwrap();
 

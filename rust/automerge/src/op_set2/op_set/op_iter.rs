@@ -802,6 +802,10 @@ impl<'a> ActionIter<'a> {
         Self { iter }
     }
 
+    pub(crate) fn pos(&self) -> usize {
+        self.iter.pos()
+    }
+
     fn try_next(&mut self) -> Result<Action, ReadOpError> {
         self.iter.next().ok_or(ReadOpError::MissingValue("action"))
     }
@@ -964,6 +968,18 @@ impl<'a> SuccIterIter<'a> {
         Some(iter)
     }
 
+    pub(crate) fn shift_skip_next(&mut self, range: Range<usize>) -> Option<()> {
+        // Like shift_next(), but used when the caller already knows this op is
+        // not visible and therefore does not need a SuccCursors value. Avoid
+        // cloning the successor sub-column cursors just to discard them.
+        let pv = self.count.shift_next(range)?;
+        let sub_pos = pv.total() as usize;
+        self.actor.advance_to(sub_pos);
+        self.ctr.advance_to(sub_pos);
+        self.incs.advance_to(sub_pos);
+        Some(())
+    }
+
     pub(crate) fn new(
         count: hexane::PrefixIter<'a, u32>,
         actor: hexane::Iter<'a, ActorIdx>,
@@ -998,6 +1014,16 @@ impl<'a> SuccIterIter<'a> {
         self.incs.advance_by(num_succ);
 
         Ok(result)
+    }
+
+    pub(crate) fn skip_next(&mut self) -> Option<()> {
+        // Like next(), but only advances over the successor run. This is the
+        // sequential counterpart to shift_skip_next().
+        let num_succ = self.count.next()?.value as usize;
+        self.actor.advance_by(num_succ);
+        self.ctr.advance_by(num_succ);
+        self.incs.advance_by(num_succ);
+        Some(())
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<SuccCursors<'a>, ReadOpError> {

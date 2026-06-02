@@ -20,7 +20,7 @@ use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
-use crate::patches::{Patch, PatchLog};
+use crate::patches::{Patch, PatchAccumulator};
 use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
@@ -34,6 +34,7 @@ use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, Text
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
+mod dirty_diff;
 
 // FIXME
 //#[cfg(test)]
@@ -87,16 +88,15 @@ pub enum StringMigration {
 }
 
 #[derive(Debug)]
-pub struct LoadOptions<'a> {
+pub struct LoadOptions {
     on_partial_load: OnPartialLoad,
     verification_mode: VerificationMode,
     string_migration: StringMigration,
-    patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
 }
 
-impl<'a> LoadOptions<'a> {
-    pub fn new() -> LoadOptions<'static> {
+impl LoadOptions {
+    pub fn new() -> LoadOptions {
         LoadOptions::default()
     }
 
@@ -120,33 +120,6 @@ impl<'a> LoadOptions<'a> {
         }
     }
 
-    /// A [`PatchLog`] to log the changes required to materialize the current state of the
-    ///
-    /// The default is to not log patches
-    pub fn patch_log(self, patch_log: &'a mut PatchLog) -> Self {
-        Self {
-            patch_log: Some(patch_log),
-            ..self
-        }
-    }
-
-    /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
-    ///
-    /// Until version 2.1.0 of the javascript library strings (as in, the native string of the JS
-    /// runtime) were represented in the document as [`ScalarValue::Str`] and there was a special
-    /// JS class called `Text` which users were expected to use for [`ObjType::Text`]. In `2.1.0`
-    /// we changed this so that native strings were represented as [`ObjType::Text`] and
-    /// [`ScalarValue::Str`] was represented as a special `RawString` class. This means
-    /// that upgrading the application code to use the new API would require either
-    ///
-    /// a) Maintaining two code paths in the application to deal with both `string` and `RawString`
-    ///    types
-    /// b) Writing a migration script to convert all `RawString` types to `string`
-    ///
-    /// The latter is logic which is the same for all applications so we implement it in the
-    /// library for convenience. The way this works is that after loading the document we iterate
-    /// through all visible [`ScalarValue::Str`] values and emit a change which creates a new
-    /// [`ObjType::Text`] at the same path with the same content.
     pub fn migrate_strings(self, migration: StringMigration) -> Self {
         Self {
             string_migration: migration,
@@ -162,12 +135,11 @@ impl<'a> LoadOptions<'a> {
     }
 }
 
-impl std::default::Default for LoadOptions<'static> {
+impl std::default::Default for LoadOptions {
     fn default() -> Self {
         Self {
             on_partial_load: OnPartialLoad::Error,
             verification_mode: VerificationMode::Check,
-            patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
         }
@@ -182,7 +154,7 @@ impl std::default::Default for LoadOptions<'static> {
 /// [`ActorId`]. Existing documents can be loaded with [`Self::load()`], or [`Self::load_with()`].
 ///
 /// If you have two documents and you want to merge the changes from one into the other you can use
-/// [`Self::merge()`] or [`Self::merge_and_log_patches()`].
+/// [`Self::merge()`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
 /// [`Self::fork()`]. If you want to split a document from ealier in its history you can use
@@ -214,6 +186,14 @@ pub struct Automerge {
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+    /// Cursor for dirty-range incremental diffs.
+    diff_cursor: Vec<ChangeHash>,
+    /// Heads corresponding to `ops.index.baseline_visible`.
+    ///
+    /// When dirty diffing from these heads to the current heads, map/list diff
+    /// can use the baseline visibility bitmap instead of reconstructing
+    /// historical visibility with clock and successor scans.
+    dirty_diff_base: Vec<ChangeHash>,
 }
 
 impl Automerge {
@@ -225,6 +205,8 @@ impl Automerge {
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            diff_cursor: Vec::new(),
+            dirty_diff_base: Vec::new(),
         }
     }
 
@@ -246,6 +228,8 @@ impl Automerge {
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            diff_cursor: Vec::new(),
+            dirty_diff_base: Vec::new(),
         }
     }
 
@@ -257,6 +241,8 @@ impl Automerge {
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
+            diff_cursor: Vec::new(),
+            dirty_diff_base: Vec::new(),
         };
         doc.remove_unused_actors(false);
         doc
@@ -272,6 +258,13 @@ impl Automerge {
 
     pub(crate) fn changes(&self) -> &ChangeGraph {
         &self.change_graph
+    }
+
+    pub(crate) fn clear_dirty_and_reset_diff_baseline(&mut self, heads: Vec<ChangeHash>) {
+        // `clear_dirty` also snapshots current visibility into baseline_visible;
+        // keep the recorded heads in lockstep with that snapshot.
+        self.ops.clear_dirty();
+        self.dirty_diff_base = heads;
     }
 
     /// Whether this document has any operations
@@ -358,60 +351,19 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
-        let patch_log = PatchLog::inactive();
         let args = self.transaction_args(None);
-        Transaction::new(self, args, patch_log)
+        Transaction::new(self, args)
     }
 
-    /// Start a transaction which records changes in a [`PatchLog`]
-    ///
-    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if `patch_log` does not belong to
-    /// this document. This probably means a patch log created for one document was reused with
-    /// another document.
-    pub fn transaction_log_patches(
-        &mut self,
-        mut patch_log: PatchLog,
-    ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
-        let args = self.transaction_args(None);
-        patch_log.begin_transaction(self, &args)?;
-        Ok(Transaction::new(self, args, patch_log))
-    }
-
-    /// Start a transaction isolated at a given heads
-    ///
-    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if `patch_log` does not belong to
-    /// this document. This probably means a patch log created for one document was reused with
-    /// another document.
-    pub fn transaction_at(
-        &mut self,
-        mut patch_log: PatchLog,
-        heads: &[ChangeHash],
-    ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
+    /// Start a transaction isolated at the given heads.
+    pub fn transaction_at(&mut self, heads: &[ChangeHash]) -> Transaction<'_> {
         let args = self.transaction_args(Some(heads));
-        patch_log.begin_transaction(self, &args)?;
-        Ok(Transaction::new(self, args, patch_log))
+        Transaction::new(self, args)
     }
 
     /// Start a transaction that owns the document, consuming `self`.
-    ///
-    /// This is useful when the transaction must be `'static` (e.g. storing across an FFI
-    /// boundary or in a struct that requires `'static`). The document is returned when the
-    /// transaction is committed or rolled back.
-    ///
-    /// # Arguments
-    /// * `patch_log` - An optional [`PatchLog`] to log the changes in this transaction to
-    /// * `heads` - An optional set of heads to isolate this transaction at, or `None` to use the
-    ///   current heads of the document
-    ///
-    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if `patch_log` does not belong to
-    /// this document. This probably means a patch log created for one document was reused with
-    /// another document.
-    pub fn into_transaction(
-        self,
-        patch_log: Option<PatchLog>,
-        heads: Option<&[ChangeHash]>,
-    ) -> Result<OwnedTransaction, crate::PatchLogMismatch> {
-        OwnedTransaction::new(self, patch_log, heads)
+    pub fn into_transaction(self, heads: Option<&[ChangeHash]>) -> OwnedTransaction {
+        OwnedTransaction::new(self, heads)
     }
 
     pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
@@ -447,6 +399,7 @@ impl Automerge {
         TransactionArgs {
             actor_index,
             seq,
+            checkpoint: self.ops.save_checkpoint(),
             start_op,
             deps,
             scope,
@@ -455,7 +408,7 @@ impl Automerge {
 
     #[cfg(test)]
     pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
-        self.ops.save_checkpoint()
+        self.ops.save_column_checkpoint()
     }
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
@@ -486,17 +439,13 @@ impl Automerge {
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let (hash, patch_log) = if let Some(c) = c {
+                let hash = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
                     tx.commit()
                 };
-                Ok(Success {
-                    result,
-                    hash,
-                    patch_log,
-                })
+                Ok(Success { result, hash })
             }
             Err(error) => Err(Failure {
                 error,
@@ -508,67 +457,11 @@ impl Automerge {
     /// Run a transaction on this document in a closure, collecting patches, automatically handling commit or rollback
     /// afterwards.
     ///
-    /// The collected patches are available in the return value of [`Transaction::commit()`]
-    pub fn transact_and_log_patches<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
-    where
-        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
-    {
-        self.transact_and_log_patches_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
-    }
-
-    /// Like [`Self::transact_and_log_patches()`] but with a function for generating the commit options
-    pub fn transact_and_log_patches_with<F, O, E, C>(
-        &mut self,
-        c: C,
-        f: F,
-    ) -> transaction::Result<O, E>
-    where
-        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
-        C: FnOnce(&O) -> CommitOptions,
-    {
-        self.transact_and_log_patches_with_impl(Some(c), f)
-    }
-
-    fn transact_and_log_patches_with_impl<F, O, E, C>(
-        &mut self,
-        c: Option<C>,
-        f: F,
-    ) -> transaction::Result<O, E>
-    where
-        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
-        C: FnOnce(&O) -> CommitOptions,
-    {
-        let mut tx = self
-            .transaction_log_patches(PatchLog::active())
-            .expect("new patch log should not mismatch");
-        let result = f(&mut tx);
-        match result {
-            Ok(result) => {
-                let (hash, history) = if let Some(c) = c {
-                    let commit_options = c(&result);
-                    tx.commit_with(commit_options)
-                } else {
-                    tx.commit()
-                };
-                Ok(Success {
-                    result,
-                    hash,
-                    patch_log: history,
-                })
-            }
-            Err(error) => Err(Failure {
-                error,
-                cancelled: tx.rollback(),
-            }),
-        }
-    }
-
     /// Generate an empty change
     ///
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
     pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
-        // No patch log is recorded for an empty change, so migrate a throwaway one.
         let args = self.transaction_args(None);
         Transaction::empty(self, args, opts)
     }
@@ -729,38 +622,9 @@ impl Automerge {
     ///
     /// # Arguments
     /// * `data` - The data to load
-    /// * `on_error` - What to do if the document is only partially loaded. This can happen if some
-    ///                prefix of `data` contains valid data.
-    /// * `mode` - Whether to verify the head hashes after loading
-    /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
-    ///                 the document once loaded
-    #[deprecated(since = "0.5.2", note = "Use `load_with_options` instead")]
-    #[tracing::instrument(skip(data), err)]
-    pub fn load_with(
-        data: &[u8],
-        on_error: OnPartialLoad,
-        mode: VerificationMode,
-        patch_log: &mut PatchLog,
-    ) -> Result<Self, AutomergeError> {
-        Self::load_with_options(
-            data,
-            LoadOptions::new()
-                .on_partial_load(on_error)
-                .verification_mode(mode)
-                .patch_log(patch_log),
-        )
-    }
-
-    /// Load a document, with options
-    ///
-    /// # Arguments
-    /// * `data` - The data to load
     /// * `options` - The options to use when loading
     #[tracing::instrument(skip(data), err)]
-    pub fn load_with_options(
-        data: &[u8],
-        options: LoadOptions<'_>,
-    ) -> Result<Self, AutomergeError> {
+    pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
         Self::load_with_options_and_mark_validation(
             data,
             options,
@@ -782,7 +646,7 @@ impl Automerge {
 
     fn load_with_options_and_mark_validation(
         data: &[u8],
-        options: LoadOptions<'_>,
+        options: LoadOptions,
         mark_order: load::MarkOrderValidation,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
@@ -868,19 +732,7 @@ impl Automerge {
         if let StringMigration::ConvertToText = options.string_migration {
             am.convert_scalar_strings_to_text()?;
         }
-        if let Some(patch_log) = options.patch_log {
-            if patch_log.is_active() {
-                am.log_current_state(ObjMeta::root(), patch_log, true);
-            }
-        }
         Ok(am)
-    }
-
-    /// Create the patches from a [`PatchLog`]
-    ///
-    /// See the documentation for [`PatchLog`] for more details on this
-    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
-        patch_log.make_patches(self)
     }
 
     /// Get a set of [`Patch`]es which materialize the current state of the document
@@ -889,9 +741,7 @@ impl Automerge {
     ///
     /// [diff]: Self::diff()
     pub fn current_state(&self) -> Vec<Patch> {
-        let mut patch_log = PatchLog::active();
-        self.log_current_state(ObjMeta::root(), &mut patch_log, true);
-        patch_log.make_patches(self)
+        self.diff(&[], &self.get_heads())
     }
 
     /// Load an incremental save of a document.
@@ -902,16 +752,6 @@ impl Automerge {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_log_patches(data, &mut PatchLog::inactive())
-    }
-
-    /// Like [`Self::load_incremental()`] but log the changes to the current state of the document
-    /// to [`PatchLog`]
-    pub fn load_incremental_log_patches(
-        &mut self,
-        data: &[u8],
-        patch_log: &mut PatchLog,
-    ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
             let mut doc = Self::load_with_options(
                 data,
@@ -921,9 +761,8 @@ impl Automerge {
                     .verification_mode(VerificationMode::Check),
             )?;
             doc = doc.with_actor(self.actor_id().clone());
-            if patch_log.is_active() {
-                doc.log_current_state(ObjMeta::root(), patch_log, true);
-            }
+            let len = doc.ops().len();
+            doc.ops_mut().mark_dirty_range(0..len);
             *self = doc;
             return Ok(self.ops.len());
         }
@@ -940,20 +779,19 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_log_patches(changes, patch_log)?;
-        let delta = self.ops.len() - start;
-        Ok(delta)
+        self.apply_changes(changes)?;
+        Ok(self.ops.len() - start)
     }
 
     pub(crate) fn log_current_state(
         &self,
         obj: ObjMeta,
-        patch_log: &mut PatchLog,
+        patch_accumulator: &mut PatchAccumulator,
         recursive: bool,
     ) {
         let clock = ClockRange::default();
-        let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
-        patch_log.path_hint(path_map);
+        let path_map = DiffIter::log(self, obj, clock, patch_accumulator, recursive);
+        patch_accumulator.path_hint(path_map);
     }
 
     fn seq_for_actor(&self, actor: &ActorId) -> u64 {
@@ -975,46 +813,17 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_log_patches(changes, &mut PatchLog::inactive())
-    }
-
-    /// Like [`Self::apply_changes()`] but log the resulting changes to the current state of the
-    /// document to `patch_log`
-    pub fn apply_changes_log_patches<I: IntoIterator<Item = Change> + Clone>(
-        &mut self,
-        changes: I,
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(changes, patch_log)
+        self.apply_changes_batch(changes)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_and_log_patches(other, &mut PatchLog::inactive())
-    }
-
-    /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
-    /// the resulting changes to the current state of the document to `patch_log`
-    pub fn merge_and_log_patches(
-        &mut self,
-        other: &mut Self,
-        patch_log: &mut PatchLog,
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self.get_changes_added(other);
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_log_patches(changes, patch_log)?;
+        self.apply_changes(changes)?;
         Ok(self.get_heads())
     }
 
-    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
-    ///
-    /// A "bundle" is a compact representation of a set of changes which uses
-    /// the same compression tricks as the document encoding we use in
-    /// [`Automerge::save`].
-    ///
-    /// This is an experimental API, the bundle format is still subject to change
-    /// and so should not be used in production just yet.
     pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
@@ -1107,7 +916,7 @@ impl Automerge {
     pub(crate) fn clock_range(&self, before: &[ChangeHash], after: &[ChangeHash]) -> ClockRange {
         let before = self.clock_at(before);
         let after = self.clock_at(after);
-        ClockRange::Diff(before, after)
+        ClockRange::Diff(before, Some(after))
     }
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
@@ -1253,7 +1062,7 @@ impl Automerge {
                         OpType::Make(obj) => format!("make({})", obj),
                         OpType::Increment(obj) => format!("inc({})", obj),
                         OpType::Delete => format!("del{}", 0),
-                        OpType::MarkBegin(_, MarkData { name, value }) => {
+                        OpType::MarkBegin(_, crate::op_set2::types::MarkData { name, value }) => {
                             format!("mark({},{})", name, value)
                         }
                         OpType::MarkEnd(_) => "/mark".to_string(),
@@ -1284,10 +1093,24 @@ impl Automerge {
     /// in the opposite order.
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let clock = self.clock_range(before_heads, after_heads);
-        let mut patch_log = PatchLog::active();
-        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
-        patch_log.heads = Some(after_heads.to_vec());
-        patch_log.make_patches(self)
+        let mut patch_accumulator = PatchAccumulator::event_log();
+        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_accumulator, true);
+        patch_accumulator.heads = Some(after_heads.to_vec());
+        patch_accumulator.make_patches(self)
+    }
+
+    /// Generate an incremental diff from the last incremental cursor to the current heads.
+    ///
+    /// This uses the internal dirty-range diff path, clears dirty bits after successful patch
+    /// generation, and advances the incremental cursor to the current heads.
+    pub fn diff_incremental(&mut self) -> Vec<Patch> {
+        let before = self.diff_cursor.clone();
+        let after = self.get_heads();
+        let patches = self
+            .dirty_diff_patches_and_clear(&before, &after)
+            .expect("dirty diff should support Automerge incremental intervals");
+        self.diff_cursor = after;
+        patches
     }
 
     /// Create patches representing the change in the current state of an object
@@ -1315,10 +1138,10 @@ impl Automerge {
     ) -> Result<Vec<Patch>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_range(before_heads, after_heads);
-        let mut patch_log = PatchLog::active();
-        DiffIter::log(self, obj, clock, &mut patch_log, recursive);
-        patch_log.heads = Some(after_heads.to_vec());
-        Ok(patch_log.make_patches(self))
+        let mut patch_accumulator = PatchAccumulator::event_log();
+        DiffIter::log(self, obj, clock, &mut patch_accumulator, recursive);
+        patch_accumulator.heads = Some(after_heads.to_vec());
+        Ok(patch_accumulator.make_patches(self))
     }
 
     /// Get the heads of this document.
@@ -2120,4 +1943,1812 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: Clock,
+}
+
+#[cfg(test)]
+mod dirty_diff_tests {
+    use std::ops::Range;
+
+    use crate::{
+        marks::{ExpandMark, Mark},
+        op_set2::types::Action,
+        sync::{State as SyncState, SyncDoc},
+        transaction::Transactable,
+        types::ObjId,
+        ActorId, AutoCommit, Automerge, ScalarValue, ROOT,
+    };
+
+    fn dirty_ranges(doc: &Automerge) -> Vec<Range<usize>> {
+        doc.ops().dirty_runs().map(|run| run.range).collect()
+    }
+
+    fn ranges_contain(ranges: &[Range<usize>], needle: Range<usize>) -> bool {
+        ranges
+            .iter()
+            .any(|range| range.start <= needle.start && needle.end <= range.end)
+    }
+
+    fn assert_patch_effects_match(
+        doc: &Automerge,
+        before: &[crate::ChangeHash],
+        after: &[crate::ChangeHash],
+        left_label: &str,
+        left: &[crate::Patch],
+        right_label: &str,
+        right: &[crate::Patch],
+    ) {
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc,
+            before,
+            after,
+            left_label,
+            left,
+            right_label,
+            right,
+        );
+    }
+
+    fn assert_dirty_diff_matches_full(
+        doc: &Automerge,
+        before: &[crate::ChangeHash],
+        after: &[crate::ChangeHash],
+    ) {
+        let full = doc.diff(before, after);
+        let dirty = doc.dirty_diff_patches(before, after).unwrap();
+        assert_patch_effects_match(doc, before, after, "dirty diff", &dirty, "full diff", &full);
+    }
+
+    fn assert_incremental_effect_matches_full(
+        doc: &mut Automerge,
+        before: &[crate::ChangeHash],
+        after: &[crate::ChangeHash],
+    ) {
+        let full = doc.diff(before, after);
+        let incremental = doc.diff_incremental();
+        assert_patch_effects_match(
+            doc,
+            before,
+            after,
+            "incremental diff",
+            &incremental,
+            "full diff",
+            &full,
+        );
+    }
+
+    fn assert_autocommit_incremental_effect_matches_full(
+        doc: &mut AutoCommit,
+        before: &[crate::ChangeHash],
+        after: &[crate::ChangeHash],
+    ) {
+        let full = doc.document().diff(before, after);
+        let incremental = doc.diff_incremental();
+        assert_patch_effects_match(
+            doc.document(),
+            before,
+            after,
+            "incremental diff",
+            &incremental,
+            "full diff",
+            &full,
+        );
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_map_put() {
+        let mut doc = Automerge::new();
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn automerge_diff_incremental_clears_dirty_and_advances_cursor() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+        let first_heads = doc.get_heads();
+
+        assert_incremental_effect_matches_full(&mut doc, &[], &first_heads);
+        assert!(doc.ops().dirty_runs().next().is_none());
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 2).unwrap();
+        tx.commit();
+        let second_heads = doc.get_heads();
+
+        assert_incremental_effect_matches_full(&mut doc, &first_heads, &second_heads);
+        assert!(doc.ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn dirty_diff_patches_and_clear_keeps_dirty_bits_on_error() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.commit();
+        let before = doc.get_heads();
+
+        let mut tx = doc.transaction();
+        tx.put(&list, 0, "A").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        doc.ops_mut().clear_dirty();
+        doc.ops_mut().mark_dirty(1);
+        assert!(doc.dirty_diff_patches_and_clear(&before, &after).is_err());
+        assert_eq!(dirty_ranges(&doc), vec![1..2]);
+    }
+
+    #[test]
+    fn automerge_diff_incremental_empty_doc_and_repeated_calls_are_empty() {
+        let mut doc = Automerge::new();
+
+        assert!(doc.diff_incremental().is_empty());
+        assert!(doc.ops().dirty_runs().next().is_none());
+        assert!(doc.diff_incremental().is_empty());
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+        assert!(!doc.diff_incremental().is_empty());
+        assert!(doc.ops().dirty_runs().next().is_none());
+        assert!(doc.diff_incremental().is_empty());
+    }
+
+    #[test]
+    fn automerge_diff_incremental_materializes_loaded_document() {
+        let mut source = Automerge::new();
+        let mut tx = source.transaction();
+        let list = tx.put_object(ROOT, "todos", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.commit();
+        let data = source.save();
+
+        let mut doc = Automerge::load(&data).unwrap();
+        let heads = doc.get_heads();
+
+        assert_incremental_effect_matches_full(&mut doc, &[], &heads);
+        assert!(doc.ops().dirty_runs().next().is_none());
+        assert!(doc.diff_incremental().is_empty());
+    }
+
+    #[test]
+    fn automerge_diff_incremental_after_load_incremental_uses_saved_cursor() {
+        let mut source = Automerge::new();
+        let mut tx = source.transaction();
+        tx.put(ROOT, "base", 1).unwrap();
+        tx.commit();
+        let base_heads = source.get_heads();
+        let base_data = source.save();
+
+        let mut doc = Automerge::new();
+        doc.load_incremental(&base_data).unwrap();
+        assert_incremental_effect_matches_full(&mut doc, &[], &base_heads);
+
+        let mut tx = source.transaction();
+        tx.put(ROOT, "later", 2).unwrap();
+        tx.commit();
+        let data = source.save_after(&base_heads);
+
+        let before = doc.get_heads();
+        doc.load_incremental(&data).unwrap();
+        let after = doc.get_heads();
+        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert!(doc.ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn automerge_diff_incremental_after_apply_merge_and_sync_receive() {
+        let mut source = Automerge::new();
+        let mut tx = source.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+
+        let mut doc = Automerge::new();
+        let before = doc.get_heads();
+        doc.apply_changes(source.get_changes(&[])).unwrap();
+        let after = doc.get_heads();
+        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert!(doc.ops().dirty_runs().next().is_none());
+
+        let mut source = Automerge::new();
+        let mut tx = source.transaction();
+        tx.put(ROOT, "merged", 2).unwrap();
+        tx.commit();
+
+        let mut doc = Automerge::new();
+        let before = doc.get_heads();
+        doc.merge(&mut source).unwrap();
+        let after = doc.get_heads();
+        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert!(doc.ops().dirty_runs().next().is_none());
+
+        let mut source = Automerge::new();
+        let mut tx = source.transaction();
+        tx.put(ROOT, "synced", 3).unwrap();
+        tx.commit();
+        let mut sync_state = SyncState::new();
+        let message = source.generate_sync_message(&mut sync_state).unwrap();
+
+        let mut doc = Automerge::new();
+        let before = doc.get_heads();
+        doc.receive_sync_message(&mut SyncState::new(), message)
+            .unwrap();
+        let after = doc.get_heads();
+        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert!(doc.ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn automerge_diff_incremental_fork_inherits_cursor() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "base", 1).unwrap();
+        tx.commit();
+        let base_heads = doc.get_heads();
+        doc.diff_incremental();
+
+        let mut fork = doc.fork();
+        let mut tx = fork.transaction();
+        tx.put(ROOT, "fork", 2).unwrap();
+        tx.commit();
+        let fork_heads = fork.get_heads();
+
+        assert_incremental_effect_matches_full(&mut fork, &base_heads, &fork_heads);
+        assert!(fork.ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn autocommit_diff_incremental_repeated_empty_and_rollback_lifecycle() {
+        let mut doc = AutoCommit::new();
+
+        assert!(doc.diff_incremental().is_empty());
+
+        doc.put(ROOT, "key", 1).unwrap();
+        assert!(!doc.diff_incremental().is_empty());
+        assert!(doc.document().ops().dirty_runs().next().is_none());
+        assert!(doc.diff_incremental().is_empty());
+
+        let heads = doc.get_heads();
+        doc.reset_diff_cursor();
+        assert_autocommit_incremental_effect_matches_full(&mut doc, &[], &heads);
+        assert!(doc.document().ops().dirty_runs().next().is_none());
+        assert!(doc.diff_incremental().is_empty());
+
+        doc.put(ROOT, "key", 2).unwrap();
+        assert_eq!(doc.rollback(), 1);
+        assert!(doc.diff_incremental().is_empty());
+        assert!(doc.document().ops().dirty_runs().next().is_none());
+
+        doc.put(ROOT, "key", 3).unwrap();
+        assert!(!doc.diff_incremental().is_empty());
+        assert!(doc.document().ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_map_update() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 2).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn adjacent_map_updates_dirty_contiguous_key_ranges() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "b", 2).unwrap();
+        tx.put(ROOT, "c", 3).unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 10).unwrap();
+        tx.put(ROOT, "b", 20).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        let a = doc.ops().prop_range(&ObjId::root(), "a");
+        let b = doc.ops().prop_range(&ObjId::root(), "b");
+        assert_eq!(dirty_ranges(&doc), vec![a.start..b.end]);
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn remote_map_update_and_adjacent_insert_dirty_contiguous_key_ranges() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "c", 3).unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "a", 10).unwrap();
+        tx.put(ROOT, "b", 2).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let a = doc1.ops().prop_range(&ObjId::root(), "a");
+        let b = doc1.ops().prop_range(&ObjId::root(), "b");
+        assert_eq!(a.end, b.start);
+        assert_eq!(dirty_ranges(&doc1), vec![a.start..b.end]);
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_map_delete() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.delete(ROOT, "key").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_map_increment() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.increment(ROOT, "counter", 2).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_list_insert() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_list_update() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.put(&list, 1, "B").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn adjacent_list_updates_dirty_contiguous_register_ranges() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.put(&list, 1, "B").unwrap();
+        tx.put(&list, 2, "C").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        let ranges = dirty_ranges(&doc);
+        let list_obj = doc.exid_to_obj(&list).unwrap().id;
+        let list_range = doc.ops().scope_to_obj(&list_obj);
+        assert_eq!(ranges, vec![2..6]);
+        assert!(doc
+            .ops()
+            .list_range_is_on_register_boundaries(&ranges[0], list_range));
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn remote_adjacent_list_updates_dirty_contiguous_register_ranges() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 1, "B").unwrap();
+        tx.put(&list, 2, "C").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert_eq!(ranges, vec![2..6]);
+        assert!(doc1
+            .ops()
+            .list_range_is_on_register_boundaries(&ranges[0], list_range));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_remote_adjacent_list_update_and_conflict_dirty_register_ranges() {
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+
+        let mut tx = doc1.transaction();
+        tx.put(&list, 1, "local-b").unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 1, "remote-b").unwrap();
+        tx.put(&list, 2, "remote-c").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert_eq!(ranges.len(), 1);
+        assert!(doc1
+            .ops()
+            .list_range_is_on_register_boundaries(&ranges[0], list_range));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_remote_list_update_plus_nearby_insert_dirty_register_ranges() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 1, "B").unwrap();
+        tx.insert(&list, 2, "X").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert!(ranges.iter().all(|range| doc1
+            .ops()
+            .list_range_is_on_register_boundaries(range, list_range.clone())));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_remote_insert_before_updated_list_element_matches_full_diff() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.insert(&list, 3, "d").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.insert(&list, 1, "X").unwrap();
+        tx.put(&list, 2, "B").unwrap();
+        tx.put(&list, 3, "C").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert!(ranges.iter().all(|range| doc1
+            .ops()
+            .list_range_is_on_register_boundaries(range, list_range.clone())));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_remote_insert_before_conflicting_list_element_matches_full_diff() {
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+
+        let mut tx = doc1.transaction();
+        tx.put(&list, 1, "local-b").unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.insert(&list, 1, "X").unwrap();
+        tx.put(&list, 2, "remote-b").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert!(ranges.iter().all(|range| doc1
+            .ops()
+            .list_range_is_on_register_boundaries(range, list_range.clone())));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_remote_dependent_insert_and_update_list_changes_match_full_diff() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.insert(&list, 3, "d").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.insert(&list, 1, "X").unwrap();
+        tx.commit();
+        let mut tx = doc2.transaction();
+        tx.put(&list, 3, "C").unwrap();
+        tx.insert(&list, 4, "Y").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert!(ranges.iter().all(|range| doc1
+            .ops()
+            .list_range_is_on_register_boundaries(range, list_range.clone())));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    fn next_dirty_diff_test_rand(seed: &mut u64) -> usize {
+        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (*seed >> 32) as usize
+    }
+
+    fn assert_batch_random_list_changes_match_full_diff(mut seed: u64, split_changes: bool) {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        for index in 0..8 {
+            tx.insert(&list, index, format!("v{index}")).unwrap();
+        }
+        tx.commit();
+        let mut doc2 = doc1.fork();
+        let mut model_len = 8;
+        let mut value_counter = 0;
+
+        let change_count = if split_changes { 3 } else { 1 };
+        let ops_per_change = if split_changes { 5 } else { 15 };
+        for _ in 0..change_count {
+            let mut tx = doc2.transaction();
+            for _ in 0..ops_per_change {
+                value_counter += 1;
+                match next_dirty_diff_test_rand(&mut seed) % 4 {
+                    // Insert before an existing element, shifting the final ranges for later
+                    // existing-register updates in the same batch.
+                    0 if model_len > 0 => {
+                        let index = next_dirty_diff_test_rand(&mut seed) % model_len;
+                        tx.insert(&list, index, format!("i{value_counter}"))
+                            .unwrap();
+                        model_len += 1;
+                    }
+                    // Update an existing register whose identity must be resolved after all
+                    // batch splices have been applied.
+                    1 if model_len > 0 => {
+                        let index = next_dirty_diff_test_rand(&mut seed) % model_len;
+                        tx.put(&list, index, format!("u{value_counter}")).unwrap();
+                    }
+                    // Insert at any legal sequence position, including after the last element.
+                    2 => {
+                        let index = next_dirty_diff_test_rand(&mut seed) % (model_len + 1);
+                        tx.insert(&list, index, format!("j{value_counter}"))
+                            .unwrap();
+                        model_len += 1;
+                    }
+                    // Delete an element so later dirty existing-register identities may move left.
+                    _ if model_len > 1 => {
+                        let index = next_dirty_diff_test_rand(&mut seed) % model_len;
+                        tx.delete(&list, index).unwrap();
+                        model_len -= 1;
+                    }
+                    _ => {
+                        tx.insert(&list, 0, format!("k{value_counter}")).unwrap();
+                        model_len += 1;
+                    }
+                }
+            }
+            tx.commit();
+        }
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        assert!(!ranges.is_empty());
+        assert!(ranges.iter().all(|range| doc1
+            .ops()
+            .list_range_is_on_register_boundaries(range, list_range.clone())));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_randomized_list_splices_and_existing_updates_match_full_diff() {
+        for seed in [1, 2, 3, 5, 8, 13, 21, 34] {
+            assert_batch_random_list_changes_match_full_diff(seed, false);
+            assert_batch_random_list_changes_match_full_diff(seed, true);
+        }
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_list_delete() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.delete(&list, 1).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_object_creation_with_child_mutations() {
+        let mut doc = Automerge::new();
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "todos", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn remote_object_creation_with_child_mutations_dirties_parent_and_child_ranges() {
+        let mut doc1 = Automerge::new();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        let list = tx.put_object(ROOT, "todos", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let parent_range = doc1.ops().prop_range(&ObjId::root(), "todos");
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let child_range = doc1.ops().scope_to_obj(&list_obj);
+        assert_eq!(parent_range.end, child_range.start);
+        assert_eq!(
+            dirty_ranges(&doc1),
+            vec![parent_range.start..child_range.end]
+        );
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn remote_nested_object_creation_in_complex_layout_dirties_subtree_ranges() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "z", 26).unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        let map = tx.put_object(ROOT, "m", crate::ObjType::Map).unwrap();
+        tx.put(&map, "scalar", 10).unwrap();
+        let list = tx.put_object(&map, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        let text = tx.put_object(&map, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "hello").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let parent_range = doc1.ops().prop_range(&ObjId::root(), "m");
+        let map_range = doc1.ops().scope_to_obj(&doc1.exid_to_obj(&map).unwrap().id);
+        let list_range = doc1
+            .ops()
+            .scope_to_obj(&doc1.exid_to_obj(&list).unwrap().id);
+        let text_range = doc1
+            .ops()
+            .scope_to_obj(&doc1.exid_to_obj(&text).unwrap().id);
+        assert!(ranges_contain(&ranges, parent_range));
+        assert!(ranges_contain(&ranges, map_range));
+        assert!(ranges_contain(&ranges, list_range));
+        assert!(ranges_contain(&ranges, text_range));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_child_mutation_followed_by_parent_delete() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let map = tx.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
+        tx.put(&map, "key", 1).unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.put(&map, "key", 2).unwrap();
+        tx.delete(ROOT, "map").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn concurrent_child_mutation_and_parent_delete_matches_full_diff() {
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
+        let mut tx = doc1.transaction();
+        let map = tx.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
+        tx.put(&map, "key", 1).unwrap();
+        tx.commit();
+        let before = doc1.get_heads();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+
+        doc1.ops_mut().clear_dirty();
+        let mut tx = doc1.transaction();
+        tx.put(&map, "key", 2).unwrap();
+        tx.put(&map, "other", 3).unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.delete(ROOT, "map").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&before);
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let ranges = dirty_ranges(&doc1);
+        let parent_range = doc1.ops().prop_range(&ObjId::root(), "map");
+        let child_range = doc1.ops().scope_to_obj(&doc1.exid_to_obj(&map).unwrap().id);
+        assert!(ranges_contain(&ranges, parent_range));
+        assert!(ranges_contain(&ranges, child_range));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_map_conflict() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "key", 2).unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "key", 3).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn remote_map_conflict_dirties_whole_key_register() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "key", 2).unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "key", 3).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let key_range = doc1.ops().prop_range(&ObjId::root(), "key");
+        assert_eq!(dirty_ranges(&doc1), vec![key_range]);
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batched_remote_map_conflict_dirties_whole_new_key_register() {
+        let mut doc1 = Automerge::new();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+        let mut doc3 = doc1.fork().with_actor(ActorId::from([3]));
+
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "key", "a").unwrap();
+        tx.commit();
+
+        let mut tx = doc3.transaction();
+        tx.put(ROOT, "key", "b").unwrap();
+        tx.commit();
+
+        let mut changes = doc2.get_changes(&doc1.get_heads());
+        changes.extend(doc3.get_changes(&doc1.get_heads()));
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let key_range = doc1.ops().prop_range(&ObjId::root(), "key");
+        assert_eq!(dirty_ranges(&doc1), vec![key_range]);
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_list_conflict() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc1.transaction();
+        tx.put(&list, 0, "A").unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 0, "B").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn remote_list_conflict_dirties_whole_element_register() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc1.transaction();
+        tx.put(&list, 0, "A").unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 0, "B").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        let ranges = dirty_ranges(&doc1);
+        assert_eq!(ranges.len(), 1);
+        assert!(doc1
+            .ops()
+            .list_range_is_on_register_boundaries(&ranges[0], list_range.clone()));
+        assert_eq!(ranges[0], list_range);
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn remote_insert_then_update_same_list_element_dirties_new_register() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.put(&list, 0, "A").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        let list_obj = doc1.exid_to_obj(&list).unwrap().id;
+        let list_range = doc1.ops().scope_to_obj(&list_obj);
+        let ranges = dirty_ranges(&doc1);
+        assert_eq!(ranges, vec![list_range.clone()]);
+        assert!(doc1
+            .ops()
+            .list_range_is_on_register_boundaries(&ranges[0], list_range));
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_map_conflict_resolution_exposes_value() {
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "key", "base").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "key", "a").unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "key", "b").unwrap();
+        tx.commit();
+        doc1.apply_changes(doc2.get_changes(&doc1.get_heads()))
+            .unwrap();
+
+        let mut tx = doc2.transaction();
+        tx.delete(ROOT, "key").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_list_conflict_resolution_exposes_value() {
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+        tx.insert(&list, 0, "base").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+
+        let mut tx = doc1.transaction();
+        tx.put(&list, 0, "a").unwrap();
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 0, "b").unwrap();
+        tx.commit();
+        doc1.apply_changes(doc2.get_changes(&doc1.get_heads()))
+            .unwrap();
+
+        let mut tx = doc2.transaction();
+        tx.delete(&list, 0).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_counter_increment() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.increment(ROOT, "counter", 2).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_text_insert() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, 1, 0, "X").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_mark() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 0, 3),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_remote_middle_mark() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+        let text_obj = doc1.exid_to_obj(&text).unwrap().id;
+        let text_range = doc1.ops().scope_to_obj(&text_obj);
+        assert!(doc1.ops().dirty_runs().any(|run| run.range == text_range));
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_text_insert_without_marks() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, 1, 0, "X").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_text_delete() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, 1, 1, "").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_text_insert_inside_mark() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 0, 3),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, 1, 0, "X").unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn text_insert_at_mark_boundaries_stays_localized() {
+        for index in [1, 3] {
+            let mut doc = Automerge::new();
+            let mut tx = doc.transaction();
+            let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+            tx.splice_text(&text, 0, 0, "abcd").unwrap();
+            tx.mark(
+                &text,
+                Mark::new("bold".to_string(), true, 1, 3),
+                ExpandMark::Both,
+            )
+            .unwrap();
+            tx.commit();
+
+            doc.ops_mut().clear_dirty();
+            let before = doc.get_heads();
+            let mut tx = doc.transaction();
+            tx.splice_text(&text, index, 0, "X").unwrap();
+            tx.commit();
+            let after = doc.get_heads();
+
+            let text_obj = doc.exid_to_obj(&text).unwrap().id;
+            let text_range = doc.ops().scope_to_obj(&text_obj);
+            let ranges = dirty_ranges(&doc);
+            assert_eq!(ranges.len(), 1);
+            assert!(text_range.start <= ranges[0].start && ranges[0].end <= text_range.end);
+            assert_ne!(ranges[0], text_range);
+            assert!(!doc.ops().range_has_mark(ranges[0].clone()));
+            assert_dirty_diff_matches_full(&doc, &before, &after);
+        }
+    }
+
+    fn assert_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn text_deletion_around_mark_anchors_matches_full_diff() {
+        for (index, del) in [
+            (1, 1), // immediately before mark begin
+            (2, 1), // at mark begin
+            (3, 1), // inside marked span
+            (4, 1), // immediately after mark end
+            (1, 4), // through both mark anchors
+        ] {
+            assert_text_splice_around_mark_matches_full(index, del, "");
+        }
+    }
+
+    #[test]
+    fn text_replacement_around_mark_anchors_matches_full_diff() {
+        for (index, del, value) in [
+            (2, 1, "X"),  // replace at mark begin
+            (3, 1, "X"),  // replace inside marked span
+            (2, 2, "XY"), // replace whole marked span
+            (1, 4, "XY"), // replace across both mark anchors
+        ] {
+            assert_text_splice_around_mark_matches_full(index, del, value);
+        }
+    }
+
+    fn assert_text_splice_around_nested_marks_matches_full(index: usize, del: isize, value: &str) {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdefghij").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 8),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.mark(
+            &text,
+            Mark::new("italic".to_string(), true, 4, 6),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.mark(
+            &text,
+            Mark::new("color".to_string(), "red", 5, 9),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn text_edits_around_nested_overlapping_mark_boundaries_match_full_diff() {
+        for (index, del, value) in [
+            (4, 0, "X"),  // at nested mark begin
+            (5, 1, ""),   // at overlapping mark begin
+            (6, 2, "XY"), // through nested mark end
+            (8, 1, ""),   // at outer mark end
+        ] {
+            assert_text_splice_around_nested_marks_matches_full(index, del, value);
+        }
+    }
+
+    fn assert_remote_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn remote_text_deletion_around_mark_anchors_matches_full_diff() {
+        for (index, del) in [
+            (1, 1), // immediately before mark begin
+            (2, 1), // at mark begin
+            (3, 1), // inside marked span
+            (4, 1), // immediately after mark end
+            (1, 4), // through both mark anchors
+        ] {
+            assert_remote_text_splice_around_mark_matches_full(index, del, "");
+        }
+    }
+
+    #[test]
+    fn remote_text_replacement_around_mark_anchors_matches_full_diff() {
+        for (index, del, value) in [
+            (2, 1, "X"),  // replace at mark begin
+            (3, 1, "X"),  // replace inside marked span
+            (2, 2, "XY"), // replace whole marked span
+            (1, 4, "XY"), // replace across both mark anchors
+        ] {
+            assert_remote_text_splice_around_mark_matches_full(index, del, value);
+        }
+    }
+
+    fn assert_batch_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_text_deletion_around_mark_anchors_matches_full_diff() {
+        for (index, del) in [
+            (1, 1), // immediately before mark begin
+            (2, 1), // at mark begin
+            (3, 1), // inside marked span
+            (4, 1), // immediately after mark end
+            (1, 4), // through both mark anchors
+        ] {
+            assert_batch_text_splice_around_mark_matches_full(index, del, "");
+        }
+    }
+
+    #[test]
+    fn batch_text_replacement_around_mark_anchors_matches_full_diff() {
+        for (index, del, value) in [
+            (2, 1, "X"),  // replace at mark begin
+            (3, 1, "X"),  // replace inside marked span
+            (2, 2, "XY"), // replace whole marked span
+            (1, 4, "XY"), // replace across both mark anchors
+        ] {
+            assert_batch_text_splice_around_mark_matches_full(index, del, value);
+        }
+    }
+
+    fn assert_batch_text_splice_around_nested_marks_matches_full(
+        index: usize,
+        del: isize,
+        value: &str,
+    ) {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdefghij").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 8),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.mark(
+            &text,
+            Mark::new("italic".to_string(), true, 4, 6),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.mark(
+            &text,
+            Mark::new("color".to_string(), "red", 5, 9),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_text_edits_around_nested_overlapping_mark_boundaries_match_full_diff() {
+        for (index, del, value) in [
+            (4, 0, "X"),  // at nested mark begin
+            (5, 1, ""),   // at overlapping mark begin
+            (6, 2, "XY"), // through nested mark end
+            (8, 1, ""),   // at outer mark end
+        ] {
+            assert_batch_text_splice_around_nested_marks_matches_full(index, del, value);
+        }
+    }
+
+    #[test]
+    fn batch_text_edit_plus_mark_in_same_change_matches_full_diff() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, 2, 1, "X").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("italic".to_string(), true, 1, 5),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+        let text_obj = doc1.exid_to_obj(&text).unwrap().id;
+        let text_range = doc1.ops().scope_to_obj(&text_obj);
+        assert!(doc1.ops().dirty_runs().any(|run| run.range == text_range));
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn batch_multiple_text_edits_around_same_mark_match_full_diff() {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, 4, 1, "Y").unwrap();
+        tx.splice_text(&text, 2, 1, "X").unwrap();
+        tx.commit();
+        let changes = doc2.get_changes(&doc1.get_heads());
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.apply_changes_batch(changes).unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    fn assert_sync_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdef").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 4),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+
+        let mut sync_state = SyncState::new();
+        let message = doc2.generate_sync_message(&mut sync_state).unwrap();
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.receive_sync_message(&mut SyncState::new(), message)
+            .unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn sync_text_edits_around_mark_anchors_match_full_diff() {
+        for (index, del, value) in [
+            (2, 1, ""),   // delete at mark begin
+            (1, 4, ""),   // delete through both mark anchors
+            (2, 2, "XY"), // replace whole marked span
+            (1, 4, "XY"), // replace across both mark anchors
+        ] {
+            assert_sync_text_splice_around_mark_matches_full(index, del, value);
+        }
+    }
+
+    fn assert_sync_text_splice_around_nested_marks_matches_full(
+        index: usize,
+        del: isize,
+        value: &str,
+    ) {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abcdefghij").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 2, 8),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.mark(
+            &text,
+            Mark::new("italic".to_string(), true, 4, 6),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.mark(
+            &text,
+            Mark::new("color".to_string(), "red", 5, 9),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc2.transaction();
+        tx.splice_text(&text, index, del, value).unwrap();
+        tx.commit();
+
+        let mut sync_state = SyncState::new();
+        let message = doc2.generate_sync_message(&mut sync_state).unwrap();
+
+        doc1.ops_mut().clear_dirty();
+        let before = doc1.get_heads();
+        doc1.receive_sync_message(&mut SyncState::new(), message)
+            .unwrap();
+        let after = doc1.get_heads();
+
+        assert_dirty_diff_matches_full(&doc1, &before, &after);
+    }
+
+    #[test]
+    fn sync_text_edits_around_nested_overlapping_mark_boundaries_match_full_diff() {
+        for (index, del, value) in [
+            (4, 0, "X"),  // at nested mark begin
+            (5, 1, ""),   // at overlapping mark begin
+            (6, 2, "XY"), // through nested mark end
+            (8, 1, ""),   // at outer mark end
+        ] {
+            assert_sync_text_splice_around_nested_marks_matches_full(index, del, value);
+        }
+    }
+
+    #[test]
+    fn dirty_diff_matches_full_diff_for_mark() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+
+        doc.ops_mut().clear_dirty();
+        let before = doc.get_heads();
+        let mut tx = doc.transaction();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 0, 3),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+    }
+
+    #[test]
+    fn partial_text_mark_dirty_range_expands_to_whole_object() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+        let before = doc.get_heads();
+
+        let mut tx = doc.transaction();
+        tx.mark(
+            &text,
+            Mark::new("bold".to_string(), true, 1, 2),
+            ExpandMark::Both,
+        )
+        .unwrap();
+        tx.commit();
+        let after = doc.get_heads();
+        let text_obj = doc.exid_to_obj(&text).unwrap().id;
+        let text_range = doc.ops().scope_to_obj(&text_obj);
+        let mark_pos = doc
+            .ops()
+            .iter_range(&text_range)
+            .find(|op| op.action == Action::Mark)
+            .unwrap()
+            .pos;
+
+        doc.ops_mut().clear_dirty();
+        doc.ops_mut().mark_dirty(mark_pos);
+
+        let full = doc.diff(&before, &after);
+        let dirty = doc.dirty_diff_patches_and_clear(&before, &after).unwrap();
+        assert_patch_effects_match(
+            &doc,
+            &before,
+            &after,
+            "dirty diff",
+            &dirty,
+            "full diff",
+            &full,
+        );
+        assert!(doc.ops().dirty_runs().next().is_none());
+    }
 }

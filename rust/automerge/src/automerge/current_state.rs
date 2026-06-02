@@ -3,8 +3,8 @@ mod tests {
     use std::{borrow::Cow, fs};
 
     use crate::{
-        patches::PatchLog, read::ReadDoc, transaction::Transactable, Automerge, ObjType, Patch,
-        PatchAction, Prop, Value,
+        read::ReadDoc, transaction::Transactable, Automerge, ObjType, Patch, PatchAction, Prop,
+        Value,
     };
 
     // Patches often carry a "tagged value", which is a value and the OpID of the op which
@@ -522,16 +522,14 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut patch_log = PatchLog::active();
-        let _doc = Automerge::load_with_options(
+        let doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
             crate::LoadOptions::new()
                 .on_partial_load(crate::OnPartialLoad::Error)
-                .verification_mode(crate::VerificationMode::Check)
-                .patch_log(&mut patch_log),
+                .verification_mode(crate::VerificationMode::Check),
         )
         .unwrap();
-        let p = _doc.make_patches(&mut patch_log);
+        let p = doc.current_state();
 
         assert_eq!(
             Patches::from(p),

@@ -4,7 +4,7 @@ use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
 use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, SkipToTopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
-use crate::patches::PatchLog;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, OpId, TextEncoding};
 use crate::value;
 
@@ -19,7 +19,7 @@ pub(crate) struct SpanDiff {
 }
 
 impl SpanDiff {
-    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchAccumulator, encoding: TextEncoding) {
         match (self.diff, self.span) {
             (Diff::Add, SpanInternal::Text(text, index, marks)) => {
                 log.splice(obj, index, &text, marks.export());
@@ -56,6 +56,7 @@ impl SpanDiff {
 enum SpansActionValue<'a> {
     Current(Unshift<ActionValueIter<'a>>),
     Diff(Unshift<DiffIter<'a, ActionValueIter<'a>, SkipToTopIter<'a>>>),
+    Baseline(Unshift<DiffIter<'a, ActionValueIter<'a>>>),
 }
 
 impl Default for SpansActionValue<'_> {
@@ -81,6 +82,15 @@ impl<'a> SpansActionValue<'a> {
         }
     }
 
+    fn new_with_baseline(op_set: &'a OpSet, range: Range<usize>) -> Self {
+        let value = op_set.value_iter_range(&range);
+        let action = op_set.action_iter_range(&range);
+        let iter = ActionValueIter::new(action, value);
+        Self::Baseline(Unshift::new(DiffIter::new_with_baseline_before(
+            op_set, iter, range,
+        )))
+    }
+
     fn shift(&mut self, op_set: &'a OpSet, clock: &ClockRange, range: Range<usize>) {
         if matches!(self, Self::Current(_)) && !op_set.all_of_range_is_top(&range) {
             *self = Self::new(op_set, clock, range);
@@ -88,6 +98,7 @@ impl<'a> SpansActionValue<'a> {
             match self {
                 Self::Current(iter) => iter.shift(range),
                 Self::Diff(iter) => iter.shift(range),
+                Self::Baseline(iter) => iter.shift(range),
             }
         }
     }
@@ -101,6 +112,7 @@ impl<'a> Iterator for SpansActionValue<'a> {
         match self {
             Self::Current(iter) => Some((Diff::Add, iter.next()?)),
             Self::Diff(iter) => iter.next(),
+            Self::Baseline(iter) => iter.next(),
         }
     }
 }
@@ -165,13 +177,61 @@ impl<'a> SpansDiff<'a> {
         clock: ClockRange,
         encoding: TextEncoding,
     ) -> Self {
+        Self::new_with_index(op_set, range, clock, encoding, 0)
+    }
+
+    pub(crate) fn new_with_index(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+    ) -> Self {
+        Self::new_with_index_and_marks(op_set, range, clock, encoding, index, Default::default())
+    }
+
+    pub(crate) fn new_with_index_and_marks(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+        marks: RichTextDiff<'a>,
+    ) -> Self {
+        Self::new_with_index_and_marks_inner(op_set, range, clock, encoding, index, marks, false)
+    }
+
+    pub(crate) fn new_with_baseline_before(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+        marks: RichTextDiff<'a>,
+    ) -> Self {
+        Self::new_with_index_and_marks_inner(op_set, range, clock, encoding, index, marks, true)
+    }
+
+    fn new_with_index_and_marks_inner(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+        marks: RichTextDiff<'a>,
+        use_baseline_before: bool,
+    ) -> Self {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
         let mark_info = op_set.mark_info_iter_range(&range);
 
-        let action_value = SpansActionValue::new(op_set, &clock, range.clone());
-        let marks = Default::default();
-        let state = SpanState::empty(encoding);
+        let action_value = if use_baseline_before {
+            SpansActionValue::new_with_baseline(op_set, range.clone())
+        } else {
+            SpansActionValue::new(op_set, &clock, range.clone())
+        };
+        let mut state = SpanState::empty_at(encoding, index);
+        state.push_marks(marks.current());
         let op_set = Some(op_set);
 
         Self {
@@ -479,8 +539,12 @@ impl NextText {
 
 impl SpanState {
     fn empty(encoding: TextEncoding) -> Self {
+        Self::empty_at(encoding, 0)
+    }
+
+    fn empty_at(encoding: TextEncoding, index: usize) -> Self {
         Self {
-            index: 0,
+            index,
             next_text: None,
             next_diff: None,
             marks: MarkDiff::default(),
@@ -660,7 +724,7 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    fn mark_begin_diff(&mut self, diff: Diff, id: OpId, data: MarkData<'a>) -> bool {
+    pub(crate) fn mark_begin_diff(&mut self, diff: Diff, id: OpId, data: MarkData<'a>) -> bool {
         match diff {
             Diff::Add => self.after.mark_begin(id, data),
             Diff::Del => self.before.mark_begin(id, data),
@@ -671,7 +735,7 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    fn mark_end_diff(&mut self, diff: Diff, id: OpId) -> bool {
+    pub(crate) fn mark_end_diff(&mut self, diff: Diff, id: OpId) -> bool {
         match diff {
             Diff::Add => self.after.mark_end(id),
             Diff::Del => self.before.mark_end(id),

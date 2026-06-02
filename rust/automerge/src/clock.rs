@@ -59,7 +59,7 @@ impl SeqClock {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ClockRange {
     Current(Option<Clock>),
-    Diff(Clock, Clock),
+    Diff(Clock, Option<Clock>),
 }
 
 impl Default for ClockRange {
@@ -73,19 +73,23 @@ impl ClockRange {
         Self::Current(clock)
     }
 
+    pub(crate) fn diff_to_current(before: Clock) -> Self {
+        Self::Diff(before, None)
+    }
+
     pub(crate) fn after(&self) -> Option<&Clock> {
         match self {
-            Self::Diff(_, after) => Some(after),
+            Self::Diff(_, after) => after.as_ref(),
             Self::Current(Some(after)) => Some(after),
-            _ => None,
+            Self::Current(None) => None,
         }
     }
 
     pub(crate) fn visible_after(&self, id: &OpId) -> bool {
         match self {
             Self::Current(Some(after)) => after.covers(id),
-            Self::Diff(_, after) => after.covers(id),
-            _ => true,
+            Self::Diff(_, Some(after)) => after.covers(id),
+            Self::Diff(_, None) | Self::Current(None) => true,
         }
     }
 
@@ -96,7 +100,7 @@ impl ClockRange {
     pub(crate) fn predates(&self, id: &OpId) -> bool {
         match self {
             Self::Diff(before, _) => before.covers(id),
-            _ => false,
+            Self::Current(_) => false,
         }
     }
 }

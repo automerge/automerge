@@ -39,16 +39,6 @@ impl Mark {
             value: self.value.clone(),
         }
     }
-
-    pub(crate) fn len(&self) -> usize {
-        self.end - self.start
-    }
-
-    pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
-        let mut m = MarkSet::default();
-        m.insert(self.name, self.value);
-        Arc::new(m)
-    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

@@ -60,7 +60,121 @@ pub(crate) struct OpSet {
     pub(crate) actors: Vec<ActorId>,
     pub(crate) obj_info: ObjIndex,
     cols: Columns,
+    dirty: DirtyRanges,
     pub(crate) text_encoding: TextEncoding,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OpSetCheckpoint(OpSet);
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DirtyRun {
+    pub(crate) range: Range<usize>,
+}
+
+const MAX_DIRTY_RANGES: usize = 1024;
+
+#[derive(Debug, Clone, Default)]
+struct DirtyRanges {
+    ranges: Vec<Range<usize>>,
+}
+
+impl DirtyRanges {
+    fn clear(&mut self) {
+        self.ranges.clear();
+    }
+
+    fn mark(&mut self, range: Range<usize>, len: usize) {
+        let mut new = range.start.min(len)..range.end.min(len);
+        if new.start >= new.end {
+            return;
+        }
+
+        let mut index = 0;
+        while index < self.ranges.len() && self.ranges[index].end < new.start {
+            index += 1;
+        }
+
+        while index < self.ranges.len() && self.ranges[index].start <= new.end {
+            let current = self.ranges.remove(index);
+            new.start = new.start.min(current.start);
+            new.end = new.end.max(current.end);
+        }
+
+        self.ranges.insert(index, new);
+        self.coarsen_if_fragmented(len);
+    }
+
+    fn mark_ranges(&mut self, mut ranges: Vec<Range<usize>>, len: usize) {
+        ranges.retain(|range| range.start < range.end);
+        ranges.sort_unstable_by(|left, right| {
+            left.start
+                .cmp(&right.start)
+                .then_with(|| left.end.cmp(&right.end))
+        });
+
+        let mut normalized: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            if let Some(last) = normalized.last_mut() {
+                if range.start <= last.end {
+                    last.end = last.end.max(range.end);
+                    continue;
+                }
+            }
+            normalized.push(range);
+        }
+
+        for range in normalized {
+            self.mark(range, len);
+        }
+    }
+
+    fn coarsen_if_fragmented(&mut self, len: usize) {
+        if self.ranges.len() > MAX_DIRTY_RANGES {
+            self.ranges.clear();
+            if len > 0 {
+                self.ranges.push(0..len);
+            }
+        }
+    }
+
+    fn insert_dirty(&mut self, pos: usize, added: usize, len: usize) {
+        if added == 0 {
+            return;
+        }
+        for range in &mut self.ranges {
+            if range.start >= pos {
+                range.start += added;
+                range.end += added;
+            } else if range.end > pos {
+                range.end += added;
+            }
+        }
+        self.mark(pos..(pos + added), len);
+    }
+
+    fn iter(&self) -> DirtyRunIter<'_> {
+        DirtyRunIter {
+            iter: self.ranges.iter(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub(crate) struct DirtyRunIter<'a> {
+    iter: std::slice::Iter<'a, Range<usize>>,
+}
+
+impl Iterator for DirtyRunIter<'_> {
+    type Item = DirtyRun;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|range| DirtyRun {
+            range: range.clone(),
+        })
+    }
 }
 
 impl OpSet {
@@ -69,8 +183,18 @@ impl OpSet {
         self.cols.debug_cmp(&other.cols)
     }
 
+    pub(crate) fn save_checkpoint(&self) -> OpSetCheckpoint {
+        OpSetCheckpoint(self.clone())
+    }
+
+    pub(crate) fn load_checkpoint(&mut self, mut checkpoint: OpSetCheckpoint) {
+        std::mem::swap(&mut checkpoint.0, self);
+    }
+
     #[cfg(test)]
-    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
+    pub(crate) fn save_column_checkpoint(
+        &self,
+    ) -> std::collections::HashMap<&'static str, Vec<u8>> {
         self.cols.save_checkpoint()
     }
 
@@ -79,6 +203,7 @@ impl OpSet {
         OpSet {
             actors,
             cols: Columns::default(),
+            dirty: DirtyRanges::default(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
         }
@@ -104,7 +229,13 @@ impl OpSet {
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
-        let top = self.cols.index.top.values().iter_range(range.clone());
+        self.mark_dirty_range(range.clone());
+        let top = self
+            .cols
+            .index
+            .top
+            .iter_range(range.clone())
+            .map(|v| v.value);
         let vis = self.cols.index.visible.iter_range(range.clone());
 
         let mut conflicts = vec![];
@@ -138,12 +269,14 @@ impl OpSet {
 
     pub(crate) fn conflict(&mut self, pos: usize) {
         const NONE: Option<u32> = None;
+        self.mark_dirty_logical_at_pos(pos);
         self.cols.index.top.splice(pos, 1, [false]);
         // Make sure losing ops are not contributing width to the text sequence length.
         self.cols.index.text.splice(pos, 1, [NONE]);
     }
 
     pub(crate) fn expose(&mut self, pos: usize) {
+        self.mark_dirty_logical_at_pos(pos);
         self.cols.index.top.splice(pos, 1, [true]);
         // Note we alwasy set the exposed widht using the text type, as the text
         // index is only used for text width. Non-text ops are never measured
@@ -154,6 +287,183 @@ impl OpSet {
             .get(pos)
             .map(|op| op.width(SequenceType::Text, self.text_encoding) as u32);
         self.cols.index.text.splice(pos, 1, [width]);
+    }
+
+    pub(crate) fn mark_dirty(&mut self, pos: usize) {
+        self.mark_dirty_range(pos..(pos + 1));
+    }
+
+    pub(crate) fn mark_dirty_range(&mut self, range: Range<usize>) {
+        let len = self.len();
+        self.dirty.mark(range, len);
+    }
+
+    pub(crate) fn mark_dirty_ranges(&mut self, ranges: Vec<Range<usize>>) {
+        let len = self.len();
+        self.dirty.mark_ranges(ranges, len);
+    }
+
+    pub(crate) fn mark_dirty_logical_at_pos(&mut self, pos: usize) {
+        if let Some(range) = self.dirty_logical_range_at_pos(pos) {
+            self.mark_dirty_range(range);
+        } else {
+            self.mark_dirty(pos);
+        }
+    }
+
+    pub(crate) fn mark_dirty_sequence_registers(&mut self, mut registers: Vec<(ObjId, ElemId)>) {
+        registers.retain(|(_, elemid)| !elemid.is_head());
+        registers.sort_unstable();
+        registers.dedup();
+
+        let mut ranges = Vec::new();
+        let mut group_start = 0;
+        while group_start < registers.len() {
+            let obj = registers[group_start].0;
+            let group_end = registers[group_start..]
+                .iter()
+                .position(|(next_obj, _)| *next_obj != obj)
+                .map_or(registers.len(), |offset| group_start + offset);
+
+            let obj_range = self.scope_to_obj(&obj);
+            self.collect_dirty_sequence_register_ranges(
+                obj_range,
+                &registers[group_start..group_end],
+                &mut ranges,
+            );
+
+            group_start = group_end;
+        }
+
+        self.mark_dirty_ranges(ranges);
+    }
+
+    fn collect_dirty_sequence_register_ranges(
+        &self,
+        obj_range: Range<usize>,
+        targets: &[(ObjId, ElemId)],
+        ranges: &mut Vec<Range<usize>>,
+    ) {
+        let mut current_elem = None;
+        let mut current_start = obj_range.start;
+        let mut current_end = obj_range.start;
+
+        for op in self.iter_range(&obj_range) {
+            let KeyRef::Seq(elemid) = op.elemid_or_key() else {
+                continue;
+            };
+            if current_elem != Some(elemid) {
+                Self::push_dirty_sequence_register_range(
+                    current_elem,
+                    current_start,
+                    current_end,
+                    targets,
+                    ranges,
+                );
+                current_elem = Some(elemid);
+                current_start = op.pos;
+            }
+            current_end = op.pos + 1;
+        }
+
+        Self::push_dirty_sequence_register_range(
+            current_elem,
+            current_start,
+            current_end,
+            targets,
+            ranges,
+        );
+    }
+
+    fn push_dirty_sequence_register_range(
+        elemid: Option<ElemId>,
+        start: usize,
+        end: usize,
+        targets: &[(ObjId, ElemId)],
+        ranges: &mut Vec<Range<usize>>,
+    ) {
+        let Some(elemid) = elemid else {
+            return;
+        };
+        if targets
+            .binary_search_by(|(_, target)| target.cmp(&elemid))
+            .is_ok()
+        {
+            ranges.push(start..end);
+        }
+    }
+
+    fn dirty_logical_range_at_pos(&self, pos: usize) -> Option<Range<usize>> {
+        let (obj, obj_range) = self.obj_range_containing(pos)?;
+        let typ = self.object_type(&obj)?;
+        self.dirty_logical_range_at_pos_in_object(pos, obj_range, typ)
+    }
+
+    fn dirty_logical_range_at_pos_in_object(
+        &self,
+        pos: usize,
+        obj_range: Range<usize>,
+        typ: ObjType,
+    ) -> Option<Range<usize>> {
+        if !obj_range.contains(&pos) {
+            return None;
+        }
+        Some(match typ {
+            ObjType::Map | ObjType::Table => self.map_key_register_at_pos(pos, obj_range),
+            ObjType::List => self.list_register_at_pos(pos, obj_range),
+            ObjType::Text => {
+                if self.get(pos).is_some_and(|op| op.action == Action::Mark) {
+                    obj_range
+                } else {
+                    self.list_register_at_pos(pos, obj_range)
+                }
+            }
+        })
+    }
+
+    fn map_key_register_at_pos(&self, pos: usize, obj_range: Range<usize>) -> Range<usize> {
+        let Some(op) = self.get(pos) else {
+            return pos..pos;
+        };
+        let key = op.elemid_or_key();
+        let mut start = pos;
+        while start > obj_range.start {
+            let Some(prev) = self.get(start - 1) else {
+                break;
+            };
+            if prev.elemid_or_key() != key {
+                break;
+            }
+            start -= 1;
+        }
+        let mut end = pos + 1;
+        while end < obj_range.end {
+            let Some(next) = self.get(end) else {
+                break;
+            };
+            if next.elemid_or_key() != key {
+                break;
+            }
+            end += 1;
+        }
+        start..end
+    }
+
+    pub(crate) fn clear_dirty(&mut self) {
+        self.dirty.clear();
+        self.reset_dirty_baseline_visibility();
+    }
+
+    pub(crate) fn reset_dirty_baseline_visibility(&mut self) {
+        // Keep a row-aligned visibility snapshot for the next dirty diff
+        // baseline. Future inserts splice `false` into this column, while
+        // current visibility continues to update independently.
+        self.cols.index.baseline_visible = self.cols.index.visible.clone();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dirty_positions(&self) -> impl Iterator<Item = usize> + '_ {
+        self.dirty_runs().flat_map(|run| run.range)
     }
 
     pub(crate) fn validate(
@@ -179,6 +489,7 @@ impl OpSet {
 
         assert_eq!(_top.len(), _visible.len());
         assert_eq!(_top.len(), self.len());
+        assert_eq!(self.cols.index.baseline_visible.len(), self.len());
 
         let top_iter = _top.values().iter();
         let vis_iter = _visible.iter();
@@ -218,13 +529,16 @@ impl OpSet {
         assert_eq!(indexes.text.len(), self.len());
         assert_eq!(indexes.mark.len(), self.len());
         assert_eq!(indexes.visible.len(), self.len());
+        assert_eq!(indexes.baseline_visible.len(), self.len());
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
         self.cols.index.text = indexes.text;
         self.cols.index.top = indexes.top;
         self.cols.index.visible = indexes.visible;
+        self.cols.index.baseline_visible = indexes.baseline_visible;
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
+        self.dirty.clear();
         self.obj_info = indexes.obj_info;
     }
 
@@ -238,6 +552,7 @@ impl OpSet {
 
     pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) -> usize {
         let added = self.cols.splice(pos, ops, self.text_encoding);
+        self.dirty.insert_dirty(pos, added, self.len());
         self.splice_objects(ops);
         added
     }
@@ -782,8 +1097,57 @@ impl OpSet {
         }
     }
 
-    fn get(&self, pos: usize) -> Option<Op<'_>> {
+    pub(crate) fn get(&self, pos: usize) -> Option<Op<'_>> {
         self.iter_range(&(pos..(pos + 1))).next()
+    }
+
+    pub(crate) fn map_range_is_on_key_boundaries(&self, range: &Range<usize>) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        let Some(first) = self.get(range.start) else {
+            return false;
+        };
+        if range.start > 0 {
+            if let Some(prev) = self.get(range.start - 1) {
+                if prev.obj == first.obj && prev.elemid_or_key() == first.elemid_or_key() {
+                    return false;
+                }
+            }
+        }
+        if range.end < self.len() {
+            let Some(last) = self.get(range.end - 1) else {
+                return false;
+            };
+            if let Some(next) = self.get(range.end) {
+                if next.obj == last.obj && next.elemid_or_key() == last.elemid_or_key() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    pub(crate) fn list_range_is_on_register_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+    ) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        if self
+            .list_register_at_pos(range.start, obj_range.clone())
+            .start
+            != range.start
+        {
+            return false;
+        }
+        if range.end < obj_range.end {
+            self.list_register_at_pos(range.end, obj_range).start == range.end
+        } else {
+            true
+        }
     }
 
     /// The ElemId of the element the op at `pos` belongs to, and the last
@@ -1106,6 +1470,7 @@ impl OpSet {
         OpSet {
             actors: vec![],
             cols: Columns::default(),
+            dirty: DirtyRanges::default(),
             obj_info: ObjIndex::default(),
             text_encoding,
         }
@@ -1130,6 +1495,7 @@ impl OpSet {
         OpSet {
             actors,
             cols,
+            dirty: DirtyRanges::default(),
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),
         }
@@ -1146,6 +1512,7 @@ impl OpSet {
         let op_set = OpSet {
             actors,
             cols,
+            dirty: DirtyRanges::default(),
             obj_info: ObjIndex::default(),
             text_encoding,
         };
@@ -1163,6 +1530,17 @@ impl OpSet {
             .obj_ctr
             .scope_to_value(obj.counter().map(|c| c as u32), ..);
         self.cols.obj_actor.scope_to_value(obj.actor(), range)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn obj_range_containing(&self, pos: usize) -> Option<(ObjId, Range<usize>)> {
+        if pos >= self.len() {
+            return None;
+        }
+        let ctr = self.cols.obj_ctr.get(pos)?;
+        let actor = self.cols.obj_actor.get(pos)?;
+        let obj = ObjId::load(ctr.map(u64::from), actor)?;
+        Some((obj, self.scope_to_obj(&obj)))
     }
 
     pub(crate) fn iter_ctr_range(
@@ -1187,6 +1565,40 @@ impl OpSet {
     pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a> {
         let range = self.scope_to_obj(obj);
         self.iter_range(&range)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn dirty_runs(&self) -> DirtyRunIter<'_> {
+        self.dirty.iter()
+    }
+
+    pub(crate) fn list_visible_items_in_range(&self, range: Range<usize>) -> usize {
+        self.cols
+            .index
+            .top
+            .iter_range(range)
+            .filter(|value| value.value)
+            .count()
+    }
+
+    pub(crate) fn text_visible_width_in_range(&self, range: Range<usize>) -> usize {
+        let start = range.start.min(self.len());
+        let end = range.end.min(self.len());
+        if start >= end {
+            return 0;
+        }
+        self.cols.index.text.sum_range(start..end) as usize
+    }
+
+    pub(crate) fn has_marks(&self) -> bool {
+        !self.cols.index.mark.is_empty()
+    }
+
+    pub(crate) fn range_has_mark(&self, range: Range<usize>) -> bool {
+        self.cols
+            .action
+            .iter_range(range)
+            .any(|value| value == Action::Mark)
     }
 
     pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
@@ -1535,13 +1947,205 @@ mod tests {
         storage::Document,
         transaction::Transactable,
         types::{ObjId, OpId},
-        ActorId, AutoCommit, ObjType,
+        ActorId, AutoCommit, Automerge, ObjType, ROOT,
     };
 
     use super::OpSet;
 
     use rand::distr::Alphanumeric;
     use rand::RngExt;
+
+    #[test]
+    fn dirty_runs_returns_contiguous_dirty_ranges() {
+        let mut doc = Automerge::new();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "b", 2).unwrap();
+        tx.commit();
+
+        let dirty = doc.ops().dirty_runs().collect::<Vec<_>>();
+
+        assert_eq!(dirty, vec![DirtyRun { range: 0..2 }]);
+    }
+
+    #[test]
+    fn dirty_runs_skips_clean_ranges() {
+        let mut doc = Automerge::new();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "clean", 1).unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "dirty", 2).unwrap();
+        tx.commit();
+
+        let dirty = doc.ops().dirty_runs().collect::<Vec<_>>();
+
+        assert_eq!(dirty, vec![DirtyRun { range: 1..2 }]);
+    }
+
+    #[test]
+    fn mark_dirty_ranges_normalizes_overlapping_and_adjacent_ranges() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "b", 2).unwrap();
+        tx.put(ROOT, "c", 3).unwrap();
+        tx.put(ROOT, "d", 4).unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        doc.ops_mut()
+            .mark_dirty_ranges(vec![2..3, 0..1, 1..2, 2..4, 4..4]);
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range: 0..4 }]
+        );
+    }
+
+    #[test]
+    fn map_update_marks_whole_key_register_dirty() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 1).unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "key", 2).unwrap();
+        tx.commit();
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range: 0..2 }]
+        );
+    }
+
+    #[test]
+    fn list_update_marks_whole_element_register_dirty() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(&list, 1, "B").unwrap();
+        tx.commit();
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range: 2..4 }]
+        );
+    }
+
+    #[test]
+    fn inserting_before_dirty_rows_shifts_existing_dirty_ranges() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 1, "b").unwrap();
+        tx.insert(&list, 2, "c").unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(&list, 2, "C").unwrap();
+        tx.commit();
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range: 3..5 }]
+        );
+
+        let mut tx = doc.transaction();
+        tx.insert(&list, 0, "z").unwrap();
+        tx.commit();
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range: 1..2 }, DirtyRun { range: 4..6 }]
+        );
+    }
+
+    #[test]
+    fn mark_dirty_sequence_registers_handles_list_order_not_elemid_order() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, "a").unwrap();
+        tx.insert(&list, 0, "b").unwrap();
+        tx.insert(&list, 0, "c").unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let list_obj = doc.exid_to_obj(&list).unwrap().id;
+        let (elemid, range) = {
+            let query = doc
+                .ops()
+                .seek_ops_by_index(&list_obj, 1, SequenceType::List, None);
+            (query.elemid().unwrap(), query.range)
+        };
+
+        doc.ops_mut()
+            .mark_dirty_sequence_registers(vec![(list_obj, elemid)]);
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range }]
+        );
+    }
+
+    #[test]
+    fn text_insert_marks_inserted_rows_dirty() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, 1, 0, "X").unwrap();
+        tx.commit();
+
+        assert_eq!(
+            doc.ops().dirty_runs().collect::<Vec<_>>(),
+            vec![DirtyRun { range: 2..3 }]
+        );
+    }
+
+    #[test]
+    fn obj_range_containing_finds_text_object_from_dirty_range() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "before", 1).unwrap();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "abc").unwrap();
+        tx.put(ROOT, "after", 2).unwrap();
+        tx.commit();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.splice_text(&text, 1, 0, "X").unwrap();
+        tx.commit();
+
+        let dirty = doc.ops().dirty_runs().next().unwrap();
+        let text_obj = doc.exid_to_obj(&text).unwrap().id;
+        let (obj, range) = doc.ops().obj_range_containing(dirty.range.start).unwrap();
+        assert_eq!(obj, text_obj);
+        assert_eq!(range, doc.ops().scope_to_obj(&text_obj));
+    }
 
     #[test]
     fn suspend_resume_op_set_iter() {

@@ -39,6 +39,7 @@ pub(super) struct Indexes {
     pub(super) text: hexane::PrefixColumn<Option<u32>>,
     pub(super) top: hexane::PrefixColumn<bool>,
     pub(super) visible: hexane::Column<bool>,
+    pub(super) baseline_visible: hexane::Column<bool>,
     pub(super) inc: hexane::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
 }
@@ -49,6 +50,7 @@ impl Default for Indexes {
             text: hexane::PrefixColumn::new(),
             top: hexane::PrefixColumn::new(),
             visible: hexane::Column::new(),
+            baseline_visible: hexane::Column::new(),
             inc: hexane::Column::new(),
             mark: MarkIndexColumn::new(),
         }
@@ -492,6 +494,9 @@ impl Columns {
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+        self.index
+            .baseline_visible
+            .splice(pos, 0, ops.clone().map(|_| false));
 
         ops.count()
     }

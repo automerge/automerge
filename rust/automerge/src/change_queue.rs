@@ -59,6 +59,19 @@ impl ChangeQueue {
         }
     }
 
+    pub(crate) fn take(&mut self) -> Vec<Change> {
+        self.hashes.clear();
+        self.incoming_actor_seqs.clear();
+        std::mem::take(&mut self.changes)
+    }
+
+    pub(crate) fn push(&mut self, change: Change) {
+        let actor_seq = (change.actor_id().clone(), change.seq());
+        self.incoming_actor_seqs.insert(actor_seq);
+        self.hashes.insert(change.hash());
+        self.changes.push(change);
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.changes.is_empty()
     }

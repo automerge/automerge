@@ -94,15 +94,8 @@
 //!
 //! ## Patches, maintaining materialized state
 //!
-//! Often you will have some state which represents the "current" state of the document. E.g. some
-//! text in a UI which is a view of a text object in the document. Rather than re-rendering this
-//! text every single time a change comes in you can use a [`PatchLog`] to capture incremental
-//! changes made to the document and then use [`Automerge::make_patches()`] to get a set of patches
-//! to apply to the materialized state.
-//!
-//! Many of the methods on [`Automerge`], [`crate::sync::SyncDoc`] and
-//! [`crate::transaction::Transactable`] have a `*_log_patches()` variant which allow you to pass in
-//! a [`PatchLog`] to collect these incremental changes.
+//! Use [`Automerge::diff_incremental()`] for changes since the incremental cursor, or
+//! [`Automerge::diff()`] for differences between historical heads.
 //!
 //! ## Serde serialization
 //!
@@ -295,13 +288,13 @@ pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
+pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
-pub use error::{AutomergeError, PatchLogMismatch};
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};
-pub use patches::{Patch, PatchAction, PatchLog};
+pub use patches::{Patch, PatchAction};
 pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};

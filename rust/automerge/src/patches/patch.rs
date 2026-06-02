@@ -10,9 +10,7 @@ use crate::sequence_tree::SequenceTree;
 
 /// A change to the current state of the document
 ///
-/// [`Patch`]es are obtained from a [`PatchLog`](super::PatchLog) which has been passed to any of
-/// the various methods which mutate a document and add incremental changes to the
-/// [`PatchLog`](super::PatchLog)
+/// [`Patch`]es are obtained from document diff APIs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Patch {
     /// The object this patch modifies
@@ -21,12 +19,6 @@ pub struct Patch {
     pub path: Vec<(ObjId, Prop)>,
     /// The change this patch represents
     pub action: PatchAction,
-}
-
-impl Patch {
-    pub(crate) fn has(&self, obj: &ObjId, recursive: bool) -> bool {
-        &self.obj == obj || (recursive && self.path.iter().any(|(o, _)| o == obj))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -5,10 +5,6 @@ use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use hexane::PackError;
 use thiserror::Error;
 
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
-#[error("patch logs cannot be shared between documents; this probably means a PatchLog created for one document was reused with another")]
-pub struct PatchLogMismatch;
-
 #[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error(transparent)]
@@ -68,8 +64,6 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
-    #[error(transparent)]
-    PatchLogMismatch(#[from] PatchLogMismatch),
     #[error(transparent)]
     EncodingError(#[from] PackError),
     #[error("failed to unbundle: {0}")]

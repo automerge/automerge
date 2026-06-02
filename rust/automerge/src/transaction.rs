@@ -315,7 +315,7 @@ macro_rules! impl_transactable_for_tx {
                 prop: P,
                 value: V,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.put(doc, hist, obj.as_ref(), prop, value))
+                self.do_tx(|tx, doc| tx.put(doc, obj.as_ref(), prop, value))
             }
 
             fn put_object<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
@@ -324,7 +324,7 @@ macro_rules! impl_transactable_for_tx {
                 prop: P,
                 value: crate::ObjType,
             ) -> Result<crate::exid::ExId, crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.put_object(doc, hist, obj.as_ref(), prop, value))
+                self.do_tx(|tx, doc| tx.put_object(doc, obj.as_ref(), prop, value))
             }
 
             fn insert<O: AsRef<crate::exid::ExId>, V: Into<crate::ScalarValue>>(
@@ -333,7 +333,7 @@ macro_rules! impl_transactable_for_tx {
                 index: usize,
                 value: V,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.insert(doc, hist, obj.as_ref(), index, value))
+                self.do_tx(|tx, doc| tx.insert(doc, obj.as_ref(), index, value))
             }
 
             fn insert_object<O: AsRef<crate::exid::ExId>>(
@@ -342,7 +342,7 @@ macro_rules! impl_transactable_for_tx {
                 index: usize,
                 value: crate::ObjType,
             ) -> Result<crate::exid::ExId, crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.insert_object(doc, hist, obj.as_ref(), index, value))
+                self.do_tx(|tx, doc| tx.insert_object(doc, obj.as_ref(), index, value))
             }
 
             fn increment<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
@@ -351,7 +351,7 @@ macro_rules! impl_transactable_for_tx {
                 prop: P,
                 value: i64,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.increment(doc, hist, obj.as_ref(), prop, value))
+                self.do_tx(|tx, doc| tx.increment(doc, obj.as_ref(), prop, value))
             }
 
             fn delete<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
@@ -359,7 +359,7 @@ macro_rules! impl_transactable_for_tx {
                 obj: O,
                 prop: P,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.delete(doc, hist, obj.as_ref(), prop))
+                self.do_tx(|tx, doc| tx.delete(doc, obj.as_ref(), prop))
             }
 
             fn splice<O: AsRef<ExId>, V: Into<crate::hydrate::Value>, I: IntoIterator<Item = V>>(
@@ -369,7 +369,7 @@ macro_rules! impl_transactable_for_tx {
                 del: isize,
                 vals: I,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))?;
+                self.do_tx(|tx, doc| tx.splice(doc, obj.as_ref(), pos, del, vals))?;
                 Ok(())
             }
 
@@ -380,9 +380,7 @@ macro_rules! impl_transactable_for_tx {
                 del: isize,
                 text: &str,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| {
-                    tx.splice_text(doc, hist, obj.as_ref(), pos, del, text)
-                })?;
+                self.do_tx(|tx, doc| tx.splice_text(doc, obj.as_ref(), pos, del, text))?;
                 Ok(())
             }
 
@@ -392,7 +390,7 @@ macro_rules! impl_transactable_for_tx {
                 mark: crate::marks::Mark,
                 expand: crate::marks::ExpandMark,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| tx.mark(doc, hist, obj.as_ref(), mark, expand))
+                self.do_tx(|tx, doc| tx.mark(doc, obj.as_ref(), mark, expand))
             }
 
             fn unmark<O: AsRef<crate::exid::ExId>>(
@@ -403,9 +401,7 @@ macro_rules! impl_transactable_for_tx {
                 end: usize,
                 expand: crate::marks::ExpandMark,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| {
-                    tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand)
-                })
+                self.do_tx(|tx, doc| tx.unmark(doc, obj.as_ref(), name, start, end, expand))
             }
 
             fn split_block<O>(
@@ -416,14 +412,14 @@ macro_rules! impl_transactable_for_tx {
             where
                 O: AsRef<crate::exid::ExId>,
             {
-                self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
+                self.do_tx(|tx, doc| tx.split_block(doc, obj.as_ref(), index))
             }
 
             fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), crate::AutomergeError>
             where
                 O: AsRef<crate::exid::ExId>,
             {
-                self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, text.as_ref(), index))
+                self.do_tx(|tx, doc| tx.join_block(doc, text.as_ref(), index))
             }
 
             fn replace_block<O>(
@@ -434,7 +430,7 @@ macro_rules! impl_transactable_for_tx {
             where
                 O: AsRef<crate::exid::ExId>,
             {
-                self.do_tx(|tx, doc, hist| tx.replace_block(doc, hist, text.as_ref(), index))
+                self.do_tx(|tx, doc| tx.replace_block(doc, text.as_ref(), index))
             }
 
             fn base_heads(&self) -> Vec<crate::ChangeHash> {
@@ -449,9 +445,7 @@ macro_rules! impl_transactable_for_tx {
                 obj: &crate::exid::ExId,
                 new_text: S,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(|tx, doc, hist| {
-                    crate::text_diff::myers_diff(doc, tx, hist, obj, new_text)
-                })
+                self.do_tx(|tx, doc| crate::text_diff::myers_diff(doc, tx, obj, new_text))
             }
 
             fn update_spans<
@@ -463,15 +457,8 @@ macro_rules! impl_transactable_for_tx {
                 config: crate::marks::UpdateSpansConfig,
                 new_text: I,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(move |tx, doc, hist| {
-                    crate::text_diff::myers_block_diff(
-                        doc,
-                        tx,
-                        hist,
-                        text.as_ref(),
-                        new_text,
-                        &config,
-                    )
+                self.do_tx(move |tx, doc| {
+                    crate::text_diff::myers_block_diff(doc, tx, text.as_ref(), new_text, &config)
                 })
             }
 
@@ -480,9 +467,7 @@ macro_rules! impl_transactable_for_tx {
                 obj: O,
                 new_value: &crate::hydrate::Value,
             ) -> Result<(), crate::error::UpdateObjectError> {
-                self.do_tx(move |tx, doc, hist| {
-                    tx.update_object(doc, hist, obj.as_ref(), new_value)
-                })
+                self.do_tx(move |tx, doc| tx.update_object(doc, obj.as_ref(), new_value))
             }
 
             fn batch_create_object<O: AsRef<ExId>, P: Into<crate::Prop>>(
@@ -493,8 +478,8 @@ macro_rules! impl_transactable_for_tx {
                 insert: bool,
             ) -> Result<ExId, crate::AutomergeError> {
                 let prop = prop.into();
-                self.do_tx(move |tx, doc, hist| {
-                    tx.batch_create_object(doc, hist, obj.as_ref(), prop, value, insert)
+                self.do_tx(move |tx, doc| {
+                    tx.batch_create_object(doc, obj.as_ref(), prop, value, insert)
                 })
             }
 
@@ -502,7 +487,7 @@ macro_rules! impl_transactable_for_tx {
                 &mut self,
                 value: &crate::hydrate::Map,
             ) -> Result<(), crate::AutomergeError> {
-                self.do_tx(move |tx, doc, hist| tx.batch_init_root_map(doc, hist, value))?;
+                self.do_tx(move |tx, doc| tx.batch_init_root_map(doc, value))?;
                 Ok(())
             }
         }

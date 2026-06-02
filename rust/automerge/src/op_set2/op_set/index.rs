@@ -151,6 +151,7 @@ pub(crate) struct Indexes {
     pub(crate) text: hexane::PrefixColumn<Option<u32>>,
     pub(crate) top: hexane::PrefixColumn<bool>,
     pub(crate) visible: hexane::Column<bool>,
+    pub(crate) baseline_visible: hexane::Column<bool>,
     pub(crate) inc: hexane::Column<Option<i64>>,
     pub(crate) mark: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
@@ -229,6 +230,7 @@ impl IndexBuilder {
 
         let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();
         let visible = hexane::Column::from_values(visible);
+        let baseline_visible = visible.clone();
 
         let top: Vec<bool> = self.top.to_vec();
         let top = hexane::PrefixColumn::from_values(top);
@@ -245,6 +247,7 @@ impl IndexBuilder {
                 text,
                 top,
                 visible,
+                baseline_visible,
                 inc,
                 mark,
                 obj_info,

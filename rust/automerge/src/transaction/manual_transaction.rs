@@ -1,5 +1,4 @@
 use crate::exid::ExId;
-use crate::patches::PatchLog;
 use crate::ChangeHash;
 use crate::{automerge::Automerge, AutomergeError};
 
@@ -22,16 +21,14 @@ pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     inner: Option<TransactionInner>,
-    patch_log: PatchLog,
     doc: &'a mut Automerge,
 }
 
 impl<'a> Transaction<'a> {
-    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, patch_log: PatchLog) -> Self {
+    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs) -> Self {
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
-            patch_log,
         }
     }
 
@@ -64,12 +61,8 @@ impl Transaction<'_> {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
-        let tx = self.inner.take().unwrap();
-        let hash = tx.commit(self.doc, None, None);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
-        // TODO - remove this clone
-        (hash, self.patch_log.clone())
+    pub fn commit(mut self) -> Option<ChangeHash> {
+        self.inner.take().unwrap().commit(self.doc, None, None)
     }
 
     /// Commit the operations in this transaction with some options.
@@ -88,27 +81,25 @@ impl Transaction<'_> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
-        let tx = self.inner.take().unwrap();
-        let hash = tx.commit(self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
-        // TODO - remove this clone
-        (hash, self.patch_log.clone())
+    pub fn commit_with(mut self, options: CommitOptions) -> Option<ChangeHash> {
+        self.inner
+            .take()
+            .unwrap()
+            .commit(self.doc, options.message, options.time)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(mut self) -> usize {
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
         self.inner.take().unwrap().rollback(self.doc)
     }
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
+        F: FnOnce(&mut TransactionInner, &mut Automerge) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        f(tx, self.doc, &mut self.patch_log)
+        f(tx, self.doc)
     }
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
@@ -123,7 +114,7 @@ impl Transaction<'_> {
         &mut self,
         value: &crate::hydrate::Map,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(move |tx, doc, hist| tx.batch_init_root_map(doc, hist, value))
+        self.do_tx(move |tx, doc| tx.batch_init_root_map(doc, value))
     }
 }
 

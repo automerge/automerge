@@ -360,10 +360,16 @@ impl<'a> DiffSkipper<VisIter<'a>> {
             }
             ClockRange::Diff(before, after) => {
                 let before = VisIter::new(op_set, Some(&before), range.clone());
-                let after = VisIter::new(op_set, Some(&after), range);
+                let after = VisIter::new(op_set, after.as_ref(), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
             }
         }
+    }
+
+    fn new_with_baseline_before(op_set: &'a OpSet, range: Range<usize>) -> Self {
+        let before = VisIter::new_baseline(op_set, range.clone());
+        let after = VisIter::new(op_set, None, range);
+        DiffSkipper::Diff(PastSkipper::new(before, after))
     }
 }
 
@@ -375,7 +381,7 @@ impl<'a> DiffSkipper<SkipToTopIter<'a>> {
             }
             ClockRange::Diff(before, after) => {
                 let before = SkipToTopIter::new(op_set, Some(before), range.clone());
-                let after = SkipToTopIter::new(op_set, Some(after), range);
+                let after = SkipToTopIter::new(op_set, after, range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
             }
         }
@@ -508,6 +514,18 @@ impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I, VisIter<'a>> {
         Self {
             iter,
             skipper: DiffSkipper::new(op_set, clock, range),
+            _phantom: Default::default(),
+        }
+    }
+
+    pub(crate) fn new_with_baseline_before(
+        op_set: &'a OpSet,
+        iter: I,
+        range: Range<usize>,
+    ) -> Self {
+        Self {
+            iter,
+            skipper: DiffSkipper::new_with_baseline_before(op_set, range),
             _phantom: Default::default(),
         }
     }
