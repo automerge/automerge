@@ -282,6 +282,7 @@ pub mod op_set2;
 pub mod patches;
 mod read;
 mod sequence_tree;
+pub mod signatures;
 mod storage;
 pub mod sync;
 mod text_diff;
@@ -304,11 +305,16 @@ pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
+pub use signatures::{
+    SignatureAlgorithm, SignatureError, SignatureReport, SignatureState, SigningRequest,
+    VerificationRequest, VerificationRequestId,
+};
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
 pub use types::{
-    ActorId, Author, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding,
+    ActorId, Author, ChangeHash, ChangeSignature, ObjType, OpType, ParseChangeHashError, Prop,
+    TextEncoding,
 };
 pub use value::{ScalarValue, Value};
 

@@ -69,7 +69,10 @@
 
 use itertools::Itertools;
 use serde::ser::SerializeMap;
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use crate::{
     patches::PatchLog,
@@ -163,7 +166,8 @@ impl MessageVersion {
 
 impl SyncDoc for Automerge {
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
-        let our_heads = self.get_heads();
+        let include_proof_bundles = sync_state.supports_v2_messages();
+        let our_heads = self.sync_advertised_heads(include_proof_bundles);
 
         let our_need = if sync_state.read_only {
             vec![]
@@ -177,7 +181,7 @@ impl SyncDoc for Automerge {
             HashSet::new()
         };
         let our_have = if our_need.iter().all(|hash| their_heads_set.contains(hash)) {
-            vec![self.make_bloom_filter(sync_state.shared_heads.clone())]
+            vec![self.make_bloom_filter(sync_state.shared_heads.clone(), include_proof_bundles)]
         } else {
             Vec::new()
         };
@@ -187,7 +191,7 @@ impl SyncDoc for Automerge {
                 if !first_have
                     .last_sync
                     .iter()
-                    .all(|hash| self.has_change(hash))
+                    .all(|hash| self.has_received_change(hash))
                 {
                     return Some(Message::reset(our_heads));
                 }
@@ -199,25 +203,67 @@ impl SyncDoc for Automerge {
             // Skip computing and sending changes to save bandwidth.
             MessageBuilder::new(vec![], sync_state)
         } else if let Some((their_have, their_need)) = sync_state.their() {
-            if sync_state.send_doc() {
+            let can_send_snapshot =
+                !self.signing_enabled() || self.ensure_signatures_complete().is_ok();
+            if sync_state.send_doc() && can_send_snapshot {
                 let hashes = self.change_graph.get_hashes(&[]);
-                MessageBuilder::new_v2(self.save(), hashes)
+                let bytes = if self.signing_enabled() {
+                    self.try_save_signed().ok()?
+                } else {
+                    self.save()
+                };
+                MessageBuilder::new_v2(bytes, hashes)
             } else {
                 let all_hashes = self
-                    .get_hashes_to_send(their_have, their_need)
+                    .get_hashes_to_send(their_have, their_need, include_proof_bundles)
                     .expect("Should have only used hashes that are in the document");
                 // deduplicate the changes to send with those we have already sent and clone it now
                 let hashes: Vec<_> = all_hashes
                     .into_iter()
                     .filter(|hash| !sync_state.sent_hashes.contains(hash))
                     .collect();
-                if hashes.len() > self.change_graph.len() / 3 && sync_state.supports_v2_messages() {
+                if hashes.len() > self.change_graph.len() / 3
+                    && sync_state.supports_v2_messages()
+                    && can_send_snapshot
+                {
                     // sending more than a 1/3 of the document?  send everything
                     let all_hashes = self.change_graph.get_hashes(&[]);
-                    MessageBuilder::new_v2(self.save(), all_hashes)
+                    let bytes = if self.signing_enabled() {
+                        self.try_save_signed().ok()?
+                    } else {
+                        self.save()
+                    };
+                    MessageBuilder::new_v2(bytes, all_hashes)
                 } else {
-                    let changes = self.get_changes_by_hashes(hashes.iter().copied()).ok()?;
-                    MessageBuilder::new(changes, sync_state)
+                    if self.signing_enabled() && include_proof_bundles {
+                        let bundle_hashes = self.signed_sync_bundle_hashes(&hashes);
+                        let bundled = bundle_hashes.iter().copied().collect::<HashSet<_>>();
+                        let standalone_changes =
+                            self.sync_standalone_changes_for_hashes(&hashes, &bundled);
+                        let standalone_hashes = standalone_changes
+                            .iter()
+                            .map(|change| change.hash())
+                            .collect::<Vec<_>>();
+                        let mut data = Vec::new();
+                        if !bundle_hashes.is_empty() {
+                            let bundle = self.bundle(bundle_hashes.iter().copied()).ok()?;
+                            data.extend_from_slice(bundle.bytes());
+                        }
+                        for change in standalone_changes {
+                            data.extend_from_slice(change.raw_bytes());
+                        }
+                        let mut sent_hashes = bundle_hashes;
+                        sent_hashes.extend(standalone_hashes);
+                        MessageBuilder::new_v2(data, Cow::Owned(sent_hashes))
+                    } else {
+                        let changes = self.get_changes_by_hashes(hashes.iter().copied()).ok()?;
+                        let changes = if self.signing_enabled() {
+                            self.attach_available_signatures(changes)
+                        } else {
+                            changes
+                        };
+                        MessageBuilder::new(changes, sync_state)
+                    }
                 }
             }
         } else {
@@ -296,8 +342,9 @@ impl SyncDoc for Automerge {
 }
 
 impl Automerge {
-    fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let hashes = self.change_graph.get_hashes(&last_sync);
+    fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>, include_proof_bundles: bool) -> Have {
+        let advertised = self.sync_advertised_hashes(include_proof_bundles);
+        let hashes = advertised.into_iter().collect::<Vec<_>>();
         Have {
             last_sync,
             bloom: BloomFilter::from_hashes(hashes.iter()),
@@ -308,9 +355,14 @@ impl Automerge {
         &self,
         have: &[Have],
         need: &[ChangeHash],
+        include_proof_bundles: bool,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         if have.is_empty() {
-            Ok(need.to_vec())
+            Ok(need
+                .iter()
+                .filter(|hash| self.has_received_change(hash))
+                .copied()
+                .collect())
         } else {
             let mut last_sync_hashes = HashSet::new();
             let mut bloom_filters = Vec::with_capacity(have.len());
@@ -323,12 +375,13 @@ impl Automerge {
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
             let hashes = self.change_graph.get_hashes(&last_sync_hashes);
+            let advertised = self.sync_advertised_hashes(include_proof_bundles);
 
             let mut change_hashes = HashSet::with_capacity(hashes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
             let mut hashes_to_send = HashSet::new();
 
-            for hash in &*hashes {
+            for hash in hashes.iter().filter(|hash| advertised.contains(hash)) {
                 change_hashes.insert(*hash);
 
                 for dep in self.change_graph.deps(hash) {
@@ -353,12 +406,12 @@ impl Automerge {
 
             let mut final_hashes = Vec::with_capacity(hashes_to_send.len() + need.len());
             for hash in need {
-                if !hashes_to_send.contains(hash) {
+                if self.has_received_change(hash) && !hashes_to_send.contains(hash) {
                     final_hashes.push(*hash);
                 }
             }
 
-            for hash in &*hashes {
+            for hash in hashes.iter().filter(|hash| advertised.contains(hash)) {
                 if hashes_to_send.contains(hash) {
                     final_hashes.push(*hash);
                 }
@@ -374,7 +427,6 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_heads();
 
         let Message {
             heads: message_heads,
@@ -401,12 +453,18 @@ impl Automerge {
             sync_state.peer_read_only = flags.contains(MessageFlags::READ_ONLY);
         }
 
+        let include_proof_bundles = sync_state.supports_v2_messages();
+        let before_heads = self.sync_advertised_heads(include_proof_bundles);
+
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty && !sync_state.read_only {
             self.load_incremental_log_patches(&message_changes.join(), patch_log)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
+                &self
+                    .sync_advertised_heads(include_proof_bundles)
+                    .into_iter()
+                    .collect(),
                 &sync_state.shared_heads,
             );
         }
@@ -420,7 +478,7 @@ impl Automerge {
 
         let known_heads = message_heads
             .iter()
-            .filter(|head| self.has_change(head))
+            .filter(|head| self.has_received_change(head))
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads.clone_from(&message_heads);

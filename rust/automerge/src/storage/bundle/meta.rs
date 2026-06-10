@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::types::ChangeHash;
+use crate::types::{ChangeHash, ChangeSignature};
 
 #[derive(Clone, Debug)]
 pub(crate) struct BundleMetadata<'a> {
@@ -12,6 +12,7 @@ pub(crate) struct BundleMetadata<'a> {
     pub(crate) message: Option<Cow<'a, str>>,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) extra: Cow<'a, [u8]>,
+    pub(crate) signature: Option<ChangeSignature>,
     pub(crate) start_op: u64,
     pub(crate) builder: usize,
 }

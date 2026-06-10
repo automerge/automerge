@@ -1,4 +1,5 @@
 use super::parents::Parents;
+use crate::change_graph::ChangeGraph;
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
@@ -7,8 +8,8 @@ use crate::storage::columns::BadColumnLayout;
 use crate::storage::{columns::compression::Uncompressed, Document, RawColumns};
 use crate::types;
 use crate::types::{
-    ActorId, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
-    TextEncoding,
+    ActorId, ChangeHash, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop,
+    SequenceType, TextEncoding,
 };
 use crate::AutomergeError;
 
@@ -23,6 +24,7 @@ use itertools::Itertools;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
@@ -44,6 +46,101 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
+
+#[derive(Debug)]
+struct FilteredOp<'a> {
+    op: Op<'a>,
+    succs: Vec<(OpId, Option<i64>)>,
+}
+
+impl OpLike for FilteredOp<'_> {
+    type SuccIter<'b>
+        = std::vec::IntoIter<OpId>
+    where
+        Self: 'b;
+
+    fn id_actor(op: &Self) -> ActorIdx {
+        op.op.id.actoridx()
+    }
+
+    fn id_ctr(op: &Self) -> i64 {
+        op.op.id.icounter()
+    }
+
+    fn id(&self) -> OpId {
+        self.op.id
+    }
+
+    fn obj(&self) -> ObjId {
+        self.op.obj
+    }
+
+    fn action(op: &Self) -> Action {
+        op.op.action
+    }
+
+    fn key_str(op: &Self) -> Option<&str> {
+        match &op.op.key {
+            KeyRef::Map(Cow::Owned(s)) => Some(s),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(*s),
+            _ => None,
+        }
+    }
+
+    fn key(&self) -> KeyRef<'_> {
+        self.op.key.clone()
+    }
+
+    fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
+        self.op.value.as_raw()
+    }
+
+    fn meta_value(&self) -> super::ValueMeta {
+        super::ValueMeta::from(&self.op.value)
+    }
+
+    fn insert(op: &Self) -> bool {
+        op.op.insert
+    }
+
+    fn expand(op: &Self) -> bool {
+        op.op.expand
+    }
+
+    fn succ(&self) -> Self::SuccIter<'_> {
+        self.succs
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
+        Box::new(op.succs.iter().map(|(_, inc)| *inc))
+    }
+
+    fn mark_name(op: &Self) -> Option<&str> {
+        op.op.mark_name
+    }
+
+    fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
+        op.op.mark_index()
+    }
+
+    fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
+        op.op.width(seq_type, text_encoding) as u64
+    }
+
+    fn visible(_op: &Self) -> bool {
+        true
+    }
+
+    fn obj_info(&self) -> Option<ObjInfo> {
+        let obj_type = ObjType::try_from(self.op.action).ok()?;
+        let parent = self.op.obj;
+        Some(ObjInfo { parent, obj_type })
+    }
+}
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
@@ -1099,6 +1196,45 @@ impl OpSet {
 
     pub(crate) fn export(&self) -> (RawColumns<Uncompressed>, Vec<u8>) {
         self.cols.export()
+    }
+
+    pub(crate) fn filtered_for_changes(
+        &self,
+        change_graph: &ChangeGraph,
+        hashes: &[ChangeHash],
+    ) -> Self {
+        let mut keep_ops = HashSet::new();
+        for meta in change_graph
+            .get_bundle_metadata(hashes.iter().copied())
+            .flatten()
+        {
+            for counter in meta.start_op..=meta.max_op {
+                keep_ops.insert(OpId::new(counter, meta.actor));
+            }
+        }
+
+        let ops = self
+            .iter()
+            .filter(|op| keep_ops.contains(&op.id))
+            .map(|op| {
+                let succs = op
+                    .succ_cursors
+                    .clone()
+                    .with_inc()
+                    .filter(|(id, _)| keep_ops.contains(id))
+                    .collect::<Vec<_>>();
+                FilteredOp { op, succs }
+            })
+            .collect::<Vec<_>>();
+
+        let mut cols = Columns::default();
+        cols.splice(0, &ops, self.text_encoding);
+        OpSet {
+            actors: self.actors.clone(),
+            cols,
+            obj_info: ObjIndex::default(),
+            text_encoding: self.text_encoding,
+        }
     }
 
     pub(crate) fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {

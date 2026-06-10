@@ -140,6 +140,7 @@ impl TransactionInner {
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
         doc.update_history(&change);
+        doc.mark_local_change(hash);
         doc.remove_unused_actors(true);
         hash
     }

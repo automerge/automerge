@@ -223,7 +223,7 @@ impl<'a> Input<'a> {
         Ok((new_input, self.bytes))
     }
 
-    fn truncate(&self, length: usize) -> Input<'a> {
+    pub(crate) fn truncate(&self, length: usize) -> Input<'a> {
         let length = if length > self.bytes.len() {
             self.bytes.len()
         } else {

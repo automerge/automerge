@@ -973,6 +973,17 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        if self.signing_enabled() {
+            return self.queue_unverified_changes(changes);
+        }
+        self.apply_verified_changes_batch_log_patches(changes, log)
+    }
+
+    pub(crate) fn apply_verified_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
+        &mut self,
+        changes: I,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
         // Pool all incoming changes together with any previously queued orphans.
         let mut pool: Vec<Change> = self.queue.take();
         let queue_len = pool.len();

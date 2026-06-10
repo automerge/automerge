@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroU32;
 use std::ops::Add;
 
@@ -15,7 +15,7 @@ use crate::{
     storage::columns::BadColumnLayout,
     storage::document::ReconstructError as LoadError,
     storage::{Columns, Document, RawColumn, RawColumns},
-    types::{Author, AuthorIdx, OpId},
+    types::{Author, AuthorIdx, ChangeSignature, OpId},
     Change, ChangeHash,
 };
 
@@ -30,6 +30,7 @@ pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
     actors: Vec<ActorIdx>,
+    signatures: HashMap<ChangeHash, ChangeSignature>,
     authors: Vec<Author>,
     author: Option<AuthorIdx>,
     pub(crate) revocations: HashMap<Author, Vec<ChangeHash>>,
@@ -54,7 +55,10 @@ pub(crate) struct ChangeGraph {
     seq_index: Vec<Vec<NodeIdx>>,
 }
 
-pub(crate) struct ChangeGraphCols(ChangeGraph);
+pub(crate) struct ChangeGraphCols {
+    graph: ChangeGraph,
+    signatures_by_index: Vec<(usize, ChangeSignature)>,
+}
 
 const CACHE_STEP: u32 = 16;
 
@@ -96,6 +100,7 @@ impl ChangeGraph {
             nodes_by_hash: HashMap::new(),
             hashes: Vec::new(),
             actors: Vec::new(),
+            signatures: HashMap::new(),
             authors: Vec::new(),
             actor_author: Vec::new(),
             author: None,
@@ -140,6 +145,10 @@ impl ChangeGraph {
         self.heads.iter().cloned()
     }
 
+    pub(crate) fn all_hashes(&self) -> impl Iterator<Item = ChangeHash> + '_ {
+        self.hashes.iter().copied()
+    }
+
     pub(crate) fn head_indexes(&self) -> impl Iterator<Item = u64> + '_ {
         self.heads
             .iter()
@@ -148,6 +157,129 @@ impl ChangeGraph {
 
     pub(crate) fn num_actors(&self) -> usize {
         self.seq_index.len()
+    }
+
+    pub(crate) fn has_signature(&self, hash: &ChangeHash) -> bool {
+        self.signatures.contains_key(hash)
+    }
+
+    pub(crate) fn signature(&self, hash: &ChangeHash) -> Option<&ChangeSignature> {
+        self.signatures.get(hash)
+    }
+
+    fn author_for_node(&self, idx: NodeIdx) -> Option<AuthorIdx> {
+        self.actor_author
+            .get(usize::from(self.actors[idx.0 as usize]))
+            .copied()
+            .flatten()
+    }
+
+    pub(crate) fn author_frontier_hashes(&self) -> Vec<(ChangeHash, Author)> {
+        let has_same_author_child = self.same_author_child_flags();
+        self.node_ids()
+            .filter_map(|idx| {
+                if has_same_author_child[idx.0 as usize] {
+                    return None;
+                }
+                let actor = usize::from(self.actors[idx.0 as usize]);
+                let author_idx = self.actor_author.get(actor).copied().flatten()?;
+                let author = self.authors.get(author_idx.as_usize())?.clone();
+                Some((self.hashes[idx.0 as usize], author))
+            })
+            .collect()
+    }
+
+    pub(crate) fn signature_covered_hashes(&self) -> HashSet<ChangeHash> {
+        let mut covered = HashSet::new();
+        let mut stack = self
+            .node_ids()
+            .filter(|idx| self.signatures.contains_key(&self.hashes[idx.0 as usize]))
+            .collect::<Vec<_>>();
+
+        while let Some(child) = stack.pop() {
+            if !covered.insert(child) {
+                continue;
+            }
+            let child_author = self.author_for_node(child);
+            let Some(child_author) = child_author else {
+                continue;
+            };
+            for parent in self.parents(child) {
+                if self.author_for_node(parent) == Some(child_author) {
+                    stack.push(parent);
+                }
+            }
+        }
+
+        covered
+            .into_iter()
+            .map(|idx| self.hashes[idx.0 as usize])
+            .collect()
+    }
+
+    pub(crate) fn same_author_signed_descendant_path(
+        &self,
+        hash: &ChangeHash,
+    ) -> Option<Vec<ChangeHash>> {
+        let start = *self.nodes_by_hash.get(hash)?;
+        let author = self.author_for_node(start)?;
+        if self.signatures.contains_key(hash) {
+            return Some(vec![*hash]);
+        }
+
+        let mut children = vec![Vec::new(); self.len()];
+        for child in self.node_ids() {
+            for parent in self.parents(child) {
+                if self.author_for_node(child) == Some(author)
+                    && self.author_for_node(parent) == Some(author)
+                {
+                    children[parent.0 as usize].push(child);
+                }
+            }
+        }
+
+        let mut queue = VecDeque::from([start]);
+        let mut seen = HashSet::from([start]);
+        let mut prev = HashMap::<NodeIdx, NodeIdx>::new();
+        let mut signed = None;
+        while let Some(node) = queue.pop_front() {
+            for child in &children[node.0 as usize] {
+                if !seen.insert(*child) {
+                    continue;
+                }
+                prev.insert(*child, node);
+                if self.signatures.contains_key(&self.hashes[child.0 as usize]) {
+                    signed = Some(*child);
+                    break;
+                }
+                queue.push_back(*child);
+            }
+            if signed.is_some() {
+                break;
+            }
+        }
+
+        let mut node = signed?;
+        let mut path = vec![self.hashes[node.0 as usize]];
+        while node != start {
+            node = prev[&node];
+            path.push(self.hashes[node.0 as usize]);
+        }
+        path.reverse();
+        Some(path)
+    }
+
+    pub(crate) fn attach_signature(
+        &mut self,
+        hash: ChangeHash,
+        signature: ChangeSignature,
+    ) -> bool {
+        if self.nodes_by_hash.contains_key(&hash) {
+            self.signatures.insert(hash, signature);
+            true
+        } else {
+            false
+        }
     }
 
     pub(crate) fn revoke(&mut self, author: Author, heads: Vec<ChangeHash>) {
@@ -386,6 +518,41 @@ impl ChangeGraph {
         (0..end).map(NodeIdx)
     }
 
+    fn same_author_child_flags(&self) -> Vec<bool> {
+        let mut has_same_author_child = vec![false; self.len()];
+        for child in self.node_ids() {
+            let child_idx = child.0 as usize;
+            let child_author = self.actor_author[usize::from(self.actors[child_idx])];
+            let Some(child_author) = child_author else {
+                continue;
+            };
+            for parent in self.parents(child) {
+                let parent_idx = parent.0 as usize;
+                let parent_author = self.actor_author[usize::from(self.actors[parent_idx])];
+                if parent_author == Some(child_author) {
+                    has_same_author_child[parent_idx] = true;
+                }
+            }
+        }
+        has_same_author_child
+    }
+
+    pub(crate) fn retained_signature_rows(&self) -> Vec<(usize, &ChangeSignature)> {
+        let has_same_author_child = self.same_author_child_flags();
+
+        self.node_ids()
+            .filter_map(|idx| {
+                if has_same_author_child[idx.0 as usize] {
+                    return None;
+                }
+                let hash = self.hashes.get(idx.0 as usize)?;
+                self.signatures
+                    .get(hash)
+                    .map(|signature| (idx.0 as usize, signature))
+            })
+            .collect()
+    }
+
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
         use hexane::v1::EncoderApi;
         use ids::*;
@@ -513,7 +680,7 @@ impl ChangeGraph {
             let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
             let (meta_prefix, meta_value) = self.extra_bytes_meta.get(i).unwrap();
-            let meta_start = meta_prefix as usize;
+            let meta_start = meta_prefix as usize - meta_value.length();
             let meta_range = meta_start..(meta_start + meta_value.length());
             let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
@@ -533,6 +700,7 @@ impl ChangeGraph {
                 timestamp,
                 message,
                 extra,
+                signature: self.signatures.get(&hash).cloned(),
                 deps,
                 builder: i,
             })
@@ -591,7 +759,7 @@ impl ChangeGraph {
 
                 // FIXME - this needs a test
                 let (meta_prefix, meta_value) = self.extra_bytes_meta.get(i).unwrap();
-                let meta_start = meta_prefix as usize;
+                let meta_start = meta_prefix as usize - meta_value.length();
                 let meta_range = meta_start..(meta_start + meta_value.length());
                 let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
@@ -928,15 +1096,15 @@ impl ChangeGraph {
 
 impl ChangeGraphCols {
     pub(crate) fn len(&self) -> usize {
-        self.0.len()
+        self.graph.len()
     }
 
     pub(crate) fn iter(&self) -> ChangeIter<'_> {
-        self.0.iter()
+        self.graph.iter()
     }
 
     pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
-        let mut graph = self.0;
+        let mut graph = self.graph;
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.is_empty());
 
@@ -953,6 +1121,12 @@ impl ChangeGraphCols {
                 if c.seq() == 1 {
                     graph.assign_author(author.into(), graph.actors[idx].into())
                 }
+            }
+        }
+
+        for (idx, signature) in self.signatures_by_index {
+            if let Some(hash) = graph.hashes.get(idx).copied() {
+                graph.signatures.insert(hash, signature);
             }
         }
 
@@ -1002,6 +1176,10 @@ impl ChangeGraphCols {
             v1::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
         let extra_bytes_meta =
             v1::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts.into())?;
+        let signatures_by_index = doc.signatures_by_index().to_vec();
+        if signatures_by_index.iter().any(|(idx, _)| *idx >= len) {
+            return Err(LoadError::InvalidColumnLength(ACTOR_COL_SPEC));
+        }
 
         if max_ops.len() != len {
             return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));
@@ -1066,6 +1244,7 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
+        let signatures = HashMap::new();
 
         let author = None;
         let authors = vec![];
@@ -1075,31 +1254,35 @@ impl ChangeGraphCols {
         let revocation_cached_clock = OpClock(vec![u32::MAX; num_actors]);
         let pending_revoke = HashSet::default();
 
-        Ok(ChangeGraphCols(ChangeGraph {
-            edges,
-            hashes,
-            actors,
-            authors,
-            author,
-            actor_author,
-            revocations,
-            revocations_mask,
-            revocation_cached_clock,
-            pending_revoke,
-            parents,
-            seq,
-            max_ops,
-            max_op,
-            num_ops,
-            timestamps,
-            messages,
-            extra_bytes_meta,
-            extra_bytes_raw,
-            heads,
-            nodes_by_hash,
-            clock_cache,
-            seq_index,
-        }))
+        Ok(ChangeGraphCols {
+            graph: ChangeGraph {
+                edges,
+                hashes,
+                actors,
+                signatures,
+                authors,
+                author,
+                actor_author,
+                revocations,
+                revocations_mask,
+                revocation_cached_clock,
+                pending_revoke,
+                parents,
+                seq,
+                max_ops,
+                max_op,
+                num_ops,
+                timestamps,
+                messages,
+                extra_bytes_meta,
+                extra_bytes_raw,
+                heads,
+                nodes_by_hash,
+                clock_cache,
+                seq_index,
+            },
+            signatures_by_index,
+        })
     }
 }
 
@@ -1300,7 +1483,7 @@ impl<'a> Iterator for ChangeIter<'a> {
         let start_op = max_op - num_ops + 1;
 
         let (meta_prefix, meta_value) = self.extra_bytes_meta.next()?;
-        let meta_start = meta_prefix as usize;
+        let meta_start = meta_prefix as usize - meta_value.length();
         let meta_range = meta_start..(meta_start + meta_value.length());
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
         let deps = self
@@ -1335,7 +1518,7 @@ impl<'a> Iterator for ChangeIter<'a> {
         let start_op = max_op - num_ops + 1;
 
         let meta = self.extra_bytes_meta.delta_nth(n)?;
-        let meta_start = meta.delta as usize;
+        let meta_start = meta.total as usize - meta.value.length();
         let meta_range = meta_start..(meta_start + meta.value.length());
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
 

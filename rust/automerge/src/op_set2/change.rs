@@ -107,6 +107,7 @@ where
         data.extend(meta.extra.as_ref());
     }
 
+    let canonical_body_len = data.len();
     let header = Header::new(ChunkType::Change, &data);
 
     let mut bytes = Vec::with_capacity(header.len() + data.len());
@@ -129,6 +130,9 @@ where
         ops_meta,
         ops_data,
         extra_bytes,
+        canonical_body_len,
+        signature: None,
+        signature_bytes: None,
         num_ops,
         _phantom: PhantomData,
     }

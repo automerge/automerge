@@ -242,6 +242,7 @@ impl<'a> OpEncoderStrategy<'a> {
             data.extend(change.extra.as_ref());
         }
 
+        let canonical_body_len = data.len();
         let header = Header::new(ChunkType::Change, &data);
 
         let mut bytes = Vec::with_capacity(header.len() + data.len());
@@ -264,6 +265,9 @@ impl<'a> OpEncoderStrategy<'a> {
             ops_meta,
             ops_data,
             extra_bytes,
+            canonical_body_len,
+            signature: None,
+            signature_bytes: None,
             num_ops,
             _phantom: PhantomData,
         })
@@ -730,11 +734,14 @@ impl<'a> ChangeCollector<'a> {
     ) -> Vec<Change> {
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
         debug_assert_eq!(
-            r1,
+            r1.iter().map(|c| c.hash()).collect::<Vec<_>>(),
             crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
                 .unwrap()
                 .to_changes()
                 .unwrap()
+                .iter()
+                .map(|c| c.hash())
+                .collect::<Vec<_>>()
         );
         r1
     }

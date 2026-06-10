@@ -46,6 +46,10 @@ pub struct ActorId(TinyVec<[u8; 16]>);
 
 #[derive(PartialEq, Hash, Clone, Ord, Eq, PartialOrd)]
 pub struct Author(Vec<u8>);
+
+#[derive(PartialEq, Hash, Clone, Ord, Eq, PartialOrd)]
+pub struct ChangeSignature(Vec<u8>);
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) struct AuthorIdx(usize);
 
@@ -61,6 +65,15 @@ impl AuthorIdx {
 }
 
 impl Author {
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+    pub fn to_hex_string(&self) -> String {
+        hex::encode(&self.0)
+    }
+}
+
+impl ChangeSignature {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_slice()
     }
@@ -87,9 +100,21 @@ impl From<Vec<u8>> for Author {
     }
 }
 
+impl From<Vec<u8>> for ChangeSignature {
+    fn from(v: Vec<u8>) -> Self {
+        ChangeSignature(v)
+    }
+}
+
 impl<'a> From<&'a [u8]> for Author {
     fn from(s: &'a [u8]) -> Self {
         Author(s.to_vec())
+    }
+}
+
+impl<'a> From<&'a [u8]> for ChangeSignature {
+    fn from(s: &'a [u8]) -> Self {
+        ChangeSignature(s.to_vec())
     }
 }
 
@@ -104,6 +129,14 @@ impl fmt::Debug for ActorId {
 impl fmt::Debug for Author {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Author")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl fmt::Debug for ChangeSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ChangeSignature")
             .field(&hex::encode(&self.0))
             .finish()
     }

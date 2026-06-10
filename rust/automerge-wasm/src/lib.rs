@@ -66,6 +66,27 @@ export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
+export type SigningRequest = {
+  hash: Hash;
+  author: Author;
+  algorithm: "ed25519" | string;
+  bytesToSign: Uint8Array;
+};
+export type VerificationRequest = {
+  id: number;
+  hash: Hash;
+  author: Author;
+  algorithm: "ed25519" | string;
+  signature?: Uint8Array;
+  bytesToVerify: Uint8Array;
+};
+export type SignatureReport = {
+  signingRequested: number;
+  signaturesAttached: number;
+  verificationRequested: number;
+  verificationAccepted: number;
+  verificationRejected: number;
+};
 export type ScalarValue = string | number | boolean | null | Date | Uint8Array;
 export type Value = ScalarValue | object;
 export type MaterializeValue =
@@ -340,6 +361,8 @@ interface Automerge {
 
 export type LoadOptions = {
   actor?: Actor;
+  author?: Author;
+  signing?: boolean;
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
@@ -352,6 +375,8 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
+  author?: Author;
+  signing?: boolean;
 };
 
 export function create(options?: InitOptions): Automerge;
@@ -413,6 +438,99 @@ macro_rules! log {
     ( $( $t:tt )* ) => {
           web_sys::console::log_1(&format!( $( $t )* ).into());
     };
+}
+
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct SignatureState {
+    inner: am::SignatureState,
+}
+
+#[wasm_bindgen]
+impl SignatureState {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> SignatureState {
+        SignatureState {
+            inner: am::SignatureState::new(),
+        }
+    }
+
+    #[wasm_bindgen(js_name = pendingSigningRequests, unchecked_return_type = "SigningRequest[]")]
+    pub fn pending_signing_requests(&self) -> Array {
+        self.inner
+            .pending_signing_requests()
+            .map(|request| {
+                let obj = Object::new();
+                js_set(&obj, "hash", request.hash().to_string()).unwrap();
+                js_set(&obj, "author", request.author().to_string()).unwrap();
+                js_set(&obj, "algorithm", "ed25519").unwrap();
+                js_set(
+                    &obj,
+                    "bytesToSign",
+                    Uint8Array::from(request.bytes_to_sign()),
+                )
+                .unwrap();
+                JsValue::from(obj)
+            })
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = markSigningStarted)]
+    pub fn mark_signing_started(&mut self, hash: String) -> Result<bool, JsValue> {
+        let bytes = hex::decode(hash).map_err(|e| js_sys::Error::new(&e.to_string()))?;
+        let hash = am::ChangeHash::try_from(bytes.as_slice())
+            .map_err(|e| js_sys::Error::new(&e.to_string()))?;
+        Ok(self.inner.mark_signing_started(&hash))
+    }
+
+    #[wasm_bindgen(js_name = completeSigning)]
+    pub fn complete_signing(&mut self, hash: String, signature: Uint8Array) -> Result<(), JsValue> {
+        let bytes = hex::decode(hash).map_err(|e| js_sys::Error::new(&e.to_string()))?;
+        let hash = am::ChangeHash::try_from(bytes.as_slice())
+            .map_err(|e| js_sys::Error::new(&e.to_string()))?;
+        self.inner.complete_signing(hash, signature.to_vec());
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = pendingVerificationRequests, unchecked_return_type = "VerificationRequest[]")]
+    pub fn pending_verification_requests(&self) -> Array {
+        self.inner
+            .pending_verification_requests()
+            .map(|request| {
+                let obj = Object::new();
+                js_set(&obj, "id", request.id().as_u64() as f64).unwrap();
+                js_set(&obj, "hash", request.hash().to_string()).unwrap();
+                js_set(&obj, "author", request.author().to_string()).unwrap();
+                js_set(&obj, "algorithm", "ed25519").unwrap();
+                if let Some(signature) = request.signature() {
+                    js_set(&obj, "signature", Uint8Array::from(signature.as_bytes())).unwrap();
+                }
+                js_set(
+                    &obj,
+                    "bytesToVerify",
+                    Uint8Array::from(request.bytes_to_verify()),
+                )
+                .unwrap();
+                JsValue::from(obj)
+            })
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = completeVerification)]
+    pub fn complete_verification(&mut self, id: f64, valid: bool) {
+        self.inner
+            .complete_verification(am::VerificationRequestId::from(id as u64), valid);
+    }
+}
+
+fn signature_report_to_js(report: am::SignatureReport) -> JsValue {
+    let obj = Object::new();
+    js_set(&obj, "signingRequested", report.signing_requested).unwrap();
+    js_set(&obj, "signaturesAttached", report.signatures_attached).unwrap();
+    js_set(&obj, "verificationRequested", report.verification_requested).unwrap();
+    js_set(&obj, "verificationAccepted", report.verification_accepted).unwrap();
+    js_set(&obj, "verificationRejected", report.verification_rejected).unwrap();
+    obj.into()
 }
 
 #[wasm_bindgen]
@@ -1267,8 +1385,9 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn save(&mut self) -> Uint8Array {
-        Uint8Array::from(self.doc.save().as_slice())
+    pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
+        let bytes = self.doc.save();
+        Ok(Uint8Array::from(bytes.as_slice()))
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]
@@ -1466,6 +1585,32 @@ impl Automerge {
             .map_err(error::BadAuthor::from)?;
         self.doc.set_author(author);
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = signingEnabled)]
+    pub fn signing_enabled(&self) -> bool {
+        self.doc.signing_enabled()
+    }
+
+    #[wasm_bindgen(js_name = reconcileSignatures, unchecked_return_type = "SignatureReport")]
+    pub fn reconcile_signatures(
+        &mut self,
+        signatures: &mut SignatureState,
+    ) -> Result<JsValue, JsValue> {
+        let report = self
+            .doc
+            .reconcile_signatures(&mut signatures.inner)
+            .map_err(JsValue::from)?;
+        Ok(signature_report_to_js(report))
+    }
+
+    #[wasm_bindgen(js_name = missingSignatureHashes, unchecked_return_type = "Heads")]
+    pub fn missing_signature_hashes(&mut self) -> Array {
+        self.doc
+            .missing_signature_hashes()
+            .iter()
+            .map(|h| JsValue::from_str(&h.to_string()))
+            .collect()
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
@@ -1773,10 +1918,23 @@ impl Automerge {
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
-pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
+pub fn init(options: JsValue) -> Result<Automerge, JsValue> {
     console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    Automerge::new(actor)
+    let author = js_get(&options, "author").ok().and_then(|a| a.as_string());
+    let signing = js_get(&options, "signing")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut doc = Automerge::new(actor).map_err(JsValue::from)?;
+    if let Some(author) = author {
+        let author = Author::try_from(author).map_err(error::BadAuthor::from)?;
+        doc.doc.set_author(Some(author));
+    }
+    if signing {
+        doc.doc = doc.doc.with_signing();
+    }
+    Ok(doc)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
@@ -1785,6 +1943,11 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
+    let author = js_get(&options, "author").ok().and_then(|a| a.as_string());
+    let signing = js_get(&options, "signing")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let unchecked = js_get(&options, "unchecked")
         .ok()
         .and_then(|v1| v1.as_bool())
@@ -1812,14 +1975,22 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
-    let mut doc = am::AutoCommit::load_with_options(
-        &data,
-        am::LoadOptions::new()
-            .on_partial_load(on_partial_load)
-            .verification_mode(verification_mode)
-            .migrate_strings(string_migration)
-            .text_encoding(TextEncoding::Utf16CodeUnit),
-    )?;
+    let author = author
+        .map(Author::try_from)
+        .transpose()
+        .map_err(error::BadAuthor::from)?;
+    let mut options = am::LoadOptions::new()
+        .on_partial_load(on_partial_load)
+        .verification_mode(verification_mode)
+        .migrate_strings(string_migration)
+        .text_encoding(TextEncoding::Utf16CodeUnit);
+    if let Some(author) = author {
+        options = options.author(author);
+    }
+    if signing {
+        options = options.signing();
+    }
+    let mut doc = am::AutoCommit::load_with_options(&data, options)?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
@@ -2401,6 +2572,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
     }
 
     impl From<Load> for JsValue {

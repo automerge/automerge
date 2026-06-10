@@ -5,8 +5,8 @@ use std::ops::Range;
 use crate::op_set2::change::ChangeCollector;
 use crate::storage::change::{OpReadState, Unverified, Verified};
 use crate::storage::columns::compression;
-use crate::storage::{parse, Header, RawColumns};
-use crate::types::{ActorId, ChangeHash};
+use crate::storage::{parse, parse_signature_table, Header, RawColumns};
+use crate::types::{ActorId, ChangeHash, ChangeSignature};
 use crate::Change;
 
 use super::{BundleChangeIter, BundleChangeIterUnverified, OpIter, OpIterUnverified, ParseError};
@@ -21,6 +21,7 @@ pub(crate) struct BundleStorage<'a, OpReadState> {
     pub(crate) ops_data: Range<usize>,
     pub(crate) changes_meta: RawColumns<compression::Uncompressed>,
     pub(crate) changes_data: Range<usize>,
+    pub(crate) signatures_by_index: Vec<(usize, ChangeSignature)>,
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
@@ -35,6 +36,7 @@ impl<O: OpReadState> BundleStorage<'_, O> {
             ops_data: self.ops_data,
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
+            signatures_by_index: self.signatures_by_index,
             _phantom: self._phantom,
         }
     }
@@ -66,12 +68,13 @@ impl<'a> BundleStorage<'a, Unverified> {
         let ops_meta = ops_meta
             .uncompressed()
             .ok_or(parse::ParseError::Error(ParseError::CompressedOpCols))?;
-        let (_, ops) = parse::range_of(|i| parse::take_n(ops_meta.total_column_len(), i), i)?;
+        let (i, ops) = parse::range_of(|i| parse::take_n(ops_meta.total_column_len(), i), i)?;
         OpIterUnverified::try_new(&ops_meta, ops.value)
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
+        let (i, signatures_by_index) = parse_signature_table::<ParseError>(i)?;
 
         Ok((
-            parse::Input::empty(),
+            i,
             BundleStorage {
                 bytes: input.bytes().into(),
                 header,
@@ -81,14 +84,24 @@ impl<'a> BundleStorage<'a, Unverified> {
                 ops_data: ops.range,
                 changes_meta,
                 changes_data: changes.range,
+                signatures_by_index,
                 _phantom: PhantomData,
             },
         ))
     }
 
     pub(crate) fn verify(self) -> Result<BundleStorage<'a, Verified>, ParseError> {
+        let mut change_count = 0;
         for c in self.iter_change_meta() {
             let _ = c?;
+            change_count += 1;
+        }
+        if self
+            .signatures_by_index
+            .iter()
+            .any(|(idx, _)| *idx >= change_count)
+        {
+            return Err(ParseError::InvalidSignatureIndex);
         }
         for o in self.iter_ops() {
             let _ = o?;
@@ -102,6 +115,7 @@ impl<'a> BundleStorage<'a, Unverified> {
             ops_data: self.ops_data,
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
+            signatures_by_index: self.signatures_by_index,
             _phantom: PhantomData,
         })
     }
@@ -119,14 +133,30 @@ impl<'a> BundleStorage<'a, Unverified> {
 
 impl BundleStorage<'_, Verified> {
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
-        let change_meta = self.iter_change_meta().collect();
+        let change_meta = self.iter_change_meta().collect::<Vec<_>>();
+        let mut signatures = vec![None; change_meta.len()];
+        for (idx, signature) in &self.signatures_by_index {
+            if let Some(slot) = signatures.get_mut(*idx) {
+                *slot = Some(signature.clone());
+            }
+        }
         let mut collector = ChangeCollector::from_bundle_changes(change_meta, &self.actors);
         for op in self.iter_ops() {
             collector.add(op);
         }
         let bundle = collector
             .unbundle(&self.actors, &self.deps)
-            .map_err(|e| ParseError::Unbundle(Box::new(e)))?;
+            .map_err(|e| ParseError::Unbundle(Box::new(e)))?
+            .into_iter()
+            .zip(signatures)
+            .map(|(change, signature)| {
+                if let Some(signature) = signature {
+                    change.with_signature(signature)
+                } else {
+                    change
+                }
+            })
+            .collect();
         Ok(bundle)
     }
 

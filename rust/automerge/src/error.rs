@@ -80,6 +80,8 @@ pub enum AutomergeError {
     EncodingError(#[from] PackError),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error(transparent)]
+    Signature(#[from] crate::signatures::SignatureError),
 }
 
 impl AutomergeError {

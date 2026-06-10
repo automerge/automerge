@@ -2,14 +2,17 @@ use hexane::PackError;
 use std::collections::BTreeSet;
 use std::{borrow::Cow, ops::Range};
 
-use super::{parse, shift_range, ChunkType, Header, RawColumns};
+use super::{
+    parse, parse_signature_table, shift_range, write_signature_table, ChunkType, Header,
+    RawColumns, SignatureTableError,
+};
 
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{ActorId, Automerge, Change, ChangeHash, ChangeSignature, TextEncoding};
 
 mod compression;
 
@@ -31,6 +34,7 @@ pub(crate) struct Document<'a> {
     op_bytes: Range<usize>,
     change_metadata: RawColumns<Uncompressed>,
     change_bytes: Range<usize>,
+    signatures_by_index: Vec<(usize, ChangeSignature)>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -44,6 +48,8 @@ pub(crate) enum ParseError {
         column_type: &'static str,
         error: super::columns::BadColumnLayout,
     },
+    #[error("invalid signature table: {0}")]
+    SignatureTable(#[from] SignatureTableError),
 }
 
 impl<'a> Document<'a> {
@@ -132,6 +138,7 @@ impl<'a> Document<'a> {
             |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
             i,
         )?;
+        let (i, signatures_by_index) = parse_signature_table::<ParseError>(i)?;
 
         let compression::Decompressed {
             change_bytes,
@@ -177,6 +184,7 @@ impl<'a> Document<'a> {
                 op_bytes,
                 change_metadata,
                 change_bytes,
+                signatures_by_index,
             },
         ))
     }
@@ -187,6 +195,10 @@ impl<'a> Document<'a> {
 
     pub(crate) fn change_bytes(&self) -> &[u8] {
         &self.bytes[self.change_bytes.clone()]
+    }
+
+    pub(crate) fn signatures_by_index(&self) -> &[(usize, ChangeSignature)] {
+        &self.signatures_by_index
     }
 
     pub(crate) fn new(
@@ -231,6 +243,8 @@ impl<'a> Document<'a> {
         for index in &head_indices {
             leb128::write::unsigned(&mut data, *index).unwrap();
         }
+        let signatures_by_index = change_graph.retained_signature_rows();
+        write_signature_table(&mut data, signatures_by_index.iter().copied());
 
         let header = Header::new(ChunkType::Document, &data);
         let mut bytes = Vec::with_capacity(data.len() + header.len());
@@ -274,6 +288,10 @@ impl<'a> Document<'a> {
             op_bytes,
             change_metadata,
             change_bytes,
+            signatures_by_index: signatures_by_index
+                .into_iter()
+                .map(|(idx, signature)| (idx, signature.clone()))
+                .collect(),
         }
     }
 
@@ -360,7 +378,14 @@ impl<'a> Document<'a> {
 
         change_collector.process_ops(&op_set)?;
 
-        Ok(change_collector.collect(&op_set)?.changes)
+        let mut changes = change_collector.collect(&op_set)?.changes;
+        for (index, signature) in &self.signatures_by_index {
+            if let Some(change) = changes.get_mut(*index) {
+                let signed = change.clone().with_signature(signature.clone());
+                *change = signed;
+            }
+        }
+        Ok(changes)
     }
 }
 

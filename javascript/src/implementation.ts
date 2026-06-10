@@ -57,6 +57,7 @@ import type {
   DecodedChange,
   DiffOptions,
   Heads,
+  Hash,
   MaterializeValue,
   JsSyncState,
   SyncMessage,
@@ -81,6 +82,7 @@ export type {
 type API = WasmAPI
 
 const _SyncStateSymbol = Symbol("_syncstate")
+const _SignatureStateSymbol = Symbol("_signaturestate")
 
 /**
  * An opaque type tracking the state of sync with a remote peer
@@ -88,6 +90,40 @@ const _SyncStateSymbol = Symbol("_syncstate")
 type SyncState = JsSyncState & {
   /** @hidden */
   _opaque: typeof _SyncStateSymbol
+}
+
+export type SigningRequest = {
+  hash: Hash
+  author: Author
+  algorithm: "ed25519" | string
+  bytesToSign: Uint8Array
+}
+
+export type VerificationRequest = {
+  id: number
+  hash: Hash
+  author: Author
+  algorithm: "ed25519" | string
+  signature?: Uint8Array
+  bytesToVerify: Uint8Array
+}
+
+export type SignatureReport = {
+  signingRequested: number
+  signaturesAttached: number
+  verificationRequested: number
+  verificationAccepted: number
+  verificationRejected: number
+}
+
+export type SignatureState = {
+  pendingSigningRequests(): SigningRequest[]
+  markSigningStarted(hash: Hash): boolean
+  completeSigning(hash: Hash, signature: Uint8Array): void
+  pendingVerificationRequests(): VerificationRequest[]
+  completeVerification(id: number, valid: boolean): void
+  /** @hidden */
+  _opaque: typeof _SignatureStateSymbol
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
@@ -200,6 +236,8 @@ export type InitOptions<T> = {
   actor?: ActorId
   /** The author for this document */
   author?: Author
+  /** Enable signature reconciliation and signed export gating */
+  signing?: boolean
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
@@ -267,10 +305,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor })
-  if (typeof opts.author == "string") {
-    handle.setAuthor(opts.author)
-  }
+  const handle = ApiHandler.create({ actor, author: opts.author, signing: opts.signing })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -718,6 +753,8 @@ export function load<T>(
     opts.convertImmutableStringsToText || false
   const handle = ApiHandler.load(data, {
     actor,
+    author: opts.author,
+    signing: opts.signing,
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
@@ -809,6 +846,48 @@ export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
  */
 export function save<T>(doc: Doc<T>): Uint8Array {
   return _state(doc).handle.save()
+}
+
+export function initSignatureState(): SignatureState {
+  return new (ApiHandler as any).SignatureState() as SignatureState
+}
+
+export function reconcileSignatures<T>(
+  doc: Doc<T>,
+  signatures: SignatureState,
+  opts?: ApplyOptions<T>,
+): [Doc<T>, SignatureReport] {
+  const state = _state(doc)
+  if (!opts) {
+    opts = {}
+  }
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  const report = state.handle.reconcileSignatures(signatures as any)
+  return [
+    progressDocument(
+      doc,
+      "reconcileSignatures",
+      heads,
+      opts.patchCallback || state.patchCallback,
+    ),
+    report,
+  ]
+}
+
+export function signingEnabled<T>(doc: Doc<T>): boolean {
+  return _state(doc).handle.signingEnabled()
+}
+
+export function missingSignatureHashes<T>(doc: Doc<T>): Heads {
+  return _state(doc).handle.missingSignatureHashes()
 }
 
 /**
@@ -1034,6 +1113,7 @@ export function applyChanges<T>(
     ),
   ]
 }
+
 
 /** @hidden */
 export function getHistory<T>(doc: Doc<T>): State<T>[] {

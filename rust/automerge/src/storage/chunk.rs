@@ -195,16 +195,35 @@ pub(crate) struct Header {
 
 impl Header {
     pub(crate) fn new(chunk_type: ChunkType, data: &[u8]) -> Self {
-        let hash = hash(chunk_type, data);
+        Self::new_with_canonical_data(chunk_type, data.len(), data)
+    }
+
+    pub(crate) fn new_with_canonical_data(
+        chunk_type: ChunkType,
+        data_len: usize,
+        canonical_data: &[u8],
+    ) -> Self {
+        let hash = hash(chunk_type, canonical_data);
         Self {
             hash,
             checksum: hash.checksum().into(),
-            data_len: data.len(),
+            data_len,
             header_size: MAGIC_BYTES.len()
                 + 4 // checksum
                 + 1 // chunk type
-                + (ulebsize(data.len() as u64) as usize),
+                + (ulebsize(data_len as u64) as usize),
             chunk_type,
+        }
+    }
+
+    pub(crate) fn with_canonical_data(&self, canonical_data: &[u8]) -> Header {
+        let hash = hash(self.chunk_type, canonical_data);
+        Self {
+            hash,
+            checksum: self.checksum,
+            data_len: self.data_len,
+            header_size: self.header_size,
+            chunk_type: self.chunk_type,
         }
     }
 

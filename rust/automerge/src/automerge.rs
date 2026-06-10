@@ -30,8 +30,10 @@ use crate::transaction::{
 
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
+use crate::signatures::{SignatureReport, SignatureState, VerificationRequestId};
 use crate::types::{
-    ActorId, Author, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value,
+    ActorId, Author, ChangeHash, ChangeSignature, ObjId, ObjMeta, OpId, SequenceType, TextEncoding,
+    Value,
 };
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
@@ -96,6 +98,7 @@ pub struct LoadOptions<'a> {
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
     author: Option<Author>,
+    signing: bool,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -170,6 +173,14 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    /// Enable signature reconciliation and signed export gating for the loaded document.
+    pub fn signing(self) -> Self {
+        Self {
+            signing: true,
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -181,6 +192,7 @@ impl std::default::Default for LoadOptions<'static> {
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
             author: None,
+            signing: false,
         }
     }
 }
@@ -214,6 +226,19 @@ impl std::default::Default for LoadOptions<'static> {
 /// This type implements [`crate::sync::SyncDoc`]
 ///
 #[derive(Debug, Clone)]
+struct PendingUnverifiedChange {
+    change: Change,
+    signature: Option<ChangeSignature>,
+    verification_request: Option<VerificationRequestId>,
+}
+
+#[derive(Debug, Clone)]
+struct RejectedUnverifiedChange {
+    change: Change,
+    signature: Option<ChangeSignature>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: ChangeQueue,
@@ -227,6 +252,16 @@ pub struct Automerge {
     actor: Actor,
     /// The current author.
     author: Option<Author>,
+    /// Whether this document should require signatures before signed export/sync.
+    signing_enabled: bool,
+    /// Changes created by this document which still require local signing policy checks.
+    local_changes: HashSet<ChangeHash>,
+    /// Remote changes which have not yet been externally verified.
+    pending_unverified_changes: Vec<PendingUnverifiedChange>,
+    /// Remote changes which were received but rejected by external verification.
+    rejected_unverified_changes: HashMap<ChangeHash, RejectedUnverifiedChange>,
+    /// Verified signatures for changes which may still be causally queued.
+    verified_pending_signatures: HashMap<ChangeHash, ChangeSignature>,
 }
 
 impl Automerge {
@@ -239,6 +274,11 @@ impl Automerge {
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
+            signing_enabled: false,
+            local_changes: HashSet::new(),
+            pending_unverified_changes: Vec::new(),
+            rejected_unverified_changes: HashMap::new(),
+            verified_pending_signatures: HashMap::new(),
         }
     }
 
@@ -261,6 +301,11 @@ impl Automerge {
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
+            signing_enabled: false,
+            local_changes: HashSet::new(),
+            pending_unverified_changes: Vec::new(),
+            rejected_unverified_changes: HashMap::new(),
+            verified_pending_signatures: HashMap::new(),
         }
     }
 
@@ -273,6 +318,11 @@ impl Automerge {
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
+            signing_enabled: false,
+            local_changes: HashSet::new(),
+            pending_unverified_changes: Vec::new(),
+            rejected_unverified_changes: HashMap::new(),
+            verified_pending_signatures: HashMap::new(),
         };
         doc.remove_unused_actors(false);
         doc
@@ -389,6 +439,339 @@ impl Automerge {
     pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
         let actor_index = self.ops.actors.binary_search(actor).ok()?;
         self.change_graph.get_author_for_actor(actor_index)
+    }
+
+    /// Enable signature reconciliation and signed export gating for this document.
+    ///
+    /// This is intended for construction-time use, e.g. `Automerge::new().with_signing()`
+    /// or via [`LoadOptions::signing`].
+    pub fn with_signing(mut self) -> Self {
+        self.signing_enabled = true;
+        self
+    }
+
+    pub fn signing_enabled(&self) -> bool {
+        self.signing_enabled
+    }
+
+    pub fn has_signature(&self, hash: &ChangeHash) -> bool {
+        self.change_graph.has_signature(hash)
+    }
+
+    pub fn reconcile_signatures(
+        &mut self,
+        signatures: &mut SignatureState,
+    ) -> Result<SignatureReport, AutomergeError> {
+        self.reconcile_signatures_log_patches(signatures, &mut PatchLog::inactive())
+    }
+
+    pub fn reconcile_signatures_log_patches(
+        &mut self,
+        signatures: &mut SignatureState,
+        patch_log: &mut PatchLog,
+    ) -> Result<SignatureReport, AutomergeError> {
+        let mut report = SignatureReport::default();
+        if !self.signing_enabled {
+            return Ok(report);
+        }
+
+        self.reconcile_pending_verified_changes(signatures, patch_log, &mut report)?;
+
+        for (hash, author) in self.changes_requiring_signatures() {
+            if let Some(signature) = signatures.take_completed_signature(&hash) {
+                if self.change_graph.attach_signature(hash, signature) {
+                    signatures.mark_attached(hash);
+                    report.signatures_attached += 1;
+                }
+                continue;
+            }
+            if signatures.ensure_signing_request(hash, author) {
+                report.signing_requested += 1;
+            }
+        }
+
+        Ok(report)
+    }
+
+    pub(crate) fn queue_unverified_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<(), AutomergeError> {
+        for change in changes {
+            let hash = change.hash();
+            let signature = change.signature().cloned();
+            if self.change_graph.has_change(&hash)
+                || self.queue.has_hash(&hash)
+                || self.verified_pending_signatures.contains_key(&hash)
+                || self
+                    .pending_unverified_changes
+                    .iter()
+                    .any(|p| p.change.hash() == hash)
+                || self
+                    .rejected_unverified_changes
+                    .get(&hash)
+                    .is_some_and(|rejected| rejected.signature == signature)
+            {
+                continue;
+            }
+            self.pending_unverified_changes
+                .push(PendingUnverifiedChange {
+                    change,
+                    signature,
+                    verification_request: None,
+                });
+        }
+        Ok(())
+    }
+
+    fn reconcile_pending_verified_changes(
+        &mut self,
+        signatures: &mut SignatureState,
+        patch_log: &mut PatchLog,
+        report: &mut SignatureReport,
+    ) -> Result<(), AutomergeError> {
+        let pending_authors = self.pending_author_footers();
+        let authors = self.pending_change_authors(&pending_authors);
+        let by_hash = self.pending_changes_by_hash();
+
+        let mut accepted_indices = HashSet::new();
+        let mut rejected_indices = HashSet::new();
+        let mut rejected_changes = Vec::new();
+        for (idx, pending) in self.pending_unverified_changes.iter().enumerate() {
+            if let Some(id) = pending.verification_request.clone() {
+                match signatures.take_verification_result(&id) {
+                    Some(true) => {
+                        signatures.remove_verification_request(&id);
+                        report.verification_accepted += 1;
+                        self.collect_same_author_ancestors(
+                            idx,
+                            &authors,
+                            &by_hash,
+                            &mut accepted_indices,
+                        );
+                    }
+                    Some(false) => {
+                        signatures.remove_verification_request(&id);
+                        report.verification_rejected += 1;
+                        rejected_indices.insert(idx);
+                        rejected_changes.push((
+                            pending.change.hash(),
+                            RejectedUnverifiedChange {
+                                change: pending.change.clone(),
+                                signature: pending.signature.clone(),
+                            },
+                        ));
+                    }
+                    None => {}
+                }
+            }
+        }
+
+        self.rejected_unverified_changes.extend(rejected_changes);
+
+        let mut accepted = Vec::new();
+        let mut retained = Vec::with_capacity(self.pending_unverified_changes.len());
+        for (idx, pending) in self.pending_unverified_changes.drain(..).enumerate() {
+            if accepted_indices.contains(&idx) {
+                accepted.push((pending.change, pending.signature));
+            } else if !rejected_indices.contains(&idx) {
+                retained.push(pending);
+            }
+        }
+        self.pending_unverified_changes = retained;
+
+        if !accepted.is_empty() {
+            let changes = accepted
+                .iter()
+                .map(|(change, _)| change.clone())
+                .collect::<Vec<_>>();
+            for (change, signature) in &accepted {
+                self.rejected_unverified_changes.remove(&change.hash());
+                if let Some(signature) = signature {
+                    self.verified_pending_signatures
+                        .insert(change.hash(), signature.clone());
+                }
+            }
+            self.apply_verified_changes_batch_log_patches(changes, patch_log)?;
+            self.attach_verified_pending_signatures();
+        }
+
+        let pending_authors = self.pending_author_footers();
+        let authors = self.pending_change_authors(&pending_authors);
+        let by_hash = self.pending_changes_by_hash();
+        let same_author_parents_with_child =
+            self.same_author_parents_with_child(&authors, &by_hash);
+
+        let mut requests = Vec::new();
+        for (idx, pending) in self.pending_unverified_changes.iter().enumerate() {
+            if pending.verification_request.is_some()
+                || same_author_parents_with_child.contains(&idx)
+            {
+                continue;
+            }
+            if let Some(author) = authors[idx].clone() {
+                requests.push((idx, author));
+            }
+        }
+        for (idx, author) in requests {
+            let pending = &mut self.pending_unverified_changes[idx];
+            let id = signatures.ensure_verification_request(
+                pending.change.hash(),
+                author,
+                pending.signature.clone(),
+            );
+            pending.verification_request = Some(id);
+            report.verification_requested += 1;
+        }
+
+        Ok(())
+    }
+
+    fn pending_author_footers(&self) -> HashMap<ActorId, Author> {
+        self.pending_unverified_changes
+            .iter()
+            .filter_map(|pending| {
+                pending
+                    .change
+                    .author()
+                    .map(|author| (pending.change.actor_id().clone(), Author::from(author)))
+            })
+            .collect()
+    }
+
+    fn pending_change_authors(
+        &self,
+        pending_authors: &HashMap<ActorId, Author>,
+    ) -> Vec<Option<Author>> {
+        self.pending_unverified_changes
+            .iter()
+            .map(|pending| self.author_for_signed_change(&pending.change, pending_authors))
+            .collect()
+    }
+
+    fn pending_changes_by_hash(&self) -> HashMap<ChangeHash, usize> {
+        self.pending_unverified_changes
+            .iter()
+            .enumerate()
+            .map(|(idx, pending)| (pending.change.hash(), idx))
+            .collect()
+    }
+
+    fn collect_same_author_ancestors(
+        &self,
+        idx: usize,
+        authors: &[Option<Author>],
+        by_hash: &HashMap<ChangeHash, usize>,
+        accepted: &mut HashSet<usize>,
+    ) {
+        let Some(author) = authors.get(idx).and_then(|a| a.as_ref()) else {
+            return;
+        };
+        let mut stack = vec![idx];
+        while let Some(idx) = stack.pop() {
+            if !accepted.insert(idx) {
+                continue;
+            }
+            for dep in self.pending_unverified_changes[idx].change.deps() {
+                if let Some(dep_idx) = by_hash.get(dep).copied() {
+                    if authors.get(dep_idx).and_then(|a| a.as_ref()) == Some(author) {
+                        stack.push(dep_idx);
+                    }
+                }
+            }
+        }
+    }
+
+    fn same_author_parents_with_child(
+        &self,
+        authors: &[Option<Author>],
+        by_hash: &HashMap<ChangeHash, usize>,
+    ) -> HashSet<usize> {
+        let mut parents = HashSet::new();
+        for (child_idx, pending) in self.pending_unverified_changes.iter().enumerate() {
+            let Some(child_author) = authors.get(child_idx).and_then(|a| a.as_ref()) else {
+                continue;
+            };
+            for dep in pending.change.deps() {
+                if let Some(parent_idx) = by_hash.get(dep).copied() {
+                    if authors.get(parent_idx).and_then(|a| a.as_ref()) == Some(child_author) {
+                        parents.insert(parent_idx);
+                    }
+                }
+            }
+        }
+        parents
+    }
+
+    fn attach_verified_pending_signatures(&mut self) {
+        let attached = self
+            .verified_pending_signatures
+            .keys()
+            .filter(|hash| self.change_graph.has_change(hash))
+            .cloned()
+            .collect::<Vec<_>>();
+        for hash in attached {
+            if let Some(signature) = self.verified_pending_signatures.remove(&hash) {
+                self.change_graph.attach_signature(hash, signature);
+            }
+        }
+    }
+
+    fn author_for_signed_change(
+        &self,
+        change: &Change,
+        pending_authors: &HashMap<ActorId, Author>,
+    ) -> Option<Author> {
+        change
+            .author()
+            .map(Author::from)
+            .or_else(|| self.get_author_for_actor(change.actor_id()).cloned())
+            .or_else(|| pending_authors.get(change.actor_id()).cloned())
+    }
+
+    pub fn missing_signature_hashes(&self) -> Vec<ChangeHash> {
+        if !self.signing_enabled {
+            return Vec::new();
+        }
+        self.changes_requiring_signatures()
+            .into_iter()
+            .map(|(hash, _)| hash)
+            .collect()
+    }
+
+    pub fn ensure_signatures_complete(&self) -> Result<(), AutomergeError> {
+        let missing = self.missing_signature_hashes();
+        if missing.is_empty() {
+            Ok(())
+        } else if missing.len() == 1 {
+            Err(crate::signatures::SignatureError::MissingSignature { hash: missing[0] }.into())
+        } else {
+            Err(crate::signatures::SignatureError::SigningIncomplete {
+                missing: missing.len(),
+            }
+            .into())
+        }
+    }
+
+    pub fn try_save_signed(&self) -> Result<Vec<u8>, AutomergeError> {
+        self.ensure_signatures_complete()?;
+        Ok(self.save())
+    }
+
+    pub fn get_signed_changes(
+        &self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<Change>, AutomergeError> {
+        Ok(self.get_changes(have_deps))
+    }
+
+    fn changes_requiring_signatures(&self) -> Vec<(ChangeHash, Author)> {
+        self.change_graph
+            .author_frontier_hashes()
+            .into_iter()
+            .filter(|(hash, _)| self.local_changes.contains(hash))
+            .filter(|(hash, _)| !self.change_graph.has_signature(hash))
+            .collect()
     }
 
     /// Get the current actor id of this document.
@@ -851,7 +1234,12 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
+            let mut doc =
+                Self::new_with_encoding(options.text_encoding).with_author(options.author);
+            if options.signing {
+                doc = doc.with_signing();
+            }
+            return Ok(doc);
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -863,6 +1251,15 @@ impl Automerge {
         let mut changes = vec![];
         let mut first_chunk_was_doc = false;
         let mut am = match first_chunk {
+            storage::Chunk::Document(d) if options.signing => {
+                tracing::trace!("first chunk is document chunk loaded in signing mode, queuing for verification");
+                first_chunk_was_doc = true;
+                changes.extend(
+                    d.reconstruct_changes(options.text_encoding)
+                        .map_err(|e| load::Error::InflateDocument(Box::new(e)))?,
+                );
+                Self::new_with_encoding(options.text_encoding).with_signing()
+            }
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
@@ -875,17 +1272,27 @@ impl Automerge {
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new_with_encoding(options.text_encoding)
+                let doc = Self::new_with_encoding(options.text_encoding);
+                if options.signing {
+                    doc.with_signing()
+                } else {
+                    doc
+                }
             }
             storage::Chunk::Bundle(bundle) => {
-                tracing::trace!("first chunk is change chunk");
+                tracing::trace!("first chunk is bundle chunk");
                 let bundle = Bundle::new_from_unverified(bundle.into_owned())
                     .map_err(|e| load::Error::InvalidBundleColumn(Box::new(e)))?;
                 let bundle_changes = bundle
                     .to_changes()
                     .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
                 changes.extend(bundle_changes);
-                Self::new_with_encoding(options.text_encoding)
+                let doc = Self::new_with_encoding(options.text_encoding);
+                if options.signing {
+                    doc.with_signing()
+                } else {
+                    doc
+                }
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
@@ -896,7 +1303,12 @@ impl Automerge {
                     )
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new_with_encoding(options.text_encoding)
+                let doc = Self::new_with_encoding(options.text_encoding);
+                if options.signing {
+                    doc.with_signing()
+                } else {
+                    doc
+                }
             }
         };
         tracing::trace!("loading change chunks");
@@ -927,7 +1339,11 @@ impl Automerge {
             }
         }
 
-        Ok(am.with_author(options.author))
+        am = am.with_author(options.author);
+        if options.signing {
+            am = am.with_signing();
+        }
+        Ok(am)
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -967,17 +1383,24 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc = Self::load_with_options(
-                data,
-                LoadOptions::new()
+            let mut doc = Self::load_with_options(data, {
+                let options = LoadOptions::new()
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check)
-                    .text_encoding(self.text_encoding()),
-            )?;
+                    .text_encoding(self.text_encoding());
+                if self.signing_enabled {
+                    options.signing()
+                } else {
+                    options
+                }
+            })?;
             // because we replace the *self here its important that all state not
             // in the file to be loaded is copied here
             doc.set_actor(self.actor_id().clone());
             doc.set_author(self.author.clone());
+            if self.signing_enabled {
+                doc = doc.with_signing();
+            }
             doc.set_revocations(self.get_revocations());
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
@@ -1085,6 +1508,14 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
+        if self.signing_enabled {
+            self.save_signed_filtering_local_unsigned(options)
+        } else {
+            self.save_with_options_unchecked(options)
+        }
+    }
+
+    fn save_with_options_unchecked(&self, options: SaveOptions) -> Vec<u8> {
         self.assert_no_unused_actors(true);
 
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
@@ -1096,6 +1527,62 @@ impl Automerge {
             }
         }
         bytes
+    }
+
+    fn save_signed_filtering_local_unsigned(&self, options: SaveOptions) -> Vec<u8> {
+        let hashes = self.saveable_signed_hashes();
+        let all_hashes = self.change_graph.all_hashes().collect::<Vec<_>>();
+        if hashes.len() == all_hashes.len() {
+            return self.save_with_options_unchecked(options);
+        }
+
+        let ops = self.ops.filtered_for_changes(&self.change_graph, &hashes);
+        let mut change_graph = ChangeGraph::new(0);
+        for idx in 0..ops.actors.len() {
+            change_graph.insert_actor(idx);
+        }
+        let changes = self
+            .get_changes_by_hashes(hashes.iter().copied())
+            .expect("saveable hashes should exist in the document");
+        for change in &changes {
+            let actor = ops
+                .actors
+                .binary_search(change.actor_id())
+                .expect("filtered op set should retain change actor");
+            change_graph
+                .add_change(change, actor)
+                .expect("saveable hashes should be dependency closed");
+            if let Some(signature) = self.change_graph.signature(&change.hash()).cloned() {
+                change_graph.attach_signature(change.hash(), signature);
+            }
+        }
+
+        let doc = Document::new(&ops, &change_graph, options.compress());
+        doc.into_bytes()
+    }
+
+    fn saveable_signed_hashes(&self) -> Vec<ChangeHash> {
+        let signature_covered = self.change_graph.signature_covered_hashes();
+        let locally_blocked = self
+            .local_changes
+            .iter()
+            .filter(|hash| !signature_covered.contains(hash))
+            .copied()
+            .collect::<HashSet<_>>();
+        let mut included = HashSet::new();
+        let mut hashes = Vec::new();
+        for hash in self.change_graph.all_hashes() {
+            if !locally_blocked.contains(&hash)
+                && self
+                    .change_graph
+                    .deps(&hash)
+                    .all(|dep| included.contains(&dep))
+            {
+                included.insert(hash);
+                hashes.push(hash);
+            }
+        }
+        hashes
     }
 
     #[cfg(test)]
@@ -1224,6 +1711,10 @@ impl Automerge {
         self.change_graph
             .add_change(change, actor_index)
             .expect("Change's deps should already be in the document");
+    }
+
+    pub(crate) fn mark_local_change(&mut self, hash: ChangeHash) {
+        self.local_changes.insert(hash);
     }
 
     fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
@@ -1391,7 +1882,183 @@ impl Automerge {
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
-        ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
+        let changes = ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps);
+        if self.signing_enabled {
+            self.exportable_signed_changes(changes)
+        } else {
+            changes
+        }
+    }
+
+    pub(crate) fn exportable_signed_changes(&self, changes: Vec<Change>) -> Vec<Change> {
+        let candidate_hashes = changes.iter().map(Change::hash).collect::<HashSet<_>>();
+        let mut available = self
+            .change_graph
+            .all_hashes()
+            .filter(|hash| !candidate_hashes.contains(hash))
+            .collect::<HashSet<_>>();
+        let mut exportable = Vec::new();
+        for change in changes {
+            let hash = change.hash();
+            let Some(signature) = self.change_graph.signature(&hash).cloned() else {
+                continue;
+            };
+            if change.deps().iter().all(|dep| available.contains(dep)) {
+                available.insert(hash);
+                exportable.push(change.with_signature(signature));
+            }
+        }
+        exportable
+    }
+
+    pub(crate) fn attach_available_signatures(&self, changes: Vec<Change>) -> Vec<Change> {
+        changes
+            .into_iter()
+            .map(|change| {
+                let hash = change.hash();
+                if let Some(signature) = self.change_graph.signature(&hash).cloned() {
+                    change.with_signature(signature)
+                } else {
+                    change
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn signed_sync_bundle_hashes(&self, hashes: &[ChangeHash]) -> Vec<ChangeHash> {
+        let mut included = HashSet::new();
+        let mut stack = hashes
+            .iter()
+            .filter(|hash| self.change_graph.has_change(hash))
+            .copied()
+            .collect::<Vec<_>>();
+
+        while let Some(hash) = stack.pop() {
+            if !included.insert(hash) {
+                continue;
+            }
+            if let Some(path) = self.change_graph.same_author_signed_descendant_path(&hash) {
+                included.extend(path);
+            }
+            for dep in self.change_graph.deps(&hash) {
+                if self.change_graph.has_change(&dep) && !included.contains(&dep) {
+                    stack.push(dep);
+                }
+            }
+        }
+
+        self.change_graph
+            .all_hashes()
+            .filter(|hash| included.contains(hash))
+            .collect()
+    }
+
+    pub(crate) fn sync_standalone_changes_for_hashes(
+        &self,
+        hashes: &[ChangeHash],
+        exclude: &HashSet<ChangeHash>,
+    ) -> Vec<Change> {
+        let requested = hashes.iter().copied().collect::<HashSet<_>>();
+        self.pending_unverified_changes
+            .iter()
+            .filter(|pending| {
+                let hash = pending.change.hash();
+                requested.contains(&hash) && !exclude.contains(&hash)
+            })
+            .map(|pending| pending.change.clone())
+            .chain(
+                self.rejected_unverified_changes
+                    .iter()
+                    .filter(|(hash, _)| requested.contains(hash) && !exclude.contains(hash))
+                    .map(|(_, rejected)| rejected.change.clone()),
+            )
+            .collect()
+    }
+
+    pub(crate) fn has_received_change(&self, hash: &ChangeHash) -> bool {
+        self.change_graph.has_change(hash)
+            || self.queue.has_hash(hash)
+            || self.rejected_unverified_changes.contains_key(hash)
+            || self
+                .pending_unverified_changes
+                .iter()
+                .any(|pending| pending.change.hash() == *hash)
+    }
+
+    pub(crate) fn sync_advertised_hashes(
+        &self,
+        _include_proof_bundles: bool,
+    ) -> HashSet<ChangeHash> {
+        if !self.signing_enabled {
+            return self.change_graph.all_hashes().collect();
+        }
+
+        let signature_covered = self.change_graph.signature_covered_hashes();
+        let locally_blocked = self
+            .local_changes
+            .iter()
+            .filter(|hash| !signature_covered.contains(hash))
+            .copied()
+            .collect::<HashSet<_>>();
+        let mut advertised = HashSet::new();
+        for hash in self.change_graph.all_hashes() {
+            if !locally_blocked.contains(&hash)
+                && self
+                    .change_graph
+                    .deps(&hash)
+                    .all(|dep| advertised.contains(&dep))
+            {
+                advertised.insert(hash);
+            }
+        }
+
+        advertised
+            .into_iter()
+            .chain(self.queue.iter().map(Change::hash))
+            .chain(self.rejected_unverified_changes.keys().copied())
+            .chain(
+                self.pending_unverified_changes
+                    .iter()
+                    .map(|pending| pending.change.hash()),
+            )
+            .collect()
+    }
+
+    pub(crate) fn sync_advertised_heads(&self, include_proof_bundles: bool) -> Vec<ChangeHash> {
+        if !self.signing_enabled {
+            return self.get_heads();
+        }
+        let advertised = self.sync_advertised_hashes(include_proof_bundles);
+        let mut heads = advertised.clone();
+        for hash in &advertised {
+            if self.change_graph.has_change(hash) {
+                for dep in self.change_graph.deps(hash) {
+                    heads.remove(&dep);
+                }
+            }
+        }
+        for change in self.queue.iter() {
+            if advertised.contains(&change.hash()) {
+                for dep in change.deps() {
+                    heads.remove(dep);
+                }
+            }
+        }
+        for pending in &self.pending_unverified_changes {
+            if advertised.contains(&pending.change.hash()) {
+                for dep in pending.change.deps() {
+                    heads.remove(dep);
+                }
+            }
+        }
+        for rejected in self.rejected_unverified_changes.values() {
+            for dep in rejected.change.deps() {
+                heads.remove(dep);
+            }
+        }
+        let mut heads = heads.into_iter().collect::<Vec<_>>();
+        heads.sort_unstable();
+        heads
     }
 
     pub fn get_changes_meta(&self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
@@ -2139,13 +2806,33 @@ impl ReadDoc for Automerge {
         let mut missing = HashSet::new();
 
         for head in self.queue.iter().flat_map(|change| change.deps()) {
-            if !self.has_change(head) {
+            if !self.has_received_change(head) {
+                missing.insert(head);
+            }
+        }
+
+        for head in self
+            .pending_unverified_changes
+            .iter()
+            .flat_map(|pending| pending.change.deps())
+        {
+            if !self.has_received_change(head) {
+                missing.insert(head);
+            }
+        }
+
+        for head in self
+            .rejected_unverified_changes
+            .values()
+            .flat_map(|rejected| rejected.change.deps().iter())
+        {
+            if !self.has_received_change(head) {
                 missing.insert(head);
             }
         }
 
         for head in heads {
-            if !self.has_change(head) {
+            if !self.has_received_change(head) {
                 missing.insert(head);
             }
         }
@@ -2153,6 +2840,13 @@ impl ReadDoc for Automerge {
         let mut missing = missing
             .into_iter()
             .filter(|hash| !self.queue.has_hash(hash))
+            .filter(|hash| !self.rejected_unverified_changes.contains_key(*hash))
+            .filter(|hash| {
+                !self
+                    .pending_unverified_changes
+                    .iter()
+                    .any(|pending| pending.change.hash() == **hash)
+            })
             .copied()
             .collect::<Vec<_>>();
         missing.sort();

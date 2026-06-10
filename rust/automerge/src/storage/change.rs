@@ -1,6 +1,6 @@
 use std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
-use crate::{convert, ActorId, ChangeHash, ScalarValue};
+use crate::{convert, ActorId, ChangeHash, ChangeSignature, ScalarValue};
 
 use super::{parse, shift_range, CheckSum, ChunkType, Header, RawColumns};
 
@@ -15,6 +15,9 @@ mod op_with_change_actors;
 pub(crate) use compressed::Compressed;
 
 pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
+const SIGNATURE_MAGIC: &[u8; 4] = b"AMSG";
+const SIGNATURE_VERSION: u8 = 1;
+const SIGNATURE_TRAILER_LEN: usize = 4 + 1 + SIGNATURE_MAGIC.len();
 
 /// Changes present an iterator over the operations encoded in them. Before we have read these
 /// changes we don't know if they are valid, so we expose an iterator with items which are
@@ -56,6 +59,9 @@ pub(crate) struct Change<'a, O: OpReadState> {
     /// The range in `Self::bytes` where the ops column data is
     pub(crate) ops_data: Range<usize>,
     pub(crate) extra_bytes: Range<usize>,
+    pub(crate) canonical_body_len: usize,
+    pub(crate) signature: Option<ChangeSignature>,
+    pub(crate) signature_bytes: Option<Range<usize>>,
     pub(crate) num_ops: usize,
     pub(crate) _phantom: PhantomData<O>,
 }
@@ -101,6 +107,12 @@ impl<'a> Change<'a, Unverified> {
         input: parse::Input<'a>,
         header: Header,
     ) -> parse::ParseResult<'a, Change<'a, Unverified>, ParseError> {
+        let full_input = input;
+        let full_body = full_input.unconsumed_bytes();
+        let (canonical_body_len, signature, signature_offset) = split_signature(full_body);
+        let input = full_input.truncate(canonical_body_len);
+        let header = header.with_canonical_data(input.unconsumed_bytes());
+
         let (i, deps) = parse::length_prefixed(parse::change_hash)(input)?;
         let (i, actor) = parse::actor_id(i)?;
         let (i, seq) = parse::leb128_u64(i)?;
@@ -129,11 +141,12 @@ impl<'a> Change<'a, Unverified> {
             .ok_or(parse::ParseError::Error(ParseError::CompressedChangeCols))?;
 
         let ops_meta = ChangeOpsColumns::try_from(ops_meta)?;
+        let signature_bytes = signature_offset.map(|range| shift_range(range, header.len()));
 
         Ok((
             parse::Input::empty(),
             Change {
-                bytes: input.bytes().into(),
+                bytes: full_input.bytes().into(),
                 header,
                 dependencies: deps,
                 actor,
@@ -149,6 +162,9 @@ impl<'a> Change<'a, Unverified> {
                 ops_meta,
                 ops_data,
                 extra_bytes,
+                canonical_body_len,
+                signature_bytes,
+                signature,
                 num_ops: 0,
                 _phantom: PhantomData,
             },
@@ -195,6 +211,9 @@ impl<'a> Change<'a, Unverified> {
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
             extra_bytes: self.extra_bytes,
+            canonical_body_len: self.canonical_body_len,
+            signature: self.signature,
+            signature_bytes: self.signature_bytes,
             num_ops,
             _phantom: PhantomData,
         })
@@ -261,6 +280,14 @@ impl<O: OpReadState> Change<'_, O> {
         &self.bytes[self.header.len()..]
     }
 
+    pub(crate) fn canonical_body_bytes(&self) -> &[u8] {
+        &self.bytes[self.header.len()..self.header.len() + self.canonical_body_len]
+    }
+
+    pub(crate) fn signature(&self) -> Option<&ChangeSignature> {
+        self.signature.as_ref()
+    }
+
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -286,6 +313,9 @@ impl<O: OpReadState> Change<'_, O> {
             message: self.message,
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
+            canonical_body_len: self.canonical_body_len,
+            signature: self.signature,
+            signature_bytes: self.signature_bytes,
             num_ops: self.num_ops,
             extra_bytes: self.extra_bytes,
             _phantom: PhantomData,
@@ -299,6 +329,85 @@ impl<O: OpReadState> Change<'_, O> {
             None
         }
     }
+
+    pub(crate) fn with_signature(self, signature: ChangeSignature) -> Change<'static, O> {
+        let mut data = Vec::with_capacity(
+            self.canonical_body_len + signature.as_bytes().len() + SIGNATURE_TRAILER_LEN,
+        );
+        data.extend_from_slice(self.canonical_body_bytes());
+        data.extend_from_slice(signature.as_bytes());
+        data.extend_from_slice(&(signature.as_bytes().len() as u32).to_le_bytes());
+        data.push(SIGNATURE_VERSION);
+        data.extend_from_slice(SIGNATURE_MAGIC);
+
+        let header = Header::new_with_canonical_data(
+            ChunkType::Change,
+            data.len(),
+            self.canonical_body_bytes(),
+        );
+        let old_header_len = self.header.len();
+        let new_header_len = header.len();
+        let mut bytes = Vec::with_capacity(new_header_len + data.len());
+        header.write(&mut bytes);
+        bytes.extend_from_slice(&data);
+
+        let shift = |range: Range<usize>| {
+            if new_header_len >= old_header_len {
+                let by = new_header_len - old_header_len;
+                range.start + by..range.end + by
+            } else {
+                let by = old_header_len - new_header_len;
+                range.start - by..range.end - by
+            }
+        };
+        let signature_start = new_header_len + self.canonical_body_len;
+        let signature_len = signature.as_bytes().len();
+        Change {
+            bytes: Cow::Owned(bytes),
+            header,
+            dependencies: self.dependencies,
+            actor: self.actor,
+            other_actors: self.other_actors,
+            seq: self.seq,
+            start_op: self.start_op,
+            timestamp: self.timestamp,
+            message: self.message,
+            ops_meta: self.ops_meta,
+            ops_data: shift(self.ops_data),
+            extra_bytes: shift(self.extra_bytes),
+            canonical_body_len: self.canonical_body_len,
+            signature: Some(signature),
+            signature_bytes: Some(signature_start..signature_start + signature_len),
+            num_ops: self.num_ops,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+fn split_signature(body: &[u8]) -> (usize, Option<ChangeSignature>, Option<Range<usize>>) {
+    if body.len() < SIGNATURE_TRAILER_LEN {
+        return (body.len(), None, None);
+    }
+    let magic_start = body.len() - SIGNATURE_MAGIC.len();
+    if &body[magic_start..] != SIGNATURE_MAGIC {
+        return (body.len(), None, None);
+    }
+    let version_index = magic_start - 1;
+    if body[version_index] != SIGNATURE_VERSION {
+        return (body.len(), None, None);
+    }
+    let len_start = version_index - 4;
+    let signature_len =
+        u32::from_le_bytes(body[len_start..version_index].try_into().unwrap()) as usize;
+    let Some(signature_start) = len_start.checked_sub(signature_len) else {
+        return (body.len(), None, None);
+    };
+    let range = signature_start..len_start;
+    (
+        signature_start,
+        Some(ChangeSignature::from(&body[range.clone()])),
+        Some(range),
+    )
 }
 
 fn length_prefixed_bytes<B: AsRef<[u8]>>(b: B, out: &mut Vec<u8>) -> usize {
@@ -493,6 +602,7 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
         if let Some(extra) = self.extra_bytes {
             data.extend(extra);
         }
+        let canonical_body_len = data.len();
 
         let header = Header::new(ChunkType::Change, &data);
 
@@ -516,6 +626,9 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
             ops_meta: cols,
             ops_data,
             extra_bytes,
+            canonical_body_len,
+            signature: None,
+            signature_bytes: None,
             num_ops,
             _phantom: PhantomData,
         })

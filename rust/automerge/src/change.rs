@@ -6,7 +6,7 @@ use crate::{
         change::{Unverified, Verified},
         parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
     },
-    types::{ActorId, Author, ChangeHash, ElemId},
+    types::{ActorId, Author, ChangeHash, ChangeSignature, ElemId},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,6 +95,16 @@ impl Change {
 
     pub fn hash(&self) -> ChangeHash {
         self.stored.hash()
+    }
+
+    pub fn signature(&self) -> Option<&ChangeSignature> {
+        self.stored.signature()
+    }
+
+    pub(crate) fn with_signature(mut self, signature: ChangeSignature) -> Self {
+        self.stored = self.stored.with_signature(signature);
+        self.compression = CompressionState::NotCompressed;
+        self
     }
 
     pub fn seq(&self) -> u64 {

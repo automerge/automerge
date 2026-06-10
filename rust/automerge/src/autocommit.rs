@@ -12,7 +12,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{Author, ObjId, ObjMeta};
-use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
+use crate::{hydrate, Bundle, OnPartialLoad, SignatureReport, SignatureState, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -407,6 +407,48 @@ impl AutoCommit {
         self.doc.get_author()
     }
 
+    /// Enable signature reconciliation and signed export gating.
+    ///
+    /// This is intended for construction-time use, e.g. `AutoCommit::new().with_signing()`
+    /// or via [`LoadOptions::signing`].
+    pub fn with_signing(mut self) -> Self {
+        self.doc = self.doc.with_signing();
+        self
+    }
+
+    pub fn signing_enabled(&self) -> bool {
+        self.doc.signing_enabled()
+    }
+
+    pub fn reconcile_signatures(
+        &mut self,
+        signatures: &mut SignatureState,
+    ) -> Result<SignatureReport, AutomergeError> {
+        self.ensure_transaction_closed();
+        if self.isolation.is_some() {
+            self.doc
+                .reconcile_signatures_log_patches(signatures, &mut PatchLog::null())
+        } else {
+            self.doc
+                .reconcile_signatures_log_patches(signatures, &mut self.patch_log)
+        }
+    }
+
+    pub fn reconcile_signatures_log_patches(
+        &mut self,
+        signatures: &mut SignatureState,
+        patch_log: &mut PatchLog,
+    ) -> Result<SignatureReport, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc
+            .reconcile_signatures_log_patches(signatures, patch_log)
+    }
+
+    pub fn missing_signature_hashes(&mut self) -> Vec<ChangeHash> {
+        self.ensure_transaction_closed();
+        self.doc.missing_signature_hashes()
+    }
+
     pub fn get_authors(&self) -> Vec<Author> {
         self.doc.get_authors()
     }
@@ -526,6 +568,15 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
+    pub fn try_save_signed(&mut self) -> Result<Vec<u8>, AutomergeError> {
+        self.ensure_transaction_closed();
+        let bytes = self.doc.try_save_signed()?;
+        if !bytes.is_empty() {
+            self.save_cursor = self.doc.get_heads()
+        }
+        Ok(bytes)
+    }
+
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.remove_unused_actors(true);
@@ -615,6 +666,14 @@ impl AutoCommit {
     pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<Change> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
+    }
+
+    pub fn get_signed_changes(
+        &mut self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.get_signed_changes(have_deps)
     }
 
     pub fn get_changes_meta(&mut self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {

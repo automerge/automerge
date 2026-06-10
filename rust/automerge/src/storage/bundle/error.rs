@@ -1,6 +1,6 @@
 use crate::op_set2::ReadOpError;
 use crate::storage::columns::raw_column;
-use crate::storage::{chunk, parse};
+use crate::storage::{chunk, parse, SignatureTableError};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ParseError {
@@ -18,6 +18,8 @@ pub(crate) enum ParseError {
     InvalidChangeColumn(u32),
     #[error("invalid op column")]
     InvalidOpColumn(u32),
+    #[error("invalid signature change index")]
+    InvalidSignatureIndex,
     #[error(transparent)]
     ParseColumns(#[from] raw_column::ParseError),
     #[error(transparent)]
@@ -28,6 +30,8 @@ pub(crate) enum ParseError {
     Pack(#[from] hexane::PackError),
     #[error(transparent)]
     Deflate(#[from] std::io::Error),
+    #[error("invalid signature table: {0}")]
+    SignatureTable(#[from] SignatureTableError),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
