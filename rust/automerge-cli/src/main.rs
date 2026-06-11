@@ -10,6 +10,7 @@ mod color_json;
 mod examine;
 mod examine_sync;
 mod export;
+mod fork;
 mod import;
 mod merge;
 
@@ -129,6 +130,23 @@ enum Command {
         /// The file(s) to compact. If empty assumes stdin
         input: Vec<PathBuf>,
     },
+
+    /// Create a new document forked from a given change hash of an existing document
+    Fork {
+        /// The change hash to fork from
+        hash: String,
+
+        /// The document to fork. If omitted assumes stdin
+        input_file: Option<PathBuf>,
+
+        /// The file to write to. If omitted assumes stdout
+        #[clap(long("out"), short('o'))]
+        output_file: Option<PathBuf>,
+
+        /// Whether to verify the head hashes of a compressed document
+        #[clap(long, action = clap::ArgAction::SetFalse)]
+        skip_verifying_heads: VerifyFlag,
+    },
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
@@ -234,6 +252,22 @@ fn main() -> Result<()> {
                 Ok(()) => {}
                 Err(e) => {
                     eprintln!("Failed to merge: {}", e);
+                }
+            };
+            Ok(())
+        }
+        Command::Fork {
+            hash,
+            input_file,
+            output_file,
+            skip_verifying_heads,
+        } => {
+            let in_buffer = open_file_or_stdin(input_file)?;
+            let out_buffer = create_file_or_stdout(output_file)?;
+            match fork::fork(in_buffer, out_buffer, &hash, skip_verifying_heads) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Failed to fork: {}", e);
                 }
             };
             Ok(())
