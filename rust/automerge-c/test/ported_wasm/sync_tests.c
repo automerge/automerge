@@ -86,6 +86,8 @@ static void sync(AMdoc* a, AMdoc* b, AMsyncState* a_sync_state, AMsyncState* b_s
                 break;
             }
         }
+        AMresultFree(a2b_msg_result);
+        AMresultFree(b2a_msg_result);
         if (++iter > MAX_ITER) {
             fail_msg(
                 "Did not synchronize within %d iterations. "
