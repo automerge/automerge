@@ -344,7 +344,14 @@ impl SyncDoc for Automerge {
 impl Automerge {
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>, include_proof_bundles: bool) -> Have {
         let advertised = self.sync_advertised_hashes(include_proof_bundles);
-        let hashes = advertised.into_iter().collect::<Vec<_>>();
+        let hashes = self
+            .change_graph
+            .get_hashes(&last_sync)
+            .iter()
+            .copied()
+            .filter(|hash| advertised.contains(hash))
+            .collect::<Vec<_>>();
+
         Have {
             last_sync,
             bloom: BloomFilter::from_hashes(hashes.iter()),
