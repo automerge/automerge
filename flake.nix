@@ -65,6 +65,39 @@
         Foundation
       ];
 
+      # wasm-bindgen CLI must match rust/automerge-wasm's pinned wasm-bindgen crate.
+      wasmBindgenVersion = "0.2.121";
+
+      wasmBindgenTarget = {
+        x86_64-linux = "x86_64-unknown-linux-musl";
+        aarch64-linux = "aarch64-unknown-linux-musl";
+        x86_64-darwin = "x86_64-apple-darwin";
+        aarch64-darwin = "aarch64-apple-darwin";
+      }.${system};
+
+      wasmBindgenHash = {
+        x86_64-linux = "sha256-MDnzj2X+I3tkDPBqFAyRnKjXF+xQEhRtFF0/J7tNayg=";
+        aarch64-linux = "sha256-clOzqm4ZmAsV6leHbg7TqZluGSqLqfxOKHcxjV8IMOE=";
+        x86_64-darwin = "sha256-GZykGE3DW1dDLoIMuThbW+ZbKKFS9Wn3Eeboo+VjI8g=";
+        aarch64-darwin = "sha256-SzaoqSg4CK9tI6DS1UmimeQARauLInnBOc3/Yxm28MM=";
+      }.${system};
+
+      wasm-bindgen-cli = pkgs.stdenv.mkDerivation {
+        pname = "wasm-bindgen-cli";
+        version = wasmBindgenVersion;
+
+        src = pkgs.fetchurl {
+          url = "https://github.com/rustwasm/wasm-bindgen/releases/download/${wasmBindgenVersion}/wasm-bindgen-${wasmBindgenVersion}-${wasmBindgenTarget}.tar.gz";
+          hash = wasmBindgenHash;
+        };
+
+        installPhase = ''
+          runHook preInstall
+          install -Dm755 wasm-bindgen wasm-bindgen-test-runner wasm2es6js -t $out/bin
+          runHook postInstall
+        '';
+      };
+
       cargo-installs = with pkgs; [
         cargo-criterion
         unstable.cargo-deny
@@ -76,7 +109,7 @@
         cargo-watch
         # llvmPackages.bintools
         twiggy
-        unstable.wasm-bindgen-cli
+        wasm-bindgen-cli
         wasm-tools
       ];
 
@@ -174,10 +207,10 @@
           "test:wasm:node && test:wasm:chrome";
 
         "test:wasm:node" = cmd "Run wasm-pack tests in Node.js"
-          "${wasm-pack} test ${wasm-dir} --node";
+          "${wasm-pack} test --node ${wasm-dir}";
 
         "test:wasm:chrome" = cmd "Run wasm-pack tests in headless Chrome"
-          "${wasm-pack} test ${wasm-dir} --headless --chrome";
+          "${wasm-pack} test --headless --chrome ${wasm-dir}";
 
         "test:docs" = cmd "Run Cargo doctests"
           "${cargo} test ${rust-dir} --doc";
@@ -221,6 +254,7 @@
             unstable.wasm-pack
 
             # JS
+            chromium
             chromedriver
             unstable.deno
             nodejs_22 # Current LTS
@@ -244,6 +278,10 @@
           ++ format-pkgs
           ++ cargo-installs
           ++ lib.optionals stdenv.isDarwin darwin-installs;
+
+        PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
+        CHROME_BIN = "${pkgs.chromium}/bin/chromium";
+        PUPPETEER_SKIP_DOWNLOAD = "true";
 
         shellHook = "menu";
       };
