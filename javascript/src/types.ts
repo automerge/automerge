@@ -37,6 +37,8 @@ export type PatchSource =
   | "loadIncremental"
   | "applyChanges"
   | "reconcileSignatures"
+  | "addCommits"
+  | "addFragments"
   | "receiveSyncMessage"
 export type PatchInfo<T> = {
   before: Doc<T>

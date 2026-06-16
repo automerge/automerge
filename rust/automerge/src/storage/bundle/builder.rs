@@ -9,6 +9,7 @@ use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::op::{Op, OpBuilder};
 use crate::op_set2::types::{Action, ActorIdx, KeyRef};
 use crate::op_set2::{ReadOpError, ScalarValue};
+use crate::storage::change::DEFLATE_MIN_SIZE;
 use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{write_signature_table, ChunkType, Header, RawColumn, RawColumns};
 use crate::types::{ChangeHash, ObjId, OpId};
@@ -53,6 +54,10 @@ impl<'a> BundleBuilder<'a> {
         mut changes: Vec<BundleMetadata<'a>>,
         mut mapper: ActorMapper<'a>,
     ) -> BundleBuilder<'a> {
+        // change[n].builder starts off as NodeIdx which is topo order
+        // writing the changes in topo order prevents un-needed hashes in the external buffer
+        changes.sort_by(|a, b| a.builder.cmp(&b.builder));
+
         let mut builders: Vec<_> = changes
             .iter()
             .enumerate()
@@ -142,58 +147,97 @@ impl<'a> BundleBuilder<'a> {
 
         mapper.build_mapping(None);
 
-        let mut data = vec![];
-
         let deps = self.change_writer.external.clone();
         let actors = mapper.iter().collect::<Vec<_>>();
 
-        leb128::write::unsigned(&mut data, deps.len() as u64).unwrap();
+        // Prefix: deps + actors. Identical in both the uncompressed and
+        // compressed representations.
+        let mut prefix = Vec::new();
+        leb128::write::unsigned(&mut prefix, deps.len() as u64).unwrap();
         for hash in &deps {
-            data.extend(hash.as_bytes());
+            prefix.extend(hash.as_bytes());
         }
-
-        leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
+        leb128::write::unsigned(&mut prefix, actors.len() as u64).unwrap();
         for actor in &actors {
-            length_prefixed_bytes(actor, &mut data);
+            length_prefixed_bytes(actor, &mut prefix);
         }
 
         let signatures_by_index = self.change_writer.signatures_by_index().to_vec();
-        let mut change_bytes = vec![];
-        let change_cols = self.change_writer.finish(&mapper, &mut change_bytes);
-        let (changes_data, changes_meta) = change_cols.write(&mut data, change_bytes);
 
-        let mut ops_bytes = vec![];
-        let ops_cols = self.op_writer.finish(&mapper, &mut ops_bytes);
-        let (ops_data, ops_meta) = ops_cols.write(&mut data, ops_bytes);
+        // Column data (uncompressed) and per-column metadata.
+        let mut change_data_buf = Vec::new();
+        let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
+        let changes_meta = change_cols.raw_columns();
+        let mut ops_data_buf = Vec::new();
+        let (ops_cols, id_ctr) = self.op_writer.finish(&mapper, &mut ops_data_buf);
+        let ops_meta = ops_cols.raw_columns();
 
+        // ---- Uncompressed assembly (used in-memory for iteration) ----
+        let mut data_u = prefix.clone();
+        changes_meta.write(&mut data_u);
+        let changes_data_start_u = data_u.len();
+        data_u.extend_from_slice(&change_data_buf);
+        let changes_data_end_u = data_u.len();
+        ops_meta.write(&mut data_u);
+        let ops_data_start_u = data_u.len();
+        data_u.extend_from_slice(&ops_data_buf);
+        let ops_data_end_u = data_u.len();
         write_signature_table(
-            &mut data,
+            &mut data_u,
             signatures_by_index
                 .iter()
                 .map(|(idx, signature)| (*idx, signature)),
         );
 
-        let header = Header::new(ChunkType::Bundle, &data);
+        let header_u = Header::new(ChunkType::Bundle, &data_u);
+        let mut bytes_u = Vec::with_capacity(header_u.len() + data_u.len());
+        header_u.write(&mut bytes_u);
+        bytes_u.extend(data_u);
 
-        let mut bytes = Vec::with_capacity(header.len() + data.len());
-        header.write(&mut bytes);
-        bytes.extend(data);
+        let changes_data_u_range =
+            shift_range(changes_data_start_u..changes_data_end_u, header_u.len());
+        let ops_data_u_range = shift_range(ops_data_start_u..ops_data_end_u, header_u.len());
 
-        let bytes = Cow::Owned(bytes);
+        // ---- Compressed assembly (used as the on-disk/wire form) ----
+        // Per-column DEFLATE above DEFLATE_MIN_SIZE, mirroring Document.
+        let mut data_c = prefix;
+        let mut compressed_change_data = Vec::new();
+        let changes_meta_c = changes_meta.compress(
+            &change_data_buf,
+            &mut compressed_change_data,
+            DEFLATE_MIN_SIZE,
+        );
+        changes_meta_c.write(&mut data_c);
+        data_c.extend_from_slice(&compressed_change_data);
+        let mut compressed_ops_data = Vec::new();
+        let ops_meta_c =
+            ops_meta.compress(&ops_data_buf, &mut compressed_ops_data, DEFLATE_MIN_SIZE);
+        ops_meta_c.write(&mut data_c);
+        data_c.extend_from_slice(&compressed_ops_data);
+        write_signature_table(
+            &mut data_c,
+            signatures_by_index
+                .iter()
+                .map(|(idx, signature)| (*idx, signature)),
+        );
 
-        let ops_data = shift_range(ops_data, header.len());
-        let changes_data = shift_range(changes_data, header.len());
+        let header_c = Header::new(ChunkType::Bundle, &data_c);
+        let mut bytes_c = Vec::with_capacity(header_c.len() + data_c.len());
+        header_c.write(&mut bytes_c);
+        bytes_c.extend(data_c);
 
         let storage = BundleStorage {
-            bytes,
-            header,
+            bytes: Cow::Owned(bytes_u),
+            compressed_bytes: Some(Cow::Owned(bytes_c)),
+            header: header_u,
             ops_meta,
-            ops_data,
+            ops_data: ops_data_u_range,
             deps,
             actors,
             changes_meta,
-            changes_data,
+            changes_data: changes_data_u_range,
             signatures_by_index,
+            id_ctr,
             _phantom: PhantomData,
         };
 
@@ -315,7 +359,6 @@ pub(crate) struct BundleOpWriter<'a> {
     key_ctr: hexane::v1::DeltaEncoder<'a, Option<i64>>,
     key_str: hexane::v1::Encoder<'a, Option<String>>,
     id_actor: hexane::v1::Encoder<'a, ActorIdx>,
-    id_ctr: hexane::v1::DeltaEncoder<'a, i64>,
     insert: hexane::v1::Encoder<'a, bool>,
     action: hexane::v1::Encoder<'a, Action>,
     value_meta: hexane::v1::Encoder<'a, ValueMeta>,
@@ -325,13 +368,19 @@ pub(crate) struct BundleOpWriter<'a> {
     pred_ctr: hexane::v1::DeltaEncoder<'a, i64>,
     expand: hexane::v1::Encoder<'a, bool>,
     mark_name: hexane::v1::Encoder<'a, Option<String>>,
+    /// `(actor, counter, doc_pos)` for each op as we process it. At
+    /// `finish` time these are sorted by `(actor, counter)` and the
+    /// `doc_pos` values are emitted as a delta-int column. Readers
+    /// reconstruct each op's counter from this column plus the change
+    /// metadata, so we don't need an explicit `id_ctr` column on the wire.
+    inverse_positions: Vec<(usize, u64, u32)>,
 }
 
 impl<'a> BundleOpWriter<'a> {
     fn add(&mut self, op: OpBuilder<'a>, _index: usize, mapper: &mut ActorMapper<'a>) {
         mapper.process_op(&op);
+        let doc_pos = self.id_actor.len() as u32;
         self.id_actor.append(op.id.actoridx());
-        self.id_ctr.append(op.id.icounter());
         self.obj_actor.append(op.obj.actor());
         self.obj_ctr.append(op.obj.icounter());
         self.key_actor.append(op.key.actor());
@@ -352,16 +401,21 @@ impl<'a> BundleOpWriter<'a> {
         self.expand.append(op.expand);
         self.mark_name
             .append_owned(op.mark_name.map(|s| s.into_owned()));
+        self.inverse_positions
+            .push((op.id.actor(), op.id.counter(), doc_pos));
     }
 
-    fn finish(self, mapper: &ActorMapper<'a>, data: &mut Vec<u8>) -> BundleOpsColumns {
+    fn finish(
+        mut self,
+        mapper: &ActorMapper<'a>,
+        data: &mut Vec<u8>,
+    ) -> (BundleOpsColumns, Vec<i64>) {
         let obj_actor = save_opt_actor_unless_empty(self.obj_actor, &mapper.mapping, data);
         let obj_ctr = self.obj_ctr.save_to_unless(data, None);
         let key_actor = save_opt_actor_unless_empty(self.key_actor, &mapper.mapping, data);
         let key_ctr = self.key_ctr.save_to_unless(data, None);
         let key_str = self.key_str.save_to_unless(data, None);
         let id_actor = save_actor(self.id_actor, &mapper.mapping, data);
-        let id_ctr = self.id_ctr.save_to(data);
         let insert = self.insert.save_to(data);
         let action = self.action.save_to(data);
         let value_meta = self.value_meta.save_to(data);
@@ -374,31 +428,59 @@ impl<'a> BundleOpWriter<'a> {
         let expand = self.expand.save_to_unless(data, false);
         let mark_name = self.mark_name.save_to_unless(data, None);
 
-        BundleOpsColumns {
-            id_actor,
-            id_ctr,
-            obj_actor,
-            obj_ctr,
-            key_actor,
-            key_ctr,
-            key_str,
-            insert,
-            action,
-            value_meta,
-            value,
-            pred_count,
-            pred_actor,
-            pred_ctr,
-            expand,
-            mark_name,
+        // Capture doc-order counters before sorting `inverse_positions`.
+        // `add()` populates this Vec in doc order, so element k is the
+        // counter of the op at doc position k.
+        let id_ctr_values: Vec<i64> = self
+            .inverse_positions
+            .iter()
+            .map(|(_, counter, _)| *counter as i64)
+            .collect();
+
+        // Sort by canonical (actor, counter) order and emit each op's
+        // doc_pos as a delta-int — the inverse permutation. Readers walk
+        // the change metadata in (actor, seq) order to materialise the
+        // canonical (actor, counter) for each `k`, then look up
+        // `doc_pos = inverse[k]` to place that op's id in the doc-order
+        // column. For editing-style workloads where each new op lands
+        // close to its predecessor, the deltas are almost all `+1`s —
+        // far more compressible than the doc-order counter sequence.
+        self.inverse_positions
+            .sort_unstable_by_key(|(a, c, _)| (*a, *c));
+        let mut id_ctr_inverse_enc = hexane::v1::DeltaEncoder::<i64>::new();
+        for (_, _, doc_pos) in &self.inverse_positions {
+            id_ctr_inverse_enc.append(*doc_pos as i64);
         }
+        let id_ctr_inverse = id_ctr_inverse_enc.save_to(data);
+
+        (
+            BundleOpsColumns {
+                id_actor,
+                id_ctr_inverse,
+                obj_actor,
+                obj_ctr,
+                key_actor,
+                key_ctr,
+                key_str,
+                insert,
+                action,
+                value_meta,
+                value,
+                pred_count,
+                pred_actor,
+                pred_ctr,
+                expand,
+                mark_name,
+            },
+            id_ctr_values,
+        )
     }
 }
 
 #[derive(Default)]
 pub(crate) struct BundleOpsColumns {
     pub(crate) id_actor: Range<usize>,
-    pub(crate) id_ctr: Range<usize>,
+    pub(crate) id_ctr_inverse: Range<usize>,
     pub(crate) obj_actor: Range<usize>,
     pub(crate) obj_ctr: Range<usize>,
     pub(crate) key_actor: Range<usize>,
@@ -430,19 +512,6 @@ pub(crate) struct BundleChangeColumns {
 }
 
 impl BundleChangeColumns {
-    fn write(
-        &self,
-        data: &mut Vec<u8>,
-        col_data: Vec<u8>,
-    ) -> (Range<usize>, RawColumns<compression::Uncompressed>) {
-        let cols = self.raw_columns();
-        cols.write(data);
-        let start = data.len();
-        data.extend(col_data);
-        let end = data.len();
-        (start..end, cols)
-    }
-
     fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (change::ACTOR, &self.actor),
@@ -464,18 +533,6 @@ impl BundleChangeColumns {
 }
 
 impl BundleOpsColumns {
-    fn write(
-        &self,
-        data: &mut Vec<u8>,
-        col_data: Vec<u8>,
-    ) -> (Range<usize>, RawColumns<compression::Uncompressed>) {
-        let cols = self.raw_columns();
-        cols.write(data);
-        let start = data.len();
-        data.extend(col_data);
-        let end = data.len();
-        (start..end, cols)
-    }
     fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (ops::OBJ_ACTOR, &self.obj_actor),
@@ -484,7 +541,6 @@ impl BundleOpsColumns {
             (ops::KEY_CTR, &self.key_ctr),
             (ops::KEY_STR, &self.key_str),
             (ops::ID_ACTOR, &self.id_actor),
-            (ops::ID_CTR, &self.id_ctr),
             (ops::INSERT, &self.insert),
             (ops::ACTION, &self.action),
             (ops::VALUE_META, &self.value_meta),
@@ -494,6 +550,7 @@ impl BundleOpsColumns {
             (ops::PRED_CTR, &self.pred_ctr),
             (ops::MARK_NAME, &self.mark_name),
             (ops::EXPAND, &self.expand),
+            (ops::ID_CTR_INVERSE, &self.id_ctr_inverse),
         ]
         .into_iter()
         .filter(|(_, range)| !range.is_empty())
@@ -684,18 +741,23 @@ pub(crate) struct OpIterUnverified<'a> {
 }
 
 impl<'a> OpIterUnverified<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
+    pub(crate) fn new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+        id_ctr_values: &'a [i64],
+    ) -> Self {
         Self {
-            inner: OpIterInner::try_new(columns, data).ok(),
+            inner: OpIterInner::try_new(columns, data, id_ctr_values).ok(),
         }
     }
 
     pub(crate) fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
+        id_ctr_values: &'a [i64],
     ) -> Result<Self, ParseError> {
         Ok(Self {
-            inner: Some(OpIterInner::try_new(columns, data)?),
+            inner: Some(OpIterInner::try_new(columns, data, id_ctr_values)?),
         })
     }
 }
@@ -707,7 +769,10 @@ struct OpIterInner<'a> {
     key_ctr: hexane::v1::DeltaDecoder<'a, Option<i64>>,
     key_str: hexane::v1::Decoder<'a, Option<String>>,
     id_actor: hexane::v1::Decoder<'a, Option<ActorIdx>>,
-    id_ctr: hexane::v1::DeltaDecoder<'a, Option<i64>>,
+    /// Doc-order counter values, reconstructed at parse time from the
+    /// wire's `ID_CTR_INVERSE` column. Read directly as `i64`s instead
+    /// of going through a re-encoded columnar form.
+    id_ctr: std::slice::Iter<'a, i64>,
     insert: hexane::v1::Decoder<'a, bool>,
     action: hexane::v1::Decoder<'a, Option<Action>>,
     meta: hexane::v1::Decoder<'a, Option<ValueMeta>>,
@@ -724,9 +789,13 @@ pub(crate) struct OpIter<'a> {
 }
 
 impl<'a> OpIter<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
+    pub(crate) fn new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+        id_ctr_values: &'a [i64],
+    ) -> Self {
         Self {
-            iter: OpIterUnverified::new(columns, data),
+            iter: OpIterUnverified::new(columns, data, id_ctr_values),
         }
     }
 }
@@ -754,7 +823,7 @@ impl<'a> Iterator for OpIterUnverified<'a> {
 impl<'a> OpIterInner<'a> {
     fn try_next(&mut self) -> Result<Option<OpBuilder<'a>>, ParseError> {
         let id_actor = self.id_actor.next().flatten();
-        let id_ctr = self.id_ctr.next().flatten();
+        let id_ctr = self.id_ctr.next().copied();
         let id = match OpId::try_load(id_actor, id_ctr) {
             Ok(id) => id,
             Err(_) => return Ok(None),
@@ -812,6 +881,7 @@ impl<'a> OpIterInner<'a> {
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
+        id_ctr_values: &'a [i64],
     ) -> Result<Self, ParseError> {
         let mut obj_actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
         let mut obj_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
@@ -819,7 +889,11 @@ impl<'a> OpIterInner<'a> {
         let mut key_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
         let mut key_str = hexane::v1::decoder::<Option<String>>(&[]);
         let mut id_actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
-        let mut id_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
+        // id_ctr is not stored on the wire — it's reconstructed in
+        // `BundleStorage::parse_following_header` from `ID_CTR_INVERSE`
+        // plus the change metadata. We iterate over the reconstructed
+        // values directly as a slice, no columnar round-trip needed.
+        let id_ctr = id_ctr_values.iter();
         let mut insert = hexane::v1::decoder::<bool>(&[]);
         let mut action = hexane::v1::decoder::<Option<Action>>(&[]);
         let mut meta = hexane::v1::decoder::<Option<ValueMeta>>(&[]);
@@ -848,9 +922,6 @@ impl<'a> OpIterInner<'a> {
                 }
                 (ops::KEY_COL_ID, C::String) => key_str = hexane::v1::decoder::<Option<String>>(d),
                 (ops::ID_COL_ID, C::Actor) => id_actor = hexane::v1::decoder::<Option<ActorIdx>>(d),
-                (ops::ID_COL_ID, C::DeltaInteger) => {
-                    id_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
-                }
                 (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::v1::decoder::<bool>(d),
                 (ops::ACTION_COL_ID, C::Integer) => {
                     action = hexane::v1::decoder::<Option<Action>>(d)
@@ -870,6 +941,12 @@ impl<'a> OpIterInner<'a> {
                 (ops::MARK_NAME_COL_ID, C::String) => {
                     mark_name = hexane::v1::decoder::<Option<String>>(d)
                 }
+                // `ID_CTR_INVERSE` and the legacy `ID_CTR` are both
+                // handled at the storage layer: it picks whichever is
+                // present and feeds the resulting doc-order counters in
+                // via `id_ctr_values`.
+                (ops::ID_CTR_INVERSE_COL_ID, C::DeltaInteger) => {}
+                (ops::ID_COL_ID, C::DeltaInteger) => {}
                 _ => return Err(ParseError::InvalidOpColumn(u32::from(col.spec()))),
             }
         }
@@ -907,9 +984,15 @@ pub(crate) mod ops {
     pub(super) const PRED_COL_ID:           ColumnId = ColumnId::new(7);
     pub(super) const EXPAND_COL_ID:         ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID:      ColumnId = ColumnId::new(10);
+    /// Inverse permutation of doc positions. For each op in canonical
+    /// `(actor, counter)` order, stores its doc-order index as a
+    /// delta-int. Readers reconstruct each op's `counter` from this
+    /// column plus the change metadata — no separate `ID_CTR` column on
+    /// the wire.
+    pub(super) const ID_CTR_INVERSE_COL_ID: ColumnId = ColumnId::new(11);
 
     pub(super) const ID_ACTOR:   ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
-    pub(super) const ID_CTR:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
+    pub(super) const ID_CTR_INVERSE: ColumnSpec = ColumnSpec::new_delta(ID_CTR_INVERSE_COL_ID);
     pub(super) const OBJ_ACTOR:  ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
     pub(super) const OBJ_CTR:    ColumnSpec = ColumnSpec::new_delta(OBJ_COL_ID);
     pub(super) const KEY_ACTOR:  ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);

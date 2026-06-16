@@ -733,16 +733,25 @@ impl<'a> ChangeCollector<'a> {
         changes: Vec<BuildChangeMetadata<'a>>,
     ) -> Vec<Change> {
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
-        debug_assert_eq!(
-            r1.iter().map(|c| c.hash()).collect::<Vec<_>>(),
-            crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
-                .unwrap()
-                .to_changes()
-                .unwrap()
-                .iter()
-                .map(|c| c.hash())
-                .collect::<Vec<_>>()
-        );
+        #[cfg(debug_assertions)]
+        {
+            // Bundle::from_meta sorts changes by (start_op, actor) before
+            // encoding columns, so the two paths produce the same set of
+            // changes but not necessarily in the same order. Compare as sets
+            // keyed by hash.
+            let bundle_changes = crate::storage::Bundle::for_hashes(
+                op_set,
+                change_graph,
+                r1.iter().map(|c| c.hash()),
+            )
+            .unwrap()
+            .to_changes()
+            .unwrap();
+            let r1_hashes: std::collections::HashSet<_> = r1.iter().map(|c| c.hash()).collect();
+            let bundle_hashes: std::collections::HashSet<_> =
+                bundle_changes.iter().map(|c| c.hash()).collect();
+            debug_assert_eq!(r1_hashes, bundle_hashes);
+        }
         r1
     }
 

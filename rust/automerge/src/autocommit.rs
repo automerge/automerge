@@ -12,7 +12,9 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{Author, ObjId, ObjMeta};
-use crate::{hydrate, Bundle, OnPartialLoad, SignatureReport, SignatureState, TextEncoding};
+use crate::{
+    hydrate, Bundle, Fragment, OnPartialLoad, SignatureReport, SignatureState, TextEncoding,
+};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -712,6 +714,18 @@ impl AutoCommit {
     pub fn dump(&mut self) {
         self.ensure_transaction_closed();
         self.doc.dump()
+    }
+
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.doc.fragments(levels)
+    }
+
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.doc.get_fragment(head)
+    }
+
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        self.doc.bundle_fragments(fragments)
     }
 
     /// Get the current heads of the document.
