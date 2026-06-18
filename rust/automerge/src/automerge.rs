@@ -1562,13 +1562,7 @@ impl Automerge {
     }
 
     fn saveable_signed_hashes(&self) -> Vec<ChangeHash> {
-        let signature_covered = self.change_graph.signature_covered_hashes();
-        let locally_blocked = self
-            .local_changes
-            .iter()
-            .filter(|hash| !signature_covered.contains(hash))
-            .copied()
-            .collect::<HashSet<_>>();
+        let locally_blocked = self.locally_blocked_hashes();
         let mut included = HashSet::new();
         let mut hashes = Vec::new();
         for hash in self.change_graph.all_hashes() {
@@ -1919,6 +1913,21 @@ impl Automerge {
         }
     }
 
+    /// The set of local changes we are still waiting for signatures on.
+    ///
+    /// These are the only changes that should be withheld from exports in
+    /// signing mode. A local change is considered blocked until either it or a
+    /// same-author descendant has been signed (i.e. it is not yet
+    /// signature-covered). Unsigned remote changes are never blocked here.
+    pub(crate) fn locally_blocked_hashes(&self) -> HashSet<ChangeHash> {
+        let signature_covered = self.change_graph.signature_covered_hashes();
+        self.local_changes
+            .iter()
+            .filter(|hash| !signature_covered.contains(hash))
+            .copied()
+            .collect()
+    }
+
     pub(crate) fn exportable_signed_changes(&self, changes: Vec<Change>) -> Vec<Change> {
         let candidate_hashes = changes.iter().map(Change::hash).collect::<HashSet<_>>();
         let mut available = self
@@ -1926,15 +1935,24 @@ impl Automerge {
             .all_hashes()
             .filter(|hash| !candidate_hashes.contains(hash))
             .collect::<HashSet<_>>();
+        let locally_blocked = self.locally_blocked_hashes();
         let mut exportable = Vec::new();
         for change in changes {
             let hash = change.hash();
-            let Some(signature) = self.change_graph.signature(&hash).cloned() else {
+            // Only withhold local changes we are still waiting for signatures
+            // on. Unsigned remote changes are exported as-is, attaching any
+            // signature that happens to be available.
+            if locally_blocked.contains(&hash) {
                 continue;
-            };
+            }
             if change.deps().iter().all(|dep| available.contains(dep)) {
                 available.insert(hash);
-                exportable.push(change.with_signature(signature));
+                let change = if let Some(signature) = self.change_graph.signature(&hash).cloned() {
+                    change.with_signature(signature)
+                } else {
+                    change
+                };
+                exportable.push(change);
             }
         }
         exportable
@@ -2022,13 +2040,7 @@ impl Automerge {
             return self.change_graph.all_hashes().collect();
         }
 
-        let signature_covered = self.change_graph.signature_covered_hashes();
-        let locally_blocked = self
-            .local_changes
-            .iter()
-            .filter(|hash| !signature_covered.contains(hash))
-            .copied()
-            .collect::<HashSet<_>>();
+        let locally_blocked = self.locally_blocked_hashes();
         let mut advertised = HashSet::new();
         for hash in self.change_graph.all_hashes() {
             if !locally_blocked.contains(&hash)

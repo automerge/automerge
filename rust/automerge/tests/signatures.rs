@@ -474,7 +474,12 @@ fn signed_get_changes_is_gated() {
 }
 
 #[test]
-fn signed_get_changes_hides_signed_descendant_until_unsigned_ancestor_exportable() {
+fn signed_get_changes_exports_signature_covered_ancestor_with_signed_descendant() {
+    // When a local change is signature-covered by a same-author signed
+    // descendant we are not waiting for a signature on it, so it should not be
+    // withheld from `get_changes`. Both the (unsigned) ancestor and the signed
+    // descendant are exported; the descendant's signature transitively covers
+    // the ancestor for any signing receiver.
     let mut doc = AutoCommit::new().with_author(Some(author())).with_signing();
     doc.put(ROOT, "first", "one").unwrap();
     doc.commit();
@@ -487,7 +492,36 @@ fn signed_get_changes_hides_signed_descendant_until_unsigned_ancestor_exportable
     signatures.complete_signing(head, vec![2; 64]);
     doc.reconcile_signatures(&mut signatures).unwrap();
 
-    assert!(doc.get_changes(&[]).is_empty());
+    let changes = doc.get_changes(&[]);
+    assert_eq!(changes.len(), 2);
+    // The unsigned ancestor is exported without a signature.
+    assert_eq!(changes[0].signature(), None);
+    // The signed descendant carries its signature.
+    assert_eq!(changes[1].hash(), head);
+    assert_eq!(changes[1].signature().unwrap().as_bytes(), &[2; 64]);
+
+    // A signing receiver can apply and verify the pair via the signed frontier.
+    let mut remote = AutoCommit::new().with_signing();
+    remote.apply_changes(changes).unwrap();
+    let mut verifier = SignatureState::new();
+    let report = remote.reconcile_signatures(&mut verifier).unwrap();
+    assert_eq!(report.verification_requested, 1);
+    let request = verifier
+        .pending_verification_requests()
+        .next()
+        .cloned()
+        .unwrap();
+    assert_eq!(request.hash(), head);
+    verifier.complete_verification(request.id(), true);
+    remote.reconcile_signatures(&mut verifier).unwrap();
+    assert_eq!(
+        remote.get(ROOT, "first").unwrap().unwrap().0,
+        Value::str("one")
+    );
+    assert_eq!(
+        remote.get(ROOT, "second").unwrap().unwrap().0,
+        Value::str("two")
+    );
 }
 
 #[test]
