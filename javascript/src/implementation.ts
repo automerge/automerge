@@ -945,21 +945,23 @@ function applyVisibilityMutation<T>(
 
   const heads = state.handle.getHeads()
   const patches = mutate(state.handle)
+  if (patches.length === 0) {
+    return doc
+  }
+
   const nextDoc = state.handle.materialize("/", undefined, {
     ...state,
     heads: undefined,
   }) as Doc<T>
 
-  if (patches.length > 0) {
-    const callback = opts.patchCallback || state.patchCallback
-    if (callback != null)
-      callback(patches, { before: doc, after: nextDoc, source })
+  const callback = opts.patchCallback || state.patchCallback
+  if (callback != null)
+    callback(patches, { before: doc, after: nextDoc, source })
 
-    _state(nextDoc).mostRecentPatch = {
-      before: _state(doc).heads,
-      after: _state(nextDoc).handle.getHeads(),
-      patches,
-    }
+  _state(nextDoc).mostRecentPatch = {
+    before: _state(doc).heads,
+    after: _state(nextDoc).handle.getHeads(),
+    patches,
   }
 
   state.heads = heads

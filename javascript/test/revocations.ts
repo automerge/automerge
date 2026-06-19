@@ -10,9 +10,15 @@ describe("revocations", () => {
       d.value = "visible"
     })
 
+    const noOp = Automerge.unrevoke(doc, author)
+    assert.equal(noOp, doc)
+
     const revoked = Automerge.revoke(doc, author, [])
     assert.equal(revoked.value, undefined)
     assert.deepEqual(Automerge.getHeads(revoked), Automerge.getHeads(doc))
+
+    const stillRevoked = Automerge.revoke(revoked, author, [])
+    assert.equal(stillRevoked, revoked)
 
     const unrevoked = Automerge.unrevoke(revoked, author)
     assert.equal(unrevoked.value, "visible")
