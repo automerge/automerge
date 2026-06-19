@@ -313,7 +313,11 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor, author: opts.author, signing: opts.signing })
+  const handle = ApiHandler.create({
+    actor,
+    author: opts.author,
+    signing: opts.signing,
+  })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -898,6 +902,70 @@ export function missingSignatureHashes<T>(doc: Doc<T>): Heads {
   return _state(doc).handle.missingSignatureHashes()
 }
 
+export type RevocationOptions<T> = { patchCallback?: PatchCallback<T> }
+
+/** Revoke all changes by `author` after `heads` from the document view. */
+export function revoke<T>(
+  doc: Doc<T>,
+  author: string,
+  heads: Heads,
+  opts: RevocationOptions<T> = {},
+): Doc<T> {
+  return applyVisibilityMutation(doc, "revoke", opts, handle =>
+    handle.revoke(author, heads),
+  )
+}
+
+/** Remove a view-local revocation for `author`. */
+export function unrevoke<T>(
+  doc: Doc<T>,
+  author: string,
+  opts: RevocationOptions<T> = {},
+): Doc<T> {
+  return applyVisibilityMutation(doc, "unrevoke", opts, handle =>
+    handle.unrevoke(author),
+  )
+}
+
+function applyVisibilityMutation<T>(
+  doc: Doc<T>,
+  source: "revoke" | "unrevoke",
+  opts: RevocationOptions<T>,
+  mutate: (handle: Automerge) => Patch[],
+): Doc<T> {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+
+  const heads = state.handle.getHeads()
+  const patches = mutate(state.handle)
+  const nextDoc = state.handle.materialize("/", undefined, {
+    ...state,
+    heads: undefined,
+  }) as Doc<T>
+
+  if (patches.length > 0) {
+    const callback = opts.patchCallback || state.patchCallback
+    if (callback != null)
+      callback(patches, { before: doc, after: nextDoc, source })
+
+    _state(nextDoc).mostRecentPatch = {
+      before: _state(doc).heads,
+      after: _state(nextDoc).handle.getHeads(),
+      patches,
+    }
+  }
+
+  state.heads = heads
+  return nextDoc
+}
+
 /**
  * Merge `remote` into `local`
  * @typeParam T - The type of values contained in each document
@@ -946,7 +1014,10 @@ export function getAuthors<T>(doc: Doc<T>): Author[] {
   return state.handle.getAuthors()
 }
 
-export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+export function getAuthorForActor<T>(
+  doc: Doc<T>,
+  actor: ActorId,
+): Author | null {
   const state = _state(doc)
   return state.handle.getAuthorForActor(actor)
 }
@@ -1121,7 +1192,6 @@ export function applyChanges<T>(
     ),
   ]
 }
-
 
 /** @hidden */
 export function getHistory<T>(doc: Doc<T>): State<T>[] {
@@ -2017,7 +2087,9 @@ export function getFragments(
   levels?: FragmentLevelRange,
 ): Fragment[] {
   const state = _state(doc, false)
-  const fragmentMetadata = state.handle.getFragmentMetadata(levels ?? { start: 1 })
+  const fragmentMetadata = state.handle.getFragmentMetadata(
+    levels ?? { start: 1 },
+  )
   const bytes = state.handle.bundleFragmentMetadata(fragmentMetadata)
   return fragmentMetadata.map((fragment, index) => ({
     ...fragment,
