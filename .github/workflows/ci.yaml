@@ -10,7 +10,7 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -24,7 +24,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -38,7 +38,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -61,7 +61,7 @@ jobs:
           - bans licenses sources
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: "./rust/Cargo.toml"
@@ -74,7 +74,7 @@ jobs:
       # -Zbuild-std (panic=unwind). Bump deliberately when needed.
       WASM_TOOLCHAIN: nightly-2026-04-25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
@@ -95,7 +95,7 @@ jobs:
       WASM_TOOLCHAIN: nightly-2026-04-25
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -121,7 +121,7 @@ jobs:
       WASM_TOOLCHAIN: nightly-2026-04-25
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "18"
@@ -144,7 +144,7 @@ jobs:
         toolchain:
           - "1.90"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -157,7 +157,7 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -170,7 +170,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
