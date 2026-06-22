@@ -379,7 +379,9 @@ fn rollback_scoped_transaction_on_conflicted_register() {
     let before = doc1.save_checkpoint();
 
     {
-        let mut tx = doc1.transaction_at(PatchLog::null(), &scoped_heads);
+        let mut tx = doc1
+            .transaction_at(PatchLog::null(), &scoped_heads)
+            .unwrap();
         tx.put(ROOT, "field", "scoped_value").unwrap();
         tx.rollback();
     }
