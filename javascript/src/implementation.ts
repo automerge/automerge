@@ -28,6 +28,7 @@ import {
 export {
   type AutomergeValue,
   type Cursor,
+  type CursorPosition,
   Counter,
   type Doc,
   Int,
@@ -1025,7 +1026,7 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
  *
  * If either of the heads are missing from the document the returned set of patches will be empty
  */
-export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
+export function diff<T>(doc: Doc<T>, before: Heads, after: Heads): Patch[] {
   checkHeads(before, "before heads")
   checkHeads(after, "after heads")
   const state = _state(doc)
@@ -1300,7 +1301,7 @@ function isObject(obj: unknown): obj is Record<string, unknown> {
   return typeof obj === "object" && obj !== null
 }
 
-export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
+export function saveSince<T>(doc: Doc<T>, heads: Heads): Uint8Array {
   const state = _state(doc)
   const result = state.handle.saveSince(heads)
   return result
@@ -1309,7 +1310,7 @@ export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
 /**
  * Returns true if the document has all of the given heads somewhere in its history
  */
-export function hasHeads(doc: Doc<unknown>, heads: Heads): boolean {
+export function hasHeads<T>(doc: Doc<T>, heads: Heads): boolean {
   const state = _state(doc)
   for (const hash of heads) {
     if (!state.handle.getChangeByHash(hash)) {
@@ -1371,8 +1372,8 @@ export function topoHistoryTraversal(doc: Doc<unknown>): string[] {
  * encoding in backwards incompatible ways but we won't bump a major version if
  * we do have to change it
  */
-export function inspectChange(
-  doc: Doc<unknown>,
+export function inspectChange<T>(
+  doc: Doc<T>,
   changeHash: string,
 ): DecodedChange | null {
   const state = _state(doc)
@@ -1382,7 +1383,7 @@ export function inspectChange(
 /**
  * Return some internal statistics about the document
  */
-export function stats(doc: Doc<unknown>): {
+export function stats<T>(doc: Doc<T>): {
   numChanges: number
   numOps: number
   numActors: number
@@ -1503,7 +1504,7 @@ export function splice<T>(
  *
  * @beta
  */
-export function updateText(doc: Doc<unknown>, path: Prop[], newText: string) {
+export function updateText<T>(doc: Doc<T>, path: Prop[], newText: string) {
   const objPath = absoluteObjPath(doc, path, "updateText")
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
