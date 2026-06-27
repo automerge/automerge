@@ -14,7 +14,7 @@ use super::{ActorMapper, ChangeOpsColumns};
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
-use crate::op_set2::op_set::IndexBuilder;
+use crate::op_set2::op_set::{IndexBuilder, MarkOrderValidator};
 use crate::storage::bundle::BundleChange;
 use crate::storage::change::{Change as StoredChange, Verified};
 use crate::storage::load::change_collector::Error;
@@ -580,13 +580,18 @@ impl<'a> ChangeCollector<'a> {
         ChangeCollector::try_from_change_meta(meta, &op_set.actors)
     }
 
-    pub(crate) fn process_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
+    pub(crate) fn process_ops(
+        &mut self,
+        op_set: &'a OpSet,
+        mark_order: &mut MarkOrderValidator,
+    ) -> Result<(), ReadOpError> {
         let mut iter = op_set.iter();
 
         while let Some(op) = iter.try_next()? {
             let op_id = op.id;
             let op_succ = op.succ();
 
+            mark_order.process_op(&op);
             self.process_op(op);
 
             for id in op_succ {

@@ -3,7 +3,7 @@ use tracing::instrument;
 use crate::{
     change::Change,
     change_graph::ChangeGraph,
-    storage::{self, parse, Bundle},
+    storage::{self, document::ReconstructError, parse, Bundle},
     types::TextEncoding,
 };
 
@@ -13,6 +13,18 @@ pub(crate) mod change_collector;
 pub enum VerificationMode {
     Check,
     DontCheck,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MarkOrderValidation {
+    Validate,
+    AllowInvalid,
+}
+
+impl MarkOrderValidation {
+    pub(crate) fn allows_invalid(self) -> bool {
+        matches!(self, Self::AllowInvalid)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,19 +76,21 @@ pub(crate) fn load_changes<'a>(
     mut data: parse::Input<'a>,
     text_encoding: TextEncoding,
     current: &ChangeGraph,
+    mark_order: MarkOrderValidation,
 ) -> LoadedChanges<'a> {
     let mut changes = Vec::new();
     while !data.is_empty() {
-        let remaining = match load_next_change(data, &mut changes, text_encoding, current) {
-            Ok(d) => d,
-            Err(e) => {
-                return LoadedChanges::Partial {
-                    loaded: changes,
-                    remaining: data,
-                    error: e,
-                };
-            }
-        };
+        let remaining =
+            match load_next_change(data, &mut changes, text_encoding, current, mark_order) {
+                Ok(d) => d,
+                Err(e) => {
+                    return LoadedChanges::Partial {
+                        loaded: changes,
+                        remaining: data,
+                        error: e,
+                    };
+                }
+            };
         data = remaining.reset();
     }
     LoadedChanges::Complete(changes)
@@ -87,6 +101,7 @@ fn load_next_change<'a>(
     changes: &mut Vec<Change>,
     text_encoding: TextEncoding,
     current: &ChangeGraph,
+    mark_order: MarkOrderValidation,
 ) -> Result<parse::Input<'a>, Error> {
     let (remaining, chunk) = storage::Chunk::parse(data).map_err(|e| Error::Parse(Box::new(e)))?;
     if !chunk.checksum_valid() {
@@ -96,9 +111,14 @@ fn load_next_change<'a>(
         storage::Chunk::Document(d) => {
             tracing::trace!("loading document chunk");
             if !d.heads().iter().all(|h| current.has_change(h)) {
-                let new_changes = d
-                    .reconstruct_changes(text_encoding)
-                    .map_err(|e| Error::InflateDocument(Box::new(e)))?;
+                let new_changes = match d.reconstruct_changes(text_encoding) {
+                    Ok(c) => c,
+                    Err(ReconstructError::InvalidMarkOrderChanges {
+                        changes,
+                        error_message: _,
+                    }) if mark_order.allows_invalid() => changes,
+                    Err(e) => return Err(Error::InflateDocument(Box::new(e))),
+                };
                 changes.extend(new_changes);
             }
         }

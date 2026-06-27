@@ -3,6 +3,7 @@ use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
+use crate::op_set2::op_set::index::Indexes;
 use crate::storage::columns::BadColumnLayout;
 use crate::storage::{columns::compression::Uncompressed, Document, RawColumns};
 use crate::types;
@@ -37,7 +38,7 @@ mod op_query;
 mod top_op;
 mod visible;
 
-pub(crate) use index::{IndexBuilder, ObjIndex, ObjInfo};
+pub(crate) use index::{IndexBuilder, MarkOrderValidator, ObjIndex, ObjInfo};
 
 pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
@@ -200,8 +201,8 @@ impl OpSet {
         true
     }
 
-    pub(crate) fn set_indexes(&mut self, builder: IndexBuilder) {
-        let indexes = builder.finish();
+    pub(crate) fn set_indexes(&mut self, indexes: Indexes) {
+        // let indexes = builder.finish();
 
         assert_eq!(indexes.text.len(), self.len());
         assert_eq!(indexes.mark.len(), self.len());

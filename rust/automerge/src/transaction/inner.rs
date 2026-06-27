@@ -31,6 +31,19 @@ pub(crate) struct TransactionInner {
     pending: Vec<TxOp>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct InsertedOp {
+    id: OpId,
+    pos: usize,
+    index: usize,
+}
+
+impl InsertedOp {
+    fn id(&self) -> OpId {
+        self.id
+    }
+}
+
 /// Arguments required to create a new transaction
 pub(crate) struct TransactionArgs {
     /// The index of the actor ID this transaction will create ops for in the
@@ -316,7 +329,9 @@ impl TransactionInner {
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
         };
-        let id = self.do_insert(doc, patch_log, &obj, seq_type, index, value.into())?;
+        let id = self
+            .do_insert(doc, patch_log, &obj, seq_type, index, value.into())?
+            .id();
         Ok(doc.ops().id_to_exid(id))
     }
 
@@ -328,7 +343,7 @@ impl TransactionInner {
         seq_type: SequenceType,
         index: usize,
         action: OpType,
-    ) -> Result<OpId, AutomergeError> {
+    ) -> Result<InsertedOp, AutomergeError> {
         let id = self.next_id();
 
         let query = doc
@@ -337,17 +352,51 @@ impl TransactionInner {
 
         let marks = query.marks;
         let pos = query.pos;
+        let elemid = query.elemid;
 
         //let key = query.elemid.into();
 
-        let op = TxOp::insert(id, *obj, pos, index, action, query.elemid);
+        let op = TxOp::insert(id, *obj, pos, index, action, elemid);
+        let inserted = InsertedOp {
+            id,
+            pos: op.pos,
+            index: op.index,
+        };
 
         doc.ops_mut().splice(op.pos, &[&op]);
         self.finalize_op(doc.text_encoding(), patch_log, &op, marks);
 
         self.pending.push(op);
 
-        Ok(id)
+        Ok(inserted)
+    }
+
+    fn insert_mark_end_after(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        obj: &ObjMeta,
+        begin: &InsertedOp,
+        expand: bool,
+    ) -> InsertedOp {
+        let id = self.next_id();
+        let op = TxOp::insert(
+            id,
+            *obj,
+            begin.pos + 1,
+            begin.index,
+            OpType::MarkEnd(expand),
+            ElemId(begin.id),
+        );
+        let inserted = InsertedOp {
+            id,
+            pos: op.pos,
+            index: op.index,
+        };
+        doc.ops_mut().splice(op.pos, &[&op]);
+        self.finalize_op(doc.text_encoding(), patch_log, &op, None);
+        self.pending.push(op);
+        inserted
     }
 
     pub(crate) fn local_op(
@@ -702,17 +751,47 @@ impl TransactionInner {
             // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
             return Ok(());
         }
-        let action = OpType::MarkBegin(expand.before(), mark.old_data());
 
-        self.do_insert(doc, patch_log, &obj, SequenceType::Text, mark.start, action)?;
-        self.do_insert(
-            doc,
-            patch_log,
-            &obj,
-            SequenceType::Text,
-            mark.end,
-            OpType::MarkEnd(expand.after()),
-        )?;
+        let action = OpType::MarkBegin(expand.before(), mark.old_data());
+        let begin = self.do_insert(doc, patch_log, &obj, SequenceType::Text, mark.start, action)?;
+
+        if mark.start == mark.end {
+            self.insert_mark_end_after(doc, patch_log, &obj, &begin, expand.after());
+        } else {
+            // The mark end must be inserted *after* the begin in the op set. When
+            // the mark's [start, end) range lies within a single multi-width text
+            // element (e.g. a string inserted as one op), both anchors resolve to
+            // the same op-set position, and a plain end insert would land before
+            // the begin — corrupting the mark index and producing a document that
+            // fails to reload with "mark end before begin". In that case, anchor
+            // the end immediately after the begin, exactly as the zero-width branch
+            // above does.
+            let end_pos = doc
+                .ops()
+                .query_insert_at(&obj.id, mark.end, SequenceType::Text, self.scope.clone())?
+                .pos;
+            let end = if end_pos > begin.pos {
+                self.do_insert(
+                    doc,
+                    patch_log,
+                    &obj,
+                    SequenceType::Text,
+                    mark.end,
+                    OpType::MarkEnd(expand.after()),
+                )?
+            } else {
+                self.insert_mark_end_after(doc, patch_log, &obj, &begin, expand.after())
+            };
+            // Invariant: the MarkEnd op must sort after its MarkBegin. Violating it
+            // inverts the mark index (see `MarkIndexSpanner`) and yields a document
+            // that fails to reload.
+            debug_assert!(
+                end.pos > begin.pos,
+                "mark end (pos {}) must follow its begin (pos {})",
+                end.pos,
+                begin.pos
+            );
+        }
         if patch_log.is_active() {
             patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set());
         }
@@ -1097,17 +1176,19 @@ impl TransactionInner {
 
         // First insert the root of the new object
         let root_id = match (&prop, insert) {
-            (Prop::Seq(index), true) => self.do_insert(
-                doc,
-                patch_log,
-                &parent,
-                parent
-                    .typ
-                    .as_sequence_type()
-                    .ok_or(AutomergeError::InvalidOp(parent.typ))?,
-                *index,
-                OpType::Make(root_obj_type),
-            )?,
+            (Prop::Seq(index), true) => self
+                .do_insert(
+                    doc,
+                    patch_log,
+                    &parent,
+                    parent
+                        .typ
+                        .as_sequence_type()
+                        .ok_or(AutomergeError::InvalidOp(parent.typ))?,
+                    *index,
+                    OpType::Make(root_obj_type),
+                )?
+                .id(),
             _ => self
                 .local_op(doc, patch_log, &parent, prop, OpType::Make(root_obj_type))?
                 .expect("creating a new object"),
