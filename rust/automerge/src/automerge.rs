@@ -21,6 +21,7 @@ use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
+use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
@@ -757,6 +758,30 @@ impl Automerge {
         data: &[u8],
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
+        Self::load_with_options_and_mark_validation(
+            data,
+            options,
+            load::MarkOrderValidation::Validate,
+        )
+    }
+
+    /// Best-effort rescue for documents which fail strict loading.
+    ///
+    /// This returns only the current hydrated value and does not preserve the original change graph.
+    pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
+        Ok(Self::load_with_options_and_mark_validation(
+            data,
+            Default::default(),
+            load::MarkOrderValidation::AllowInvalid,
+        )?
+        .hydrate(None))
+    }
+
+    fn load_with_options_and_mark_validation(
+        data: &[u8],
+        options: LoadOptions<'_>,
+        mark_order: load::MarkOrderValidation,
+    ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
             return Ok(Self::new());
@@ -774,8 +799,14 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                d.reconstruct(options.verification_mode, options.text_encoding)
-                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?
+                match d.reconstruct(options.verification_mode, options.text_encoding) {
+                    Ok(doc) => doc,
+                    Err(ReconstructError::InvalidMarkOrderDoc {
+                        doc,
+                        error_message: _,
+                    }) if mark_order.allows_invalid() => *doc,
+                    Err(e) => return Err(load::Error::InflateDocument(Box::new(e)).into()),
+                }
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -808,7 +839,12 @@ impl Automerge {
             }
         };
         tracing::trace!("loading change chunks");
-        match load::load_changes(remaining.reset(), options.text_encoding, &am.change_graph) {
+        match load::load_changes(
+            remaining.reset(),
+            options.text_encoding,
+            &am.change_graph,
+            mark_order,
+        ) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(changes.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
@@ -891,6 +927,7 @@ impl Automerge {
             storage::parse::Input::new(data),
             self.text_encoding(),
             &self.change_graph,
+            load::MarkOrderValidation::Validate,
         ) {
             load::LoadedChanges::Complete(c) => c,
             load::LoadedChanges::Partial { error, loaded, .. } => {

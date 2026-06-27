@@ -1,3 +1,19 @@
+## Unreleased
+
+### Fixed 
+
+* Inserting a zero width mark could cause subsequent insertions into the same
+  text object to throw errors on valid insertion indexes
+* The order of mark operations was not validated when loading documents leading
+  to the same errors as above
+
+### Added
+
+* `Automerge::rescue` which returns the current value of a document even if it
+  fails validation. This is intended for use when loading corrupted documents
+  produced by now fixed bugs
+
+
 ## 0.10.0
 
 ### Breaking Changes
