@@ -559,16 +559,30 @@ impl TransactionInner {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
         let values: Vec<hydrate::Value> = vals.into_iter().map(Into::into).collect();
-        self.inner_splice(
-            doc,
-            patch_log,
-            SpliceArgs {
-                obj,
-                index,
-                del,
-                splice_type: SpliceType::List(values),
-            },
-        )?;
+        if obj.typ == ObjType::Text {
+            let text = values_to_splice_text(values)?;
+            self.inner_splice(
+                doc,
+                patch_log,
+                SpliceArgs {
+                    obj,
+                    index,
+                    del,
+                    splice_type: SpliceType::Text(&text),
+                },
+            )?;
+        } else {
+            self.inner_splice(
+                doc,
+                patch_log,
+                SpliceArgs {
+                    obj,
+                    index,
+                    del,
+                    splice_type: SpliceType::List(values),
+                },
+            )?;
+        }
         Ok(())
     }
 
@@ -1275,6 +1289,22 @@ impl TransactionInner {
     pub(crate) fn get_deps(&self) -> Vec<ChangeHash> {
         self.deps.clone()
     }
+}
+
+fn values_to_splice_text(values: Vec<hydrate::Value>) -> Result<String, AutomergeError> {
+    let mut text = String::new();
+    for value in values {
+        match value {
+            hydrate::Value::Scalar(ScalarValue::Str(value)) => text.push_str(&value),
+            unexpected => {
+                return Err(AutomergeError::InvalidValueType {
+                    expected: "a string".to_string(),
+                    unexpected: format!("{unexpected:?}"),
+                });
+            }
+        }
+    }
+    Ok(text)
 }
 
 enum SpliceType<'a> {
