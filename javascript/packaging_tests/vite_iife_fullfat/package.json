@@ -4,8 +4,8 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
-    "vite": "^6.4.1",
+    "vite": "^8.1.0",
     "vite-plugin-top-level-await": "^1.5.0",
-    "vite-plugin-wasm": "^3.4.1"
+    "vite-plugin-wasm": "^3.6.0"
   }
 }
