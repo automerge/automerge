@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -1800,6 +1800,39 @@ impl Automerge {
         self.change_graph.has_change(head)
     }
 
+    /// The first hash on each path back from `start` which is neither applied nor queued,
+    /// traversing through the dependencies of queued changes on the way.
+    pub(crate) fn missing_deps_from(
+        &self,
+        start: impl Iterator<Item = ChangeHash>,
+    ) -> Vec<ChangeHash> {
+        let queued_changes = self
+            .queue
+            .iter()
+            .map(|change| (change.hash(), change))
+            .collect::<HashMap<_, _>>();
+
+        let mut missing = HashSet::new();
+        let mut seen = HashSet::new();
+        let mut stack = start.collect::<Vec<_>>();
+
+        while let Some(hash) = stack.pop() {
+            if self.has_change(&hash) || !seen.insert(hash) {
+                continue;
+            }
+
+            if let Some(change) = queued_changes.get(&hash) {
+                stack.extend(change.deps().iter().copied());
+            } else {
+                missing.insert(hash);
+            }
+        }
+
+        let mut missing = missing.into_iter().collect::<Vec<_>>();
+        missing.sort();
+        missing
+    }
+
     pub fn text_encoding(&self) -> TextEncoding {
         self.ops.text_encoding
     }
@@ -2022,27 +2055,8 @@ impl ReadDoc for Automerge {
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let mut missing = HashSet::new();
-
-        for head in self.queue.iter().flat_map(|change| change.deps()) {
-            if !self.has_change(head) {
-                missing.insert(head);
-            }
-        }
-
-        for head in heads {
-            if !self.has_change(head) {
-                missing.insert(head);
-            }
-        }
-
-        let mut missing = missing
-            .into_iter()
-            .filter(|hash| !self.queue.has_hash(hash))
-            .copied()
-            .collect::<Vec<_>>();
-        missing.sort();
-        missing
+        let queued = self.queue.iter().map(|change| change.hash());
+        self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {
