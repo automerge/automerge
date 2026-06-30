@@ -71,10 +71,12 @@ use itertools::Itertools;
 use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+use crate::ReadDoc;
 use crate::{
     patches::PatchLog,
     storage::{parse, ReadChangeOpError},
-    Automerge, AutomergeError, ChangeHash, ReadDoc,
+    Automerge, AutomergeError, ChangeHash,
 };
 
 mod bloom;
@@ -168,7 +170,16 @@ impl SyncDoc for Automerge {
         let our_need = if sync_state.read_only {
             vec![]
         } else {
-            self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
+            // Only request what we need to reach the peer's advertised heads. This is
+            // deliberately not `get_missing_deps`, which reports the missing dependencies of
+            // _every_ queued change: the queue can contain orphans picked up from another peer
+            // (or an interrupted sync) whose dependencies this peer does not have. Advertising
+            // those blocks the sync — this peer can never satisfy the request and, because we
+            // withhold our `have` until everything we need is in the peer's advertised heads,
+            // the peer never sends us the unrelated changes it _does_ have. We still pick the
+            // orphans' dependencies back up if we later sync with a peer whose heads depend on
+            // them.
+            self.missing_deps_from(sync_state.their_heads.iter().flatten().copied())
         };
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
