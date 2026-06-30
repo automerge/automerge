@@ -1,3 +1,4 @@
+use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef};
@@ -13,7 +14,7 @@ use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
@@ -989,100 +990,34 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        // Pool all incoming changes together with any previously queued orphans.
-        let mut pool: Vec<Change> = self.queue.take();
-        let mut seen: HashSet<ChangeHash> = pool.iter().map(|c| c.hash()).collect();
-        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
-        for c in &pool {
-            actor_seqs
-                .entry(c.actor_id().clone())
-                .or_default()
-                .insert(c.seq());
-        }
-
         // Add new changes, deduplicating and checking for duplicate seq numbers.
+        let mut batch = ChangeBatch::new();
         for c in changes {
             let hash = c.hash();
-            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
+            if self.change_graph.has_change(&hash) {
                 continue;
             }
-            if self.has_actor_seq(&c)
-                || actor_seqs
-                    .get(c.actor_id())
-                    .is_some_and(|s| s.contains(&c.seq()))
-            {
-                // Put pool back as queue before returning error
-                for pc in pool {
-                    self.queue.push(pc);
-                }
+            if self.queue.has_hash(&c.hash()) {
+                continue;
+            }
+            if self.has_actor_seq(&c) || self.queue.has_actor_seq(&c) {
                 return Err(AutomergeError::DuplicateSeqNumber(
                     c.seq(),
                     c.actor_id().clone(),
                 ));
             }
-            seen.insert(hash);
-            actor_seqs
-                .entry(c.actor_id().clone())
-                .or_default()
-                .insert(c.seq());
-            pool.push(c);
+            batch.push(c)?;
         }
 
-        if pool.is_empty() {
+        self.queue.extend(batch);
+
+        if self.queue.is_empty() {
             return Ok(());
         }
 
-        // Kahn's algorithm: topological sort of the pool.
-        let n = pool.len();
-        let mut unsatisfied = vec![0u32; n];
-        let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
-
-        for (i, c) in pool.iter().enumerate() {
-            for dep in c.deps() {
-                if !self.change_graph.has_change(dep) {
-                    unsatisfied[i] += 1;
-                    waiting_on.entry(*dep).or_default().push(i);
-                }
-            }
-        }
-
-        let mut ready: VecDeque<usize> = VecDeque::new();
-        for (i, &count) in unsatisfied.iter().enumerate() {
-            if count == 0 {
-                ready.push_back(i);
-            }
-        }
-
-        let mut topo_order: Vec<usize> = Vec::new();
-        while let Some(idx) = ready.pop_front() {
-            let hash = pool[idx].hash();
-            topo_order.push(idx);
-            if let Some(dependents) = waiting_on.remove(&hash) {
-                for dep_idx in dependents {
-                    unsatisfied[dep_idx] -= 1;
-                    if unsatisfied[dep_idx] == 0 {
-                        ready.push_back(dep_idx);
-                    }
-                }
-            }
-        }
-
-        // Split pool into ready (topo-sorted) and orphaned.
-        let mut consumed = vec![false; n];
-        for &idx in &topo_order {
-            consumed[idx] = true;
-        }
-        let mut slots: Vec<Option<Change>> = pool.into_iter().map(Some).collect();
-
         let mut chap = BatchApply::default();
-        for idx in topo_order {
-            if let Some(c) = slots[idx].take() {
-                chap.push(c);
-            }
-        }
-
-        for c in slots.into_iter().flatten() {
-            self.queue.push(c);
+        for c in self.queue.pop_topo_sorted_ready(&self.change_graph) {
+            chap.push(c);
         }
 
         Ok(chap.apply(self, log)?)

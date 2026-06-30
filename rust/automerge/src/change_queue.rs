@@ -1,6 +1,43 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{Change, ChangeHash};
+use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash};
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChangeBatch {
+    changes: Vec<Change>,
+    hashes: HashSet<ChangeHash>,
+    incoming_actor_seqs: HashSet<(ActorId, u64)>,
+}
+
+impl ChangeBatch {
+    pub(crate) fn new() -> Self {
+        Self {
+            changes: Vec::new(),
+            hashes: HashSet::new(),
+            incoming_actor_seqs: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn push(&mut self, change: Change) -> Result<(), AutomergeError> {
+        let hash = change.hash();
+        if self.hashes.contains(&hash) {
+            return Ok(());
+        }
+
+        let actor_seq = (change.actor_id().clone(), change.seq());
+        if self.incoming_actor_seqs.contains(&actor_seq) {
+            return Err(AutomergeError::DuplicateSeqNumber(
+                change.seq(),
+                change.actor_id().clone(),
+            ));
+        }
+
+        self.hashes.insert(hash);
+        self.incoming_actor_seqs.insert(actor_seq);
+        self.changes.push(change);
+        Ok(())
+    }
+}
 
 /// An indexed queue of unapplied changes that are not yet causally ready.
 ///
@@ -10,6 +47,7 @@ pub(crate) struct ChangeQueue {
     changes: Vec<Change>,
     /// Set of hashes of all changes in the queue — O(1) contains check.
     hashes: HashSet<ChangeHash>,
+    incoming_actor_seqs: HashSet<(ActorId, u64)>,
 }
 
 impl ChangeQueue {
@@ -17,12 +55,8 @@ impl ChangeQueue {
         Self {
             changes: Vec::new(),
             hashes: HashSet::new(),
+            incoming_actor_seqs: HashSet::new(),
         }
-    }
-
-    pub(crate) fn push(&mut self, c: Change) {
-        self.hashes.insert(c.hash());
-        self.changes.push(c);
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -38,9 +72,76 @@ impl ChangeQueue {
         self.changes.iter()
     }
 
-    /// Take all changes out, leaving the queue empty.
-    pub(crate) fn take(&mut self) -> Vec<Change> {
-        self.hashes.clear();
-        std::mem::take(&mut self.changes)
+    pub(crate) fn has_actor_seq(&self, c: &Change) -> bool {
+        self.incoming_actor_seqs
+            .contains(&(c.actor_id().clone(), c.seq()))
+    }
+
+    pub(crate) fn extend(&mut self, batch: ChangeBatch) {
+        for c in batch.changes {
+            let incoming_actor_seq = (c.actor_id().clone(), c.seq());
+            debug_assert!(!self.incoming_actor_seqs.contains(&incoming_actor_seq));
+            debug_assert!(!self.hashes.contains(&c.hash()));
+            self.incoming_actor_seqs.insert(incoming_actor_seq);
+            self.hashes.insert(c.hash());
+            self.changes.push(c);
+        }
+    }
+
+    /// Return the causally ready (according to ChangeGraph) changes in
+    /// topological order, removing them from the queue
+    pub(crate) fn pop_topo_sorted_ready(&mut self, change_graph: &ChangeGraph) -> Vec<Change> {
+        // Kahn's algorithm: topological sort of the pool.
+        let n = self.changes.len();
+        let mut unsatisfied = vec![0u32; n];
+        let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
+
+        for (i, c) in self.changes.iter().enumerate() {
+            for dep in c.deps() {
+                if !change_graph.has_change(dep) {
+                    unsatisfied[i] += 1;
+                    waiting_on.entry(*dep).or_default().push(i);
+                }
+            }
+        }
+
+        let mut ready: VecDeque<usize> = VecDeque::new();
+        for (i, &count) in unsatisfied.iter().enumerate() {
+            if count == 0 {
+                ready.push_back(i);
+            }
+        }
+
+        let mut topo_order: Vec<usize> = Vec::new();
+        while let Some(idx) = ready.pop_front() {
+            let hash = self.changes[idx].hash();
+            topo_order.push(idx);
+            if let Some(dependents) = waiting_on.remove(&hash) {
+                for dep_idx in dependents {
+                    unsatisfied[dep_idx] -= 1;
+                    if unsatisfied[dep_idx] == 0 {
+                        ready.push_back(dep_idx);
+                    }
+                }
+            }
+        }
+
+        let mut slots = std::mem::take(&mut self.changes)
+            .into_iter()
+            .map(Some)
+            .collect::<Vec<_>>();
+        let mut topo = Vec::new();
+        for idx in topo_order {
+            let change = slots[idx]
+                .take()
+                .expect("topo_order contains invalid index");
+            self.hashes.remove(&change.hash());
+            self.incoming_actor_seqs
+                .remove(&(change.actor_id().clone(), change.seq()));
+            topo.push(change);
+        }
+        self.changes = slots.into_iter().flatten().collect::<Vec<_>>();
+
+        topo
     }
 }
