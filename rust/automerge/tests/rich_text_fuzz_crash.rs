@@ -21,6 +21,45 @@ fn save_load(doc: &mut AutoCommit) {
 }
 
 #[test]
+fn splice_scalar_into_marked_text() {
+    // Splice on a text object should either forward to splice_text for string
+    // input or reject non-string input; it must not use list splice semantics.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    doc.update_text(&text, "abcd").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("m".to_string(), true, 0, 4),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    let result = doc.splice(&text, 2, 0, [1_i64]);
+    assert!(matches!(
+        result,
+        Err(automerge::AutomergeError::InvalidValueType { .. })
+    ));
+}
+
+#[test]
+fn splice_string_into_marked_text() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    doc.update_text(&text, "abcd").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("m".to_string(), true, 0, 4),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    doc.splice(&text, 2, 0, ["x"]).unwrap();
+    assert_eq!(doc.text(&text).unwrap(), "abxcd");
+}
+
+#[test]
 fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
     // Minimized from fuzz/corpus/trace/crashes/crash-00000000.amtrace. Syncing a new
     // change into a document containing a zero-width unmark on empty text used to panic
