@@ -2757,3 +2757,196 @@ fn should_reload_document_containing_deflated_columns() {
         doc.commit();
     }
 }
+
+#[test]
+fn failed_merge_with_duplicate_sequence_number_does_not_corrupt_save_load() {
+    // Minimized from a fuzz crash. The merge returns DuplicateSeqNumber, but it
+    // has already partially applied one remote change. The in-memory indexes
+    // and saved document then disagree.
+    let mut left = AutoCommit::new().with_actor(ActorId::from(vec![0]));
+    let mut right = left.fork().with_actor(ActorId::from(vec![1]));
+
+    right.put_object(ROOT, "k", ObjType::Map).unwrap();
+    right.commit();
+    right.set_actor(ActorId::from(vec![0]));
+    right.put_object(ROOT, "k", ObjType::Map).unwrap();
+    right.commit();
+
+    left.put(ROOT, "k", "a").unwrap();
+    left.commit();
+
+    let result = left.merge(&mut right);
+    assert!(matches!(
+        result,
+        Err(AutomergeError::DuplicateSeqNumber(1, _))
+    ));
+
+    let before = left.hydrate(&ROOT, None).unwrap();
+    let loaded = AutoCommit::load(&left.save()).unwrap();
+    let after = loaded.hydrate(&ROOT, None).unwrap();
+
+    assert_eq!(before, after);
+}
+
+#[test]
+fn duplicate_seq_number_in_batch_change_aborts_whole_batch() {
+    let mut base = AutoCommit::new();
+    base.put(&ROOT, "foo", "bar").unwrap();
+
+    let mut middle = base.fork();
+    middle.put(&ROOT, "foo", "baz").unwrap();
+    let change1 = middle
+        .get_changes(&base.get_heads())
+        .pop()
+        .expect("should be at least one change");
+
+    let mut left = base.fork().with_actor("aaaaaa".try_into().unwrap());
+    left.put(&ROOT, "foo", "qux").unwrap();
+    let change2 = left
+        .get_changes(&base.get_heads())
+        .pop()
+        .expect("should be at least one change");
+
+    let mut right = middle.fork().with_actor("aaaaaa".try_into().unwrap());
+    right.put(&ROOT, "foo", "boz").unwrap();
+    let change3 = right
+        .get_changes(&middle.get_heads())
+        .pop()
+        .expect("should be at least one change");
+
+    // First apply the left change.
+    base.apply_changes_batch([change2]).unwrap();
+
+    // Now apply a causally ready change together with a change whose actor/seq
+    // conflicts with the already-applied left change. This should throw a
+    // duplicate seq number error before applying the ready change.
+    let Err(AutomergeError::DuplicateSeqNumber(_, _)) =
+        base.apply_changes_batch([change1.clone(), change3])
+    else {
+        panic!("expected duplicate seq number error");
+    };
+    // Because the batch apply failed the document should not have change1 applied.
+    assert!(base.get_change_by_hash(&change1.hash()).is_none());
+}
+
+#[test]
+fn duplicate_seq_number_within_incoming_batch_is_rejected() {
+    let mut base = AutoCommit::new();
+    base.put(&ROOT, "foo", "bar").unwrap();
+    let base_heads = base.get_heads();
+
+    let actor = ActorId::try_from("aaaaaa").unwrap();
+    let mut left = base.fork().with_actor(actor.clone());
+    left.put(&ROOT, "left", 1).unwrap();
+    let change1 = left
+        .get_changes(&base_heads)
+        .pop()
+        .expect("should be at least one change");
+
+    let mut right = base.fork().with_actor(actor.clone());
+    right.put(&ROOT, "right", 2).unwrap();
+    let change2 = right
+        .get_changes(&base_heads)
+        .pop()
+        .expect("should be at least one change");
+
+    assert_ne!(change1.hash(), change2.hash());
+    let Err(AutomergeError::DuplicateSeqNumber(1, duplicate_actor)) =
+        base.apply_changes_batch([change1.clone(), change2.clone()])
+    else {
+        panic!("expected duplicate seq number error");
+    };
+    assert_eq!(duplicate_actor, actor);
+
+    assert!(base.get_change_by_hash(&change1.hash()).is_none());
+    assert!(base.get_change_by_hash(&change2.hash()).is_none());
+    assert!(base.get(ROOT, "left").unwrap().is_none());
+    assert!(base.get(ROOT, "right").unwrap().is_none());
+}
+
+#[test]
+fn duplicate_seq_number_changes_are_rejected() {
+    let mut base = AutoCommit::new();
+    base.put(&ROOT, "foo", "bar").unwrap();
+
+    let mut left = base.fork().with_actor("aaaaaa".try_into().unwrap());
+    left.put(&ROOT, "foo", "qux").unwrap();
+    let change1 = left
+        .get_changes(&base.get_heads())
+        .pop()
+        .expect("should be at least one change");
+
+    let mut right = base.fork().with_actor("aaaaaa".try_into().unwrap());
+    right.put(&ROOT, "foo", "boz").unwrap();
+    let change2 = right
+        .get_changes(&base.get_heads())
+        .pop()
+        .expect("should be at least one change");
+
+    // First apply the left change.
+    base.apply_changes_batch([change1]).unwrap();
+
+    // Applying another change with the same actor/seq should throw a duplicate
+    // seq number error.
+    let Err(AutomergeError::DuplicateSeqNumber(_, _)) = base.apply_changes_batch([change2]) else {
+        panic!("expected duplicate seq number error");
+    };
+}
+
+#[test]
+fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
+    let base_actor = ActorId::try_from("aaaaaaaa").unwrap();
+    let branch_actor = ActorId::try_from("bbbbbbbb").unwrap();
+
+    let mut base_doc = AutoCommit::new().with_actor(base_actor.clone());
+    base_doc.put(ROOT, "base", ScalarValue::Uint(0)).unwrap();
+    base_doc.commit();
+    let base_heads = base_doc.get_heads();
+    let base = base_doc.save();
+
+    let mut receiver = AutoCommit::load(&base).unwrap().with_actor(base_actor);
+
+    let mut stale_branch = AutoCommit::load(&base)
+        .unwrap()
+        .with_actor(branch_actor.clone());
+    stale_branch
+        .put(ROOT, "stale_missing", ScalarValue::Uint(1))
+        .unwrap();
+    stale_branch.commit();
+    let stale_missing = stale_branch.get_heads()[0];
+    stale_branch
+        .put(ROOT, "stale_orphan", ScalarValue::Uint(2))
+        .unwrap();
+    stale_branch.commit();
+    let stale_orphan = stale_branch.get_changes(&[stale_missing]);
+    assert_eq!(stale_orphan.len(), 1);
+
+    receiver.apply_changes_batch(stale_orphan).unwrap();
+    assert_eq!(receiver.get_missing_deps(&[]), vec![stale_missing]);
+
+    let mut live_branch = AutoCommit::load(&base)
+        .unwrap()
+        .with_actor(branch_actor.clone());
+    live_branch
+        .put(ROOT, "live_1", ScalarValue::Uint(3))
+        .unwrap();
+    live_branch.commit();
+    live_branch
+        .put(ROOT, "live_2", ScalarValue::Uint(4))
+        .unwrap();
+    live_branch.commit();
+    let live_changes = live_branch.get_changes(&base_heads);
+
+    let Err(AutomergeError::DuplicateSeqNumber(2, actor)) =
+        receiver.apply_changes_batch(live_changes)
+    else {
+        panic!("expected duplicate seq number error");
+    };
+    assert_eq!(actor, branch_actor);
+
+    assert_eq!(receiver.get_heads(), base_heads);
+    assert!(receiver.get(ROOT, "live_1").unwrap().is_none());
+    assert!(receiver.get(ROOT, "live_2").unwrap().is_none());
+    assert!(receiver.get(ROOT, "stale_orphan").unwrap().is_none());
+    assert_eq!(receiver.get_missing_deps(&[]), vec![stale_missing]);
+}
