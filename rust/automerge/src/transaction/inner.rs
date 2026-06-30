@@ -1166,6 +1166,13 @@ impl TransactionInner {
     ) -> Result<ExId, AutomergeError> {
         let parent = doc.exid_to_obj(ex_parent)?;
 
+        match (&prop, insert, parent.typ) {
+            (Prop::Map(_), _, ObjType::Map) => Ok(()),
+            (Prop::Seq(_), _, ObjType::List) => Ok(()),
+            (Prop::Seq(_), true, ObjType::Text) => Ok(()),
+            _ => Err(AutomergeError::InvalidOp(parent.typ)),
+        }?;
+
         // Determine the ObjType for the root of the value being inserted
         let root_obj_type = match value {
             hydrate::Value::Map(_) => ObjType::Map,
