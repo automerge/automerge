@@ -223,8 +223,8 @@ impl IndexBuilder {
         let text = self
             .widths
             .iter()
-            .zip(self.succ.iter())
-            .map(|(w, t)| if *t == 0 { Some(*w as u32) } else { None })
+            .zip(self.top.iter())
+            .map(|(w, t)| if *t { Some(*w as u32) } else { None })
             .collect();
 
         let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();

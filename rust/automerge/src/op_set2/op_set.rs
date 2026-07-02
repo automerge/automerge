@@ -22,7 +22,6 @@ use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 use hexane::PackError;
 use itertools::Itertools;
 
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
@@ -138,11 +137,23 @@ impl OpSet {
     }
 
     pub(crate) fn conflict(&mut self, pos: usize) {
+        const NONE: Option<u32> = None;
         self.cols.index.top.splice(pos, 1, [false]);
+        // Make sure losing ops are not contributing width to the text sequence length.
+        self.cols.index.text.splice(pos, 1, [NONE]);
     }
 
     pub(crate) fn expose(&mut self, pos: usize) {
         self.cols.index.top.splice(pos, 1, [true]);
+        // Note we alwasy set the exposed widht using the text type, as the text
+        // index is only used for text width. Non-text ops are never measured
+        // anyway. We could alternatively require the caller pass the object type
+        // and just not set the width for non-text ops, but we haven't done that
+        // here.
+        let width = self
+            .get(pos)
+            .map(|op| op.width(SequenceType::Text, self.text_encoding) as u32);
+        self.cols.index.text.splice(pos, 1, [width]);
     }
 
     pub(crate) fn validate(
@@ -467,7 +478,9 @@ impl OpSet {
 
         let marks = self.cols.index.mark.rich_text_at(pos, None);
 
-        let elemid = ElemId(self.get_opid(pos)?);
+        // An element's ElemId is the id of its *insert* op, but `pos` is the
+        // element's last op (the text index stores widths on top ops).
+        let elemid = self.elemid_at(pos)?;
 
         Some(QueryNth {
             marks: MarkSet::from_query_state(&marks),
@@ -713,37 +726,75 @@ impl OpSet {
     pub(crate) fn seek_text_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
-        index: usize,
+        mut index: usize,
     ) -> OpsFound<'a> {
-        let range = self.scope_to_obj(obj);
+        let mut range = self.scope_to_obj(obj);
         let mut text_iter = self.cols.index.text.iter_range(range.clone());
         let seek = text_iter.advance_prefix(index as u64);
+
+        let mut ops = vec![];
+        let mut end_pos = range.end;
         if let Some(tx) = seek {
-            if let Some(op) = self.get(tx.pos) {
-                return OpsFound {
-                    index: tx.delta as usize,
-                    ops: vec![op],
-                    range: tx.pos..tx.pos + 1,
-                    end_pos: tx.pos + 1,
-                };
+            debug_assert!(tx.delta <= index as u64);
+            // The `text` index carries an element's width on its `top` op, which is
+            // the element's LAST op, so `advance_prefix` lands on that final op. Expand
+            // back to the element's first op (its insert) so the scan below collects
+            // every op of the element, including conflicting values that sort before
+            // the winner.
+            range.start = self.list_register_at_pos(tx.pos, range.clone()).start;
+            index = tx.delta as usize;
+            // TODO
+            // could use a SkipIter here
+            // could grab only needed fields and not all ops
+            for op in self.iter_range(&range) {
+                if op.insert {
+                    if !ops.is_empty() {
+                        break;
+                    }
+                    range.start = op.pos;
+                }
+                end_pos = op.pos + 1;
+                range.end = op.pos + 1;
+                if op.succ().len() == 0 && op.action != Action::Mark {
+                    ops.push(op);
+                }
             }
+            return OpsFound {
+                index,
+                ops,
+                range,
+                end_pos,
+            };
         }
         OpsFound {
             index,
             ops: vec![],
             range: range.end..range.end,
-            end_pos: range.end,
+            end_pos,
         }
-    }
-
-    fn get_opid(&self, pos: usize) -> Option<OpId> {
-        let id_ctr = self.cols.id_ctr.get(pos)?;
-        let id_actor = self.cols.id_actor.get(pos)?;
-        Some(OpId::new(id_ctr.into(), id_actor.into()))
     }
 
     fn get(&self, pos: usize) -> Option<Op<'_>> {
         self.iter_range(&(pos..(pos + 1))).next()
+    }
+
+    /// The ElemId of the element the op at `pos` belongs to: the op's own id
+    /// for insert ops, its key's elemid otherwise. This only needs to load the
+    /// `insert`, `id_ctr`, and `id_actor` columns.
+    fn elemid_at(&self, pos: usize) -> Option<ElemId> {
+        let (_, insert) = self.cols.insert.get(pos)?;
+        if insert {
+            let ctr = self.cols.id_ctr.get(pos)?;
+            let actor = self.cols.id_actor.get(pos)?;
+            Some(ElemId(OpId::new(ctr.into(), usize::from(actor))))
+        } else {
+            let ctr = self.cols.key_ctr.get(pos)??;
+            if ctr == 0 {
+                return Some(ElemId::head());
+            }
+            let actor = self.cols.key_actor.get(pos)??;
+            Some(ElemId(OpId::new(ctr.into(), usize::from(actor))))
+        }
     }
 
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
@@ -842,14 +893,11 @@ impl OpSet {
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        let range = self.scope_to_obj(obj);
-        let skip = self.action_value_iter(range, clock.as_ref());
-        skip.map(|item| match item {
-            (Action::Set, ScalarValue::Str(s), _) => s,
-            (Action::Mark, _, _) => Cow::Borrowed(""),
-            (_, _, _) => Cow::Borrowed("\u{fffc}"),
-        })
-        .collect()
+        let mut text = String::new();
+        for op in self.top_ops(obj, clock) {
+            text.push_str(op.as_str());
+        }
+        text
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
