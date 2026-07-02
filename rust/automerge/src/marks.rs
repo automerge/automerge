@@ -166,7 +166,14 @@ impl MarkSet {
         for (id, mark_data) in q.iter() {
             marks.mark_begin(*id, mark_data.clone());
         }
-        marks.current().cloned()
+        // A mark that resolves to a null value is an *unmark* (removal) tombstone
+        // If all we have is tombstones then there are no marks at all.
+        let current = marks.current()?.as_ref().clone().without_unmarks();
+        if current.is_empty() {
+            None
+        } else {
+            Some(Arc::new(current))
+        }
     }
 
     /// Return this MarkSet without any marks which have a value of Null, i.e.
@@ -474,5 +481,60 @@ impl UpdateSpansConfig {
         self.per_mark_expands
             .insert(mark_name.as_ref().to_string(), expand);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::op_set2::ScalarValue as OpScalar;
+
+    fn query_state(
+        entries: &[(OpId, &'static str, OpScalar<'static>)],
+    ) -> RichTextQueryState<'static> {
+        let mut q = RichTextQueryState::default();
+        for (id, name, value) in entries {
+            q.map.insert(
+                *id,
+                MarkData {
+                    name: Cow::Borrowed(name),
+                    value: value.clone(),
+                },
+            );
+        }
+        q
+    }
+
+    // Regression test for the insert-query mark normalization: the fast insert
+    // query seeds its mark state from the mark index accumulator, which surfaces
+    // `unmark` (null) tombstones, whereas the reference query builds from an empty
+    // seed and never carries them. `from_query_state` must strip tombstones so the
+    // two agree (and to match what `get_marks` reports to callers).
+    #[test]
+    fn from_query_state_strips_unmark_tombstones() {
+        // A lone unmark (null value) is not an active mark.
+        let q = query_state(&[(OpId::new(1, 0), "bold", OpScalar::Null)]);
+        assert!(MarkSet::from_query_state(&q).is_none());
+
+        // A real mark survives.
+        let q = query_state(&[(OpId::new(1, 0), "bold", OpScalar::Boolean(true))]);
+        let marks = MarkSet::from_query_state(&q).expect("bold should be present");
+        assert_eq!(marks.num_marks(), 1);
+        assert_eq!(
+            marks.iter().next(),
+            Some(("bold", &ScalarValue::Boolean(true)))
+        );
+
+        // A real mark alongside a tombstone keeps only the real one.
+        let q = query_state(&[
+            (OpId::new(1, 0), "bold", OpScalar::Boolean(true)),
+            (OpId::new(2, 0), "italic", OpScalar::Null),
+        ]);
+        let marks = MarkSet::from_query_state(&q).expect("bold should be present");
+        assert_eq!(marks.num_marks(), 1);
+        assert_eq!(
+            marks.iter().next(),
+            Some(("bold", &ScalarValue::Boolean(true)))
+        );
     }
 }
