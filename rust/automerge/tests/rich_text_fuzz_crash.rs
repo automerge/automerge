@@ -3,7 +3,8 @@ use automerge::marks::{ExpandMark, Mark};
 use automerge::sync::{self, SyncDoc};
 use automerge::transaction::Transactable;
 use automerge::{
-    hydrate, hydrate_map, hydrate_text, ActorId, AutoCommit, Automerge, ObjType, ReadDoc, ROOT,
+    hydrate, hydrate_map, hydrate_text, ActorId, AutoCommit, Automerge, ObjType, ReadDoc,
+    ScalarValue, ROOT,
 };
 
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
@@ -146,6 +147,47 @@ fn zero_width_mark_does_not_leak_to_later_text_object_from_fuzz_trace() {
             marks: None,
         }]
     );
+}
+
+// A text object holds one character which is then overwritten by two *concurrent*
+// `put`s (from a fork and its parent) targeting the same element. After merging,
+// that one character position carries two conflicting values.
+//
+// The `text` index used to carry a width per *visible* op, so it counted the
+// conflicted position twice: `length` returned 2, and the index-based fast insert
+// query disagreed with the per-element reference query (which counts it once,
+// like a list element), tripping a `debug_assert_eq!` in the op set. The fix
+// makes the `text` index carry width only on each element's winning (`top`) op,
+// so a conflicted text element is one character position — consistent with lists,
+// `get_all`, and `values`.
+#[test]
+fn splice_text_at_length_over_conflicted_element_from_fuzz_trace() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    commit_as(&mut doc, &[0]);
+
+    let mut fork = doc.fork();
+    fork.put(&text, 0, ScalarValue::Int(1)).unwrap();
+    commit_as(&mut fork, &[1]);
+
+    doc.put(&text, 0, ScalarValue::Int(2)).unwrap();
+    commit_as(&mut doc, &[0]);
+
+    doc.merge(&mut fork).unwrap();
+
+    // One character position carrying two conflicting values.
+    assert_eq!(doc.length(&text), 1);
+    assert_eq!(doc.get_all(&text, 0).unwrap().len(), 2);
+    assert_eq!(doc.text(&text).unwrap().chars().count(), doc.length(&text));
+
+    // Appending at the object's own reported length must never be out of bounds.
+    let len = doc.length(&text);
+    doc.splice_text(&text, len, 0, "b").unwrap();
+    commit_as(&mut doc, &[0]);
+    assert_eq!(doc.length(&text), 2);
+
+    save_load(&mut doc);
 }
 
 #[test]
