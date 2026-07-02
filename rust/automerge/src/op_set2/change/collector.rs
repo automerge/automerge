@@ -670,6 +670,9 @@ impl<'a> ChangeCollector<'a> {
             .into_iter()
             .map(|c| ChangeMetadata {
                 actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                author: change_graph
+                    .get_author_for_actor(c.actor)
+                    .map(Cow::Borrowed),
                 seq: c.seq,
                 start_op: c.start_op,
                 max_op: c.max_op,
@@ -699,6 +702,9 @@ impl<'a> ChangeCollector<'a> {
             .into_iter()
             .map(|c| ChangeMetadata {
                 actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                author: change_graph
+                    .get_author_for_actor(c.actor)
+                    .map(Cow::Borrowed),
                 seq: c.seq,
                 start_op: c.start_op,
                 max_op: c.max_op,

@@ -319,6 +319,23 @@ describe("Automerge", () => {
         assert.equal(changes[i].time, meta[i].time)
         assert.deepEqual(changes[i].deps, meta[i].deps)
         assert.deepEqual(changes[i].startOp, meta[i].startOp)
+        assert.equal(meta[i].author, null)
+      }
+    })
+    it("get change metadata includes the author when set", () => {
+      const author = "ab".repeat(32)
+      let doc = Automerge.init<any>({ author })
+      let heads = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.foo = "bar"
+      })
+      doc = Automerge.change(doc, d => {
+        d.zip = "zop"
+      })
+      const meta = Automerge.getChangesMetaSince(doc, heads)
+      assert.equal(meta.length, 2)
+      for (const m of meta) {
+        assert.equal(m.author, author)
       }
     })
   })

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
-use crate::types::{ActorId, ChangeHash, ElemId, ObjType};
+use crate::types::{ActorId, Author, ChangeHash, ElemId, ObjType};
 use crate::value;
 use crate::{hydrate, TextEncoding};
 
@@ -741,6 +741,7 @@ impl hexane::v1::RleValue for Action {
 #[derive(PartialEq, Debug, Clone)]
 pub struct ChangeMetadata<'a> {
     pub actor: Cow<'a, ActorId>,
+    pub author: Option<Cow<'a, Author>>,
     pub seq: u64,
     pub start_op: u64,
     pub max_op: u64,
@@ -755,6 +756,7 @@ impl ChangeMetadata<'_> {
     pub fn into_owned(self) -> ChangeMetadata<'static> {
         ChangeMetadata {
             actor: Cow::Owned(self.actor.into_owned()),
+            author: self.author.map(|a| Cow::Owned(a.into_owned())),
             seq: self.seq,
             start_op: self.start_op,
             max_op: self.max_op,

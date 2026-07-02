@@ -182,6 +182,7 @@ export type DecodedChange = {
 
 export type ChangeMetadata = {
   actor: Actor;
+  author: Author | null;
   seq: number;
   startOp: number;
   maxOp: number;
