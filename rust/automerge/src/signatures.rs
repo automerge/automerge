@@ -43,7 +43,6 @@ impl From<u64> for VerificationRequestId {
 pub struct SigningRequest {
     hash: ChangeHash,
     author: Author,
-    algorithm: SignatureAlgorithm,
     bytes_to_sign: Vec<u8>,
     started: bool,
 }
@@ -53,7 +52,6 @@ impl SigningRequest {
         Self {
             hash,
             author,
-            algorithm: SignatureAlgorithm::Ed25519,
             bytes_to_sign: signing_payload(hash),
             started: false,
         }
@@ -65,10 +63,6 @@ impl SigningRequest {
 
     pub fn author(&self) -> &Author {
         &self.author
-    }
-
-    pub fn algorithm(&self) -> &SignatureAlgorithm {
-        &self.algorithm
     }
 
     pub fn bytes_to_sign(&self) -> &[u8] {

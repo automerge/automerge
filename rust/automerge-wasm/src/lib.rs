@@ -71,7 +71,6 @@ export type Heads = Hash[];
 export type SigningRequest = {
   hash: Hash;
   author: Author;
-  algorithm: "ed25519" | string;
   bytesToSign: Uint8Array;
 };
 export type VerificationRequest = {
@@ -489,7 +488,6 @@ impl SignatureState {
                 let obj = Object::new();
                 js_set(&obj, "hash", request.hash().to_string()).unwrap();
                 js_set(&obj, "author", request.author().to_string()).unwrap();
-                js_set(&obj, "algorithm", "ed25519").unwrap();
                 js_set(
                     &obj,
                     "bytesToSign",

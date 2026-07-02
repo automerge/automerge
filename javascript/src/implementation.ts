@@ -103,7 +103,6 @@ type SyncState = JsSyncState & {
 export type SigningRequest = {
   hash: Hash
   author: Author
-  algorithm: "ed25519" | string
   bytesToSign: Uint8Array
 }
 

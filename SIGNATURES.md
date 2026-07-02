@@ -91,7 +91,6 @@ A signing request should contain only public/stable data:
 type SigningRequest = {
   hash: Uint8Array
   author: Uint8Array       // author public key / verifier identity bytes
-  algorithm: "ed25519"     // or an application-level algorithm identifier
   bytesToSign: Uint8Array  // domain-separated payload
 }
 ```
@@ -166,7 +165,6 @@ pub struct SignatureState { /* external reconciliation state */ }
 pub struct SigningRequest<'a> {
     pub hash: ChangeHash,
     pub author: &'a Author,
-    pub algorithm: SignatureAlgorithm,
     pub bytes_to_sign: Cow<'a, [u8]>,
 }
 
