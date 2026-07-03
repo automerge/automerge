@@ -294,3 +294,132 @@ impl TryFrom<Vec<u8>> for Cursor {
         Self::try_from(value.as_slice())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_actor() -> ActorId {
+        ActorId::from("mock_actor_id".as_bytes())
+    }
+
+    #[test]
+    fn test_string_round_trip() {
+        let actor = mock_actor();
+
+        let cases = vec![
+            (Cursor::Start, "s"),
+            (Cursor::End, "e"),
+            (
+                Cursor::Op(OpCursor {
+                    ctr: 42,
+                    actor: actor.clone(),
+                    move_cursor: MoveCursor::After,
+                }),
+                "42@6d6f636b5f6163746f725f6964", // "mock_actor_id" hex representation
+            ),
+            (
+                Cursor::Op(OpCursor {
+                    ctr: 123,
+                    actor: actor.clone(),
+                    move_cursor: MoveCursor::Before,
+                }),
+                "-123@6d6f636b5f6163746f725f6964",
+            ),
+        ];
+
+        for (cursor, expected_str) in cases {
+            let serialized = cursor.to_string();
+            assert_eq!(serialized, expected_str);
+
+            let parsed: Cursor = serialized.as_str().try_into().unwrap();
+            assert_eq!(parsed, cursor);
+        }
+    }
+
+    #[test]
+    fn test_binary_v1_round_trip() {
+        let actor = mock_actor();
+
+        let cases = vec![
+            Cursor::Start,
+            Cursor::End,
+            Cursor::Op(OpCursor {
+                ctr: 0,
+                actor: actor.clone(),
+                move_cursor: MoveCursor::After,
+            }),
+            Cursor::Op(OpCursor {
+                ctr: 123456, // Multi-byte leb128
+                actor: actor.clone(),
+                move_cursor: MoveCursor::Before,
+            }),
+        ];
+
+        for cursor in cases {
+            let bytes = cursor.to_bytes();
+            let parsed: Cursor = bytes.as_slice().try_into().unwrap();
+            assert_eq!(parsed, cursor);
+        }
+    }
+
+    #[test]
+    fn test_binary_v0_round_trip() {
+        let actor = mock_actor();
+        let actor_bytes = actor.to_bytes();
+        let ctr = 42;
+
+        // No v0 serializer so we construct by hand
+        let mut v0_bytes = vec![0u8];
+        leb128::write::unsigned(&mut v0_bytes, actor_bytes.len() as u64).unwrap();
+        v0_bytes.extend_from_slice(actor_bytes);
+        leb128::write::unsigned(&mut v0_bytes, ctr).unwrap();
+
+        let expected = Cursor::Op(OpCursor {
+            ctr,
+            actor,
+            move_cursor: MoveCursor::After,
+        });
+
+        let parsed: Cursor = v0_bytes.clone().as_slice().try_into().unwrap();
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_invalid_string_parsing() {
+        let cases = vec![
+            "",        // Empty string
+            "x",       // Not "s" or "e"
+            "42",      // Missing @
+            "42@",     // Missing actor ID
+            "@actor",  // Missing counter
+            "-@actor", // Another missing counter
+            "abc@actor", // Counter doesn't parse to integer
+                       // "你好@actor"
+        ];
+
+        for invalid in cases {
+            let result: Result<Cursor, _> = invalid.try_into();
+            assert!(
+                matches!(result, Err(AutomergeError::InvalidCursorFormat)),
+                "Expected failure for input: {}",
+                invalid
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_binary_parsing() {
+        let cases = vec![
+            vec![],                       // Empty data
+            vec![2, START_TAG],           // Unsupported version
+            vec![VERSION_TAG, 99],        // Unsupported inner tag for v1
+            vec![VERSION_TAG, OP_TAG, 5], // Incomplete payload
+        ];
+
+        for invalid in cases {
+            let result: Result<Cursor, _> = Cursor::try_from(invalid.as_slice());
+            assert!(matches!(result, Err(AutomergeError::InvalidCursorFormat)));
+        }
+    }
+}
