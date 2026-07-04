@@ -1,3 +1,11 @@
+## Unreleased
+
+### Fixed
+
+`Cursor::from_str` now returns `None` (transformed to `AutomergeError::InvalidCursorFormat`
+in `Cursor::try_from<&str>`) instead of panicking when input is empty or has
+empty `ActorID`.
+
 ## 0.10.0
 
 ### Breaking Changes

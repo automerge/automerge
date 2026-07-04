@@ -153,14 +153,20 @@ impl Cursor {
             }
         } else {
             // MoveCursor::Before is prefixed with '-'
-            let (move_cursor, i) = match &s[0..1] {
-                "-" => (MoveCursor::Before, 1),
-                _ => (MoveCursor::After, 0),
+            let (move_cursor, remainder) = if let Some(stripped) = s.strip_prefix('-') {
+                (MoveCursor::Before, stripped)
+            } else {
+                (MoveCursor::After, s)
             };
 
-            let n = s.find('@')?;
-            let ctr = s[i..n].parse().ok()?;
-            let actor = s[(n + 1)..].try_into().ok()?;
+            let (ctr_str, actor_str) = remainder.split_once('@')?;
+
+            if actor_str.is_empty() {
+                return None;
+            }
+
+            let ctr = ctr_str.parse().ok()?;
+            let actor = actor_str.try_into().ok()?;
 
             Some(Self::Op(OpCursor {
                 ctr,
