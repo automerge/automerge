@@ -21,6 +21,36 @@ use std::fmt;
 ///
 /// A cursor is typically obtained from [`ReadDoc::get_cursor()`] or [`ReadDoc::get_cursor_moving()`] and
 /// is dereferenced back to a concrete index using [`ReadDoc::get_cursor_position()`].
+///
+/// # Examples
+///
+/// ```rust
+/// # use automerge::{Automerge, Cursor, ReadDoc, transaction::Transactable, ObjId, AutomergeError};
+/// # let mut doc = Automerge::new();
+/// // Create a text object and insert "some text"
+/// let text_id = doc.transact(|tx| {
+///     let id = tx.put_object(automerge::ROOT, "text", automerge::ObjType::Text)?;
+///     tx.splice_text(&id, 0, 0, "some text")?;
+///     Ok::<ObjId, AutomergeError>(id)
+/// }).unwrap().result;
+///
+/// // Obtain a stable cursor at index 1 (pointing to 'o' in "some text")
+/// let cursor = doc.get_cursor(&text_id, 1, None).unwrap();
+/// let bytes = cursor.to_bytes();
+///
+/// // Modify the document by inserting "got " at index 0
+/// doc.transact(|tx| {
+///     tx.splice_text(&text_id, 0, 0, "got ")?;
+///     Ok::<(), AutomergeError>(())
+/// }).unwrap();
+///
+/// // Deserialize the cursor and look up its new position
+/// let restored_cursor = Cursor::try_from(bytes.as_slice()).unwrap();
+/// let new_position = doc.get_cursor_position(&text_id, &restored_cursor, None).unwrap();
+///
+/// // Now that text is "got some text", the cursor points to index 5
+/// assert_eq!(new_position, 5);
+/// ```
 #[derive(Clone, PartialEq, Debug)]
 pub enum Cursor {
     /// Attached to the beginning of the sequence. It always dereferences to position 0.
