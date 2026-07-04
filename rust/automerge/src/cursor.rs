@@ -6,37 +6,52 @@ use crate::ReadDoc;
 use crate::{ActorId, AutomergeError};
 use std::fmt;
 
-/// An identifier of a position in a Sequence (either Self::List or Self::Text).
+/// An identifier of a position in a sequence (either [`crate::ObjType::List`] or [`crate::ObjType::Text`]).
 ///
-/// Every element in an Automerge Sequence can be internally identified with an operation ID.
-/// While ExId is our default external representation of the Operation ID, it can be quite heavy.
-/// Therefore, we use this lightweight specialized structure.
+/// Every element in an Automerge sequence can be internally identified with an operation ID.
+/// While [`crate::exid::ExId`] is the default external representation of an operation ID, it
+/// can be quite heavy to pass around or persist. A `Cursor` offers a lightweight, specialized
+/// alternative.
 ///
-/// This can be persisted using [`Self::to_bytes()`] and [`TryFrom<&[u8]>`][TryFrom].
+/// Unlike a raw integer index, a cursor remains stable across concurrent edits. If items are inserted
+/// or deleted elsewhere in the sequence, the cursor shifts dynamically to maintain its intended position.
 ///
-/// A cursor is obtained from [`ReadDoc::get_cursor()`] or [`ReadDoc::get_cursor_moving()`] and
-/// is dereferenced to a position using [`ReadDoc::get_cursor_position()`].
+/// A cursor can be persisted using [`Self::to_bytes()`] and restored using [`TryFrom<&[u8]>`][TryFrom].
+/// It can also be stringified via its [`fmt::Display`] implementation and parsed back using [`TryFrom<&str>`].
+///
+/// A cursor is typically obtained from [`ReadDoc::get_cursor()`] or [`ReadDoc::get_cursor_moving()`] and
+/// is dereferenced back to a concrete index using [`ReadDoc::get_cursor_position()`].
 #[derive(Clone, PartialEq, Debug)]
 pub enum Cursor {
-    // cursor always dereferences to position = 0
+    /// Attached to the beginning of the sequence. It always dereferences to position 0.
     Start,
-
-    // cursor always dereferences to position = sequence.length
+    /// Attached to the end of the sequence. It always dereferences to the current sequence length.
     End,
-
-    // cursor is attached to a specific op
+    /// Attached to a specific historical operation inside the sequence.
     Op(OpCursor),
 }
 
-/// A cursor which represents a specific op in a sequence.
+/// A cursor anchored to a specific operation in a sequence.
+///
+/// This structure identifies the point in history where the cursor was placed. If the element
+/// created by this operation is later deleted, `move_cursor` specifies how the cursor adjusts
+/// to an adjacent visible item.
 #[derive(Clone, PartialEq, Debug)]
 pub struct OpCursor {
+    /// The counter component of the operation ID this cursor is anchored to.
     pub(crate) ctr: u64,
+    /// The unique identifier of the actor who generated the anchored operation.
     pub(crate) actor: ActorId,
+    /// The shifting strategy used if the targeted operation is deleted.
     pub(crate) move_cursor: MoveCursor,
 }
 
 impl OpCursor {
+    /// Constructs a new `OpCursor` by looking up the absolute `ActorId` from the active set of
+    /// operations.
+    ///
+    /// This resolves the compact, integer-mapped actor reference inside an `OpId` to its full,
+    /// shareable `ActorId` representation.
     pub(crate) fn new(id: OpId, op_set: &OpSet, move_cursor: MoveCursor) -> Self {
         OpCursor {
             ctr: id.counter(),
@@ -46,11 +61,14 @@ impl OpCursor {
     }
 }
 
-/// Locations in sequences that a cursor can represent.
+/// The locations in a sequence that a cursor can represent.
 #[derive(Debug)]
 pub enum CursorPosition {
+    /// Resolves to the start of the sequence (index 0).
     Start,
+    /// Resolves to the current end of the sequence (index is the sequence length).
     End,
+    /// Resolves to an offset within the sequence.
     Index(usize),
 }
 
@@ -60,16 +78,15 @@ impl From<usize> for CursorPosition {
     }
 }
 
-/// `MoveCursor` determines how the cursor will resolve its position if the item originally referenced by the cursor is removed.
-///
-/// With `MoveCursor::Before`, the cursor will shift to the **previous item that was visible at the time of cursor creation.**.
-/// If no previous item is found that's still visible, the cursor will dereference to `0`.
-///
-/// With `MoveCursor::After`, the cursor will shift to the **next item that was visible at the time of cursor creation.**
-/// If no next item is found that's still visible, the cursor will dereference to `sequence.length`.
+/// Shifting strategy determining how a cursor will resolve its position if the item originally referenced by
+/// the cursor is deleted.
 #[derive(Clone, PartialEq, Debug)]
 pub enum MoveCursor {
+    /// The cursor will shift to the **previous** item that was visible at the time of cursor creation.
+    /// If no previous item is found that's still visible, the cursor will dereference to `0`.
     Before,
+    /// The cursor will shift to the **next** item that was visible at the time of cursor creation.
+    /// If no next item is found that's still visible, the cursor will dereference to the current sequence length.
     After,
 }
 
@@ -89,6 +106,13 @@ const MOVE_BEFORE_TAG: u8 = 1;
 const MOVE_AFTER_TAG: u8 = 2;
 
 impl Cursor {
+    /// Parses a cursor from its human-readable serialized string format.
+    ///
+    /// Expected format shapes:
+    /// - `"s"` -> `Cursor::Start`
+    /// - `"e"` -> `Cursor::End`
+    /// - `"42@actor_hex"` -> `Cursor::Op` with `MoveCursor::After` behavior.
+    /// - `"-42@actor_hex"` -> `Cursor::Op` with `MoveCursor::Before` behavior.
     fn from_str(s: &str) -> Option<Self> {
         if s.len() == 1 {
             // start and end cursors are just "s" and "e" respectively
@@ -116,35 +140,26 @@ impl Cursor {
         }
     }
 
+    /// Serializes the cursor into a compact binary vector suitable for storage or network transit.
+    ///
+    /// The serialized output combines a version tag, enum variant tags, and ULEB128 encoding for
+    /// integers and lengths to minimize storage footprints.
+    ///
+    /// # EBNF layout specification
+    ///
+    /// ```text
+    /// version      = %d01            ; Version 1 byte identifier
+    /// start        = %d01            ; Cursor start variant
+    /// end          = %d02            ; Cursor end variant
+    /// opid_tag     = %d03            ; Operational cursor variant
+    /// move         = %d01 / %d02     ; 1 = Before, 2 = After
+    /// counter      = uleb128         ; Variable-length operation counter
+    /// actor_id     = uleb128 1*byte  ; Length-prefixed actor ID bytes
+    ///
+    /// opid         = opid_tag actor_id counter move
+    /// cursor       = version (start / end / opid)
+    /// ```
     pub fn to_bytes(&self) -> Vec<u8> {
-        /*
-        EBNF:
-
-        byte = %x00-FF
-                ; any octet
-        bytes = 1*byte
-                ; any sequence of octets
-        uleb128 = 1*8( %x00-7F ) / ( %x80-FF bytes )
-                ; unsigned LEB128 encoding
-
-        ; tags:
-        version   = %d01 ; for version 1
-
-        start     = %d01 ; Cursor::Start
-        end       = %d02 ; Cursor::End
-        opid_tag  = %d03 ; Cursor::Op
-
-        move      = %d01 ; MoveCursor::Before
-                  / %d02 ; MoveCursor::After
-
-        counter = uleb128
-        actor_id = uleb128 bytes ; length prefixed bytes of the actor ID
-
-        opid = opid_tag actor_id counter move
-
-        cursor = version (start / end / opid)
-         */
-
         match self {
             Self::Start => vec![VERSION_TAG, START_TAG],
             Self::End => vec![VERSION_TAG, END_TAG],
@@ -204,6 +219,13 @@ impl fmt::Display for OpCursor {
 impl TryFrom<&str> for Cursor {
     type Error = AutomergeError;
 
+    /// Attempts to parse a `Cursor` from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AutomergeError::InvalidCursorFormat`] if the syntax is unrecognized,
+    /// structural component symbols like `@` are missing, integers fail parsing boundaries,
+    /// or actor IDs are incomplete.
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         Cursor::from_str(s).ok_or_else(|| AutomergeError::InvalidCursorFormat)
     }
@@ -212,6 +234,14 @@ impl TryFrom<&str> for Cursor {
 impl TryFrom<String> for Cursor {
     type Error = AutomergeError;
 
+    /// Attempts to parse a `Cursor` from bytes.
+    ///
+    /// This function handles both the current V1 binary tags as well as the legacy V0 format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AutomergeError::InvalidCursorFormat`] if payload sizes are truncated, LEB128 numbers
+    /// fail parsing constraints, or illegal version flags or type tags are discovered.
     fn try_from(s: String) -> Result<Self, Self::Error> {
         s.as_str().try_into()
     }
@@ -262,15 +292,19 @@ impl<'a> TryFrom<&'a [u8]> for Cursor {
     }
 }
 
+/// Parsing for legacy version 0 cursor formats.
+///
+/// ```text
+/// .----------------------------------------------------------------.
+/// | version   | actorId len     | actorId bytes | counter          |
+/// +----------------------------------------------------------------+
+/// |  1 byte   | unsigned leb128 | variable      | unsigned leb128  |
+/// '----------------------------------------------------------------'
+/// ```
+///
+/// `MoveCursor::After` was the default behavior of cursors in version 0
+/// and there was no notion of start/end cursors
 fn parse_0(i: parse::Input<'_>) -> Result<Cursor, AutomergeError> {
-    // version = 0 serialized format:
-    //
-    // .----------------------------------------------------------------.
-    // | version   | actorId len     | actorId bytes | counter          |
-    // +----------------------------------------------------------------+
-    // |  1 byte   | unsigned leb128 | variable      | unsigned leb128  |
-    // '----------------------------------------------------------------'
-    //
     let (i, len) = parse::leb128_u64::<parse::leb128::Error>(i)
         .map_err(|_| AutomergeError::InvalidCursorFormat)?;
     let (i, actor) =
@@ -278,8 +312,6 @@ fn parse_0(i: parse::Input<'_>) -> Result<Cursor, AutomergeError> {
     let (_i, ctr) = parse::leb128_u64::<parse::leb128::Error>(i)
         .map_err(|_| AutomergeError::InvalidCursorFormat)?;
 
-    // `MoveCursor::After` was the default behavior of cursors in version 0
-    // and there was no notion of start/end cursors
     Ok(Cursor::Op(OpCursor {
         ctr,
         actor: actor.into(),
