@@ -41,6 +41,12 @@ pub trait ColumnIndex<W>: Default {
     /// matching the behaviour of `find_slab_bit`.
     fn find_slab(&self, index: usize) -> (usize, usize);
 
+    /// Number of items in slabs `0..slab_idx` — the inverse of
+    /// [`find_slab`](Self::find_slab).  O(log n) for both implementations.
+    /// `slab_idx` may equal `len()`, in which case the total item count
+    /// is returned.
+    fn items_before(&self, slab_idx: usize) -> usize;
+
     /// Replace slab `slab_idx`'s weight with `new_weight`.  O(log n) for
     /// both implementations.
     fn update_slab(&mut self, slab_idx: usize, new_weight: W);
@@ -86,6 +92,18 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
         find_slab_bit(&self.bit, index, self.weights.len())
     }
 
+    fn items_before(&self, slab_idx: usize) -> usize {
+        // Standard BIT prefix query: sum of weights[0..slab_idx].
+        debug_assert!(slab_idx <= self.weights.len());
+        let mut acc = 0;
+        let mut i = slab_idx; // 1-indexed BIT: query(i) covers first i weights
+        while i > 0 {
+            acc += self.bit[i].len();
+            i -= i & i.wrapping_neg();
+        }
+        acc
+    }
+
     fn update_slab(&mut self, slab_idx: usize, new_weight: W) {
         let old = self.weights[slab_idx].clone();
         self.weights[slab_idx] = new_weight.clone();
@@ -114,6 +132,10 @@ impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
             Some((si, items_before)) => (si, index - items_before),
             None => (SlabBTree::len(self), 0),
         }
+    }
+
+    fn items_before(&self, slab_idx: usize) -> usize {
+        self.items_before_slab(slab_idx)
     }
 
     fn update_slab(&mut self, slab_idx: usize, new_weight: A) {

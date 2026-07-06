@@ -761,7 +761,8 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
     let postfix = slab.data.len() - range.end;
 
     // we have to splice before rewrite header so range will be correct
-    slab.data.splice(range, result.bytes);
+    // (splice_bytes = memcpy-based Vec::splice — see column::splice_bytes)
+    crate::v1::column::splice_bytes(&mut slab.data, range.start, range.len(), &result.bytes);
 
     if let Some(rw) = result.rewrite {
         prefix += rewrite_lit_header(&mut slab.data, rw.pos, rw.count);

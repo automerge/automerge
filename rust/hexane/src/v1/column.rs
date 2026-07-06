@@ -172,6 +172,46 @@ pub(crate) fn try_merge_range_skeleton(
     start..end
 }
 
+/// Byte-level `Vec::splice` without the per-element iterator dance.
+///
+/// `Vec::splice(range, iter)` in stdlib walks the iterator and does a
+/// `ptr::write` per element in its drop handler — no memcpy fast path for
+/// `Copy` types with a known size.  This replacement uses three safe
+/// stdlib calls that all lower to SIMD memcpy / memmove:
+///
+///   * [`Vec::resize`] (memset-for-`u8`) to grow,
+///   * [`<[u8]>::copy_within`] to shift the suffix,
+///   * [`<[u8]>::copy_from_slice`] to drop the new bytes in.
+///
+/// Compared to `Vec::splice` the inserted bytes go in as one memcpy instead
+/// of a byte-at-a-time `ptr::write` loop.  Compared to a hand-rolled
+/// `unsafe` version this leaves one wasted pass over the grown tail
+/// (the memset-to-zero before we overwrite it), which is negligible:
+/// `bytes.len()` is typically tiny next to the suffix shift.
+///
+/// Used by the RLE, bool, and raw splice paths.
+#[inline]
+pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &[u8]) {
+    let old_len = vec.len();
+    debug_assert!(index + del <= old_len);
+    let insert = bytes.len();
+    let new_len = old_len - del + insert;
+
+    use std::cmp::Ordering;
+    match insert.cmp(&del) {
+        Ordering::Greater => {
+            vec.resize(new_len, 0);
+            vec.copy_within(index + del..old_len, index + insert);
+        }
+        Ordering::Less => {
+            vec.copy_within(index + del..old_len, index + insert);
+            vec.truncate(new_len);
+        }
+        Ordering::Equal => {}
+    }
+    vec[index..index + insert].copy_from_slice(bytes);
+}
+
 // Find slab containing logical index. Returns (slab_index, offset_within_slab). O(log S).
 // Uses binary lifting on the BIT.
 #[inline]
@@ -310,7 +350,7 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
         self.slab_remaining -= offset + 1;
         self.items_left -= offset + 1;
         self.pos += offset + 1;
-        assert_eq!(self.pos, target_pos + 1);
+        debug_assert_eq!(self.pos, target_pos + 1);
         self.decoder.nth(offset)
     }
 
@@ -503,7 +543,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             self.items_left = 0;
             false
         } else {
-            assert!(pos >= self.pos);
+            debug_assert!(pos >= self.pos);
             let skipped = pos - self.pos;
             self.pos = pos;
             self.slab_idx = si;
@@ -858,6 +898,37 @@ where
         })
     }
 
+    /// Build a column directly from pre-encoded slabs, skipping the
+    /// decode/validate pass that `load` performs.
+    ///
+    /// Callers must guarantee each slab is well-formed with correct
+    /// `len` / `segments` / `tail` metadata and `segments <= max_segments`
+    /// (debug builds verify).  Used by the streaming encoders'
+    /// `into_column` fast path.
+    pub(crate) fn from_slabs(slabs: Vec<Slab<TailOf<T>>>, max_segments: usize) -> Self {
+        #[cfg(debug_assertions)]
+        for s in &slabs {
+            let info = T::Encoding::validate_encoding(&s.data)
+                .unwrap_or_else(|e| panic!("from_slabs: invalid slab encoding: {e}"));
+            debug_assert_eq!(s.len, info.len, "from_slabs: slab len mismatch");
+            debug_assert_eq!(
+                s.segments, info.segments,
+                "from_slabs: slab segments mismatch"
+            );
+            debug_assert!(s.segments <= max_segments);
+        }
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        let index = Idx::from_weights(slabs.iter().map(WF::compute));
+        Self {
+            slabs,
+            index,
+            total_len,
+            max_segments,
+            counter: 0,
+            _phantom: PhantomData,
+        }
+    }
+
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
         if len == 0 {
@@ -1029,9 +1100,10 @@ where
         }
     }
 
-    /// Sum of slab lengths over `0..si`.  O(si) — used by `scope_to_value`.
+    /// Sum of slab lengths over `0..si`.  O(log S) via the index — used by
+    /// `scope_to_value`'s slab binary search.
     fn slab_start(&self, si: usize) -> usize {
-        self.slabs.iter().take(si).map(|s| s.len).sum()
+        self.index.items_before(si)
     }
 
     /// Narrow a range to the contiguous run of items matching `value`.

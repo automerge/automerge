@@ -176,10 +176,20 @@ pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
         self.len() == 0
     }
 
-    // TODO - actually store the segments
-    // make into_column not do an extra copy
+    /// Set the slab segment budget for [`into_column`](Self::into_column).
+    ///
+    /// Encoders that support slab rollover (`RleEncoder`, `BoolEncoder`)
+    /// use this to cut completed output into slabs as values arrive, so
+    /// `into_column` can build the column directly without re-decoding.
+    /// Must be called before appending.  The default is a no-op.
     fn max_segments(&mut self, _max: usize) {}
 
+    /// Build a [`Column`] from the encoder's contents.
+    ///
+    /// The default round-trips through `save` + `load` (one full decode +
+    /// validate pass).  Encoders with slab rollover override this with a
+    /// direct slab handoff when [`max_segments`](Self::max_segments) was
+    /// set.
     fn into_column<WF, Idx>(self) -> Column<T, WF, Idx>
     where
         WF: WeightFn<T>,

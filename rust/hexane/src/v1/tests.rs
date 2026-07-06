@@ -4167,3 +4167,127 @@ fn fuzz_column_save_load_after_mutations() {
         assert_eq!(saved, loaded.save(), "trial={trial}: save/load roundtrip");
     }
 }
+
+// ── Encoder slab-rollover (direct into_column) tests ────────────────────────
+//
+// With `max_segments` set, the streaming encoders cut completed output into
+// slabs and `into_column` hands them to the column directly — no decode
+// pass.  These tests pin down that the direct path produces columns
+// equivalent to the save-then-load path (values, canonical save bytes, and
+// structural validity for later mutation).
+
+#[test]
+fn encoder_into_column_direct_matches_load() {
+    use crate::v1::encoding::EncoderApi;
+    // Mixed runs + literals, enough to force several slab cuts at max=4.
+    let vals: Vec<u64> = (0..300u64)
+        .map(|i| if i % 7 == 0 { 42 } else { i })
+        .collect();
+
+    let plain = crate::v1::Encoder::<u64>::encode(vals.iter().copied());
+
+    let mut enc = crate::v1::Encoder::<u64>::default();
+    enc.max_segments(4);
+    enc.extend(vals.iter().copied());
+    let mut col: Column<u64> = enc.into_column();
+
+    assert!(col.slab_count() > 1, "expected slab cuts");
+    assert_eq!(col.to_vec(), vals);
+    // Column save merges cut boundaries back into canonical bytes.
+    assert_eq!(col.save(), plain);
+    // The column must be structurally valid for later mutation.
+    col.insert(150, 999u64);
+    col.remove(10);
+    assert_eq!(col.len(), vals.len());
+    col.validate_encoding().unwrap();
+}
+
+#[test]
+fn encoder_save_after_rollover_matches_plain() {
+    use crate::v1::encoding::EncoderApi;
+    let vals: Vec<u64> = (0..200u64).map(|i| i % 13).collect();
+    let plain = crate::v1::Encoder::<u64>::encode(vals.iter().copied());
+
+    let mut enc = crate::v1::Encoder::<u64>::default();
+    enc.max_segments(4);
+    enc.extend(vals.iter().copied());
+    // save() after cuts must fold the slabs back into canonical bytes.
+    assert_eq!(enc.save(), plain);
+}
+
+#[test]
+fn string_encoder_into_column_direct() {
+    use crate::v1::encoding::EncoderApi;
+    // Strings stress the literal-run tail metadata (lit_tail) across cuts.
+    let vals: Vec<String> = (0..80)
+        .map(|i| {
+            if i % 5 == 0 {
+                "dup".to_string()
+            } else {
+                format!("s{i}")
+            }
+        })
+        .collect();
+
+    let mut enc = crate::v1::Encoder::<String>::default();
+    enc.max_segments(4);
+    for s in &vals {
+        enc.append(s.as_str());
+    }
+    let col: Column<String> = enc.into_column();
+
+    assert!(col.slab_count() > 1, "expected slab cuts");
+    let got: Vec<&str> = col.iter().collect();
+    let expect: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
+    assert_eq!(got, expect);
+}
+
+#[test]
+fn bool_encoder_into_column_direct_matches_load() {
+    use crate::v1::encoding::EncoderApi;
+    let vals: Vec<bool> = (0..500).map(|i| (i / 3) % 2 == 0).collect();
+    let plain = crate::v1::Encoder::<bool>::encode(vals.iter().copied());
+
+    let mut enc = crate::v1::Encoder::<bool>::default();
+    enc.max_segments(4);
+    enc.extend(vals.iter().copied());
+    let col: Column<bool> = enc.into_column();
+
+    assert!(col.slab_count() > 1, "expected slab cuts");
+    assert_eq!(col.to_vec(), vals);
+    assert_eq!(col.save(), plain);
+}
+
+// ── ColumnIndex::items_before parity ─────────────────────────────────────────
+
+#[test]
+fn index_items_before_parity() {
+    use crate::v1::column::LenWeight;
+    use crate::v1::index::{BitIndex, ColumnIndex};
+
+    let vals: Vec<u64> = (0..500u64).collect();
+    let btree = Column::<u64>::from_values_with_max_segments(vals.clone(), 4);
+    let bit: Column<u64, LenWeight, BitIndex<usize>> =
+        Column::from_values_with_max_segments(vals, 4);
+    assert!(btree.slab_count() > 1);
+
+    let lens = btree.slab_lens();
+    let mut expect = 0;
+    for (i, len) in lens.iter().enumerate() {
+        assert_eq!(
+            btree.index.items_before(i),
+            expect,
+            "btree items_before({i})"
+        );
+        expect += len;
+    }
+    assert_eq!(btree.index.items_before(lens.len()), expect);
+
+    let lens = bit.slab_lens();
+    let mut expect = 0;
+    for (i, len) in lens.iter().enumerate() {
+        assert_eq!(bit.index.items_before(i), expect, "bit items_before({i})");
+        expect += len;
+    }
+    assert_eq!(bit.index.items_before(lens.len()), expect);
+}

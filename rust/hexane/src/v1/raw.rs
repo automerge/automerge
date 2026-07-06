@@ -14,7 +14,9 @@
 //! callers splice at value boundaries, no value ever crosses a slab — which
 //! is what makes the zero-copy [`RawColumn::get`] API safe.
 
-use super::column::{bit_point_update, find_slab_bit, rebuild_bit, try_merge_range_skeleton};
+use super::column::{
+    bit_point_update, find_slab_bit, rebuild_bit, splice_bytes, try_merge_range_skeleton,
+};
 use crate::PackError;
 use std::ops::Range;
 
@@ -394,44 +396,6 @@ impl RawColumn {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Byte-level `Vec::splice` without the per-element iterator dance.
-///
-/// `Vec::splice(range, iter)` in stdlib walks the iterator and does a
-/// `ptr::write` per element in its drop handler — no memcpy fast path for
-/// `Copy` types with a known size.  This replacement uses three safe
-/// stdlib calls that all lower to SIMD memcpy / memmove:
-///
-///   * [`Vec::resize`] (memset-for-`u8`) to grow,
-///   * [`<[u8]>::copy_within`] to shift the suffix,
-///   * [`<[u8]>::copy_from_slice`] to drop the new bytes in.
-///
-/// Compared to `Vec::splice` the inserted bytes go in as one memcpy instead
-/// of a byte-at-a-time `ptr::write` loop.  Compared to a hand-rolled
-/// `unsafe` version this leaves one wasted pass over the grown tail
-/// (the memset-to-zero before we overwrite it), which is negligible:
-/// `bytes.len()` is typically tiny next to the suffix shift.
-#[inline]
-fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &[u8]) {
-    let old_len = vec.len();
-    debug_assert!(index + del <= old_len);
-    let insert = bytes.len();
-    let new_len = old_len - del + insert;
-
-    use std::cmp::Ordering;
-    match insert.cmp(&del) {
-        Ordering::Greater => {
-            vec.resize(new_len, 0);
-            vec.copy_within(index + del..old_len, index + insert);
-        }
-        Ordering::Less => {
-            vec.copy_within(index + del..old_len, index + insert);
-            vec.truncate(new_len);
-        }
-        Ordering::Equal => {}
-    }
-    vec[index..index + insert].copy_from_slice(bytes);
-}
 
 /// Splice a single slab: delete up to `del` bytes at `index`, insert
 /// `values`.  Mirrors the shape of [`ColumnEncoding::splice_slab`] used by

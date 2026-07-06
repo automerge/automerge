@@ -471,6 +471,11 @@ impl RleValue for u32 {
         let v = u32::try_from(v).map_err(|_| PackError::InvalidValue("u32 overflow".into()))?;
         Ok((start - buf.len(), v))
     }
+    /// Skipping doesn't need the range check — data was validated at load.
+    /// Same byte structure as u64 LEB128.
+    fn value_len(data: &[u8]) -> Option<usize> {
+        u64::value_len(data)
+    }
     fn pack(value: u32, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value as u64).unwrap();
         true
@@ -488,6 +493,10 @@ impl RleValue for usize {
         let v = leb128::read::unsigned(&mut buf)?;
         let v = usize::try_from(v).map_err(|_| PackError::InvalidValue("usize overflow".into()))?;
         Ok((start - buf.len(), v))
+    }
+    /// Skipping doesn't need the range check — data was validated at load.
+    fn value_len(data: &[u8]) -> Option<usize> {
+        u64::value_len(data)
     }
     fn pack(value: usize, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value as u64).unwrap();
@@ -508,6 +517,10 @@ impl RleValue for std::num::NonZeroU32 {
         let v = std::num::NonZeroU32::new(v)
             .ok_or_else(|| PackError::InvalidValue("NonZeroU32 is zero".into()))?;
         Ok((start - buf.len(), v))
+    }
+    /// Skipping doesn't need the zero/range checks — data was validated at load.
+    fn value_len(data: &[u8]) -> Option<usize> {
+        u64::value_len(data)
     }
     fn pack(value: std::num::NonZeroU32, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value.get() as u64).unwrap();

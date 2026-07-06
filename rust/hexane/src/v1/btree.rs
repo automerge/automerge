@@ -1022,11 +1022,11 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// Find the slab index containing the `pos`-th item and the
     /// item-count of items strictly before that slab.  Returns `None`
     /// if `pos >= total_items`.
+    ///
+    /// Out-of-range `pos` is detected during the descent (no child
+    /// covers the remainder), so no upfront root-aggregate merge is
+    /// needed — this runs on every positional lookup.
     pub(crate) fn find_by_prefix(&self, pos: usize) -> Option<(usize, usize)> {
-        let root_agg = self.root_agg();
-        if pos >= root_agg.len() {
-            return None;
-        }
         let mut node = self.root;
         let mut pos = pos;
         let mut slab_idx_base = 0;
@@ -1044,14 +1044,57 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     return None;
                 }
                 Node::Internal(n) => {
+                    let mut descended = false;
                     for c in &n.children {
                         if pos < c.agg.len() {
                             node = c.id;
+                            descended = true;
                             break;
                         }
                         pos -= c.agg.len();
                         items_before += c.agg.len();
                         slab_idx_base += c.slab_count;
+                    }
+                    if !descended {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Number of items in slabs `0..slab_idx`.  O(log n) — descends by
+    /// slab count, accumulating the item lengths of skipped siblings.
+    /// `slab_idx` may equal the total slab count (returns total items).
+    pub(crate) fn items_before_slab(&self, slab_idx: usize) -> usize {
+        let mut remaining = slab_idx;
+        let mut items = 0;
+        let mut node = self.root;
+        loop {
+            match self.node(node) {
+                Node::Leaf(l) => {
+                    for a in &l.aggs {
+                        if remaining == 0 {
+                            return items;
+                        }
+                        remaining -= 1;
+                        items += a.len();
+                    }
+                    return items;
+                }
+                Node::Internal(n) => {
+                    let mut descended = false;
+                    for c in &n.children {
+                        if remaining < c.slab_count {
+                            node = c.id;
+                            descended = true;
+                            break;
+                        }
+                        remaining -= c.slab_count;
+                        items += c.agg.len();
+                    }
+                    if !descended {
+                        return items;
                     }
                 }
             }

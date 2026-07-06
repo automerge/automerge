@@ -13,8 +13,10 @@
 //! let bytes = enc.save();
 //! ```
 
+use super::column::{Column, Slab};
 use super::leb::encode_count;
 use super::rle::state::{FlushState, RleCow, RleState};
+use super::rle::RleTail;
 use super::RleValue;
 
 use std::ops::Range;
@@ -112,11 +114,23 @@ impl<'a, T: RleValue> RleEncoderState<'a, T> {
 /// with [`save`](RleEncoder::save) or [`save_to`](RleEncoder::save_to).
 /// Both output methods consume the encoder.
 ///
+/// When a slab segment budget is set via
+/// [`EncoderApi::max_segments`](super::encoding::EncoderApi::max_segments)
+/// **before appending**, the encoder rolls completed output into [`Slab`]s
+/// as it goes, and [`into_column`](super::encoding::EncoderApi::into_column)
+/// hands them to the column directly — no decode/validate pass.
+///
 /// The lifetime `'a` ties borrowed values (e.g. `&'a str` for `String` columns)
 /// to the encoder. For `Copy` types like `u64`, `'a` is typically `'static`.
 pub struct RleEncoder<'a, T: RleValue> {
     data: Vec<u8>,
     state: RleEncoderState<'a, T>,
+    /// Completed slabs, populated only when `max_segments` is set.
+    slabs: Vec<Slab<RleTail>>,
+    /// Slab rollover budget.  `None` = single contiguous buffer (default).
+    max_segments: Option<usize>,
+    /// Items already rolled into `slabs` (`state.len()` is cumulative).
+    len_flushed: usize,
 }
 
 impl<T: RleValue> Default for RleEncoder<'_, T> {
@@ -140,6 +154,9 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
         Self {
             data: Vec::new(),
             state: RleEncoderState::new(),
+            slabs: Vec::new(),
+            max_segments: None,
+            len_flushed: 0,
         }
     }
 
@@ -153,28 +170,89 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
         self.state.is_empty()
     }
 
+    /// Roll the pending buffer into a completed slab once the segment
+    /// budget is reached.  No-op unless `max_segments` is set.  Called
+    /// before each append so a run in progress is never left dangling.
+    ///
+    /// Cuts at `max / 2` (half-full slabs) to mirror `load`'s split
+    /// policy, leaving room for later inserts.
+    #[inline]
+    fn maybe_cut(&mut self) {
+        let Some(max) = self.max_segments else { return };
+        let target = max / 2;
+        if target == 0 || self.state.flush.segments + self.state.state.pending_segments() < target {
+            return;
+        }
+        self.state.finish(&mut self.data);
+        let len = self.state.len() - self.len_flushed;
+        if len == 0 {
+            return;
+        }
+        let flush = self.state.flush;
+        // A pure encoder owns every literal header it writes, so a
+        // deferred header rewrite can never be pending here.
+        debug_assert!(flush.rewrite.is_none());
+        let tail = flush.wpos.as_tail(0, self.data.len());
+        // Successive slabs are similar-sized — pre-size the next buffer to
+        // avoid incremental realloc traffic (one alloc per slab, like load).
+        let next_capacity = self.data.len();
+        self.slabs.push(Slab {
+            data: std::mem::replace(&mut self.data, Vec::with_capacity(next_capacity)),
+            len,
+            segments: flush.segments,
+            tail,
+        });
+        self.len_flushed = self.state.len();
+        self.state.flush = FlushState::default();
+    }
+
+    /// Flush pending state and return all slabs (rollover slabs + final).
+    fn take_slabs(&mut self) -> Vec<Slab<RleTail>> {
+        self.state.finish(&mut self.data);
+        let len = self.state.len() - self.len_flushed;
+        if len > 0 {
+            let flush = self.state.flush;
+            debug_assert!(flush.rewrite.is_none());
+            let tail = flush.wpos.as_tail(0, self.data.len());
+            self.slabs.push(Slab {
+                data: std::mem::take(&mut self.data),
+                len,
+                segments: flush.segments,
+                tail,
+            });
+            self.len_flushed = self.state.len();
+        }
+        std::mem::take(&mut self.slabs)
+    }
+
     /// Append a single value.
     pub fn append(&mut self, value: T::Get<'a>) {
+        self.maybe_cut();
         self.state.append(&mut self.data, value);
     }
 
     pub fn append_owned(&mut self, value: T) {
+        self.maybe_cut();
         self.state.append_owned(&mut self.data, value);
     }
 
     /// Append `n` copies of `value`.
     pub fn append_n(&mut self, value: T::Get<'a>, n: usize) {
+        self.maybe_cut();
         self.state.append_n(&mut self.data, value, n);
     }
 
     /// Append `n` copies of `value`.
     pub fn append_n_owned(&mut self, value: T, n: usize) {
+        self.maybe_cut();
         self.state.append_n_owned(&mut self.data, value, n);
     }
 
     /// Append all values from an iterator.
     pub fn extend(&mut self, iter: impl IntoIterator<Item = T::Get<'a>>) {
-        self.state.extend(&mut self.data, iter);
+        for value in iter {
+            self.append(value);
+        }
     }
 
     fn finish(&mut self) {
@@ -183,6 +261,11 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
 
     /// Flush and return the encoded bytes. Consumes the encoder.
     pub fn save(mut self) -> Vec<u8> {
+        if !self.slabs.is_empty() {
+            let mut out = Vec::new();
+            self.save_to(&mut out);
+            return out;
+        }
         self.finish();
         self.data
     }
@@ -190,16 +273,35 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
     /// Flush and append the encoded bytes to `out`. Consumes the encoder.
     /// Returns the byte range written.
     pub fn save_to(mut self, out: &mut Vec<u8>) -> Range<usize> {
-        self.finish();
         let start = out.len();
-        out.extend_from_slice(&self.data);
+        if self.slabs.is_empty() {
+            self.finish();
+            out.extend_from_slice(&self.data);
+            return start..out.len();
+        }
+        // Slab rollover happened — fold the slabs back into canonical
+        // bytes, merging boundary runs (same walk as `Column::save_to`).
+        let slabs = self.take_slabs();
+        let mut iter = slabs.into_iter();
+        let first = iter.next().expect("take_slabs: slabs are non-empty");
+        out.extend_from_slice(&first.data);
+        let mut tail = first.tail;
+        let mut segments = first.segments;
+        let mut buf = Vec::new();
+        for s in iter {
+            let (new_seg, new_tail) =
+                super::rle::splice::do_merge::<T>(out, tail, segments, &s, &mut buf);
+            segments = new_seg;
+            tail = new_tail;
+            buf.clear();
+        }
         start..out.len()
     }
 
     /// Like [`save_to`](Self::save_to) but returns an empty range if the
     /// encoded data is empty or consists entirely of a single run of `value`.
     pub fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> Range<usize> {
-        if self.state.is_single_run_of(value) {
+        if self.slabs.is_empty() && self.state.is_single_run_of(value) {
             return out.len()..out.len();
         }
         self.save_to(out)
@@ -239,6 +341,9 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
 
     /// Flush `self` and walk every run through `f`, re-emitting into `dst`.
     /// Shared implementation for the `*_and_remap` methods.
+    ///
+    /// Walks any rollover slabs first, then the pending buffer; `dst`'s
+    /// state machine re-merges runs that were split at slab cuts.
     fn walk_runs<F>(mut self, dst: &mut RleEncoder<'a, T>, f: F)
     where
         F: Fn(T) -> T,
@@ -246,15 +351,25 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
         use super::encoding::RunDecoder;
         use super::rle::RleDecoder;
         self.finish();
-        let mut dec = RleDecoder::<'_, T>::new(&self.data);
-        while let Some(run) = dec.next_run() {
-            let value = T::to_owned(run.value);
-            dst.append_n_owned(f(value), run.count);
+        for slab in self
+            .slabs
+            .iter()
+            .map(|s| &s.data[..])
+            .chain([&self.data[..]])
+        {
+            let mut dec = RleDecoder::<'_, T>::new(slab);
+            while let Some(run) = dec.next_run() {
+                let value = T::to_owned(run.value);
+                dst.append_n_owned(f(value), run.count);
+            }
         }
     }
 }
 
-impl<'a, T: RleValue> super::encoding::EncoderApi<'a, T> for RleEncoder<'a, T> {
+impl<'a, T> super::encoding::EncoderApi<'a, T> for RleEncoder<'a, T>
+where
+    T: RleValue + super::ColumnValueRef<Encoding = super::rle::RleEncoding<T>>,
+{
     type Tail = super::rle::RleTail;
     fn append(&mut self, value: T::Get<'a>) {
         self.append(value);
@@ -283,7 +398,40 @@ impl<'a, T: RleValue> super::encoding::EncoderApi<'a, T> for RleEncoder<'a, T> {
     fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> Range<usize> {
         self.save_to_unless(out, value)
     }
+
+    /// Enable slab rollover: completed output is cut into [`Slab`]s at
+    /// `max / 2` segments as values arrive, so
+    /// [`into_column`](super::encoding::EncoderApi::into_column) can build
+    /// the column directly.  Must be called before appending.
+    fn max_segments(&mut self, max: usize) {
+        debug_assert!(
+            self.state.is_empty(),
+            "max_segments must be set before appending"
+        );
+        self.max_segments = Some(max);
+    }
+
+    /// Direct path: hand the rollover slabs to the column, skipping the
+    /// decode/validate pass that the save-then-load default performs.
+    /// Falls back to that default when `max_segments` was never set
+    /// (no cut points were tracked, so the slab split is unknown).
+    fn into_column<WF, Idx>(mut self) -> Column<T, WF, Idx>
+    where
+        WF: super::column::WeightFn<T>,
+        WF::Weight: super::btree::SlabAggregate,
+        Idx: super::index::ColumnIndex<WF::Weight>,
+    {
+        match self.max_segments {
+            Some(max) => Column::from_slabs(self.take_slabs(), max),
+            None => Column::load(&self.save()).unwrap(),
+        }
+    }
+
     fn into_slab(mut self) -> super::column::Slab<Self::Tail> {
+        debug_assert!(
+            self.slabs.is_empty(),
+            "into_slab is single-slab only — don't combine with max_segments"
+        );
         self.finish();
         let flush = self.state.flush_state();
         let tail = flush.wpos.as_tail(0, self.data.len());
@@ -440,9 +588,20 @@ impl BoolEncoderState {
 /// Streaming encoder for boolean columns.
 ///
 /// Uses the alternating run-length format: `[false_count, true_count, false_count, ...]`.
+///
+/// Like [`RleEncoder`], setting a segment budget via
+/// [`EncoderApi::max_segments`](super::encoding::EncoderApi::max_segments)
+/// before appending enables slab rollover for a direct
+/// [`into_column`](super::encoding::EncoderApi::into_column) path.
 pub struct BoolEncoder {
     data: Vec<u8>,
     state: BoolEncoderState,
+    /// Completed slabs, populated only when `max_segments` is set.
+    slabs: Vec<Slab<u8>>,
+    /// Slab rollover budget.  `None` = single contiguous buffer (default).
+    max_segments: Option<usize>,
+    /// Items already rolled into `slabs` (`state.len` is cumulative).
+    len_flushed: usize,
 }
 
 impl Default for BoolEncoder {
@@ -466,6 +625,9 @@ impl BoolEncoder {
         Self {
             data: Vec::new(),
             state: BoolEncoderState::new(),
+            slabs: Vec::new(),
+            max_segments: None,
+            len_flushed: 0,
         }
     }
 
@@ -479,13 +641,72 @@ impl BoolEncoder {
         self.state.is_empty()
     }
 
+    /// Roll the pending buffer into a completed slab once the segment
+    /// budget is reached.  No-op unless `max_segments` is set.  Only cuts
+    /// when `incoming` closes the current run, so the pending run always
+    /// lands whole in the finished slab.  The fresh state restarts on a
+    /// false run; `flush_run`'s zero-count pad handles a true `incoming`.
+    #[inline]
+    fn maybe_cut(&mut self, incoming: bool) {
+        let Some(max) = self.max_segments else { return };
+        let target = max / 2;
+        if target == 0
+            || incoming == self.state.cur_value
+            || self.state.cur_count == 0
+            || self.state.segments + 1 < target
+        {
+            return;
+        }
+        // Tail = byte length of the last count written (the pending run
+        // that `finish` is about to flush).
+        let tail = encode_count(self.state.cur_count).len() as u8;
+        self.state.finish(&mut self.data);
+        let len = self.state.len - self.len_flushed;
+        self.slabs.push(Slab {
+            data: std::mem::take(&mut self.data),
+            len,
+            segments: self.state.segments,
+            tail,
+        });
+        self.len_flushed = self.state.len;
+        self.state.segments = 0;
+        self.state.cur_value = false;
+        self.state.cur_count = 0;
+    }
+
+    /// Flush pending state and return all slabs (rollover slabs + final).
+    fn take_slabs(&mut self) -> Vec<Slab<u8>> {
+        let tail = if self.state.cur_count > 0 {
+            encode_count(self.state.cur_count).len() as u8
+        } else {
+            0
+        };
+        self.state.finish(&mut self.data);
+        let len = self.state.len - self.len_flushed;
+        if len > 0 {
+            self.slabs.push(Slab {
+                data: std::mem::take(&mut self.data),
+                len,
+                segments: self.state.segments,
+                tail,
+            });
+            self.len_flushed = self.state.len;
+        }
+        std::mem::take(&mut self.slabs)
+    }
+
     /// Append a single boolean value.
     pub fn append(&mut self, value: bool) {
+        self.maybe_cut(value);
         self.state.append(&mut self.data, value);
     }
 
     /// Append `n` copies of `value`.
     pub fn append_n(&mut self, value: bool, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.maybe_cut(value);
         self.state.append_n(&mut self.data, value, n);
     }
 
@@ -495,6 +716,11 @@ impl BoolEncoder {
 
     /// Flush and return the encoded bytes. Consumes the encoder.
     pub fn save(mut self) -> Vec<u8> {
+        if !self.slabs.is_empty() {
+            let mut out = Vec::new();
+            self.save_to(&mut out);
+            return out;
+        }
         self.finish();
         self.data
     }
@@ -502,6 +728,13 @@ impl BoolEncoder {
     /// Flush and append the encoded bytes to `out`. Consumes the encoder.
     /// Returns the byte range written.
     pub fn save_to(mut self, out: &mut Vec<u8>) -> Range<usize> {
+        if !self.slabs.is_empty() {
+            // Slab rollover happened — merge boundary runs back into
+            // canonical bytes via the column save path.
+            let max = self.max_segments.unwrap_or(super::column::DEFAULT_MAX_SEG);
+            let col: Column<bool> = Column::from_slabs(self.take_slabs(), max);
+            return col.save_to(out);
+        }
         self.finish();
         let start = out.len();
         out.extend_from_slice(&self.data);
@@ -516,7 +749,7 @@ impl BoolEncoder {
     /// handle `[true]` + sentinel=true correctly (the leading 0-count
     /// false run is part of the encoding, not part of the logical content).
     pub fn save_to_unless(self, out: &mut Vec<u8>, value: bool) -> Range<usize> {
-        if self.state.all_equal_pre_finish(value) {
+        if self.slabs.is_empty() && self.state.all_equal_pre_finish(value) {
             return out.len()..out.len();
         }
         self.save_to(out)
@@ -524,7 +757,9 @@ impl BoolEncoder {
 
     /// Append all values from an iterator.
     pub fn extend(&mut self, iter: impl IntoIterator<Item = bool>) {
-        self.state.extend(&mut self.data, iter);
+        for value in iter {
+            self.append(value);
+        }
     }
 }
 
@@ -558,7 +793,38 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
     fn save_to_unless(self, out: &mut Vec<u8>, value: bool) -> Range<usize> {
         self.save_to_unless(out, value)
     }
+
+    /// Enable slab rollover — see [`RleEncoder`]'s
+    /// [`max_segments`](super::encoding::EncoderApi::max_segments).
+    /// Must be called before appending.
+    fn max_segments(&mut self, max: usize) {
+        debug_assert!(
+            self.state.is_empty(),
+            "max_segments must be set before appending"
+        );
+        self.max_segments = Some(max);
+    }
+
+    /// Direct path: hand the rollover slabs to the column, skipping the
+    /// decode pass.  Falls back to save-then-load when `max_segments`
+    /// was never set.
+    fn into_column<WF, Idx>(mut self) -> Column<bool, WF, Idx>
+    where
+        WF: super::column::WeightFn<bool>,
+        WF::Weight: super::btree::SlabAggregate,
+        Idx: super::index::ColumnIndex<WF::Weight>,
+    {
+        match self.max_segments {
+            Some(max) => Column::from_slabs(self.take_slabs(), max),
+            None => Column::load(&self.save()).unwrap(),
+        }
+    }
+
     fn into_slab(mut self) -> super::column::Slab<Self::Tail> {
+        debug_assert!(
+            self.slabs.is_empty(),
+            "into_slab is single-slab only — don't combine with max_segments"
+        );
         self.finish();
         let segments = self.state.segments;
         let tail = if segments > 0 {
