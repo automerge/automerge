@@ -239,14 +239,8 @@ pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) ->
 
 // ── Iter ─────────────────────────────────────────────────────────────────────
 
-// ── Iter ─────────────────────────────────────────────────────────────────────
-
-/// Forward iterator over column items.
-///
-/// Created by [`Column::iter`] or [`Column::iter_range`].
-///
-/// `nth()` is O(log S + runs_skipped) — uses the column's index structure
-/// to skip directly to the target slab.
+/// Object-safe view of a `Column` used by [`Iter`] for index-assisted
+/// slab lookups, independent of the column's `WF` / `Idx` parameters.
 pub(crate) trait ColumnRef<T: ColumnValueRef> {
     fn find_slab(&self, index: usize) -> (usize, usize);
     fn slab_data(&self, index: usize) -> &[u8];
@@ -272,6 +266,12 @@ where
     }
 }
 
+/// Forward iterator over column items.
+///
+/// Created by [`Column::iter`] or [`Column::iter_range`].
+///
+/// `nth()` is O(log S + runs_skipped) — uses the column's index structure
+/// to skip directly to the target slab.
 pub struct Iter<'a, T: ColumnValueRef> {
     pub(crate) slabs: &'a [Slab<TailOf<T>>],
     pub(crate) col: Option<&'a dyn ColumnRef<T>>,
@@ -448,16 +448,6 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         self.advance_to(self.pos + amount)
     }
 
-    /// Narrow the iterator window to the contiguous run of `value` within a
-    /// sorted range, returning that range.
-    ///
-    /// If the value is not found, returns an empty range at the insertion
-    /// point and the iterator is positioned past the search area.
-    ///
-    /// Optimistic fast-path: if the first value of the next slab is greater
-    /// than the target, the value must be on the current slab and we scan
-    /// linearly with `next_run()`.  Otherwise, falls back to the column's
-    /// `scope_to_value` binary search.
     /// Returns the next run of identical values, merging across slab boundaries.
     ///
     /// For repeat runs, returns the full count. For literal runs, returns
@@ -642,6 +632,11 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 }
 
 impl<'a, T: ColumnValueRef> Iter<'a, T> {
+    /// Narrow the iterator window to the contiguous run of `value` within a
+    /// sorted range, returning that range.
+    ///
+    /// If the value is not found, returns an empty range at the insertion
+    /// point and the iterator is positioned past the search area.
     pub fn seek_to_value(
         &mut self,
         target: T::Get<'a>,

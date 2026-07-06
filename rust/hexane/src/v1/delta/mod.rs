@@ -182,26 +182,6 @@ impl DeltaValue for Option<usize> {
 
 // ── DeltaEncoder ────────────────────────────────────────────────────────────
 
-/// Streaming encoder for delta-encoded columns.
-///
-/// Mirrors [`RleEncoder`](super::encoder::RleEncoder)'s interface but applies
-/// delta encoding on append: each absolute value is transformed into the
-/// difference from the previous non-null value before being written to an
-/// inner RLE encoder.  The serialized bytes are byte-compatible with both
-/// [`DeltaColumn::save`] and v0's `DeltaCursor::encode`.
-///
-/// Use this when you need to build a delta column incrementally (e.g. while
-/// walking change ops) rather than collecting a `Vec` and calling
-/// [`DeltaColumn::from_values`].
-///
-/// ```no_run
-/// # use hexane::v1::delta::DeltaEncoder;
-/// let mut enc = DeltaEncoder::<i64>::new();
-/// enc.append(10);
-/// enc.append(20);
-/// enc.append(30);
-/// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
-/// ```
 /// State half of [`DeltaEncoder`] — owns delta tracking and inner-RLE
 /// state but **not** the output buffer.  Every mutating method takes a
 /// `&mut Vec<u8>` so the caller decides where bytes land.  Used by the
@@ -296,6 +276,26 @@ impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
     }
 }
 
+/// Streaming encoder for delta-encoded columns.
+///
+/// Mirrors [`RleEncoder`](super::encoder::RleEncoder)'s interface but applies
+/// delta encoding on append: each absolute value is transformed into the
+/// difference from the previous non-null value before being written to an
+/// inner RLE encoder.  The serialized bytes are byte-compatible with both
+/// [`DeltaColumn::save`] and v0's `DeltaCursor::encode`.
+///
+/// Use this when you need to build a delta column incrementally (e.g. while
+/// walking change ops) rather than collecting a `Vec` and calling
+/// [`DeltaColumn::from_values`].
+///
+/// ```no_run
+/// # use hexane::v1::delta::DeltaEncoder;
+/// let mut enc = DeltaEncoder::<i64>::new();
+/// enc.append(10);
+/// enc.append(20);
+/// enc.append(30);
+/// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
+/// ```
 pub struct DeltaEncoder<'a, T: DeltaValue> {
     data: Vec<u8>,
     state: DeltaEncoderState<'a, T>,
@@ -443,6 +443,592 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
         }
         state.finish(out);
         start..out.len()
+    }
+}
+
+// ── DeltaColumn ────────────────────────────────────────────────────────────
+//
+// Deltas are always stored as `Column<Option<i64>, IndexedDeltaWeightFn>`
+// regardless of `T`.  `T` only affects how realized values are materialized
+// on read (and validated on load).  The `SlabAgg` aggregate (len + total +
+// min/max offsets) unlocks `find_by_value` / `find_by_range` via min/max
+// pruning.
+
+/// A delta-encoded column.
+pub struct DeltaColumn<T: DeltaValue> {
+    pub(crate) col: Column<Option<i64>, IndexedDeltaWeightFn>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: DeltaValue> Clone for DeltaColumn<T> {
+    fn clone(&self) -> Self {
+        Self {
+            col: self.col.clone(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: DeltaValue> Debug for DeltaColumn<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeltaColumn")
+            .field("len", &self.col.len())
+            .field("slabs", &self.col.slab_count())
+            .finish()
+    }
+}
+
+impl<T: DeltaValue> Default for DeltaColumn<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: DeltaValue> DeltaColumn<T> {
+    pub fn new() -> Self {
+        Self {
+            col: Column::new(),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn with_max_segments(max_segments: usize) -> Self {
+        Self {
+            col: Column::with_max_segments(max_segments),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn from_values(values: Vec<T>) -> Self {
+        let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
+        let mut col = Column::new();
+        col.splice(0, 0, deltas_from(&inner, 0));
+        Self {
+            col,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn load_with(data: &[u8], opts: TypedLoadOpts<Option<i64>>) -> Result<Self, PackError> {
+        if data.is_empty() {
+            let col = Column::load_with(data, opts)?;
+            return Ok(Self {
+                col,
+                _phantom: PhantomData,
+            });
+        }
+        let validate = |running: i64, count: usize, val: Option<i64>| {
+            if let Some(f) = opts.validate {
+                if let Some(msg) = f(val) {
+                    return Err(msg);
+                }
+            }
+            match val {
+                None => {
+                    if !T::NULLABLE {
+                        return Err("unexpected null in non-nullable delta column".into());
+                    }
+                    Ok(running)
+                }
+                Some(d) => {
+                    let new_running = running + d * count as i64;
+                    T::try_from_i64(new_running)?;
+                    Ok(new_running)
+                }
+            }
+        };
+        let col = Column::load_verified_fold(data, opts.max_segments, Some(validate))?;
+        if let Some(expected) = opts.length {
+            if col.len() != expected {
+                return Err(PackError::InvalidLength(col.len(), expected));
+            }
+        }
+        Ok(Self {
+            col,
+            _phantom: PhantomData,
+        })
+    }
+
+    pub fn load(data: &[u8]) -> Result<Self, PackError> {
+        Self::load_with(data, super::LoadOpts::default().into())
+    }
+
+    pub fn len(&self) -> usize {
+        self.col.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.col.is_empty()
+    }
+
+    pub fn slab_count(&self) -> usize {
+        self.col.slab_count()
+    }
+
+    pub fn save(&self) -> Vec<u8> {
+        self.col.save()
+    }
+
+    pub fn save_to(&self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
+        self.col.save_to(out)
+    }
+
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: Option<i64>) -> std::ops::Range<usize> {
+        self.col.save_to_unless(out, value)
+    }
+
+    /// Collect realized values into a Vec.
+    pub fn to_vec(&self) -> Vec<T> {
+        self.iter().collect()
+    }
+
+    pub fn get(&self, index: usize) -> Option<T> {
+        self.iter().nth(index)
+    }
+
+    pub fn iter(&self) -> DeltaIter<'_, T> {
+        DeltaIter {
+            inner: self.col.iter(),
+            running: 0,
+            col: Some(&self.col),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T> {
+        let start = range.start.min(self.col.len());
+        let end = range.end.min(self.col.len());
+        let mut iter = self.iter();
+        iter.set_max(end);
+        iter.advance_by(start);
+        iter
+    }
+
+    pub fn insert(&mut self, index: usize, value: T) {
+        self.splice(index, 0, [value]);
+    }
+
+    pub fn remove(&mut self, index: usize) {
+        if index < self.col.total_len {
+            self.splice(index, 1, std::iter::empty());
+        }
+    }
+
+    pub fn push(&mut self, value: T) {
+        let len = self.col.len();
+        self.insert(len, value);
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+        let val = self.get(self.col.len() - 1)?;
+        self.remove(self.col.len() - 1);
+        Some(val)
+    }
+
+    pub fn first(&self) -> Option<T> {
+        self.get(0)
+    }
+
+    pub fn last(&self) -> Option<T> {
+        if self.is_empty() {
+            None
+        } else {
+            self.get(self.col.len() - 1)
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.col.clear();
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        let cur = self.col.len();
+        if len < cur {
+            self.splice(len, cur - len, std::iter::empty::<T>());
+        }
+    }
+
+    pub fn splice(&mut self, index: usize, del: usize, values: impl IntoIterator<Item = T>) {
+        let _ = self.splice_inner(index, del, values);
+    }
+
+    pub(crate) fn splice_inner(
+        &mut self,
+        index: usize,
+        del: usize,
+        values: impl IntoIterator<Item = T>,
+    ) -> std::ops::Range<usize> {
+        let len = self.col.len();
+        assert!(index + del <= len, "splice range out of bounds");
+
+        let mut values = values.into_iter().map(|t| t.to_i64()).peekable();
+        if del == 0 && values.peek().is_none() {
+            return 0..0;
+        }
+
+        let (prev, skip, next_val) = self.find_boundaries(index, del);
+        // When a boundary non-null follows the splice, replace `del` original
+        // items + `skip` preserved nulls + 1 boundary, and inline the bulk
+        // null run + a recomputed boundary delta to keep the realized value
+        // of `next_val` intact.
+        let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
+        let iter = SpliceDeltaIter::new(values, prev, skip, next_val);
+        self.col.splice_inner(index, total_del, iter)
+    }
+
+    /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
+    ///
+    /// Returns `(prev, skip, next_val)` where:
+    /// - `prev` is the realized prefix at `index` (running before position `index`).
+    /// - `skip` is the number of null entries between `index + del` and the
+    ///   next non-null (or the end of the column).
+    /// - `next_val` is the realized value of that next non-null (or `None` if
+    ///   there isn't one).  Subsequent deltas decode against this value, so
+    ///   fix-ups must re-establish it to preserve the column's realized values.
+    fn find_boundaries(&self, index: usize, del: usize) -> (i64, usize, Option<i64>) {
+        let mut iter = self.iter();
+        iter.advance_by(index);
+        let prev = iter.running;
+        iter.advance_by(del);
+
+        // RLE merges consecutive null runs, so at most one null run sits
+        // between `index + del` and the next non-null — no loop needed.
+        match iter.inner.next_run() {
+            None => (prev, 0, None),
+            Some(run) if run.value.is_none() => {
+                (prev, run.count, iter.next().map(|_| iter.running))
+            }
+            Some(run) => (prev, 0, Some(iter.running + run.value.unwrap())),
+        }
+    }
+}
+
+// ── DeltaIter ──────────────────────────────────────────────────────────────
+
+type InnerColumn = Column<Option<i64>, IndexedDeltaWeightFn>;
+
+/// Iterator over realized values in a [`DeltaColumn`].
+///
+/// `next()` walks the underlying `Column` value-by-value and
+/// accumulates a running `i64` prefix.  `nth(n)` uses the column's
+/// B-tree to jump directly to the target position and reset the
+/// running prefix in O(log n), avoiding an O(n) replay.
+pub struct DeltaIter<'a, T: DeltaValue> {
+    inner: super::column::Iter<'a, Option<i64>>,
+    running: i64,
+    col: Option<&'a InnerColumn>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T: DeltaValue> Default for DeltaIter<'_, T> {
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+            running: 0,
+            col: None,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        match self.inner.next()? {
+            None => Some(T::null_value()),
+            Some(d) => {
+                self.running += d;
+                Some(T::from_i64(self.running))
+            }
+        }
+    }
+
+    fn nth(&mut self, mut n: usize) -> Option<T> {
+        if n == 0 {
+            return self.next();
+        }
+        if n >= self.inner.items_left {
+            if self.inner.items_left > 0 {
+                self.nth(self.inner.items_left - 1);
+            }
+            return None;
+        }
+
+        if self.inner.slab_remaining <= n {
+            let pos = self.pos();
+            let col = self.col?;
+            let found = col.index.find_slab_at_item(pos + n);
+            self.running = found.prefix;
+            if !self.inner.advance_to_slab(found.index, found.pos) {
+                return None;
+            }
+            n -= self.pos() - pos;
+        }
+        while let Some(run) = self.inner.next_run_max(n + 1) {
+            if let Some(delta) = run.value {
+                self.running += delta * run.count as i64;
+            }
+            if run.count > n {
+                return Some(match run.value {
+                    None => T::null_value(),
+                    Some(_) => T::from_i64(self.running),
+                });
+            }
+            n -= run.count
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeltaIter")
+            .field("pos", &self.inner.pos())
+            .field("running", &self.running)
+            .field("items_left", &self.inner.len())
+            .finish()
+    }
+}
+
+impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
+
+impl<'a, T: DeltaValue> DeltaIter<'a, T> {
+    #[inline]
+    pub fn pos(&self) -> usize {
+        self.inner.pos()
+    }
+
+    #[inline]
+    pub fn end_pos(&self) -> usize {
+        self.inner.end_pos()
+    }
+
+    pub fn set_max(&mut self, pos: usize) {
+        self.inner.set_max(pos);
+    }
+
+    pub fn advance_to(&mut self, target: usize) {
+        assert!(
+            target >= self.pos(),
+            "advance_to: target ({target}) < pos ({})",
+            self.pos()
+        );
+        if target > self.pos() {
+            self.nth(target - self.pos() - 1);
+        }
+    }
+
+    pub fn advance_by(&mut self, amount: usize) {
+        if amount > 0 {
+            self.nth(amount - 1);
+        }
+    }
+
+    pub fn shift_next(&mut self, range: Range<usize>) -> Option<T> {
+        assert!(range.start >= self.inner.pos);
+        self.inner.set_max(range.end);
+        self.nth(range.start - self.inner.pos)
+    }
+
+    pub fn suspend(&self) -> DeltaIterState {
+        DeltaIterState {
+            inner: self.inner.suspend(),
+            running: self.running,
+        }
+    }
+}
+
+pub struct DeltaIterState {
+    inner: super::column::IterState,
+    running: i64,
+}
+
+impl DeltaIterState {
+    pub fn try_resume<'a, T: DeltaValue>(
+        &self,
+        column: &'a DeltaColumn<T>,
+    ) -> Result<DeltaIter<'a, T>, crate::PackError> {
+        let inner = self.inner.try_resume(&column.col)?;
+        Ok(DeltaIter {
+            inner,
+            running: self.running,
+            col: Some(&column.col),
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            running: self.running,
+            col: self.col,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+// ── Free helpers ────────────────────────────────────────────────────────────
+
+/// Iterator that maps realized values to their delta encoding relative to
+/// a running `prev_realized`.  Null values pass through as `None` and leave
+/// `prev_realized` untouched.  No allocation.
+pub(crate) fn deltas_from<'a>(
+    values: &'a [Option<i64>],
+    mut prev_realized: i64,
+) -> impl Iterator<Item = Option<i64>> + 'a {
+    values.iter().map(move |v| match v {
+        None => None,
+        Some(r) => {
+            let d = *r - prev_realized;
+            prev_realized = *r;
+            Some(d)
+        }
+    })
+}
+
+/// Streaming iterator that turns realized `Option<i64>` values + the result
+/// of `find_boundaries` into the `(delta, count)` pairs that
+/// `Column::splice_inner` consumes.  Avoids allocating the values into a
+/// `Vec`: emits each delta in lockstep with the input iterator, then —
+/// when a boundary non-null follows the splice — emits a bulk
+/// `(None, skip)` and a recomputed boundary delta against the post-splice
+/// running.
+struct SpliceDeltaIter<I> {
+    iter: I,
+    running: i64,
+    skip: usize,
+    next_val: Option<i64>,
+    phase: SplicePhase,
+}
+
+enum SplicePhase {
+    Values,
+    NullRun,
+    Boundary,
+    Done,
+}
+
+impl<I: Iterator<Item = Option<i64>>> SpliceDeltaIter<I> {
+    fn new(iter: I, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
+        Self {
+            iter,
+            running: prev,
+            skip,
+            next_val,
+            phase: SplicePhase::Values,
+        }
+    }
+}
+
+impl<I: Iterator<Item = Option<i64>>> Iterator for SpliceDeltaIter<I> {
+    type Item = (Option<i64>, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.phase {
+                SplicePhase::Values => match self.iter.next() {
+                    Some(None) => return Some((None, 1)),
+                    Some(Some(r)) => {
+                        let d = r - self.running;
+                        self.running = r;
+                        return Some((Some(d), 1));
+                    }
+                    None => {
+                        self.phase = if self.next_val.is_some() {
+                            SplicePhase::NullRun
+                        } else {
+                            SplicePhase::Done
+                        };
+                    }
+                },
+                SplicePhase::NullRun => {
+                    self.phase = SplicePhase::Boundary;
+                    return Some((None, self.skip));
+                }
+                SplicePhase::Boundary => {
+                    self.phase = SplicePhase::Done;
+                    let next = self.next_val.expect("boundary phase requires next_val");
+                    return Some((Some(next - self.running), 1));
+                }
+                SplicePhase::Done => return None,
+            }
+        }
+    }
+}
+
+// ── FromIterator / Extend / IntoIterator ────────────────────────────────────
+
+impl<T: DeltaValue> FromIterator<T> for DeltaColumn<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self::from_values(iter.into_iter().collect())
+    }
+}
+
+impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let vals: Vec<T> = iter.into_iter().collect();
+        if !vals.is_empty() {
+            let len = self.len();
+            self.splice(len, 0, vals);
+        }
+    }
+}
+
+impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
+    type Item = T;
+    type IntoIter = DeltaIter<'a, T>;
+
+    fn into_iter(self) -> DeltaIter<'a, T> {
+        self.iter()
+    }
+}
+
+// ── Overflow safety tests ───────────────────────────────────────────────────
+
+#[cfg(test)]
+mod overflow_tests {
+    use super::*;
+
+    #[test]
+    fn delta_u32_rejects_i64_overflow() {
+        let col = DeltaColumn::<i64>::from_values(vec![u32::MAX as i64 + 1]);
+        let bytes = col.save();
+        let result = DeltaColumn::<u32>::load(&bytes);
+        assert!(
+            result.is_err(),
+            "DeltaColumn<u32> should reject realized value > u32::MAX"
+        );
+    }
+
+    #[test]
+    fn delta_u32_rejects_negative() {
+        let col = DeltaColumn::<i64>::from_values(vec![10, -5]);
+        let bytes = col.save();
+        let result = DeltaColumn::<u32>::load(&bytes);
+        assert!(
+            result.is_err(),
+            "DeltaColumn<u32> should reject negative delta"
+        );
+    }
+
+    #[test]
+    fn delta_u32_accepts_max_u32() {
+        let col = DeltaColumn::<i64>::from_values(vec![u32::MAX as i64]);
+        let bytes = col.save();
+        let loaded = DeltaColumn::<u32>::load(&bytes);
+        assert!(loaded.is_ok(), "DeltaColumn<u32> should accept u32::MAX");
+        assert_eq!(loaded.unwrap().get(0), Some(u32::MAX));
     }
 }
 
@@ -1191,590 +1777,3 @@ mod tests {
         }
     }
 }
-// ── DeltaColumn ────────────────────────────────────────────────────────────
-//
-// Deltas are always stored as `Column<Option<i64>, IndexedDeltaWeightFn>`
-// regardless of `T`.  `T` only affects how realized values are materialized
-// on read (and validated on load).  The `SlabAgg` aggregate (len + total +
-// min/max offsets) unlocks `find_by_value` / `find_by_range` via min/max
-// pruning.
-
-/// A delta-encoded column.
-pub struct DeltaColumn<T: DeltaValue> {
-    pub(crate) col: Column<Option<i64>, IndexedDeltaWeightFn>,
-    _phantom: PhantomData<T>,
-}
-
-impl<T: DeltaValue> Clone for DeltaColumn<T> {
-    fn clone(&self) -> Self {
-        Self {
-            col: self.col.clone(),
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: DeltaValue> Debug for DeltaColumn<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeltaColumn")
-            .field("len", &self.col.len())
-            .field("slabs", &self.col.slab_count())
-            .finish()
-    }
-}
-
-impl<T: DeltaValue> Default for DeltaColumn<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<T: DeltaValue> DeltaColumn<T> {
-    pub fn new() -> Self {
-        Self {
-            col: Column::new(),
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn with_max_segments(max_segments: usize) -> Self {
-        Self {
-            col: Column::with_max_segments(max_segments),
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn from_values(values: Vec<T>) -> Self {
-        let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
-        let mut col = Column::new();
-        col.splice(0, 0, deltas_from(&inner, 0));
-        Self {
-            col,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<Option<i64>>) -> Result<Self, PackError> {
-        if data.is_empty() {
-            let col = Column::load_with(data, opts)?;
-            return Ok(Self {
-                col,
-                _phantom: PhantomData,
-            });
-        }
-        let validate = |running: i64, count: usize, val: Option<i64>| {
-            if let Some(f) = opts.validate {
-                if let Some(msg) = f(val) {
-                    return Err(msg);
-                }
-            }
-            match val {
-                None => {
-                    if !T::NULLABLE {
-                        return Err("unexpected null in non-nullable delta column".into());
-                    }
-                    Ok(running)
-                }
-                Some(d) => {
-                    let new_running = running + d * count as i64;
-                    T::try_from_i64(new_running)?;
-                    Ok(new_running)
-                }
-            }
-        };
-        let col = Column::load_verified_fold(data, opts.max_segments, Some(validate))?;
-        if let Some(expected) = opts.length {
-            if col.len() != expected {
-                return Err(PackError::InvalidLength(col.len(), expected));
-            }
-        }
-        Ok(Self {
-            col,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_with(data, super::LoadOpts::default().into())
-    }
-
-    pub fn len(&self) -> usize {
-        self.col.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.col.is_empty()
-    }
-
-    pub fn slab_count(&self) -> usize {
-        self.col.slab_count()
-    }
-
-    pub fn save(&self) -> Vec<u8> {
-        self.col.save()
-    }
-
-    pub fn save_to(&self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
-        self.col.save_to(out)
-    }
-
-    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: Option<i64>) -> std::ops::Range<usize> {
-        self.col.save_to_unless(out, value)
-    }
-
-    /// Collect realized values into a Vec.
-    pub fn to_vec(&self) -> Vec<T> {
-        self.iter().collect()
-    }
-
-    pub fn get(&self, index: usize) -> Option<T> {
-        self.iter().nth(index)
-    }
-
-    pub fn iter(&self) -> DeltaIter<'_, T> {
-        DeltaIter {
-            inner: self.col.iter(),
-            running: 0,
-            col: Some(&self.col),
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T> {
-        let start = range.start.min(self.col.len());
-        let end = range.end.min(self.col.len());
-        let mut iter = self.iter();
-        iter.set_max(end);
-        iter.advance_by(start);
-        iter
-    }
-
-    pub fn insert(&mut self, index: usize, value: T) {
-        self.splice(index, 0, [value]);
-    }
-
-    pub fn remove(&mut self, index: usize) {
-        if index < self.col.total_len {
-            self.splice(index, 1, std::iter::empty());
-        }
-    }
-
-    pub fn push(&mut self, value: T) {
-        let len = self.col.len();
-        self.insert(len, value);
-    }
-
-    pub fn pop(&mut self) -> Option<T> {
-        if self.is_empty() {
-            return None;
-        }
-        let val = self.get(self.col.len() - 1)?;
-        self.remove(self.col.len() - 1);
-        Some(val)
-    }
-
-    pub fn first(&self) -> Option<T> {
-        self.get(0)
-    }
-
-    pub fn last(&self) -> Option<T> {
-        if self.is_empty() {
-            None
-        } else {
-            self.get(self.col.len() - 1)
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.col.clear();
-    }
-
-    pub fn truncate(&mut self, len: usize) {
-        let cur = self.col.len();
-        if len < cur {
-            self.splice(len, cur - len, std::iter::empty::<T>());
-        }
-    }
-
-    pub fn splice(&mut self, index: usize, del: usize, values: impl IntoIterator<Item = T>) {
-        let _ = self.splice_inner(index, del, values);
-    }
-
-    pub(crate) fn splice_inner(
-        &mut self,
-        index: usize,
-        del: usize,
-        values: impl IntoIterator<Item = T>,
-    ) -> std::ops::Range<usize> {
-        let len = self.col.len();
-        assert!(index + del <= len, "splice range out of bounds");
-
-        let mut values = values.into_iter().map(|t| t.to_i64()).peekable();
-        if del == 0 && values.peek().is_none() {
-            return 0..0;
-        }
-
-        let (prev, skip, next_val) = self.find_boundaries(index, del);
-        // When a boundary non-null follows the splice, replace `del` original
-        // items + `skip` preserved nulls + 1 boundary, and inline the bulk
-        // null run + a recomputed boundary delta to keep the realized value
-        // of `next_val` intact.
-        let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
-        let iter = SpliceDeltaIter::new(values, prev, skip, next_val);
-        self.col.splice_inner(index, total_del, iter)
-    }
-
-    /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
-    ///
-    /// Returns `(prev, skip, next_val)` where:
-    /// - `prev` is the realized prefix at `index` (running before position `index`).
-    /// - `skip` is the number of null entries between `index + del` and the
-    ///   next non-null (or the end of the column).
-    /// - `next_val` is the realized value of that next non-null (or `None` if
-    ///   there isn't one).  Subsequent deltas decode against this value, so
-    ///   fix-ups must re-establish it to preserve the column's realized values.
-    fn find_boundaries(&self, index: usize, del: usize) -> (i64, usize, Option<i64>) {
-        let mut iter = self.iter();
-        iter.advance_by(index);
-        let prev = iter.running;
-        iter.advance_by(del);
-
-        // RLE merges consecutive null runs, so at most one null run sits
-        // between `index + del` and the next non-null — no loop needed.
-        match iter.inner.next_run() {
-            None => (prev, 0, None),
-            Some(run) if run.value.is_none() => {
-                (prev, run.count, iter.next().map(|_| iter.running))
-            }
-            Some(run) => (prev, 0, Some(iter.running + run.value.unwrap())),
-        }
-    }
-}
-
-// ── DeltaIter ──────────────────────────────────────────────────────────────
-
-type InnerColumn = Column<Option<i64>, IndexedDeltaWeightFn>;
-
-/// Iterator over realized values in a [`DeltaColumn`].
-///
-/// `next()` walks the underlying `Column` value-by-value and
-/// accumulates a running `i64` prefix.  `nth(n)` uses the column's
-/// B-tree to jump directly to the target position and reset the
-/// running prefix in O(log n), avoiding an O(n) replay.
-pub struct DeltaIter<'a, T: DeltaValue> {
-    inner: super::column::Iter<'a, Option<i64>>,
-    running: i64,
-    col: Option<&'a InnerColumn>,
-    _phantom: PhantomData<T>,
-}
-
-impl<T: DeltaValue> Default for DeltaIter<'_, T> {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
-            running: 0,
-            col: None,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
-    type Item = T;
-
-    #[inline]
-    fn next(&mut self) -> Option<T> {
-        match self.inner.next()? {
-            None => Some(T::null_value()),
-            Some(d) => {
-                self.running += d;
-                Some(T::from_i64(self.running))
-            }
-        }
-    }
-
-    fn nth(&mut self, mut n: usize) -> Option<T> {
-        if n == 0 {
-            return self.next();
-        }
-        if n >= self.inner.items_left {
-            if self.inner.items_left > 0 {
-                self.nth(self.inner.items_left - 1);
-            }
-            return None;
-        }
-
-        if self.inner.slab_remaining <= n {
-            let pos = self.pos();
-            let col = self.col?;
-            let found = col.index.find_slab_at_item(pos + n);
-            self.running = found.prefix;
-            if !self.inner.advance_to_slab(found.index, found.pos) {
-                return None;
-            }
-            n -= self.pos() - pos;
-        }
-        while let Some(run) = self.inner.next_run_max(n + 1) {
-            if let Some(delta) = run.value {
-                self.running += delta * run.count as i64;
-            }
-            if run.count > n {
-                return Some(match run.value {
-                    None => T::null_value(),
-                    Some(_) => T::from_i64(self.running),
-                });
-            }
-            n -= run.count
-        }
-        None
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DeltaIter")
-            .field("pos", &self.inner.pos())
-            .field("running", &self.running)
-            .field("items_left", &self.inner.len())
-            .finish()
-    }
-}
-
-impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
-
-impl<'a, T: DeltaValue> DeltaIter<'a, T> {
-    #[inline]
-    pub fn pos(&self) -> usize {
-        self.inner.pos()
-    }
-
-    #[inline]
-    pub fn end_pos(&self) -> usize {
-        self.inner.end_pos()
-    }
-
-    pub fn set_max(&mut self, pos: usize) {
-        self.inner.set_max(pos);
-    }
-
-    pub fn advance_to(&mut self, target: usize) {
-        assert!(
-            target >= self.pos(),
-            "advance_to: target ({target}) < pos ({})",
-            self.pos()
-        );
-        if target > self.pos() {
-            self.nth(target - self.pos() - 1);
-        }
-    }
-
-    pub fn advance_by(&mut self, amount: usize) {
-        if amount > 0 {
-            self.nth(amount - 1);
-        }
-    }
-
-    pub fn shift_next(&mut self, range: Range<usize>) -> Option<T> {
-        assert!(range.start >= self.inner.pos);
-        self.inner.set_max(range.end);
-        self.nth(range.start - self.inner.pos)
-    }
-
-    pub fn suspend(&self) -> DeltaIterState {
-        DeltaIterState {
-            inner: self.inner.suspend(),
-            running: self.running,
-        }
-    }
-}
-
-pub struct DeltaIterState {
-    inner: super::column::IterState,
-    running: i64,
-}
-
-impl DeltaIterState {
-    pub fn try_resume<'a, T: DeltaValue>(
-        &self,
-        column: &'a DeltaColumn<T>,
-    ) -> Result<DeltaIter<'a, T>, crate::PackError> {
-        let inner = self.inner.try_resume(&column.col)?;
-        Ok(DeltaIter {
-            inner,
-            running: self.running,
-            col: Some(&column.col),
-            _phantom: PhantomData,
-        })
-    }
-}
-
-impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            running: self.running,
-            col: self.col,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-// ── Free helpers ────────────────────────────────────────────────────────────
-
-/// Iterator that maps realized values to their delta encoding relative to
-/// a running `prev_realized`.  Null values pass through as `None` and leave
-/// `prev_realized` untouched.  No allocation.
-pub(crate) fn deltas_from<'a>(
-    values: &'a [Option<i64>],
-    mut prev_realized: i64,
-) -> impl Iterator<Item = Option<i64>> + 'a {
-    values.iter().map(move |v| match v {
-        None => None,
-        Some(r) => {
-            let d = *r - prev_realized;
-            prev_realized = *r;
-            Some(d)
-        }
-    })
-}
-
-/// Streaming iterator that turns realized `Option<i64>` values + the result
-/// of `find_boundaries` into the `(delta, count)` pairs that
-/// `Column::splice_inner` consumes.  Avoids allocating the values into a
-/// `Vec`: emits each delta in lockstep with the input iterator, then —
-/// when a boundary non-null follows the splice — emits a bulk
-/// `(None, skip)` and a recomputed boundary delta against the post-splice
-/// running.
-struct SpliceDeltaIter<I> {
-    iter: I,
-    running: i64,
-    skip: usize,
-    next_val: Option<i64>,
-    phase: SplicePhase,
-}
-
-enum SplicePhase {
-    Values,
-    NullRun,
-    Boundary,
-    Done,
-}
-
-impl<I: Iterator<Item = Option<i64>>> SpliceDeltaIter<I> {
-    fn new(iter: I, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
-        Self {
-            iter,
-            running: prev,
-            skip,
-            next_val,
-            phase: SplicePhase::Values,
-        }
-    }
-}
-
-impl<I: Iterator<Item = Option<i64>>> Iterator for SpliceDeltaIter<I> {
-    type Item = (Option<i64>, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.phase {
-                SplicePhase::Values => match self.iter.next() {
-                    Some(None) => return Some((None, 1)),
-                    Some(Some(r)) => {
-                        let d = r - self.running;
-                        self.running = r;
-                        return Some((Some(d), 1));
-                    }
-                    None => {
-                        self.phase = if self.next_val.is_some() {
-                            SplicePhase::NullRun
-                        } else {
-                            SplicePhase::Done
-                        };
-                    }
-                },
-                SplicePhase::NullRun => {
-                    self.phase = SplicePhase::Boundary;
-                    return Some((None, self.skip));
-                }
-                SplicePhase::Boundary => {
-                    self.phase = SplicePhase::Done;
-                    let next = self.next_val.expect("boundary phase requires next_val");
-                    return Some((Some(next - self.running), 1));
-                }
-                SplicePhase::Done => return None,
-            }
-        }
-    }
-}
-
-// ── FromIterator / Extend / IntoIterator ────────────────────────────────────
-
-impl<T: DeltaValue> FromIterator<T> for DeltaColumn<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self::from_values(iter.into_iter().collect())
-    }
-}
-
-impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        let vals: Vec<T> = iter.into_iter().collect();
-        if !vals.is_empty() {
-            let len = self.len();
-            self.splice(len, 0, vals);
-        }
-    }
-}
-
-impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
-    type Item = T;
-    type IntoIter = DeltaIter<'a, T>;
-
-    fn into_iter(self) -> DeltaIter<'a, T> {
-        self.iter()
-    }
-}
-
-// ── Overflow safety tests ───────────────────────────────────────────────────
-
-#[cfg(test)]
-mod overflow_tests {
-    use super::*;
-
-    #[test]
-    fn delta_u32_rejects_i64_overflow() {
-        let col = DeltaColumn::<i64>::from_values(vec![u32::MAX as i64 + 1]);
-        let bytes = col.save();
-        let result = DeltaColumn::<u32>::load(&bytes);
-        assert!(
-            result.is_err(),
-            "DeltaColumn<u32> should reject realized value > u32::MAX"
-        );
-    }
-
-    #[test]
-    fn delta_u32_rejects_negative() {
-        let col = DeltaColumn::<i64>::from_values(vec![10, -5]);
-        let bytes = col.save();
-        let result = DeltaColumn::<u32>::load(&bytes);
-        assert!(
-            result.is_err(),
-            "DeltaColumn<u32> should reject negative delta"
-        );
-    }
-
-    #[test]
-    fn delta_u32_accepts_max_u32() {
-        let col = DeltaColumn::<i64>::from_values(vec![u32::MAX as i64]);
-        let bytes = col.save();
-        let loaded = DeltaColumn::<u32>::load(&bytes);
-        assert!(loaded.is_ok(), "DeltaColumn<u32> should accept u32::MAX");
-        assert_eq!(loaded.unwrap().get(0), Some(u32::MAX));
-    }
-}
-
-// ── Tests ───────────────────────────────────────────────────────────────────

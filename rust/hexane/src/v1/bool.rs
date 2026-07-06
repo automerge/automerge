@@ -58,6 +58,48 @@ impl BoolPartition {
     }
 }
 
+/// Build an overflow slab from a suffix partition: an optional zero-count
+/// false pad (so the slab starts on a false run), the partial run at the
+/// splice boundary, then the raw suffix bytes.  Returns `None` if the
+/// suffix holds no items.
+///
+/// Shared by the two overflow paths in [`splice_slab`].
+fn make_suffix_slab(
+    suffix: &BoolPartition,
+    raw_suffix: &[u8],
+    raw_suffix_item_count: usize,
+    old_tail: u8,
+) -> Option<Slab> {
+    let mut buf = Vec::new();
+    let mut segments = 0;
+    let mut len = 0;
+    let mut tail = 0u8;
+    // Bool slabs must start on a false run.
+    if suffix.value && suffix.count > 0 {
+        buf.extend(encode_count(0));
+        segments += 1;
+    }
+    if suffix.count > 0 {
+        let c = encode_count(suffix.count);
+        tail = c.len() as u8;
+        buf.extend(c);
+        len += suffix.count;
+        segments += 1;
+    }
+    if suffix.segments > 0 {
+        tail = old_tail;
+    }
+    buf.extend_from_slice(raw_suffix);
+    len += raw_suffix_item_count;
+    segments += suffix.segments;
+    (len > 0).then_some(Slab {
+        data: buf,
+        len,
+        segments,
+        tail,
+    })
+}
+
 /// Find the partition boundaries for a splice at `[start_index, end_index)`.
 ///
 /// Returns `(prefix_cursor, suffix_cursor)` such that the slab can be
@@ -256,37 +298,12 @@ pub(crate) fn splice_slab(
         slab.segments = segments;
         slab.tail = tail;
 
-        // Build suffix slab.
-        let mut suffix_buf = Vec::new();
-        let mut suffix_segs = 0;
-        let mut suffix_len = 0;
-        let mut suffix_tail = 0u8;
-        // Bool slabs must start on a false run.
-        if suffix.value && suffix.count > 0 {
-            suffix_buf.extend(encode_count(0));
-            suffix_segs += 1;
-        }
-        if suffix.count > 0 {
-            let c = encode_count(suffix.count);
-            suffix_tail = c.len() as u8;
-            suffix_buf.extend(c);
-            suffix_len += suffix.count;
-            suffix_segs += 1;
-        }
-        if suffix.segments > 0 {
-            suffix_tail = old_tail;
-        }
-        suffix_buf.extend_from_slice(&raw_suffix);
-        suffix_len += raw_suffix_item_count;
-        suffix_segs += suffix.segments;
-        if suffix_len > 0 {
-            overflow.push(Slab {
-                data: suffix_buf,
-                len: suffix_len,
-                segments: suffix_segs,
-                tail: suffix_tail,
-            });
-        }
+        overflow.extend(make_suffix_slab(
+            &suffix,
+            &raw_suffix,
+            raw_suffix_item_count,
+            old_tail,
+        ));
 
         #[cfg(debug_assertions)]
         validate_slab(slab);
@@ -361,46 +378,12 @@ pub(crate) fn splice_slab(
                 });
             }
 
-            // Build suffix slab: partial run + raw suffix bytes.
-            let mut suffix_buf = Vec::new();
-            let mut suffix_segs = 0;
-            let mut suffix_len = 0;
-            let mut suffix_tail = 0u8;
-
-            if suffix.count > 0 {
-                let c = encode_count(suffix.count);
-                suffix_tail = c.len() as u8;
-                suffix_buf.extend(c);
-                suffix_len += suffix.count;
-                suffix_segs += 1;
-            }
-            if suffix.segments > 0 {
-                suffix_tail = old_tail;
-            }
-            suffix_buf.extend_from_slice(&raw_suffix);
-            suffix_len += raw_suffix_item_count;
-            suffix_segs += suffix.segments;
-
-            if suffix_len > 0 {
-                // Ensure slab starts on a false run.
-                if suffix.value && suffix.count > 0 {
-                    let mut padded = Vec::new();
-                    padded.extend(encode_count(0)); // zero-count false
-                    padded.extend_from_slice(&suffix_buf);
-                    suffix_segs += 1;
-                    if suffix_segs == 1 {
-                        suffix_tail = 1; // just the padding byte
-                    }
-                    suffix_buf = padded;
-                }
-
-                overflow.push(Slab {
-                    data: suffix_buf,
-                    len: suffix_len,
-                    segments: suffix_segs,
-                    tail: suffix_tail,
-                });
-            }
+            overflow.extend(make_suffix_slab(
+                &suffix,
+                &raw_suffix,
+                raw_suffix_item_count,
+                old_tail,
+            ));
         }
 
         #[cfg(debug_assertions)]

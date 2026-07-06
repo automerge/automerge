@@ -88,8 +88,7 @@ pub trait PrefixValue: ColumnValueRef {
         acc
     }
 
-    /// Compute the partial prefix sum of the first `count` items in a slab,
-    /// returning `(prefix_sum, items_consumed)`.
+    /// Compute the partial prefix sum of the first `count` items in a slab.
     fn partial_sum(slab: &Slab<TailOf<Self>>, count: usize) -> Self::Prefix {
         let mut decoder = Self::Encoding::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
