@@ -186,8 +186,12 @@ impl<'a> Untangler<'a> {
 
         if op.is_set_or_make() && !op.has_succ() {
             vis = Some(pos);
+        } else if op.is_set_or_make() {
+            crate::sometimes!("conflict.seq.concurrent_insert.first_has_succ");
         } else if op.action() == Action::Mark {
             self.value.process_mark(op.id(), op.mark_data());
+        } else {
+            crate::sometimes!("conflict.seq.concurrent_insert.first_not_value");
         }
 
         if let Some(v) = self.gosub.get(&pos) {
@@ -204,20 +208,59 @@ impl<'a> Untangler<'a> {
                     break;
                 }
 
+                crate::sometimes!("conflict.seq.concurrent_insert.same_elem");
+
+                let is_value = next_op.is_set_or_make();
+                let has_succ = next_op.has_succ();
+                if is_value && has_succ {
+                    crate::sometimes!("conflict.seq.concurrent_insert.sibling_has_succ");
+                    crate::sometimes!(
+                        "conflict.seq.concurrent_insert.first_visible_sibling_has_succ",
+                        if vis.is_some()
+                    );
+                } else if !is_value {
+                    crate::sometimes!("conflict.seq.concurrent_insert.sibling_not_value");
+                    crate::sometimes!(
+                        "conflict.seq.concurrent_insert.first_visible_sibling_not_value",
+                        if vis.is_some()
+                    );
+                }
+
                 next_op.pos = Some(insert_pos);
                 next_op.subsort = self.count;
                 self.count += 1;
 
-                next_op.is_set_or_make() && !next_op.has_succ()
+                is_value && !has_succ
             };
 
             if next_vis {
+                crate::sometimes!("conflict.seq.concurrent_insert.visible_sibling");
                 // borrow checker stuff
                 if let Some(conflict_pos) = vis {
+                    crate::sometimes!("conflict.seq.concurrent_insert.two_visible_before_conflict");
+                    crate::sometimes!("conflict.seq.concurrent_insert.multi_visible");
                     self.change_ops[conflict_pos].conflicted = true;
                     conflict = true;
+                } else {
+                    crate::sometimes!(
+                        "conflict.seq.concurrent_insert.visible_sibling_without_first"
+                    );
                 }
                 vis = Some(pos);
+            }
+        }
+
+        if conflict {
+            crate::sometimes!("conflict.seq.concurrent_insert.conflict");
+            match self.seq_type {
+                SequenceType::List => {
+                    crate::sometimes!("conflict.list.concurrent_insert.near");
+                    crate::sometimes!("conflict.list.concurrent_insert");
+                }
+                SequenceType::Text => {
+                    crate::sometimes!("conflict.text.concurrent_insert.near");
+                    crate::sometimes!("conflict.text.concurrent_insert");
+                }
             }
         }
 
@@ -555,9 +598,15 @@ impl OpValueOption {
     }
 
     fn set(&mut self, value: Value, id: OpId, deleted: bool) {
+        if deleted {
+            crate::sometimes!("delete.visible_op_has_delete_succ");
+        }
         if deleted && self.is_visible() {
+            crate::sometimes!("delete.expose.candidate");
             self.expose();
         } else {
+            crate::sometimes!("delete.succ_without_visible_value", if deleted);
+            crate::sometimes!("delete.succ_after_deleted_value", if deleted && self.is_deleted());
             let conflict = self.is_visible();
             let expose = !deleted && self.is_deleted();
             *self = Self(Some(OpValue {
@@ -625,6 +674,7 @@ impl<'a> ValueState<'a> {
     }
 
     fn do_increment(&mut self, op: &ChangeOp) {
+        crate::sometimes!("counter.increment");
         if self.change.is_none() {
             if let Some(id) = self.doc.id() {
                 if op.pred().contains(&id) && !self.doc.is_deleted() {
@@ -641,8 +691,10 @@ impl<'a> ValueState<'a> {
 
     fn process_mark(&mut self, id: OpId, data: Option<MarkData<'static>>) {
         if let Some(data) = data {
+            crate::sometimes!("mark.begin");
             self.marks.after.mark_begin(id, data);
         } else {
+            crate::sometimes!("mark.end");
             self.marks.after.mark_end(id);
         }
     }
@@ -678,7 +730,11 @@ impl<'a> ValueState<'a> {
         let encoding = self.seq_type;
         if encoding == SequenceType::List {
             match (self.doc.0.take(), self.change.0.take()) {
-                (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
+                (None, Some(c)) => {
+                    crate::sometimes!("conflict.list.insert.patch_conflict", if c.conflict);
+                    crate::sometimes!("conflict.list.concurrent_insert", if c.conflict);
+                    log.insert(obj, index, c.value, c.id, c.conflict)
+                }
                 (Some(d), Some(c)) if d.id == c.id => {
                     let n = c.value.as_i64() - d.value.as_i64();
                     if n != 0 {
@@ -686,16 +742,27 @@ impl<'a> ValueState<'a> {
                     }
                 }
                 (Some(d), Some(c)) if c.id < d.id => {
+                    crate::sometimes!("conflict.list.put.doc_wins");
+                    crate::sometimes!("conflict.list.put.near");
+                    crate::sometimes!("conflict.list.put");
                     log.flag_conflict(obj, &Prop::from(index));
                 }
                 (Some(d), Some(c)) => {
+                    crate::sometimes!("conflict.list.put.doc_and_change");
                     let conflict = !d.deleted || c.conflict;
+                    crate::sometimes!("conflict.list.put.near", if conflict);
+                    crate::sometimes!("conflict.list.put", if conflict);
                     log.put_seq(obj, index, c.value, c.id, conflict, false)
                 }
                 (Some(d), None) => {
+                    crate::sometimes!("delete.list.deleted_candidate", if d.deleted);
+                    crate::sometimes!("delete.expose_list.candidate", if d.expose);
+                    crate::sometimes!("delete.expose_list.conflicted", if d.expose && d.conflict);
                     if d.expose {
+                        crate::sometimes!("delete.expose_list_value");
                         log.put_seq(obj, index, d.value, d.id, d.conflict, true);
                     } else if d.deleted {
+                        crate::sometimes!("delete.list_value");
                         log.delete_seq(obj, index, 1);
                     }
                 }
@@ -761,21 +828,34 @@ impl<'a> ValueState<'a> {
     ) {
         match (doc.into_value(), change.into_value()) {
             (None, Some(c)) => {
+                crate::sometimes!("conflict.map.put.patch_conflict", if c.conflict);
+                crate::sometimes!("conflict.map.put", if c.conflict);
                 log.put_map(obj, key, c.value, c.id, c.conflict, false);
             }
             (Some(d), None) => {
+                crate::sometimes!("delete.map.deleted_candidate", if d.deleted);
+                crate::sometimes!("delete.expose_map.candidate", if d.expose);
+                crate::sometimes!("delete.expose_map.conflicted", if d.expose && d.conflict);
                 if d.expose {
+                    crate::sometimes!("delete.expose_map_value");
                     log.put_map(obj, key, d.value, d.id, d.conflict, true);
                 } else if d.deleted {
+                    crate::sometimes!("delete.map_value");
                     log.delete_map(obj, key);
                 }
             }
             (Some(d), Some(c)) if c.id > d.id => {
+                crate::sometimes!("conflict.map.put.doc_and_change");
                 let conflict = (c.conflict && !d.conflict) || !d.deleted;
+                crate::sometimes!("conflict.map.put.near", if conflict);
+                crate::sometimes!("conflict.map.put", if conflict);
                 log.put_map(obj, key, c.value, c.id, conflict, false);
             }
             (Some(d), Some(c)) if c.id < d.id => {
                 if !d.conflict {
+                    crate::sometimes!("conflict.map.put.doc_wins");
+                    crate::sometimes!("conflict.map.put.near");
+                    crate::sometimes!("conflict.map.put");
                     log.flag_conflict(obj, &Prop::from(key));
                 }
             }

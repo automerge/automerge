@@ -259,6 +259,36 @@ macro_rules! __log {
      }
  }
 
+/// Record that a deliberately chosen semantic situation was reached.
+///
+/// This is enabled by the `fuzzing` feature and otherwise compiles to a no-op.
+/// Labels should be static and low-cardinality.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __register_sometimes_label {
+    ($name:literal) => {
+        #[cfg(all(feature = "fuzzing", target_family = "unix", not(target_os = "macos")))]
+        #[used]
+        #[unsafe(link_section = "automerge_sometimes")]
+        static __AUTOMERGE_SOMETIMES_LABEL: $crate::sometimes::SometimesLabel =
+            $crate::sometimes::SometimesLabel { name: $name };
+    };
+}
+
+#[macro_export]
+macro_rules! sometimes {
+    ($name:literal) => {{
+        $crate::__register_sometimes_label!($name);
+        $crate::sometimes::hit($name);
+    }};
+    ($name:literal, if $cond:expr) => {{
+        $crate::__register_sometimes_label!($name);
+        if $cond {
+            $crate::sometimes::hit($name);
+        }
+    }};
+}
+
 mod autocommit;
 mod automerge;
 mod autoserde;
@@ -282,6 +312,7 @@ pub mod op_set2;
 pub mod patches;
 mod read;
 mod sequence_tree;
+pub mod sometimes;
 mod storage;
 pub mod sync;
 mod text_diff;

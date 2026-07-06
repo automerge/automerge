@@ -106,6 +106,7 @@ impl AutoCommit {
     }
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
+        crate::sometimes!("load.large", if data.len() > 1024);
         let doc = Automerge::load(data)?;
         Ok(Self {
             doc,
@@ -248,6 +249,7 @@ impl AutoCommit {
         let range = OpRange::new(before, after);
         if let Some((r, id, rec, patches)) = &self.diff_cache {
             if r == &range && id == &obj.id && *rec == recursive {
+                crate::sometimes!("diff.cache_hit");
                 // we could skip this clone and return &[Patch]
                 return patches.clone();
             }
@@ -257,6 +259,7 @@ impl AutoCommit {
             && range.before() == self.diff_cursor
             && self.patch_log.is_active()
         {
+            crate::sometimes!("diff.indexed");
             if obj.id.is_root() && recursive {
                 self.patch_log.make_patches(&self.doc)
             } else {
@@ -267,6 +270,7 @@ impl AutoCommit {
                     .collect()
             }
         } else if range.before().is_empty() && range.after() == heads {
+            crate::sometimes!("diff.current_state");
             let mut patch_log = PatchLog::active();
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
@@ -275,12 +279,14 @@ impl AutoCommit {
             self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
+            crate::sometimes!("diff.scan");
             let clock = self.doc.clock_range(range.before(), range.after());
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(range.after().to_vec());
             DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         };
+        crate::sometimes!("diff.nonempty", if !patches.is_empty());
         self.diff_cache = Some((range, obj.id, recursive, patches.clone()));
         patches
     }
@@ -950,8 +956,16 @@ impl ReadDoc for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(None))
+        crate::sometimes!("read.get_all.called");
+        let values = self
+            .doc
+            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(None))?;
+        crate::sometimes!("read.get_all.nonempty", if !values.is_empty());
+        crate::sometimes!("read.get_all.2plus", if values.len() > 1);
+        crate::sometimes!("read.get_all.exactly2", if values.len() == 2);
+        crate::sometimes!("read.get_all.conflict", if values.len() > 1);
+        crate::sometimes!("read.get_all.3plus", if values.len() > 2);
+        Ok(values)
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -960,8 +974,16 @@ impl ReadDoc for AutoCommit {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+        crate::sometimes!("read.get_all_at.called");
+        let values =
+            self.doc
+                .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))?;
+        crate::sometimes!("read.get_all_at.nonempty", if !values.is_empty());
+        crate::sometimes!("read.get_all_at.2plus", if values.len() > 1);
+        crate::sometimes!("read.get_all_at.exactly2", if values.len() == 2);
+        crate::sometimes!("read.get_all_at.conflict", if values.len() > 1);
+        crate::sometimes!("read.get_all_at.3plus", if values.len() > 2);
+        Ok(values)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {

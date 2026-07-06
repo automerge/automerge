@@ -7,17 +7,32 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(sancov)'] }
+
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 libfuzzer-sys = "0.4"
 leb128 = "^0.2.5"
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "^0.10.0"
 
 [dependencies.automerge]
 path = ".."
+features = ["fuzzing"]
 
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
+
+# The trace fuzzer is normally run with `cargo run`, including from
+# run-trace-fuzz-coverage.sh. A fully unoptimized Automerge is slow enough that
+# long fuzz runs can look stuck, so optimize the dev profile while keeping debug
+# info and overflow checks from the default dev settings.
+[profile.dev]
+opt-level = 3
 
 [profile.release]
 debug = 1
@@ -25,5 +40,11 @@ debug = 1
 [[bin]]
 name = "load"
 path = "fuzz_targets/load.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "trace_fuzz"
+path = "src/bin/trace_fuzz.rs"
 test = false
 doc = false

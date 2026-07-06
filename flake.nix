@@ -225,10 +225,11 @@
             unstable.deno
             nodejs_22 # Current LTS
 
-            # Clang
+            # Clang / LLVM
             cmake
             cmocka
             doxygen
+            llvmPackages_20.llvm
 
             # Nix
             direnv

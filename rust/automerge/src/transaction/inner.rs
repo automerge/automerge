@@ -729,6 +729,7 @@ impl TransactionInner {
             // if we delete in the middle of a multi-character
             // move cursor to the next character
             if query.index < delete_index {
+                crate::sometimes!("delete.in.multicharacter");
                 delete_index = query.index + step;
                 continue;
             }
@@ -768,6 +769,7 @@ impl TransactionInner {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
         if mark.start == mark.end && expand == ExpandMark::None {
+            crate::sometimes!("mark.insert.empty");
             // In peritext terms this is the same as a mark which has a begin anchor before one
             // character and an end anchor after the character preceding that character. E.g in the
             // following sequence where the "<",">" symbols represent the mark anchor points:
@@ -1138,6 +1140,7 @@ impl TransactionInner {
                 crate::text_diff::myers_diff(doc, self, patch_log, &id, new.to_string().as_str())
             }
             (old, new) => {
+                crate::sometimes!("update.object.hydrated");
                 // Here we are either changing the type of the existing object, or inserting an
                 // entirely new object
                 let mut make_obj = |typ: ObjType| match (&old, &key) {
@@ -1238,6 +1241,7 @@ impl TransactionInner {
 
         let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
         queue.push_back((root_obj_meta, value));
+        crate::sometimes!("batch.insert.descendants");
         let insert_pos = doc.ops().len();
         let mut batch = BatchInsertion::new(self, doc, patch_log, insert_pos);
 

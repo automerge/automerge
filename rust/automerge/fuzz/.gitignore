@@ -1,3 +1,9 @@
 target
-corpus
 coverage
+
+# Generated fuzz corpora can become large. Commit only curated seed traces.
+corpus/*
+!corpus/trace/
+corpus/trace/*
+!corpus/trace/seeds/
+!corpus/trace/seeds/*.amtrace
