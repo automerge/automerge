@@ -443,6 +443,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
             };
             let local_start = cursor - leaf_start;
             let count = (leaf_len - local_start).min(new.len() - i);
+            if count == 0 {
+                // Only possible if cached slab counts are inconsistent
+                // (cursor landed on a leaf boundary mid-overwrite) —
+                // bail rather than loop forever.
+                debug_assert!(false, "overwrite_range: zero-progress step");
+                return;
+            }
             if let Node::Leaf(l) = self.node_mut(leaf_id) {
                 l.aggs[local_start..local_start + count].clone_from_slice(&new[i..i + count]);
             }
@@ -457,12 +464,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
     fn splice_structural(&mut self, range: &Range<usize>, new: &[A]) {
         if self.total_slabs == 0 {
             self.splice_into_empty(new);
-            return;
+        } else if !self.try_single_leaf_splice(range, new) {
+            self.splice_via_lca(range, new);
         }
-        if self.try_single_leaf_splice(range, new) {
-            return;
-        }
-        self.splice_via_lca(range, new);
+        // Large deletions can leave a single-child chain at the top;
+        // promote so query depth tracks the live tree.
+        self.collapse_root();
     }
 
     /// General multi-leaf splice via the lowest common ancestor (LCA).
@@ -491,8 +498,15 @@ impl<A: SlabAggregate> SlabBTree<A> {
             .zip(end_path.iter())
             .position(|(a, b)| a.1 != b.1);
         let Some(d) = diverge else {
-            // Paths identical — single leaf.  Shouldn't reach here.
-            // Defensive: rebuild.
+            // Paths identical — the range lies within a single leaf, which
+            // `try_single_leaf_splice` handles for every case (including
+            // whole-leaf deletion, via `remove_and_cascade`).  Defensive
+            // fallback: rebuild rather than corrupt, but flag in debug —
+            // reaching this is a routing bug.
+            debug_assert!(
+                false,
+                "splice_via_lca: single-leaf range should be handled by try_single_leaf_splice"
+            );
             let mut all: Vec<A> = Vec::with_capacity(self.total_slabs + new.len() - range.len());
             self.collect_into(self.root, &mut all);
             all.splice(range.clone(), new.iter().cloned());
@@ -582,7 +596,21 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
         // Propagate up.
         let lca_path_vec = lca_path.to_vec();
-        if new_lca_len <= B && new_lca_len > 0 {
+        if new_lca_len == 0 {
+            // Every child of the LCA was deleted (`new` must be empty for
+            // the combined span to vanish).  An empty internal node is not
+            // allowed: remove the LCA from its parent and cascade.  A root
+            // LCA means the whole tree was deleted — reset to an empty
+            // leaf root.
+            debug_assert!(new.is_empty());
+            if lca_path_vec.is_empty() {
+                debug_assert_eq!(self.total_slabs, 0);
+                debug_assert_eq!(lca_id, self.root);
+                self.nodes[lca_id as usize] = Some(Node::Leaf(Leaf::default()));
+            } else {
+                self.remove_and_cascade(lca_path_vec);
+            }
+        } else if new_lca_len <= B {
             let (agg, count) = self.internal_summary(lca_id);
             let replacement = vec![ChildSlot {
                 id: lca_id,
@@ -590,7 +618,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 slab_count: count,
             }];
             self.propagate_splits(lca_path_vec, replacement);
-        } else if new_lca_len > B {
+        } else {
             self.split_and_propagate(lca_id, lca_path_vec);
         }
     }
@@ -604,6 +632,121 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.free_subtree(cid);
         }
         self.free(id);
+    }
+
+    // ── Underflow handling ──────────────────────────────────────────────
+
+    /// Remove the child slot at `path.last()` from its parent, freeing the
+    /// child's subtree.  If the parent becomes empty, cascade the removal
+    /// upward (empty non-root nodes are not allowed); surviving ancestors'
+    /// cached aggregates and slab counts are refreshed.  An emptied root is
+    /// reset to a fresh leaf so the tree returns to its empty state.
+    ///
+    /// `path` is an ancestor path as produced by `locate_leaf_for_start`:
+    /// `path[i] = (ancestor_id, child_idx_taken)`, ending with the parent
+    /// of the node being removed.
+    fn remove_and_cascade(&mut self, mut path: Vec<(NodeId, usize)>) {
+        while let Some((parent_id, child_idx)) = path.pop() {
+            let child_id = match self.node(parent_id) {
+                Node::Internal(n) => n.children[child_idx].id,
+                Node::Leaf(_) => unreachable!("leaf can't be a parent"),
+            };
+            self.free_subtree(child_id);
+            let remaining = match self.node_mut(parent_id) {
+                Node::Internal(p) => {
+                    p.children.remove(child_idx);
+                    p.children.len()
+                }
+                Node::Leaf(_) => unreachable!(),
+            };
+            if remaining == 0 {
+                if path.is_empty() {
+                    // The root itself emptied — the whole tree was deleted.
+                    // Reset to a fresh empty leaf, reusing the root id.
+                    debug_assert_eq!(self.total_slabs, 0);
+                    self.nodes[parent_id as usize] = Some(Node::Leaf(Leaf::default()));
+                    return;
+                }
+                continue; // cascade: remove the now-empty parent too
+            }
+            // Parent survives — refresh the ancestors above it and stop.
+            self.update_ancestor_aggregates(&path, parent_id);
+            return;
+        }
+    }
+
+    /// While the root is an internal node with exactly one child, promote
+    /// the child.  Keeps query depth proportional to the live tree after
+    /// large deletions.  Called once per structural mutation.
+    fn collapse_root(&mut self) {
+        loop {
+            let child = match self.node(self.root) {
+                Node::Internal(n) if n.children.len() == 1 => n.children[0].id,
+                _ => return,
+            };
+            self.free(self.root);
+            self.root = child;
+        }
+    }
+
+    /// After a leaf shrinks, merge it into an adjacent sibling when it is
+    /// under a quarter full and the pair fits in one node — mirrors
+    /// `Column::try_merge`'s (min = max/4, combined ≤ max) policy.
+    ///
+    /// Leaf-level only: internal nodes thin ~B× slower than leaves (they
+    /// lose a child only when an entire leaf dies), so leaf merging is
+    /// where fill degradation actually shows up.
+    ///
+    /// `path` ends with `(parent_id, child_idx)` for the shrunken leaf.
+    fn maybe_merge_leaf(&mut self, path: &[(NodeId, usize)]) {
+        let Some(&(parent_id, child_idx)) = path.last() else {
+            return; // leaf is the root — nothing to merge with
+        };
+        let (sibling_count, my_len) = match self.node(parent_id) {
+            Node::Internal(p) => (p.children.len(), p.children[child_idx].slab_count),
+            Node::Leaf(_) => unreachable!(),
+        };
+        if my_len >= B / 4 {
+            return;
+        }
+        // Merge right-into-left so slab order is preserved.
+        let (dst_idx, src_idx) = if child_idx > 0 {
+            (child_idx - 1, child_idx)
+        } else if child_idx + 1 < sibling_count {
+            (child_idx, child_idx + 1)
+        } else {
+            return; // only child — handled by cascade/collapse instead
+        };
+        let (dst_id, src_id, combined) = match self.node(parent_id) {
+            Node::Internal(p) => {
+                let d = &p.children[dst_idx];
+                let s = &p.children[src_idx];
+                (d.id, s.id, d.slab_count + s.slab_count)
+            }
+            Node::Leaf(_) => unreachable!(),
+        };
+        if combined > B {
+            return;
+        }
+        let src_aggs = match self.node_mut(src_id) {
+            Node::Leaf(l) => std::mem::take(&mut l.aggs),
+            Node::Internal(_) => unreachable!("uniform depth: leaf siblings are leaves"),
+        };
+        match self.node_mut(dst_id) {
+            Node::Leaf(l) => l.aggs.extend(src_aggs),
+            Node::Internal(_) => unreachable!(),
+        }
+        self.free(src_id);
+        let new_agg = self.agg_of(dst_id);
+        match self.node_mut(parent_id) {
+            Node::Internal(p) => {
+                p.children[dst_idx].agg = new_agg;
+                p.children[dst_idx].slab_count = combined;
+                p.children.remove(src_idx);
+            }
+            Node::Leaf(_) => unreachable!(),
+        }
+        self.update_ancestor_aggregates(&path[..path.len() - 1], parent_id);
     }
 
     fn subtree_height(&self, id: NodeId) -> usize {
@@ -729,8 +872,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
             return;
         }
         if new.len() <= B {
-            if let Node::Leaf(l) = self.node_mut(self.root) {
-                l.aggs.extend_from_slice(new);
+            match self.node_mut(self.root) {
+                Node::Leaf(l) => l.aggs.extend_from_slice(new),
+                // An empty tree always has a leaf root: `remove_and_cascade`
+                // and the LCA wipe path both reset it.  Reaching this means
+                // the tree was corrupted — fail loudly rather than silently
+                // dropping the inserted aggregates.
+                Node::Internal(_) => unreachable!("empty tree must have a leaf root"),
             }
             self.total_slabs = new.len();
             return;
@@ -771,15 +919,21 @@ impl<A: SlabAggregate> SlabBTree<A> {
         // walk the path updating aggregates.
         if new_leaf_len <= B {
             if new_leaf_len == 0 && leaf_id != self.root {
-                // Empty non-root leaf would break the B+tree invariant.
-                // Fall back to rebuild.
-                self.total_slabs = self.total_slabs + range.len() - new.len();
-                return false;
+                // The splice deletes every agg in this leaf.  Empty
+                // non-root nodes are not allowed — remove the leaf from
+                // its parent, cascading if the parent empties too.
+                self.remove_and_cascade(path);
+                return true;
             }
             if let Node::Leaf(l) = self.node_mut(leaf_id) {
                 l.aggs.splice(local_start..local_end, new.iter().cloned());
             }
             self.update_ancestor_aggregates(&path, leaf_id);
+            if new.len() < range.len() {
+                // The leaf shrank — merge with a sibling if it dropped
+                // below a quarter full.
+                self.maybe_merge_leaf(&path);
+            }
             return true;
         }
 
@@ -847,7 +1001,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     /// After an in-place leaf edit, walk up `path` recomputing each
     /// ancestor's `agg` + `slab_count` from scratch.  O(log n) nodes,
-    /// each summary is O(B) ≤ 16 ops.
+    /// each summary is O(B) ops.
     fn update_ancestor_aggregates(&mut self, path: &[(NodeId, usize)], leaf_id: NodeId) {
         let mut current = leaf_id;
         for &(parent_id, child_idx) in path.iter().rev() {
@@ -1097,6 +1251,101 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         return items;
                     }
                 }
+            }
+        }
+    }
+}
+
+// ── Structural invariant checker (test builds only) ─────────────────────────
+
+#[cfg(test)]
+impl<A: SlabAggregate> SlabBTree<A> {
+    /// Verify every structural invariant; panics with a description on the
+    /// first violation.  O(nodes) — test builds only.
+    ///
+    /// * arena consistency: reachable ⟺ live, dead ⟺ on the free list,
+    ///   no node reachable twice, no duplicate free-list entries
+    /// * all leaves at uniform depth
+    /// * no empty nodes (except the root leaf of an empty tree);
+    ///   an internal root has ≥ 2 children (else it must be collapsed)
+    /// * node sizes ≤ B
+    /// * every cached `slab_count` and `agg.len()` matches recomputation;
+    ///   `total_slabs` matches the real slab count
+    pub(crate) fn check_invariants(&self) {
+        let mut reachable = vec![false; self.nodes.len()];
+        let mut leaf_depth: Option<usize> = None;
+        if let Node::Internal(n) = self.node(self.root) {
+            assert!(
+                n.children.len() >= 2,
+                "internal root with {} children (should be collapsed)",
+                n.children.len()
+            );
+        }
+        let (slabs, _items) = self.check_node(self.root, 0, &mut leaf_depth, &mut reachable);
+        assert_eq!(slabs, self.total_slabs, "total_slabs mismatch");
+
+        let free_set: std::collections::HashSet<NodeId> = self.free.iter().copied().collect();
+        assert_eq!(
+            free_set.len(),
+            self.free.len(),
+            "duplicate free-list entries"
+        );
+        for (i, slot) in self.nodes.iter().enumerate() {
+            let live = slot.is_some();
+            let reach = reachable[i];
+            let freed = free_set.contains(&(i as NodeId));
+            assert!(!(reach && !live), "node {i}: reachable but freed");
+            assert!(!(live && !reach), "node {i}: live but unreachable (leak)");
+            assert!(!(live && freed), "node {i}: live but on free list");
+            assert!(live || freed, "node {i}: dead but not on free list");
+        }
+    }
+
+    /// Returns `(slab_count, item_count)` for the subtree at `id`.
+    fn check_node(
+        &self,
+        id: NodeId,
+        depth: usize,
+        leaf_depth: &mut Option<usize>,
+        reachable: &mut [bool],
+    ) -> (usize, usize) {
+        assert!(!reachable[id as usize], "node {id}: reachable twice");
+        reachable[id as usize] = true;
+        match self.node(id) {
+            Node::Leaf(l) => {
+                assert!(l.aggs.len() <= B, "leaf {id}: over B ({})", l.aggs.len());
+                if id != self.root {
+                    assert!(!l.aggs.is_empty(), "leaf {id}: empty non-root leaf");
+                }
+                match *leaf_depth {
+                    Some(d) => assert_eq!(d, depth, "leaf {id}: non-uniform depth"),
+                    None => *leaf_depth = Some(depth),
+                }
+                (l.aggs.len(), merge_all(&l.aggs).len())
+            }
+            Node::Internal(n) => {
+                assert!(!n.children.is_empty(), "internal {id}: empty");
+                assert!(n.children.len() <= B, "internal {id}: over B");
+                let mut slabs = 0;
+                let mut items = 0;
+                for c in &n.children {
+                    let (s, it) = self.check_node(c.id, depth + 1, leaf_depth, reachable);
+                    assert_eq!(
+                        s, c.slab_count,
+                        "internal {id}: cached slab_count for child {} is {} (actual {s})",
+                        c.id, c.slab_count
+                    );
+                    assert_eq!(
+                        it,
+                        c.agg.len(),
+                        "internal {id}: cached agg.len() for child {} is {} (actual {it})",
+                        c.id,
+                        c.agg.len()
+                    );
+                    slabs += s;
+                    items += it;
+                }
+                (slabs, items)
             }
         }
     }
@@ -1605,6 +1854,7 @@ mod tests {
                 _ => {}
             }
             assert_eq!(tree.len(), reference.len());
+            tree.check_invariants();
             for _ in 0..4 {
                 let t: i64 = rng.random_range(-5_000..5_000);
                 let got: Vec<_> = tree.find_by_value(t).collect();
@@ -1775,6 +2025,7 @@ mod tests {
                     reference.len(),
                     "trial={trial} step={step}: slab count"
                 );
+                tree.check_invariants();
 
                 // Verify root_agg
                 let expected_root = reference_root_agg(&reference);
@@ -1913,6 +2164,7 @@ mod tests {
                     reference.len(),
                     "trial={trial} step={step}: len"
                 );
+                tree.check_invariants();
 
                 // Verify root aggregate matches
                 let expected_root = reference.iter().copied().fold(W::default(), |mut acc, w| {
@@ -1994,6 +2246,204 @@ mod tests {
                         "trial={trial} step={step}: find_slab_at_prefix({target})"
                     );
                 }
+            }
+        }
+    }
+    // ── Underflow regression tests ──────────────────────────────────────
+    //
+    // These pin the three bugs found in the deletion-underflow audit:
+    // an LCA left empty by an exact-span delete (silent corruption), a
+    // whole-leaf delete falling into an O(N) full rebuild, and the root
+    // never collapsing after mass deletion.
+
+    #[test]
+    fn full_wipe_then_reinsert() {
+        let aggs: Vec<_> = (0..65).map(|i| simple_agg(i as i64 + 1, 1)).collect();
+        let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
+        t.splice(0..65, std::iter::empty());
+        assert_eq!(t.len(), 0);
+        t.check_invariants();
+        t.splice(0..0, std::iter::once(simple_agg(5, 1)));
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.find_by_prefix(0), Some((0, 0)));
+        t.check_invariants();
+    }
+
+    #[test]
+    fn exact_internal_span_delete() {
+        // Pure delete exactly covering the middle level-1 internal's span.
+        let n = 64 * 64 * 3;
+        let aggs: Vec<_> = (0..n).map(|i| simple_agg(i as i64, 1)).collect();
+        let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
+        assert_eq!(t.subtree_height(t.root), 2);
+        t.splice(4096..8192, std::iter::empty());
+        assert_eq!(t.len(), 8192);
+        assert_eq!(t.find_by_prefix(5000), Some((5000, 5000)));
+        assert_eq!(t.root_agg().len, 8192);
+        t.check_invariants();
+    }
+
+    #[test]
+    fn whole_leaf_delete_removes_leaf() {
+        // Deleting all 64 slabs of leaf 0 removes the leaf (no rebuild)
+        // and the root collapses onto the surviving leaf.
+        let aggs: Vec<_> = (0..65).map(|i| simple_agg(i as i64 + 1, 1)).collect();
+        let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
+        t.splice(0..64, std::iter::empty());
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.find_by_prefix(0), Some((0, 0)));
+        assert_eq!(
+            t.subtree_height(t.root),
+            0,
+            "root should collapse to the leaf"
+        );
+        t.check_invariants();
+    }
+
+    #[test]
+    fn sequential_single_deletes_stay_valid() {
+        // The pattern that used to trigger an O(N) rebuild every ~64th
+        // delete.  Now each delete is O(log n): leaves shrink in place,
+        // empty and merge away, and the root collapses at the end.
+        let aggs: Vec<_> = (0..2_000).map(|i| simple_agg(i as i64, 1)).collect();
+        let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
+        for i in 0..1_999 {
+            t.splice(0..1, std::iter::empty());
+            if i % 64 == 0 {
+                t.check_invariants();
+            }
+        }
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.subtree_height(t.root), 0);
+        t.check_invariants();
+    }
+
+    #[test]
+    fn root_collapses_after_mass_delete() {
+        let n = 64 * 64 + 5;
+        let aggs: Vec<_> = (0..n).map(|i| simple_agg(i as i64, 1)).collect();
+        let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
+        assert_eq!(t.subtree_height(t.root), 2);
+        t.splice(5..n, std::iter::empty());
+        assert_eq!(t.len(), 5);
+        assert!(
+            t.subtree_height(t.root) <= 1,
+            "height {} for 5 slabs",
+            t.subtree_height(t.root)
+        );
+        for i in 0..5 {
+            assert_eq!(t.find_by_prefix(i), Some((i, i)));
+        }
+        t.check_invariants();
+    }
+
+    // ── Deep structural fuzz ────────────────────────────────────────────
+    //
+    // The older fuzzers run at ~10-70 slabs, which at B=64 almost never
+    // leaves a single root leaf.  This one starts at 200-1500 slabs so
+    // splits, LCA splices, underflow removal, sibling merges, and root
+    // collapse all actually fire — with full invariant checking each step.
+
+    #[test]
+    fn fuzz_deep_structural() {
+        let mut rng = SmallRng::seed_from_u64(0xB7EE5);
+
+        for trial in 0..25 {
+            let n0 = rng.random_range(200..1500);
+            let mut reference: Vec<SlabAgg> = (0..n0)
+                .map(|_| simple_agg(rand_total(&mut rng), rng.random_range(1..=4)))
+                .collect();
+            let mut tree = SlabBTree::<SlabAgg>::from_iter(reference.clone());
+
+            for step in 0..300 {
+                let len = reference.len();
+                match rng.random_range(0..12) {
+                    // small insert
+                    0..=2 => {
+                        let at = rng.random_range(0..=len);
+                        let count = rng.random_range(1..=3);
+                        let new: Vec<_> = (0..count)
+                            .map(|_| simple_agg(rand_total(&mut rng), rng.random_range(1..=4)))
+                            .collect();
+                        tree.splice(at..at, new.clone());
+                        reference.splice(at..at, new);
+                    }
+                    // bulk insert (forces splits + root growth)
+                    3 => {
+                        let at = rng.random_range(0..=len);
+                        let count = rng.random_range(50..=200);
+                        let new: Vec<_> = (0..count)
+                            .map(|_| simple_agg(rand_total(&mut rng), rng.random_range(1..=4)))
+                            .collect();
+                        tree.splice(at..at, new.clone());
+                        reference.splice(at..at, new);
+                    }
+                    // small delete
+                    4..=6 if len > 0 => {
+                        let at = rng.random_range(0..len);
+                        let count = rng.random_range(1..=(len - at).min(3));
+                        tree.splice(at..at + count, std::iter::empty());
+                        reference.drain(at..at + count);
+                    }
+                    // large delete (crosses leaves / internal boundaries)
+                    7 if len > 8 => {
+                        let at = rng.random_range(0..len);
+                        let count = rng.random_range(1..=(len - at).min(len / 4).max(1));
+                        tree.splice(at..at + count, std::iter::empty());
+                        reference.drain(at..at + count);
+                    }
+                    // 64-aligned delete (exact-span shapes)
+                    8 if len > 64 => {
+                        let at = (rng.random_range(0..len) / 64) * 64;
+                        let count = 64.min(len - at);
+                        tree.splice(at..at + count, std::iter::empty());
+                        reference.drain(at..at + count);
+                    }
+                    // replace k with m
+                    9 if len > 0 => {
+                        let at = rng.random_range(0..len);
+                        let del = rng.random_range(1..=(len - at).min(4));
+                        let ins = rng.random_range(0..=4);
+                        let new: Vec<_> = (0..ins)
+                            .map(|_| simple_agg(rand_total(&mut rng), rng.random_range(1..=4)))
+                            .collect();
+                        tree.splice(at..at + del, new.clone());
+                        reference.splice(at..at + del, new);
+                    }
+                    // update_slab
+                    10 if len > 0 => {
+                        let at = rng.random_range(0..len);
+                        let new = simple_agg(rand_total(&mut rng), rng.random_range(1..=4));
+                        tree.update_slab(at, new);
+                        reference[at] = new;
+                    }
+                    // rare full wipe
+                    11 if len > 0 && rng.random_range(0..20) == 0 => {
+                        tree.splice(0..len, std::iter::empty());
+                        reference.clear();
+                    }
+                    _ => {}
+                }
+
+                assert_eq!(tree.len(), reference.len(), "trial={trial} step={step}");
+                tree.check_invariants();
+
+                let total_items: usize = reference.iter().map(|a| a.len).sum();
+                if total_items > 0 {
+                    for _ in 0..2 {
+                        let pos = rng.random_range(0..total_items);
+                        assert_eq!(
+                            tree.find_by_prefix(pos),
+                            reference_find_by_prefix(&reference, pos),
+                            "trial={trial} step={step}: find_by_prefix({pos})"
+                        );
+                    }
+                }
+                assert_eq!(
+                    tree.root_agg(),
+                    reference_root_agg(&reference),
+                    "trial={trial} step={step}: root_agg"
+                );
             }
         }
     }
