@@ -413,7 +413,6 @@ impl ChangeGraph {
                 let num_ops = self.num_ops.get(i).unwrap_or_default();
                 let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
-                // FIXME - this needs a test
                 let meta = self.extra_bytes_meta.get(i).unwrap();
                 let meta_range = meta.prefix() as usize..meta.total() as usize;
                 let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);

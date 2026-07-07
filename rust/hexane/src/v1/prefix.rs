@@ -620,10 +620,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
 // ── PrefixIter ──────────────────────────────────────────────────────────────
 
-/// Forward iterator over a [`PrefixColumn`] that yields `(prefix_sum, value)`.
-///
-/// `next()` is O(1): accumulates the total from the yielded value.
-/// `nth(n)` is O(log S) via the B-tree.
 /// A value paired with its running prefix sum — the item type of
 /// [`PrefixIter`] and return type of [`PrefixColumn::get`].
 ///
@@ -694,6 +690,11 @@ where
     }
 }
 
+/// Forward iterator over a [`PrefixColumn`], yielding a [`PrefixedValue`]
+/// per item.
+///
+/// `next()` is O(1) — it accumulates the running total from each value.
+/// `nth(n)` is O(log S) via the B-tree.
 pub struct PrefixIter<'a, T: PrefixValue> {
     col: Option<&'a PrefixColumn<T>>,
     inner: Iter<'a, T>,

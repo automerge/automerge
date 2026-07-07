@@ -161,14 +161,13 @@ let index = tx.delta as usize;
 For one-shot lookups without needing the iterator afterwards:
 
 ```rust
-// Seek from a start position
-let tx = col.seek(start, n)?;
-
-// Get value + delta at a position
-let tx = col.get_delta(start, pos)?;
+// Value + prefix context at a position, in one shot
+let tx = col.delta(start, pos)?;
+let value = tx.pv.value;
+let consumed = tx.delta;   // sum over [start, pos)
 ```
 
-These create a temporary iterator internally. Use the iterator methods
+`delta` creates a temporary iterator internally. Use the iterator methods
 directly when you already have a range or need to continue iterating.
 
 ## Cross-check scaffolding pattern

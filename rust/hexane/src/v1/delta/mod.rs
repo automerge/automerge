@@ -622,8 +622,9 @@ impl<T: DeltaValue> DeltaColumn<T> {
                     // Checked: hostile bytes can encode deltas whose running
                     // sum overflows i64 — that must be a load error, never a
                     // debug-panic or a silent release-mode wrap.
-                    let new_running = d
-                        .checked_mul(count as i64)
+                    let new_running = i64::try_from(count)
+                        .ok()
+                        .and_then(|c| d.checked_mul(c))
                         .and_then(|x| running.checked_add(x))
                         .ok_or_else(|| "delta running sum overflows i64".to_string())?;
                     T::try_from_i64(new_running)?;

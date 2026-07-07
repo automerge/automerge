@@ -68,8 +68,9 @@ let col = PrefixColumn::<u64>::from_values(vec![5, 3, 7, 2]);
 assert_eq!(col.get_prefix(3), 15);       // 5 + 3 + 7
 assert_eq!(col.sum_range(1..3), 10);     // 3 + 7
 
-// First index where the prefix sum reaches `target`
-assert_eq!(col.get_index_for_prefix(10), 2);
+// Index of the element that "owns" cumulative offset 10 — the first
+// index whose inclusive total reaches it (totals are [5, 8, 15, 17])
+assert_eq!(col.get_index_for_total(10), 2);
 
 // Walk items paired with their running prefix sum.  Each item is a
 // PrefixedValue: .prefix() is the sum BEFORE the item (exclusive),
@@ -103,9 +104,6 @@ assert_eq!(col.find_first(200), Some(2));
 let hits: Vec<usize> = col.find_by_range(150..250).collect();
 assert_eq!(hits, vec![1, 2]);
 ```
-
-For a smaller per-slab aggregate when value queries are not needed,
-instantiate with `PrefixWeightFn<T::Inner>` as the second type parameter.
 
 ## Implementing a Custom Type
 
@@ -234,7 +232,7 @@ implicit from position parity.
 
 Each slab tracks its item count, segment count, and (depending on the column
 type) its prefix sum and min/max offsets. Slabs are kept within a segment
-budget (default: 16 segments). When a mutation pushes a slab over budget it is
+budget (default: 64 segments). When a mutation pushes a slab over budget it is
 split; when adjacent slabs are small enough they are merged. This keeps both
 sequential iteration and random access efficient.
 
@@ -243,9 +241,10 @@ sequential iteration and random access efficient.
 Slabs are indexed by a pluggable structure keyed on a per-slab aggregate. Two
 concrete backings ship:
 
-- **Fenwick BIT** — used by `Column` and `PrefixColumn`. Fast, cache-tight;
-  requires an invertible aggregate.
-- **Slab B-tree** — used by `DeltaColumn`. Supports non-invertible aggregates
+- **Slab B-tree** — the default for `Column`, `PrefixColumn`, and
+  `DeltaColumn`. Supports non-invertible aggregates
+- **Fenwick BIT** — an internal alternative backing (invertible aggregates
+  only); not part of the public API
   (min/max) that Fenwick can't handle; typically wins on compound prefix-sum
   queries.
 
@@ -258,12 +257,12 @@ concrete backings ship:
 | `encoding.rs` | `ColumnEncoding` trait, `RunDecoder` trait |
 | `rle/` | `RleEncoding<T>` — RLE codec for numeric/binary types |
 | `bool.rs` | `BoolEncoding` — specialized boolean RLE codec |
-| `prefix.rs` | `PrefixColumn<T>`, `PrefixValue` trait, `PrefixIter` |
+| `prefix.rs` | `PrefixColumn<T>`, `PrefixValue` trait, `PrefixIter`, `PrefixSlabWeight` |
 | `delta/mod.rs` | `DeltaColumn<T>`, `DeltaValue` trait, streaming `DeltaEncoder` |
-| `delta/indexed.rs` | `IndexedDeltaWeightFn<T>` (default WF on `DeltaColumn`), min/max-based value queries |
+| `delta/indexed.rs` | `IndexedDeltaWeightFn` (default WF on `DeltaColumn`), min/max-based value queries |
 | `raw.rs` | `RawColumn` — uncompressed byte arena |
-| `index.rs` | `ColumnIndex` trait, `BitIndex` (Fenwick backing) |
-| `btree.rs` | `SlabBTree<A>`, `SlabAgg`, `PrefixSlabWeight` — B-tree backing |
+| `index.rs` | `ColumnIndex` trait, `BitIndex` (internal, `#[doc(hidden)]`, sealed) |
+| `btree.rs` | `SlabBTree<A>`, `SlabAgg` — B-tree backing |
 | `load_opts.rs` | `LoadOpts<T>` — builder for deserialization options |
 | `encoder.rs` | Streaming `RleEncoder` and friends |
 
@@ -335,8 +334,8 @@ In the current API, `PrefixColumn<T>` answers the same questions in O(log n):
 | `col.get_acc(pos)` | `col.get_prefix(pos)` |
 | `iter.with_acc()` | `col.iter()` yields `PrefixedValue`s (`.value`, `.prefix()`, `.total()`) |
 
-Convenience shorthands `col.seek(start, n)` and `col.get_delta(start, pos)`
-wrap iterator construction for one-shot lookups.
+The one-shot convenience is `col.delta(from, to)`, which wraps iterator
+construction and returns a `PrefixSeek { pos, delta, pv }`.
 
 ### Delta columns
 

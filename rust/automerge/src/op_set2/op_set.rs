@@ -782,7 +782,8 @@ impl OpSet {
     /// for insert ops, its key's elemid otherwise. This only needs to load the
     /// `insert`, `id_ctr`, and `id_actor` columns.
     fn elemid_at(&self, pos: usize) -> Option<ElemId> {
-        let (_, insert) = self.cols.insert.get(pos)?;
+        let prefix_val = self.cols.insert.get(pos)?;
+        let insert = prefix_val.value;
         if insert {
             let ctr = self.cols.id_ctr.get(pos)?;
             let actor = self.cols.id_actor.get(pos)?;
