@@ -1,4 +1,5 @@
 use automerge::marks::{ExpandMark, Mark};
+use automerge::sync::{Message, MessageVersion, State};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
@@ -2949,4 +2950,65 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
     assert!(receiver.get(ROOT, "live_2").unwrap().is_none());
     assert!(receiver.get(ROOT, "stale_orphan").unwrap().is_none());
     assert_eq!(receiver.get_missing_deps(&[]), vec![stale_missing]);
+}
+
+#[test]
+fn queued_orphan_need_does_not_block_unrelated_sync_response() {
+    let mut left = AutoCommit::new().with_actor(ActorId::from(vec![0]));
+    left.put(ROOT, "base", ScalarValue::Uint(0)).unwrap();
+    left.commit();
+    let base = left.save();
+
+    let mut orphan_source = left.fork().with_actor(ActorId::from(vec![1]));
+    orphan_source
+        .put(ROOT, "missing", ScalarValue::Uint(1))
+        .unwrap();
+    orphan_source.commit();
+    let missing = orphan_source.get_heads()[0];
+
+    orphan_source
+        .put(ROOT, "orphan", ScalarValue::Uint(2))
+        .unwrap();
+    orphan_source.commit();
+    let orphan_head = orphan_source.get_heads()[0];
+    let orphan_change = orphan_source.get_changes(&[missing]);
+    assert_eq!(orphan_change.len(), 1);
+
+    // Queue a change whose dependency is not present in `left`. This is a
+    // valid intermediate sync state: the receiver advertises the missing
+    // dependency in its next `need` message.
+    let orphan_message = Message {
+        heads: vec![orphan_head],
+        need: vec![],
+        have: vec![],
+        changes: orphan_change
+            .into_iter()
+            .map(|change| change.raw_bytes().to_vec())
+            .collect::<Vec<_>>()
+            .into(),
+        flags: None,
+        version: MessageVersion::V1,
+    };
+    left.sync()
+        .receive_sync_message(&mut State::new(), orphan_message)
+        .unwrap();
+    assert_eq!(left.get_missing_deps(&[]), vec![missing]);
+
+    let mut right = AutoCommit::load(&base)
+        .unwrap()
+        .with_actor(ActorId::from(vec![2]));
+    right.put(ROOT, "right", ScalarValue::Uint(3)).unwrap();
+    right.commit();
+
+    let mut right_state = State::new();
+    right_state.their_heads = Some(left.get_heads());
+    right_state.their_need = Some(vec![missing]);
+    right_state.their_have = Some(vec![]);
+
+    let message = right.sync().generate_sync_message(&mut right_state);
+    assert_eq!(
+        message.map(|message| message.heads),
+        Some(right.get_heads()),
+        "right should still advertise its heads even though it cannot satisfy the orphan dep"
+    );
 }
