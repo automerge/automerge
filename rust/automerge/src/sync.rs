@@ -320,8 +320,13 @@ impl Automerge {
         have: &[Have],
         need: &[ChangeHash],
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        let need = need
+            .iter()
+            .filter(|hash| self.has_change(hash))
+            .copied()
+            .collect::<Vec<_>>();
         if have.is_empty() {
-            Ok(need.to_vec())
+            Ok(need)
         } else {
             let mut last_sync_hashes = HashSet::new();
             let mut bloom_filters = Vec::with_capacity(have.len());
@@ -364,8 +369,8 @@ impl Automerge {
 
             let mut final_hashes = Vec::with_capacity(hashes_to_send.len() + need.len());
             for hash in need {
-                if !hashes_to_send.contains(hash) {
-                    final_hashes.push(*hash);
+                if !hashes_to_send.contains(&hash) {
+                    final_hashes.push(hash);
                 }
             }
 
