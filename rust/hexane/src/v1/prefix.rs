@@ -318,19 +318,50 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
 /// Result of a seek operation on a [`PrefixIter`].
 ///
-/// Returned by [`PrefixIter::advance_prefix`] and [`PrefixIter::advance_to`].
-/// After the call the iterator is positioned at `pos + 1`, ready to yield
-/// subsequent items.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrefixSeek<P, V> {
-    /// Position of the item.
+/// Returned by [`PrefixIter::advance_prefix`], [`PrefixIter::delta_nth`],
+/// and [`PrefixColumn::delta`].  After the call the iterator is positioned
+/// at `pos + 1`, ready to yield subsequent items.
+pub struct PrefixSeek<'a, T: PrefixValue> {
+    /// Position (index) of the item landed on.
     pub pos: usize,
-    /// Inclusive prefix sum through this item (absolute).
-    pub total: P,
-    /// Prefix sum consumed since the iterator's range start.
-    pub delta: P,
-    /// The value at this position.
-    pub value: V,
+    /// Prefix consumed between the iterator's running total when the seek
+    /// began and this item, **exclusive** of the item itself.  For a seek
+    /// spanning `from..to`, this is the sum over `[from, to)`.
+    pub delta: T::Prefix,
+    /// The item itself, with its absolute running sums
+    /// ([`prefix()`](PrefixedValue::prefix) / [`total()`](PrefixedValue::total)).
+    pub pv: PrefixedValue<'a, T>,
+}
+
+impl<'a, T: PrefixValue> Clone for PrefixSeek<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            pos: self.pos,
+            delta: self.delta.clone(),
+            pv: self.pv.clone(),
+        }
+    }
+}
+
+impl<'a, T: PrefixValue> Copy for PrefixSeek<'a, T> where T::Prefix: Copy {}
+
+impl<'a, T: PrefixValue> std::fmt::Debug for PrefixSeek<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrefixSeek")
+            .field("pos", &self.pos)
+            .field("delta", &self.delta)
+            .field("pv", &self.pv)
+            .finish()
+    }
+}
+
+impl<'a, T: PrefixValue> PartialEq for PrefixSeek<'a, T>
+where
+    T::Prefix: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos && self.delta == other.delta && self.pv == other.pv
+    }
 }
 // ── PrefixColumn (B-tree backed — one aggregate for len+prefix queries) ────
 //
@@ -448,7 +479,14 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.get_prefix(index + 1)
     }
 
-    pub fn delta(&self, from: usize, to: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
+    /// Seek to position `to`, returning the item there together with the
+    /// prefix consumed over `[from, to)` in [`PrefixSeek::delta`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `to < from` (inverted range is a caller error, matching
+    /// [`PrefixIter::shift_next`]).
+    pub fn delta(&self, from: usize, to: usize) -> Option<PrefixSeek<'_, T>> {
         assert!(to >= from);
         let mut iter = self.iter();
         iter.advance_to(from);
@@ -496,23 +534,6 @@ where
         let slab = &self.col.slabs[si];
         let idx_in_slab = find_prefix_in_slab::<T>(slab, remaining);
         items_before + idx_in_slab
-    }
-
-    /// Seek forward from `start`, advancing past `n` prefix units.
-    ///
-    /// Shorthand for `self.iter_range(start..).advance_prefix(n)`.
-    pub fn seek(&self, start: usize, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
-        // FIXME
-        self.iter_range(start..self.col.len()).advance_prefix(n)
-    }
-
-    pub fn get_delta(&self, start: usize, pos: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'_>>> {
-        if pos >= start {
-            self.iter_range(start..self.col.len())
-                .delta_nth(pos - start)
-        } else {
-            None
-        }
     }
 }
 
@@ -807,15 +828,14 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         }
     }
 
-    pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
+    pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<'a, T>> {
         let base = self.total.clone();
         let pv = self.nth(n)?;
         let pos = self.pos() - 1;
         Some(PrefixSeek {
             pos,
-            total: pv.total(),
-            delta: pv.prefix() - base, // prefix change: exclusive
-            value: pv.value,
+            delta: pv.prefix() - base, // prefix consumed before the item
+            pv,
         })
     }
 }
@@ -832,7 +852,7 @@ where
     /// `advance_prefix(1)` lands on item **1** — passing item 0's single
     /// unit lands *past* it.  An item whose cumulative sum exactly equals
     /// `n` is skipped, not returned.
-    pub fn advance_prefix(&mut self, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
+    pub fn advance_prefix(&mut self, n: T::Prefix) -> Option<PrefixSeek<'a, T>> {
         // this does an O(slabs) lookup even if the destination is on the current slab
         // if we stored slab_prefix on the iterator we could avoid that
         // but doing so would require an O(slab) lookup on each slab change

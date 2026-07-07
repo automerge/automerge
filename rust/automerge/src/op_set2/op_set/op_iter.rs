@@ -329,7 +329,7 @@ impl Iterator for SuccWalker<'_> {
         }
         let delta = *self.ctr.peek()? - self.acc;
         let c = self.count.advance_prefix(delta as u64)?;
-        self.acc = c.total as usize;
+        self.acc = c.pv.total() as usize;
         Some(c.pos)
     }
 }

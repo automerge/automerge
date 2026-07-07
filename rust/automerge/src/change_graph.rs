@@ -1112,7 +1112,7 @@ impl<'a> Iterator for ChangeIter<'a> {
 
         let meta = self.extra_bytes_meta.delta_nth(n)?;
         let meta_start = meta.delta as usize;
-        let meta_range = meta_start..(meta_start + meta.value.length());
+        let meta_range = meta_start..(meta_start + meta.pv.value.length());
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
 
         let deps = self

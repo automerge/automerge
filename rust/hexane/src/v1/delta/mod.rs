@@ -667,8 +667,45 @@ impl<T: DeltaValue> DeltaColumn<T> {
         self.col.save_to(out)
     }
 
-    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: Option<i64>) -> std::ops::Range<usize> {
-        self.col.save_to_unless(out, value)
+    /// Serialize, unless every **realized** value equals `value` — in
+    /// which case write nothing and return an empty range.
+    ///
+    /// The sentinel is expressed in `T`, like the rest of the API, and is
+    /// compared against realized values (matching
+    /// [`DeltaEncoder::save_to_unless`]): a uniform column `[7, 7, 7]`
+    /// elides on sentinel `7` even though its stored deltas are
+    /// `[7, 0, 0]`.
+    ///
+    /// # Panics
+    ///
+    /// Inherits [`DeltaValue::to_i64`]'s domain check for unsigned
+    /// sentinels (an unstorable sentinel is a caller bug).
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: T) -> std::ops::Range<usize> {
+        match value.to_i64() {
+            // Null sentinel: elide iff every entry is null.
+            None => self.col.save_to_unless(out, None),
+            // Realized sentinel v: uniform iff the first delta realizes v
+            // and every later delta is zero.
+            Some(v) => {
+                let uniform = self.col.is_empty() || {
+                    let mut it = self.col.iter();
+                    let mut ok = it.next() == Some(Some(v));
+                    while ok {
+                        match it.next_run() {
+                            Some(run) if run.value != Some(0) => ok = false,
+                            Some(_) => {}
+                            None => break,
+                        }
+                    }
+                    ok
+                };
+                if uniform {
+                    out.len()..out.len()
+                } else {
+                    self.col.save_to(out)
+                }
+            }
+        }
     }
 
     /// Collect realized values into a Vec.
@@ -1135,6 +1172,30 @@ mod overflow_tests {
     #[should_panic(expected = "must fit in i64")]
     fn delta_usize_write_panics_above_2_63() {
         let _ = DeltaColumn::<usize>::from_values(vec![i64::MAX as usize + 1]);
+    }
+
+    #[test]
+    fn delta_save_to_unless_realized_semantics() {
+        // Uniform realized values elide (deltas are [7, 0, 0] internally).
+        let col = DeltaColumn::<u64>::from_values(vec![7, 7, 7]);
+        let mut out = Vec::new();
+        assert!(col.save_to_unless(&mut out, 7).is_empty());
+        assert!(out.is_empty());
+        // Non-uniform saves, and the bytes match save().
+        let col = DeltaColumn::<u64>::from_values(vec![7, 7, 8]);
+        let range = col.save_to_unless(&mut out, 7);
+        assert_eq!(&out[range], col.save().as_slice());
+        // Nullable: all-null elides on None sentinel.
+        let col = DeltaColumn::<Option<u32>>::from_values(vec![None, None]);
+        let mut out = Vec::new();
+        assert!(col.save_to_unless(&mut out, None).is_empty());
+        // Mixed does not.
+        let col = DeltaColumn::<Option<u32>>::from_values(vec![None, Some(2)]);
+        assert!(!col.save_to_unless(&mut out, None).is_empty());
+        // Empty column always elides.
+        let col = DeltaColumn::<u64>::new();
+        let mut out = Vec::new();
+        assert!(col.save_to_unless(&mut out, 0).is_empty());
     }
 
     #[test]

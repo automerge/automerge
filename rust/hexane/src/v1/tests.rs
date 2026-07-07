@@ -3956,7 +3956,7 @@ fn fuzz_prefix_column() {
             let mut iter = col.iter();
             if let Some(seek) = iter.advance_prefix(target_prefix) {
                 assert!(
-                    seek.total >= target_prefix,
+                    seek.pv.total() >= target_prefix,
                     "trial={trial}: advance_prefix undershoot"
                 );
             }
@@ -3969,29 +3969,31 @@ fn fuzz_prefix_column() {
             if let Some(seek) = iter.delta_nth(target_pos) {
                 assert_eq!(seek.pos, target_pos, "trial={trial}: advance_to pos");
                 assert_eq!(
-                    seek.total,
+                    seek.pv.total(),
                     col.get_total(target_pos),
                     "trial={trial}: advance_to prefix"
                 );
             }
         }
 
-        // seek / get_delta
-        if col.len() > 5 && total > 0 {
-            let start = (xorshift(&mut rng) as usize) % col.len();
-            let n = xorshift(&mut rng) % total.min(100);
-            let seek_result = col.seek(start, n);
-            let delta_result = if start < col.len() - 1 {
-                let pos =
-                    start + 1 + (xorshift(&mut rng) as usize) % (col.len() - start - 1).max(1);
-                col.get_delta(start, pos)
-                //col.prefix_delta(start.. pos)
-            } else {
-                None
-            };
-            // Just verify they don't panic
-            let _ = seek_result;
-            let _ = delta_result;
+        // delta (seek with context): pos lands on `to`, delta is the
+        // sum over [from, to), pv carries the absolute totals.
+        if col.len() > 5 {
+            let from = (xorshift(&mut rng) as usize) % (col.len() - 1);
+            let to = from + 1 + (xorshift(&mut rng) as usize) % (col.len() - from - 1);
+            if let Some(seek) = col.delta(from, to) {
+                assert_eq!(seek.pos, to, "trial={trial}: delta pos");
+                assert_eq!(
+                    seek.pv.total(),
+                    col.get_total(to),
+                    "trial={trial}: delta total"
+                );
+                assert_eq!(
+                    seek.delta,
+                    col.prefix_delta(from..to),
+                    "trial={trial}: delta == prefix_delta"
+                );
+            }
         }
 
         // save/load roundtrip

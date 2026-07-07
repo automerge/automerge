@@ -470,7 +470,7 @@ impl OpSet {
         let mut text_iter = self.cols.index.text.iter_range(range.clone());
         let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
 
-        let index = tx.delta as usize + tx.value.unwrap_or(0) as usize;
+        let index = tx.delta as usize + tx.pv.value.unwrap_or(0) as usize;
 
         let pos = self
             .scan_for_sticky_marks(text_iter, tx.pos)
@@ -834,12 +834,12 @@ impl OpSet {
         if encoding == SequenceType::List {
             assert!(obj_range.contains(&pos)); // safe to unwrap
             let prefix = self.cols.index.top.delta(obj_range.start, pos).unwrap();
-            visible = prefix.value;
+            visible = prefix.pv.value;
             index = prefix.delta;
         } else {
             assert!(obj_range.contains(&pos)); // safe to unwrap
             let prefix = self.cols.index.text.delta(obj_range.start, pos).unwrap();
-            visible = prefix.value.is_some();
+            visible = prefix.pv.value.is_some();
             index = prefix.delta as usize;
         }
         Some(FoundOpId { op, index, visible })

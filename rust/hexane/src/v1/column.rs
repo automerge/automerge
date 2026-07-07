@@ -637,6 +637,10 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     ///
     /// If the value is not found, returns an empty range at the insertion
     /// point and the iterator is positioned past the search area.
+    ///
+    /// Assumes values within `range` are sorted.  If they aren't, the
+    /// result is unspecified — a wrong or empty range may be returned —
+    /// but never a panic, memory unsafety, or column corruption.
     pub fn seek_to_value(
         &mut self,
         target: T::Get<'a>,
@@ -1110,8 +1114,9 @@ where
 
     /// Narrow a range to the contiguous run of items matching `value`.
     ///
-    /// Assumes values within `range` are sorted.  Behaviour is undefined
-    /// if this precondition is violated.
+    /// Assumes values within `range` are sorted.  If they aren't, the
+    /// result is unspecified — a wrong or empty range may be returned —
+    /// but never a panic, memory unsafety, or column corruption.
     ///
     /// Returns the sub-range of `range` where every item equals `value`,
     /// or an empty range at the appropriate insertion point if `value` is
