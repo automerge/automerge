@@ -66,7 +66,7 @@ let col = PrefixColumn::<u64>::from_values(vec![5, 3, 7, 2]);
 
 // Exclusive prefix sum (sum of items before `index`)
 assert_eq!(col.get_prefix(3), 15);       // 5 + 3 + 7
-assert_eq!(col.prefix_delta(1..3), 10);  // 3 + 7
+assert_eq!(col.sum_range(1..3), 10);     // 3 + 7
 
 // First index where the prefix sum reaches `target`
 assert_eq!(col.get_index_for_prefix(10), 2);
@@ -363,7 +363,7 @@ col.splice::<u64, _>(pos, del, []);                 // typed empty delete
 col.splice(pos, 1, [Some(value)]);
 
 // Current
-col.splice(pos, del, [] as [Option<u32>; 0]);       // typed empty delete
+col.remove_n(pos, del);                             // same args as splice
 col.splice(pos, 1, [Some(value)]);
 ```
 

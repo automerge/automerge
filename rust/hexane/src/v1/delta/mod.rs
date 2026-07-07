@@ -745,6 +745,15 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
+    /// Remove `n` items starting at `index` — same arguments as
+    /// [`splice`](Self::splice)`(index, n, [])`.  Panics if `index + n`
+    /// exceeds the column length.
+    pub fn remove_n(&mut self, index: usize, n: usize) {
+        if n > 0 {
+            self.splice(index, n, std::iter::empty());
+        }
+    }
+
     pub fn push(&mut self, value: T) {
         let len = self.col.len();
         self.insert(len, value);

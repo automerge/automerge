@@ -1146,6 +1146,20 @@ where
         }
     }
 
+    /// Remove `n` items starting at `index` — same arguments as
+    /// [`splice`](Self::splice)`(index, n, [])`, without the typed
+    /// empty-iterator dance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index + n` exceeds the column length (matching
+    /// `splice`'s contract).
+    pub fn remove_n(&mut self, index: usize, n: usize) {
+        if n > 0 {
+            self.splice::<T, _>(index, n, std::iter::empty());
+        }
+    }
+
     pub fn push(&mut self, value: impl AsColumnRef<T>) {
         let len = self.total_len;
         self.splice(len, 0, [value]);

@@ -3922,15 +3922,15 @@ fn fuzz_prefix_column() {
                 "trial={trial} op={i}: get_prefix(len)"
             );
 
-            // prefix_delta
+            // sum_range
             if mirror.len() > 2 {
                 let lo = (xorshift(&mut rng) as usize) % mirror.len();
                 let hi = lo + (xorshift(&mut rng) as usize) % (mirror.len() - lo);
                 let expected: u64 = mirror[lo..hi].iter().map(|&v| v as u64).sum();
                 assert_eq!(
-                    col.prefix_delta(lo..hi),
+                    col.sum_range(lo..hi),
                     expected,
-                    "trial={trial} op={i}: prefix_delta({lo}..{hi})"
+                    "trial={trial} op={i}: sum_range({lo}..{hi})"
                 );
             }
         }
@@ -3990,8 +3990,8 @@ fn fuzz_prefix_column() {
                 );
                 assert_eq!(
                     seek.delta,
-                    col.prefix_delta(from..to),
-                    "trial={trial}: delta == prefix_delta"
+                    col.sum_range(from..to),
+                    "trial={trial}: delta == sum_range"
                 );
             }
         }
@@ -4361,4 +4361,38 @@ fn max_segments_two_full_cycle() {
     loaded.push(7);
     assert_eq!(loaded.len(), 100);
     loaded.validate_encoding().unwrap();
+}
+
+// ── remove_n ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn remove_n_matches_vec_drain() {
+    let mut col = Column::<u64>::from_values((0..100).collect());
+    let mut mirror: Vec<u64> = (0..100).collect();
+    col.remove_n(10, 25);
+    mirror.drain(10..35);
+    assert_eq!(col.to_vec(), mirror);
+    col.remove_n(0, 0); // no-op
+    assert_eq!(col.to_vec(), mirror);
+
+    let mut dcol = DeltaColumn::<u64>::from_values((0..50).collect());
+    let mut dmirror: Vec<u64> = (0..50).collect();
+    dcol.remove_n(5, 40);
+    dmirror.drain(5..45);
+    assert_eq!(dcol.to_vec(), dmirror);
+
+    let mut pcol = PrefixColumn::<u64>::from_values((1..=30).collect());
+    pcol.remove_n(3, 20);
+    assert_eq!(pcol.len(), 10);
+    assert_eq!(
+        pcol.get_prefix(pcol.len()),
+        (1..=3).sum::<u64>() as u128 + (24..=30).sum::<u64>() as u128
+    );
+}
+
+#[test]
+#[should_panic(expected = "splice range out of bounds")]
+fn remove_n_out_of_bounds_panics() {
+    let mut col = Column::<u64>::from_values((0..10).collect());
+    col.remove_n(5, 6);
 }

@@ -447,6 +447,13 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.remove(index);
     }
 
+    /// Remove `n` items starting at `index` — same arguments as
+    /// [`splice`](Self::splice)`(index, n, [])`, without the typed
+    /// empty-iterator dance.  Panics if `index + n` exceeds the length.
+    pub fn remove_n(&mut self, index: usize, n: usize) {
+        self.col.remove_n(index, n);
+    }
+
     pub fn push(&mut self, value: impl super::AsColumnRef<T>) {
         self.col.push(value);
     }
@@ -469,12 +476,16 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────
 
-    /// Exclusive prefix sum at `index` — sum of values at indices
-    /// `0..index`.  Matches [`PrefixColumn::get_prefix`] semantics.
+    /// **Exclusive** prefix sum at `index` — the sum of values at
+    /// indices `0..index`: what [`PrefixedValue::prefix`] shows for the
+    /// item at `index`.
     pub fn get_prefix(&self, index: usize) -> T::Prefix {
         self.iter_range(index..self.len()).total
     }
 
+    /// **Inclusive** prefix sum through `index`: what
+    /// [`PrefixedValue::total`] shows for the item at `index`.  Equals
+    /// `get_prefix(index + 1)`.
     pub fn get_total(&self, index: usize) -> T::Prefix {
         self.get_prefix(index + 1)
     }
@@ -493,7 +504,9 @@ impl<T: PrefixValue> PrefixColumn<T> {
         iter.delta_nth(to - from)
     }
 
-    pub fn prefix_delta(&self, range: std::ops::Range<usize>) -> T::Prefix {
+    /// Sum of the values in `range` — `get_prefix(range.end)` minus
+    /// `get_prefix(range.start)`, computed in one pass.
+    pub fn sum_range(&self, range: std::ops::Range<usize>) -> T::Prefix {
         if range.start >= range.end || self.col.is_empty() {
             T::Prefix::default()
         } else {
@@ -512,10 +525,19 @@ impl<T: PrefixValue> PrefixColumn<T>
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
+    /// Index of the item whose **inclusive** total
+    /// ([`PrefixedValue::total`]) first reaches `target` — the inverse of
+    /// [`get_total`](Self::get_total).  Equals
+    /// `get_index_for_prefix(target).saturating_sub(1)`.
     pub fn get_index_for_total(&self, target: T::Prefix) -> usize {
         self.get_index_for_prefix(target).saturating_sub(1)
     }
 
+    /// First index `i` where the **exclusive** prefix
+    /// ([`get_prefix`](Self::get_prefix)`(i)`, i.e. what
+    /// [`PrefixedValue::prefix`] shows at `i`) reaches `target`.
+    /// Returns `0` when `target` is zero (or non-positive) and
+    /// `len() + 1` when `target` exceeds the grand total.
     pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
         if target <= T::Prefix::default() {
             return 0;
@@ -948,9 +970,9 @@ mod tests {
         for lo in 0..=n {
             for hi in lo..=n {
                 assert_eq!(
-                    tree.prefix_delta(lo..hi),
-                    col.prefix_delta(lo..hi),
-                    "prefix_delta({lo}..{hi}) mismatch",
+                    tree.sum_range(lo..hi),
+                    col.sum_range(lo..hi),
+                    "sum_range({lo}..{hi}) mismatch",
                 );
             }
         }

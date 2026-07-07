@@ -437,7 +437,7 @@ impl OpSet {
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
             if clock.is_none() {
-                self.cols.index.text.prefix_delta(range.clone()) as usize
+                self.cols.index.text.sum_range(range.clone()) as usize
             } else {
                 self.action_value_iter(range.clone(), clock.as_ref())
                     .map(|(action, value, _)| match (action, &value) {
