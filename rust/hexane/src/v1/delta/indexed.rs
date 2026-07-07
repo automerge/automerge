@@ -83,6 +83,14 @@ fn compute_slab_agg(data: &[u8]) -> SlabAgg {
 
 impl<T: DeltaValue> DeltaColumn<T> {
     /// Iterator over all indices whose realized value equals `target`.
+    ///
+    /// # Panics
+    ///
+    /// Inherits [`DeltaValue::to_i64`]'s domain check: querying an
+    /// unsigned `target > i64::MAX` panics (such a value can never be
+    /// stored — see the [`DeltaValue`] domain contract).  For a
+    /// non-panicking probe use [`find_by_range`](Self::find_by_range),
+    /// which returns an empty iterator for unrepresentable targets.
     pub fn find_by_value(&self, target: T) -> FindByRange<'_> {
         match target.to_i64() {
             Some(v) => self.find_by_range(v..v + 1),

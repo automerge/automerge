@@ -17,6 +17,22 @@ pub use indexed::IndexedDeltaWeightFn;
 ///
 /// All `DeltaColumn`s store deltas internally as `Option<i64>` regardless
 /// of `T`; this trait maps `T` to and from that inner representation.
+///
+/// # Value domain
+///
+/// All realized values in a column must lie within a 2^63-wide range —
+/// for unsigned types that means `< 2^63`.  This is not an accumulator
+/// limitation but the wire format's closure boundary: deltas are stored
+/// as `i64`, and deleting an element makes its two neighbours adjacent,
+/// so *any* pair of values in the column may end up needing their
+/// difference encoded as a single delta.  If values could span 2^63 or
+/// more, a deletion could produce a delta that doesn't fit the wire
+/// format.
+///
+/// Unsigned [`to_i64`](Self::to_i64) implementations **panic** outside
+/// this domain (a precondition violation on the writer's own data);
+/// [`load`](DeltaColumn::load) **rejects** out-of-domain data with an
+/// error (untrusted bytes must never panic).
 pub trait DeltaValue: Copy + PartialEq + Default + Debug {
     /// Whether this type supports null values.
     const NULLABLE: bool;
@@ -58,11 +74,23 @@ impl DeltaValue for u32 {
 
 impl DeltaValue for u64 {
     const NULLABLE: bool = false;
+    /// # Panics
+    ///
+    /// Panics for values `> i64::MAX` — see the [`DeltaValue`] domain
+    /// contract (2^63 is the wire format's closure boundary under
+    /// deletion).
     fn to_i64(self) -> Option<i64> {
+        assert!(
+            self <= i64::MAX as u64,
+            "DeltaColumn<u64> values must fit in i64 (wire deltas are i64): {self}"
+        );
         Some(self as i64)
     }
     fn from_i64(v: i64) -> Self {
         v as u64
+    }
+    fn try_from_i64(v: i64) -> Result<Self, String> {
+        u64::try_from(v).map_err(|_| format!("delta value {} out of u64 range", v))
     }
     fn null_value() -> Self {
         panic!("non-nullable u64")
@@ -76,6 +104,9 @@ impl DeltaValue for i32 {
     }
     fn from_i64(v: i64) -> Self {
         v as i32
+    }
+    fn try_from_i64(v: i64) -> Result<Self, String> {
+        i32::try_from(v).map_err(|_| format!("delta value {} out of i32 range", v))
     }
     fn null_value() -> Self {
         panic!("non-nullable i32")
@@ -97,11 +128,22 @@ impl DeltaValue for i64 {
 
 impl DeltaValue for usize {
     const NULLABLE: bool = false;
+    /// # Panics
+    ///
+    /// Panics for values `> i64::MAX` — see the [`DeltaValue`] domain
+    /// contract.
     fn to_i64(self) -> Option<i64> {
+        assert!(
+            self as u64 <= i64::MAX as u64,
+            "DeltaColumn<usize> values must fit in i64 (wire deltas are i64): {self}"
+        );
         Some(self as i64)
     }
     fn from_i64(v: i64) -> Self {
         v as usize
+    }
+    fn try_from_i64(v: i64) -> Result<Self, String> {
+        usize::try_from(v).map_err(|_| format!("delta value {} out of usize range", v))
     }
     fn null_value() -> Self {
         panic!("non-nullable usize")
@@ -130,11 +172,17 @@ impl DeltaValue for Option<u32> {
 
 impl DeltaValue for Option<u64> {
     const NULLABLE: bool = true;
+    /// # Panics
+    ///
+    /// Panics for `Some(v)` with `v > i64::MAX` — see [`DeltaValue`].
     fn to_i64(self) -> Option<i64> {
-        self.map(|v| v as i64)
+        self.and_then(DeltaValue::to_i64)
     }
     fn from_i64(v: i64) -> Self {
         Some(v as u64)
+    }
+    fn try_from_i64(v: i64) -> Result<Self, String> {
+        u64::try_from_i64(v).map(Some)
     }
     fn null_value() -> Self {
         None
@@ -148,6 +196,9 @@ impl DeltaValue for Option<i32> {
     }
     fn from_i64(v: i64) -> Self {
         Some(v as i32)
+    }
+    fn try_from_i64(v: i64) -> Result<Self, String> {
+        i32::try_from_i64(v).map(Some)
     }
     fn null_value() -> Self {
         None
@@ -169,11 +220,17 @@ impl DeltaValue for Option<i64> {
 
 impl DeltaValue for Option<usize> {
     const NULLABLE: bool = true;
+    /// # Panics
+    ///
+    /// Panics for `Some(v)` with `v > i64::MAX` — see [`DeltaValue`].
     fn to_i64(self) -> Option<i64> {
-        self.map(|v| v as i64)
+        self.and_then(DeltaValue::to_i64)
     }
     fn from_i64(v: i64) -> Self {
         Some(v as usize)
+    }
+    fn try_from_i64(v: i64) -> Result<Self, String> {
+        usize::try_from_i64(v).map(Some)
     }
     fn null_value() -> Self {
         None
@@ -455,6 +512,11 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 // pruning.
 
 /// A delta-encoded column.
+///
+/// Values must respect the [`DeltaValue`] domain contract: all realized
+/// values lie within a 2^63-wide range (for unsigned types, `< 2^63`).
+/// Writes outside the domain panic; [`load`](DeltaColumn::load) rejects
+/// out-of-domain data with an error.
 pub struct DeltaColumn<T: DeltaValue> {
     pub(crate) col: Column<Option<i64>, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
@@ -531,7 +593,13 @@ impl<T: DeltaValue> DeltaColumn<T> {
                     Ok(running)
                 }
                 Some(d) => {
-                    let new_running = running + d * count as i64;
+                    // Checked: hostile bytes can encode deltas whose running
+                    // sum overflows i64 — that must be a load error, never a
+                    // debug-panic or a silent release-mode wrap.
+                    let new_running = d
+                        .checked_mul(count as i64)
+                        .and_then(|x| running.checked_add(x))
+                        .ok_or_else(|| "delta running sum overflows i64".to_string())?;
                     T::try_from_i64(new_running)?;
                     Ok(new_running)
                 }
@@ -1020,6 +1088,103 @@ mod overflow_tests {
             result.is_err(),
             "DeltaColumn<u32> should reject negative delta"
         );
+    }
+
+    // ── u64 / usize / i32 domain validation ────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "must fit in i64")]
+    fn delta_u64_write_panics_above_2_63() {
+        let _ = DeltaColumn::<u64>::from_values(vec![i64::MAX as u64 + 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "must fit in i64")]
+    fn delta_opt_u64_write_panics_above_2_63() {
+        let mut col = DeltaColumn::<Option<u64>>::new();
+        col.push(Some(u64::MAX));
+    }
+
+    #[test]
+    #[should_panic(expected = "must fit in i64")]
+    fn delta_usize_write_panics_above_2_63() {
+        let _ = DeltaColumn::<usize>::from_values(vec![i64::MAX as usize + 1]);
+    }
+
+    #[test]
+    fn delta_u64_write_accepts_domain_max() {
+        let col = DeltaColumn::<u64>::from_values(vec![0, i64::MAX as u64]);
+        assert_eq!(col.get(1), Some(i64::MAX as u64));
+        let bytes = col.save();
+        let loaded = DeltaColumn::<u64>::load(&bytes).unwrap();
+        assert_eq!(loaded.get(1), Some(i64::MAX as u64));
+    }
+
+    #[test]
+    fn delta_u64_load_rejects_negative() {
+        let col = DeltaColumn::<i64>::from_values(vec![10, -5]);
+        let bytes = col.save();
+        assert!(
+            DeltaColumn::<u64>::load(&bytes).is_err(),
+            "DeltaColumn<u64> should reject negative realized values"
+        );
+    }
+
+    #[test]
+    fn delta_opt_u64_load_rejects_negative() {
+        let col = DeltaColumn::<Option<i64>>::from_values(vec![Some(3), Some(-1)]);
+        let bytes = col.save();
+        assert!(DeltaColumn::<Option<u64>>::load(&bytes).is_err());
+    }
+
+    #[test]
+    fn delta_usize_load_rejects_negative() {
+        let col = DeltaColumn::<i64>::from_values(vec![0, -1]);
+        let bytes = col.save();
+        assert!(DeltaColumn::<usize>::load(&bytes).is_err());
+    }
+
+    #[test]
+    fn delta_i32_load_rejects_out_of_range() {
+        let col = DeltaColumn::<i64>::from_values(vec![i32::MAX as i64 + 1]);
+        let bytes = col.save();
+        assert!(
+            DeltaColumn::<i32>::load(&bytes).is_err(),
+            "DeltaColumn<i32> should reject values above i32::MAX"
+        );
+        let col = DeltaColumn::<i64>::from_values(vec![i32::MIN as i64 - 1]);
+        let bytes = col.save();
+        assert!(DeltaColumn::<i32>::load(&bytes).is_err());
+    }
+
+    #[test]
+    fn delta_i32_load_accepts_bounds() {
+        let col = DeltaColumn::<i64>::from_values(vec![i32::MIN as i64, i32::MAX as i64]);
+        let bytes = col.save();
+        let loaded = DeltaColumn::<i32>::load(&bytes).unwrap();
+        assert_eq!(loaded.get(0), Some(i32::MIN));
+        assert_eq!(loaded.get(1), Some(i32::MAX));
+    }
+
+    #[test]
+    fn delta_load_rejects_running_sum_overflow() {
+        // Hostile bytes: two i64::MAX deltas overflow the running sum.
+        // Must be a clean Err in every build profile, never a panic.
+        use crate::v1::encoding::EncoderApi;
+        let bytes = crate::v1::Encoder::<Option<i64>>::encode([Some(i64::MAX), Some(i64::MAX)]);
+        assert!(
+            DeltaColumn::<i64>::load(&bytes).is_err(),
+            "overflowing running sum should be a load error"
+        );
+    }
+
+    #[test]
+    fn delta_u64_find_by_range_out_of_domain_is_empty() {
+        // find_by_range guards via TryInto and returns empty for
+        // unrepresentable targets (find_by_value panics instead — the
+        // loud variant of the same domain violation).
+        let col = DeltaColumn::<u64>::from_values(vec![1, 2, 3]);
+        assert_eq!(col.find_by_range(u64::MAX - 1..u64::MAX).count(), 0);
     }
 
     #[test]
