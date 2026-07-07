@@ -22,6 +22,7 @@
 //! dies), so under realistic churn their fill follows the leaf count;
 //! worst case is extra memory, never incorrect queries.
 
+use crate::prefix::PrefixSlabWeight;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
@@ -56,7 +57,7 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
 /// [`find_slab_at_prefix`](SlabBTree::find_slab_at_prefix) to work
 /// aggregate-agnostically.
 ///
-/// Implemented by [`PrefixSlabWeight<P>`](super::prefix::PrefixSlabWeight)
+/// Implemented by [`PrefixSlabWeight<P>`](crate::prefix::PrefixSlabWeight)
 /// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
 pub trait PrefixAggregate: SlabAggregate {
     /// `Ord` is not required here — only forward accumulation needs `Add`.
@@ -159,7 +160,7 @@ impl SlabAggregate for usize {
 
 // ── SlabAggregate for PrefixSlabWeight ──────────────────────────────────────
 
-impl<P> SlabAggregate for super::prefix::PrefixSlabWeight<P>
+impl<P> SlabAggregate for PrefixSlabWeight<P>
 where
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
 {
@@ -174,7 +175,7 @@ where
     }
 }
 
-impl<P> PrefixAggregate for super::prefix::PrefixSlabWeight<P>
+impl<P> PrefixAggregate for PrefixSlabWeight<P>
 where
     P: Clone
         + Default
@@ -1877,7 +1878,7 @@ mod tests {
 
     // ── Prefix-sum B-tree smoke test ────────────────────────────────────
 
-    use super::super::prefix::PrefixSlabWeight;
+    use crate::prefix::PrefixSlabWeight;
 
     fn psw(len: usize, prefix: i64) -> PrefixSlabWeight<i64> {
         PrefixSlabWeight { len, prefix }
@@ -2116,7 +2117,7 @@ mod tests {
 
     #[test]
     fn fuzz_btree_with_prefix_weights() {
-        use super::super::prefix::PrefixSlabWeight;
+        use crate::prefix::PrefixSlabWeight;
         type W = PrefixSlabWeight<u64>;
         type Tree = SlabBTree<W>;
 

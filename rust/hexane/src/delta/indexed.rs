@@ -9,13 +9,14 @@
 //!   * Value-query methods (`find_by_value` / `find_by_range` /
 //!     `find_first`) on [`DeltaColumn`].
 
+use crate::sealed::Sealed;
 use std::ops::Range;
 
-use super::super::btree::{FindByValueRange, SlabAgg};
-use super::super::column::{Slab, TailOf, WeightFn};
-use super::super::encoding::{ColumnEncoding, RunDecoder};
-use super::super::ColumnValueRef;
-use super::{DeltaColumn, DeltaValue};
+use crate::btree::{FindByValueRange, SlabAgg};
+use crate::column::{Slab, TailOf, WeightFn};
+use crate::delta::{DeltaColumn, DeltaValue};
+use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::ColumnValueRef;
 
 // Type aliases to keep the decoder / slab types readable in struct fields.
 type OptI64Encoding = <Option<i64> as ColumnValueRef>::Encoding;
@@ -29,7 +30,7 @@ type OptI64Slab = Slab<TailOf<Option<i64>>>;
 #[derive(Copy, Clone, Debug, Default)]
 pub struct IndexedDeltaWeightFn;
 
-impl crate::sealed::Sealed for IndexedDeltaWeightFn {}
+impl Sealed for IndexedDeltaWeightFn {}
 
 impl WeightFn<Option<i64>> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
@@ -273,7 +274,7 @@ fn div_ceil_i64(a: i64, b: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::delta::*;
 
     #[test]
     fn empty() {

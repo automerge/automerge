@@ -1,7 +1,9 @@
-use super::column;
-use super::column::{Column, Slab, WeightFn};
-use super::{AsColumnRef, ColumnValueRef, Run};
+use crate::btree::SlabAggregate;
+use crate::column;
+use crate::column::{Column, Slab, WeightFn};
+use crate::index::ColumnIndex;
 use crate::PackError;
+use crate::{AsColumnRef, ColumnValueRef, Run};
 
 /// Fold-style validation function for [`ColumnEncoding::load_and_verify`].
 ///
@@ -20,7 +22,7 @@ pub type SimpleValidateFn<V> = for<'a> fn(<V as ColumnValueRef>::Get<'a>) -> Opt
 /// validation operations on raw `Vec<u8>` slabs.  [`Column`] delegates
 /// to `T::Encoding`.
 ///
-/// Both [`super::rle::RleEncoding`] and [`super::bool::BoolEncoding`]
+/// Both [`crate::rle::RleEncoding`] and [`crate::bool::BoolEncoding`]
 /// are zero-sized types — all state lives in the slab bytes.
 pub trait ColumnEncoding: Default {
     /// The column value type this encoding operates on.
@@ -113,8 +115,8 @@ pub trait ColumnEncoding: Default {
     ) -> Column<Self::Value, WF, Idx>
     where
         WF: WeightFn<Self::Value>,
-        WF::Weight: super::btree::SlabAggregate,
-        Idx: super::index::ColumnIndex<WF::Weight>,
+        WF::Weight: SlabAggregate,
+        Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
     {
         let mut encoder = Self::encoder();
@@ -193,8 +195,8 @@ pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
     fn into_column<WF, Idx>(self) -> Column<T, WF, Idx>
     where
         WF: WeightFn<T>,
-        WF::Weight: super::btree::SlabAggregate,
-        Idx: super::index::ColumnIndex<WF::Weight>,
+        WF::Weight: SlabAggregate,
+        Idx: ColumnIndex<WF::Weight>,
     {
         Column::load(&self.save()).unwrap()
     }
@@ -304,12 +306,12 @@ pub trait RunDecoder: Iterator {
 /// Metadata extracted from a validated slab encoding.
 ///
 /// Returned by [`ColumnEncoding::validate_encoding`] and
-/// [`Column::validate_encoding`](super::Column::validate_encoding).
+/// [`Column::validate_encoding`](crate::Column::validate_encoding).
 pub struct SlabInfo<T> {
     /// Number of RLE/bool segments in the slab.
     pub segments: usize,
     /// Number of logical items in the slab.
     pub len: usize,
-    /// Per-encoding tail metadata (e.g. [`RleTail`](super::rle::RleTail) for RLE columns).
+    /// Per-encoding tail metadata (e.g. [`RleTail`](crate::rle::RleTail) for RLE columns).
     pub tail: T,
 }

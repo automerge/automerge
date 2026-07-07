@@ -1,6 +1,6 @@
-use super::state::{RleCow, RleState};
-use super::*;
 use crate::leb::{encode_signed, encode_unsigned};
+use crate::rle::state::{RleCow, RleState};
+use crate::rle::*;
 use crate::{AsColumnRef, Column, RleValue};
 
 pub(crate) fn rle_encode_state<T: RleValue>(

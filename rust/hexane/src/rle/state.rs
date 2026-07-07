@@ -1,7 +1,8 @@
 //! RLE encoding state machine for cursor-aware splice.
 
-use super::RleTail;
 use crate::leb::{encode_signed, encode_unsigned, rewrite_lit_header};
+use crate::rle::splice::Postfix;
+use crate::rle::RleTail;
 use crate::{AsColumnRef, RleValue};
 
 use std::num::NonZeroU32;
@@ -392,9 +393,8 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     pub fn flush_postfix(
         &mut self,
         buf: &mut Vec<u8>,
-        postfix: Option<super::splice::Postfix<'a, T>>,
+        postfix: Option<Postfix<'a, T>>,
     ) -> (FlushState, usize) {
-        use super::splice::Postfix;
         let mut f = FlushState::default();
         let postfix_segs = match postfix {
             None => {

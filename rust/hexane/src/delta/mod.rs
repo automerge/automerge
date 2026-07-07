@@ -2,13 +2,15 @@ mod decoder;
 pub mod indexed;
 pub use decoder::DeltaDecoder;
 
+use crate::column::{Iter, IterState};
+use crate::encoder::RleEncoderState;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Range;
 
-use super::column::Column;
-use super::TypedLoadOpts;
+use crate::column::Column;
 use crate::PackError;
+use crate::TypedLoadOpts;
 pub use indexed::IndexedDeltaWeightFn;
 
 // ── DeltaValue trait ────────────────────────────────────────────────────────
@@ -271,7 +273,7 @@ impl DeltaValue for Option<usize> {
 /// fast-path `encode_to_unless` static path to avoid a per-call heap
 /// allocation in the change-encoding loop.
 pub struct DeltaEncoderState<'a, T: DeltaValue> {
-    inner: super::encoder::RleEncoderState<'a, Option<i64>>,
+    inner: RleEncoderState<'a, Option<i64>>,
     abs: i64,
     /// Tracks whether every appended value has been equal so far.
     ///
@@ -296,7 +298,7 @@ impl<T: DeltaValue> Default for DeltaEncoderState<'_, T> {
 impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
     pub fn new() -> Self {
         Self {
-            inner: super::encoder::RleEncoderState::new(),
+            inner: RleEncoderState::new(),
             abs: 0,
             uniform: None,
             _phantom: PhantomData,
@@ -361,7 +363,7 @@ impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
 
 /// Streaming encoder for delta-encoded columns.
 ///
-/// Mirrors [`RleEncoder`](super::encoder::RleEncoder)'s interface but applies
+/// Mirrors [`RleEncoder`](crate::encoder::RleEncoder)'s interface but applies
 /// delta encoding on append: each absolute value is transformed into the
 /// difference from the previous non-null value before being written to an
 /// inner RLE encoder.  The serialized bytes are byte-compatible with both
@@ -437,7 +439,7 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
     }
 
     /// Alias for [`append`](Self::append) — provided so call sites that
-    /// use [`append_owned`](super::encoder::RleEncoder::append_owned) on
+    /// use [`append_owned`](crate::encoder::RleEncoder::append_owned) on
     /// `RleEncoder` can swap encoders without edits.
     pub fn append_owned(&mut self, value: T) {
         self.append(value);
@@ -471,7 +473,7 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
     /// range when the encoder is empty or every appended value equals
     /// `value`.
     ///
-    /// Mirrors [`RleEncoder::save_to_unless`](super::encoder::RleEncoder::save_to_unless)
+    /// Mirrors [`RleEncoder::save_to_unless`](crate::encoder::RleEncoder::save_to_unless)
     /// on the absolute (realized) values.  For nullable delta columns
     /// pass `None` to get v0's `encode_unless_empty` semantics (elide on
     /// empty or all-null).
@@ -645,7 +647,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
     }
 
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_with(data, super::LoadOpts::default().into())
+        Self::load_with(data, crate::LoadOpts::default().into())
     }
 
     pub fn len(&self) -> usize {
@@ -858,7 +860,7 @@ type InnerColumn = Column<Option<i64>, IndexedDeltaWeightFn>;
 /// B-tree to jump directly to the target position and reset the
 /// running prefix in O(log n), avoiding an O(n) replay.
 pub struct DeltaIter<'a, T: DeltaValue> {
-    inner: super::column::Iter<'a, Option<i64>>,
+    inner: Iter<'a, Option<i64>>,
     running: i64,
     col: Option<&'a InnerColumn>,
     _phantom: PhantomData<T>,
@@ -989,7 +991,7 @@ impl<'a, T: DeltaValue> DeltaIter<'a, T> {
 }
 
 pub struct DeltaIterState {
-    inner: super::column::IterState,
+    inner: IterState,
     running: i64,
 }
 

@@ -5,7 +5,7 @@
 //! * [`BitIndex<W>`] — Fenwick BIT over a parallel `Vec<W>` of per-slab
 //!   weights.  Fast, cache-tight; requires `W: SlabWeight` (AddAssign +
 //!   SubAssign for incremental updates).
-//! * `super::btree::SlabBTree<W>` — B-tree over per-slab weights.
+//! * `crate::btree::SlabBTree<W>` — B-tree over per-slab weights.
 //!   Slightly slower for plain positional lookups but supports
 //!   non-invertible aggregates (min/max) that Fenwick can't handle, and
 //!   typically wins on compound prefix-sum queries.
@@ -13,17 +13,18 @@
 //! `Column<T, WF, Idx>` is parameterised over `Idx: ColumnIndex<WF::Weight>`
 //! so you can swap indices with a type parameter change.
 
+use crate::sealed::Sealed;
 use std::ops::Range;
 
-use super::btree::{SlabAggregate, SlabBTree};
-use super::column::{bit_point_update, find_slab_bit, rebuild_bit, SlabWeight};
+use crate::btree::{SlabAggregate, SlabBTree};
+use crate::column::{bit_point_update, find_slab_bit, rebuild_bit, SlabWeight};
 
 /// Abstraction over the per-slab weight index a `Column` maintains.
 ///
 /// Implementors store one weight per slab plus whatever aggregation
 /// structure they need (Fenwick array, B-tree, etc.) and answer
 /// positional queries in O(log n).
-pub trait ColumnIndex<W>: super::sealed::Sealed + Default {
+pub trait ColumnIndex<W>: Sealed + Default {
     /// Construct from an iterator of per-slab weights in slab order.
     fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self;
 
@@ -77,7 +78,7 @@ impl<W: SlabWeight> Default for BitIndex<W> {
     }
 }
 
-impl<W: SlabWeight> super::sealed::Sealed for BitIndex<W> {}
+impl<W: SlabWeight> Sealed for BitIndex<W> {}
 
 impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
     fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self {
@@ -120,7 +121,7 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
 
 // ── SlabBTree: B-tree-backed ───────────────────────────────────────────────
 
-impl<A: SlabAggregate> super::sealed::Sealed for SlabBTree<A> {}
+impl<A: SlabAggregate> Sealed for SlabBTree<A> {}
 
 impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
     fn from_weights<I: IntoIterator<Item = A>>(iter: I) -> Self {

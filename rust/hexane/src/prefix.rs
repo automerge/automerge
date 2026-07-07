@@ -1,10 +1,12 @@
+use crate::column::IterState;
+use crate::sealed::Sealed;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 
-use super::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
-use super::encoding::{ColumnEncoding, RunDecoder};
-use super::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
+use crate::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
+use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::PackError;
+use crate::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
 
@@ -181,10 +183,7 @@ impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SubAssign
     }
 }
 
-impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> super::sealed::Sealed
-    for PrefixSlabWeight<P>
-{
-}
+impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> Sealed for PrefixSlabWeight<P> {}
 
 impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
     for PrefixSlabWeight<P>
@@ -202,7 +201,7 @@ impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
 #[derive(Clone)]
 pub struct PrefixWeightFn<T>(PhantomData<fn() -> T>);
 
-impl<T> super::sealed::Sealed for PrefixWeightFn<T> {}
+impl<T> Sealed for PrefixWeightFn<T> {}
 
 impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
@@ -309,7 +308,7 @@ impl PrefixValue for bool {
 // ── Load / save with options ────────────────────────────────────────────────
 
 impl<T: PrefixValue> PrefixColumn<T> {
-    /// Deserialize with options. See [`LoadOpts`](super::LoadOpts).
+    /// Deserialize with options. See [`LoadOpts`](crate::LoadOpts).
     pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, crate::PackError> {
         let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
         Ok(Self { col })
@@ -446,7 +445,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     // ── Mutations ───────────────────────────────────────────────────────
 
-    pub fn insert(&mut self, index: usize, value: impl super::AsColumnRef<T>) {
+    pub fn insert(&mut self, index: usize, value: impl crate::AsColumnRef<T>) {
         self.col.insert(index, value);
     }
 
@@ -461,7 +460,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.remove_n(index, n);
     }
 
-    pub fn push(&mut self, value: impl super::AsColumnRef<T>) {
+    pub fn push(&mut self, value: impl crate::AsColumnRef<T>) {
         self.col.push(value);
     }
 
@@ -475,7 +474,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     pub fn splice<V, I>(&mut self, index: usize, del: usize, values: I)
     where
-        V: super::AsColumnRef<T>,
+        V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = V>,
     {
         self.col.splice(index, del, values);
@@ -908,7 +907,7 @@ where
 // ── PrefixIterState ────────────────────────────────────────────────────────
 
 pub struct PrefixIterState<T: PrefixValue> {
-    inner: super::column::IterState,
+    inner: IterState,
     total: T::Prefix,
 }
 
@@ -936,7 +935,7 @@ impl<T: PrefixValue> FromIterator<T> for PrefixColumn<T> {
 
 impl<V, T: PrefixValue> Extend<V> for PrefixColumn<T>
 where
-    V: super::AsColumnRef<T>,
+    V: crate::AsColumnRef<T>,
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.col.len();

@@ -5,6 +5,7 @@ pub(crate) mod state;
 #[cfg(test)]
 mod tests;
 
+use crate::encoder::RleEncoder;
 pub use decoder::RleDecoder;
 use load::rle_load_and_verify;
 pub(crate) use load::rle_validate_encoding;
@@ -15,10 +16,10 @@ use std::num::NonZeroU32;
 
 use crate::PackError;
 
-type Slab = super::column::Slab<RleTail>;
-use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
-use super::Run;
-use super::{AsColumnRef, ColumnValueRef, RleValue};
+type Slab = crate::column::Slab<RleTail>;
+use crate::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
+use crate::Run;
+use crate::{AsColumnRef, ColumnValueRef, RleValue};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
 //
@@ -44,7 +45,7 @@ impl<T: RleValue> Default for RleEncoding<T> {
 /// Compute the RleTail for a slab by scanning to the last segment.
 #[cfg(test)]
 pub(crate) fn compute_rle_tail<T: RleValue>(data: &[u8]) -> RleTail {
-    use super::leb::{read_signed, read_unsigned};
+    use crate::leb::{read_signed, read_unsigned};
     if data.is_empty() {
         return RleTail::default();
     }
@@ -208,9 +209,9 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         RleDecoder::new(slab)
     }
 
-    type Encoder<'a> = super::encoder::RleEncoder<'a, T>;
+    type Encoder<'a> = RleEncoder<'a, T>;
 
     fn encoder<'a>() -> Self::Encoder<'a> {
-        super::encoder::RleEncoder::new()
+        RleEncoder::new()
     }
 }

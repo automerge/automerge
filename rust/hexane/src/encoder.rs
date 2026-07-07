@@ -1,6 +1,6 @@
 //! Streaming encoder for building column data from a sequence of values.
 //!
-//! Unlike [`Column`](super::Column) which supports random-access splice,
+//! Unlike [`Column`] which supports random-access splice,
 //! `Encoder<T>` is append-only and produces a single contiguous byte buffer.
 //! This is used for building change data where values arrive in order.
 //!
@@ -13,11 +13,17 @@
 //! let bytes = enc.save();
 //! ```
 
-use super::column::{Column, Slab};
-use super::leb::encode_count;
-use super::rle::state::{FlushState, RleCow, RleState};
-use super::rle::RleTail;
-use super::RleValue;
+use crate::btree::SlabAggregate;
+use crate::column::WeightFn;
+use crate::column::{Column, Slab, DEFAULT_MAX_SEG};
+use crate::encoding::EncoderApi;
+use crate::index::ColumnIndex;
+use crate::leb::encode_count;
+use crate::rle::splice::do_merge;
+use crate::rle::state::{FlushState, RleCow, RleState};
+use crate::rle::RleEncoding;
+use crate::rle::RleTail;
+use crate::RleValue;
 
 use std::ops::Range;
 
@@ -29,7 +35,7 @@ use std::ops::Range;
 ///
 /// Use [`RleEncoder`] when you want a self-contained encoder that owns its
 /// buffer.  Use this directly (via the `encode_to_unless` static path on
-/// [`super::encoding::EncoderApi`]) when you want to write through to a
+/// [`crate::encoding::EncoderApi`]) when you want to write through to a
 /// caller-owned buffer with no per-call heap allocation.
 pub struct RleEncoderState<'a, T: RleValue> {
     state: RleState<'a, T, T>,
@@ -115,9 +121,9 @@ impl<'a, T: RleValue> RleEncoderState<'a, T> {
 /// Both output methods consume the encoder.
 ///
 /// When a slab segment budget is set via
-/// [`EncoderApi::max_segments`](super::encoding::EncoderApi::max_segments)
+/// [`EncoderApi::max_segments`]
 /// **before appending**, the encoder rolls completed output into [`Slab`]s
-/// as it goes, and [`into_column`](super::encoding::EncoderApi::into_column)
+/// as it goes, and [`into_column`](crate::encoding::EncoderApi::into_column)
 /// hands them to the column directly — no decode/validate pass.
 ///
 /// The lifetime `'a` ties borrowed values (e.g. `&'a str` for `String` columns)
@@ -289,8 +295,7 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
         let mut segments = first.segments;
         let mut buf = Vec::new();
         for s in iter {
-            let (new_seg, new_tail) =
-                super::rle::splice::do_merge::<T>(out, tail, segments, &s, &mut buf);
+            let (new_seg, new_tail) = do_merge::<T>(out, tail, segments, &s, &mut buf);
             segments = new_seg;
             tail = new_tail;
             buf.clear();
@@ -314,9 +319,9 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
 
     /// Like [`save_to`](Self::save_to) but applies `f` to every value before
     /// re-encoding.  The encoder's accumulated runs are walked directly with
-    /// [`RleDecoder`](super::rle::RleDecoder), so this avoids the round-trip
-    /// through [`Column`](super::Column) that
-    /// [`Column::remap`](super::Column::remap) would require.  Always writes
+    /// [`RleDecoder`](crate::rle::RleDecoder), so this avoids the round-trip
+    /// through [`Column`] that
+    /// [`Column::remap`] would require.  Always writes
     /// — no elision.
     pub fn save_to_and_remap<F>(self, out: &mut Vec<u8>, f: F) -> Range<usize>
     where
@@ -353,8 +358,8 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
     where
         F: Fn(T) -> T,
     {
-        use super::encoding::RunDecoder;
-        use super::rle::RleDecoder;
+        use crate::encoding::RunDecoder;
+        use crate::rle::RleDecoder;
         self.finish();
         for slab in self
             .slabs
@@ -371,11 +376,11 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
     }
 }
 
-impl<'a, T> super::encoding::EncoderApi<'a, T> for RleEncoder<'a, T>
+impl<'a, T> EncoderApi<'a, T> for RleEncoder<'a, T>
 where
-    T: RleValue + super::ColumnValueRef<Encoding = super::rle::RleEncoding<T>>,
+    T: RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
 {
-    type Tail = super::rle::RleTail;
+    type Tail = RleTail;
     fn append(&mut self, value: T::Get<'a>) {
         self.append(value);
     }
@@ -406,7 +411,7 @@ where
 
     /// Enable slab rollover: completed output is cut into [`Slab`]s at
     /// `max / 2` segments as values arrive, so
-    /// [`into_column`](super::encoding::EncoderApi::into_column) can build
+    /// [`into_column`](crate::encoding::EncoderApi::into_column) can build
     /// the column directly.  Must be called before appending.
     fn max_segments(&mut self, max: usize) {
         debug_assert!(
@@ -422,9 +427,9 @@ where
     /// (no cut points were tracked, so the slab split is unknown).
     fn into_column<WF, Idx>(mut self) -> Column<T, WF, Idx>
     where
-        WF: super::column::WeightFn<T>,
-        WF::Weight: super::btree::SlabAggregate,
-        Idx: super::index::ColumnIndex<WF::Weight>,
+        WF: WeightFn<T>,
+        WF::Weight: SlabAggregate,
+        Idx: ColumnIndex<WF::Weight>,
     {
         match self.max_segments {
             Some(max) => Column::from_slabs(self.take_slabs(), max),
@@ -432,7 +437,7 @@ where
         }
     }
 
-    fn into_slab(mut self) -> super::column::Slab<Self::Tail> {
+    fn into_slab(mut self) -> Slab<Self::Tail> {
         debug_assert!(
             self.slabs.is_empty(),
             "into_slab is single-slab only — don't combine with max_segments"
@@ -440,7 +445,7 @@ where
         self.finish();
         let flush = self.state.flush_state();
         let tail = flush.wpos.as_tail(0, self.data.len());
-        super::column::Slab {
+        Slab {
             data: self.data,
             len: self.state.len(),
             segments: flush.segments,
@@ -595,9 +600,9 @@ impl BoolEncoderState {
 /// Uses the alternating run-length format: `[false_count, true_count, false_count, ...]`.
 ///
 /// Like [`RleEncoder`], setting a segment budget via
-/// [`EncoderApi::max_segments`](super::encoding::EncoderApi::max_segments)
+/// [`EncoderApi::max_segments`]
 /// before appending enables slab rollover for a direct
-/// [`into_column`](super::encoding::EncoderApi::into_column) path.
+/// [`into_column`](crate::encoding::EncoderApi::into_column) path.
 pub struct BoolEncoder {
     data: Vec<u8>,
     state: BoolEncoderState,
@@ -736,7 +741,7 @@ impl BoolEncoder {
         if !self.slabs.is_empty() {
             // Slab rollover happened — merge boundary runs back into
             // canonical bytes via the column save path.
-            let max = self.max_segments.unwrap_or(super::column::DEFAULT_MAX_SEG);
+            let max = self.max_segments.unwrap_or(DEFAULT_MAX_SEG);
             let col: Column<bool> = Column::from_slabs(self.take_slabs(), max);
             return col.save_to(out);
         }
@@ -768,7 +773,7 @@ impl BoolEncoder {
     }
 }
 
-impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
+impl<'a> EncoderApi<'a, bool> for BoolEncoder {
     type Tail = u8;
     fn append(&mut self, value: bool) {
         self.append(value);
@@ -800,7 +805,7 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
     }
 
     /// Enable slab rollover — see [`RleEncoder`]'s
-    /// [`max_segments`](super::encoding::EncoderApi::max_segments).
+    /// [`max_segments`](crate::encoding::EncoderApi::max_segments).
     /// Must be called before appending.
     fn max_segments(&mut self, max: usize) {
         debug_assert!(
@@ -815,9 +820,9 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
     /// was never set.
     fn into_column<WF, Idx>(mut self) -> Column<bool, WF, Idx>
     where
-        WF: super::column::WeightFn<bool>,
-        WF::Weight: super::btree::SlabAggregate,
-        Idx: super::index::ColumnIndex<WF::Weight>,
+        WF: WeightFn<bool>,
+        WF::Weight: SlabAggregate,
+        Idx: ColumnIndex<WF::Weight>,
     {
         match self.max_segments {
             Some(max) => Column::from_slabs(self.take_slabs(), max),
@@ -825,7 +830,7 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
         }
     }
 
-    fn into_slab(mut self) -> super::column::Slab<Self::Tail> {
+    fn into_slab(mut self) -> Slab<Self::Tail> {
         debug_assert!(
             self.slabs.is_empty(),
             "into_slab is single-slab only — don't combine with max_segments"
@@ -844,7 +849,7 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
         } else {
             0
         };
-        super::column::Slab {
+        Slab {
             data: self.data,
             len: self.state.len(),
             segments,

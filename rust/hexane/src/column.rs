@@ -1,12 +1,14 @@
+use crate::btree::SlabAggregate;
+use crate::sealed::Sealed;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 
-use super::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
-use super::encoding::{ColumnEncoding, RunDecoder};
-use super::index::ColumnIndex;
-use super::{AsColumnRef, ColumnValueRef, TypedLoadOpts};
+use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
+use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::index::ColumnIndex;
 use crate::PackError;
+use crate::{AsColumnRef, ColumnValueRef, TypedLoadOpts};
 
 /// Type alias for the slab tail metadata of a column value type.
 pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
@@ -47,9 +49,7 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
 /// For columns that track prefix sums, this is a compound value carrying
 /// both the item count and the slab's contribution to the prefix sum.
 #[doc(hidden)]
-pub trait SlabWeight:
-    super::sealed::Sealed + Clone + Default + std::fmt::Debug + AddAssign + SubAssign
-{
+pub trait SlabWeight: Sealed + Clone + Default + std::fmt::Debug + AddAssign + SubAssign {
     /// The length (item count) component of this weight.
     fn len(&self) -> usize;
 
@@ -59,7 +59,7 @@ pub trait SlabWeight:
     }
 }
 
-impl super::sealed::Sealed for usize {}
+impl Sealed for usize {}
 
 impl SlabWeight for usize {
     #[inline]
@@ -77,13 +77,13 @@ impl SlabWeight for usize {
 /// counts.  Prefix-aware columns use a compound weight that also tracks
 /// prefix sums in the same BIT.
 #[doc(hidden)]
-pub trait WeightFn<T: ColumnValueRef>: super::sealed::Sealed {
+pub trait WeightFn<T: ColumnValueRef>: Sealed {
     /// The per-slab weight type.
     ///
-    /// For the Fenwick-BIT-backed [`Column`] and [`BitIndex`](super::index::BitIndex),
+    /// For the Fenwick-BIT-backed [`Column`] and [`BitIndex`](crate::index::BitIndex),
     /// this must additionally implement [`SlabWeight`] (invertible aggregation
     /// via `AddAssign`/`SubAssign`).  For the B-tree-backed path it only needs
-    /// [`SlabAggregate`](super::btree::SlabAggregate), which permits
+    /// [`SlabAggregate`](SlabAggregate), which permits
     /// non-invertible aggregates like min/max.
     type Weight: Clone + Default + std::fmt::Debug;
     fn compute(slab: &Slab<TailOf<T>>) -> Self::Weight;
@@ -94,7 +94,7 @@ pub trait WeightFn<T: ColumnValueRef>: super::sealed::Sealed {
 #[derive(Clone)]
 pub struct LenWeight;
 
-impl super::sealed::Sealed for LenWeight {}
+impl Sealed for LenWeight {}
 
 impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     type Weight = usize;
@@ -485,11 +485,11 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     ///
     /// For repeat runs, returns the full count. For literal runs, returns
     /// count=1 per value. Null runs return the null value with the full count.
-    pub fn next_run(&mut self) -> Option<super::Run<T::Get<'a>>> {
+    pub fn next_run(&mut self) -> Option<crate::Run<T::Get<'a>>> {
         self.next_run_max(self.items_left)
     }
 
-    pub(crate) fn next_run_max(&mut self, mut max: usize) -> Option<super::Run<T::Get<'a>>> {
+    pub(crate) fn next_run_max(&mut self, mut max: usize) -> Option<crate::Run<T::Get<'a>>> {
         if max == 0 {
             return None;
         }
@@ -542,7 +542,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             break;
         }
 
-        Some(super::Run {
+        Some(crate::Run {
             count: total_count,
             value,
         })
@@ -680,7 +680,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         range: impl std::ops::RangeBounds<usize>,
     ) -> Range<usize>
     where
-        for<'x> T::Get<'x>: Ord + super::AsColumnRef<T>,
+        for<'x> T::Get<'x>: Ord + crate::AsColumnRef<T>,
     {
         let (start, end) = normalize_range_max(range, self.end_pos());
 
@@ -783,7 +783,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 /// supported ways to get non-default weights.
 pub struct Column<
     T: ColumnValueRef,
-    WF: WeightFn<T> = super::column::LenWeight,
+    WF: WeightFn<T> = LenWeight,
     Idx = SlabBTree<<WF as WeightFn<T>>::Weight>,
 > where
     Idx: ColumnIndex<WF::Weight>,
@@ -1017,7 +1017,7 @@ where
     pub fn remap<F>(&mut self, f: F)
     where
         F: Fn(T) -> T,
-        WF::Weight: super::btree::SlabAggregate,
+        WF::Weight: SlabAggregate,
     {
         *self = T::Encoding::remap(self.iter(), self.max_segments, f);
     }
@@ -1374,7 +1374,7 @@ where
     }
 
     fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
-        super::column::try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
+        try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
     }
 }
 
@@ -1505,7 +1505,7 @@ mod tests {
     fn parity_with_bit_index() {
         // Column backed by BitIndex — same semantics, different guts.
         let base: Column<u64> = Column::from_values((0u64..100).collect());
-        let v2: Column<u64, super::super::column::LenWeight, BitIndex<usize>> =
+        let v2: Column<u64, LenWeight, BitIndex<usize>> =
             Column::from_values((0u64..100).collect());
         assert_eq!(v2.len(), base.len());
         assert_eq!(v2.save(), base.save());

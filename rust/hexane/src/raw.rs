@@ -2,7 +2,7 @@
 //!
 //! A [`RawColumn`] is conceptually a giant `Vec<u8>` that supports O(log S)
 //! random splices at any byte offset — where S is the number of slabs, kept
-//! bounded by [`RawColumn::with_max_segments`].  Unlike [`Column`](super::Column)
+//! bounded by [`RawColumn::with_max_segments`].  Unlike [`Column`](crate::Column)
 //! it stores no per-item encoding: the bytes you splice in are the bytes that
 //! come out.
 //!
@@ -14,7 +14,7 @@
 //! callers splice at value boundaries, no value ever crosses a slab — which
 //! is what makes the zero-copy [`RawColumn::get`] API safe.
 
-use super::column::{
+use crate::column::{
     bit_point_update, find_slab_bit, rebuild_bit, splice_bytes, try_merge_range_skeleton,
 };
 use crate::PackError;
@@ -411,7 +411,7 @@ impl RawColumn {
 ///
 /// Returns `(overflow_slabs, overflow_del)`.
 ///
-/// [`ColumnEncoding::splice_slab`]: super::encoding::ColumnEncoding::splice_slab
+/// [`ColumnEncoding::splice_slab`]: crate::encoding::ColumnEncoding::splice_slab
 fn splice_slab(
     slab: &mut RawSlab,
     index: usize,

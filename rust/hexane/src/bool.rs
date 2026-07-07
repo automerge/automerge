@@ -1,9 +1,11 @@
+use crate::column::splice_bytes;
+use crate::encoder::BoolEncoder;
 use crate::PackError;
 
-type Slab = super::column::Slab<u8>;
-use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
-use super::leb::{encode_count, read_count};
-use super::{AsColumnRef, Run};
+type Slab = crate::column::Slab<u8>;
+use crate::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
+use crate::leb::{encode_count, read_count};
+use crate::{AsColumnRef, Run};
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
@@ -293,7 +295,7 @@ pub(crate) fn splice_slab(
 
         raw_suffix = slab_data[suffix.pos..].to_vec(); // save suffix
         let del_bytes = slab_data.len() - prefix.pos;
-        crate::column::splice_bytes(slab_data, prefix.pos, del_bytes, &buf);
+        splice_bytes(slab_data, prefix.pos, del_bytes, &buf);
         slab.len = prefix_item_count + len;
         slab.segments = segments;
         slab.tail = tail;
@@ -343,7 +345,7 @@ pub(crate) fn splice_slab(
         if suffix.segments == 0 {
             slab.tail = tail;
         }
-        crate::column::splice_bytes(slab_data, prefix.pos, suffix.pos - prefix.pos, &buf);
+        splice_bytes(slab_data, prefix.pos, suffix.pos - prefix.pos, &buf);
         slab.len = slab.len - del + items_inserted;
         slab.segments = segments + suffix.segments;
         #[cfg(debug_assertions)]
@@ -546,7 +548,7 @@ impl ColumnEncoding for BoolEncoding {
     }
 
     fn last_run(slab: &Slab) -> Option<Run<bool>> {
-        use super::encoding::RunDecoder;
+        use crate::encoding::RunDecoder;
         if slab.len == 0 {
             return None;
         }
@@ -576,7 +578,7 @@ impl ColumnEncoding for BoolEncoding {
         F: Fn(
             P,
             usize,
-            <<BoolEncoding as ColumnEncoding>::Value as super::ColumnValueRef>::Get<'a>,
+            <<BoolEncoding as ColumnEncoding>::Value as crate::ColumnValueRef>::Get<'a>,
         ) -> Result<P, String>,
     {
         bool_load_and_verify(data, max_segments, validate.as_ref())
@@ -616,10 +618,10 @@ impl ColumnEncoding for BoolEncoding {
         BoolDecoder::new(slab)
     }
 
-    type Encoder<'a> = super::encoder::BoolEncoder;
+    type Encoder<'a> = BoolEncoder;
 
     fn encoder<'a>() -> Self::Encoder<'a> {
-        super::encoder::BoolEncoder::new()
+        BoolEncoder::new()
     }
 }
 
@@ -881,10 +883,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::super::Column;
     use super::Slab;
     use super::{bool_count_segments, find_partition, BoolPartition};
     use crate::leb::{encode_count, read_count};
+    use crate::Column;
 
     fn build_bool(values: &[bool]) -> Column<bool> {
         let mut col = Column::<bool>::new();

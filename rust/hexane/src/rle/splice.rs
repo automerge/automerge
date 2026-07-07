@@ -1,15 +1,16 @@
 //! RLE splice — in-place insert/delete/replace within a slab.
 
+use crate::column::splice_bytes;
 use std::ops::Range;
 
-use super::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
-use super::{RleDecoder, RleTail, Slab};
 use crate::encoding::RunDecoder;
 use crate::leb::{read_signed, read_unsigned, rewrite_lit_header};
+use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
+use crate::rle::{RleDecoder, RleTail, Slab};
 use crate::{AsColumnRef, RleValue};
 
 #[cfg(debug_assertions)]
-use super::validate_rle_slab;
+use crate::rle::validate_rle_slab;
 
 // ── RLE fast splice ─────────────────────────────────────────────────────────
 
@@ -813,7 +814,7 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
 
     // we have to splice before rewrite header so range will be correct
     // (splice_bytes = memcpy-based Vec::splice — see column::splice_bytes)
-    crate::column::splice_bytes(&mut slab.data, range.start, range.len(), &result.bytes);
+    splice_bytes(&mut slab.data, range.start, range.len(), &result.bytes);
 
     if let Some(rw) = result.rewrite {
         prefix += rewrite_lit_header(&mut slab.data, rw.pos, rw.count);

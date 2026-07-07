@@ -2,10 +2,11 @@
 
 use std::num::NonZeroU32;
 
-use super::decoder::{RleDecoder, RleSegment};
-use super::{RleTail, Slab};
 use crate::encoding::SlabInfo;
 use crate::leb::{encode_signed, rewrite_lit_header};
+use crate::rle::decoder::{RleDecoder, RleSegment};
+use crate::rle::{RleTail, Slab};
+use crate::ColumnValueRef;
 use crate::PackError;
 use crate::RleValue;
 
@@ -75,7 +76,7 @@ pub(crate) fn rle_load_and_verify<'a, F, P: Default + Copy, T: RleValue>(
     validate: Option<&F>,
 ) -> Result<Vec<Slab>, PackError>
 where
-    F: Fn(P, usize, <T as super::ColumnValueRef>::Get<'a>) -> Result<P, String>,
+    F: Fn(P, usize, <T as ColumnValueRef>::Get<'a>) -> Result<P, String>,
 {
     let target_segments = max_segments / 2;
     if input.is_empty() {
@@ -200,9 +201,9 @@ impl Slab {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::leb::encode_signed;
     use crate::rle::state::{RleCow, RleState};
+    use crate::rle::*;
     use crate::rle::{RleDecoder, RleEncoding};
     use crate::{Column, ColumnValueRef};
 

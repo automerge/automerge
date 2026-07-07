@@ -1,3 +1,5 @@
+use crate::column::{Slab, DEFAULT_MAX_SEG};
+use crate::rle::{compute_rle_tail, rle_validate_encoding, RleDecoder, RleEncoding, RleTail};
 use crate::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
 use proptest::prelude::*;
 
@@ -2318,7 +2320,7 @@ fn cross_slab_fuzz() {
 // validating the full column invariants after each operation.
 // Marked #[ignore] — run with `cargo test -- --ignored fuzz_`.
 
-use super::encoding::ColumnEncoding;
+use crate::encoding::ColumnEncoding;
 
 /// Validate every invariant on a Column<T>:
 /// - total_len matches sum of slab lens
@@ -2326,7 +2328,7 @@ use super::encoding::ColumnEncoding;
 /// - no slab exceeds max_segments
 /// - each slab's encoding is valid (len, segments match wire data)
 /// - BIT is correct (matches rebuild from scratch)
-fn validate_column<T: super::ColumnValueRef>(col: &Column<T>)
+fn validate_column<T: crate::ColumnValueRef>(col: &Column<T>)
 where
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
@@ -2358,12 +2360,12 @@ where
 
 fn validate_rle_column<T>(col: &Column<T>)
 where
-    T: super::RleValue + super::ColumnValueRef<Encoding = super::rle::RleEncoding<T>>,
+    T: crate::RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
     validate_column(col);
     for (i, slab) in col.slabs.iter().enumerate() {
-        let expected = super::rle::compute_rle_tail::<T>(&slab.data);
+        let expected = compute_rle_tail::<T>(&slab.data);
         assert_eq!(
             slab.tail.lit_tail, expected.lit_tail,
             "slab {i}: tail.lit_tail mismatch"
@@ -2861,79 +2863,79 @@ fn string_splice_variable_length_values() {
 
 #[test]
 fn merge_slab_literal_to_same_value_start() {
-    use super::encoding::{ColumnEncoding, EncoderApi};
+    use crate::encoding::{ColumnEncoding, EncoderApi};
 
     let a_vals: &[u64] = &[1, 2, 3, 4, 5];
     let b_vals: &[u64] = &[5, 5, 5, 6, 7];
-    let mut a = super::Encoder::<u64>::encode_slab(a_vals.iter().copied());
-    let b = super::Encoder::<u64>::encode_slab(b_vals.iter().copied());
+    let mut a = crate::Encoder::<u64>::encode_slab(a_vals.iter().copied());
+    let b = crate::Encoder::<u64>::encode_slab(b_vals.iter().copied());
     validate_rle_column_slab::<u64>(&a);
     validate_rle_column_slab::<u64>(&b);
 
-    super::rle::RleEncoding::<u64>::merge_slabs(&mut a, b);
+    RleEncoding::<u64>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<u64>(&a);
 
-    let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
+    let merged: Vec<u64> = RleDecoder::<u64>::new(&a.data).collect();
     assert_eq!(merged, vec![1, 2, 3, 4, 5, 5, 5, 5, 6, 7]);
 }
 
 #[test]
 fn merge_slab_repeat_to_literal_same_value() {
-    use super::encoding::{ColumnEncoding, EncoderApi};
+    use crate::encoding::{ColumnEncoding, EncoderApi};
 
     let a_vals: &[u64] = &[1, 2, 3, 3, 3];
     let b_vals: &[u64] = &[3, 4, 5];
-    let mut a = super::Encoder::<u64>::encode_slab(a_vals.iter().copied());
-    let b = super::Encoder::<u64>::encode_slab(b_vals.iter().copied());
+    let mut a = crate::Encoder::<u64>::encode_slab(a_vals.iter().copied());
+    let b = crate::Encoder::<u64>::encode_slab(b_vals.iter().copied());
 
-    super::rle::RleEncoding::<u64>::merge_slabs(&mut a, b);
+    RleEncoding::<u64>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<u64>(&a);
 
-    let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
+    let merged: Vec<u64> = RleDecoder::<u64>::new(&a.data).collect();
     assert_eq!(merged, vec![1, 2, 3, 3, 3, 3, 4, 5]);
 }
 
 #[test]
 fn merge_slab_literal_to_literal_same_value() {
-    use super::encoding::{ColumnEncoding, EncoderApi};
+    use crate::encoding::{ColumnEncoding, EncoderApi};
 
     let a_vals: &[u64] = &[1, 2, 5];
     let b_vals: &[u64] = &[5, 3, 4];
-    let mut a = super::Encoder::<u64>::encode_slab(a_vals.iter().copied());
-    let b = super::Encoder::<u64>::encode_slab(b_vals.iter().copied());
+    let mut a = crate::Encoder::<u64>::encode_slab(a_vals.iter().copied());
+    let b = crate::Encoder::<u64>::encode_slab(b_vals.iter().copied());
 
-    super::rle::RleEncoding::<u64>::merge_slabs(&mut a, b);
+    RleEncoding::<u64>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<u64>(&a);
 
-    let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
+    let merged: Vec<u64> = RleDecoder::<u64>::new(&a.data).collect();
     assert_eq!(merged, vec![1, 2, 5, 5, 3, 4]);
 }
 
 #[test]
 fn merge_slab_string_literal_boundary() {
-    use super::encoding::{ColumnEncoding, EncoderApi};
+    use crate::encoding::{ColumnEncoding, EncoderApi};
 
-    let mut a = super::Encoder::<String>::encode_slab(["x", "y", "hello"]);
-    let b = super::Encoder::<String>::encode_slab(["hello", "hello", "world"]);
+    let mut a = crate::Encoder::<String>::encode_slab(["x", "y", "hello"]);
+    let b = crate::Encoder::<String>::encode_slab(["hello", "hello", "world"]);
 
-    super::rle::RleEncoding::<String>::merge_slabs(&mut a, b);
+    RleEncoding::<String>::merge_slabs(&mut a, b);
     validate_rle_column_slab::<String>(&a);
 
-    let merged: Vec<&str> = super::rle::RleDecoder::<String>::new(&a.data).collect();
+    let merged: Vec<&str> = RleDecoder::<String>::new(&a.data).collect();
     assert_eq!(merged, vec!["x", "y", "hello", "hello", "hello", "world"]);
 }
 
 /// Validate a single RLE slab (encoding + tail).
-fn validate_rle_column_slab<T>(slab: &super::column::Slab<super::rle::RleTail>)
+fn validate_rle_column_slab<T>(slab: &Slab<RleTail>)
 where
-    T: super::RleValue + super::ColumnValueRef<Encoding = super::rle::RleEncoding<T>>,
+    T: crate::RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
-    let info = super::rle::rle_validate_encoding::<T>(&slab.data)
+    let info = rle_validate_encoding::<T>(&slab.data)
         .unwrap_or_else(|e| panic!("slab encoding invalid: {e}"));
     assert_eq!(slab.len, info.len, "len mismatch");
     assert_eq!(slab.segments, info.segments, "segments mismatch");
-    let expected_tail = super::rle::compute_rle_tail::<T>(&slab.data);
+    let expected_tail = compute_rle_tail::<T>(&slab.data);
     assert_eq!(slab.tail.bytes, expected_tail.bytes, "tail.bytes mismatch");
     assert_eq!(
         slab.tail.lit_tail, expected_tail.lit_tail,
@@ -3531,7 +3533,7 @@ fn fuzz_scope_to_value_nullable() {
 
 fn check_slab_merge_invariant<T: ColumnValueRef>(col: &Column<T>, context: &str) {
     let segs = col.slab_segments();
-    let max = crate::column::DEFAULT_MAX_SEG;
+    let max = DEFAULT_MAX_SEG;
     let min = max / 4;
     for i in 0..segs.len() {
         if segs[i] < min {

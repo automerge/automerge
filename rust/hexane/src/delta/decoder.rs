@@ -1,22 +1,22 @@
 //! Streaming decoder for delta-encoded column bytes.
 //!
-//! Counterpart to [`DeltaEncoder`](super::DeltaEncoder).  Reads raw
+//! Counterpart to [`DeltaEncoder`](crate::delta::DeltaEncoder).  Reads raw
 //! `Option<i64>` deltas from a byte slice and accumulates them into
-//! realised `T` values, without allocating a [`DeltaColumn`](super::DeltaColumn) or its
+//! realised `T` values, without allocating a [`DeltaColumn`](crate::delta::DeltaColumn) or its
 //! slab/B-tree index.  Use this when a single linear pass is all you
-//! need — `DeltaColumn::load` + [`DeltaIter`](super::DeltaIter) is the
+//! need — `DeltaColumn::load` + [`DeltaIter`](crate::delta::DeltaIter) is the
 //! heavier alternative for when you also want random access.
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use super::DeltaValue;
+use crate::delta::DeltaValue;
 
 /// Streaming decoder over delta-encoded column bytes.  See module docs.
 ///
 /// `next()` is O(1) per item.  There is no `nth` fast path because this
 /// decoder doesn't have an index to consult — for skipping, build a
-/// [`DeltaColumn`](super::DeltaColumn) instead.
+/// [`DeltaColumn`](crate::delta::DeltaColumn) instead.
 #[derive(Clone)]
 pub struct DeltaDecoder<'a, T: DeltaValue> {
     inner: crate::Decoder<'a, Option<i64>>,
@@ -60,15 +60,16 @@ impl<T: DeltaValue> Debug for DeltaDecoder<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::DeltaColumn;
-    use super::DeltaDecoder;
+    use crate::delta::DeltaDecoder;
+    use crate::delta::DeltaValue;
+    use crate::DeltaColumn;
 
     /// Round-trip parity: bytes saved by `DeltaColumn::save` should
     /// decode to the same sequence via `DeltaDecoder` as via
     /// `DeltaColumn::load(...).iter()`.
     fn parity<T>(values: Vec<T>)
     where
-        T: super::DeltaValue + PartialEq + std::fmt::Debug,
+        T: DeltaValue + PartialEq + std::fmt::Debug,
     {
         let col = DeltaColumn::<T>::from_values(values.clone());
         let bytes = col.save();
