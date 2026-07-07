@@ -237,7 +237,8 @@ impl MarkIndexColumn {
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         let new_values: Vec<Option<MarkIdx>> = self
             .data
-            .value_iter()
+            .values()
+            .iter()
             .map(|v| v.map(|m| m.with_new_actor(idx)))
             .collect();
         let new_cache = self
@@ -358,7 +359,8 @@ pub(crate) mod tests {
     /// Find the column positions of Start and End entries for a given OpId.
     fn find_mark_positions(col: &MarkIndexColumn, target: OpId) -> Vec<usize> {
         col.data
-            .value_iter()
+            .values()
+            .iter()
             .enumerate()
             .filter_map(|(pos, val)| match val {
                 Some(MarkIdx::Start(idv)) | Some(MarkIdx::End(idv)) if idv == target => Some(pos),

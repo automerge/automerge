@@ -452,7 +452,7 @@ impl OpSet {
                 .cols
                 .insert
                 .iter_range(range.clone())
-                .map(|(prefix, _)| prefix);
+                .map(|pv| pv.total());
             SkipIter::new(insert, vis).dedup().count()
         } else {
             let key = self.cols.key_str.iter_range(range.clone());
@@ -501,9 +501,9 @@ impl OpSet {
         let mut found: Vec<(MarkIdx, usize)> = vec![];
 
         while let Some(run) = text_iter.next_run() {
-            match run.value {
-                (_prefix, None) => (), // deleted chars
-                (_prefix, Some(0)) => {
+            match run.value.value {
+                None => (), // deleted chars
+                Some(0) => {
                     for i in 0..run.count {
                         let p = pos + i + 1;
                         let e = expand.shift_next(p..end)?;
@@ -681,12 +681,12 @@ impl OpSet {
         let at_pos = iter.nth(pos);
         let next_run = iter.next_run();
         match (at_pos, next_run) {
-            (Some((_, insert)), Some(run)) if insert && !run.value.1 => pos..pos + run.count + 1,
-            (Some((_, insert)), _) if insert => pos..pos + 1,
-            (Some((pre, _)), run) => {
-                let start = self.cols.insert.get_index_for_total(pre);
+            (Some(pv), Some(run)) if pv.value && !run.value.value => pos..pos + run.count + 1,
+            (Some(pv), _) if pv.value => pos..pos + 1,
+            (Some(pv), run) => {
+                let start = self.cols.insert.get_index_for_total(pv.total());
                 match run {
-                    Some(run) if !run.value.1 => start..pos + run.count + 1,
+                    Some(run) if !run.value.value => start..pos + run.count + 1,
                     _ => start..pos + 1,
                 }
             }
@@ -989,10 +989,10 @@ impl OpSet {
     }
 
     pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
-        if let Some((prefix, count)) = self.cols.succ_count.get(pos) {
-            let start = (prefix - count as u64) as usize;
-            let len = count as usize;
-            let end = prefix as usize;
+        if let Some(sc) = self.cols.succ_count.get(pos) {
+            let start = sc.prefix() as usize;
+            let len = sc.value as usize;
+            let end = sc.total() as usize;
             let succ = SuccCursors {
                 len,
                 succ_actor: self.cols.succ_actor.iter_range(start..end),
@@ -1619,7 +1619,7 @@ mod tests {
 
         // first encode the succs
         for test_op in test_ops {
-            let (_prefix, group_count) = group_iter.next().unwrap();
+            let group_count = group_iter.next().unwrap().value;
             let op = super::super::op::Op {
                 pos: 0,
                 id: test_op.id,

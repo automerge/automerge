@@ -337,9 +337,8 @@ impl ChangeGraph {
             let num_ops = self.num_ops.get(i).unwrap_or_default();
             let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
-            let (meta_prefix, meta_value) = self.extra_bytes_meta.get(i).unwrap();
-            let meta_start = meta_prefix as usize;
-            let meta_range = meta_start..(meta_start + meta_value.length());
+            let meta = self.extra_bytes_meta.get(i).unwrap();
+            let meta_range = meta.prefix() as usize..meta.total() as usize;
             let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
             let deps = self
@@ -415,9 +414,8 @@ impl ChangeGraph {
                 let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
                 // FIXME - this needs a test
-                let (meta_prefix, meta_value) = self.extra_bytes_meta.get(i).unwrap();
-                let meta_start = meta_prefix as usize;
-                let meta_range = meta_start..(meta_start + meta_value.length());
+                let meta = self.extra_bytes_meta.get(i).unwrap();
+                let meta_range = meta.prefix() as usize..meta.total() as usize;
                 let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
                 let deps = self.parents(index).map(|p| p.0 as u64).collect::<Vec<_>>();
@@ -1078,9 +1076,8 @@ impl<'a> Iterator for ChangeIter<'a> {
 
         let start_op = max_op - num_ops + 1;
 
-        let (meta_prefix, meta_value) = self.extra_bytes_meta.next()?;
-        let meta_start = meta_prefix as usize;
-        let meta_range = meta_start..(meta_start + meta_value.length());
+        let meta = self.extra_bytes_meta.next()?;
+        let meta_range = meta.prefix() as usize..meta.total() as usize;
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
         let deps = self
             .graph

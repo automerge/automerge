@@ -144,35 +144,35 @@ mod tests {
         ];
         let col = PrefixColumn::<ValueMeta>::from_values(data);
 
-        // PrefixIter yields (inclusive_prefix, value) — running sum of length()
-        // up to and including the current item.
+        // PrefixIter yields PrefixedValues; total() is the running sum of
+        // length() up to and including the current item.
         let mut iter = col.iter();
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(1));
-        assert_eq!(acc, 0);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(1));
+        assert_eq!(pv.total(), 0);
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(6 + (30 << 4)));
-        assert_eq!(acc, 30);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(6 + (30 << 4)));
+        assert_eq!(pv.total(), 30);
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(6 + (10 << 4)));
-        assert_eq!(acc, 40);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(6 + (10 << 4)));
+        assert_eq!(pv.total(), 40);
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(3));
-        assert_eq!(acc, 40);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(3));
+        assert_eq!(pv.total(), 40);
 
         // nth(3) jumps to index 3 (the fourth item)
-        let (acc, v) = col.iter().nth(3).unwrap();
-        assert_eq!(v, ValueMeta(3));
-        assert_eq!(acc, 40);
+        let pv = col.iter().nth(3).unwrap();
+        assert_eq!(pv.value, ValueMeta(3));
+        assert_eq!(pv.total(), 40);
 
         // iter_range(3..5) starts at index 3 with the cumulative prefix carried
         let mut iter = col.iter_range(3..5);
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(3));
-        assert_eq!(acc, 40);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(3));
+        assert_eq!(pv.total(), 40);
     }
 }

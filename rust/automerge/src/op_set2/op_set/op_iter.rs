@@ -831,11 +831,10 @@ impl ValueIterState {
 
 impl Shiftable for ValueIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let (prefix, meta) = self.meta.shift_next(range)?;
-        let length = meta.length();
-        let value_advance = prefix as usize - length;
-        self.raw.seek_to(value_advance);
-        let raw = self.raw.take(length);
+        let pv = self.meta.shift_next(range)?;
+        let meta = pv.value;
+        self.raw.seek_to(pv.prefix() as usize);
+        let raw = self.raw.take(meta.length());
         ScalarValue::from_raw(meta, raw).ok()
     }
 }
@@ -849,10 +848,11 @@ impl<'a> ValueIter<'a> {
     }
 
     pub(crate) fn try_next(&mut self) -> Result<ScalarValue<'a>, ReadOpError> {
-        let (_prefix, meta) = self
+        let meta = self
             .meta
             .next()
-            .ok_or(ReadOpError::MissingValue("value_meta"))?;
+            .ok_or(ReadOpError::MissingValue("value_meta"))?
+            .value;
         let raw = self.raw.take(meta.length());
         Ok(ScalarValue::from_raw(meta, raw)?)
     }
@@ -861,14 +861,13 @@ impl<'a> ValueIter<'a> {
         if n == 0 {
             self.try_next()
         } else {
-            let (prefix, meta) = self
+            let pv = self
                 .meta
                 .nth(n)
                 .ok_or(ReadOpError::MissingValue("value_meta"))?;
-            let raw_len = meta.length();
-            let raw_pos = prefix as usize;
-            self.raw.seek_to(raw_pos - raw_len);
-            let raw = self.raw.take(raw_len);
+            let meta = pv.value;
+            self.raw.seek_to(pv.prefix() as usize);
+            let raw = self.raw.take(meta.length());
             Ok(ScalarValue::from_raw(meta, raw)?)
         }
     }
@@ -921,13 +920,13 @@ impl SuccIterIterState {
 
 impl<'a> SuccIterIter<'a> {
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let (prefix, num_succ) = self.count.shift_next(range)?;
-        let num_succ = num_succ as usize;
-        let sub_pos = prefix as usize;
+        let pv = self.count.shift_next(range)?;
+        let num_succ = pv.value as usize;
+        let sub_start = pv.prefix() as usize;
 
-        self.actor.advance_to(sub_pos - num_succ);
-        self.ctr.advance_to(sub_pos - num_succ);
-        self.incs.advance_to(sub_pos - num_succ);
+        self.actor.advance_to(sub_start);
+        self.ctr.advance_to(sub_start);
+        self.incs.advance_to(sub_start);
 
         let iter = SuccCursors {
             len: num_succ,
@@ -959,11 +958,11 @@ impl<'a> SuccIterIter<'a> {
 
     #[inline(never)]
     pub(crate) fn try_next(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let (_prefix, num_succ) = self
+        let num_succ = self
             .count
             .next()
-            .ok_or(ReadOpError::MissingValue("succ_count"))?;
-        let num_succ = num_succ as usize;
+            .ok_or(ReadOpError::MissingValue("succ_count"))?
+            .value as usize;
 
         let result = SuccCursors {
             len: num_succ,
@@ -983,13 +982,12 @@ impl<'a> SuccIterIter<'a> {
         if n == 0 {
             self.try_next()
         } else {
-            let (prefix, num_succ) = self
+            let pv = self
                 .count
                 .nth(n)
                 .ok_or(ReadOpError::MissingValue("succ_count"))?;
-            let num_succ = num_succ as usize;
-            let sub_pos = prefix as usize;
-            let items_before = sub_pos - num_succ;
+            let num_succ = pv.value as usize;
+            let items_before = pv.prefix() as usize;
             let actor_pos = self.actor.pos();
             let seek = items_before - actor_pos;
 

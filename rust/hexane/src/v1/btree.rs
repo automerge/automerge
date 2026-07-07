@@ -1301,8 +1301,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let live = slot.is_some();
             let reach = reachable[i];
             let freed = free_set.contains(&(i as NodeId));
-            assert!(!(reach && !live), "node {i}: reachable but freed");
-            assert!(!(live && !reach), "node {i}: live but unreachable (leak)");
+            assert!(!reach || live, "node {i}: reachable but freed");
+            assert!(!live || reach, "node {i}: live but unreachable (leak)");
             assert!(!(live && freed), "node {i}: live but on free list");
             assert!(live || freed, "node {i}: dead but not on free list");
         }

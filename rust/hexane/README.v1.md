@@ -71,9 +71,11 @@ assert_eq!(col.prefix_delta(1..3), 10);  // 3 + 7
 // First index where the prefix sum reaches `target`
 assert_eq!(col.get_index_for_prefix(10), 2);
 
-// Walk items paired with their running prefix sum
-for (prefix, value) in col.iter() {
-    println!("{value} (prefix so far: {prefix})");
+// Walk items paired with their running prefix sum.  Each item is a
+// PrefixedValue: .prefix() is the sum BEFORE the item (exclusive),
+// .total() the sum THROUGH it (inclusive).
+for pv in col.iter() {
+    println!("{} (range: {}..{})", pv.value, pv.prefix(), pv.total());
 }
 ```
 
@@ -331,7 +333,7 @@ In the current API, `PrefixColumn<T>` answers the same questions in O(log n):
 | `iter.shift_acc(n)` | `iter.advance_prefix(n)` |
 | `col.get_acc_delta(start, pos)` | `iter.advance_to(pos)` (on a `PrefixIter`) |
 | `col.get_acc(pos)` | `col.get_prefix(pos)` |
-| `iter.with_acc()` | `col.iter()` already yields `(prefix, value)` pairs |
+| `iter.with_acc()` | `col.iter()` yields `PrefixedValue`s (`.value`, `.prefix()`, `.total()`) |
 
 Convenience shorthands `col.seek(start, n)` and `col.get_delta(start, pos)`
 wrap iterator construction for one-shot lookups.

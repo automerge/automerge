@@ -1724,7 +1724,7 @@ mod prefix_iter_random {
     fn v1_prefix_iter_10k(bencher: Bencher) {
         let col = build_v1_prefix(10_000);
         bencher.bench_local(|| {
-            let sum: u128 = col.iter().map(|(p, _)| p).last().unwrap_or(0);
+            let sum: u128 = col.iter().map(|pv| pv.total()).last().unwrap_or(0);
             std::hint::black_box(sum)
         });
     }
@@ -1749,7 +1749,7 @@ mod prefix_iter_random {
     fn v1_prefix_iter_100k(bencher: Bencher) {
         let col = build_v1_prefix(100_000);
         bencher.bench_local(|| {
-            let sum: u128 = col.iter().map(|(p, _)| p).last().unwrap_or(0);
+            let sum: u128 = col.iter().map(|pv| pv.total()).last().unwrap_or(0);
             std::hint::black_box(sum)
         });
     }
@@ -1784,7 +1784,7 @@ mod prefix_iter_runs {
     fn v1_prefix_iter_1m(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
         bencher.bench_local(|| {
-            let sum: u128 = col.iter().map(|(p, _)| p).last().unwrap_or(0);
+            let sum: u128 = col.iter().map(|pv| pv.total()).last().unwrap_or(0);
             std::hint::black_box(sum)
         });
     }
@@ -2055,8 +2055,8 @@ mod iter_range_next {
         bencher.bench_local(|| {
             let mut acc = 0i64;
             for r in ranges() {
-                if let Some((_prefix, v)) = c.iter_range(r).next() {
-                    acc = acc.wrapping_add(v);
+                if let Some(pv) = c.iter_range(r).next() {
+                    acc = acc.wrapping_add(pv.value);
                 }
             }
             std::hint::black_box(acc)

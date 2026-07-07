@@ -610,25 +610,26 @@ fn prefix_iter_pos_and_shift_next() {
     let mut iter = col.iter_range(0..4);
     assert_eq!(iter.pos(), 0);
 
-    let (prefix, val) = iter.next().unwrap();
-    assert_eq!(val, 1);
-    assert_eq!(prefix, 1);
+    let pv = iter.next().unwrap();
+    assert_eq!(pv.value, 1);
+    assert_eq!(pv.total(), 1); // inclusive: through item 0
+    assert_eq!(pv.prefix(), 0); // exclusive: before item 0
     assert_eq!(iter.pos(), 1);
 
     // shift_next to 5..8
-    let result = iter.shift_next(5..8);
-    let (prefix, val) = result.unwrap();
-    assert_eq!(val, 6);
-    assert_eq!(prefix, 1 + 2 + 3 + 4 + 5 + 6); // prefix through item 5
+    let pv = iter.shift_next(5..8).unwrap();
+    assert_eq!(pv.value, 6);
+    assert_eq!(pv.total(), 1 + 2 + 3 + 4 + 5 + 6); // through item 5
+    assert_eq!(pv.prefix(), 1 + 2 + 3 + 4 + 5); // before item 5
     assert_eq!(iter.pos(), 6);
 
-    let (prefix, val) = iter.next().unwrap();
-    assert_eq!(val, 7);
-    assert_eq!(prefix, 1 + 2 + 3 + 4 + 5 + 6 + 7);
+    let pv = iter.next().unwrap();
+    assert_eq!(pv.value, 7);
+    assert_eq!(pv.total(), 1 + 2 + 3 + 4 + 5 + 6 + 7);
 
-    let (prefix, val) = iter.next().unwrap();
-    assert_eq!(val, 8);
-    assert_eq!(prefix, 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8);
+    let pv = iter.next().unwrap();
+    assert_eq!(pv.value, 8);
+    assert_eq!(pv.total(), 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8);
 
     assert!(iter.next().is_none());
 }
@@ -1720,7 +1721,7 @@ fn prefix_iter_range_matches_inner_iter_range() {
     for start in 0..20 {
         for end in start..=20 {
             let inner_vals: Vec<u64> = col.values().iter_range(start..end).collect();
-            let prefix_vals: Vec<u64> = col.iter_range(start..end).map(|(_, v)| v).collect();
+            let prefix_vals: Vec<u64> = col.iter_range(start..end).map(|pv| pv.value).collect();
             assert_eq!(
                 inner_vals, prefix_vals,
                 "iter_range({start}..{end}) mismatch"
@@ -1740,7 +1741,7 @@ fn prefix_iter_values_match_v0() {
         .map(|v| v.unwrap_or_default().into_owned())
         .collect();
     // v1 prefix iter values (drop prefix)
-    let v1_vals: Vec<u64> = v1.iter().map(|(_, v)| v).collect();
+    let v1_vals: Vec<u64> = v1.iter().map(|pv| pv.value).collect();
     assert_eq!(v0_vals, v1_vals);
 }
 
@@ -1755,7 +1756,8 @@ fn prefix_iter_acc_matches_v0_with_acc() {
     let v1_items: Vec<_> = v1.iter().collect();
 
     assert_eq!(v0_items.len(), v1_items.len());
-    for (i, (v0i, &(v1_total, v1_val))) in v0_items.iter().zip(v1_items.iter()).enumerate() {
+    for (i, (v0i, v1pv)) in v0_items.iter().zip(v1_items.iter()).enumerate() {
+        let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
         let v0_val = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
         assert_eq!(v0_val, v1_val, "value mismatch at {i}");
         // v0 acc_before + val == v1 prefix_through
@@ -1779,8 +1781,8 @@ fn prefix_iter_range_acc_matches_v0() {
                 "len mismatch for {start}..{end}"
             );
 
-            for (i, (v0i, &(v1_total, v1_val))) in v0_items.iter().zip(v1_items.iter()).enumerate()
-            {
+            for (i, (v0i, v1pv)) in v0_items.iter().zip(v1_items.iter()).enumerate() {
+                let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
                 let v0_val = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
                 assert_eq!(
                     v0_val, v1_val,
@@ -1805,8 +1807,8 @@ fn prefix_iter_nth_matches_v0() {
     let v0_all: Vec<_> = v0.iter().with_acc().collect();
 
     for (skip, v0_item) in v0_all.iter().take(10).enumerate() {
-        let v1_result = v1.iter().nth(skip);
-        let (v1_total, v1_val) = v1_result.unwrap();
+        let v1pv = v1.iter().nth(skip).unwrap();
+        let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
         let v0_val = v0_item.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
         assert_eq!(v0_val, v1_val, "nth({skip}) value mismatch");
         let v0_acc_through = v0_item.acc.as_u64() as u128 + v0_val as u128;
@@ -1882,9 +1884,16 @@ fn prefix_ground_truth(vals: &[u64], max_seg: usize) -> (PrefixColumn<u64>, Vec<
     for &v in vals {
         col.push(v);
     }
-    let all: Vec<_> = col.iter().collect();
+    // Owned (total, value) tuples — a Vec<PrefixedValue> would borrow `col`.
+    let all: Vec<(u128, u64)> = col.iter().map(tv).collect();
     assert_eq!(all.len(), vals.len());
     (col, all)
+}
+
+/// `(total, value)` view of a [`PrefixedValue`] for comparison against
+/// owned ground-truth tuples.
+fn tv(pv: crate::v1::PrefixedValue<'_, u64>) -> (u128, u64) {
+    (pv.total(), pv.value)
 }
 
 #[allow(clippy::iter_nth_zero)]
@@ -1947,13 +1956,13 @@ fn prefix_nth_bit_traversal() {
     // nth that crosses slab boundary
     let mut iter = col.iter();
     let mid = all.len() / 2;
-    assert_eq!(iter.nth(mid).unwrap(), all[mid]);
-    assert_eq!(iter.next().unwrap(), all[mid + 1]);
+    assert_eq!(tv(iter.nth(mid).unwrap()), all[mid]);
+    assert_eq!(tv(iter.next().unwrap()), all[mid + 1]);
 
     // nth to last item via BIT
     let mut iter = col.iter();
     let last = all.len() - 1;
-    assert_eq!(iter.nth(last).unwrap(), all[last]);
+    assert_eq!(tv(iter.nth(last).unwrap()), all[last]);
     assert!(iter.next().is_none());
 }
 
@@ -1977,7 +1986,7 @@ fn prefix_nth_exhaustive_vs_next() {
 
     for (i, expected) in all.iter().enumerate() {
         let result = col.iter().nth(i);
-        assert_eq!(result.unwrap(), *expected, "nth({}) mismatch", i);
+        assert_eq!(tv(result.unwrap()), *expected, "nth({}) mismatch", i);
     }
     assert!(col.iter().nth(vals.len()).is_none());
 }
@@ -2080,10 +2089,10 @@ fn prefix_shift_next_multi_slab() {
     // Jump to middle of a later slab
     let mid = 15;
     let shifted = iter.shift_next(mid..30).unwrap();
-    assert_eq!(shifted, all[mid], "shift_next to mid of multi-slab");
+    assert_eq!(tv(shifted), all[mid], "shift_next to mid of multi-slab");
 
     // Verify remaining iteration
-    let remaining: Vec<_> = iter.collect();
+    let remaining: Vec<_> = iter.map(tv).collect();
     let expected: Vec<_> = all[mid + 1..].to_vec();
     assert_eq!(remaining, expected);
 }
@@ -2128,7 +2137,7 @@ proptest! {
 
         // 1. iter_range values match inner
         let inner_vals: Vec<u64> = v1.values().iter().collect();
-        let prefix_vals: Vec<u64> = v1.iter().map(|(_, v)| v).collect();
+        let prefix_vals: Vec<u64> = v1.iter().map(|pv| pv.value).collect();
         prop_assert_eq!(&inner_vals, &prefix_vals);
         prop_assert_eq!(&inner_vals, &values);
 
@@ -2136,7 +2145,8 @@ proptest! {
         let v0_items: Vec<_> = v0.iter().with_acc().collect();
         let v1_items: Vec<_> = v1.iter().collect();
         prop_assert_eq!(v0_items.len(), v1_items.len());
-        for (i, (v0i, &(v1_total, v1_val))) in v0_items.iter().zip(v1_items.iter()).enumerate() {
+        for (i, (v0i, v1pv)) in v0_items.iter().zip(v1_items.iter()).enumerate() {
+            let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
             let v0_val = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
             prop_assert_eq!(v0_val, v1_val, "value mismatch at {}", i);
             let v0_acc_through = v0i.acc.as_u64() as u128 + v0_val as u128;
@@ -2150,7 +2160,8 @@ proptest! {
             let v0_sub: Vec<_> = v0.iter_range(s..e).with_acc().collect();
             let v1_sub: Vec<_> = v1.iter_range(s..e).collect();
             prop_assert_eq!(v0_sub.len(), v1_sub.len(), "range len mismatch for {}..{}", s, e);
-            for (j, (v0j, &(v1p, v1v))) in v0_sub.iter().zip(v1_sub.iter()).enumerate() {
+            for (j, (v0j, v1pv)) in v0_sub.iter().zip(v1_sub.iter()).enumerate() {
+                let (v1p, v1v) = (v1pv.total(), v1pv.value);
                 let v0v = v0j.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
                 prop_assert_eq!(v0v, v1v, "range value at {}", j);
                 let v0at = v0j.acc.as_u64() as u128 + v0v as u128;
@@ -2161,8 +2172,8 @@ proptest! {
         // 4. nth consistency
         for skip in [0, 1, n / 2, n.saturating_sub(1)] {
             if skip < n {
-                let v1_nth = v1.iter().nth(skip);
-                let (v1p, v1v) = v1_nth.unwrap();
+                let v1pv = v1.iter().nth(skip).unwrap();
+                let (v1p, v1v) = (v1pv.total(), v1pv.value);
                 let v0i = &v0_items[skip];
                 let v0v = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
                 prop_assert_eq!(v0v, v1v, "nth({}) value", skip);

@@ -56,7 +56,7 @@ pub use encoding::ColumnEncoding;
 pub use encoding::EncoderApi;
 pub use encoding::RunDecoder;
 pub use load_opts::{LoadOpts, TypedLoadOpts};
-pub use prefix::{PrefixColumn, PrefixIter, PrefixIterState, PrefixValue};
+pub use prefix::{PrefixColumn, PrefixIter, PrefixIterState, PrefixValue, PrefixedValue};
 pub use raw::{RawColumn, RawColumnIter};
 
 #[cfg(test)]
@@ -184,7 +184,7 @@ impl<T: ColumnValue> ColumnValueRef for T {
     fn eq(a: T, b: T) -> bool {
         a == b
     }
-    fn shorten<'s>(v: &'s T) -> T {
+    fn shorten(v: &T) -> T {
         *v
     }
 }
@@ -324,7 +324,7 @@ impl ColumnValueRef for bool {
     fn eq(a: bool, b: bool) -> bool {
         a == b
     }
-    fn shorten<'s>(v: &'s bool) -> bool {
+    fn shorten(v: &bool) -> bool {
         *v
     }
 }

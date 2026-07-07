@@ -398,10 +398,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.is_empty()
     }
 
-    pub fn get_value(&self, index: usize) -> Option<T::Get<'_>> {
-        self.col.get(index)
-    }
-
     pub fn save(&self) -> Vec<u8> {
         self.col.save()
     }
@@ -438,11 +434,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
         I: IntoIterator<Item = V>,
     {
         self.col.splice(index, del, values);
-    }
-
-    /// Iterator over raw values (no prefix accumulation).
-    pub fn value_iter(&self) -> super::column::Iter<'_, T> {
-        self.col.iter()
     }
 
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────
@@ -536,8 +527,13 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.to_vec()
     }
 
-    /// Reference to the inner `Column` — for code that needs Column-level
-    /// operations (iter, get, etc.) without going through the prefix APIs.
+    /// Reference to the inner `Column` — the gateway for value-level
+    /// reads that don't need prefix sums:
+    ///
+    /// * `col.values().get(i)` — value at `i`
+    /// * `col.values().iter()` / `.iter_range(a..b)` — plain value iteration
+    ///
+    /// (`PrefixColumn::get` / `iter` return [`PrefixedValue`]s.)
     pub fn values(&self) -> &Column<T, PrefixWeightFn<T>> {
         &self.col
     }
@@ -547,12 +543,12 @@ impl<T: PrefixValue> PrefixColumn<T> {
         Self { col }
     }
 
-    /// Returns `(prefix, value)` at `index` via the iterator.
-    pub fn get(&self, index: usize) -> Option<(T::Prefix, T::Get<'_>)> {
+    /// Returns the [`PrefixedValue`] at `index` via the iterator.
+    pub fn get(&self, index: usize) -> Option<PrefixedValue<'_, T>> {
         self.iter().nth(index)
     }
 
-    /// Iterator that yields `(inclusive_prefix, value)` per item.
+    /// Iterator yielding a [`PrefixedValue`] per item.
     pub fn iter(&self) -> PrefixIter<'_, T> {
         PrefixIter {
             col: Some(self),
@@ -578,6 +574,76 @@ impl<T: PrefixValue> PrefixColumn<T> {
 ///
 /// `next()` is O(1): accumulates the total from the yielded value.
 /// `nth(n)` is O(log S) via the B-tree.
+/// A value paired with its running prefix sum — the item type of
+/// [`PrefixIter`] and return type of [`PrefixColumn::get`].
+///
+/// Both views of the accumulator are available as methods, named to make
+/// the inclusive/exclusive distinction impossible to miss:
+///
+/// * [`prefix()`](Self::prefix) — running sum **before** this item
+///   (exclusive).
+/// * [`total()`](Self::total) — running sum **through** this item
+///   (inclusive).
+///
+/// With unit widths `[1, 1, 1]`, item 1 has `prefix() == 1` and
+/// `total() == 2`.  A byte-offset column reads naturally as
+/// `pv.prefix()..pv.total()` — the item's byte range.
+///
+/// For run-shaped access ([`PrefixIter::next_run`]) the `PrefixedValue`
+/// describes the run's **final** item: `total()` is the sum through the
+/// end of the run, `prefix()` the sum before that last item.
+pub struct PrefixedValue<'a, T: PrefixValue> {
+    /// The item's value.
+    pub value: T::Get<'a>,
+    total: T::Prefix,
+}
+
+impl<'a, T: PrefixValue> PrefixedValue<'a, T> {
+    /// Running sum **through** this item (inclusive).
+    #[inline]
+    pub fn total(&self) -> T::Prefix {
+        self.total.clone()
+    }
+
+    /// Running sum of the items **before** this one (exclusive) —
+    /// `total()` minus this value's own contribution.
+    #[inline]
+    pub fn prefix(&self) -> T::Prefix {
+        let mut single = T::Prefix::default();
+        T::accumulate(&mut single, self.value);
+        self.total.clone() - single
+    }
+}
+
+impl<'a, T: PrefixValue> Clone for PrefixedValue<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value,
+            total: self.total.clone(),
+        }
+    }
+}
+
+impl<'a, T: PrefixValue> Copy for PrefixedValue<'a, T> where T::Prefix: Copy {}
+
+impl<'a, T: PrefixValue> std::fmt::Debug for PrefixedValue<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrefixedValue")
+            .field("value", &self.value)
+            .field("total", &self.total)
+            .finish()
+    }
+}
+
+impl<'a, T: PrefixValue> PartialEq for PrefixedValue<'a, T>
+where
+    T::Prefix: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        T::eq(self.value, other.value) && self.total == other.total
+    }
+}
+
 pub struct PrefixIter<'a, T: PrefixValue> {
     col: Option<&'a PrefixColumn<T>>,
     inner: Iter<'a, T>,
@@ -614,13 +680,16 @@ impl<T: PrefixValue> std::fmt::Debug for PrefixIter<'_, T> {
 }
 
 impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
-    type Item = (T::Prefix, T::Get<'a>);
+    type Item = PrefixedValue<'a, T>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let val = self.inner.next()?;
-        T::accumulate(&mut self.total, val);
-        Some((self.total.clone(), val))
+        let value = self.inner.next()?;
+        T::accumulate(&mut self.total, value);
+        Some(PrefixedValue {
+            value,
+            total: self.total.clone(),
+        })
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -658,11 +727,14 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
 impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
 
 impl<'a, T: PrefixValue> PrefixIter<'a, T> {
-    fn same_slab_nth(&mut self, mut n: usize) -> (T::Prefix, T::Get<'a>) {
+    fn same_slab_nth(&mut self, mut n: usize) -> PrefixedValue<'a, T> {
         while let Some(run) = self.inner.next_run_max(n + 1) {
             T::accumulate_run(&mut self.total, &run);
             if run.count > n {
-                return (self.total.clone(), run.value);
+                return PrefixedValue {
+                    value: run.value,
+                    total: self.total.clone(),
+                };
             }
             n -= run.count;
         }
@@ -707,20 +779,23 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     /// through `range.end - 1`.
     ///
     /// Panics if `range.start < self.pos()`.
-    pub fn shift_next(&mut self, range: std::ops::Range<usize>) -> Option<(T::Prefix, T::Get<'a>)> {
+    pub fn shift_next(&mut self, range: std::ops::Range<usize>) -> Option<PrefixedValue<'a, T>> {
         assert!(range.start >= self.pos());
         self.set_max(range.end);
         self.nth(range.start - self.pos())
     }
 
-    /// Next run of identical values, paired with the inclusive total at
-    /// the *end* of the run.
-    pub fn next_run(&mut self) -> Option<Run<(T::Prefix, T::Get<'a>)>> {
+    /// Next run of identical values as a [`PrefixedValue`] describing the
+    /// run's final item: `total()` is the sum through the end of the run.
+    pub fn next_run(&mut self) -> Option<Run<PrefixedValue<'a, T>>> {
         let run = self.inner.next_run()?;
         T::accumulate_run(&mut self.total, &run);
         Some(Run {
             count: run.count,
-            value: (self.total.clone(), run.value),
+            value: PrefixedValue {
+                value: run.value,
+                total: self.total.clone(),
+            },
         })
     }
 
@@ -734,17 +809,13 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
 
     pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
         let base = self.total.clone();
-        let (total, value) = self.nth(n)?;
+        let pv = self.nth(n)?;
         let pos = self.pos() - 1;
-        // Single-value contribution as a fresh `Prefix`, then subtract.
-        let mut single = T::Prefix::default();
-        T::accumulate(&mut single, value);
-        let delta = total.clone() - base - single; // prefix change : exclusive
         Some(PrefixSeek {
             pos,
-            total,
-            delta,
-            value,
+            total: pv.total(),
+            delta: pv.prefix() - base, // prefix change: exclusive
+            value: pv.value,
         })
     }
 }
@@ -824,7 +895,7 @@ where
 }
 
 impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
-    type Item = (T::Prefix, T::Get<'a>);
+    type Item = PrefixedValue<'a, T>;
     type IntoIter = PrefixIter<'a, T>;
 
     fn into_iter(self) -> PrefixIter<'a, T> {
