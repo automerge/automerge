@@ -38,7 +38,21 @@ pub trait DeltaValue: Copy + PartialEq + Default + Debug {
     const NULLABLE: bool;
 
     /// Convert to `i64` for delta computation. Returns `None` for null values.
+    ///
+    /// Write paths funnel through this, so implementations for types whose
+    /// domain exceeds `i64` (`u64`, `usize`) **panic** on out-of-domain
+    /// values — see the trait-level domain contract.
     fn to_i64(self) -> Option<i64>;
+
+    /// Non-panicking variant of [`to_i64`](Self::to_i64) for query paths.
+    ///
+    /// Returns `None` for nulls *and* for values outside the domain —
+    /// such values can never be stored, so a query for one is simply
+    /// "not found".  The default delegates to `to_i64`; implementations
+    /// whose `to_i64` panics (unsigned types) must override this.
+    fn try_to_i64(self) -> Option<i64> {
+        self.to_i64()
+    }
 
     /// Convert from an `i64` realized value back to this type.
     fn from_i64(v: i64) -> Self;
@@ -88,6 +102,9 @@ impl DeltaValue for u64 {
     }
     fn from_i64(v: i64) -> Self {
         v as u64
+    }
+    fn try_to_i64(self) -> Option<i64> {
+        i64::try_from(self).ok()
     }
     fn try_from_i64(v: i64) -> Result<Self, String> {
         u64::try_from(v).map_err(|_| format!("delta value {} out of u64 range", v))
@@ -142,6 +159,9 @@ impl DeltaValue for usize {
     fn from_i64(v: i64) -> Self {
         v as usize
     }
+    fn try_to_i64(self) -> Option<i64> {
+        i64::try_from(self).ok()
+    }
     fn try_from_i64(v: i64) -> Result<Self, String> {
         usize::try_from(v).map_err(|_| format!("delta value {} out of usize range", v))
     }
@@ -180,6 +200,9 @@ impl DeltaValue for Option<u64> {
     }
     fn from_i64(v: i64) -> Self {
         Some(v as u64)
+    }
+    fn try_to_i64(self) -> Option<i64> {
+        self.and_then(DeltaValue::try_to_i64)
     }
     fn try_from_i64(v: i64) -> Result<Self, String> {
         u64::try_from_i64(v).map(Some)
@@ -228,6 +251,9 @@ impl DeltaValue for Option<usize> {
     }
     fn from_i64(v: i64) -> Self {
         Some(v as usize)
+    }
+    fn try_to_i64(self) -> Option<i64> {
+        self.and_then(DeltaValue::try_to_i64)
     }
     fn try_from_i64(v: i64) -> Result<Self, String> {
         usize::try_from_i64(v).map(Some)
@@ -1176,6 +1202,24 @@ mod overflow_tests {
             DeltaColumn::<i64>::load(&bytes).is_err(),
             "overflowing running sum should be a load error"
         );
+    }
+
+    #[test]
+    fn delta_u64_find_by_value_out_of_domain_is_empty() {
+        // Queries for unstorable values are "not found", not a panic —
+        // consistent with find_by_range's TryInto guard.
+        let col = DeltaColumn::<u64>::from_values(vec![1, 2, 3]);
+        assert_eq!(col.find_by_value(u64::MAX).count(), 0);
+        assert_eq!(col.find_first(i64::MAX as u64 + 1), None);
+        // In-domain queries still work.
+        assert_eq!(col.find_first(2), Some(1));
+    }
+
+    #[test]
+    fn delta_opt_u64_find_by_value_out_of_domain_is_empty() {
+        let col = DeltaColumn::<Option<u64>>::from_values(vec![Some(1), None, Some(3)]);
+        assert_eq!(col.find_by_value(Some(u64::MAX)).count(), 0);
+        assert_eq!(col.find_first(Some(3)), Some(2));
     }
 
     #[test]
