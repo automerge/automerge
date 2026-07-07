@@ -4304,3 +4304,48 @@ fn bool_into_slab_tail_multibyte_leb() {
     let info = BoolEncoding::validate_encoding(&slab.data).unwrap();
     assert_eq!(slab.tail, info.tail, "into_slab tail vs validated tail");
 }
+
+// ── max_segments budget guard ────────────────────────────────────────────────
+//
+// Budgets below 2 used to produce poisoned columns: the first push
+// created a slab whose segment count already exceeded the budget, and the
+// next mutation tripped `splice_slab`'s `segments <= max_segments` assert
+// (with `1`, the same poison arrived via `load`, which cuts at max/2 = 0
+// and so never splits).  Now rejected at construction and load.
+
+#[test]
+#[should_panic(expected = "max_segments must be at least 2")]
+fn max_segments_zero_rejected() {
+    let _ = Column::<u64>::with_max_segments(0);
+}
+
+#[test]
+#[should_panic(expected = "max_segments must be at least 2")]
+fn max_segments_one_rejected() {
+    let _ = Column::<u64>::with_max_segments(1);
+}
+
+#[test]
+#[should_panic(expected = "max_segments must be at least 2")]
+fn max_segments_one_rejected_at_load() {
+    let bytes = Column::<u64>::from_values((0..50).collect()).save();
+    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1).into());
+}
+
+#[test]
+fn max_segments_two_full_cycle() {
+    // The minimum legal budget must survive build/mutate/save/load/mutate.
+    let mut col = Column::<u64>::with_max_segments(2);
+    for i in 0..100u64 {
+        col.push(i);
+    }
+    col.remove(50);
+    col.insert(10, 999u64);
+    let bytes = col.save();
+    let mut loaded =
+        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2).into()).unwrap();
+    loaded.remove(0);
+    loaded.push(7);
+    assert_eq!(loaded.len(), 100);
+    loaded.validate_encoding().unwrap();
+}

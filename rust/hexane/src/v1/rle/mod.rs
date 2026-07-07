@@ -89,6 +89,10 @@ pub(crate) fn compute_rle_tail<T: RleValue>(data: &[u8]) -> RleTail {
 pub struct RleTail {
     /// Total byte length of the last segment (header + values).
     /// Same meaning for repeat, literal, and null runs.
+    ///
+    /// `u32` by design: a single segment (one run) must stay under
+    /// 4 GiB.  Large blobs belong in [`RawColumn`](crate::v1::RawColumn),
+    /// not an RLE column.
     pub(crate) bytes: u32,
     /// For literal runs: byte length of the last value only.
     /// `None` for repeat/null runs.

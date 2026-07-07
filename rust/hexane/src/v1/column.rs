@@ -806,6 +806,11 @@ where
     }
 
     pub fn with_max_segments(max_segments: usize) -> Self {
+        // `load` splits slabs at `max_segments / 2` and `splice` asserts
+        // `slab.segments <= max_segments`, so budgets below 2 produce
+        // columns that panic on their next mutation.  Reject up front
+        // (same policy as `RawColumn::with_max_segments`).
+        assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
             slabs: Vec::new(),
             index: Idx::default(),
@@ -858,6 +863,7 @@ where
         max_segments: usize,
         validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
     ) -> Result<Self, PackError> {
+        assert!(max_segments >= 2, "max_segments must be at least 2");
         let slabs = T::Encoding::load_and_verify(data, max_segments, validate)?;
         let total_len: usize = slabs.iter().map(|s| s.len).sum();
         let index = Idx::from_weights(slabs.iter().map(WF::compute));
@@ -880,6 +886,7 @@ where
         P: Default + Copy,
         F: Fn(P, usize, T::Get<'a>) -> Result<P, String>,
     {
+        assert!(max_segments >= 2, "max_segments must be at least 2");
         let slabs = T::Encoding::load_and_verify_fold(data, max_segments, validate)?;
         let total_len: usize = slabs.iter().map(|s| s.len).sum();
         let index = Idx::from_weights(slabs.iter().map(WF::compute));
