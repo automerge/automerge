@@ -1,9 +1,17 @@
 //! v1 public interface for `Column`.
 //!
-//! The type parameter is now a *value type* (`u64`, `Option<String>`, …)
-//! rather than a cursor type.  Storage is a single `Vec<u8>` using the same
-//! RLE + LEB128 wire format as v0; mutations edit bytes in place instead of
-//! re-encoding the whole slab.
+//! The type parameter is a *value type* (`u64`, `Option<String>`, …)
+//! rather than a cursor type.  Storage is a `Vec` of slabs — independent
+//! byte buffers of RLE + LEB128 runs, wire-compatible with v0 — indexed
+//! by a per-slab aggregate structure (a B-tree by default) for O(log S)
+//! positional access, where S is the slab count.  Mutations splice bytes
+//! in place within the affected slab; slabs split when they exceed a
+//! segment budget and merge when undersized.
+//!
+//! Complexity at a glance (S = slabs, R = runs in a slab):
+//! * `get` / `iter_range` seek: O(log S + R)
+//! * `insert` / `remove` / `splice`: O(log S + slab bytes)
+//! * `save`: O(total bytes); `load`: O(total bytes) with full validation
 
 pub mod bool;
 pub(crate) mod btree;
@@ -105,6 +113,16 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
     /// Cross-lifetime equality: compare two `Get` values that may have
     /// different borrow lifetimes.
     fn eq(a: Self::Get<'_>, b: Self::Get<'_>) -> bool;
+
+    /// Reborrow a `Get` value at a shorter lifetime.
+    ///
+    /// `Get<'l>` is covariant in `'l` for every implementation — owned
+    /// `Copy` values ignore the lifetime, borrowed forms are plain
+    /// references — but Rust can't express that for a generic associated
+    /// type, so implementations provide the coercion (always just `*v` or
+    /// a `map` over it).  Lets generic code like `RleCow::get` shorten
+    /// lifetimes without `unsafe`.
+    fn shorten<'s>(v: &'s Self::Get<'_>) -> Self::Get<'s>;
 }
 
 /// Marker trait for `Copy` value types, giving them a blanket
@@ -165,6 +183,9 @@ impl<T: ColumnValue> ColumnValueRef for T {
     }
     fn eq(a: T, b: T) -> bool {
         a == b
+    }
+    fn shorten<'s>(v: &'s T) -> T {
+        *v
     }
 }
 
@@ -243,6 +264,9 @@ impl<T: RleValue> ColumnValueRef for Option<T> {
             _ => false,
         }
     }
+    fn shorten<'s>(v: &'s Option<T::Get<'_>>) -> Option<T::Get<'s>> {
+        v.as_ref().map(T::shorten)
+    }
 }
 
 impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
@@ -299,6 +323,9 @@ impl ColumnValueRef for bool {
     }
     fn eq(a: bool, b: bool) -> bool {
         a == b
+    }
+    fn shorten<'s>(v: &'s bool) -> bool {
+        *v
     }
 }
 
@@ -538,6 +565,9 @@ impl ColumnValueRef for String {
     fn eq(a: &str, b: &str) -> bool {
         a == b
     }
+    fn shorten<'s>(v: &'s &str) -> &'s str {
+        v
+    }
 }
 
 impl RleValue for String {
@@ -588,6 +618,9 @@ impl ColumnValueRef for Vec<u8> {
     }
     fn eq(a: &[u8], b: &[u8]) -> bool {
         a == b
+    }
+    fn shorten<'s>(v: &'s &[u8]) -> &'s [u8] {
+        v
     }
 }
 

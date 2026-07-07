@@ -437,6 +437,57 @@ mod partition_tests {
         roundtrip_check(&vals, 23, 27);
     }
 
+    // ── String splice fuzz (variable-length values) ─────────────────────
+
+    fn decode_string_bytes(data: &[u8]) -> Vec<String> {
+        RleDecoder::<String>::new(data)
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// String flavour of `roundtrip_check` — variable-length values stress
+    /// the `lit_tail` metadata and header rewrites that fixed-width u64
+    /// values can't.
+    fn roundtrip_check_str(vals: &[String], start: usize, end: usize) {
+        let slab = Encoder::<String>::encode_slab(vals.iter().map(|s| s.as_str()));
+        let result = build_splice_buf::<String, &str>(
+            &slab,
+            start,
+            end - start,
+            vals[start..end].iter().map(|v| (v.as_str(), 1)),
+            usize::MAX,
+        );
+        let mut recon = slab.data.to_vec();
+        recon.splice(result.range.clone(), result.bytes);
+        if let Some(rw) = result.rewrite {
+            rewrite_lit_header(&mut recon, rw.pos, rw.count);
+        }
+        crate::v1::rle::rle_validate_encoding::<String>(&recon)
+            .unwrap_or_else(|e| panic!("invalid encoding for {vals:?}, range={start}..{end}: {e}"));
+        assert_eq!(
+            decode_string_bytes(&recon),
+            vals,
+            "roundtrip failed for {vals:?}, range={start}..{end}"
+        );
+    }
+
+    #[test]
+    fn roundtrip_fuzz_strings() {
+        use rand::{rng, RngExt};
+        let mut r = rng();
+        // Mixed lengths so literal-run values have different byte widths.
+        let pool = ["a", "bb", "ccc", "dddd", "ee"];
+        for _ in 0..300 {
+            let len = r.random_range(3u32..25) as usize;
+            let vals: Vec<String> = (0..len)
+                .map(|_| pool[r.random_range(0..pool.len())].to_string())
+                .collect();
+            let start = r.random_range(0..len);
+            let end = (start + r.random_range(0..len - start + 1)).min(len);
+            roundtrip_check_str(&vals, start, end);
+        }
+    }
+
     // ── Overflow tests ──────────────────────────────────────────────────
 
     /// Verify that build_splice_buf with overflow produces correct slabs
@@ -784,6 +835,7 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
 }
 
 fn head<T: RleValue>(slab: &Slab) -> (Postfix<'_, T>, usize) {
+    debug_assert!(slab.segments > 0, "head() on empty slab");
     let segments = slab.segments - 1;
     match read_signed(&slab.data).unwrap() {
         (tb, count) if count > 0 => {

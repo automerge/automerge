@@ -558,7 +558,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
             col: Some(self),
             inner: self.col.iter(),
             total: T::Prefix::default(),
-            base: T::Prefix::default(),
         }
     }
 
@@ -583,7 +582,6 @@ pub struct PrefixIter<'a, T: PrefixValue> {
     col: Option<&'a PrefixColumn<T>>,
     inner: Iter<'a, T>,
     total: T::Prefix,
-    base: T::Prefix,
 }
 
 impl<T: PrefixValue> Default for PrefixIter<'_, T> {
@@ -592,7 +590,6 @@ impl<T: PrefixValue> Default for PrefixIter<'_, T> {
             col: None,
             inner: Iter::default(),
             total: T::Prefix::default(),
-            base: T::Prefix::default(),
         }
     }
 }
@@ -603,7 +600,6 @@ impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
             col: self.col,
             inner: self.inner.clone(),
             total: self.total.clone(),
-            base: self.base.clone(),
         }
     }
 }
@@ -702,7 +698,6 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         PrefixIterState {
             inner: self.inner.suspend(),
             total: self.total.clone(),
-            base: self.base.clone(),
         }
     }
 
@@ -758,8 +753,14 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T>
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
-    /// Advance past `n` prefix units (cumulative sum) and return the
-    /// item landed on.
+    /// Advance **past** `n` prefix units (cumulative sum) and return the
+    /// item landed on — i.e. the item containing unit `n + 1`.
+    ///
+    /// Boundary contract (automerge's text indexing depends on this): with
+    /// unit widths `[1, 1, 1]`, `advance_prefix(0)` lands on item 0 and
+    /// `advance_prefix(1)` lands on item **1** — passing item 0's single
+    /// unit lands *past* it.  An item whose cumulative sum exactly equals
+    /// `n` is skipped, not returned.
     pub fn advance_prefix(&mut self, n: T::Prefix) -> Option<PrefixSeek<T::Prefix, T::Get<'a>>> {
         // this does an O(slabs) lookup even if the destination is on the current slab
         // if we stored slab_prefix on the iterator we could avoid that
@@ -788,7 +789,6 @@ where
 pub struct PrefixIterState<T: PrefixValue> {
     inner: super::column::IterState,
     total: T::Prefix,
-    base: T::Prefix,
 }
 
 impl<T: PrefixValue> PrefixIterState<T> {
@@ -801,7 +801,6 @@ impl<T: PrefixValue> PrefixIterState<T> {
             col: Some(column),
             inner,
             total: self.total.clone(),
-            base: self.base.clone(),
         })
     }
 }

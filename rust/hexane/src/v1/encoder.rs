@@ -300,6 +300,11 @@ impl<'a, T: RleValue> RleEncoder<'a, T> {
 
     /// Like [`save_to`](Self::save_to) but returns an empty range if the
     /// encoded data is empty or consists entirely of a single run of `value`.
+    ///
+    /// Note: once slab rollover has cut (only possible with `max_segments`
+    /// set and multi-run data — or a degenerate budget ≤ 3), elision is
+    /// skipped; uniform data never cuts under a sane budget, so this only
+    /// forgoes elision where it wouldn't apply anyway.
     pub fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> Range<usize> {
         if self.slabs.is_empty() && self.state.is_single_run_of(value) {
             return out.len()..out.len();
@@ -828,11 +833,13 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
         self.finish();
         let segments = self.state.segments;
         let tail = if segments > 0 {
-            let mut pos = self.data.len();
+            // The last LEB128 count is one terminal byte (bit 7 clear)
+            // preceded by any continuation bytes (bit 7 set): step over
+            // the terminal byte first, then absorb continuations.
+            let mut pos = self.data.len() - 1;
             while pos > 0 && self.data[pos - 1] & 0x80 != 0 {
                 pos -= 1;
             }
-            pos = pos.saturating_sub(1);
             (self.data.len() - pos) as u8
         } else {
             0

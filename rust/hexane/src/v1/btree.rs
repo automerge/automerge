@@ -14,6 +14,13 @@
 //! Mutation API ([`splice`](SlabBTree::splice)) matches what
 //! `Column::splice_inner` produces: a slab-range to replace + a stream
 //! of new aggregates.
+//!
+//! Deletion underflow: emptied nodes are removed (cascading upward), a
+//! single-child root chain is collapsed, and underfull *leaves* merge
+//! into siblings.  Internal nodes are deliberately not rebalanced — they
+//! thin ~B× slower than leaves (losing a child only when a whole leaf
+//! dies), so under realistic churn their fill follows the leaf count;
+//! worst case is extra memory, never incorrect queries.
 
 use std::fmt::Debug;
 use std::marker::PhantomData;

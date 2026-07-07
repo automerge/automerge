@@ -4291,3 +4291,16 @@ fn index_items_before_parity() {
     }
     assert_eq!(bit.index.items_before(lens.len()), expect);
 }
+
+#[test]
+fn bool_into_slab_tail_multibyte_leb() {
+    use crate::v1::bool::BoolEncoding;
+    use crate::v1::encoding::{ColumnEncoding, EncoderApi};
+    use crate::v1::Encoder;
+    // 200 false + 200 true: last count = 200 → 2-byte LEB128.
+    let mut vals = vec![false; 200];
+    vals.extend(vec![true; 200]);
+    let slab = Encoder::<bool>::encode_slab(vals);
+    let info = BoolEncoding::validate_encoding(&slab.data).unwrap();
+    assert_eq!(slab.tail, info.tail, "into_slab tail vs validated tail");
+}

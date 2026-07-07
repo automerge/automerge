@@ -29,13 +29,15 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> Clone for RleCow<'a, T, V> {
 }
 
 impl<'a, T: RleValue, V: AsColumnRef<T>> RleCow<'a, T, V> {
-    /// Get as T::Get<'_>. Uses transmute_copy for the Ref arm to shorten
-    /// lifetime 'a → '_ — sound because T::Get is Copy and covariant.
+    /// Get as `T::Get<'_>` — the Ref arm reborrows at the shorter
+    /// lifetime via [`ColumnValueRef::shorten`], no `unsafe` needed.
+    ///
+    /// [`ColumnValueRef::shorten`]: crate::v1::ColumnValueRef::shorten
     #[inline]
     pub fn get(&self) -> T::Get<'_> {
         match self {
             Self::Owned(v) => v.as_column_ref(),
-            Self::Ref(g) => unsafe { std::mem::transmute_copy(g) },
+            Self::Ref(g) => T::shorten(g),
         }
     }
 
