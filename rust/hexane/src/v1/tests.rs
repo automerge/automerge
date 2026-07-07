@@ -567,41 +567,24 @@ fn shift_next_at_current_pos() {
 }
 
 #[test]
-fn shift_next_cross_validation_with_v0() {
-    use crate::{ColumnData, UIntCursor};
-
+fn shift_next_reference_model() {
+    // shift_next windows + pos tracking against direct slice indexing.
     let data: Vec<u64> = (0..50).map(|i| i / 3).collect();
-    let v0: ColumnData<UIntCursor> = data.iter().collect();
     let v1 = Column::<u64>::from_values(data.clone());
 
-    // Create iterators from same range
-    let mut v0_iter = v0.iter_range(0..10);
-    let mut v1_iter = v1.iter_range(0..10);
-
-    // Consume some
-    for _ in 0..5 {
-        let a = v0_iter.next().map(|o| o.map(|c| *c));
-        let b = v1_iter.next();
-        assert_eq!(a, b.map(Some));
+    let mut iter = v1.iter_range(0..10);
+    for expected in data.iter().take(5) {
+        assert_eq!(iter.next(), Some(*expected));
     }
-    assert_eq!(v0_iter.pos(), v1_iter.pos());
+    assert_eq!(iter.pos(), 5);
 
-    // shift_next to a later range
-    let a = v0_iter.shift_next(15..20).map(|o| o.map(|c| *c));
-    let b = v1_iter.shift_next(15..20);
-    assert_eq!(a, b.map(Some));
-    assert_eq!(v0_iter.pos(), v1_iter.pos());
+    // shift_next to a later range lands on its first item
+    assert_eq!(iter.shift_next(15..20), Some(data[15]));
+    assert_eq!(iter.pos(), 16);
 
-    // Continue iterating
-    loop {
-        let a = v0_iter.next().map(|o| o.map(|c| *c));
-        let b = v1_iter.next();
-        assert_eq!(a, b.map(Some));
-        if b.is_none() {
-            break;
-        }
-    }
-    assert_eq!(v0_iter.pos(), v1_iter.pos());
+    // and the remaining window is exactly data[16..20]
+    let rest: Vec<u64> = iter.collect();
+    assert_eq!(rest, data[16..20].to_vec());
 }
 
 #[test]
@@ -1704,118 +1687,6 @@ fn nth_sequential_calls() {
     assert_eq!(iter.len(), 89); // 100 - 11 consumed
 }
 
-// ── PrefixIter ↔ v0 cross-validation ────────────────────────────────────────
-
-/// Build both v0 and v1 columns from the same u64 data.
-fn build_both(values: &[u64]) -> (crate::ColumnData<crate::UIntCursor>, PrefixColumn<u64>) {
-    let v0: crate::ColumnData<crate::UIntCursor> = values.iter().copied().collect();
-    let v1 = PrefixColumn::<u64>::from_values(values.to_vec());
-    (v0, v1)
-}
-
-#[test]
-fn prefix_iter_range_matches_inner_iter_range() {
-    let values: Vec<u64> = (1..=20).collect();
-    let col = PrefixColumn::<u64>::from_values(values);
-
-    for start in 0..20 {
-        for end in start..=20 {
-            let inner_vals: Vec<u64> = col.values().iter_range(start..end).collect();
-            let prefix_vals: Vec<u64> = col.iter_range(start..end).map(|pv| pv.value).collect();
-            assert_eq!(
-                inner_vals, prefix_vals,
-                "iter_range({start}..{end}) mismatch"
-            );
-        }
-    }
-}
-
-#[test]
-fn prefix_iter_values_match_v0() {
-    let values: Vec<u64> = vec![1, 0, 3, 3, 0, 5, 2, 2, 2, 7];
-    let (v0, v1) = build_both(&values);
-
-    // v0 iter values
-    let v0_vals: Vec<u64> = v0
-        .iter()
-        .map(|v| v.unwrap_or_default().into_owned())
-        .collect();
-    // v1 prefix iter values (drop prefix)
-    let v1_vals: Vec<u64> = v1.iter().map(|pv| pv.value).collect();
-    assert_eq!(v0_vals, v1_vals);
-}
-
-#[test]
-fn prefix_iter_acc_matches_v0_with_acc() {
-    let values: Vec<u64> = vec![1, 0, 3, 3, 0, 5, 2, 2, 2, 7];
-    let (v0, v1) = build_both(&values);
-
-    // v0 ColGroupIter yields acc BEFORE the item
-    let v0_items: Vec<_> = v0.iter().with_acc().collect();
-    // v1 PrefixIter yields total (inclusive sum THROUGH the item)
-    let v1_items: Vec<_> = v1.iter().collect();
-
-    assert_eq!(v0_items.len(), v1_items.len());
-    for (i, (v0i, v1pv)) in v0_items.iter().zip(v1_items.iter()).enumerate() {
-        let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
-        let v0_val = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
-        assert_eq!(v0_val, v1_val, "value mismatch at {i}");
-        // v0 acc_before + val == v1 prefix_through
-        let v0_acc_through = v0i.acc.as_u64() as u128 + v0_val as u128;
-        assert_eq!(v0_acc_through, v1_total, "total mismatch at {i}");
-    }
-}
-
-#[test]
-fn prefix_iter_range_acc_matches_v0() {
-    let values: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let (v0, v1) = build_both(&values);
-
-    for start in 0..10 {
-        for end in start..=10 {
-            let v0_items: Vec<_> = v0.iter_range(start..end).with_acc().collect();
-            let v1_items: Vec<_> = v1.iter_range(start..end).collect();
-            assert_eq!(
-                v0_items.len(),
-                v1_items.len(),
-                "len mismatch for {start}..{end}"
-            );
-
-            for (i, (v0i, v1pv)) in v0_items.iter().zip(v1_items.iter()).enumerate() {
-                let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
-                let v0_val = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
-                assert_eq!(
-                    v0_val, v1_val,
-                    "value mismatch at {i} for range {start}..{end}"
-                );
-                let v0_acc_through = v0i.acc.as_u64() as u128 + v0_val as u128;
-                assert_eq!(
-                    v0_acc_through, v1_total,
-                    "total mismatch at {i} for range {start}..{end}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn prefix_iter_nth_matches_v0() {
-    let values: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let (v0, v1) = build_both(&values);
-
-    // v0 with_acc collects all items; we use nth on v1 to verify
-    let v0_all: Vec<_> = v0.iter().with_acc().collect();
-
-    for (skip, v0_item) in v0_all.iter().take(10).enumerate() {
-        let v1pv = v1.iter().nth(skip).unwrap();
-        let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
-        let v0_val = v0_item.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
-        assert_eq!(v0_val, v1_val, "nth({skip}) value mismatch");
-        let v0_acc_through = v0_item.acc.as_u64() as u128 + v0_val as u128;
-        assert_eq!(v0_acc_through, v1_total, "nth({skip}) prefix mismatch");
-    }
-}
-
 /// Test next_run across a slab boundary where the next slab starts with a
 /// different value.  The cross-slab merge in Iter::next_run peeks the first
 /// run of the next slab.  If it doesn't match, the decoder must be reset so
@@ -2129,56 +2000,45 @@ proptest! {
         prop_assert_eq!(col.iter().nth(skip), expected);
     }
 
-    /// Cross-validate v0 and v1 prefix/acc iteration on random data.
+    /// Validate prefix/total iteration against a plain running-sum
+    /// reference model on random data.
     #[test]
     fn prefix_iter_proptest(values in prop::collection::vec(0..100u64, 1..200)) {
-        let v0: crate::ColumnData<crate::UIntCursor> = values.iter().copied().collect();
         let v1 = PrefixColumn::<u64>::from_values(values.clone());
 
-        // 1. iter_range values match inner
+        // 1. iter values match the source
         let inner_vals: Vec<u64> = v1.values().iter().collect();
         let prefix_vals: Vec<u64> = v1.iter().map(|pv| pv.value).collect();
         prop_assert_eq!(&inner_vals, &prefix_vals);
         prop_assert_eq!(&inner_vals, &values);
 
-        // 2. Prefix/acc consistency
-        let v0_items: Vec<_> = v0.iter().with_acc().collect();
-        let v1_items: Vec<_> = v1.iter().collect();
-        prop_assert_eq!(v0_items.len(), v1_items.len());
-        for (i, (v0i, v1pv)) in v0_items.iter().zip(v1_items.iter()).enumerate() {
-            let (v1_total, v1_val) = (v1pv.total(), v1pv.value);
-            let v0_val = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
-            prop_assert_eq!(v0_val, v1_val, "value mismatch at {}", i);
-            let v0_acc_through = v0i.acc.as_u64() as u128 + v0_val as u128;
-            prop_assert_eq!(v0_acc_through, v1_total, "total mismatch at {}", i);
+        // 2. totals/prefixes match a running sum
+        let mut running: u128 = 0;
+        for (i, pv) in v1.iter().enumerate() {
+            prop_assert_eq!(pv.prefix(), running, "prefix at {}", i);
+            running += values[i] as u128;
+            prop_assert_eq!(pv.total(), running, "total at {}", i);
         }
 
-        // 3. iter_range consistency for random subranges
+        // 3. iter_range totals carry the absolute prefix
         let n = values.len();
         for s in [0, n / 4, n / 2, 3 * n / 4] {
             let e = (s + n / 4).min(n);
-            let v0_sub: Vec<_> = v0.iter_range(s..e).with_acc().collect();
-            let v1_sub: Vec<_> = v1.iter_range(s..e).collect();
-            prop_assert_eq!(v0_sub.len(), v1_sub.len(), "range len mismatch for {}..{}", s, e);
-            for (j, (v0j, v1pv)) in v0_sub.iter().zip(v1_sub.iter()).enumerate() {
-                let (v1p, v1v) = (v1pv.total(), v1pv.value);
-                let v0v = v0j.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
-                prop_assert_eq!(v0v, v1v, "range value at {}", j);
-                let v0at = v0j.acc.as_u64() as u128 + v0v as u128;
-                prop_assert_eq!(v0at, v1p, "range prefix at {}", j);
+            let base: u128 = values[..s].iter().map(|&v| v as u128).sum();
+            let mut running = base;
+            for (j, pv) in v1.iter_range(s..e).enumerate() {
+                running += values[s + j] as u128;
+                prop_assert_eq!(pv.total(), running, "range total at {}..{} idx {}", s, e, j);
             }
         }
 
-        // 4. nth consistency
+        // 4. nth matches direct indexing
         for skip in [0, 1, n / 2, n.saturating_sub(1)] {
             if skip < n {
-                let v1pv = v1.iter().nth(skip).unwrap();
-                let (v1p, v1v) = (v1pv.total(), v1pv.value);
-                let v0i = &v0_items[skip];
-                let v0v = v0i.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
-                prop_assert_eq!(v0v, v1v, "nth({}) value", skip);
-                let v0at = v0i.acc.as_u64() as u128 + v0v as u128;
-                prop_assert_eq!(v0at, v1p, "nth({}) prefix", skip);
+                let pv = v1.iter().nth(skip).unwrap();
+                prop_assert_eq!(pv.value, values[skip], "nth({}) value", skip);
+                let want: u128 = values[..=skip].iter().map(|&v| v as u128).sum();
+                prop_assert_eq!(pv.total(), want, "nth({}) total", skip);
             }
         }
     }
@@ -4395,4 +4255,110 @@ fn remove_n_matches_vec_drain() {
 fn remove_n_out_of_bounds_panics() {
     let mut col = Column::<u64>::from_values((0..10).collect());
     col.remove_n(5, 6);
+}
+
+// ── Wire-format golden tests ─────────────────────────────────────────────────
+//
+// Byte-exact fixtures freezing the save() format.  Captured on branch
+// `hexane_cleanup` at the point the v0 implementation was removed, while
+// the v0<->v1 byte-parity fuzz tests were still present and green — so
+// these bytes ARE the v0-compatible automerge column format.
+//
+// If one of these assertions fails, the wire format changed.  That is a
+// compatibility break with every existing automerge document: stop and
+// think, don't update the fixture.
+
+fn golden_rle<T>(values: Vec<T>, fixture: &[u8])
+where
+    T: crate::v1::ColumnValueRef + Clone + PartialEq + std::fmt::Debug + crate::v1::AsColumnRef<T>,
+{
+    let col = Column::<T>::from_values(values.clone());
+    assert_eq!(
+        col.save(),
+        fixture,
+        "save() bytes drifted from the frozen format"
+    );
+    let loaded = Column::<T>::load(fixture).unwrap();
+    assert_eq!(loaded.len(), values.len(), "reload length");
+    for (i, v) in values.iter().enumerate() {
+        assert!(
+            <T as crate::v1::ColumnValueRef>::eq(loaded.get(i).unwrap(), v.as_column_ref()),
+            "reload mismatch at {i}"
+        );
+    }
+}
+
+#[test]
+fn golden_format_rle_u64() {
+    golden_rle::<u64>(
+        vec![1, 1, 1, 2, 3, 4, 5, 5, 5, 5],
+        &[3, 1, 125, 2, 3, 4, 4, 5],
+    );
+}
+
+#[test]
+fn golden_format_rle_opt_u64() {
+    golden_rle::<Option<u64>>(
+        vec![None, None, Some(1), Some(1), None, Some(2), Some(300)],
+        &[0, 2, 2, 1, 0, 1, 126, 2, 172, 2],
+    );
+}
+
+#[test]
+fn golden_format_rle_str() {
+    golden_rle::<String>(
+        vec!["a".into(), "a".into(), "bb".into(), "ccc".into()],
+        &[2, 1, 97, 126, 2, 98, 98, 3, 99, 99, 99],
+    );
+}
+
+#[test]
+fn golden_format_rle_opt_str() {
+    golden_rle::<Option<String>>(
+        vec![Some("x".into()), None, None, Some("yz".into())],
+        &[127, 1, 120, 0, 2, 127, 2, 121, 122],
+    );
+}
+
+#[test]
+fn golden_format_rle_bytes() {
+    golden_rle::<Vec<u8>>(
+        vec![vec![1, 2], vec![1, 2], vec![3]],
+        &[2, 2, 1, 2, 127, 1, 3],
+    );
+}
+
+#[test]
+fn golden_format_bool() {
+    golden_rle::<bool>(vec![false, false, true, true, true, false], &[2, 3, 1]);
+    // A column starting true carries the zero-count false pad.
+    golden_rle::<bool>(vec![true, true, false], &[0, 2, 1]);
+}
+
+#[test]
+fn golden_format_delta_i64() {
+    let values = vec![10i64, 20, 30, 25, 25, -5];
+    let fixture: &[u8] = &[3, 10, 125, 123, 0, 98];
+    let col = DeltaColumn::<i64>::from_values(values.clone());
+    assert_eq!(
+        col.save(),
+        fixture,
+        "delta save() drifted from the frozen format"
+    );
+    let loaded = DeltaColumn::<i64>::load(fixture).unwrap();
+    assert_eq!(loaded.to_vec(), values);
+}
+
+#[test]
+fn golden_format_delta_opt_i64() {
+    let values = vec![None, Some(0i64), Some(2), Some(3), None, Some(10)];
+    let fixture: &[u8] = &[0, 1, 125, 0, 2, 1, 0, 1, 127, 7];
+    let col = DeltaColumn::<Option<i64>>::from_values(values.clone());
+    assert_eq!(
+        col.save(),
+        fixture,
+        "delta save() drifted from the frozen format"
+    );
+    let loaded = DeltaColumn::<Option<i64>>::load(fixture).unwrap();
+    assert_eq!(loaded.to_vec(), values);
 }

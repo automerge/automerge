@@ -30,19 +30,7 @@ divan = "0.1.15"
 debug = true
 
 [[bench]]
-name = "insert"
-harness = false
-
-[[bench]]
-name = "splice"
-harness = false
-
-[[bench]]
-name = "seek"
-harness = false
-
-[[bench]]
-name = "v0_vs_v1"
+name = "column_ops"
 harness = false
 
 [[bench]]
@@ -59,10 +47,6 @@ harness = false
 
 [[bench]]
 name = "btree_b_sweep"
-harness = false
-
-[[bench]]
-name = "encode_unless"
 harness = false
 
 [[bench]]

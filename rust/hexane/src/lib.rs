@@ -1,38 +1,10 @@
-//! Hexane is a columnar compression library implementing the encoding described in the
+//! Hexane is a columnar compression library implementing the encoding
+//! described in the
 //! [Automerge Binary Format](https://automerge.org/automerge-binary-format-spec/).
 //!
-//! Data is stored in [`ColumnData<C>`] where the cursor type `C` selects the encoding
-//! (`RLE<T>`, delta, boolean, or raw). Values are batched into [`Slab`]s — `Arc`-wrapped byte
-//! buffers — held in a [`SpanTree`] B-tree for O(log n) positional seek, insert, and splice.
-//!
-//! # Cursor Types
-//!
-//! | Type            | Item    | Encoding                        |
-//! |-----------------|---------|---------------------------------|
-//! | [`UIntCursor`]  | `u64`   | RLE + unsigned LEB128           |
-//! | [`IntCursor`]   | `i64`   | RLE + signed LEB128             |
-//! | [`StrCursor`]   | `str`   | RLE + length-prefixed UTF-8     |
-//! | [`ByteCursor`]  | `[u8]`  | RLE + length-prefixed bytes     |
-//! | [`BooleanCursor`]| `bool` | Boolean run-length encoding     |
-//! | [`DeltaCursor`] | `i64`   | Delta-encoded integers          |
-//! | [`RawCursor`]   | `[u8]`  | Uncompressed raw bytes          |
-//!
-//! # Quick Example
-//!
-//! ```rust
-//! use hexane::{ColumnData, UIntCursor};
-//!
-//! let mut col: ColumnData<UIntCursor> = ColumnData::new();
-//! col.splice(0, 0, [1u64, 2, 3, 4, 5]);
-//! assert_eq!(col.to_vec(), vec![Some(1), Some(2), Some(3), Some(4), Some(5)]);
-//!
-//! let bytes = col.save();
-//! let col2: ColumnData<UIntCursor> = ColumnData::load(&bytes).unwrap();
-//! assert_eq!(col.to_vec(), col2.to_vec());
-//! ```
-//!
-//! See the [README](https://github.com/automerge/automerge/tree/main/rust/hexane) for
-//! comprehensive usage documentation.
+//! The API lives in [`v1`]: typed columns (`Column<T>`, `PrefixColumn<T>`,
+//! `DeltaColumn<T>`, `RawColumn`) over RLE/delta/boolean encodings, with
+//! O(log n) random access and in-place splice.
 
 #[doc(hidden)]
 #[macro_export]
@@ -63,35 +35,9 @@ macro_rules! __log {
      }
  }
 
-pub(crate) mod aggregate;
-pub(crate) mod boolean;
-pub(crate) mod columndata;
-pub(crate) mod cursor;
-pub(crate) mod delta;
-pub(crate) mod encoder;
-pub(crate) mod leb128;
-pub(crate) mod pack;
-pub(crate) mod raw;
-pub(crate) mod rle;
-pub(crate) mod slab;
-
-#[cfg(test)]
-pub mod test;
+mod error;
+pub use error::PackError;
 
 pub mod v1;
 
-pub use aggregate::{Acc, Agg};
-pub use boolean::BooleanCursor;
-pub use columndata::{
-    ColAccIter, ColGroupItem, ColGroupIter, ColumnData, ColumnDataIter, ColumnDataIterState,
-};
-pub use cursor::{ColumnCursor, CursorIter, HasAcc, HasMinMax, HasPos, Run, RunIter, SpliceDel};
-pub use delta::DeltaCursor;
-pub use encoder::{Encoder, EncoderState};
-pub use leb128::{lebsize, ulebsize};
-pub use pack::{MaybePackable, PackError, Packable};
-pub use raw::{RawCursor, RawReader, ReadRawError};
-pub use rle::{ByteCursor, IntCursor, RleCursor, StrCursor, UIntCursor};
-pub use slab::{tree, Slab, SlabTree, SlabWeight, SlabWriter, SpanTree, SpanWeight, WriteOp};
-
-pub(crate) use std::borrow::Cow;
+pub use v1::leb::{lebsize, ulebsize};

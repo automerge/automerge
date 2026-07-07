@@ -1609,148 +1609,16 @@ mod tests {
         assert_col(&loaded, &[Some(5), None, Some(8), None, Some(12)]);
     }
 
-    // ── v0 save compatibility ───────────────────────────────────────────────
-
-    /// Build a v0 DeltaCursor column and a v1 DeltaColumn from the same
-    /// realized values and assert their serialized bytes are identical.
-    fn assert_v0_v1_save_match(values: &[Option<i64>]) {
-        use crate::ColumnData as V0ColumnData;
-        use crate::DeltaCursor;
-
-        // v0
-        let mut v0: V0ColumnData<DeltaCursor> = V0ColumnData::new();
-        v0.splice(0, 0, values.to_vec());
-        let v0_bytes = v0.save();
-
-        // v1
-        let v1 = DeltaColumn::<Option<i64>>::from_values(values.to_vec());
-        let v1_bytes = v1.save();
-
-        assert_eq!(
-            v0_bytes, v1_bytes,
-            "v0 vs v1 save mismatch for values: {:?}",
-            values
-        );
-
-        // Also verify v1 reads back correctly.
-        let loaded = DeltaColumn::<Option<i64>>::load(&v1_bytes).unwrap();
-        for (i, exp) in values.iter().enumerate() {
-            assert_eq!(loaded.get(i).as_ref(), Some(exp), "reload mismatch at {i}");
-        }
-    }
-
-    #[test]
-    fn v0_v1_save_empty() {
-        assert_v0_v1_save_match(&[]);
-    }
-
-    #[test]
-    fn v0_v1_save_single() {
-        assert_v0_v1_save_match(&[Some(42)]);
-    }
-
-    #[test]
-    fn v0_v1_save_constant_stride() {
-        assert_v0_v1_save_match(&[Some(10), Some(20), Some(30), Some(40)]);
-    }
-
-    #[test]
-    fn v0_v1_save_with_nulls() {
-        assert_v0_v1_save_match(&[None, Some(0), Some(2), Some(3)]);
-    }
-
-    #[test]
-    fn v0_v1_save_mixed() {
-        assert_v0_v1_save_match(&[
-            Some(1),
-            Some(10),
-            Some(2),
-            Some(11),
-            Some(4),
-            Some(27),
-            Some(19),
-            Some(3),
-            Some(21),
-            Some(14),
-            Some(2),
-            Some(8),
-        ]);
-    }
-
-    #[test]
-    fn v0_v1_save_runs() {
-        assert_v0_v1_save_match(&[
-            Some(1),
-            Some(2),
-            Some(4),
-            Some(6),
-            Some(9),
-            Some(12),
-            Some(16),
-            Some(20),
-            Some(25),
-            Some(30),
-        ]);
-    }
-
-    #[test]
-    fn v0_v1_save_nulls_and_values() {
-        assert_v0_v1_save_match(&[
-            None,
-            Some(0),
-            Some(2),
-            Some(3),
-            Some(4),
-            Some(4),
-            Some(5),
-            Some(6),
-            Some(7),
-            Some(7),
-            Some(8),
-            Some(9),
-        ]);
-    }
-
-    #[test]
-    fn v0_v1_save_fuzz() {
-        use rand::RngExt;
-        use rand::SeedableRng;
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(12345);
-
-        for _ in 0..200 {
-            let len = rng.random_range(0..50);
-            let mut values: Vec<Option<i64>> = Vec::with_capacity(len);
-            for _ in 0..len {
-                let r: u32 = rng.random_range(0..10);
-                if r == 0 {
-                    values.push(None);
-                } else {
-                    values.push(Some(rng.random_range(0..100)));
-                }
-            }
-            assert_v0_v1_save_match(&values);
-        }
-    }
-
     // ── DeltaEncoder ────────────────────────────────────────────────────────
 
-    /// Encode `values` via `DeltaEncoder` and compare to v0 DeltaCursor
-    /// and v1 DeltaColumn::from_values.  All three must produce identical
-    /// serialized bytes.
+    /// Encode `values` via the streaming `DeltaEncoder` and via
+    /// `DeltaColumn::from_values` — both must produce identical bytes.
+    /// (Byte-format stability itself is frozen by the golden fixtures in
+    /// `v1::tests`.)
     fn assert_delta_encoder_match(values: &[Option<i64>]) {
-        use crate::ColumnData as V0ColumnData;
-        use crate::DeltaCursor;
-
-        // v0 reference
-        let mut v0: V0ColumnData<DeltaCursor> = V0ColumnData::new();
-        v0.splice(0, 0, values.to_vec());
-        let v0_bytes = v0.save();
-
-        // v1 from_values reference
         let v1_col = DeltaColumn::<Option<i64>>::from_values(values.to_vec());
         let v1_col_bytes = v1_col.save();
 
-        // v1 DeltaEncoder streaming
         let mut enc = DeltaEncoder::<Option<i64>>::new();
         for v in values {
             enc.append(*v);
@@ -1758,13 +1626,8 @@ mod tests {
         let enc_bytes = enc.save();
 
         assert_eq!(
-            v0_bytes, v1_col_bytes,
-            "v0 / v1-from_values mismatch for {:?}",
-            values
-        );
-        assert_eq!(
-            enc_bytes, v0_bytes,
-            "DeltaEncoder mismatch for {:?}",
+            enc_bytes, v1_col_bytes,
+            "DeltaEncoder vs from_values mismatch for {:?}",
             values
         );
 
@@ -1880,30 +1743,6 @@ mod tests {
     }
 
     #[test]
-    fn delta_encoder_unless_matches_v0_encode_unless_empty_all_null() {
-        // Cross-check: v0 `encode_unless_empty` on an all-null sequence
-        // produces an empty range; v1 `encode_to_unless(None)` must too.
-        use crate::ColumnCursor;
-        use crate::DeltaCursor;
-
-        let values: Vec<Option<i64>> = vec![None; 5];
-
-        let mut v0_out = Vec::new();
-        let v0_range = DeltaCursor::encode_unless_empty(&mut v0_out, values.iter().copied());
-
-        let mut v1_out = Vec::new();
-        let v1_range = DeltaEncoder::<Option<i64>>::encode_to_unless(
-            &mut v1_out,
-            values.iter().copied(),
-            None,
-        );
-
-        assert_eq!(&v1_out[v1_range.clone()], &v0_out[v0_range.clone()]);
-        assert!(v0_range.is_empty());
-        assert!(v1_range.is_empty());
-    }
-
-    #[test]
     fn delta_encoder_unless_mixed_nulls_and_values_saves() {
         // Not all-null → must save normally.
         let mut out = Vec::new();
@@ -1949,12 +1788,10 @@ mod tests {
     }
 
     #[test]
-    fn delta_encoder_unless_matches_for_all_sequences() {
-        // Fuzz: compare encode_to_unless(None) to v0 encode_unless_empty
-        // for nullable sequences.  Both should produce identical bytes
-        // for every input.
-        use crate::ColumnCursor;
-        use crate::DeltaCursor;
+    fn delta_encoder_unless_agrees_with_column_for_all_sequences() {
+        // Fuzz: DeltaEncoder::encode_to_unless(None) and
+        // DeltaColumn::save_to_unless(None) must agree — same elision
+        // decision, same bytes — for every nullable input.
         use rand::RngExt;
         use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(77777);
@@ -1971,19 +1808,20 @@ mod tests {
                 }
             }
 
-            let mut v0_out = Vec::new();
-            let v0_range = DeltaCursor::encode_unless_empty(&mut v0_out, values.iter().copied());
-
-            let mut v1_out = Vec::new();
-            let v1_range = DeltaEncoder::<Option<i64>>::encode_to_unless(
-                &mut v1_out,
+            let mut enc_out = Vec::new();
+            let enc_range = DeltaEncoder::<Option<i64>>::encode_to_unless(
+                &mut enc_out,
                 values.iter().copied(),
                 None,
             );
 
+            let col = DeltaColumn::<Option<i64>>::from_values(values.clone());
+            let mut col_out = Vec::new();
+            let col_range = col.save_to_unless(&mut col_out, None);
+
             assert_eq!(
-                &v1_out[v1_range], &v0_out[v0_range],
-                "mismatch for {:?}",
+                &enc_out[enc_range], &col_out[col_range],
+                "encoder vs column elision mismatch for {:?}",
                 values
             );
         }

@@ -73,8 +73,6 @@ pub(crate) enum ReadOpError {
     MissingKey,
     #[error("missing value: {0}")]
     MissingValue(&'static str),
-    #[error("error reading value column: {0}")]
-    ReadValue(#[from] hexane::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
 }

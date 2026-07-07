@@ -175,3 +175,24 @@ pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: us
     }
     buf.len() as i64 - len as i64
 }
+
+/// The number of bytes required to encode `val` as a signed LEB128 integer.
+pub fn lebsize(mut val: i64) -> u64 {
+    if val < 0 {
+        val = !val
+    }
+    // 1 extra for the sign bit
+    leb_bytes(1 + 64 - val.leading_zeros() as u64)
+}
+
+/// The number of bytes required to encode `val` as an unsigned LEB128 integer.
+pub fn ulebsize(val: u64) -> u64 {
+    if val == 0 {
+        return 1;
+    }
+    leb_bytes(64 - val.leading_zeros() as u64)
+}
+
+fn leb_bytes(bits: u64) -> u64 {
+    bits.div_ceil(7)
+}

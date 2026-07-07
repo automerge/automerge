@@ -1,5 +1,5 @@
 //! Column<u64> mutation benchmark — insert / delete / replace at
-//! k = 1 / 10 / 100 / 1000, v0 vs v1.
+//! k = 1 / 10 / 100 / 1000.
 //!
 //! Same data in both columns (SmallRng seeded at 0xC0FFEE).  Each op
 //! batch picks a random position and a fresh batch of new values via
@@ -11,7 +11,6 @@
 use divan::counter::ItemsCount;
 use divan::Bencher;
 use hexane::v1::Column;
-use hexane::{ColumnData, UIntCursor};
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};
@@ -126,76 +125,6 @@ macro_rules! v1_replace {
 // ║ v0 macros (ColumnData<UIntCursor>)                                       ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
-macro_rules! v0_insert {
-    ($name:ident, $k:expr) => {
-        #[divan::bench(max_time = Duration::from_secs(8))]
-        fn $name(b: Bencher) {
-            let v = initial_values();
-            b.counter(ItemsCount::new((OPS * $k) as u64))
-                .bench_local(|| {
-                    let mut c = ColumnData::<UIntCursor>::new();
-                    c.splice(0, 0, v.iter().copied());
-                    let mut rng = SmallRng::seed_from_u64(0x1234);
-                    for _ in 0..OPS {
-                        let pos = rng.random_range(0..=c.len());
-                        let new: Vec<u64> = (0..$k).map(|_| rand_value(&mut rng)).collect();
-                        c.splice(pos, 0, new);
-                    }
-                    divan::black_box(c)
-                });
-        }
-    };
-}
-
-macro_rules! v0_delete {
-    ($name:ident, $k:expr) => {
-        #[divan::bench(max_time = Duration::from_secs(8))]
-        fn $name(b: Bencher) {
-            let v = initial_values();
-            b.counter(ItemsCount::new((OPS * $k) as u64))
-                .bench_local(|| {
-                    let mut c = ColumnData::<UIntCursor>::new();
-                    c.splice(0, 0, v.iter().copied());
-                    let mut rng = SmallRng::seed_from_u64(0x1234);
-                    for _ in 0..OPS {
-                        let len = c.len();
-                        if len < $k {
-                            break;
-                        }
-                        let pos = rng.random_range(0..=len - $k);
-                        c.splice::<u64, _>(pos, $k, std::iter::empty());
-                    }
-                    divan::black_box(c)
-                });
-        }
-    };
-}
-
-macro_rules! v0_replace {
-    ($name:ident, $k:expr) => {
-        #[divan::bench(max_time = Duration::from_secs(8))]
-        fn $name(b: Bencher) {
-            let v = initial_values();
-            b.counter(ItemsCount::new((OPS * $k) as u64))
-                .bench_local(|| {
-                    let mut c = ColumnData::<UIntCursor>::new();
-                    c.splice(0, 0, v.iter().copied());
-                    let mut rng = SmallRng::seed_from_u64(0x1234);
-                    for _ in 0..OPS {
-                        let len = c.len();
-                        if len < $k {
-                            break;
-                        }
-                        let pos = rng.random_range(0..=len - $k);
-                        let new: Vec<u64> = (0..$k).map(|_| rand_value(&mut rng)).collect();
-                        c.splice(pos, $k, new);
-                    }
-                    divan::black_box(c)
-                });
-        }
-    };
-}
-
 // v1 benches — insert
 v1_insert!(v1_insert_1, 1);
 v1_insert!(v1_insert_10, 10);
@@ -215,19 +144,7 @@ v1_replace!(v1_replace_100, 100);
 v1_replace!(v1_replace_1000, 1000);
 
 // v0 benches — insert
-v0_insert!(v0_insert_1, 1);
-v0_insert!(v0_insert_10, 10);
-v0_insert!(v0_insert_100, 100);
-v0_insert!(v0_insert_1000, 1000);
 
 // v0 benches — delete
-v0_delete!(v0_delete_1, 1);
-v0_delete!(v0_delete_10, 10);
-v0_delete!(v0_delete_100, 100);
-v0_delete!(v0_delete_1000, 1000);
 
 // v0 benches — replace
-v0_replace!(v0_replace_1, 1);
-v0_replace!(v0_replace_10, 10);
-v0_replace!(v0_replace_100, 100);
-v0_replace!(v0_replace_1000, 1000);

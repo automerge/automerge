@@ -178,6 +178,33 @@ pub(crate) fn try_merge_range_skeleton(
     start..end
 }
 
+/// Normalize any `RangeBounds` into a concrete `(start, end)` pair, with
+/// `max` standing in for an unbounded end.  Moved verbatim from the v0
+/// `columndata` module — callers (`iter_range`, `set_max`, `advance_to`)
+/// do their own clamping.
+pub(crate) fn normalize_range_max<R: std::ops::RangeBounds<usize>>(
+    range: R,
+    max: usize,
+) -> (usize, usize) {
+    use std::ops::Bound;
+    let start = match range.start_bound() {
+        Bound::Unbounded => usize::MIN,
+        Bound::Included(n) => *n,
+        Bound::Excluded(n) => *n - 1,
+    };
+
+    let end = match range.end_bound() {
+        Bound::Unbounded => max,
+        Bound::Included(n) => *n + 1,
+        Bound::Excluded(n) => *n,
+    };
+    if start > end {
+        (start, start)
+    } else {
+        (start, end)
+    }
+}
+
 /// Byte-level `Vec::splice` without the per-element iterator dance.
 ///
 /// `Vec::splice(range, iter)` in stdlib walks the iterator and does a
@@ -655,7 +682,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     where
         for<'x> T::Get<'x>: Ord + super::AsColumnRef<T>,
     {
-        let (start, end) = crate::columndata::normalize_range_max(range, self.end_pos());
+        let (start, end) = normalize_range_max(range, self.end_pos());
 
         if start > self.pos {
             self.advance_to(start);
@@ -1143,7 +1170,7 @@ where
     where
         for<'x> T::Get<'x>: Ord,
     {
-        let (start, end) = crate::columndata::normalize_range_max(range, self.total_len);
+        let (start, end) = normalize_range_max(range, self.total_len);
         let target = value.as_column_ref();
         self.iter_range(start..end).scan_to_value(target)
     }

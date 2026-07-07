@@ -1,8 +1,8 @@
 #![allow(clippy::len_zero)]
 
 use divan::Bencher;
+use hexane::v1;
 use hexane::v1::{DeltaColumn, PrefixColumn};
-use hexane::*;
 use std::time::Duration;
 
 use rand::{rng, Rng, RngExt};
@@ -25,16 +25,8 @@ fn rand_usize() -> usize {
 
 // ── Helpers: build columns ──────────────────────────────────────────────────
 
-fn build_v0(n: usize) -> ColumnData<UIntCursor> {
-    (0..n).map(|_| rand_u64()).collect()
-}
-
 fn build_v1(n: usize) -> v1::Column<u64> {
     v1::Column::from_values((0..n).map(|_| rand_u64()).collect())
-}
-
-fn build_v0_bool(n: usize) -> ColumnData<BooleanCursor> {
-    (0..n).map(|_| rand_bool()).collect()
 }
 
 fn build_v1_bool(n: usize) -> v1::Column<bool> {
@@ -64,28 +56,8 @@ mod get {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_get_10k(bencher: Bencher) {
-        let col = build_v0(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.get(pos)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_get_10k(bencher: Bencher) {
         let col = build_v1(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.get(pos)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_get_100k(bencher: Bencher) {
-        let col = build_v0(100_000);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
             col.get(pos)
@@ -110,15 +82,6 @@ mod u64_insert {
     use super::*;
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, rand_vals(n));
-        });
-    }
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
         let mut col = build_v1(10_000);
         bencher.bench_local(|| {
@@ -131,19 +94,6 @@ mod u64_insert {
 #[divan::bench_group(name = "u64_replace")]
 mod u64_replace {
     use super::*;
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0(10_000);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, rand_vals(n));
-        });
-    }
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -162,19 +112,6 @@ mod u64_replace {
 #[divan::bench_group(name = "u64_delete")]
 mod u64_delete {
     use super::*;
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0(10_000);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, std::iter::empty::<u64>());
-        });
-    }
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -196,10 +133,6 @@ fn rand_strings(n: usize, len: usize) -> Vec<String> {
     (0..n).map(|_| rand_string(len)).collect()
 }
 
-fn build_v0_str(n: usize, slen: usize) -> ColumnData<StrCursor> {
-    (0..n).map(|_| rand_string(slen)).collect()
-}
-
 fn build_v1_str(n: usize, slen: usize) -> v1::Column<String> {
     v1::Column::from_values((0..n).map(|_| rand_string(slen)).collect())
 }
@@ -207,19 +140,6 @@ fn build_v1_str(n: usize, slen: usize) -> v1::Column<String> {
 #[divan::bench_group(name = "string_replace_8b")]
 mod string_replace_8b {
     use super::*;
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0_str(10_000, 8);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, rand_strings(n, 8));
-        });
-    }
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -240,19 +160,6 @@ mod string_replace_10b {
     use super::*;
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0_str(10_000, 10);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, rand_strings(n, 10));
-        });
-    }
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
         let mut col = build_v1_str(10_000, 10);
         bencher.bench_local(|| {
@@ -269,19 +176,6 @@ mod string_replace_10b {
 #[divan::bench_group(name = "string_replace_1kb")]
 mod string_replace_1kb {
     use super::*;
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0_str(10_000, 1024);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, rand_strings(n, 1024));
-        });
-    }
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -307,17 +201,6 @@ mod splice_large_insert {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_insert_100k(bencher: Bencher) {
-        let vals = rand_vals(LARGE);
-        bencher.bench_local(|| {
-            let mut col = build_v0(1_000);
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
     fn v1_insert_100k(bencher: Bencher) {
         let vals = rand_vals(LARGE);
         bencher.bench_local(|| {
@@ -336,31 +219,11 @@ mod splice_large_delete {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_delete_1k_of_10k(bencher: Bencher) {
-        bencher.bench_local(|| {
-            let mut col = build_v0(10_000);
-            let pos = rand_usize() % (col.len() - 1_000);
-            col.splice(pos, 1_000, std::iter::empty::<u64>());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
     fn v1_delete_1k_of_10k(bencher: Bencher) {
         bencher.bench_local(|| {
             let mut col = build_v1(10_000);
             let pos = rand_usize() % (col.len() - 1_000);
             col.splice(pos, 1_000, std::iter::empty::<u64>());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_delete_50k_of_100k(bencher: Bencher) {
-        bencher.bench_local(|| {
-            let mut col = build_v0(100_000);
-            let pos = rand_usize() % (col.len() / 2);
-            col.splice(pos, 50_000, std::iter::empty::<u64>());
         });
     }
 
@@ -383,34 +246,12 @@ mod splice_large_replace {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_replace_1k_of_10k(bencher: Bencher) {
-        let vals = rand_vals(1_000);
-        bencher.bench_local(|| {
-            let mut col = build_v0(10_000);
-            let pos = rand_usize() % (col.len() - 1_000);
-            col.splice(pos, 1_000, vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
     fn v1_replace_1k_of_10k(bencher: Bencher) {
         let vals = rand_vals(1_000);
         bencher.bench_local(|| {
             let mut col = build_v1(10_000);
             let pos = rand_usize() % (col.len() - 1_000);
             col.splice(pos, 1_000, vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_replace_50k_of_100k(bencher: Bencher) {
-        let vals = rand_vals(50_000);
-        bencher.bench_local(|| {
-            let mut col = build_v0(100_000);
-            let pos = rand_usize() % (col.len() / 2);
-            col.splice(pos, 50_000, vals.clone());
         });
     }
 
@@ -438,28 +279,8 @@ mod bool_get {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_get_10k(bencher: Bencher) {
-        let col = build_v0_bool(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.get(pos)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_get_10k(bencher: Bencher) {
         let col = build_v1_bool(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.get(pos)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_get_100k(bencher: Bencher) {
-        let col = build_v0_bool(100_000);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
             col.get(pos)
@@ -484,15 +305,6 @@ mod bool_insert {
     use super::*;
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0_bool(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, rand_bools(n));
-        });
-    }
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
         let mut col = build_v1_bool(10_000);
         bencher.bench_local(|| {
@@ -505,19 +317,6 @@ mod bool_insert {
 #[divan::bench_group(name = "bool_replace")]
 mod bool_replace {
     use super::*;
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0_bool(10_000);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, rand_bools(n));
-        });
-    }
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -536,19 +335,6 @@ mod bool_replace {
 #[divan::bench_group(name = "bool_delete")]
 mod bool_delete {
     use super::*;
-
-    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let mut col = build_v0_bool(10_000);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, std::iter::empty::<bool>());
-        });
-    }
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -574,17 +360,6 @@ mod bool_splice_large_insert {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_insert_100k(bencher: Bencher) {
-        let vals = rand_bools(LARGE);
-        bencher.bench_local(|| {
-            let mut col = build_v0_bool(1_000);
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
     fn v1_insert_100k(bencher: Bencher) {
         let vals = rand_bools(LARGE);
         bencher.bench_local(|| {
@@ -603,16 +378,6 @@ mod bool_splice_large_delete {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_delete_1k_of_10k(bencher: Bencher) {
-        bencher.bench_local(|| {
-            let mut col = build_v0_bool(10_000);
-            let pos = rand_usize() % (col.len() - 1_000);
-            col.splice(pos, 1_000, std::iter::empty::<bool>());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
     fn v1_delete_1k_of_10k(bencher: Bencher) {
         bencher.bench_local(|| {
             let mut col = build_v1_bool(10_000);
@@ -627,17 +392,6 @@ mod bool_splice_large_delete {
 #[divan::bench_group(name = "bool_splice_large_replace")]
 mod bool_splice_large_replace {
     use super::*;
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
-    fn v0_replace_1k_of_10k(bencher: Bencher) {
-        let vals = rand_bools(1_000);
-        bencher.bench_local(|| {
-            let mut col = build_v0_bool(10_000);
-            let pos = rand_usize() % (col.len() - 1_000);
-            col.splice(pos, 1_000, vals.clone());
-        });
-    }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 10)]
@@ -663,14 +417,6 @@ mod load_u64 {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
-    fn v0_load_100k(bencher: Bencher) {
-        let col: ColumnData<UIntCursor> = (0..N).map(|_| rand_u64()).collect();
-        let bytes = col.save();
-        bencher.bench_local(|| ColumnData::<UIntCursor>::load(&bytes).unwrap());
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
     fn v1_load_100k(bencher: Bencher) {
         let col = v1::Column::<u64>::from_values((0..N).map(|_| rand_u64()).collect());
         let bytes = col.save();
@@ -687,14 +433,6 @@ mod load_string {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
-    fn v0_load_100k(bencher: Bencher) {
-        let col: ColumnData<StrCursor> = (0..N).map(|_| rand_string(STR_LEN)).collect();
-        let bytes = col.save();
-        bencher.bench_local(|| ColumnData::<StrCursor>::load(&bytes).unwrap());
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
     fn v1_load_100k(bencher: Bencher) {
         let col = v1::Column::<String>::from_values((0..N).map(|_| rand_string(STR_LEN)).collect());
         let bytes = col.save();
@@ -707,14 +445,6 @@ mod load_bool {
     use super::*;
 
     const N: usize = 100_000;
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
-    fn v0_load_100k(bencher: Bencher) {
-        let col: ColumnData<BooleanCursor> = (0..N).map(|_| rand_bool()).collect();
-        let bytes = col.save();
-        bencher.bench_local(|| ColumnData::<BooleanCursor>::load(&bytes).unwrap());
-    }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
@@ -745,15 +475,6 @@ mod bulk_load_u64 {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_from_iter_10k(bencher: Bencher) {
-        let vals = rand_vals(10_000);
-        bencher.bench_local(|| {
-            let _: ColumnData<UIntCursor> = vals.iter().copied().collect();
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_from_values_10k(bencher: Bencher) {
         let vals = rand_vals(10_000);
         bencher.bench_local(|| {
@@ -767,15 +488,6 @@ mod bulk_load_u64 {
         let vals = rand_vals(10_000);
         bencher.bench_local(|| {
             PrefixColumn::<u64>::from_values(vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_from_iter_100k(bencher: Bencher) {
-        let vals = rand_vals(100_000);
-        bencher.bench_local(|| {
-            let _: ColumnData<UIntCursor> = vals.iter().copied().collect();
         });
     }
 
@@ -801,15 +513,6 @@ mod bulk_load_u64 {
 #[divan::bench_group(name = "bulk_load_bool")]
 mod bulk_load_bool {
     use super::*;
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_from_iter_100k(bencher: Bencher) {
-        let vals = rand_bools(100_000);
-        bencher.bench_local(|| {
-            let _: ColumnData<BooleanCursor> = vals.iter().copied().collect();
-        });
-    }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
@@ -1000,26 +703,12 @@ fn rand_monotonic_i64(n: usize) -> Vec<i64> {
     v
 }
 
-fn build_v0_delta(n: usize) -> ColumnData<DeltaCursor> {
-    let vals = rand_i64_vals(n);
-    let mut col: ColumnData<DeltaCursor> = ColumnData::new();
-    col.splice(0, 0, vals);
-    col
-}
-
 fn build_v1_i64(n: usize) -> v1::Column<i64> {
     v1::Column::from_values(rand_i64_vals(n).into_iter().collect())
 }
 
 fn build_v1_delta(n: usize) -> DeltaColumn<i64> {
     DeltaColumn::from_values(rand_i64_vals(n))
-}
-
-fn build_v0_delta_monotonic(n: usize) -> ColumnData<DeltaCursor> {
-    let vals = rand_monotonic_i64(n);
-    let mut col: ColumnData<DeltaCursor> = ColumnData::new();
-    col.splice(0, 0, vals);
-    col
 }
 
 fn build_v1_i64_monotonic(n: usize) -> v1::Column<i64> {
@@ -1035,16 +724,6 @@ fn build_v1_delta_monotonic(n: usize) -> DeltaColumn<i64> {
 #[divan::bench_group(name = "delta_get")]
 mod delta_get {
     use super::*;
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_delta_get_10k(bencher: Bencher) {
-        let col = build_v0_delta(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.get(pos)
-        });
-    }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
@@ -1072,16 +751,6 @@ mod delta_get {
 #[divan::bench_group(name = "delta_insert")]
 mod delta_insert {
     use super::*;
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_delta_insert_1(bencher: Bencher) {
-        let mut col = build_v0_delta(10_000);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, [rng().random_range(0..1000i64)]);
-        });
-    }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
@@ -1123,13 +792,6 @@ fn rand_opt_i64_vals(n: usize, none_frac: f64) -> Vec<Option<i64>> {
         .collect()
 }
 
-fn build_v0_opt_delta(n: usize, none_frac: f64) -> ColumnData<DeltaCursor> {
-    let vals = rand_opt_i64_vals(n, none_frac);
-    let mut col: ColumnData<DeltaCursor> = ColumnData::new();
-    col.splice(0, 0, vals);
-    col
-}
-
 fn build_v1_opt_delta(n: usize, none_frac: f64) -> DeltaColumn<Option<i64>> {
     DeltaColumn::<Option<i64>>::from_values(rand_opt_i64_vals(n, none_frac))
 }
@@ -1149,31 +811,11 @@ mod delta_opt_insert_1_100k {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_sparse(bencher: Bencher) {
-        let mut col = build_v0_opt_delta(100_000, 0.5);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, [rand_opt_val(0.5)]);
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_sparse(bencher: Bencher) {
         let mut col = build_v1_opt_delta(100_000, 0.5);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
             col.insert(pos, rand_opt_val(0.5));
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_dense(bencher: Bencher) {
-        let mut col = build_v0_opt_delta(100_000, 0.0);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 0, [rand_opt_val(0.0)]);
         });
     }
 
@@ -1194,31 +836,11 @@ mod delta_opt_replace_1_100k {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_sparse(bencher: Bencher) {
-        let mut col = build_v0_opt_delta(100_000, 0.5);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 1, [rand_opt_val(0.5)]);
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_sparse(bencher: Bencher) {
         let mut col = build_v1_opt_delta(100_000, 0.5);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
             col.splice(pos, 1, [rand_opt_val(0.5)]);
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_dense(bencher: Bencher) {
-        let mut col = build_v0_opt_delta(100_000, 0.0);
-        bencher.bench_local(|| {
-            let pos = rand_usize() % col.len();
-            col.splice(pos, 1, [rand_opt_val(0.0)]);
         });
     }
 
@@ -1239,19 +861,6 @@ mod delta_opt_delete_1_100k {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_sparse(bencher: Bencher) {
-        let mut col = build_v0_opt_delta(100_000, 0.5);
-        bencher.bench_local(|| {
-            if col.len() == 0 {
-                return;
-            }
-            let pos = rand_usize() % col.len();
-            col.splice::<Option<i64>, _>(pos, 1, std::iter::empty::<Option<i64>>());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_sparse(bencher: Bencher) {
         let mut col = build_v1_opt_delta(100_000, 0.5);
         bencher.bench_local(|| {
@@ -1260,19 +869,6 @@ mod delta_opt_delete_1_100k {
             }
             let pos = rand_usize() % col.len();
             col.remove(pos);
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_dense(bencher: Bencher) {
-        let mut col = build_v0_opt_delta(100_000, 0.0);
-        bencher.bench_local(|| {
-            if col.len() == 0 {
-                return;
-            }
-            let pos = rand_usize() % col.len();
-            col.splice::<Option<i64>, _>(pos, 1, std::iter::empty::<Option<i64>>());
         });
     }
 
@@ -1298,13 +894,6 @@ mod delta_save {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta_save_10k(bencher: Bencher) {
-        let col = build_v0_delta(10_000);
-        bencher.bench_local(|| col.save());
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_plain_save_10k(bencher: Bencher) {
         let col = build_v1_i64(10_000);
         bencher.bench_local(|| col.save());
@@ -1314,13 +903,6 @@ mod delta_save {
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_delta_save_10k(bencher: Bencher) {
         let col = build_v1_delta(10_000);
-        bencher.bench_local(|| col.save());
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta_save_100k(bencher: Bencher) {
-        let col = build_v0_delta(100_000);
         bencher.bench_local(|| col.save());
     }
 
@@ -1347,13 +929,6 @@ mod delta_save_monotonic {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta_save_10k(bencher: Bencher) {
-        let col = build_v0_delta_monotonic(10_000);
-        bencher.bench_local(|| col.save());
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_plain_save_10k(bencher: Bencher) {
         let col = build_v1_i64_monotonic(10_000);
         bencher.bench_local(|| col.save());
@@ -1372,14 +947,6 @@ mod delta_save_monotonic {
 #[divan::bench_group(name = "delta_load")]
 mod delta_load {
     use super::*;
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta_load_100k(bencher: Bencher) {
-        let col = build_v0_delta(100_000);
-        let bytes = col.save();
-        bencher.bench_local(|| ColumnData::<DeltaCursor>::load(&bytes).unwrap());
-    }
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
@@ -1406,16 +973,6 @@ mod delta_bulk_load {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta_build_10k(bencher: Bencher) {
-        let vals = rand_i64_vals(10_000);
-        bencher.bench_local(|| {
-            let mut col: ColumnData<DeltaCursor> = ColumnData::new();
-            col.splice(0, 0, vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_plain_build_10k(bencher: Bencher) {
         let vals = rand_i64_vals(10_000);
         bencher.bench_local(|| {
@@ -1429,16 +986,6 @@ mod delta_bulk_load {
         let vals = rand_i64_vals(10_000);
         bencher.bench_local(|| {
             DeltaColumn::<i64>::from_values(vals.clone());
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta_build_100k(bencher: Bencher) {
-        let vals = rand_i64_vals(100_000);
-        bencher.bench_local(|| {
-            let mut col: ColumnData<DeltaCursor> = ColumnData::new();
-            col.splice(0, 0, vals.clone());
         });
     }
 
@@ -1471,30 +1018,10 @@ mod iter_u64 {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_iter_10k(bencher: Bencher) {
-        let col = build_v0(10_000);
-        bencher.bench_local(|| {
-            let sum: u64 = col.iter().map(|v| v.unwrap_or_default().into_owned()).sum();
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_iter_10k(bencher: Bencher) {
         let col = build_v1(10_000);
         bencher.bench_local(|| {
             let sum: u64 = col.iter().sum();
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_iter_100k(bencher: Bencher) {
-        let col = build_v0(100_000);
-        bencher.bench_local(|| {
-            let sum: u64 = col.iter().map(|v| v.unwrap_or_default().into_owned()).sum();
             std::hint::black_box(sum)
         });
     }
@@ -1516,36 +1043,10 @@ mod iter_range_u64 {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_iter_range_10k(bencher: Bencher) {
-        let col = build_v0(10_000);
-        bencher.bench_local(|| {
-            let sum: u64 = col
-                .iter_range(2500..7500)
-                .map(|v| v.unwrap_or_default().into_owned())
-                .sum();
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_iter_range_10k(bencher: Bencher) {
         let col = build_v1(10_000);
         bencher.bench_local(|| {
             let sum: u64 = col.iter_range(2500..7500).sum();
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_iter_range_100k(bencher: Bencher) {
-        let col = build_v0(100_000);
-        bencher.bench_local(|| {
-            let sum: u64 = col
-                .iter_range(25000..75000)
-                .map(|v| v.unwrap_or_default().into_owned())
-                .sum();
             std::hint::black_box(sum)
         });
     }
@@ -1563,13 +1064,6 @@ mod iter_range_u64 {
 
 // ── nth() on alternating 10k-element runs (1M total) ────────────────────────
 
-fn build_v0_alternating(run_len: usize, num_runs: usize) -> ColumnData<UIntCursor> {
-    let vals: Vec<u64> = (0..num_runs)
-        .flat_map(|r| vec![r as u64; run_len])
-        .collect();
-    vals.into_iter().collect()
-}
-
 fn build_v1_alternating(run_len: usize, num_runs: usize) -> v1::Column<u64> {
     let vals: Vec<u64> = (0..num_runs)
         .flat_map(|r| vec![r as u64; run_len])
@@ -1586,17 +1080,6 @@ mod nth_10k_runs {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_10k(bencher: Bencher) {
-        let col = build_v0_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let mut iter = col.iter_range(20_000..col.len());
-            let _ = iter.next();
-            iter.nth(10_000)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_10k(bencher: Bencher) {
         let col = build_v1_alternating(RUN_LEN, NUM_RUNS);
         bencher.bench_local(|| {
@@ -1608,34 +1091,12 @@ mod nth_10k_runs {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_100k(bencher: Bencher) {
-        let col = build_v0_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let mut iter = col.iter_range(20_000..col.len());
-            let _ = iter.next();
-            iter.nth(100_000)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_100k(bencher: Bencher) {
         let col = build_v1_alternating(RUN_LEN, NUM_RUNS);
         bencher.bench_local(|| {
             let mut iter = col.iter_range(20_000..col.len());
             let _ = iter.next();
             iter.nth(100_000)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_500k(bencher: Bencher) {
-        let col = build_v0_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let mut iter = col.iter_range(20_000..col.len());
-            let _ = iter.next();
-            iter.nth(500_000)
         });
     }
 
@@ -1657,16 +1118,6 @@ mod iter_bool {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_iter_100k(bencher: Bencher) {
-        let col = build_v0_bool(100_000);
-        bencher.bench_local(|| {
-            let count = col.iter().filter(|v| v.as_deref() == Some(&true)).count();
-            std::hint::black_box(count)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_iter_100k(bencher: Bencher) {
         let col = build_v1_bool(100_000);
         bencher.bench_local(|| {
@@ -1678,19 +1129,8 @@ mod iter_bool {
 
 // ── Prefix iter: random values ──────────────────────────────────────────────
 
-fn build_v0_prefix(n: usize) -> ColumnData<UIntCursor> {
-    (0..n).map(|_| rand_u64()).collect()
-}
-
 fn build_v1_prefix(n: usize) -> v1::PrefixColumn<u64> {
     v1::PrefixColumn::from_values((0..n).map(|_| rand_u64()).collect())
-}
-
-fn build_v0_prefix_alternating(run_len: usize, num_runs: usize) -> ColumnData<UIntCursor> {
-    let vals: Vec<u64> = (0..num_runs)
-        .flat_map(|r| vec![(r as u64 + 1) * 10; run_len])
-        .collect();
-    vals.into_iter().collect()
 }
 
 fn build_v1_prefix_alternating(run_len: usize, num_runs: usize) -> v1::PrefixColumn<u64> {
@@ -1706,40 +1146,10 @@ mod prefix_iter_random {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_with_acc_10k(bencher: Bencher) {
-        let col = build_v0_prefix(10_000);
-        bencher.bench_local(|| {
-            let sum: u64 = col
-                .iter()
-                .with_acc()
-                .map(|g| g.acc.as_u64())
-                .last()
-                .unwrap_or(0);
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_prefix_iter_10k(bencher: Bencher) {
         let col = build_v1_prefix(10_000);
         bencher.bench_local(|| {
             let sum: u128 = col.iter().map(|pv| pv.total()).last().unwrap_or(0);
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_with_acc_100k(bencher: Bencher) {
-        let col = build_v0_prefix(100_000);
-        bencher.bench_local(|| {
-            let sum: u64 = col
-                .iter()
-                .with_acc()
-                .map(|g| g.acc.as_u64())
-                .last()
-                .unwrap_or(0);
             std::hint::black_box(sum)
         });
     }
@@ -1766,21 +1176,6 @@ mod prefix_iter_runs {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_with_acc_1m(bencher: Bencher) {
-        let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let sum: u64 = col
-                .iter()
-                .with_acc()
-                .map(|g| g.acc.as_u64())
-                .last()
-                .unwrap_or(0);
-            std::hint::black_box(sum)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_prefix_iter_1m(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
         bencher.bench_local(|| {
@@ -1801,17 +1196,6 @@ mod prefix_nth_runs {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_10k(bencher: Bencher) {
-        let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let mut iter = col.iter_range(20_000..col.len()).with_acc();
-            let _ = iter.next();
-            iter.nth(10_000)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_10k(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
         bencher.bench_local(|| {
@@ -1823,34 +1207,12 @@ mod prefix_nth_runs {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_100k(bencher: Bencher) {
-        let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let mut iter = col.iter_range(20_000..col.len()).with_acc();
-            let _ = iter.next();
-            iter.nth(100_000)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_100k(bencher: Bencher) {
         let col = build_v1_prefix_alternating(RUN_LEN, NUM_RUNS);
         bencher.bench_local(|| {
             let mut iter = col.iter_range(20_000..col.len());
             let _ = iter.next();
             iter.nth(100_000)
-        });
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_500k(bencher: Bencher) {
-        let col = build_v0_prefix_alternating(RUN_LEN, NUM_RUNS);
-        bencher.bench_local(|| {
-            let mut iter = col.iter_range(20_000..col.len()).with_acc();
-            let _ = iter.next();
-            iter.nth(500_000)
         });
     }
 
@@ -1874,23 +1236,9 @@ mod prefix_nth_random {
 
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_10k(bencher: Bencher) {
-        let col = build_v0_prefix(100_000);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).with_acc().nth(10_000));
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
     fn v1_nth_10k(bencher: Bencher) {
         let col = build_v1_prefix(100_000);
         bencher.bench_local(|| col.iter_range(20_000..col.len()).nth(10_000));
-    }
-
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_nth_50k(bencher: Bencher) {
-        let col = build_v0_prefix(100_000);
-        bencher.bench_local(|| col.iter_range(20_000..col.len()).with_acc().nth(50_000));
     }
 
     #[inline(never)]
@@ -1908,12 +1256,6 @@ mod save_u64 {
     use super::*;
 
     #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let col = build_v0(n);
-        bencher.bench_local(|| col.save());
-    }
-
-    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
         let col = build_v1(n);
         bencher.bench_local(|| col.save());
@@ -1925,12 +1267,6 @@ mod save_bool {
     use super::*;
 
     #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let col = build_v0_bool(n);
-        bencher.bench_local(|| col.save());
-    }
-
-    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
         let col = build_v1_bool(n);
         bencher.bench_local(|| col.save());
@@ -1940,12 +1276,6 @@ mod save_bool {
 #[divan::bench_group(name = "save_string_8b")]
 mod save_string_8b {
     use super::*;
-
-    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
-    fn v0(bencher: Bencher, n: usize) {
-        let col = build_v0_str(n, 8);
-        bencher.bench_local(|| col.save());
-    }
 
     #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
@@ -2003,36 +1333,6 @@ mod iter_range_next {
 
     fn ranges() -> impl Iterator<Item = std::ops::Range<usize>> + Clone {
         (0..N).step_by(STEP).map(|s| s..(s + STEP).min(N))
-    }
-
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_int(bencher: Bencher) {
-        let mut c = ColumnData::<IntCursor>::new();
-        c.splice(0, 0, seeded_monotonic_i64s(N));
-        bencher.bench_local(|| {
-            let mut acc = 0i64;
-            for r in ranges() {
-                if let Some(Some(v)) = c.iter_range(r).next() {
-                    acc = acc.wrapping_add(v.into_owned());
-                }
-            }
-            std::hint::black_box(acc)
-        });
-    }
-
-    #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
-    fn v0_delta(bencher: Bencher) {
-        let mut c = ColumnData::<DeltaCursor>::new();
-        c.splice(0, 0, seeded_monotonic_i64s(N));
-        bencher.bench_local(|| {
-            let mut acc = 0i64;
-            for r in ranges() {
-                if let Some(Some(v)) = c.iter_range(r).next() {
-                    acc = acc.wrapping_add(v.into_owned());
-                }
-            }
-            std::hint::black_box(acc)
-        });
     }
 
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
