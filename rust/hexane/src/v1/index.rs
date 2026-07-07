@@ -23,7 +23,7 @@ use super::column::{bit_point_update, find_slab_bit, rebuild_bit, SlabWeight};
 /// Implementors store one weight per slab plus whatever aggregation
 /// structure they need (Fenwick array, B-tree, etc.) and answer
 /// positional queries in O(log n).
-pub trait ColumnIndex<W>: Default {
+pub trait ColumnIndex<W>: super::sealed::Sealed + Default {
     /// Construct from an iterator of per-slab weights in slab order.
     fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self;
 
@@ -77,6 +77,8 @@ impl<W: SlabWeight> Default for BitIndex<W> {
     }
 }
 
+impl<W: SlabWeight> super::sealed::Sealed for BitIndex<W> {}
+
 impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
     fn from_weights<I: IntoIterator<Item = W>>(iter: I) -> Self {
         let weights: Vec<W> = iter.into_iter().collect();
@@ -117,6 +119,8 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
 }
 
 // ── SlabBTree: B-tree-backed ───────────────────────────────────────────────
+
+impl<A: SlabAggregate> super::sealed::Sealed for SlabBTree<A> {}
 
 impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
     fn from_weights<I: IntoIterator<Item = A>>(iter: I) -> Self {

@@ -181,6 +181,11 @@ impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SubAssign
     }
 }
 
+impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> super::sealed::Sealed
+    for PrefixSlabWeight<P>
+{
+}
+
 impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
     for PrefixSlabWeight<P>
 {
@@ -196,6 +201,8 @@ impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
 /// supports both position queries and prefix-sum queries.
 #[derive(Clone)]
 pub struct PrefixWeightFn<T>(PhantomData<fn() -> T>);
+
+impl<T> super::sealed::Sealed for PrefixWeightFn<T> {}
 
 impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;

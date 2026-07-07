@@ -19,6 +19,7 @@ pub mod column;
 pub mod delta;
 pub mod encoder;
 pub mod encoding;
+#[doc(hidden)]
 pub mod index;
 pub(crate) mod leb;
 pub mod load_opts;
@@ -28,7 +29,6 @@ pub mod rle;
 pub use column::{Column, Iter, IterState};
 pub use delta::indexed::FindByRange;
 pub use delta::{DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
-pub use index::{BitIndex, ColumnIndex};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.
@@ -58,6 +58,15 @@ pub use encoding::RunDecoder;
 pub use load_opts::{LoadOpts, TypedLoadOpts};
 pub use prefix::{PrefixColumn, PrefixIter, PrefixIterState, PrefixValue, PrefixedValue};
 pub use raw::{RawColumn, RawColumnIter};
+
+/// Sealing for the internal plumbing traits (`WeightFn`, `SlabWeight`,
+/// `ColumnIndex`).  They must be `pub` because they appear in `Column`'s
+/// generic bounds, but they are implementation detail: sealing keeps
+/// external crates from implementing them, so the index/weight machinery
+/// can change shape in any release without breakage.
+mod sealed {
+    pub trait Sealed {}
+}
 
 #[cfg(test)]
 mod tests;

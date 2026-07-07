@@ -47,7 +47,9 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
 /// For columns that track prefix sums, this is a compound value carrying
 /// both the item count and the slab's contribution to the prefix sum.
 #[doc(hidden)]
-pub trait SlabWeight: Clone + Default + std::fmt::Debug + AddAssign + SubAssign {
+pub trait SlabWeight:
+    super::sealed::Sealed + Clone + Default + std::fmt::Debug + AddAssign + SubAssign
+{
     /// The length (item count) component of this weight.
     fn len(&self) -> usize;
 
@@ -56,6 +58,8 @@ pub trait SlabWeight: Clone + Default + std::fmt::Debug + AddAssign + SubAssign 
         self.len() == 0
     }
 }
+
+impl super::sealed::Sealed for usize {}
 
 impl SlabWeight for usize {
     #[inline]
@@ -73,7 +77,7 @@ impl SlabWeight for usize {
 /// counts.  Prefix-aware columns use a compound weight that also tracks
 /// prefix sums in the same BIT.
 #[doc(hidden)]
-pub trait WeightFn<T: ColumnValueRef> {
+pub trait WeightFn<T: ColumnValueRef>: super::sealed::Sealed {
     /// The per-slab weight type.
     ///
     /// For the Fenwick-BIT-backed [`Column`] and [`BitIndex`](super::index::BitIndex),
@@ -89,6 +93,8 @@ pub trait WeightFn<T: ColumnValueRef> {
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct LenWeight;
+
+impl super::sealed::Sealed for LenWeight {}
 
 impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     type Weight = usize;
@@ -740,6 +746,14 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 // over the old BIT-backed Column (now deleted); this is the equivalent for
 // the B-tree path, mutating via the `ColumnIndex` trait.
 
+/// A typed column of RLE- or bool-encoded values with O(log S) random
+/// access and in-place splice.
+///
+/// **Treat the public type as `Column<T>`.**  The `WF` (per-slab weight
+/// strategy) and `Idx` (index backend) parameters are internal plumbing
+/// with the right defaults; the traits behind them are sealed and may
+/// change shape in any release.  `PrefixColumn` and `DeltaColumn` are the
+/// supported ways to get non-default weights.
 pub struct Column<
     T: ColumnValueRef,
     WF: WeightFn<T> = super::column::LenWeight,
