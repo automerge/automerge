@@ -1,3 +1,8 @@
+> **Note (1.0.0-alpha.2):** the 0.2-era `ColumnData<C>` API described as
+> "v0" below has been **removed**, and the v1 API now lives at the crate
+> root (no `v1::` prefix).  This guide remains as a porting reference for
+> code still written against 0.2.
+
 # Migrating from v0 `ColumnData<C>` to v1 `PrefixColumn<T>` / `Column<T>`
 
 ## Why migrate?
@@ -10,8 +15,8 @@ v1 `PrefixColumn<T>` uses a slab-based Fenwick tree (BIT) for O(log n) prefix-su
 
 | Need prefix sums? | Use |
 |-|-|
-| Yes — counting, seeking by accumulated value, range sums | `v1::PrefixColumn<T>` |
-| No — just random access, iteration, splice | `v1::Column<T>` |
+| Yes — counting, seeking by accumulated value, range sums | `hexane::PrefixColumn<T>` |
+| No — just random access, iteration, splice | `hexane::Column<T>` |
 
 ## Type declarations
 
@@ -22,9 +27,9 @@ top: ColumnData<BooleanCursor>,      // bool with prefix sums
 visible: ColumnData<BooleanCursor>,  // bool, no prefix sums needed
 
 // After
-text: v1::PrefixColumn<Option<u32>>, // prefix sums over Option<u32>
-top: v1::PrefixColumn<bool>,         // prefix sums over bool
-visible: v1::Column<bool>,           // values only
+text: hexane::PrefixColumn<Option<u32>>, // prefix sums over Option<u32>
+top: hexane::PrefixColumn<bool>,         // prefix sums over bool
+visible: hexane::Column<bool>,           // values only
 ```
 
 `PrefixColumn` requires `T: PrefixValue`. Implemented for: `bool`, `u32`, `u64`, `i64`, `Option<u32>`, `Option<u64>`, `Option<i64>`, `NonZeroU32`, etc.
@@ -176,7 +181,7 @@ When migrating, keep the old column around temporarily to validate:
 
 ```rust
 // In the struct
-text: v1::PrefixColumn<Option<u32>>,
+text: hexane::PrefixColumn<Option<u32>>,
 text_old: ColumnData<UIntCursor>,    // temporary, remove after validation
 
 // At every usage site
@@ -188,10 +193,10 @@ assert_eq!(new_result, old_delta.as_usize(), "v1 vs v0 mismatch");
 ```
 
 Remove `_old` and all asserts once tests pass. Migrations done so far:
-- `insert`: `ColumnData<BooleanCursor>` → `v1::PrefixColumn<bool>` (done, scaffolding removed)
-- `top`: `ColumnData<BooleanCursor>` → `v1::PrefixColumn<bool>` (done, scaffolding removed)
-- `visible`: `ColumnData<BooleanCursor>` → `v1::Column<bool>` (done)
-- `text`: `ColumnData<UIntCursor>` → `v1::PrefixColumn<Option<u32>>` (in progress, scaffolding active)
+- `insert`: `ColumnData<BooleanCursor>` → `hexane::PrefixColumn<bool>` (done, scaffolding removed)
+- `top`: `ColumnData<BooleanCursor>` → `hexane::PrefixColumn<bool>` (done, scaffolding removed)
+- `visible`: `ColumnData<BooleanCursor>` → `hexane::Column<bool>` (done)
+- `text`: `ColumnData<UIntCursor>` → `hexane::PrefixColumn<Option<u32>>` (in progress, scaffolding active)
 
 ## API summary
 
@@ -296,10 +301,10 @@ Every other streaming encoder category (RLE, Bool, UInt, Delta) is now fully mig
 
 ### Reusable helpers added during the migration
 
-- `hexane::v1::Column::remap(|T| T)` — walks runs and re-emits each value through `f`, replacing the column. For `T: ColumnValueRef`.
-- `hexane::v1::RleEncoder::save_to_and_remap(out, |T| T)` / `save_to_unless_and_remap(out, unless, |T| T)` — like `save_to` / `save_to_unless` but applies `f` during save without a round-trip through `Column`. Walks the encoder's own buffer with `RleDecoder` and re-emits into a fresh encoder.
-- `hexane::v1::RleEncoder::append_owned(T)` — owned-value shorthand that complements `append(T::Get<'a>)`. Lets call sites with `Option<String>` or `String` values append without wrapping in `append_n_owned(v, 1)`.
-- `hexane::v1::DeltaEncoder<'a, T: DeltaValue>` — streaming delta encoder that mirrors `RleEncoder`'s interface (`append`, `append_n`, `extend`, `save`, `save_to`, static `encode` / `encode_to`). Byte-compatible with v0 `DeltaCursor` and v1 `DeltaColumn::from_values`. Supports all `DeltaValue` types: `u32`, `u64`, `i32`, `i64`, `usize` and their `Option<_>` variants.
+- `hexane::Column::remap(|T| T)` — walks runs and re-emits each value through `f`, replacing the column. For `T: ColumnValueRef`.
+- `hexane::RleEncoder::save_to_and_remap(out, |T| T)` / `save_to_unless_and_remap(out, unless, |T| T)` — like `save_to` / `save_to_unless` but applies `f` during save without a round-trip through `Column`. Walks the encoder's own buffer with `RleDecoder` and re-emits into a fresh encoder.
+- `hexane::RleEncoder::append_owned(T)` — owned-value shorthand that complements `append(T::Get<'a>)`. Lets call sites with `Option<String>` or `String` values append without wrapping in `append_n_owned(v, 1)`.
+- `hexane::DeltaEncoder<'a, T: DeltaValue>` — streaming delta encoder that mirrors `RleEncoder`'s interface (`append`, `append_n`, `extend`, `save`, `save_to`, static `encode` / `encode_to`). Byte-compatible with v0 `DeltaCursor` and v1 `DeltaColumn::from_values`. Supports all `DeltaValue` types: `u32`, `u64`, `i32`, `i64`, `usize` and their `Option<_>` variants.
 
 ## Column storage migration status (`automerge`)
 
@@ -307,22 +312,22 @@ Separate from the encoder migration above: automerge keeps live `ColumnData<*>`
 columns in memory for the op set, the change graph, and a few indexes. These
 are read/written via the v0 column API (`splice`, `iter`, `get`, etc.).
 
-### Migrated columns (`v1::Column` / `v1::PrefixColumn`)
+### Migrated columns (`hexane::Column` / `hexane::PrefixColumn`)
 
 | File | Field | Type |
 |-|-|-|
-| `op_set2/columns.rs::Columns` | `key_str` | `v1::Column<Option<String>>` |
-| `op_set2/columns.rs::Columns` | `mark_name` | `v1::Column<Option<String>>` |
-| `op_set2/columns.rs::Columns` | `expand` | `v1::Column<bool>` |
-| `op_set2/columns.rs::Columns` | `insert` | `v1::PrefixColumn<bool>` |
-| `op_set2/columns.rs::Indexes` | `text` | `v1::PrefixColumn<Option<u32>>` |
-| `op_set2/columns.rs::Indexes` | `top` | `v1::PrefixColumn<bool>` |
-| `op_set2/columns.rs::Indexes` | `visible` | `v1::Column<bool>` |
-| `change_graph.rs::ChangeGraph` | `num_ops` | `v1::Column<u64>` |
-| `change_graph.rs::ChangeGraph` | `timestamps` | `v1::DeltaColumn<i64>` |
-| `change_graph.rs::ChangeGraph` | `messages` | `v1::Column<Option<String>>` |
-| `change_graph.rs::ChangeGraph` | `extra_bytes_meta` | `v1::PrefixColumn<ValueMeta>` (via `PrefixValue for ValueMeta` → byte-length prefix) |
-| `op_set2/columns.rs::Columns` | `value` | `v1::RawColumn` — standalone byte arena with its own slab + Fenwick BIT, 4 KiB default `max_segments`; `splice_slice(&[u8])` + `splice(IntoIterator<Item = impl AsRef<[u8]>>)` |
+| `op_set2/columns.rs::Columns` | `key_str` | `hexane::Column<Option<String>>` |
+| `op_set2/columns.rs::Columns` | `mark_name` | `hexane::Column<Option<String>>` |
+| `op_set2/columns.rs::Columns` | `expand` | `hexane::Column<bool>` |
+| `op_set2/columns.rs::Columns` | `insert` | `hexane::PrefixColumn<bool>` |
+| `op_set2/columns.rs::Indexes` | `text` | `hexane::PrefixColumn<Option<u32>>` |
+| `op_set2/columns.rs::Indexes` | `top` | `hexane::PrefixColumn<bool>` |
+| `op_set2/columns.rs::Indexes` | `visible` | `hexane::Column<bool>` |
+| `change_graph.rs::ChangeGraph` | `num_ops` | `hexane::Column<u64>` |
+| `change_graph.rs::ChangeGraph` | `timestamps` | `hexane::DeltaColumn<i64>` |
+| `change_graph.rs::ChangeGraph` | `messages` | `hexane::Column<Option<String>>` |
+| `change_graph.rs::ChangeGraph` | `extra_bytes_meta` | `hexane::PrefixColumn<ValueMeta>` (via `PrefixValue for ValueMeta` → byte-length prefix) |
+| `op_set2/columns.rs::Columns` | `value` | `hexane::RawColumn` — standalone byte arena with its own slab + Fenwick BIT, 4 KiB default `max_segments`; `splice_slice(&[u8])` + `splice(IntoIterator<Item = impl AsRef<[u8]>>)` |
 
 ### Remaining v0 `ColumnData<*>` columns and migration blockers
 
