@@ -1,4 +1,4 @@
-use crate::v1::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
+use crate::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
 use proptest::prelude::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1763,7 +1763,7 @@ fn prefix_ground_truth(vals: &[u64], max_seg: usize) -> (PrefixColumn<u64>, Vec<
 
 /// `(total, value)` view of a [`PrefixedValue`] for comparison against
 /// owned ground-truth tuples.
-fn tv(pv: crate::v1::PrefixedValue<'_, u64>) -> (u128, u64) {
+fn tv(pv: crate::PrefixedValue<'_, u64>) -> (u128, u64) {
     (pv.total(), pv.value)
 }
 
@@ -3531,7 +3531,7 @@ fn fuzz_scope_to_value_nullable() {
 
 fn check_slab_merge_invariant<T: ColumnValueRef>(col: &Column<T>, context: &str) {
     let segs = col.slab_segments();
-    let max = crate::v1::column::DEFAULT_MAX_SEG;
+    let max = crate::column::DEFAULT_MAX_SEG;
     let min = max / 4;
     for i in 0..segs.len() {
         if segs[i] < min {
@@ -4051,15 +4051,15 @@ fn fuzz_column_save_load_after_mutations() {
 
 #[test]
 fn encoder_into_column_direct_matches_load() {
-    use crate::v1::encoding::EncoderApi;
+    use crate::encoding::EncoderApi;
     // Mixed runs + literals, enough to force several slab cuts at max=4.
     let vals: Vec<u64> = (0..300u64)
         .map(|i| if i % 7 == 0 { 42 } else { i })
         .collect();
 
-    let plain = crate::v1::Encoder::<u64>::encode(vals.iter().copied());
+    let plain = crate::Encoder::<u64>::encode(vals.iter().copied());
 
-    let mut enc = crate::v1::Encoder::<u64>::default();
+    let mut enc = crate::Encoder::<u64>::default();
     enc.max_segments(4);
     enc.extend(vals.iter().copied());
     let mut col: Column<u64> = enc.into_column();
@@ -4077,11 +4077,11 @@ fn encoder_into_column_direct_matches_load() {
 
 #[test]
 fn encoder_save_after_rollover_matches_plain() {
-    use crate::v1::encoding::EncoderApi;
+    use crate::encoding::EncoderApi;
     let vals: Vec<u64> = (0..200u64).map(|i| i % 13).collect();
-    let plain = crate::v1::Encoder::<u64>::encode(vals.iter().copied());
+    let plain = crate::Encoder::<u64>::encode(vals.iter().copied());
 
-    let mut enc = crate::v1::Encoder::<u64>::default();
+    let mut enc = crate::Encoder::<u64>::default();
     enc.max_segments(4);
     enc.extend(vals.iter().copied());
     // save() after cuts must fold the slabs back into canonical bytes.
@@ -4090,7 +4090,7 @@ fn encoder_save_after_rollover_matches_plain() {
 
 #[test]
 fn string_encoder_into_column_direct() {
-    use crate::v1::encoding::EncoderApi;
+    use crate::encoding::EncoderApi;
     // Strings stress the literal-run tail metadata (lit_tail) across cuts.
     let vals: Vec<String> = (0..80)
         .map(|i| {
@@ -4102,7 +4102,7 @@ fn string_encoder_into_column_direct() {
         })
         .collect();
 
-    let mut enc = crate::v1::Encoder::<String>::default();
+    let mut enc = crate::Encoder::<String>::default();
     enc.max_segments(4);
     for s in &vals {
         enc.append(s.as_str());
@@ -4117,11 +4117,11 @@ fn string_encoder_into_column_direct() {
 
 #[test]
 fn bool_encoder_into_column_direct_matches_load() {
-    use crate::v1::encoding::EncoderApi;
+    use crate::encoding::EncoderApi;
     let vals: Vec<bool> = (0..500).map(|i| (i / 3) % 2 == 0).collect();
-    let plain = crate::v1::Encoder::<bool>::encode(vals.iter().copied());
+    let plain = crate::Encoder::<bool>::encode(vals.iter().copied());
 
-    let mut enc = crate::v1::Encoder::<bool>::default();
+    let mut enc = crate::Encoder::<bool>::default();
     enc.max_segments(4);
     enc.extend(vals.iter().copied());
     let col: Column<bool> = enc.into_column();
@@ -4135,8 +4135,8 @@ fn bool_encoder_into_column_direct_matches_load() {
 
 #[test]
 fn index_items_before_parity() {
-    use crate::v1::column::LenWeight;
-    use crate::v1::index::{BitIndex, ColumnIndex};
+    use crate::column::LenWeight;
+    use crate::index::{BitIndex, ColumnIndex};
 
     let vals: Vec<u64> = (0..500u64).collect();
     let btree = Column::<u64>::from_values_with_max_segments(vals.clone(), 4);
@@ -4167,9 +4167,9 @@ fn index_items_before_parity() {
 
 #[test]
 fn bool_into_slab_tail_multibyte_leb() {
-    use crate::v1::bool::BoolEncoding;
-    use crate::v1::encoding::{ColumnEncoding, EncoderApi};
-    use crate::v1::Encoder;
+    use crate::bool::BoolEncoding;
+    use crate::encoding::{ColumnEncoding, EncoderApi};
+    use crate::Encoder;
     // 200 false + 200 true: last count = 200 → 2-byte LEB128.
     let mut vals = vec![false; 200];
     vals.extend(vec![true; 200]);
@@ -4270,7 +4270,7 @@ fn remove_n_out_of_bounds_panics() {
 
 fn golden_rle<T>(values: Vec<T>, fixture: &[u8])
 where
-    T: crate::v1::ColumnValueRef + Clone + PartialEq + std::fmt::Debug + crate::v1::AsColumnRef<T>,
+    T: crate::ColumnValueRef + Clone + PartialEq + std::fmt::Debug + crate::AsColumnRef<T>,
 {
     let col = Column::<T>::from_values(values.clone());
     assert_eq!(
@@ -4282,7 +4282,7 @@ where
     assert_eq!(loaded.len(), values.len(), "reload length");
     for (i, v) in values.iter().enumerate() {
         assert!(
-            <T as crate::v1::ColumnValueRef>::eq(loaded.get(i).unwrap(), v.as_column_ref()),
+            <T as crate::ColumnValueRef>::eq(loaded.get(i).unwrap(), v.as_column_ref()),
             "reload mismatch at {i}"
         );
     }

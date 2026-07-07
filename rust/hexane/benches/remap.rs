@@ -17,7 +17,7 @@
 
 use divan::counter::ItemsCount;
 use divan::Bencher;
-use hexane::v1::Column;
+use hexane::Column;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};

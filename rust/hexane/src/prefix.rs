@@ -957,7 +957,7 @@ impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::v1::prefix::PrefixColumn;
+    use crate::prefix::PrefixColumn;
 
     fn parity_check(values: Vec<u64>) {
         let col = PrefixColumn::<u64>::from_values(values.clone());

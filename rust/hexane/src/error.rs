@@ -11,7 +11,7 @@ pub enum PackError {
     #[error("invalid value: {0}")]
     InvalidValue(String),
     /// The decoded column length did not match the expected length passed
-    /// via [`LoadOpts::with_length`](crate::v1::LoadOpts::with_length).
+    /// via [`LoadOpts::with_length`](crate::LoadOpts::with_length).
     #[error("invalid load length len={0}, expected={1}")]
     InvalidLength(usize, usize),
     /// The encoded data did not follow the expected format.

@@ -1425,8 +1425,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v1::column::Column;
-    use crate::v1::index::BitIndex;
+    use crate::column::Column;
+    use crate::index::BitIndex;
 
     fn parity_column<T>(values: Vec<T>)
     where

@@ -846,9 +846,9 @@ pub(crate) struct Op<'a> {
 #[derive(Clone, Default)]
 pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
-    pub(super) succ_actor: hexane::v1::Iter<'a, super::types::ActorIdx>,
-    pub(super) succ_counter: hexane::v1::DeltaIter<'a, u32>,
-    pub(super) inc_values: hexane::v1::Iter<'a, Option<i64>>,
+    pub(super) succ_actor: hexane::Iter<'a, super::types::ActorIdx>,
+    pub(super) succ_counter: hexane::DeltaIter<'a, u32>,
+    pub(super) inc_values: hexane::Iter<'a, Option<i64>>,
 }
 
 impl<'a> SuccCursors<'a> {

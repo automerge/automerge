@@ -29,7 +29,7 @@ type OptI64Slab = Slab<TailOf<Option<i64>>>;
 #[derive(Copy, Clone, Debug, Default)]
 pub struct IndexedDeltaWeightFn;
 
-impl crate::v1::sealed::Sealed for IndexedDeltaWeightFn {}
+impl crate::sealed::Sealed for IndexedDeltaWeightFn {}
 
 impl WeightFn<Option<i64>> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;

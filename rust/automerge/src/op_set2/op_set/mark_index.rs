@@ -1,8 +1,8 @@
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
-use hexane::v1::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
 use hexane::PackError;
+use hexane::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
@@ -230,7 +230,7 @@ impl MarkIndexColumn {
         self.data.len()
     }
 
-    pub(crate) fn iter(&self) -> hexane::v1::Iter<'_, Option<MarkIdx>> {
+    pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>> {
         self.data.values().iter()
     }
 

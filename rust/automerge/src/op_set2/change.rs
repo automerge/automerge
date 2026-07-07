@@ -197,57 +197,48 @@ where
 
     mapper.remap_actors(ops, change_actor);
 
-    use hexane::v1::EncoderApi;
+    use hexane::EncoderApi;
 
     let mapping = &mapper.mapping;
     let remap_opt_actor = |actor: Option<ActorIdx>| actor.map(|a| mapping[usize::from(a)].unwrap());
     let remap_actor = |a: ActorIdx| mapping[usize::from(a)].unwrap();
 
-    let obj_actor = hexane::v1::Encoder::<Option<ActorIdx>>::encode_to_unless(
+    let obj_actor = hexane::Encoder::<Option<ActorIdx>>::encode_to_unless(
         data,
         ops.iter().map(T::obj_actor).map(&remap_opt_actor),
         None,
     );
-    let obj_ctr = hexane::v1::Encoder::<Option<u64>>::encode_to_unless(
-        data,
-        ops.iter().map(T::obj_ctr),
-        None,
-    );
-    let key_actor = hexane::v1::Encoder::<Option<ActorIdx>>::encode_to_unless(
+    let obj_ctr =
+        hexane::Encoder::<Option<u64>>::encode_to_unless(data, ops.iter().map(T::obj_ctr), None);
+    let key_actor = hexane::Encoder::<Option<ActorIdx>>::encode_to_unless(
         data,
         ops.iter().map(T::key_actor).map(&remap_opt_actor),
         None,
     );
-    let key_ctr = hexane::v1::DeltaEncoder::<Option<i64>>::encode_to_unless(
+    let key_ctr = hexane::DeltaEncoder::<Option<i64>>::encode_to_unless(
         data,
         ops.iter().map(T::key_ctr).map(|c| c.map(|c| *c)),
         None,
     );
-    let key_str = hexane::v1::Encoder::<Option<String>>::encode_to_unless(
-        data,
-        ops.iter().map(T::key_str),
-        None,
-    );
-    let insert = hexane::v1::Encoder::<bool>::encode_to(data, ops.iter().map(T::insert));
-    let action = hexane::v1::Encoder::<Action>::encode_to(data, ops.iter().map(T::action));
-    let value_meta =
-        hexane::v1::Encoder::<ValueMeta>::encode_to(data, ops.iter().map(T::value_meta));
+    let key_str =
+        hexane::Encoder::<Option<String>>::encode_to_unless(data, ops.iter().map(T::key_str), None);
+    let insert = hexane::Encoder::<bool>::encode_to(data, ops.iter().map(T::insert));
+    let action = hexane::Encoder::<Action>::encode_to(data, ops.iter().map(T::action));
+    let value_meta = hexane::Encoder::<ValueMeta>::encode_to(data, ops.iter().map(T::value_meta));
     let value_start = data.len();
     for bytes in ops.iter().filter_map(T::value) {
         data.extend_from_slice(&bytes);
     }
     let value = value_start..data.len();
-    let pred_count = hexane::v1::Encoder::<u32>::encode_to(data, ops.iter().map(T::pred_count));
+    let pred_count = hexane::Encoder::<u32>::encode_to(data, ops.iter().map(T::pred_count));
     let pred_iter = ops.iter().map(T::pred).flat_map(|id| id.iter());
-    let pred_actor = hexane::v1::Encoder::<ActorIdx>::encode_to(
+    let pred_actor = hexane::Encoder::<ActorIdx>::encode_to(
         data,
         pred_iter.clone().map(T::id_actor).map(&remap_actor),
     );
-    let pred_ctr =
-        hexane::v1::DeltaEncoder::<i64>::encode_to(data, pred_iter.map(|id| id.icounter()));
-    let expand =
-        hexane::v1::Encoder::<bool>::encode_to_unless(data, ops.iter().map(T::expand), false);
-    let mark_name = hexane::v1::Encoder::<Option<String>>::encode_to_unless(
+    let pred_ctr = hexane::DeltaEncoder::<i64>::encode_to(data, pred_iter.map(|id| id.icounter()));
+    let expand = hexane::Encoder::<bool>::encode_to_unless(data, ops.iter().map(T::expand), false);
+    let mark_name = hexane::Encoder::<Option<String>>::encode_to_unless(
         data,
         ops.iter().map(T::mark_name),
         None,

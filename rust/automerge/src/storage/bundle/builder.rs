@@ -18,7 +18,7 @@ use super::{Bundle, BundleChange, BundleMetadata, BundleStorage, ParseError};
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
 fn save_opt_actor_unless_empty(
-    enc: hexane::v1::Encoder<'_, Option<ActorIdx>>,
+    enc: hexane::Encoder<'_, Option<ActorIdx>>,
     mapping: &[Option<ActorIdx>],
     data: &mut Vec<u8>,
 ) -> Range<usize> {
@@ -31,7 +31,7 @@ fn save_opt_actor_unless_empty(
 /// the remapped bytes to `data`.  Used for columns where every entry is
 /// present (`id_actor`, `pred_actor`, change-level `actor`).
 fn save_actor(
-    enc: hexane::v1::Encoder<'_, ActorIdx>,
+    enc: hexane::Encoder<'_, ActorIdx>,
     mapping: &[Option<ActorIdx>],
     data: &mut Vec<u8>,
 ) -> Range<usize> {
@@ -213,15 +213,15 @@ pub(crate) struct BundleChangeWriter<'a> {
     cap: usize,
     seen: HashMap<ChangeHash, usize>,
     external: Vec<ChangeHash>,
-    actor: hexane::v1::Encoder<'a, ActorIdx>,
-    seq: hexane::v1::DeltaEncoder<'a, i64>,
-    start_op: hexane::v1::DeltaEncoder<'a, i64>,
-    max_op: hexane::v1::DeltaEncoder<'a, i64>,
-    timestamp: hexane::v1::DeltaEncoder<'a, i64>,
-    message: hexane::v1::Encoder<'a, Option<String>>,
-    dep_count: hexane::v1::Encoder<'a, u32>,
-    deps: hexane::v1::DeltaEncoder<'a, i64>,
-    extra_count: hexane::v1::Encoder<'a, u32>,
+    actor: hexane::Encoder<'a, ActorIdx>,
+    seq: hexane::DeltaEncoder<'a, i64>,
+    start_op: hexane::DeltaEncoder<'a, i64>,
+    max_op: hexane::DeltaEncoder<'a, i64>,
+    timestamp: hexane::DeltaEncoder<'a, i64>,
+    message: hexane::Encoder<'a, Option<String>>,
+    dep_count: hexane::Encoder<'a, u32>,
+    deps: hexane::DeltaEncoder<'a, i64>,
+    extra_count: hexane::Encoder<'a, u32>,
     extra: Vec<u8>,
 }
 
@@ -291,22 +291,22 @@ impl<'a> BundleChangeWriter<'a> {
 
 #[derive(Default)]
 pub(crate) struct BundleOpWriter<'a> {
-    obj_actor: hexane::v1::Encoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::v1::DeltaEncoder<'a, Option<i64>>,
-    key_actor: hexane::v1::Encoder<'a, Option<ActorIdx>>,
-    key_ctr: hexane::v1::DeltaEncoder<'a, Option<i64>>,
-    key_str: hexane::v1::Encoder<'a, Option<String>>,
-    id_actor: hexane::v1::Encoder<'a, ActorIdx>,
-    id_ctr: hexane::v1::DeltaEncoder<'a, i64>,
-    insert: hexane::v1::Encoder<'a, bool>,
-    action: hexane::v1::Encoder<'a, Action>,
-    value_meta: hexane::v1::Encoder<'a, ValueMeta>,
+    obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    key_str: hexane::Encoder<'a, Option<String>>,
+    id_actor: hexane::Encoder<'a, ActorIdx>,
+    id_ctr: hexane::DeltaEncoder<'a, i64>,
+    insert: hexane::Encoder<'a, bool>,
+    action: hexane::Encoder<'a, Action>,
+    value_meta: hexane::Encoder<'a, ValueMeta>,
     value: Vec<u8>,
-    pred_count: hexane::v1::Encoder<'a, u32>,
-    pred_actor: hexane::v1::Encoder<'a, ActorIdx>,
-    pred_ctr: hexane::v1::DeltaEncoder<'a, i64>,
-    expand: hexane::v1::Encoder<'a, bool>,
-    mark_name: hexane::v1::Encoder<'a, Option<String>>,
+    pred_count: hexane::Encoder<'a, u32>,
+    pred_actor: hexane::Encoder<'a, ActorIdx>,
+    pred_ctr: hexane::DeltaEncoder<'a, i64>,
+    expand: hexane::Encoder<'a, bool>,
+    mark_name: hexane::Encoder<'a, Option<String>>,
 }
 
 impl<'a> BundleOpWriter<'a> {
@@ -521,15 +521,15 @@ pub(crate) struct BundleChangeIterUnverified<'a> {
 
 #[derive(Debug)]
 struct BundleChangeIterInner<'a> {
-    actor: hexane::v1::Decoder<'a, Option<ActorIdx>>,
-    seq: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    max_op: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    start_op: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    timestamp: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    message: hexane::v1::Decoder<'a, Option<String>>,
-    dep_count: hexane::v1::Decoder<'a, Option<u64>>,
-    deps: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    extra_count: hexane::v1::Decoder<'a, Option<u64>>,
+    actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    seq: hexane::DeltaDecoder<'a, Option<i64>>,
+    max_op: hexane::DeltaDecoder<'a, Option<i64>>,
+    start_op: hexane::DeltaDecoder<'a, Option<i64>>,
+    timestamp: hexane::DeltaDecoder<'a, Option<i64>>,
+    message: hexane::Decoder<'a, Option<String>>,
+    dep_count: hexane::Decoder<'a, Option<u64>>,
+    deps: hexane::DeltaDecoder<'a, Option<i64>>,
+    extra_count: hexane::Decoder<'a, Option<u64>>,
     extra: &'a [u8],
 }
 
@@ -567,29 +567,29 @@ impl<'a> BundleChangeIterInner<'a> {
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
-        let mut actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
-        let mut seq = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut max_op = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut start_op = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut timestamp = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut message = hexane::v1::decoder::<Option<String>>(&[]);
-        let mut dep_count = hexane::v1::decoder::<Option<u64>>(&[]);
-        let mut deps = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut extra_count = hexane::v1::decoder::<Option<u64>>(&[]);
+        let mut actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut seq = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut max_op = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut start_op = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut timestamp = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut message = hexane::decoder::<Option<String>>(&[]);
+        let mut dep_count = hexane::decoder::<Option<u64>>(&[]);
+        let mut deps = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut extra_count = hexane::decoder::<Option<u64>>(&[]);
         let mut extra: &[u8] = &[];
 
         for col in columns.iter() {
             let d = &data[col.data()];
             match col.spec() {
-                change::ACTOR => actor = hexane::v1::decoder::<Option<ActorIdx>>(d),
-                change::SEQ => seq = hexane::v1::DeltaDecoder::<Option<i64>>::new(d),
-                change::START_OP => start_op = hexane::v1::DeltaDecoder::<Option<i64>>::new(d),
-                change::MAX_OP => max_op = hexane::v1::DeltaDecoder::<Option<i64>>::new(d),
-                change::TIMESTAMP => timestamp = hexane::v1::DeltaDecoder::<Option<i64>>::new(d),
-                change::MESSAGE => message = hexane::v1::decoder::<Option<String>>(d),
-                change::DEP_COUNT => dep_count = hexane::v1::decoder::<Option<u64>>(d),
-                change::DEPS => deps = hexane::v1::DeltaDecoder::<Option<i64>>::new(d),
-                change::EXTRA_COUNT => extra_count = hexane::v1::decoder::<Option<u64>>(d),
+                change::ACTOR => actor = hexane::decoder::<Option<ActorIdx>>(d),
+                change::SEQ => seq = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::START_OP => start_op = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::MAX_OP => max_op = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::TIMESTAMP => timestamp = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::MESSAGE => message = hexane::decoder::<Option<String>>(d),
+                change::DEP_COUNT => dep_count = hexane::decoder::<Option<u64>>(d),
+                change::DEPS => deps = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::EXTRA_COUNT => extra_count = hexane::decoder::<Option<u64>>(d),
                 change::EXTRA => extra = d,
                 spec => return Err(ParseError::InvalidChangeColumn(u32::from(spec))),
             }
@@ -683,21 +683,21 @@ impl<'a> OpIterUnverified<'a> {
 }
 
 struct OpIterInner<'a> {
-    obj_actor: hexane::v1::Decoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    key_actor: hexane::v1::Decoder<'a, Option<ActorIdx>>,
-    key_ctr: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    key_str: hexane::v1::Decoder<'a, Option<String>>,
-    id_actor: hexane::v1::Decoder<'a, Option<ActorIdx>>,
-    id_ctr: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    insert: hexane::v1::Decoder<'a, bool>,
-    action: hexane::v1::Decoder<'a, Option<Action>>,
-    meta: hexane::v1::Decoder<'a, Option<ValueMeta>>,
-    pred_count: hexane::v1::Decoder<'a, Option<u64>>,
-    pred_actor: hexane::v1::Decoder<'a, Option<ActorIdx>>,
-    pred_ctr: hexane::v1::DeltaDecoder<'a, Option<i64>>,
-    expand: hexane::v1::Decoder<'a, bool>,
-    mark_name: hexane::v1::Decoder<'a, Option<String>>,
+    obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    key_str: hexane::Decoder<'a, Option<String>>,
+    id_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    id_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    insert: hexane::Decoder<'a, bool>,
+    action: hexane::Decoder<'a, Option<Action>>,
+    meta: hexane::Decoder<'a, Option<ValueMeta>>,
+    pred_count: hexane::Decoder<'a, Option<u64>>,
+    pred_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    pred_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    expand: hexane::Decoder<'a, bool>,
+    mark_name: hexane::Decoder<'a, Option<String>>,
     value: &'a [u8],
 }
 
@@ -795,62 +795,54 @@ impl<'a> OpIterInner<'a> {
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
-        let mut obj_actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
-        let mut obj_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut key_actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
-        let mut key_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut key_str = hexane::v1::decoder::<Option<String>>(&[]);
-        let mut id_actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
-        let mut id_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut insert = hexane::v1::decoder::<bool>(&[]);
-        let mut action = hexane::v1::decoder::<Option<Action>>(&[]);
-        let mut meta = hexane::v1::decoder::<Option<ValueMeta>>(&[]);
-        let mut pred_count = hexane::v1::decoder::<Option<u64>>(&[]);
-        let mut pred_actor = hexane::v1::decoder::<Option<ActorIdx>>(&[]);
-        let mut pred_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut expand = hexane::v1::decoder::<bool>(&[]);
-        let mut mark_name = hexane::v1::decoder::<Option<String>>(&[]);
+        let mut obj_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut key_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut key_str = hexane::decoder::<Option<String>>(&[]);
+        let mut id_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut id_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut insert = hexane::decoder::<bool>(&[]);
+        let mut action = hexane::decoder::<Option<Action>>(&[]);
+        let mut meta = hexane::decoder::<Option<ValueMeta>>(&[]);
+        let mut pred_count = hexane::decoder::<Option<u64>>(&[]);
+        let mut pred_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut expand = hexane::decoder::<bool>(&[]);
+        let mut mark_name = hexane::decoder::<Option<String>>(&[]);
         let mut value: &[u8] = &[];
 
         for col in columns.iter() {
             let d = &data[col.data()];
             type C = ColumnType;
             match (col.spec().id(), col.spec().col_type()) {
-                (ops::OBJ_COL_ID, C::Actor) => {
-                    obj_actor = hexane::v1::decoder::<Option<ActorIdx>>(d)
-                }
+                (ops::OBJ_COL_ID, C::Actor) => obj_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::OBJ_COL_ID, C::DeltaInteger) => {
-                    obj_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
+                    obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
-                (ops::KEY_COL_ID, C::Actor) => {
-                    key_actor = hexane::v1::decoder::<Option<ActorIdx>>(d)
-                }
+                (ops::KEY_COL_ID, C::Actor) => key_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::KEY_COL_ID, C::DeltaInteger) => {
-                    key_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
+                    key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
-                (ops::KEY_COL_ID, C::String) => key_str = hexane::v1::decoder::<Option<String>>(d),
-                (ops::ID_COL_ID, C::Actor) => id_actor = hexane::v1::decoder::<Option<ActorIdx>>(d),
+                (ops::KEY_COL_ID, C::String) => key_str = hexane::decoder::<Option<String>>(d),
+                (ops::ID_COL_ID, C::Actor) => id_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::ID_COL_ID, C::DeltaInteger) => {
-                    id_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
+                    id_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
-                (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::v1::decoder::<bool>(d),
-                (ops::ACTION_COL_ID, C::Integer) => {
-                    action = hexane::v1::decoder::<Option<Action>>(d)
-                }
+                (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::decoder::<bool>(d),
+                (ops::ACTION_COL_ID, C::Integer) => action = hexane::decoder::<Option<Action>>(d),
                 (ops::VAL_COL_ID, C::ValueMetadata) => {
-                    meta = hexane::v1::decoder::<Option<ValueMeta>>(d)
+                    meta = hexane::decoder::<Option<ValueMeta>>(d)
                 }
                 (ops::VAL_COL_ID, C::Value) => value = d,
-                (ops::PRED_COL_ID, C::Group) => pred_count = hexane::v1::decoder::<Option<u64>>(d),
-                (ops::PRED_COL_ID, C::Actor) => {
-                    pred_actor = hexane::v1::decoder::<Option<ActorIdx>>(d)
-                }
+                (ops::PRED_COL_ID, C::Group) => pred_count = hexane::decoder::<Option<u64>>(d),
+                (ops::PRED_COL_ID, C::Actor) => pred_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::PRED_COL_ID, C::DeltaInteger) => {
-                    pred_ctr = hexane::v1::DeltaDecoder::<Option<i64>>::new(d)
+                    pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
-                (ops::EXPAND_COL_ID, C::Boolean) => expand = hexane::v1::decoder::<bool>(d),
+                (ops::EXPAND_COL_ID, C::Boolean) => expand = hexane::decoder::<bool>(d),
                 (ops::MARK_NAME_COL_ID, C::String) => {
-                    mark_name = hexane::v1::decoder::<Option<String>>(d)
+                    mark_name = hexane::decoder::<Option<String>>(d)
                 }
                 _ => return Err(ParseError::InvalidOpColumn(u32::from(col.spec()))),
             }

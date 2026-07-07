@@ -293,7 +293,7 @@ pub(crate) fn splice_slab(
 
         raw_suffix = slab_data[suffix.pos..].to_vec(); // save suffix
         let del_bytes = slab_data.len() - prefix.pos;
-        crate::v1::column::splice_bytes(slab_data, prefix.pos, del_bytes, &buf);
+        crate::column::splice_bytes(slab_data, prefix.pos, del_bytes, &buf);
         slab.len = prefix_item_count + len;
         slab.segments = segments;
         slab.tail = tail;
@@ -343,7 +343,7 @@ pub(crate) fn splice_slab(
         if suffix.segments == 0 {
             slab.tail = tail;
         }
-        crate::v1::column::splice_bytes(slab_data, prefix.pos, suffix.pos - prefix.pos, &buf);
+        crate::column::splice_bytes(slab_data, prefix.pos, suffix.pos - prefix.pos, &buf);
         slab.len = slab.len - del + items_inserted;
         slab.segments = segments + suffix.segments;
         #[cfg(debug_assertions)]
@@ -884,7 +884,7 @@ mod tests {
     use super::super::Column;
     use super::Slab;
     use super::{bool_count_segments, find_partition, BoolPartition};
-    use crate::v1::leb::{encode_count, read_count};
+    use crate::leb::{encode_count, read_count};
 
     fn build_bool(values: &[bool]) -> Column<bool> {
         let mut col = Column::<bool>::new();

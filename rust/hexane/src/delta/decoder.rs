@@ -19,7 +19,7 @@ use super::DeltaValue;
 /// [`DeltaColumn`](super::DeltaColumn) instead.
 #[derive(Clone)]
 pub struct DeltaDecoder<'a, T: DeltaValue> {
-    inner: crate::v1::Decoder<'a, Option<i64>>,
+    inner: crate::Decoder<'a, Option<i64>>,
     running: i64,
     _phantom: PhantomData<fn() -> T>,
 }
@@ -28,7 +28,7 @@ impl<'a, T: DeltaValue> DeltaDecoder<'a, T> {
     /// Construct a decoder over delta-encoded column `data`.
     pub fn new(data: &'a [u8]) -> Self {
         Self {
-            inner: crate::v1::decoder::<Option<i64>>(data),
+            inner: crate::decoder::<Option<i64>>(data),
             running: 0,
             _phantom: PhantomData,
         }

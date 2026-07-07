@@ -4,10 +4,10 @@ use std::num::NonZeroU32;
 
 use super::decoder::{RleDecoder, RleSegment};
 use super::{RleTail, Slab};
-use crate::v1::encoding::SlabInfo;
-use crate::v1::leb::{encode_signed, rewrite_lit_header};
-use crate::v1::RleValue;
+use crate::encoding::SlabInfo;
+use crate::leb::{encode_signed, rewrite_lit_header};
 use crate::PackError;
+use crate::RleValue;
 
 // ── validate_encoding ────────────────────────────────────────────────────────
 
@@ -201,10 +201,10 @@ impl Slab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v1::leb::encode_signed;
-    use crate::v1::rle::state::{RleCow, RleState};
-    use crate::v1::rle::{RleDecoder, RleEncoding};
-    use crate::v1::{Column, ColumnValueRef};
+    use crate::leb::encode_signed;
+    use crate::rle::state::{RleCow, RleState};
+    use crate::rle::{RleDecoder, RleEncoding};
+    use crate::{Column, ColumnValueRef};
 
     type NoValidate = fn((), usize, u64) -> Result<(), String>;
 

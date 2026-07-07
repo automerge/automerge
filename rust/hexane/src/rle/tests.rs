@@ -1,7 +1,7 @@
 use super::state::{RleCow, RleState};
 use super::*;
-use crate::v1::leb::{encode_signed, encode_unsigned};
-use crate::v1::{AsColumnRef, Column, RleValue};
+use crate::leb::{encode_signed, encode_unsigned};
+use crate::{AsColumnRef, Column, RleValue};
 
 pub(crate) fn rle_encode_state<T: RleValue>(
     values: impl Iterator<Item = T::Get<'static>>,

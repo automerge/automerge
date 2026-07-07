@@ -91,7 +91,7 @@ pub struct RleTail {
     /// Same meaning for repeat, literal, and null runs.
     ///
     /// `u32` by design: a single segment (one run) must stay under
-    /// 4 GiB.  Large blobs belong in [`RawColumn`](crate::v1::RawColumn),
+    /// 4 GiB.  Large blobs belong in [`RawColumn`](crate::RawColumn),
     /// not an RLE column.
     pub(crate) bytes: u32,
     /// For literal runs: byte length of the last value only.

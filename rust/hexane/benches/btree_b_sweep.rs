@@ -8,7 +8,7 @@
 
 use divan::counter::ItemsCount;
 use divan::Bencher;
-use hexane::v1::{Column, DeltaColumn};
+use hexane::{Column, DeltaColumn};
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};

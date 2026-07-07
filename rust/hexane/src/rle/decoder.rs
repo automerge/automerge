@@ -1,9 +1,9 @@
 //! RLE decoder — forward iterator over items in a single RLE-encoded slab.
 
-use crate::v1::encoding::RunDecoder;
-use crate::v1::leb::{read_signed, read_unsigned, try_read_signed, try_read_unsigned};
-use crate::v1::{ColumnValueRef, RleValue, Run};
+use crate::encoding::RunDecoder;
+use crate::leb::{read_signed, read_unsigned, try_read_signed, try_read_unsigned};
 use crate::PackError;
+use crate::{ColumnValueRef, RleValue, Run};
 
 /// Forward iterator over all items in a single RLE-encoded slab.
 ///

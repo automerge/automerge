@@ -4,9 +4,9 @@ use std::ops::Range;
 
 use super::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
 use super::{RleDecoder, RleTail, Slab};
-use crate::v1::encoding::RunDecoder;
-use crate::v1::leb::{read_signed, read_unsigned, rewrite_lit_header};
-use crate::v1::{AsColumnRef, RleValue};
+use crate::encoding::RunDecoder;
+use crate::leb::{read_signed, read_unsigned, rewrite_lit_header};
+use crate::{AsColumnRef, RleValue};
 
 #[cfg(debug_assertions)]
 use super::validate_rle_slab;
@@ -197,9 +197,9 @@ fn find_partition<'a, T: RleValue, V: AsColumnRef<T>>(
 #[cfg(test)]
 mod partition_tests {
     use super::*;
-    use crate::v1::encoding::EncoderApi;
-    use crate::v1::rle::state::RleState;
-    use crate::v1::Encoder;
+    use crate::encoding::EncoderApi;
+    use crate::rle::state::RleState;
+    use crate::Encoder;
 
     fn state_item_count<T: RleValue, V: AsColumnRef<T>>(state: &RleState<'_, T, V>) -> usize {
         match state {
@@ -462,7 +462,7 @@ mod partition_tests {
         if let Some(rw) = result.rewrite {
             rewrite_lit_header(&mut recon, rw.pos, rw.count);
         }
-        crate::v1::rle::rle_validate_encoding::<String>(&recon)
+        crate::rle::rle_validate_encoding::<String>(&recon)
             .unwrap_or_else(|e| panic!("invalid encoding for {vals:?}, range={start}..{end}: {e}"));
         assert_eq!(
             decode_string_bytes(&recon),
@@ -813,7 +813,7 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
 
     // we have to splice before rewrite header so range will be correct
     // (splice_bytes = memcpy-based Vec::splice — see column::splice_bytes)
-    crate::v1::column::splice_bytes(&mut slab.data, range.start, range.len(), &result.bytes);
+    crate::column::splice_bytes(&mut slab.data, range.start, range.len(), &result.bytes);
 
     if let Some(rw) = result.rewrite {
         prefix += rewrite_lit_header(&mut slab.data, rw.pos, rw.count);

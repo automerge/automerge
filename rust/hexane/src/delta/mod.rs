@@ -372,7 +372,7 @@ impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
 /// [`DeltaColumn::from_values`].
 ///
 /// ```no_run
-/// # use hexane::v1::delta::DeltaEncoder;
+/// # use hexane::delta::DeltaEncoder;
 /// let mut enc = DeltaEncoder::<i64>::new();
 /// enc.append(10);
 /// enc.append(20);
@@ -1267,8 +1267,8 @@ mod overflow_tests {
     fn delta_load_rejects_running_sum_overflow() {
         // Hostile bytes: two i64::MAX deltas overflow the running sum.
         // Must be a clean Err in every build profile, never a panic.
-        use crate::v1::encoding::EncoderApi;
-        let bytes = crate::v1::Encoder::<Option<i64>>::encode([Some(i64::MAX), Some(i64::MAX)]);
+        use crate::encoding::EncoderApi;
+        let bytes = crate::Encoder::<Option<i64>>::encode([Some(i64::MAX), Some(i64::MAX)]);
         assert!(
             DeltaColumn::<i64>::load(&bytes).is_err(),
             "overflowing running sum should be a load error"

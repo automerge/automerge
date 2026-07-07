@@ -1,8 +1,8 @@
 //! RLE encoding state machine for cursor-aware splice.
 
 use super::RleTail;
-use crate::v1::leb::{encode_signed, encode_unsigned, rewrite_lit_header};
-use crate::v1::{AsColumnRef, RleValue};
+use crate::leb::{encode_signed, encode_unsigned, rewrite_lit_header};
+use crate::{AsColumnRef, RleValue};
 
 use std::num::NonZeroU32;
 
@@ -32,7 +32,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleCow<'a, T, V> {
     /// Get as `T::Get<'_>` — the Ref arm reborrows at the shorter
     /// lifetime via [`ColumnValueRef::shorten`], no `unsafe` needed.
     ///
-    /// [`ColumnValueRef::shorten`]: crate::v1::ColumnValueRef::shorten
+    /// [`ColumnValueRef::shorten`]: crate::ColumnValueRef::shorten
     #[inline]
     pub fn get(&self) -> T::Get<'_> {
         match self {
@@ -569,8 +569,8 @@ fn emit_null(buf: &mut Vec<u8>, count: usize) -> WPos {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v1::leb::{read_signed, read_unsigned};
-    use crate::v1::rle::rle_validate_encoding;
+    use crate::leb::{read_signed, read_unsigned};
+    use crate::rle::rle_validate_encoding;
 
     fn encode_vals(vals: &[u64]) -> Vec<u8> {
         let mut buf = Vec::new();

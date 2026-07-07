@@ -703,11 +703,11 @@ impl<'a> ValueRef<'a> {
     }
 }
 
-impl hexane::v1::ColumnValue for ActorIdx {
-    type Encoding = hexane::v1::RleEncoding<ActorIdx>;
+impl hexane::ColumnValue for ActorIdx {
+    type Encoding = hexane::RleEncoding<ActorIdx>;
 }
 
-impl hexane::v1::RleValue for ActorIdx {
+impl hexane::RleValue for ActorIdx {
     fn try_unpack(data: &[u8]) -> Result<(usize, ActorIdx), PackError> {
         let mut buf = data;
         let start = buf.len();
@@ -720,11 +720,11 @@ impl hexane::v1::RleValue for ActorIdx {
     }
 }
 
-impl hexane::v1::ColumnValue for Action {
-    type Encoding = hexane::v1::RleEncoding<Action>;
+impl hexane::ColumnValue for Action {
+    type Encoding = hexane::RleEncoding<Action>;
 }
 
-impl hexane::v1::RleValue for Action {
+impl hexane::RleValue for Action {
     fn try_unpack(data: &[u8]) -> Result<(usize, Action), PackError> {
         let mut buf = data;
         let start = buf.len();

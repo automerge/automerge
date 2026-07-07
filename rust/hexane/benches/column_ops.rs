@@ -1,8 +1,7 @@
 #![allow(clippy::len_zero)]
 
 use divan::Bencher;
-use hexane::v1;
-use hexane::v1::{DeltaColumn, PrefixColumn};
+use hexane::{DeltaColumn, PrefixColumn};
 use std::time::Duration;
 
 use rand::{rng, Rng, RngExt};
@@ -25,12 +24,12 @@ fn rand_usize() -> usize {
 
 // ── Helpers: build columns ──────────────────────────────────────────────────
 
-fn build_v1(n: usize) -> v1::Column<u64> {
-    v1::Column::from_values((0..n).map(|_| rand_u64()).collect())
+fn build_v1(n: usize) -> hexane::Column<u64> {
+    hexane::Column::from_values((0..n).map(|_| rand_u64()).collect())
 }
 
-fn build_v1_bool(n: usize) -> v1::Column<bool> {
-    v1::Column::from_values((0..n).map(|_| rand_bool()).collect())
+fn build_v1_bool(n: usize) -> hexane::Column<bool> {
+    hexane::Column::from_values((0..n).map(|_| rand_bool()).collect())
 }
 
 fn rand_string(len: usize) -> String {
@@ -133,8 +132,8 @@ fn rand_strings(n: usize, len: usize) -> Vec<String> {
     (0..n).map(|_| rand_string(len)).collect()
 }
 
-fn build_v1_str(n: usize, slen: usize) -> v1::Column<String> {
-    v1::Column::from_values((0..n).map(|_| rand_string(slen)).collect())
+fn build_v1_str(n: usize, slen: usize) -> hexane::Column<String> {
+    hexane::Column::from_values((0..n).map(|_| rand_string(slen)).collect())
 }
 
 #[divan::bench_group(name = "string_replace_8b")]
@@ -418,9 +417,9 @@ mod load_u64 {
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
     fn v1_load_100k(bencher: Bencher) {
-        let col = v1::Column::<u64>::from_values((0..N).map(|_| rand_u64()).collect());
+        let col = hexane::Column::<u64>::from_values((0..N).map(|_| rand_u64()).collect());
         let bytes = col.save();
-        bencher.bench_local(|| v1::Column::<u64>::load(&bytes).unwrap());
+        bencher.bench_local(|| hexane::Column::<u64>::load(&bytes).unwrap());
     }
 }
 
@@ -434,9 +433,10 @@ mod load_string {
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
     fn v1_load_100k(bencher: Bencher) {
-        let col = v1::Column::<String>::from_values((0..N).map(|_| rand_string(STR_LEN)).collect());
+        let col =
+            hexane::Column::<String>::from_values((0..N).map(|_| rand_string(STR_LEN)).collect());
         let bytes = col.save();
-        bencher.bench_local(|| v1::Column::<String>::load(&bytes).unwrap());
+        bencher.bench_local(|| hexane::Column::<String>::load(&bytes).unwrap());
     }
 }
 
@@ -449,9 +449,9 @@ mod load_bool {
     #[inline(never)]
     #[divan::bench(max_time = Duration::from_secs(10), sample_count = 20)]
     fn v1_load_100k(bencher: Bencher) {
-        let col = v1::Column::<bool>::from_values((0..N).map(|_| rand_bool()).collect());
+        let col = hexane::Column::<bool>::from_values((0..N).map(|_| rand_bool()).collect());
         let bytes = col.save();
-        bencher.bench_local(|| v1::Column::<bool>::load(&bytes).unwrap());
+        bencher.bench_local(|| hexane::Column::<bool>::load(&bytes).unwrap());
     }
 }
 
@@ -478,7 +478,7 @@ mod bulk_load_u64 {
     fn v1_from_values_10k(bencher: Bencher) {
         let vals = rand_vals(10_000);
         bencher.bench_local(|| {
-            v1::Column::<u64>::from_values(vals.clone());
+            hexane::Column::<u64>::from_values(vals.clone());
         });
     }
 
@@ -496,7 +496,7 @@ mod bulk_load_u64 {
     fn v1_from_values_100k(bencher: Bencher) {
         let vals = rand_vals(100_000);
         bencher.bench_local(|| {
-            v1::Column::<u64>::from_values(vals.clone());
+            hexane::Column::<u64>::from_values(vals.clone());
         });
     }
 
@@ -519,7 +519,7 @@ mod bulk_load_bool {
     fn v1_from_values_100k(bencher: Bencher) {
         let vals = rand_bools(100_000);
         bencher.bench_local(|| {
-            v1::Column::<bool>::from_values(vals.clone());
+            hexane::Column::<bool>::from_values(vals.clone());
         });
     }
 
@@ -703,16 +703,16 @@ fn rand_monotonic_i64(n: usize) -> Vec<i64> {
     v
 }
 
-fn build_v1_i64(n: usize) -> v1::Column<i64> {
-    v1::Column::from_values(rand_i64_vals(n).into_iter().collect())
+fn build_v1_i64(n: usize) -> hexane::Column<i64> {
+    hexane::Column::from_values(rand_i64_vals(n).into_iter().collect())
 }
 
 fn build_v1_delta(n: usize) -> DeltaColumn<i64> {
     DeltaColumn::from_values(rand_i64_vals(n))
 }
 
-fn build_v1_i64_monotonic(n: usize) -> v1::Column<i64> {
-    v1::Column::from_values(rand_monotonic_i64(n).into_iter().collect())
+fn build_v1_i64_monotonic(n: usize) -> hexane::Column<i64> {
+    hexane::Column::from_values(rand_monotonic_i64(n).into_iter().collect())
 }
 
 fn build_v1_delta_monotonic(n: usize) -> DeltaColumn<i64> {
@@ -953,7 +953,7 @@ mod delta_load {
     fn v1_plain_load_100k(bencher: Bencher) {
         let col = build_v1_i64(100_000);
         let bytes = col.save();
-        bencher.bench_local(|| v1::Column::<i64>::load(&bytes).unwrap());
+        bencher.bench_local(|| hexane::Column::<i64>::load(&bytes).unwrap());
     }
 
     #[inline(never)]
@@ -976,7 +976,7 @@ mod delta_bulk_load {
     fn v1_plain_build_10k(bencher: Bencher) {
         let vals = rand_i64_vals(10_000);
         bencher.bench_local(|| {
-            v1::Column::<i64>::from_values(vals.clone());
+            hexane::Column::<i64>::from_values(vals.clone());
         });
     }
 
@@ -994,7 +994,7 @@ mod delta_bulk_load {
     fn v1_plain_build_100k(bencher: Bencher) {
         let vals = rand_i64_vals(100_000);
         bencher.bench_local(|| {
-            v1::Column::<i64>::from_values(vals.clone());
+            hexane::Column::<i64>::from_values(vals.clone());
         });
     }
 
@@ -1064,11 +1064,11 @@ mod iter_range_u64 {
 
 // ── nth() on alternating 10k-element runs (1M total) ────────────────────────
 
-fn build_v1_alternating(run_len: usize, num_runs: usize) -> v1::Column<u64> {
+fn build_v1_alternating(run_len: usize, num_runs: usize) -> hexane::Column<u64> {
     let vals: Vec<u64> = (0..num_runs)
         .flat_map(|r| vec![r as u64; run_len])
         .collect();
-    v1::Column::from_values(vals)
+    hexane::Column::from_values(vals)
 }
 
 #[divan::bench_group(name = "nth_10k_runs")]
@@ -1129,15 +1129,15 @@ mod iter_bool {
 
 // ── Prefix iter: random values ──────────────────────────────────────────────
 
-fn build_v1_prefix(n: usize) -> v1::PrefixColumn<u64> {
-    v1::PrefixColumn::from_values((0..n).map(|_| rand_u64()).collect())
+fn build_v1_prefix(n: usize) -> hexane::PrefixColumn<u64> {
+    hexane::PrefixColumn::from_values((0..n).map(|_| rand_u64()).collect())
 }
 
-fn build_v1_prefix_alternating(run_len: usize, num_runs: usize) -> v1::PrefixColumn<u64> {
+fn build_v1_prefix_alternating(run_len: usize, num_runs: usize) -> hexane::PrefixColumn<u64> {
     let vals: Vec<u64> = (0..num_runs)
         .flat_map(|r| vec![(r as u64 + 1) * 10; run_len])
         .collect();
-    v1::PrefixColumn::from_values(vals)
+    hexane::PrefixColumn::from_values(vals)
 }
 
 #[divan::bench_group(name = "prefix_iter_random")]
@@ -1288,9 +1288,9 @@ mod save_string_8b {
 mod save_opt_u64 {
     use super::*;
 
-    fn build_v1_opt(n: usize) -> v1::Column<Option<u64>> {
+    fn build_v1_opt(n: usize) -> hexane::Column<Option<u64>> {
         let choices: [Option<u64>; 5] = [None, Some(1), Some(2), Some(3), Some(4)];
-        v1::Column::from_values(
+        hexane::Column::from_values(
             (0..n)
                 .map(|_| choices[rng().next_u64() as usize % 5])
                 .collect(),
@@ -1337,7 +1337,7 @@ mod iter_range_next {
 
     #[divan::bench(max_time = Duration::from_secs(5), sample_count = 20)]
     fn v1_column(bencher: Bencher) {
-        let c = v1::Column::<i64>::from_values(seeded_monotonic_i64s(N));
+        let c = hexane::Column::<i64>::from_values(seeded_monotonic_i64s(N));
         bencher.bench_local(|| {
             let mut acc = 0i64;
             for r in ranges() {

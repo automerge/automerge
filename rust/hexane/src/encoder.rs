@@ -5,7 +5,7 @@
 //! This is used for building change data where values arrive in order.
 //!
 //! ```no_run
-//! # use hexane::v1::encoder::RleEncoder;
+//! # use hexane::encoder::RleEncoder;
 //! let mut enc = RleEncoder::<u64>::default();
 //! enc.append(1);
 //! enc.append(1);
@@ -887,10 +887,10 @@ impl<'a> super::encoding::EncoderApi<'a, bool> for BoolEncoder {
 
 #[cfg(test)]
 mod tests {
-    use crate::v1::bool::{BoolDecoder, BoolEncoding};
-    use crate::v1::encoding::{ColumnEncoding, EncoderApi};
-    use crate::v1::rle::{RleDecoder, RleEncoding};
-    use crate::v1::{Column, ColumnValueRef, Encoder};
+    use crate::bool::{BoolDecoder, BoolEncoding};
+    use crate::encoding::{ColumnEncoding, EncoderApi};
+    use crate::rle::{RleDecoder, RleEncoding};
+    use crate::{Column, ColumnValueRef, Encoder};
 
     /// Create an encoder for type T via the encoding trait.
     fn encoder<'a, T: ColumnValueRef>() -> Encoder<'a, T> {
