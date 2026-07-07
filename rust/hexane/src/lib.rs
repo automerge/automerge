@@ -1,36 +1,4 @@
-//! Hexane is a columnar compression library implementing the encoding
-//! described in the
-//! [Automerge Binary Format](https://automerge.org/automerge-binary-format-spec/).
-//!
-//! Columns are typed by the value they hold and stored as a `Vec` of
-//! slabs — independent byte buffers of RLE + LEB128 runs — indexed by a
-//! per-slab aggregate B-tree for O(log S) positional access, where S is
-//! the slab count.  Mutations splice bytes in place within the affected
-//! slab; slabs split when they exceed a segment budget and merge when
-//! undersized.
-//!
-//! # Column Types
-//!
-//! | Type | Use |
-//! |------|-----|
-//! | [`Column<T>`] | random access, insert/remove/splice, iteration |
-//! | [`PrefixColumn<T>`] | + O(log S) prefix-sum queries |
-//! | [`DeltaColumn<T>`] | delta-encoded storage, value-range queries |
-//! | [`RawColumn`] | uncompressed byte arena |
-//!
-//! # Quick Example
-//!
-//! ```rust
-//! use hexane::Column;
-//!
-//! let mut col = Column::<u64>::from_values(vec![1, 2, 3, 4, 5]);
-//! col.insert(2, 99u64);
-//! assert_eq!(col.get(2), Some(99));
-//!
-//! let bytes = col.save();
-//! let col2 = Column::<u64>::load(&bytes).unwrap();
-//! assert_eq!(col.to_vec(), col2.to_vec());
-//! ```
+#![doc = include_str!("../README.md")]
 
 #[doc(hidden)]
 #[macro_export]

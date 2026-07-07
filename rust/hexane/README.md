@@ -1,393 +1,267 @@
 # Hexane
 
-Hexane is a columnar compression library that implements the encoding
-described in the
-[Automerge Binary Format specification](https://automerge.org/automerge-binary-format-spec/).
+**Columnar compression you can edit in place.**
 
-Hexane stores sequences of typed values using run-length encoding (RLE), delta
-encoding, and other compact representations. Columns are typed by the value
-they hold (`Column<u64>`, `Column<Option<String>>`, `Column<bool>`, etc.) and
-expose random access, iteration, and in-place splice.
+Hexane stores sequences of typed values in the compressed column format of
+the [Automerge binary
+specification](https://automerge.org/automerge-binary-format-spec/) — and,
+unusually for a columnar format, lets you *mutate* them there. Insert,
+delete, and splice operate directly on the compressed bytes in
+O(log n + affected bytes), without decompressing the column. A million
+identical values cost three bytes at rest and still accept an insert at any
+position in about a hundred nanoseconds.
 
-Data is held in **slabs** — `Vec<u8>` buffers holding RLE + LEB128 encoded
-runs. Slabs are indexed by a B-tree keyed on per-slab aggregates for O(log S)
-positional access, where S is the number of slabs. Mutations happen in place on
-the affected slab; slabs automatically split when they exceed a segment budget
-and merge when they become too small.
+It is the storage engine underneath [automerge](https://automerge.org), and
+useful anywhere you want an editable, compressed, typed sequence.
 
-## Column Types
+## At a glance
 
-| Type | Description |
-|------|-------------|
-| `Column<T>` | Core column — random access, insert, remove, splice, iterate |
-| `PrefixColumn<T>` | Column with O(log S) prefix-sum queries |
-| `DeltaColumn<T>` | Stores deltas, presents realized values; `find_by_value` / `find_by_range` via per-slab min/max |
-| `RawColumn` | Uncompressed byte arena with its own slab + B-tree index |
+| Type | What it adds | Reach for it when |
+|------|--------------|-------------------|
+| [`Column<T>`] | random access, splice, iteration | you just need an editable compressed sequence |
+| [`PrefixColumn<T>`] | O(log n) running-sum queries | values are *sizes* or *counts* and you need offsets |
+| [`DeltaColumn<T>`] | delta encoding, find-by-value | values are mostly sequential (IDs, counters) |
+| [`RawColumn`] | uncompressed byte arena | variable-sized blobs addressed by byte range |
 
-## Supported Value Types
+Supported value types: `u32`, `u64`, `i64`, `usize`, `NonZeroU32`, `String`,
+`Vec<u8>`, `bool` — and `Option<T>` of each, stored as first-class nulls.
+Reads are zero-copy where possible: a `Column<String>` hands out `&str`.
 
-**Non-nullable:** `u32`, `u64`, `i64`, `usize`, `NonZeroU32`, `String`,
-`Vec<u8>`, `bool`
-
-**Nullable:** `Option<T>` for each of the above
-
-**Delta types:** `u32`, `u64`, `i32`, `i64`, `usize` and their `Option<>`
-variants
-
-Read operations return zero-copy borrows where possible — `String` yields
-`&str`, `Vec<u8>` yields `&[u8]`.
-
-## Quick Start
+## Quick start
 
 ```rust
 use hexane::Column;
 
-// Build a column from values
-let mut col = Column::<u64>::from_values(vec![10, 20, 30]);
-assert_eq!(col.get(1), Some(20));
+let mut col = Column::<Option<String>>::new();
+col.push(Some("hello"));        // &str accepted anywhere String is
+col.push(None::<String>);       // nulls are part of the encoding
+col.push(Some("world"));
 
-// Mutate
-col.insert(1, 15);           // [10, 15, 20, 30]
-col.remove(3);               // [10, 15, 20]
-col.splice(0, 2, vec![99]);  // [99, 20]
+assert_eq!(col.get(0), Some(Some("hello")));
+assert_eq!(col.get(1), Some(None));
 
-// Iterate
-for val in col.iter() {
-    println!("{val}");
-}
+col.insert(1, Some("there"));   // splice into the compressed bytes
+col.remove_n(2, 2);             // remove 2 items starting at index 2
+assert_eq!(col.len(), 2);
 
-// Serialize / deserialize
+// The wire format is the automerge binary column format.
 let bytes = col.save();
-let restored = Column::<u64>::load(&bytes).unwrap();
+let back = Column::<Option<String>>::load(&bytes).unwrap();
+assert_eq!(back.get(1), Some(Some("there")));
 ```
 
-### Prefix Sums
+## The column types
+
+### `PrefixColumn<T>` — running sums as an index
+
+When values are lengths or counts, the running sum *is* the interesting
+number: it converts "record 2" into "bytes 8..15". `PrefixColumn` keeps
+per-slab sums in its B-tree so any running sum is O(log n), and its
+iterators answer both views of the accumulator with unambiguous names:
+**`prefix()` is the sum *before* an item (exclusive), `total()` the sum
+*through* it (inclusive).**
 
 ```rust
 use hexane::PrefixColumn;
 
-let col = PrefixColumn::<u64>::from_values(vec![5, 3, 7, 2]);
+// Byte lengths of four records stored elsewhere.
+let lens = PrefixColumn::<u32>::from_values(vec![5, 3, 7, 2]);
 
-// Exclusive prefix sum (sum of items before `index`)
-assert_eq!(col.get_prefix(3), 15);       // 5 + 3 + 7
-assert_eq!(col.sum_range(1..3), 10);     // 3 + 7
+let pv = lens.get(2).unwrap();          // a PrefixedValue
+assert_eq!(pv.value, 7);
+assert_eq!(pv.prefix(), 8);             // bytes before record 2
+assert_eq!(pv.total(), 15);             // bytes through record 2
+// record 2 lives at pv.prefix()..pv.total()
 
-// Index of the element that "owns" cumulative offset 10 — the first
-// index whose inclusive total reaches it (totals are [5, 8, 15, 17])
-assert_eq!(col.get_index_for_total(10), 2);
+// One-shot sums and inverse lookups:
+assert_eq!(lens.get_prefix(3), 15);            // exclusive sum of 0..3
+assert_eq!(lens.sum_range(1..3), 10);          // 3 + 7
+assert_eq!(lens.get_index_for_total(10), 2);   // which record owns offset 10?
 
-// Walk items paired with their running prefix sum.  Each item is a
-// PrefixedValue: .prefix() is the sum BEFORE the item (exclusive),
-// .total() the sum THROUGH it (inclusive).
-for pv in col.iter() {
-    println!("{} (range: {}..{})", pv.value, pv.prefix(), pv.total());
-}
+// Plain values, when you don't need sums:
+assert_eq!(lens.values().get(1), Some(3));
 ```
 
-### Delta Encoding
+### `DeltaColumn<T>` — sequential data, tiny bytes
+
+Stores the *difference* between consecutive values, so mostly-sequential
+data collapses into a few runs. A per-slab min/max index makes
+`find_by_value` prune whole slabs at a time.
 
 ```rust
 use hexane::DeltaColumn;
 
-// Constant-stride sequences compress to a single RLE run of deltas
-let col = DeltaColumn::<u64>::from_values(vec![100, 200, 300, 400]);
-assert_eq!(col.get(2), Some(300));
+let ids = DeltaColumn::<u64>::from_values(vec![100, 101, 102, 103, 200]);
+assert_eq!(ids.get(3), Some(103));
+assert_eq!(ids.find_first(200), Some(4));
+assert_eq!(ids.find_by_range(101..104).collect::<Vec<_>>(), vec![1, 2, 3]);
 
-// Internally stored as deltas: [100, 100, 100, 100]
-// Realized values are recovered via prefix sum over deltas
+// Four sequential IDs + one jump = eight bytes on the wire.
+assert!(ids.save().len() <= 8);
 ```
 
-By default `DeltaColumn` carries a per-slab `SlabAgg` (`len + total +
-min_offset + max_offset`) that unlocks value-range queries via min/max
-pruning:
+One contract to know: realized values must fit in a 2⁶³-wide range (for
+unsigned types, `< 2⁶³`). This is not an implementation quirk — wire deltas
+are `i64`, and deleting an element makes its neighbors adjacent, so *any*
+pair of values may someday need their difference encoded. 2⁶³ is exactly
+the boundary at which that stays representable. Writes outside the domain
+panic; [`load`] rejects such data with an error; queries for unstorable
+values return empty.
+
+### `RawColumn` — the byte arena
+
+For variable-sized payloads (automerge stores op values here), addressed by
+byte ranges that a `PrefixColumn` of lengths typically provides. Splice
+points become slab boundaries, so values never straddle slabs and reads
+are zero-copy slices.
 
 ```rust
-let col = DeltaColumn::<u64>::from_values(vec![100, 150, 200, 250, 300]);
-assert_eq!(col.find_first(200), Some(2));
+use hexane::RawColumn;
 
-let hits: Vec<usize> = col.find_by_range(150..250).collect();
-assert_eq!(hits, vec![1, 2]);
+let mut raw = RawColumn::new();
+raw.splice_slice(0, 0, b"hello");
+raw.splice_slice(5, 0, b"world");
+assert_eq!(raw.get(5..10), b"world");
 ```
 
-## Implementing a Custom Type
+## Streaming: encoders and decoders
 
-To store a custom type in a `Column`, implement two traits: `ColumnValue` and
-`RleValue`. The RLE encoding layer handles runs, slab splitting, merging, and
-serialization automatically — you only define how a single value maps to/from
-bytes.
-
-### Example: `ValueMeta`
-
-`ValueMeta` packs a type code (low 4 bits) and a byte-length (high 60 bits)
-into a single `u64`.
-
-#### The type
+When values arrive in order — building a change, parsing a file — skip the
+column and stream:
 
 ```rust
-#[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
-pub struct ValueMeta(u64);
+use hexane::{Encoder, EncoderApi, DeltaEncoder};
 
-impl ValueMeta {
-    pub fn type_code(&self) -> u8 { (self.0 as u8) & 0x0f }
-    pub fn length(&self) -> usize { (self.0 >> 4) as usize }
-}
+// RLE bytes straight from an iterator:
+let bytes = Encoder::<u64>::encode([7u64, 7, 7, 8]);
+
+// ...and straight back out, no Column allocated:
+let vals: Vec<u64> = hexane::decoder::<u64>(&bytes).collect();
+assert_eq!(vals, vec![7, 7, 7, 8]);
+
+// Delta-encode absolute values as they arrive:
+let mut enc = DeltaEncoder::<u64>::new();
+enc.append(100);
+enc.append(101);
+let delta_bytes = enc.save();
 ```
 
-#### `ColumnValue` — declare the encoding
+Encoders also know the sparse-file trick: `save_to_unless(out, sentinel)`
+writes *nothing* when every value equals the sentinel, so an all-default
+column costs zero bytes in a saved document.
 
-For `Copy` types, implement `ColumnValue` instead of `ColumnValueRef` directly.
-The blanket impl provides `ColumnValueRef` and `AsColumnRef` automatically.
+## Loading untrusted data
+
+`load` fully validates: every run header, every value, UTF-8 for strings,
+delta running sums with overflow checks, domain checks per type. Only after
+that validation do the unchecked hot paths ever touch the bytes.
 
 ```rust
-use hexane::{ColumnValue, RleValue};
-use hexane::rle::RleEncoding;
-use hexane::PackError;
+use hexane::{Column, LoadOpts};
 
-impl ColumnValue for ValueMeta {
-    type Encoding = RleEncoding<ValueMeta>;
-}
+let bytes = Column::<u64>::from_values(vec![1, 2, 3]).save();
+
+// Expect an exact length; treat empty input as "3 zeros".
+let col = Column::<u64>::load_with(
+    &bytes,
+    LoadOpts::new().with_length(3).with_fill::<u64>(0),
+).unwrap();
+assert_eq!(col.len(), 3);
 ```
 
-#### `RleValue` — define the wire format for a single value
+The failure-mode policy is uniform across the crate:
 
-The only question is: how does one `ValueMeta` become bytes, and how do you
-read it back?
+| Situation | Behavior |
+|-----------|----------|
+| Your code breaks a documented precondition (out-of-bounds splice, out-of-domain delta write, inverted range) | **panic** — it points at the bug |
+| Untrusted bytes are malformed, hostile, or out of domain | **`Err(PackError)`** — `load` never panics |
+| A query asks for a value the column could never contain | **empty result** — "not found" is the truthful answer |
+
+## How it works
+
+```text
+values   ──RLE──▶  runs        7,7,7,8  →  [run 3×7][run 1×8]
+runs     ──────▶  segments     one encoded run = one segment
+segments ──────▶  slabs        ≤ max_segments per slab (default 64)
+slabs    ──────▶  B-tree       per-slab aggregates: count, sum, min/max
+```
+
+Every mutation lands in exactly one slab (plus neighbors for big deletes):
+find the slab in O(log S) through the B-tree, rewrite only the affected
+runs with a memcpy-based byte splice, update one aggregate on the path
+back up. Slabs split when they exceed the segment budget and merge with a
+sibling when underfull, so both the tree and the slabs stay balanced under
+arbitrary edit patterns.
+
+| Operation | Cost |
+|-----------|------|
+| `get(i)`, `iter_range(a..b)` seek | O(log S + runs in slab) |
+| `insert` / `remove` / `splice` | O(log S + bytes in slab) |
+| prefix-sum / find-by-value queries | O(log S + runs in slab) |
+| `save` | O(total bytes), merges boundary runs |
+| `load` | O(total bytes), full validation |
+
+## Rarely-used columns are almost free
+
+A column that is *all default* — every value `None`, every flag `false` —
+is one run, in one slab, forever:
 
 ```rust
-impl RleValue for ValueMeta {
-    fn try_unpack(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf)?;
-        Ok((start - buf.len(), ValueMeta(v)))
-    }
+use hexane::Column;
 
-    fn pack(value: ValueMeta, out: &mut Vec<u8>) -> bool {
-        leb128::write::unsigned(out, value.0).unwrap();
-        true
-    }
-}
+let flags = Column::<bool>::from_values(vec![false; 1_000_000]);
+assert_eq!(flags.save().len(), 3);   // one run: a single LEB128 count
+
+let mut sparse = Column::<Option<u32>>::from_values(vec![None; 1_000_000]);
+sparse.splice(500_000, 0, [None::<u32>, None, None]);  // ~100ns: a count bump
+assert_eq!(sparse.len(), 1_000_003);
+
+// And save_to_unless elides it from the file entirely:
+let mut out = Vec::new();
+assert!(sparse.save_to_unless(&mut out, None::<u32>).is_empty());
 ```
 
-#### That's it
+This makes speculative schema — columns you *might* need — nearly free to
+carry: sub-150ns per edit, a handful of bytes in memory, zero bytes on
+disk. (Timings from the divan benches on an M-series laptop; run
+`cargo bench` for yours.)
 
-`ColumnValue` + `RleValue` is all you need. Everything else is provided by
-blanket impls:
+## Custom value types
 
-- `ColumnValueRef` and `AsColumnRef` — from `ColumnValue`
-- `NULLABLE` — defaults to `false`
-- `get_null` — defaults to panic (correct for non-nullable types)
-- `value_len` and `unpack` — default to calling `try_unpack`
-- `Option<ValueMeta>` — automatically works as a nullable column type
+Two small trait impls teach a `Copy` type the wire format, and both
+`Column<T>` and `Column<Option<T>>` fall out — see the worked `ValueMeta`
+example on [`ColumnValue`]. Implement [`PrefixValue`] too and
+`PrefixColumn<T>` works as well; automerge's op metadata columns are built
+exactly this way.
 
-`Column<ValueMeta>` and `Column<Option<ValueMeta>>` are both fully functional:
+## Format stability
 
-```rust
-let mut col = Column::<ValueMeta>::new();
-col.insert(0, ValueMeta(0x63));
-col.insert(1, ValueMeta(0x65));
+The byte format **is** the automerge document format, so it is frozen. The
+test suite pins it with golden fixtures — byte-exact expected encodings for
+every codec, captured against the original reference implementation. If a
+change trips one of those tests, it isn't a test failure; it's a
+compatibility break with every existing document.
 
-assert_eq!(col.get(0), Some(ValueMeta(0x63)));
+Behind that sit the rest of the guarantees: property tests and fuzzers with
+reference models for every column type, a structural invariant checker that
+re-verifies every cached B-tree aggregate inside the fuzz loops, and
+validate-on-load backing the one `unsafe` block in the crate.
 
-let bytes = col.save();
-let restored = Column::<ValueMeta>::load(&bytes).unwrap();
+## Development
+
+```bash
+cargo test -p hexane            # ~900 tests incl. fuzzers & golden fixtures
+cargo bench -p hexane           # divan benches: column_ops, remap, ...
 ```
 
-### Trait Cheat Sheet
+Feature flags: `wasm` (console logging via `web-sys`). MSRV 1.80.
 
-For a custom `Copy` type, you implement **two traits** and get everything else
-from blanket impls:
+License: MIT.
 
-| Trait | You implement | Provided by blanket |
-|-------|--------------|-------------------|
-| `ColumnValue` | `type Encoding` | `ColumnValueRef`, `AsColumnRef` |
-| `RleValue` | `try_unpack`, `pack` | `NULLABLE` (false), `get_null` (panic), `value_len`, `unpack` |
-| `Option<T>` | — | `ColumnValueRef`, `AsColumnRef`, `RleValue` (nullable) |
-
-For non-`Copy` types like `String` or `Vec<u8>`, implement `ColumnValueRef`
-directly (with a custom `Get<'a>` type) and add an `AsColumnRef` impl.
-
-### Design Decisions
-
-**Wire format:** `try_unpack` and `pack` define the byte encoding for a single
-value. The RLE layer wraps these in run-length encoded segments (repeat runs,
-literal runs, null runs) automatically. Choose a compact encoding — LEB128
-varints are a good default for integer-like types.
-
-**Overriding defaults:** Override `value_len` when skipping is cheaper than
-decoding (e.g. `String` avoids UTF-8 validation). Override `unpack` when
-post-load decoding can skip validation that `try_unpack` performs on load.
-
-## Architecture
-
-### Wire Format
-
-All column types share the same RLE + LEB128 wire format:
-
-- **Repeat run:** signed LEB128 count (> 0) + one encoded value
-- **Literal run:** signed LEB128 count (< 0) + |count| encoded values
-- **Null run:** 0 byte + unsigned LEB128 null count
-
-Booleans use a specialized encoding: alternating unsigned LEB128 run-length
-counts starting with `false`. No value bytes are stored — the boolean value is
-implicit from position parity.
-
-### Slab Management
-
-Each slab tracks its item count, segment count, and (depending on the column
-type) its prefix sum and min/max offsets. Slabs are kept within a segment
-budget (default: 64 segments). When a mutation pushes a slab over budget it is
-split; when adjacent slabs are small enough they are merged. This keeps both
-sequential iteration and random access efficient.
-
-### Slab Index
-
-Slabs are indexed by a pluggable structure keyed on a per-slab aggregate. Two
-concrete backings ship:
-
-- **Slab B-tree** — the default for `Column`, `PrefixColumn`, and
-  `DeltaColumn`. Supports non-invertible aggregates
-- **Fenwick BIT** — an internal alternative backing (invertible aggregates
-  only); not part of the public API
-  (min/max) that Fenwick can't handle; typically wins on compound prefix-sum
-  queries.
-
-## Module Map
-
-| File | Contents |
-|------|----------|
-| `mod.rs` | `ColumnValue`, `ColumnValueRef`, `RleValue`, `AsColumnRef`, `Run<V>`, re-exports |
-| `column.rs` | `Column<T, WF>`, `Slab`, `SlabWeight`, Fenwick tree, `Iter<T>` |
-| `encoding.rs` | `ColumnEncoding` trait, `RunDecoder` trait |
-| `rle/` | `RleEncoding<T>` — RLE codec for numeric/binary types |
-| `bool.rs` | `BoolEncoding` — specialized boolean RLE codec |
-| `prefix.rs` | `PrefixColumn<T>`, `PrefixValue` trait, `PrefixIter`, `PrefixSlabWeight` |
-| `delta/mod.rs` | `DeltaColumn<T>`, `DeltaValue` trait, streaming `DeltaEncoder` |
-| `delta/indexed.rs` | `IndexedDeltaWeightFn` (default WF on `DeltaColumn`), min/max-based value queries |
-| `raw.rs` | `RawColumn` — uncompressed byte arena |
-| `index.rs` | `ColumnIndex` trait, `BitIndex` (internal, `#[doc(hidden)]`, sealed) |
-| `btree.rs` | `SlabBTree<A>`, `SlabAgg` — B-tree backing |
-| `load_opts.rs` | `LoadOpts<T>` — builder for deserialization options |
-| `encoder.rs` | Streaming `RleEncoder` and friends |
-
-## Migrating from Hexane 0.2
-
-Hexane 0.2 exposed a cursor-parameterized `ColumnData<C>` type. Columns now
-carry the value type directly, and prefix-sum queries move from linear
-iterator-based scans to O(log n) tree-backed queries.
-
-### Type mapping
-
-| 0.2 | Current |
-|-|-|
-| `ColumnData<UIntCursor>` (values only) | `Column<Option<u64>>` |
-| `ColumnData<IntCursor>` (values only) | `Column<Option<i64>>` |
-| `ColumnData<StrCursor>` | `Column<Option<String>>` |
-| `ColumnData<ByteCursor>` | `Column<Option<Vec<u8>>>` |
-| `ColumnData<BooleanCursor>` (values only) | `Column<bool>` |
-| `ColumnData<UIntCursor>` + `get_acc` / `advance_acc_by` | `PrefixColumn<Option<u64>>` |
-| `ColumnData<BooleanCursor>` + `get_acc` | `PrefixColumn<bool>` |
-| `ColumnData<DeltaCursor>` | `DeltaColumn<i64>` |
-| `ColumnData<RawCursor>` | `RawColumn` |
-| `RleCursor<B, T>` (custom) | `Column<T>` with `impl ColumnValue for T` |
-
-The decision is "do I need prefix-sum queries on this column?" — if yes,
-`PrefixColumn`; if no, `Column`. Delta and raw stay on their dedicated types.
-
-### Reading a value
-
-```rust
-// 0.2
-let val = col.get(pos);                 // Option<Option<Cow<'_, T>>>
-
-// Current
-let val = col.get(pos);                 // Option<T>
-```
-
-Read operations now return plain `Option<T>` (or `Option<&str>` / `Option<&[u8]>`
-for borrowed types). Null handling is encoded in the value type: `Column<T>` is
-non-nullable, `Column<Option<T>>` is nullable. The double-`Option`-plus-`Cow`
-return of 0.2 is gone.
-
-### Iterating
-
-```rust
-// 0.2
-for item in col.iter_range(range) {      // yields Option<Cow<'_, T>>
-    // ...
-}
-
-// Current
-for item in col.iter_range(range) {      // yields T (or T::Get<'_>)
-    // ...
-}
-```
-
-### Prefix sums
-
-In 0.2, prefix queries were iterator methods: `iter().with_acc()`,
-`advance_acc_by(n)`, `shift_acc`, `get_acc_delta(start, end)`. They're linear
-scans.
-
-In the current API, `PrefixColumn<T>` answers the same questions in O(log n):
-
-| 0.2 | Current |
-|-|-|
-| `iter.shift_acc(n)` | `iter.advance_prefix(n)` |
-| `col.get_acc_delta(start, pos)` | `iter.advance_to(pos)` (on a `PrefixIter`) |
-| `col.get_acc(pos)` | `col.get_prefix(pos)` |
-| `iter.with_acc()` | `col.iter()` yields `PrefixedValue`s (`.value`, `.prefix()`, `.total()`) |
-
-The one-shot convenience is `col.delta(from, to)`, which wraps iterator
-construction and returns a `PrefixSeek { pos, delta, pv }`.
-
-### Delta columns
-
-0.2 `ColumnData<DeltaCursor>` only stored `i64`. The current `DeltaColumn<T>`
-is generic over the value type (`u32`, `u64`, `i32`, `i64`, and their
-`Option<>` variants), keeps the same wire format, and adds value-range
-queries:
-
-```rust
-let col = DeltaColumn::<i64>::from_values(vec![10, 20, 30, 40, 50]);
-let hits: Vec<usize> = col.find_by_range(15..35).collect();
-// [1, 2] — indices where the realized value lies in [15, 35)
-```
-
-The streaming `DeltaEncoder<'a, T>` mirrors `RleEncoder`'s interface
-(`append`, `append_n`, `extend`, `save`, `save_to`, static `encode` /
-`encode_to`) and is byte-compatible with 0.2 `DeltaCursor`.
-
-### Splice
-
-```rust
-// 0.2
-col.splice::<u64, _>(pos, del, []);                 // typed empty delete
-col.splice(pos, 1, [Some(value)]);
-
-// Current
-col.remove_n(pos, del);                             // same args as splice
-col.splice(pos, 1, [Some(value)]);
-```
-
-Insert iterators take `T` (or `Option<T>`) directly. No `Cow` wrapping needed.
-
-### Encoder helpers
-
-The current API adds a few helpers that do not exist in 0.2:
-
-- `Column::remap(|T| T)` — walks runs and re-emits each value through `f`,
-  replacing the column in place.
-- `RleEncoder::save_to_and_remap` / `save_to_unless_and_remap` — like `save_to`
-  / `save_to_unless` but applies a mapping function during save without a
-  round-trip through `Column`.
-- `RleEncoder::append_owned(T)` — owned-value shorthand that complements
-  `append(T::Get<'a>)` for callers holding `String` or `Option<String>`
-  values.
-
-### Wire format compatibility
-
-Bytes written by the current API load cleanly into 0.2 for all shared
-encodings (RLE, boolean, delta, raw). The reverse is true as well — there is
-no schema migration step. Column types differ only in which in-memory
-aggregate they carry, not in how bytes are stored.
+[`Column<T>`]: https://docs.rs/hexane/latest/hexane/struct.Column.html
+[`PrefixColumn<T>`]: https://docs.rs/hexane/latest/hexane/struct.PrefixColumn.html
+[`DeltaColumn<T>`]: https://docs.rs/hexane/latest/hexane/struct.DeltaColumn.html
+[`RawColumn`]: https://docs.rs/hexane/latest/hexane/struct.RawColumn.html
+[`ColumnValue`]: https://docs.rs/hexane/latest/hexane/trait.ColumnValue.html
+[`PrefixValue`]: https://docs.rs/hexane/latest/hexane/trait.PrefixValue.html
+[`load`]: https://docs.rs/hexane/latest/hexane/struct.DeltaColumn.html#method.load
