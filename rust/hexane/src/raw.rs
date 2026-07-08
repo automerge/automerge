@@ -238,9 +238,18 @@ impl RawColumn {
         // Merge undersized neighbours at the boundaries.
         let range = try_merge_range_skeleton(range, |a, b| self.try_merge_pair(a, b));
 
+        // A delete can leave an empty slab behind, for example when a tiny
+        // value is inserted at the front of a loaded oversize slab and then
+        // removed again. Empty slabs have zero weight in the BIT but are not
+        // transparent to sequential readers, so drop them before rebuilding
+        // the index.
+        let slabs_before_empty_cleanup = self.slabs.len();
+        self.slabs.retain(|slab| !slab.data.is_empty());
+        let removed_empty_slabs = self.slabs.len() != slabs_before_empty_cleanup;
+
         // Update BIT: point update if exactly one slab's weight changed,
         // full rebuild otherwise.
-        if self.slabs.len() == old_slab_count && range.len() == 1 {
+        if !removed_empty_slabs && self.slabs.len() == old_slab_count && range.len() == 1 {
             let new_weight = self.slabs[range.start].data.len();
             bit_point_update(&mut self.bit, range.start, old_weight, new_weight);
         } else {
@@ -817,6 +826,20 @@ mod tests {
         let mut it = col.iter();
         // take(8) would cross — must panic.
         let _ = it.take(8);
+    }
+
+    #[test]
+    fn delete_front_insert_from_loaded_oversize_slab() {
+        let mut col = RawColumn::load_with_max_segments(b"abcdef", 4).unwrap();
+        assert_eq!(col.slabs.len(), 1);
+
+        col.splice_slice(0, 0, b"X");
+        assert_eq!(col.slabs[0].data, b"X");
+        col.splice_slice(0, 1, b"");
+
+        drive(&col, b"abcdef");
+        let mut it = col.iter();
+        assert_eq!(it.take(1), b"a");
     }
 
     #[test]

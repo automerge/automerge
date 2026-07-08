@@ -180,6 +180,75 @@ fn update_text_after_marking_text_with_hidden_scalar() {
 }
 
 #[test]
+fn rollback_after_save_load_of_deep_hydrated_root_map_from_fuzz_trace() {
+    fn fuzz_text(slot: u8) -> String {
+        const STRINGS: &[&str] = &[
+            "",
+            "a",
+            "hello",
+            "hello world",
+            "🦊🐻",
+            "multi\nline",
+            "abcdefghijklmnopqrstuvwxyz",
+        ];
+        if slot % 8 == 0 {
+            "the quick brown fox jumps over the lazy dog".to_string()
+        } else {
+            STRINGS[usize::from(slot) % STRINGS.len()].to_string()
+        }
+    }
+
+    fn fuzz_hydrated_map(seed: u8, depth: u8) -> automerge::hydrate::Value {
+        let mut entries = std::collections::HashMap::new();
+        entries.insert(format!("m{}", seed % 8), fuzz_hydrated_value(seed, depth));
+        entries.insert(
+            format!("n{}", seed % 8),
+            fuzz_hydrated_value(seed.wrapping_add(1), depth.saturating_sub(1)),
+        );
+        automerge::hydrate::Value::Map(entries.into())
+    }
+
+    fn fuzz_hydrated_list(seed: u8, depth: u8) -> automerge::hydrate::Value {
+        automerge::hydrate::Value::from(vec![
+            fuzz_hydrated_value(seed, depth),
+            fuzz_hydrated_value(seed.wrapping_add(1), depth.saturating_sub(1)),
+        ])
+    }
+
+    fn fuzz_hydrated_value(seed: u8, depth: u8) -> automerge::hydrate::Value {
+        if depth == 0 {
+            return automerge::hydrate::Value::Scalar(ScalarValue::Int(i64::from(seed) - 128));
+        }
+        match seed % 4 {
+            0 => fuzz_hydrated_map(seed, depth - 1),
+            1 => fuzz_hydrated_list(seed, depth - 1),
+            2 => automerge::hydrate::Value::text(
+                automerge::TextEncoding::UnicodeCodePoint,
+                &fuzz_text(seed),
+            ),
+            _ => automerge::hydrate::Value::Scalar(ScalarValue::Str("a".into())),
+        }
+    }
+
+    // Minimized from a fuzz crash: load a document whose root object was
+    // replaced with a deep hydrated map, start a transaction, roll it back,
+    // then hydrate the rolled-back document.
+    let mut doc = AutoCommit::new();
+    doc.update_object(ROOT, &fuzz_hydrated_map(0, 42)).unwrap();
+    doc.commit();
+
+    let mut loaded = AutoCommit::load(&doc.save()).unwrap();
+    let mut plain = loaded.document().clone();
+    let before = plain.hydrate(None);
+
+    let mut tx = plain.transaction();
+    tx.put(ROOT, "k0", "a").unwrap();
+    tx.rollback();
+
+    assert_eq!(plain.hydrate(None), before);
+}
+
+#[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();
