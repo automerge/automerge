@@ -111,8 +111,18 @@ impl Runner {
         crate::coverage::begin_cmp_observations(collect_cmps);
         let (mut state, ops) = self.execute_trace_steps(trace)?;
 
+        let mut behavior = BehaviorStats {
+            docs: state.docs.len(),
+            ..BehaviorStats::default()
+        };
         for doc in 0..state.docs.len() {
-            state.save_load(doc)?;
+            let outcome = state.save_load(doc)?;
+            behavior.max_saved_bytes = behavior.max_saved_bytes.max(outcome.saved_bytes);
+            walk_hydrated(&outcome.hydrated, 1, &mut behavior);
+            let doc_state = &mut state.docs[doc];
+            behavior.max_heads = behavior.max_heads.max(doc_state.doc.get_heads().len());
+            behavior.total_changes += doc_state.doc.get_changes_meta(&[]).len();
+            behavior.text_marks += doc_state.count_text_marks();
         }
 
         let docs = state.docs.len();
@@ -122,10 +132,62 @@ impl Runner {
             steps: trace.steps.len(),
             ops,
             docs,
+            behavior,
             sometimes_hits: Vec::new(),
             coverage_hits,
             cmp_observations,
         })
+    }
+}
+
+/// Execution-derived statistics describing where a trace actually took the
+/// documents, as opposed to what the trace text says. Collected once per run
+/// from the final state that the save/load invariant already hydrates.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BehaviorStats {
+    pub docs: usize,
+    pub max_heads: usize,
+    pub total_changes: usize,
+    pub total_objects: usize,
+    pub max_depth: usize,
+    pub total_text_len: usize,
+    pub total_seq_len: usize,
+    pub conflicted_props: usize,
+    pub list_marks: usize,
+    pub text_marks: usize,
+    pub max_saved_bytes: usize,
+}
+
+fn walk_hydrated(value: &hydrate::Value, depth: usize, stats: &mut BehaviorStats) {
+    match value {
+        hydrate::Value::Scalar(_) => {}
+        hydrate::Value::Map(map) => {
+            stats.total_objects += 1;
+            stats.max_depth = stats.max_depth.max(depth);
+            for (_, entry) in map.iter() {
+                if entry.conflict {
+                    stats.conflicted_props += 1;
+                }
+                walk_hydrated(&entry.value, depth + 1, stats);
+            }
+        }
+        hydrate::Value::List(list) => {
+            stats.total_objects += 1;
+            stats.max_depth = stats.max_depth.max(depth);
+            stats.total_seq_len += list.len();
+            for entry in list.iter() {
+                if entry.conflict {
+                    stats.conflicted_props += 1;
+                }
+                stats.list_marks += entry.marks.len();
+                walk_hydrated(&entry.value, depth + 1, stats);
+            }
+        }
+        hydrate::Value::Text(text) => {
+            stats.total_objects += 1;
+            stats.max_depth = stats.max_depth.max(depth);
+            stats.total_text_len += text.len();
+        }
     }
 }
 
@@ -427,9 +489,15 @@ pub struct RunReport {
     pub steps: usize,
     pub ops: usize,
     pub docs: usize,
+    pub behavior: BehaviorStats,
     pub sometimes_hits: Vec<automerge::sometimes::SometimesHit>,
     pub coverage_hits: Vec<crate::coverage::CoverageCounterHit>,
     pub cmp_observations: Vec<crate::coverage::CmpObservation>,
+}
+
+struct SaveLoadOutcome {
+    saved_bytes: usize,
+    hydrated: hydrate::Value,
 }
 
 #[derive(Clone)]
@@ -632,7 +700,7 @@ impl RunState {
         Ok((left_done, right_done))
     }
 
-    fn save_load(&mut self, doc: usize) -> Result<(), RunError> {
+    fn save_load(&mut self, doc: usize) -> Result<SaveLoadOutcome, RunError> {
         let doc_state = self.doc_mut(doc)?;
         let before = doc_state
             .doc
@@ -649,7 +717,10 @@ impl RunState {
             ));
         }
         doc_state.doc = loaded;
-        Ok(())
+        Ok(SaveLoadOutcome {
+            saved_bytes: bytes.len(),
+            hydrated: after,
+        })
     }
 
     fn run_vm(&mut self, instructions: &[VmInstr]) -> Result<usize, RunError> {
@@ -670,7 +741,7 @@ impl RunState {
                     }
                     result
                 }
-                VmInstr::SaveLoad { doc } => self.save_load(usize::from(*doc)),
+                VmInstr::SaveLoad { doc } => self.save_load(usize::from(*doc)).map(drop),
                 VmInstr::Observe {
                     doc,
                     object,
@@ -737,6 +808,28 @@ impl RunState {
 }
 
 impl DocState {
+    /// Best-effort count of mark spans on text objects this doc created
+    /// itself. Objects merged in from other docs are not tracked here, so this
+    /// undercounts; it only needs to be deterministic for bucketing.
+    fn count_text_marks(&mut self) -> usize {
+        let objects = self
+            .objects
+            .iter()
+            .rev()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut total = 0;
+        for obj in objects {
+            if self.doc.object_type(&obj) == Ok(ObjType::Text) {
+                if let Ok(marks) = self.doc.marks(&obj) {
+                    total += marks.len();
+                }
+            }
+        }
+        total
+    }
+
     fn observe(
         &mut self,
         doc: usize,

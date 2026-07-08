@@ -67,6 +67,15 @@ impl Text {
             marks: Default::default(),
         }
     }
+
+    /// The length of the text in the encoding it was created with.
+    pub fn len(&self) -> usize {
+        self.value.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl From<&Text> for String {

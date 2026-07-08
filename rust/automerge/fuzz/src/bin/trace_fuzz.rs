@@ -2,7 +2,9 @@ use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde_json::json;
 
 use automerge_fuzz::coverage::CoverageReporter;
 use automerge_fuzz::crash_view::show_crashes;
@@ -64,6 +66,10 @@ enum Command {
         coverage_retention: bool,
         #[arg(long, default_value_t = 128)]
         coverage_retention_window: usize,
+        /// Append machine-readable run statistics to this JSONL file.
+        /// Defaults to <corpus>/stats.jsonl.
+        #[arg(long)]
+        stats_file: Option<PathBuf>,
     },
     Crashes {
         /// Crash number, filename, or path. Omit to list crashes.
@@ -136,6 +142,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             coverage_poll_secs,
             coverage_retention,
             coverage_retention_window,
+            stats_file,
         } => {
             fuzz(FuzzOptions {
                 seed,
@@ -150,6 +157,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 coverage_poll_secs,
                 coverage_retention,
                 coverage_retention_window,
+                stats_file,
             })?;
         }
         Command::Crashes {
@@ -178,6 +186,54 @@ struct FuzzOptions {
     coverage_poll_secs: u64,
     coverage_retention: bool,
     coverage_retention_window: usize,
+    stats_file: Option<PathBuf>,
+}
+
+/// Counters accumulated over one fuzz run, shared between the human status
+/// line and the machine-readable stats log.
+#[derive(Default)]
+struct Tally {
+    valid: usize,
+    interesting: usize,
+    checkpoints: usize,
+    coverage_saved: usize,
+    crashes: usize,
+    rejected: usize,
+}
+
+/// Appends one JSON object per event to a stats file so runs can be plotted
+/// and compared offline. Logging failures disable the logger rather than
+/// interrupting the fuzz run.
+struct StatsLogger {
+    file: Option<fs::File>,
+}
+
+impl StatsLogger {
+    fn create(path: &Path) -> Self {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match fs::OpenOptions::new().create(true).append(true).open(path) {
+            Ok(file) => Self { file: Some(file) },
+            Err(err) => {
+                eprintln!(
+                    "stats: failed to open {}: {err}; stats logging disabled",
+                    path.display()
+                );
+                Self { file: None }
+            }
+        }
+    }
+
+    fn log(&mut self, event: serde_json::Value) {
+        let Some(file) = &mut self.file else {
+            return;
+        };
+        if writeln!(file, "{event}").is_err() {
+            eprintln!("stats: write failed; stats logging disabled");
+            self.file = None;
+        }
+    }
 }
 
 struct PendingMutations {
@@ -273,11 +329,14 @@ fn reason_priority(reason: &str) -> u8 {
         5
     } else if reason.starts_with("new sometimes count bucket ") {
         4
-    } else if reason.starts_with("new feature ") {
+    } else if reason.starts_with("new behavior bucket ") {
         3
     } else if is_coverage_reason(reason) {
         1
     } else {
+        // Trace-syntax novelty: features, structural buckets, comparisons.
+        // These describe the program text rather than where execution went, so
+        // they rank below behavior buckets.
         2
     }
 }
@@ -317,6 +376,7 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
         coverage_poll_secs,
         coverage_retention,
         coverage_retention_window,
+        stats_file,
     } = options;
 
     eprintln!(
@@ -363,12 +423,13 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
         feedback.seed_comparison_u8_values(persisted_comparison_values);
     }
     let mut runner = Runner::new();
-    let mut valid = 0usize;
-    let mut interesting = trace_file_count(&interesting_dir)?;
-    let mut coverage_saved = trace_file_count(&coverage_corpus_dir)?;
-    let mut checkpoints = trace_file_count(&checkpoints_dir)?;
-    let mut crashes = trace_file_count(&crashes_dir)?;
-    let mut rejected = 0usize;
+    let mut tally = Tally {
+        interesting: trace_file_count(&interesting_dir)?,
+        coverage_saved: trace_file_count(&coverage_corpus_dir)?,
+        checkpoints: trace_file_count(&checkpoints_dir)?,
+        crashes: trace_file_count(&crashes_dir)?,
+        ..Tally::default()
+    };
     let mut recent_valid = VecDeque::new();
     let mut pending_mutations = PendingMutations::new();
     let mut boring = 0usize;
@@ -377,6 +438,21 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let report_interval = Duration::from_secs(report_secs);
     let mut last_report = started;
+
+    let stats_path = stats_file.unwrap_or_else(|| corpus_dir.join("stats.jsonl"));
+    let mut stats = StatsLogger::create(&stats_path);
+    stats.log(json!({
+        "event": "start",
+        "time_unix": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|time| time.as_secs())
+            .unwrap_or(0),
+        "seed": seed,
+        "iterations": iterations,
+        "corpus_dir": corpus_dir.display().to_string(),
+        "corpus_loaded": corpus.len(),
+        "max_corpus_load": max_corpus_load,
+    }));
 
     eprintln!("warming up feedback from {} corpus traces", corpus.len());
     let mut last_warmup_report = Instant::now();
@@ -412,6 +488,17 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // The warmup snapshot is the baseline: novelty counted here came from the
+    // existing corpus, so later report deltas are attributable to fuzzing.
+    stats.log(report_event(
+        "warmup",
+        0,
+        started.elapsed(),
+        corpus.len(),
+        &tally,
+        &feedback,
+    ));
+
     println!(
         "starting fuzz run: seed={seed} iterations={iterations} corpus={}",
         corpus.len()
@@ -430,7 +517,7 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
 
         match runner.run_catching(&candidate) {
             Ok(report) => {
-                valid += 1;
+                tally.valid += 1;
                 if coverage_retention && coverage_retention_window > 0 {
                     recent_valid.push_back(candidate.clone());
                     while recent_valid.len() > coverage_retention_window {
@@ -448,16 +535,24 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                     let mut saved = candidate.clone();
                     saved.metadata.parent = Some(parent_desc.clone());
                     saved.metadata.reason = Some(reason.clone());
-                    let path =
-                        interesting_dir.join(format!("interesting-{interesting:08}.amtrace"));
+                    let path = interesting_dir
+                        .join(format!("interesting-{:08}.amtrace", tally.interesting));
                     save_trace(&path, &saved)?;
                     let saved_for_batch = saved.clone();
                     corpus.push(saved);
                     corpus_power.push(candidate_power);
-                    interesting += 1;
+                    tally.interesting += 1;
 
                     boring = 0;
                     let priority = reason_priority(&reason);
+                    stats.log(json!({
+                        "event": "novelty",
+                        "iteration": iteration,
+                        "elapsed_secs": started.elapsed().as_secs_f64(),
+                        "priority": priority,
+                        "reason": reason,
+                        "path": path.display().to_string(),
+                    }));
                     if !is_coverage_reason(&reason) {
                         let batch = mutation_batch(
                             &saved_for_batch,
@@ -480,12 +575,22 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                                 target.description(),
                                 checkpoint.steps.len()
                             ));
-                            let checkpoint_path = checkpoints_dir
-                                .join(format!("sometimes-checkpoint-{checkpoints:08}.amtrace"));
+                            let checkpoint_path = checkpoints_dir.join(format!(
+                                "sometimes-checkpoint-{:08}.amtrace",
+                                tally.checkpoints
+                            ));
                             save_trace(&checkpoint_path, &checkpoint)?;
                             if let Err(err) = runner.cache_checkpoint_prefix(&checkpoint) {
                                 eprintln!("failed to cache checkpoint prefix: {err}");
                             }
+                            stats.log(json!({
+                                "event": "checkpoint",
+                                "iteration": iteration,
+                                "elapsed_secs": started.elapsed().as_secs_f64(),
+                                "steps": checkpoint.steps.len(),
+                                "target": target.description(),
+                                "path": checkpoint_path.display().to_string(),
+                            }));
                             let extension_batch = prefix_extension_batch(
                                 &checkpoint,
                                 &mut rng,
@@ -494,7 +599,7 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                             pending_mutations.push_batch(priority.max(3), extension_batch);
                             corpus.push(checkpoint);
                             corpus_power.push(candidate_power.max(2));
-                            checkpoints += 1;
+                            tally.checkpoints += 1;
                         }
                     }
                 } else {
@@ -505,15 +610,22 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                 let mut saved = candidate.clone();
                 saved.metadata.parent = Some(parent_desc.clone());
                 saved.metadata.reason = Some(format!("failure: {err}"));
-                let path = crashes_dir.join(format!("crash-{crashes:08}.amtrace"));
+                let path = crashes_dir.join(format!("crash-{:08}.amtrace", tally.crashes));
                 save_trace(&path, &saved)?;
                 eprintln!("saved crash {}: {err}", path.display());
-                crashes += 1;
+                stats.log(json!({
+                    "event": "crash",
+                    "iteration": iteration,
+                    "elapsed_secs": started.elapsed().as_secs_f64(),
+                    "error": err.to_string(),
+                    "path": path.display().to_string(),
+                }));
+                tally.crashes += 1;
             }
             Err(_) => {
-                rejected += 1;
+                tally.rejected += 1;
                 boring = boring.saturating_add(1);
-                if rejected % 8 == 0 {
+                if tally.rejected % 8 == 0 {
                     let batch = mutation_batch(
                         &candidate,
                         &mut rng,
@@ -554,16 +666,19 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
             print_fuzz_status(
                 "iters",
                 completed,
-                started,
+                started.elapsed(),
                 corpus.len(),
-                valid,
-                interesting,
-                checkpoints,
-                coverage_saved,
-                crashes,
-                rejected,
+                &tally,
                 &feedback,
             );
+            stats.log(report_event(
+                "report",
+                completed,
+                started.elapsed(),
+                corpus.len(),
+                &tally,
+                &feedback,
+            ));
             last_report = now;
         }
 
@@ -572,11 +687,22 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
             match coverage_reporter.maybe_poll() {
                 Ok(Some(update)) => {
                     println!("coverage: {}", update.status_line());
+                    stats.log(json!({
+                        "event": "coverage",
+                        "iteration": completed,
+                        "elapsed_secs": started.elapsed().as_secs_f64(),
+                        "lines_covered": update.summary.lines_covered,
+                        "lines_total": update.summary.lines_total,
+                        "regions_covered": update.summary.regions_covered,
+                        "regions_total": update.summary.regions_total,
+                        "functions_covered": update.summary.functions_covered,
+                        "functions_total": update.summary.functions_total,
+                    }));
                     if coverage_retention && update.increased() && !recent_valid.is_empty() {
                         let saved = save_coverage_window(
                             &coverage_corpus_dir,
                             &recent_valid,
-                            coverage_saved,
+                            tally.coverage_saved,
                             completed,
                         )?;
                         for trace in &recent_valid {
@@ -588,7 +714,7 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                             );
                             pending_mutations.push_batch(2, batch);
                         }
-                        coverage_saved += saved;
+                        tally.coverage_saved += saved;
                         for trace in recent_valid.iter().cloned() {
                             corpus.push(trace);
                             corpus_power.push(2);
@@ -611,14 +737,9 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
     print_fuzz_status(
         "done: iters",
         iterations,
-        started,
+        started.elapsed(),
         corpus.len(),
-        valid,
-        interesting,
-        checkpoints,
-        coverage_saved,
-        crashes,
-        rejected,
+        &tally,
         &feedback,
     );
     if let Some(status) = runner.state_cache_status() {
@@ -646,10 +767,22 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
     );
     if !unhit.is_empty() {
         println!("sometimes labels not hit:");
-        for label in unhit {
+        for label in &unhit {
             println!("  {label}");
         }
     }
+
+    let mut done = report_event(
+        "done",
+        iterations,
+        started.elapsed(),
+        corpus.len(),
+        &tally,
+        &feedback,
+    );
+    done["sometimes_known"] = json!(known_labels.len());
+    done["sometimes_unhit"] = json!(unhit);
+    stats.log(done);
 
     save_comparison_u8_values(&comparison_values_path, feedback.comparison_u8_values())?;
 
@@ -733,24 +866,25 @@ fn find_sometimes_checkpoint(
     best.filter(|prefix| prefix.steps.len() < trace.steps.len())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn print_fuzz_status(
     prefix: &str,
     iterations: usize,
-    started: Instant,
+    elapsed: Duration,
     corpus_len: usize,
-    valid: usize,
-    interesting: usize,
-    checkpoints: usize,
-    coverage_saved: usize,
-    crashes: usize,
-    rejected: usize,
+    tally: &Tally,
     feedback: &FeedbackState,
 ) {
-    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+    let elapsed = elapsed.as_secs_f64().max(0.001);
     println!(
-        "{prefix}={iterations} exec/s={:.0} corpus={corpus_len} valid={valid} interesting={interesting} checkpoints={checkpoints} coverage_saved={coverage_saved} crashes={crashes} rejected={rejected} features={} coverage_buckets={} cmp_buckets={} cmp_values={} sometimes={} sometimes_buckets={} buckets={}",
+        "{prefix}={iterations} exec/s={:.0} corpus={corpus_len} valid={} interesting={} checkpoints={} coverage_saved={} crashes={} rejected={} behavior={} features={} coverage_buckets={} cmp_buckets={} cmp_values={} sometimes={} sometimes_buckets={} buckets={}",
         iterations as f64 / elapsed,
+        tally.valid,
+        tally.interesting,
+        tally.checkpoints,
+        tally.coverage_saved,
+        tally.crashes,
+        tally.rejected,
+        feedback.behavior_bucket_count(),
         feedback.feature_count(),
         feedback.coverage_bucket_count(),
         feedback.comparison_bucket_count(),
@@ -760,6 +894,40 @@ fn print_fuzz_status(
         feedback.structural_bucket_count(),
     );
     flush_stdout();
+}
+
+/// One stats-log line with the same counters as the status line, so runs can
+/// be plotted and A/B-compared offline.
+fn report_event(
+    event: &str,
+    iterations: usize,
+    elapsed: Duration,
+    corpus_len: usize,
+    tally: &Tally,
+    feedback: &FeedbackState,
+) -> serde_json::Value {
+    let elapsed_secs = elapsed.as_secs_f64();
+    json!({
+        "event": event,
+        "iterations": iterations,
+        "elapsed_secs": elapsed_secs,
+        "execs_per_sec": iterations as f64 / elapsed_secs.max(0.001),
+        "corpus": corpus_len,
+        "valid": tally.valid,
+        "interesting": tally.interesting,
+        "checkpoints": tally.checkpoints,
+        "coverage_saved": tally.coverage_saved,
+        "crashes": tally.crashes,
+        "rejected": tally.rejected,
+        "behavior_buckets": feedback.behavior_bucket_count(),
+        "features": feedback.feature_count(),
+        "coverage_buckets": feedback.coverage_bucket_count(),
+        "cmp_buckets": feedback.comparison_bucket_count(),
+        "cmp_values": feedback.comparison_value_count(),
+        "sometimes_labels": feedback.sometimes_label_count(),
+        "sometimes_count_buckets": feedback.sometimes_count_bucket_count(),
+        "structural_buckets": feedback.structural_bucket_count(),
+    })
 }
 
 fn flush_stdout() {

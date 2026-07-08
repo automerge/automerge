@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::coverage::{CmpKind, CmpObservation};
-use crate::runner::RunReport;
+use crate::runner::{BehaviorStats, RunReport};
 use crate::trace::{Trace, VmInstr, VmObjRef, VmOp};
 
+const MAX_BEHAVIOR_BUCKETS: usize = 65536;
 const MAX_STRUCTURAL_BUCKETS: usize = 512;
 const MAX_COVERAGE_BUCKETS: usize = 262144;
 const MAX_COMPARISON_BUCKETS: usize = 32768;
@@ -21,7 +22,44 @@ pub struct FeedbackState {
     comparison_buckets: HashSet<ComparisonKey>,
     comparison_u8_values: Vec<u8>,
     comparison_u8_value_set: HashSet<u8>,
+    behaviors: HashSet<BehaviorKey>,
     structures: HashSet<StructuralKey>,
+}
+
+/// Log-bucketed [`BehaviorStats`]. Two runs that land in the same key took
+/// the documents to roughly the same place, whatever their traces look like.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct BehaviorKey {
+    docs: u8,
+    max_heads: u8,
+    total_changes: u8,
+    total_objects: u8,
+    max_depth: u8,
+    total_text_len: u8,
+    total_seq_len: u8,
+    conflicted_props: u8,
+    list_marks: u8,
+    text_marks: u8,
+    max_saved_bytes: u8,
+}
+
+fn behavior_key(stats: &BehaviorStats) -> BehaviorKey {
+    BehaviorKey {
+        docs: bucket(stats.docs),
+        // Head count and depth are small and change one at a time; keep them
+        // exact so e.g. two vs. three concurrent heads count as different
+        // behavior.
+        max_heads: stats.max_heads.min(15) as u8,
+        total_changes: bucket(stats.total_changes),
+        total_objects: bucket(stats.total_objects),
+        max_depth: stats.max_depth.min(15) as u8,
+        total_text_len: bucket(stats.total_text_len),
+        total_seq_len: bucket(stats.total_seq_len),
+        conflicted_props: bucket(stats.conflicted_props),
+        list_marks: bucket(stats.list_marks),
+        text_marks: bucket(stats.text_marks),
+        max_saved_bytes: bucket(stats.max_saved_bytes),
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -96,6 +134,25 @@ impl FeedbackState {
                     hit.name, hit.count
                 ));
             }
+        }
+
+        let behavior = behavior_key(&report.behavior);
+        if self.behaviors.len() < MAX_BEHAVIOR_BUCKETS && !self.behaviors.contains(&behavior) {
+            let reason = format!(
+                "new behavior bucket docs={} heads={} changes={} objects={} depth={} text={} seq={} conflicts={} marks={} saved={}",
+                behavior.docs,
+                behavior.max_heads,
+                behavior.total_changes,
+                behavior.total_objects,
+                behavior.max_depth,
+                behavior.total_text_len,
+                behavior.total_seq_len,
+                behavior.conflicted_props,
+                behavior.list_marks.max(behavior.text_marks),
+                behavior.max_saved_bytes,
+            );
+            self.behaviors.insert(behavior);
+            return Some(reason);
         }
 
         for feature in features(trace) {
@@ -209,6 +266,10 @@ impl FeedbackState {
 
     pub fn feature_count(&self) -> usize {
         self.features.len()
+    }
+
+    pub fn behavior_bucket_count(&self) -> usize {
+        self.behaviors.len()
     }
 
     pub fn structural_bucket_count(&self) -> usize {

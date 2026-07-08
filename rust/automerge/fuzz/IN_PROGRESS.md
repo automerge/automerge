@@ -265,6 +265,31 @@ iters=100 corpus=81 valid=95 interesting=73 rejected=4 features=25 buckets=55 cr
 
 This immediately found repeatable Automerge panics in mark/text interactions, with crashes saved under the temporary test corpus used for the run.
 
+## Behavioral feedback and stats logging
+
+Novelty is now also measured from where execution actually took the documents,
+not just from what the trace text says.
+
+- [x] Collect `BehaviorStats` in the runner from the end-of-run state that the
+  save/load invariant already hydrates: doc count, max heads, total changes,
+  object count, max depth, text/sequence lengths, conflicted properties
+  (from hydrate `conflict` flags), list/text marks, and max saved size.
+- [x] Bucket the stats into `BehaviorKey`s in `feedback.rs`; a new key is a
+  novelty reason (`new behavior bucket ...`) ranked above trace-syntax
+  features (priority 3), which were demoted to priority 2.
+- [x] Report `behavior=` in the status line.
+- [x] Append machine-readable run statistics to `<corpus>/stats.jsonl`
+  (override with `--stats-file`). Events: `start`, `warmup` (baseline after
+  corpus replay), `report` (same cadence as the status line), `novelty`,
+  `checkpoint`, `crash`, `coverage`, and `done` (includes the unhit
+  `sometimes` label list). Use this for time-to-novelty curves and for
+  fixed-seed A/B comparison of scheduler/mutator changes.
+
+Short validation runs (400 iterations, fresh corpora): behavior buckets kept
+growing (68/103/91 across seeds) after syntax features plateaued at 31, with
+`sometimes` label counts unchanged versus the prior scheduler and no
+throughput regression.
+
 ## Deferred until later phases
 
 Do not implement these until reliable sync/read-side/rich-text traces have had some runtime testing:
