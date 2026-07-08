@@ -3234,3 +3234,43 @@ fn round_trip_change_with_extra_bytes() {
     let doc2 = Automerge::load(&saved).unwrap();
     check(doc2.get_changes(&[]));
 }
+
+#[test]
+fn fork_at_current_heads_after_interleaved_actor_changes() {
+    // Three linear changes on one document. The first and third are by the
+    // same actor, interrupted by a different actor. `fork_at` at the
+    // document's own current heads then panics with
+    // `called Result::unwrap() on an Err value: MissingOps` in
+    // `ChangeCollector::from_build_meta_inner` (op_set2/change/collector.rs),
+    // via `get_changes_by_hashes`.
+    //
+    // Sensitive to the actor ids involved: [2,0,2], [0,1,0], and [2,1,2]
+    // panic, while [1,0,1] and [0,2,0] do not.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![2]));
+    doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+    doc.commit();
+    doc.set_actor(ActorId::from(vec![0]));
+    doc.put(ROOT, "b", false).unwrap();
+    doc.commit();
+    doc.set_actor(ActorId::from(vec![2]));
+    doc.put(ROOT, "c", -7_i64).unwrap();
+    doc.commit();
+
+    let heads = doc.get_heads();
+    let forked = doc.fork_at(&heads).expect("fork_at at current heads");
+    drop(forked);
+}
+
+#[test]
+fn fork_at_foreign_heads_errors_instead_of_panicking() {
+    let mut a = AutoCommit::new();
+    a.put(ROOT, "k", 1).unwrap();
+    a.commit();
+    let heads_a = a.get_heads();
+
+    let mut b = AutoCommit::new();
+    b.put(ROOT, "x", 2).unwrap();
+    b.commit();
+    assert!(b.fork_at(&heads_a).is_err());
+}
