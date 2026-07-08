@@ -440,10 +440,8 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 fn initial_prefix_hash(trace: &Trace) -> u64 {
     let mut hash = FNV_OFFSET;
-    update_prefix_hash(&mut hash, &trace.version.to_le_bytes());
-    if let Ok(bytes) = serde_json::to_vec(&trace.actors) {
-        update_prefix_hash(&mut hash, &bytes);
-    }
+    combine_prefix_hash(&mut hash, u64::from(trace.version));
+    combine_prefix_hash(&mut hash, structural_hash(&trace.actors));
     hash
 }
 
@@ -459,18 +457,23 @@ fn trace_prefix_key(trace: &Trace) -> PrefixCacheKey {
 }
 
 fn update_prefix_hash_for_instr(hash: &mut u64, instr: &VmInstr) {
-    if let Ok(bytes) = serde_json::to_vec(instr) {
-        update_prefix_hash(hash, &bytes);
-    }
+    combine_prefix_hash(hash, structural_hash(instr));
 }
 
-fn update_prefix_hash(hash: &mut u64, bytes: &[u8]) {
-    for byte in bytes {
-        *hash ^= u64::from(*byte);
+// DefaultHasher::new() uses fixed keys, so these hashes are stable for the
+// lifetime of the process, which is all the in-memory prefix caches need.
+fn structural_hash(value: &impl std::hash::Hash) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn combine_prefix_hash(hash: &mut u64, value: u64) {
+    for byte in value.to_le_bytes() {
+        *hash ^= u64::from(byte);
         *hash = hash.wrapping_mul(FNV_PRIME);
     }
-    *hash ^= 0xff;
-    *hash = hash.wrapping_mul(FNV_PRIME);
 }
 
 fn trace_timeout() -> Duration {
@@ -536,15 +539,14 @@ impl RunState {
     }
 
     fn fork_doc(&mut self, from: usize, to: usize) -> Result<(), RunError> {
-        let (bytes, objects, head_slots) = {
+        let (mut doc, objects, head_slots) = {
             let from_doc = self.doc_mut(from)?;
             (
-                from_doc.doc.save(),
+                from_doc.doc.fork(),
                 from_doc.objects.clone(),
                 from_doc.head_slots.clone(),
             )
         };
-        let mut doc = AutoCommit::load(&bytes).map_err(|err| RunError::Load(err.to_string()))?;
         let actor = self.actors[to % self.actors.len()].clone();
         doc.set_actor(actor);
         if to >= self.docs.len() {
@@ -566,13 +568,21 @@ impl RunState {
         if into == from {
             return Ok(());
         }
-        let from_bytes = self.doc_mut(from)?.doc.save();
-        let mut from_doc =
-            AutoCommit::load(&from_bytes).map_err(|err| RunError::Load(err.to_string()))?;
-        let into_doc = self.doc_mut(into)?;
+        if into >= self.docs.len() {
+            return Err(RunError::MissingDoc { doc: into });
+        }
+        if from >= self.docs.len() {
+            return Err(RunError::MissingDoc { doc: from });
+        }
+        let (low, high) = self.docs.split_at_mut(into.max(from));
+        let (into_doc, from_doc) = if into < from {
+            (&mut low[into], &mut high[0])
+        } else {
+            (&mut high[0], &mut low[from])
+        };
         into_doc
             .doc
-            .merge(&mut from_doc)
+            .merge(&mut from_doc.doc)
             .map_err(|err| RunError::Automerge(err.to_string()))?;
         Ok(())
     }

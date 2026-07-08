@@ -360,7 +360,7 @@ impl<'a, 'rng> MutationBatchBuilder<'a, 'rng> {
             if self.is_full() {
                 return;
             }
-            let variants = position_variant_count(self.input, &position, &ctx, self.rng).min(8);
+            let variants = position_variant_count(self.input, &position, &ctx).min(8);
             for variant in 0..variants {
                 self.push_plan(MutationPlan::Position {
                     position: position.clone(),
@@ -512,11 +512,7 @@ fn apply_plan(source: &Trace, plan: MutationPlan, rng: &mut StdRng) -> Trace {
         MutationPlan::Position { position, variant } => {
             let ctx = TraceContext::new(source);
             (
-                mutate_position(source, &position, &ctx, rng)
-                    .into_iter()
-                    .nth(variant)
-                    .map(|(_, trace)| trace)
-                    .unwrap_or_else(|| source.clone()),
+                apply_position_variant(source, &position, &ctx, variant, rng),
                 false,
             )
         }
@@ -1125,14 +1121,9 @@ fn push_if_capacity(trace: &mut Trace, instr: VmInstr) {
     }
 }
 
-fn position_variant_count(
-    input: &Trace,
-    position: &Position,
-    ctx: &TraceContext,
-    rng: &mut StdRng,
-) -> usize {
+fn position_variant_count(input: &Trace, position: &Position, ctx: &TraceContext) -> usize {
     match position {
-        Position::Instr { step } => mutate_instr_position(input, *step, ctx, rng).len(),
+        Position::Instr { step } => instr_variant_count(input, *step, ctx),
         Position::Op { step, op } => nth_op_at(input, *step, *op)
             .map(constructor_swap_variant_count)
             .unwrap_or(0),
@@ -1145,6 +1136,18 @@ fn position_variant_count(
             ctx.head_refs.len()
         }
     }
+}
+
+/// Must agree with the variant list built by [`instr_variants`]: six fixed
+/// replacement instructions, three more when another document exists, plus one
+/// random change.
+fn instr_variant_count(input: &Trace, step: usize, ctx: &TraceContext) -> usize {
+    let Some(instr) = input.steps.get(step) else {
+        return 0;
+    };
+    let doc = instr_doc(instr).unwrap_or(0);
+    let has_other_doc = ctx.docs.iter().any(|candidate| *candidate != doc);
+    6 + if has_other_doc { 3 } else { 0 } + 1
 }
 
 fn constructor_swap_variant_count(op: &VmOp) -> usize {
@@ -1280,122 +1283,91 @@ fn trace_positions(trace: &Trace) -> Vec<Position> {
     positions
 }
 
-fn mutate_position(
+/// Apply variant number `variant` of the mutation at `position`, cloning the
+/// input trace exactly once. Out-of-range variants return the input unchanged.
+fn apply_position_variant(
     input: &Trace,
     position: &Position,
     ctx: &TraceContext,
+    variant: usize,
     rng: &mut StdRng,
-) -> Vec<(String, Trace)> {
+) -> Trace {
+    let mut trace = input.clone();
     match *position {
-        Position::Instr { step } => mutate_instr_position(input, step, ctx, rng),
-        Position::Op { step, op } => nth_op_at(input, step, op)
-            .map(|vm_op| {
-                constructor_swap_variants(vm_op, rng)
-                    .into_iter()
-                    .map(|replacement| {
-                        let mut trace = input.clone();
-                        set_op_at(&mut trace, step, op, replacement);
-                        (
-                            format!("position op constructor step {step} op {op}"),
-                            trace,
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        Position::OpObj { step, op } => ctx
-            .obj_refs
-            .iter()
-            .cloned()
-            .map(|obj| {
-                let mut trace = input.clone();
-                set_op_obj_at(&mut trace, step, op, obj);
-                (format!("position op object step {step} op {op}"), trace)
-            })
-            .collect(),
-        Position::OpValue { step, op } => ctx
-            .values
-            .iter()
-            .cloned()
-            .map(|value| {
-                let mut trace = input.clone();
-                set_op_value_at(&mut trace, step, op, value);
-                (format!("position op value step {step} op {op}"), trace)
-            })
-            .collect(),
-        Position::OpHydrated { step, op } => ctx
-            .hydrated
-            .iter()
-            .cloned()
-            .map(|value| {
-                let mut trace = input.clone();
-                set_op_hydrated_at(&mut trace, step, op, value);
-                (format!("position op hydrated step {step} op {op}"), trace)
-            })
-            .collect(),
-        Position::OpMarkExpand { step, op } => all_mark_expands()
-            .into_iter()
-            .map(|expand| {
-                let mut trace = input.clone();
-                set_op_mark_expand_at(&mut trace, step, op, expand);
-                (format!("position mark expand step {step} op {op}"), trace)
-            })
-            .collect(),
-        Position::ObserveMode { step } => all_observe_modes()
-            .into_iter()
-            .map(|mode| {
-                let mut trace = input.clone();
-                if let Some(VmInstr::Observe { mode: field, .. }) = trace.steps.get_mut(step) {
-                    *field = mode;
+        Position::Instr { step } => {
+            let mut variants = instr_variants(input, step, ctx, rng);
+            if variant < variants.len() {
+                trace.steps[step] = variants.swap_remove(variant);
+            }
+        }
+        Position::Op { step, op } => {
+            if let Some(vm_op) = nth_op_at(input, step, op) {
+                let mut variants = constructor_swap_variants(vm_op, rng);
+                if variant < variants.len() {
+                    set_op_at(&mut trace, step, op, variants.swap_remove(variant));
                 }
-                (format!("position observe mode step {step}"), trace)
-            })
-            .collect(),
-        Position::ObserveHead { step } => ctx
-            .head_refs
-            .iter()
-            .cloned()
-            .map(|head| {
-                let mut trace = input.clone();
-                if let Some(VmInstr::Observe { head: field, .. }) = trace.steps.get_mut(step) {
-                    *field = head;
-                }
-                (format!("position observe head step {step}"), trace)
-            })
-            .collect(),
-        Position::DiffBefore { step } => ctx
-            .head_refs
-            .iter()
-            .cloned()
-            .map(|head| {
-                let mut trace = input.clone();
-                if let Some(VmInstr::DiffRange { before, .. }) = trace.steps.get_mut(step) {
-                    *before = head;
-                }
-                (format!("position diff before step {step}"), trace)
-            })
-            .collect(),
-        Position::DiffAfter { step } => ctx
-            .head_refs
-            .iter()
-            .cloned()
-            .map(|head| {
-                let mut trace = input.clone();
-                if let Some(VmInstr::DiffRange { after, .. }) = trace.steps.get_mut(step) {
-                    *after = head;
-                }
-                (format!("position diff after step {step}"), trace)
-            })
-            .collect(),
+            }
+        }
+        Position::OpObj { step, op } => {
+            if let Some(obj) = ctx.obj_refs.get(variant) {
+                set_op_obj_at(&mut trace, step, op, obj.clone());
+            }
+        }
+        Position::OpValue { step, op } => {
+            if let Some(value) = ctx.values.get(variant) {
+                set_op_value_at(&mut trace, step, op, value.clone());
+            }
+        }
+        Position::OpHydrated { step, op } => {
+            if let Some(value) = ctx.hydrated.get(variant) {
+                set_op_hydrated_at(&mut trace, step, op, value.clone());
+            }
+        }
+        Position::OpMarkExpand { step, op } => {
+            if let Some(expand) = all_mark_expands().get(variant) {
+                set_op_mark_expand_at(&mut trace, step, op, *expand);
+            }
+        }
+        Position::ObserveMode { step } => {
+            if let (Some(mode), Some(VmInstr::Observe { mode: field, .. })) =
+                (all_observe_modes().get(variant), trace.steps.get_mut(step))
+            {
+                *field = *mode;
+            }
+        }
+        Position::ObserveHead { step } => {
+            if let (Some(head), Some(VmInstr::Observe { head: field, .. })) =
+                (ctx.head_refs.get(variant), trace.steps.get_mut(step))
+            {
+                *field = head.clone();
+            }
+        }
+        Position::DiffBefore { step } => {
+            if let (Some(head), Some(VmInstr::DiffRange { before, .. })) =
+                (ctx.head_refs.get(variant), trace.steps.get_mut(step))
+            {
+                *before = head.clone();
+            }
+        }
+        Position::DiffAfter { step } => {
+            if let (Some(head), Some(VmInstr::DiffRange { after, .. })) =
+                (ctx.head_refs.get(variant), trace.steps.get_mut(step))
+            {
+                *after = head.clone();
+            }
+        }
     }
+    trace
 }
 
-fn mutate_instr_position(
+/// Replacement instructions for the instruction at `step`. The list length
+/// must agree with [`instr_variant_count`].
+fn instr_variants(
     input: &Trace,
     step: usize,
     ctx: &TraceContext,
     rng: &mut StdRng,
-) -> Vec<(String, Trace)> {
+) -> Vec<VmInstr> {
     let Some(instr) = input.steps.get(step) else {
         return Vec::new();
     };
@@ -1412,7 +1384,7 @@ fn mutate_instr_position(
             doc,
             object: obj,
             mode: VmObserveMode::MapGets,
-            head: head.clone(),
+            head,
             budget: 32,
         },
         VmInstr::SaveHeads { doc, slot: 0 },
@@ -1439,16 +1411,6 @@ fn mutate_instr_position(
         ops: vec![builder.random_op(rng)],
     });
     variants
-        .into_iter()
-        .map(|variant| {
-            let mut trace = input.clone();
-            trace.steps[step] = variant;
-            (
-                format!("position instruction constructor step {step}"),
-                trace,
-            )
-        })
-        .collect()
 }
 
 fn instr_doc(instr: &VmInstr) -> Option<u8> {

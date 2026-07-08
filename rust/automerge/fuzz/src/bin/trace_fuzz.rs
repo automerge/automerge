@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
@@ -70,6 +72,11 @@ enum Command {
         /// Defaults to <corpus>/stats.jsonl.
         #[arg(long)]
         stats_file: Option<PathBuf>,
+        /// Number of worker threads executing traces. With more than one job,
+        /// results are processed in completion order, so runs are not
+        /// reproducible run-to-run.
+        #[arg(long, default_value_t = 1)]
+        jobs: usize,
     },
     Crashes {
         /// Crash number, filename, or path. Omit to list crashes.
@@ -143,6 +150,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             coverage_retention,
             coverage_retention_window,
             stats_file,
+            jobs,
         } => {
             fuzz(FuzzOptions {
                 seed,
@@ -158,6 +166,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 coverage_retention,
                 coverage_retention_window,
                 stats_file,
+                jobs,
             })?;
         }
         Command::Crashes {
@@ -187,6 +196,7 @@ struct FuzzOptions {
     coverage_retention: bool,
     coverage_retention_window: usize,
     stats_file: Option<PathBuf>,
+    jobs: usize,
 }
 
 /// Counters accumulated over one fuzz run, shared between the human status
@@ -377,10 +387,13 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
         coverage_retention,
         coverage_retention_window,
         stats_file,
+        jobs,
     } = options;
 
+    let jobs = effective_jobs(jobs);
+
     eprintln!(
-        "initializing fuzz run: seed={seed} iterations={iterations} corpus_dir={}",
+        "initializing fuzz run: seed={seed} iterations={iterations} jobs={jobs} corpus_dir={}",
         corpus_dir.display()
     );
 
@@ -423,18 +436,14 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
         feedback.seed_comparison_u8_values(persisted_comparison_values);
     }
     let mut runner = Runner::new();
-    let mut tally = Tally {
+    let tally = Tally {
         interesting: trace_file_count(&interesting_dir)?,
         coverage_saved: trace_file_count(&coverage_corpus_dir)?,
         checkpoints: trace_file_count(&checkpoints_dir)?,
         crashes: trace_file_count(&crashes_dir)?,
         ..Tally::default()
     };
-    let mut recent_valid = VecDeque::new();
     let mut pending_mutations = PendingMutations::new();
-    let mut boring = 0usize;
-    let mut reset_after = 1000usize;
-    let mut mutation_effort_multiplier = 1usize;
     let started = Instant::now();
     let report_interval = Duration::from_secs(report_secs);
     let mut last_report = started;
@@ -449,42 +458,64 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(0),
         "seed": seed,
         "iterations": iterations,
+        "jobs": jobs,
         "corpus_dir": corpus_dir.display().to_string(),
         "corpus_loaded": corpus.len(),
         "max_corpus_load": max_corpus_load,
     }));
 
+    let pool = (jobs > 1).then(|| ExecutorPool::new(jobs));
+
     eprintln!("warming up feedback from {} corpus traces", corpus.len());
     let mut last_warmup_report = Instant::now();
-    for (index, trace) in corpus.iter().enumerate() {
-        if let Ok(report) = runner.run_catching(trace) {
-            let reason = feedback.consider(trace, &report);
-            let raw_power = feedback.power_score(&report);
-            corpus_power[index] = if reason.as_deref().is_some_and(is_coverage_reason) {
-                raw_power.min(2)
-            } else {
-                raw_power
-            };
-            if let Some(reason) = reason {
-                let priority = reason_priority(&reason);
-                if !is_coverage_reason(&reason) {
-                    let effort = scheduled_effort(priority)
-                        .saturating_mul(effort_power(corpus_power[index]))
-                        .saturating_div(2)
-                        .max(1);
-                    let batch =
-                        mutation_batch(trace, &mut rng, effort, feedback.comparison_u8_values());
-                    pending_mutations.push_batch(priority, batch);
-                }
-            }
-        }
+    let mut warmup_progress = |completed: usize, total: usize| {
         if report_secs != 0 && last_warmup_report.elapsed() >= report_interval {
-            eprintln!(
-                "warmup: replayed {}/{} corpus traces",
-                index + 1,
-                corpus.len()
-            );
+            eprintln!("warmup: replayed {completed}/{total} corpus traces");
             last_warmup_report = Instant::now();
+        }
+    };
+    if let Some(pool) = &pool {
+        let total = corpus.len();
+        let mut submitted = 0usize;
+        let mut completed = 0usize;
+        while completed < total {
+            while submitted < total && submitted - completed < jobs * 2 {
+                pool.submit(Job {
+                    tag: submitted,
+                    trace: corpus[submitted].clone(),
+                    parent_desc: String::new(),
+                });
+                submitted += 1;
+            }
+            let outcome = pool.recv()?;
+            completed += 1;
+            if let Ok(report) = outcome.result {
+                warmup_consider(
+                    &corpus[outcome.tag],
+                    &report,
+                    outcome.tag,
+                    &mut rng,
+                    &mut feedback,
+                    &mut corpus_power,
+                    &mut pending_mutations,
+                );
+            }
+            warmup_progress(completed, total);
+        }
+    } else {
+        for index in 0..corpus.len() {
+            if let Ok(report) = runner.run_catching(&corpus[index]) {
+                warmup_consider(
+                    &corpus[index],
+                    &report,
+                    index,
+                    &mut rng,
+                    &mut feedback,
+                    &mut corpus_power,
+                    &mut pending_mutations,
+                );
+            }
+            warmup_progress(index + 1, corpus.len());
         }
     }
 
@@ -500,244 +531,92 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     println!(
-        "starting fuzz run: seed={seed} iterations={iterations} corpus={}",
+        "starting fuzz run: seed={seed} iterations={iterations} jobs={jobs} corpus={}",
         corpus.len()
     );
     flush_stdout();
 
-    for iteration in 0..iterations {
-        let (candidate, parent_desc) = if let Some(candidate) = pending_mutations.pop(&mut rng) {
-            (candidate, "scheduled recombination".to_string())
-        } else {
-            let base_index = select_base_index(&corpus, &corpus_power, &mut rng);
-            let candidate = mutate(&corpus[base_index], &mut rng);
-            let parent_desc = format!("corpus index {base_index}");
-            (candidate, parent_desc)
-        };
+    // Status exec/s and event timestamps measure the fuzz loop itself, not the
+    // sequential-or-parallel warmup that precedes it.
+    let loop_started = Instant::now();
+    let mut state = FuzzLoop {
+        rng,
+        runner,
+        corpus,
+        corpus_power,
+        feedback,
+        pending_mutations,
+        tally,
+        stats,
+        recent_valid: VecDeque::new(),
+        boring: 0,
+        reset_after: 1000,
+        mutation_effort_multiplier: 1,
+        started: loop_started,
+        interesting_dir,
+        checkpoints_dir,
+        crashes_dir,
+        coverage_corpus_dir,
+        coverage_retention,
+        coverage_retention_window,
+    };
 
-        match runner.run_catching(&candidate) {
-            Ok(report) => {
-                tally.valid += 1;
-                if coverage_retention && coverage_retention_window > 0 {
-                    recent_valid.push_back(candidate.clone());
-                    while recent_valid.len() > coverage_retention_window {
-                        recent_valid.pop_front();
-                    }
-                }
-                if let Some(reason) = feedback.consider(&candidate, &report) {
-                    let raw_candidate_power = feedback.power_score(&report);
-                    let candidate_power = if is_coverage_reason(&reason) {
-                        raw_candidate_power.min(2)
-                    } else {
-                        raw_candidate_power
-                    };
-                    let maybe_target = SometimesTarget::from_reason(&reason);
-                    let mut saved = candidate.clone();
-                    saved.metadata.parent = Some(parent_desc.clone());
-                    saved.metadata.reason = Some(reason.clone());
-                    let path = interesting_dir
-                        .join(format!("interesting-{:08}.amtrace", tally.interesting));
-                    save_trace(&path, &saved)?;
-                    let saved_for_batch = saved.clone();
-                    corpus.push(saved);
-                    corpus_power.push(candidate_power);
-                    tally.interesting += 1;
-
-                    boring = 0;
-                    let priority = reason_priority(&reason);
-                    stats.log(json!({
-                        "event": "novelty",
-                        "iteration": iteration,
-                        "elapsed_secs": started.elapsed().as_secs_f64(),
-                        "priority": priority,
-                        "reason": reason,
-                        "path": path.display().to_string(),
-                    }));
-                    if !is_coverage_reason(&reason) {
-                        let batch = mutation_batch(
-                            &saved_for_batch,
-                            &mut rng,
-                            scheduled_effort(priority)
-                                * mutation_effort_multiplier
-                                * effort_power(candidate_power),
-                            feedback.comparison_u8_values(),
-                        );
-                        pending_mutations.push_batch(priority, batch);
-                    }
-
-                    if let Some(target) = maybe_target {
-                        if let Some(mut checkpoint) =
-                            find_sometimes_checkpoint(&candidate, &target, &mut runner)
-                        {
-                            checkpoint.metadata.parent = Some(path.display().to_string());
-                            checkpoint.metadata.reason = Some(format!(
-                                "checkpoint for {} at step {}",
-                                target.description(),
-                                checkpoint.steps.len()
-                            ));
-                            let checkpoint_path = checkpoints_dir.join(format!(
-                                "sometimes-checkpoint-{:08}.amtrace",
-                                tally.checkpoints
-                            ));
-                            save_trace(&checkpoint_path, &checkpoint)?;
-                            if let Err(err) = runner.cache_checkpoint_prefix(&checkpoint) {
-                                eprintln!("failed to cache checkpoint prefix: {err}");
-                            }
-                            stats.log(json!({
-                                "event": "checkpoint",
-                                "iteration": iteration,
-                                "elapsed_secs": started.elapsed().as_secs_f64(),
-                                "steps": checkpoint.steps.len(),
-                                "target": target.description(),
-                                "path": checkpoint_path.display().to_string(),
-                            }));
-                            let extension_batch = prefix_extension_batch(
-                                &checkpoint,
-                                &mut rng,
-                                scheduled_effort(priority) * mutation_effort_multiplier,
-                            );
-                            pending_mutations.push_batch(priority.max(3), extension_batch);
-                            corpus.push(checkpoint);
-                            corpus_power.push(candidate_power.max(2));
-                            tally.checkpoints += 1;
-                        }
-                    }
-                } else {
-                    boring = boring.saturating_add(1);
-                }
+    if let Some(pool) = &pool {
+        // Workers only execute candidates; generation, feedback, and corpus
+        // management stay on this thread. Results are handled in completion
+        // order, so a parallel run is not reproducible run-to-run, but every
+        // saved trace remains individually replayable.
+        let max_in_flight = jobs * 2;
+        let mut submitted = 0usize;
+        let mut completed = 0usize;
+        while completed < iterations {
+            while submitted < iterations && submitted - completed < max_in_flight {
+                let (candidate, parent_desc) = state.next_candidate();
+                pool.submit(Job {
+                    tag: 0,
+                    trace: candidate,
+                    parent_desc,
+                });
+                submitted += 1;
             }
-            Err(err) if is_crash(&err) => {
-                let mut saved = candidate.clone();
-                saved.metadata.parent = Some(parent_desc.clone());
-                saved.metadata.reason = Some(format!("failure: {err}"));
-                let path = crashes_dir.join(format!("crash-{:08}.amtrace", tally.crashes));
-                save_trace(&path, &saved)?;
-                eprintln!("saved crash {}: {err}", path.display());
-                stats.log(json!({
-                    "event": "crash",
-                    "iteration": iteration,
-                    "elapsed_secs": started.elapsed().as_secs_f64(),
-                    "error": err.to_string(),
-                    "path": path.display().to_string(),
-                }));
-                tally.crashes += 1;
-            }
-            Err(_) => {
-                tally.rejected += 1;
-                boring = boring.saturating_add(1);
-                if tally.rejected % 8 == 0 {
-                    let batch = mutation_batch(
-                        &candidate,
-                        &mut rng,
-                        mutation_effort_multiplier,
-                        feedback.comparison_u8_values(),
-                    );
-                    pending_mutations.push_rejected_batch(1, batch);
-                }
-            }
+            let JobResult {
+                trace,
+                parent_desc,
+                result,
+                ..
+            } = pool.recv()?;
+            state.process(completed, trace, parent_desc, result)?;
+            completed += 1;
+            state.maybe_report(completed, report_every, report_secs, &mut last_report);
+            state.poll_coverage(&mut coverage, completed)?;
         }
-
-        if boring > reset_after {
-            mutation_effort_multiplier = mutation_effort_multiplier.saturating_mul(2).min(16);
-            reset_after = reset_after.saturating_mul(2);
-            boring = 0;
-            pending_mutations.clear();
-            eprintln!(
-                "mutation scheduler: no novelty recently; random effort multiplier now {mutation_effort_multiplier}"
-            );
-            let recent_start = corpus.len().saturating_sub(16);
-            let recent = corpus[recent_start..].to_vec();
-            for trace in &recent {
-                let batch = mutation_batch(
-                    trace,
-                    &mut rng,
-                    4 * mutation_effort_multiplier,
-                    feedback.comparison_u8_values(),
-                );
-                pending_mutations.push_batch(2, batch);
-            }
-        }
-
-        let completed = iteration + 1;
-        let now = Instant::now();
-        let report_by_iteration = report_every != 0 && completed % report_every == 0;
-        let report_by_time = report_secs != 0 && now.duration_since(last_report) >= report_interval;
-        if report_by_iteration || report_by_time {
-            print_fuzz_status(
-                "iters",
-                completed,
-                started.elapsed(),
-                corpus.len(),
-                &tally,
-                &feedback,
-            );
-            stats.log(report_event(
-                "report",
-                completed,
-                started.elapsed(),
-                corpus.len(),
-                &tally,
-                &feedback,
-            ));
-            last_report = now;
-        }
-
-        let mut disable_coverage = false;
-        if let Some(coverage_reporter) = &mut coverage {
-            match coverage_reporter.maybe_poll() {
-                Ok(Some(update)) => {
-                    println!("coverage: {}", update.status_line());
-                    stats.log(json!({
-                        "event": "coverage",
-                        "iteration": completed,
-                        "elapsed_secs": started.elapsed().as_secs_f64(),
-                        "lines_covered": update.summary.lines_covered,
-                        "lines_total": update.summary.lines_total,
-                        "regions_covered": update.summary.regions_covered,
-                        "regions_total": update.summary.regions_total,
-                        "functions_covered": update.summary.functions_covered,
-                        "functions_total": update.summary.functions_total,
-                    }));
-                    if coverage_retention && update.increased() && !recent_valid.is_empty() {
-                        let saved = save_coverage_window(
-                            &coverage_corpus_dir,
-                            &recent_valid,
-                            tally.coverage_saved,
-                            completed,
-                        )?;
-                        for trace in &recent_valid {
-                            let batch = mutation_batch(
-                                trace,
-                                &mut rng,
-                                4 * mutation_effort_multiplier,
-                                feedback.comparison_u8_values(),
-                            );
-                            pending_mutations.push_batch(2, batch);
-                        }
-                        tally.coverage_saved += saved;
-                        for trace in recent_valid.iter().cloned() {
-                            corpus.push(trace);
-                            corpus_power.push(2);
-                        }
-                        recent_valid.clear();
-                    }
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    eprintln!("coverage polling disabled: {err}");
-                    disable_coverage = true;
-                }
-            }
-        }
-        if disable_coverage {
-            coverage = None;
+    } else {
+        for iteration in 0..iterations {
+            let (candidate, parent_desc) = state.next_candidate();
+            let result = state.runner.run_catching(&candidate);
+            state.process(iteration, candidate, parent_desc, result)?;
+            let completed = iteration + 1;
+            state.maybe_report(completed, report_every, report_secs, &mut last_report);
+            state.poll_coverage(&mut coverage, completed)?;
         }
     }
+    if let Some(pool) = pool {
+        pool.shutdown();
+    }
+
+    let FuzzLoop {
+        runner,
+        corpus,
+        feedback,
+        tally,
+        mut stats,
+        ..
+    } = state;
 
     print_fuzz_status(
         "done: iters",
         iterations,
-        started.elapsed(),
+        loop_started.elapsed(),
         corpus.len(),
         &tally,
         &feedback,
@@ -775,7 +654,7 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
     let mut done = report_event(
         "done",
         iterations,
-        started.elapsed(),
+        loop_started.elapsed(),
         corpus.len(),
         &tally,
         &feedback,
@@ -795,6 +674,416 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Coverage and sancov instrumentation record into process-global counters, so
+/// per-trace attribution is only sound with a single executing thread.
+fn effective_jobs(requested: usize) -> usize {
+    let requested = requested.max(1);
+    if cfg!(any(coverage, sancov)) && requested > 1 {
+        eprintln!(
+            "--jobs {requested} is unsupported with coverage/sancov instrumentation; using 1"
+        );
+        return 1;
+    }
+    requested
+}
+
+#[allow(clippy::too_many_arguments)]
+fn warmup_consider(
+    trace: &Trace,
+    report: &automerge_fuzz::runner::RunReport,
+    index: usize,
+    rng: &mut StdRng,
+    feedback: &mut FeedbackState,
+    corpus_power: &mut [u32],
+    pending_mutations: &mut PendingMutations,
+) {
+    let reason = feedback.consider(trace, report);
+    let raw_power = feedback.power_score(report);
+    corpus_power[index] = if reason.as_deref().is_some_and(is_coverage_reason) {
+        raw_power.min(2)
+    } else {
+        raw_power
+    };
+    if let Some(reason) = reason {
+        let priority = reason_priority(&reason);
+        if !is_coverage_reason(&reason) {
+            let effort = scheduled_effort(priority)
+                .saturating_mul(effort_power(corpus_power[index]))
+                .saturating_div(2)
+                .max(1);
+            let batch = mutation_batch(trace, rng, effort, feedback.comparison_u8_values());
+            pending_mutations.push_batch(priority, batch);
+        }
+    }
+}
+
+/// All mutable state of the fuzzing loop. Candidate generation, feedback, and
+/// corpus management run on the main thread whether execution is inline
+/// (jobs=1) or delegated to an [`ExecutorPool`].
+struct FuzzLoop {
+    rng: StdRng,
+    runner: Runner,
+    corpus: Vec<Trace>,
+    corpus_power: Vec<u32>,
+    feedback: FeedbackState,
+    pending_mutations: PendingMutations,
+    tally: Tally,
+    stats: StatsLogger,
+    recent_valid: VecDeque<Trace>,
+    boring: usize,
+    reset_after: usize,
+    mutation_effort_multiplier: usize,
+    started: Instant,
+    interesting_dir: PathBuf,
+    checkpoints_dir: PathBuf,
+    crashes_dir: PathBuf,
+    coverage_corpus_dir: PathBuf,
+    coverage_retention: bool,
+    coverage_retention_window: usize,
+}
+
+impl FuzzLoop {
+    fn next_candidate(&mut self) -> (Trace, String) {
+        if let Some(candidate) = self.pending_mutations.pop(&mut self.rng) {
+            (candidate, "scheduled recombination".to_string())
+        } else {
+            let base_index = select_base_index(&self.corpus, &self.corpus_power, &mut self.rng);
+            let candidate = mutate(&self.corpus[base_index], &mut self.rng);
+            (candidate, format!("corpus index {base_index}"))
+        }
+    }
+
+    fn process(
+        &mut self,
+        iteration: usize,
+        candidate: Trace,
+        parent_desc: String,
+        result: Result<automerge_fuzz::runner::RunReport, RunError>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match result {
+            Ok(report) => {
+                self.tally.valid += 1;
+                if self.coverage_retention && self.coverage_retention_window > 0 {
+                    self.recent_valid.push_back(candidate.clone());
+                    while self.recent_valid.len() > self.coverage_retention_window {
+                        self.recent_valid.pop_front();
+                    }
+                }
+                if let Some(reason) = self.feedback.consider(&candidate, &report) {
+                    let raw_candidate_power = self.feedback.power_score(&report);
+                    let candidate_power = if is_coverage_reason(&reason) {
+                        raw_candidate_power.min(2)
+                    } else {
+                        raw_candidate_power
+                    };
+                    let maybe_target = SometimesTarget::from_reason(&reason);
+                    let mut saved = candidate.clone();
+                    saved.metadata.parent = Some(parent_desc.clone());
+                    saved.metadata.reason = Some(reason.clone());
+                    let path = self
+                        .interesting_dir
+                        .join(format!("interesting-{:08}.amtrace", self.tally.interesting));
+                    save_trace(&path, &saved)?;
+                    let saved_for_batch = saved.clone();
+                    self.corpus.push(saved);
+                    self.corpus_power.push(candidate_power);
+                    self.tally.interesting += 1;
+
+                    self.boring = 0;
+                    let priority = reason_priority(&reason);
+                    self.stats.log(json!({
+                        "event": "novelty",
+                        "iteration": iteration,
+                        "elapsed_secs": self.started.elapsed().as_secs_f64(),
+                        "priority": priority,
+                        "reason": reason,
+                        "path": path.display().to_string(),
+                    }));
+                    if !is_coverage_reason(&reason) {
+                        let batch = mutation_batch(
+                            &saved_for_batch,
+                            &mut self.rng,
+                            scheduled_effort(priority)
+                                * self.mutation_effort_multiplier
+                                * effort_power(candidate_power),
+                            self.feedback.comparison_u8_values(),
+                        );
+                        self.pending_mutations.push_batch(priority, batch);
+                    }
+
+                    if let Some(target) = maybe_target {
+                        if let Some(mut checkpoint) =
+                            find_sometimes_checkpoint(&candidate, &target, &mut self.runner)
+                        {
+                            checkpoint.metadata.parent = Some(path.display().to_string());
+                            checkpoint.metadata.reason = Some(format!(
+                                "checkpoint for {} at step {}",
+                                target.description(),
+                                checkpoint.steps.len()
+                            ));
+                            let checkpoint_path = self.checkpoints_dir.join(format!(
+                                "sometimes-checkpoint-{:08}.amtrace",
+                                self.tally.checkpoints
+                            ));
+                            save_trace(&checkpoint_path, &checkpoint)?;
+                            if let Err(err) = self.runner.cache_checkpoint_prefix(&checkpoint) {
+                                eprintln!("failed to cache checkpoint prefix: {err}");
+                            }
+                            self.stats.log(json!({
+                                "event": "checkpoint",
+                                "iteration": iteration,
+                                "elapsed_secs": self.started.elapsed().as_secs_f64(),
+                                "steps": checkpoint.steps.len(),
+                                "target": target.description(),
+                                "path": checkpoint_path.display().to_string(),
+                            }));
+                            let extension_batch = prefix_extension_batch(
+                                &checkpoint,
+                                &mut self.rng,
+                                scheduled_effort(priority) * self.mutation_effort_multiplier,
+                            );
+                            self.pending_mutations
+                                .push_batch(priority.max(3), extension_batch);
+                            self.corpus.push(checkpoint);
+                            self.corpus_power.push(candidate_power.max(2));
+                            self.tally.checkpoints += 1;
+                        }
+                    }
+                } else {
+                    self.boring = self.boring.saturating_add(1);
+                }
+            }
+            Err(err) if is_crash(&err) => {
+                let mut saved = candidate.clone();
+                saved.metadata.parent = Some(parent_desc.clone());
+                saved.metadata.reason = Some(format!("failure: {err}"));
+                let path = self
+                    .crashes_dir
+                    .join(format!("crash-{:08}.amtrace", self.tally.crashes));
+                save_trace(&path, &saved)?;
+                eprintln!("saved crash {}: {err}", path.display());
+                self.stats.log(json!({
+                    "event": "crash",
+                    "iteration": iteration,
+                    "elapsed_secs": self.started.elapsed().as_secs_f64(),
+                    "error": err.to_string(),
+                    "path": path.display().to_string(),
+                }));
+                self.tally.crashes += 1;
+            }
+            Err(_) => {
+                self.tally.rejected += 1;
+                self.boring = self.boring.saturating_add(1);
+                if self.tally.rejected % 8 == 0 {
+                    let batch = mutation_batch(
+                        &candidate,
+                        &mut self.rng,
+                        self.mutation_effort_multiplier,
+                        self.feedback.comparison_u8_values(),
+                    );
+                    self.pending_mutations.push_rejected_batch(1, batch);
+                }
+            }
+        }
+
+        if self.boring > self.reset_after {
+            self.mutation_effort_multiplier =
+                self.mutation_effort_multiplier.saturating_mul(2).min(16);
+            self.reset_after = self.reset_after.saturating_mul(2);
+            self.boring = 0;
+            self.pending_mutations.clear();
+            eprintln!(
+                "mutation scheduler: no novelty recently; random effort multiplier now {}",
+                self.mutation_effort_multiplier
+            );
+            let recent_start = self.corpus.len().saturating_sub(16);
+            let recent = self.corpus[recent_start..].to_vec();
+            for trace in &recent {
+                let batch = mutation_batch(
+                    trace,
+                    &mut self.rng,
+                    4 * self.mutation_effort_multiplier,
+                    self.feedback.comparison_u8_values(),
+                );
+                self.pending_mutations.push_batch(2, batch);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn maybe_report(
+        &mut self,
+        completed: usize,
+        report_every: usize,
+        report_secs: u64,
+        last_report: &mut Instant,
+    ) {
+        let now = Instant::now();
+        let report_interval = Duration::from_secs(report_secs);
+        let report_by_iteration = report_every != 0 && completed % report_every == 0;
+        let report_by_time =
+            report_secs != 0 && now.duration_since(*last_report) >= report_interval;
+        if !(report_by_iteration || report_by_time) {
+            return;
+        }
+        print_fuzz_status(
+            "iters",
+            completed,
+            self.started.elapsed(),
+            self.corpus.len(),
+            &self.tally,
+            &self.feedback,
+        );
+        self.stats.log(report_event(
+            "report",
+            completed,
+            self.started.elapsed(),
+            self.corpus.len(),
+            &self.tally,
+            &self.feedback,
+        ));
+        *last_report = now;
+    }
+
+    fn poll_coverage(
+        &mut self,
+        coverage: &mut Option<CoverageReporter>,
+        completed: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(coverage_reporter) = coverage.as_mut() else {
+            return Ok(());
+        };
+        match coverage_reporter.maybe_poll() {
+            Ok(Some(update)) => {
+                println!("coverage: {}", update.status_line());
+                self.stats.log(json!({
+                    "event": "coverage",
+                    "iteration": completed,
+                    "elapsed_secs": self.started.elapsed().as_secs_f64(),
+                    "lines_covered": update.summary.lines_covered,
+                    "lines_total": update.summary.lines_total,
+                    "regions_covered": update.summary.regions_covered,
+                    "regions_total": update.summary.regions_total,
+                    "functions_covered": update.summary.functions_covered,
+                    "functions_total": update.summary.functions_total,
+                }));
+                if self.coverage_retention && update.increased() && !self.recent_valid.is_empty() {
+                    let saved = save_coverage_window(
+                        &self.coverage_corpus_dir,
+                        &self.recent_valid,
+                        self.tally.coverage_saved,
+                        completed,
+                    )?;
+                    for trace in &self.recent_valid {
+                        let batch = mutation_batch(
+                            trace,
+                            &mut self.rng,
+                            4 * self.mutation_effort_multiplier,
+                            self.feedback.comparison_u8_values(),
+                        );
+                        self.pending_mutations.push_batch(2, batch);
+                    }
+                    self.tally.coverage_saved += saved;
+                    for trace in self.recent_valid.iter().cloned() {
+                        self.corpus.push(trace);
+                        self.corpus_power.push(2);
+                    }
+                    self.recent_valid.clear();
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("coverage polling disabled: {err}");
+                *coverage = None;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct Job {
+    tag: usize,
+    trace: Trace,
+    parent_desc: String,
+}
+
+struct JobResult {
+    tag: usize,
+    trace: Trace,
+    parent_desc: String,
+    result: Result<automerge_fuzz::runner::RunReport, RunError>,
+}
+
+/// A fixed pool of worker threads that execute traces. Each worker owns its
+/// own [`Runner`]; `sometimes` hits are recorded thread-locally, so reports
+/// stay attributed to the trace that produced them.
+struct ExecutorPool {
+    work_tx: Option<mpsc::Sender<Job>>,
+    results_rx: mpsc::Receiver<JobResult>,
+    workers: Vec<thread::JoinHandle<()>>,
+}
+
+impl ExecutorPool {
+    fn new(jobs: usize) -> Self {
+        let (work_tx, work_rx) = mpsc::channel::<Job>();
+        let work_rx = Arc::new(Mutex::new(work_rx));
+        let (results_tx, results_rx) = mpsc::channel::<JobResult>();
+        let workers = (0..jobs)
+            .map(|_| {
+                let work_rx = Arc::clone(&work_rx);
+                let results_tx = results_tx.clone();
+                thread::spawn(move || {
+                    let mut runner = Runner::new();
+                    loop {
+                        let job = {
+                            let work_rx = work_rx.lock().unwrap_or_else(|err| err.into_inner());
+                            work_rx.recv()
+                        };
+                        let Ok(job) = job else {
+                            break;
+                        };
+                        let result = runner.run_catching(&job.trace);
+                        let sent = results_tx.send(JobResult {
+                            tag: job.tag,
+                            trace: job.trace,
+                            parent_desc: job.parent_desc,
+                            result,
+                        });
+                        if sent.is_err() {
+                            break;
+                        }
+                    }
+                })
+            })
+            .collect();
+        Self {
+            work_tx: Some(work_tx),
+            results_rx,
+            workers,
+        }
+    }
+
+    fn submit(&self, job: Job) {
+        let _ = self
+            .work_tx
+            .as_ref()
+            .expect("pool has not been shut down")
+            .send(job);
+    }
+
+    fn recv(&self) -> Result<JobResult, mpsc::RecvError> {
+        self.results_rx.recv()
+    }
+
+    fn shutdown(mut self) {
+        self.work_tx.take();
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

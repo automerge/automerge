@@ -290,6 +290,38 @@ growing (68/103/91 across seeds) after syntax features plateaued at 31, with
 `sometimes` label counts unchanged versus the prior scheduler and no
 throughput regression.
 
+## Throughput
+
+Profiling (perf, dwarf call graphs) showed the loop was dominated by
+avoidable work rather than op application. Fixes, measured on a fixed seed
+against a 480-trace reference corpus:
+
+- [x] Mutation planning no longer materializes a full trace clone per variant:
+  `position_variant_count` counts arithmetically and `apply_position_variant`
+  clones the input exactly once (~11% of total time was `VmInstr`/`VmOp`
+  vector clones).
+- [x] `Fork` uses `AutoCommit::fork` and `Merge` merges the two live docs via
+  `split_at_mut` instead of save+load round trips (~24% of total time was
+  document loading; explicit `SaveLoad` steps and the end-of-run save/load
+  invariant still exercise those paths).
+- [x] Prefix-cache hashing uses derived `Hash` instead of serde_json
+  serialization of every instruction.
+- [x] `--jobs N` executes candidates on N worker threads, each with its own
+  `Runner`; generation, feedback, and corpus management stay on the main
+  thread, and warmup replays also go through the pool. Results are processed
+  in completion order, so parallel runs are not reproducible run-to-run, but
+  every saved trace remains individually replayable. Coverage/sancov builds
+  force `--jobs 1` because their counters are process-global.
+- [x] Status-line exec/s and event timestamps measure the fuzz loop itself,
+  excluding warmup.
+
+Single-thread: 107 -> 166 exec/s on the reference corpus, with identical
+discovery counts. Parallel on a heavier corpus: 31 exec/s at `--jobs 1` to
+421 exec/s at `--jobs 24` (13.6x). Short novelty-heavy runs are limited by
+main-thread trace saving and batch enumeration; saturated long runs are
+worker-bound and scale better. Trace timeouts (2s wall clock) fire slightly
+more often under high `--jobs` due to CPU contention; they count as rejected.
+
 ## Deferred until later phases
 
 Do not implement these until reliable sync/read-side/rich-text traces have had some runtime testing:
