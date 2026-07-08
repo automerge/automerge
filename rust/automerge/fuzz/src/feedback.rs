@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::coverage::{CmpKind, CmpObservation};
 use crate::runner::{BehaviorStats, RunReport};
-use crate::trace::{Trace, VmInstr, VmObjRef, VmOp};
+use crate::trace::{Trace, VmInstr, VmObjRef, VmOp, VmSyncFault, VmSyncOp};
 
 const MAX_BEHAVIOR_BUCKETS: usize = 65536;
 const MAX_STRUCTURAL_BUCKETS: usize = 512;
@@ -85,6 +85,7 @@ struct StructuralKey {
     fork_instrs: u8,
     merge_instrs: u8,
     sync_instrs: u8,
+    sync_session_instrs: u8,
     observe_instrs: u8,
     save_heads_instrs: u8,
     diff_range_instrs: u8,
@@ -400,6 +401,21 @@ fn features(trace: &Trace) -> Vec<&'static str> {
             VmInstr::Merge { .. } => features.push("merge"),
             VmInstr::SaveLoad { .. } => features.push("save_load"),
             VmInstr::Sync { .. } => features.push("sync"),
+            VmInstr::SyncSession { op, .. } => {
+                features.push("sync_session");
+                features.push(match op {
+                    VmSyncOp::Start { .. } => "sync_session_start",
+                    VmSyncOp::Generate { .. } => "sync_session_generate",
+                    VmSyncOp::Deliver { fault, .. } => match fault {
+                        VmSyncFault::None => "sync_session_deliver",
+                        VmSyncFault::Drop => "sync_session_drop",
+                        VmSyncFault::Duplicate => "sync_session_duplicate",
+                        VmSyncFault::Reorder => "sync_session_reorder",
+                    },
+                    VmSyncOp::SaveStates => "sync_session_save_states",
+                    VmSyncOp::Finish { .. } => "sync_session_finish",
+                });
+            }
             VmInstr::Observe { .. } => features.push("observe"),
             VmInstr::SaveHeads { .. } => features.push("save_heads"),
             VmInstr::DiffRange { .. } => features.push("diff_range"),
@@ -475,6 +491,7 @@ fn structural_key(trace: &Trace) -> StructuralKey {
             VmInstr::Merge { .. } => stats.merge_instrs += 1,
             VmInstr::SaveLoad { .. } => stats.save_load_instrs += 1,
             VmInstr::Sync { .. } => stats.sync_instrs += 1,
+            VmInstr::SyncSession { .. } => stats.sync_session_instrs += 1,
             VmInstr::Observe { .. } => stats.observe_instrs += 1,
             VmInstr::SaveHeads { .. } => stats.save_heads_instrs += 1,
             VmInstr::DiffRange { .. } => stats.diff_range_instrs += 1,
@@ -524,6 +541,7 @@ fn structural_key(trace: &Trace) -> StructuralKey {
         fork_instrs: bucket(stats.fork_instrs),
         merge_instrs: bucket(stats.merge_instrs),
         sync_instrs: bucket(stats.sync_instrs),
+        sync_session_instrs: bucket(stats.sync_session_instrs),
         observe_instrs: bucket(stats.observe_instrs),
         save_heads_instrs: bucket(stats.save_heads_instrs),
         diff_range_instrs: bucket(stats.diff_range_instrs),
@@ -557,6 +575,7 @@ struct StructuralStats {
     fork_instrs: usize,
     merge_instrs: usize,
     sync_instrs: usize,
+    sync_session_instrs: usize,
     observe_instrs: usize,
     save_heads_instrs: usize,
     diff_range_instrs: usize,

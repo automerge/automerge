@@ -277,6 +277,7 @@ fn step_kind(step: &VmInstr) -> &'static str {
         VmInstr::Merge { .. } => "merge",
         VmInstr::SaveLoad { .. } => "save_load",
         VmInstr::Sync { .. } => "sync",
+        VmInstr::SyncSession { .. } => "sync_session",
         VmInstr::Observe { .. } => "observe",
         VmInstr::SaveHeads { .. } => "save_heads",
         VmInstr::DiffRange { .. } => "diff_range",

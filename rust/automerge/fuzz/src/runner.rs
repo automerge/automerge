@@ -12,7 +12,7 @@ use automerge::{
 
 use crate::trace::{
     ActorSpec, MarkExpand, Trace, VmHeadRef, VmHydrated, VmInstr, VmObjRef, VmObserveMode, VmOp,
-    VmValue,
+    VmSyncFault, VmSyncOp, VmValue,
 };
 
 pub struct Runner {
@@ -507,6 +507,7 @@ struct SaveLoadOutcome {
 struct RunState {
     actors: Vec<ActorId>,
     docs: Vec<DocState>,
+    sessions: Vec<Option<SyncSession>>,
 }
 
 #[derive(Clone)]
@@ -514,6 +515,37 @@ struct DocState {
     doc: AutoCommit,
     objects: Vec<ObjId>,
     head_slots: Vec<Option<Vec<ChangeHash>>>,
+    /// Bumped whenever `Fork` replaces the document at this index with an
+    /// unrelated history, which invalidates sync sessions targeting it.
+    generation: u64,
+}
+
+const MAX_SYNC_SESSIONS: usize = 8;
+
+/// A persistent sync exchange between two documents. Messages sit in the
+/// in-flight queues in encoded form, so every delivery exercises the message
+/// codec, and delivery faults (drop/duplicate/reorder) can be injected.
+#[derive(Clone)]
+struct SyncSession {
+    left: usize,
+    right: usize,
+    left_generation: u64,
+    right_generation: u64,
+    left_state: sync::State,
+    right_state: sync::State,
+    to_left: VecDeque<Vec<u8>>,
+    to_right: VecDeque<Vec<u8>>,
+}
+
+impl SyncSession {
+    /// Doc index, sync state, and inbound queue for one side.
+    fn side_mut(&mut self, left: bool) -> (usize, &mut sync::State, &mut VecDeque<Vec<u8>>) {
+        if left {
+            (self.left, &mut self.left_state, &mut self.to_left)
+        } else {
+            (self.right, &mut self.right_state, &mut self.to_right)
+        }
+    }
 }
 
 impl RunState {
@@ -534,7 +566,9 @@ impl RunState {
                 doc,
                 objects: Vec::new(),
                 head_slots: Vec::new(),
+                generation: 0,
             }],
+            sessions: vec![None; MAX_SYNC_SESSIONS],
         }
     }
 
@@ -554,12 +588,15 @@ impl RunState {
                 doc: AutoCommit::new(),
                 objects: Vec::new(),
                 head_slots: Vec::new(),
+                generation: 0,
             });
         }
+        let generation = self.docs[to].generation + 1;
         self.docs[to] = DocState {
             doc,
             objects,
             head_slots,
+            generation,
         };
         Ok(())
     }
@@ -710,6 +747,173 @@ impl RunState {
         Ok((left_done, right_done))
     }
 
+    fn sync_session(&mut self, session: u8, op: &VmSyncOp) -> Result<(), RunError> {
+        let slot = usize::from(session) % MAX_SYNC_SESSIONS;
+        match op {
+            VmSyncOp::Start { left, right } => {
+                let left = usize::from(*left);
+                let right = usize::from(*right);
+                if left == right {
+                    return Ok(());
+                }
+                let left_generation = self.doc_mut(left)?.generation;
+                let right_generation = self.doc_mut(right)?.generation;
+                self.sessions[slot] = Some(SyncSession {
+                    left,
+                    right,
+                    left_generation,
+                    right_generation,
+                    left_state: sync::State::new(),
+                    right_state: sync::State::new(),
+                    to_left: VecDeque::new(),
+                    to_right: VecDeque::new(),
+                });
+            }
+            VmSyncOp::Generate { from_left } => {
+                let Some(session) = self.sessions[slot].as_mut() else {
+                    return Ok(());
+                };
+                let (doc, state, _) = session.side_mut(*from_left);
+                let Some(doc_state) = self.docs.get_mut(doc) else {
+                    return Ok(());
+                };
+                if let Some(message) = doc_state.doc.sync().generate_sync_message(state) {
+                    let outbound = if *from_left {
+                        &mut session.to_right
+                    } else {
+                        &mut session.to_left
+                    };
+                    outbound.push_back(message.encode());
+                }
+            }
+            VmSyncOp::Deliver { to_left, fault } => {
+                let Some(session) = self.sessions[slot].as_mut() else {
+                    return Ok(());
+                };
+                let (doc, state, inbound) = session.side_mut(*to_left);
+                let bytes = match fault {
+                    VmSyncFault::Reorder => inbound.pop_back(),
+                    _ => inbound.pop_front(),
+                };
+                let Some(bytes) = bytes else {
+                    return Ok(());
+                };
+                if matches!(fault, VmSyncFault::Drop) {
+                    return Ok(());
+                }
+                let Some(doc_state) = self.docs.get_mut(doc) else {
+                    return Ok(());
+                };
+                let deliveries = if matches!(fault, VmSyncFault::Duplicate) {
+                    2
+                } else {
+                    1
+                };
+                for _ in 0..deliveries {
+                    let message = sync::Message::decode(&bytes).map_err(|err| {
+                        RunError::Invariant(format!(
+                            "sync message failed to decode its own encoding: {err}"
+                        ))
+                    })?;
+                    doc_state
+                        .doc
+                        .sync()
+                        .receive_sync_message(state, message)
+                        .map_err(|err| RunError::Automerge(err.to_string()))?;
+                }
+            }
+            VmSyncOp::SaveStates => {
+                let Some(session) = self.sessions[slot].as_mut() else {
+                    return Ok(());
+                };
+                for state in [&mut session.left_state, &mut session.right_state] {
+                    let decoded = sync::State::decode(&state.encode()).map_err(|err| {
+                        RunError::Invariant(format!(
+                            "sync state failed to decode its own encoding: {err}"
+                        ))
+                    })?;
+                    // Decoding deliberately resets the in-memory-only fields
+                    // (`their_have` and friends), exactly as a process restart
+                    // would, so no equality check here; the protocol has to
+                    // recover from the reset, which `Finish` verifies.
+                    *state = decoded;
+                }
+            }
+            VmSyncOp::Finish { rounds } => return self.sync_session_finish(slot, *rounds),
+        }
+        Ok(())
+    }
+
+    fn sync_session_finish(&mut self, slot: usize, rounds: u8) -> Result<(), RunError> {
+        let Some(mut session) = self.sessions[slot].take() else {
+            return Ok(());
+        };
+        if session.left >= self.docs.len() || session.right >= self.docs.len() {
+            return Ok(());
+        }
+
+        // Flush anything still in flight, then run the protocol reliably.
+        for to_left in [true, false] {
+            loop {
+                let (doc, state, inbound) = session.side_mut(to_left);
+                let Some(bytes) = inbound.pop_front() else {
+                    break;
+                };
+                let Ok(message) = sync::Message::decode(&bytes) else {
+                    break;
+                };
+                let doc_state = &mut self.docs[doc];
+                doc_state
+                    .doc
+                    .sync()
+                    .receive_sync_message(state, message)
+                    .map_err(|err| RunError::Automerge(err.to_string()))?;
+            }
+        }
+
+        let mut quiesced = false;
+        for _ in 0..usize::from(rounds) {
+            let mut sent = false;
+            for from_left in [true, false] {
+                let (from_doc, from_state, _) = session.side_mut(from_left);
+                let message = self.docs[from_doc]
+                    .doc
+                    .sync()
+                    .generate_sync_message(from_state);
+                if let Some(message) = message {
+                    sent = true;
+                    let (to_doc, to_state, _) = session.side_mut(!from_left);
+                    self.docs[to_doc]
+                        .doc
+                        .sync()
+                        .receive_sync_message(to_state, message)
+                        .map_err(|err| RunError::Automerge(err.to_string()))?;
+                }
+            }
+            if !sent {
+                quiesced = true;
+                break;
+            }
+        }
+
+        // The convergence invariant only applies if neither document was
+        // replaced by a Fork since the session started; reusing a sync state
+        // against an unrelated history is API misuse the protocol does not
+        // promise to converge from.
+        let clean = self.docs[session.left].generation == session.left_generation
+            && self.docs[session.right].generation == session.right_generation;
+        if quiesced && clean {
+            let left_heads = self.docs[session.left].doc.get_heads();
+            let right_heads = self.docs[session.right].doc.get_heads();
+            if left_heads != right_heads {
+                return Err(RunError::Invariant(
+                    "sync session quiesced without converging".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn save_load(&mut self, doc: usize) -> Result<SaveLoadOutcome, RunError> {
         let doc_state = self.doc_mut(doc)?;
         let before = doc_state
@@ -784,6 +988,7 @@ impl RunState {
                     right,
                     rounds,
                 } => self.sync(usize::from(*left), usize::from(*right), *rounds),
+                VmInstr::SyncSession { session, op } => self.sync_session(*session, op),
             };
             if let Err(err) = result {
                 if err.is_invariant_or_panic() {
@@ -1498,6 +1703,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use crate::trace::Metadata;
+    use crate::trace::{VmSyncFault, VmSyncOp};
 
     fn transact_instr(key: u8, value: u8, commit: bool) -> VmInstr {
         VmInstr::Transact {
@@ -1510,6 +1716,52 @@ mod tests {
             }],
             commit,
         }
+    }
+
+    #[test]
+    fn faulty_sync_session_converges_on_finish() {
+        let put = |key: u8, value: u8| VmInstr::Change {
+            doc: 0,
+            actor: 0,
+            ops: vec![VmOp::Put {
+                obj: VmObjRef::Root,
+                key,
+                value: VmValue::Uint { slot: value },
+            }],
+        };
+        let session = |op: VmSyncOp| VmInstr::SyncSession { session: 0, op };
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            steps: vec![
+                put(1, 5),
+                VmInstr::Fork { from: 0, to: 1 },
+                put(2, 9),
+                session(VmSyncOp::Start { left: 0, right: 1 }),
+                session(VmSyncOp::Generate { from_left: true }),
+                session(VmSyncOp::Generate { from_left: true }),
+                session(VmSyncOp::Deliver {
+                    to_left: false,
+                    fault: VmSyncFault::Drop,
+                }),
+                session(VmSyncOp::Generate { from_left: false }),
+                session(VmSyncOp::Deliver {
+                    to_left: true,
+                    fault: VmSyncFault::Duplicate,
+                }),
+                session(VmSyncOp::SaveStates),
+                // Edit mid-session, then finish reliably: the protocol must
+                // recover from the drop, the duplicate, and the state
+                // round-trip, and converge.
+                put(3, 7),
+                session(VmSyncOp::Finish { rounds: 32 }),
+            ],
+        };
+        let report = Runner::new()
+            .run_catching(&trace)
+            .expect("session converges");
+        assert_eq!(report.docs, 2);
     }
 
     #[test]

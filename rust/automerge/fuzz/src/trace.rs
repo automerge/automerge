@@ -94,6 +94,38 @@ pub enum VmInstr {
         right: u8,
         rounds: u8,
     },
+    /// One step of a persistent sync session. Sessions hold live
+    /// `sync::State`s and an in-flight queue of encoded messages, so edits,
+    /// save/loads, and message faults can be interleaved with the protocol.
+    SyncSession {
+        session: u8,
+        op: VmSyncOp,
+    },
+}
+
+#[derive(Clone, Debug, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VmSyncOp {
+    /// Create (or replace) the session with fresh sync states between two docs.
+    Start { left: u8, right: u8 },
+    /// Generate one sync message from a side into the in-flight queue.
+    Generate { from_left: bool },
+    /// Deliver (or mis-deliver, per `fault`) one queued message to a side.
+    Deliver { to_left: bool, fault: VmSyncFault },
+    /// Encode/decode both sync states in place, as a process restart would.
+    SaveStates,
+    /// Deliver everything in flight, then sync reliably for up to `rounds`
+    /// rounds. If the protocol quiesces, both docs must have equal heads.
+    Finish { rounds: u8 },
+}
+
+#[derive(Clone, Copy, Debug, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmSyncFault {
+    None,
+    Drop,
+    Duplicate,
+    Reorder,
 }
 
 #[derive(Clone, Debug, Hash, serde::Serialize, serde::Deserialize)]

@@ -4,7 +4,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::trace::{
     ActorSpec, MarkExpand, Metadata, Trace, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
-    VmObserveMode, VmOp, VmValue,
+    VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmValue,
 };
 
 pub const MAX_VM_INSTRUCTIONS: usize = 256;
@@ -1445,6 +1445,10 @@ fn instr_doc(instr: &VmInstr) -> Option<u8> {
         | VmInstr::ResetDiffCursor { doc }
         | VmInstr::DiffIncremental { doc } => Some(*doc),
         VmInstr::Sync { left, .. } => Some(*left),
+        VmInstr::SyncSession { op, .. } => match op {
+            VmSyncOp::Start { left, .. } => Some(*left),
+            _ => None,
+        },
     }
 }
 
@@ -2132,6 +2136,62 @@ fn mutate_vm_instruction(instructions: &mut [VmInstr], rng: &mut StdRng) {
             1 => *right = mutate_byte(*right, rng),
             _ => *rounds = mutate_byte(*rounds, rng).max(1),
         },
+        VmInstr::SyncSession { session, op } => {
+            if rng.random_range(0..4) == 0 {
+                *session = mutate_byte(*session, rng);
+            } else {
+                mutate_sync_op(op, rng);
+            }
+        }
+    }
+}
+
+fn mutate_sync_op(op: &mut VmSyncOp, rng: &mut StdRng) {
+    if rng.random_range(0..3) == 0 {
+        *op = random_sync_op(rng);
+        return;
+    }
+    match op {
+        VmSyncOp::Start { left, right } => mutate_u8_pair(left, right, rng),
+        VmSyncOp::Generate { from_left } => *from_left = !*from_left,
+        VmSyncOp::Deliver { to_left, fault } => {
+            if rng.random_range(0..2) == 0 {
+                *to_left = !*to_left;
+            } else {
+                *fault = random_sync_fault(rng);
+            }
+        }
+        VmSyncOp::SaveStates => *op = random_sync_op(rng),
+        VmSyncOp::Finish { rounds } => *rounds = mutate_byte(*rounds, rng).max(1),
+    }
+}
+
+fn random_sync_op(rng: &mut StdRng) -> VmSyncOp {
+    match rng.random_range(0..8) {
+        0 => VmSyncOp::Start {
+            left: rng.random_range(0..4),
+            right: rng.random_range(0..4),
+        },
+        1..=2 => VmSyncOp::Generate {
+            from_left: rng.random_range(0..2) == 0,
+        },
+        3..=4 => VmSyncOp::Deliver {
+            to_left: rng.random_range(0..2) == 0,
+            fault: random_sync_fault(rng),
+        },
+        5 => VmSyncOp::SaveStates,
+        _ => VmSyncOp::Finish {
+            rounds: rng.random_range(1..=16),
+        },
+    }
+}
+
+fn random_sync_fault(rng: &mut StdRng) -> VmSyncFault {
+    match rng.random_range(0..10) {
+        0..=5 => VmSyncFault::None,
+        6 => VmSyncFault::Drop,
+        7..=8 => VmSyncFault::Duplicate,
+        _ => VmSyncFault::Reorder,
     }
 }
 
@@ -2304,6 +2364,12 @@ fn referenced_docs(instructions: &[VmInstr]) -> Vec<u8> {
                 docs.push(*left);
                 docs.push(*right);
             }
+            VmInstr::SyncSession { op, .. } => {
+                if let VmSyncOp::Start { left, right } = op {
+                    docs.push(*left);
+                    docs.push(*right);
+                }
+            }
         }
     }
     docs
@@ -2342,6 +2408,12 @@ fn rebase_instr(instr: &mut VmInstr, prefix: &VmBuilder, rng: &mut StdRng) {
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
         | VmInstr::DiffIncremental { doc } => *doc = (*doc).min(prefix.docs.max(1)),
+        VmInstr::SyncSession { op, .. } => {
+            if let VmSyncOp::Start { left, right } = op {
+                *left = (*left).min(prefix.docs);
+                *right = (*right).min(prefix.docs.max(1));
+            }
+        }
     }
 }
 
@@ -2480,6 +2552,17 @@ fn collect_instr_u8(instr: &VmInstr, values: &mut Vec<u8>) {
             values.push(*left);
             values.push(*right);
             values.push(*rounds);
+        }
+        VmInstr::SyncSession { session, op } => {
+            values.push(*session);
+            match op {
+                VmSyncOp::Start { left, right } => {
+                    values.push(*left);
+                    values.push(*right);
+                }
+                VmSyncOp::Finish { rounds } => values.push(*rounds),
+                VmSyncOp::Generate { .. } | VmSyncOp::Deliver { .. } | VmSyncOp::SaveStates => {}
+            }
         }
     }
 }
@@ -2682,6 +2765,19 @@ fn set_instr_u8(instr: &mut VmInstr, target: usize, value: u8, seen: &mut usize)
             maybe_set_u8(left, target, value, seen)
                 || maybe_set_u8(right, target, value, seen)
                 || maybe_set_u8(rounds, target, value, seen)
+        }
+        VmInstr::SyncSession { session, op } => {
+            maybe_set_u8(session, target, value, seen)
+                || match op {
+                    VmSyncOp::Start { left, right } => {
+                        maybe_set_u8(left, target, value, seen)
+                            || maybe_set_u8(right, target, value, seen)
+                    }
+                    VmSyncOp::Finish { rounds } => maybe_set_u8(rounds, target, value, seen),
+                    VmSyncOp::Generate { .. } | VmSyncOp::Deliver { .. } | VmSyncOp::SaveStates => {
+                        false
+                    }
+                }
         }
     }
 }
@@ -3103,6 +3199,8 @@ struct VmBuilder {
     lists: Vec<u8>,
     texts: Vec<u8>,
     saved_heads: u8,
+    /// Sync session slots a Start has been issued for.
+    sync_sessions: Vec<u8>,
 }
 
 impl VmBuilder {
@@ -3141,6 +3239,12 @@ impl VmBuilder {
                 VmInstr::Observe { doc, .. } => builder.docs = builder.docs.max(*doc),
                 VmInstr::Sync { left, right, .. } => {
                     builder.docs = builder.docs.max(*left).max(*right);
+                }
+                VmInstr::SyncSession { session, op } => {
+                    if let VmSyncOp::Start { left, right } = op {
+                        builder.docs = builder.docs.max(*left).max(*right);
+                        push_unique(&mut builder.sync_sessions, *session);
+                    }
                 }
             }
         }
@@ -3186,7 +3290,29 @@ impl VmBuilder {
                 right: 1,
                 rounds: rng.random_range(1..=16),
             },
+            10 if self.docs >= 1 => self.random_sync_session_instr(rng),
             _ => self.random_change(rng),
+        }
+    }
+
+    fn random_sync_session_instr(&mut self, rng: &mut StdRng) -> VmInstr {
+        // Prefer continuing a session the trace has already started; sessions
+        // that never see a Start are runtime no-ops.
+        if self.sync_sessions.is_empty() || rng.random_range(0..100) < 25 {
+            let session = rng.random_range(0..8);
+            push_unique(&mut self.sync_sessions, session);
+            let left = rng.random_range(0..=self.docs);
+            let right = rng.random_range(0..=self.docs);
+            VmInstr::SyncSession {
+                session,
+                op: VmSyncOp::Start { left, right },
+            }
+        } else {
+            let session = self.sync_sessions[rng.random_range(0..self.sync_sessions.len())];
+            VmInstr::SyncSession {
+                session,
+                op: random_sync_op(rng),
+            }
         }
     }
 
@@ -3354,6 +3480,12 @@ impl VmBuilder {
             }
             VmInstr::Sync { left, right, .. } => {
                 self.docs = self.docs.max(*left).max(*right);
+            }
+            VmInstr::SyncSession { session, op } => {
+                if let VmSyncOp::Start { left, right } = op {
+                    self.docs = self.docs.max(*left).max(*right);
+                    push_unique(&mut self.sync_sessions, *session);
+                }
             }
         }
     }
