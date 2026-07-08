@@ -349,11 +349,40 @@ Validation: a 3,000-iteration coverage run took `transaction.rs` from 0% to
 5,000-iteration soak at `--jobs 16` (1,900 exec/s) hit the rollback labels
 thousands of times with no invariant failures.
 
-Next VM extensions from the same coverage triage, not yet implemented: sync
-sessions as first-class state (persistent sync states, drop/dup/reorder,
-mid-session edits and state save/load), `fork_at` + `apply_changes` transfer
-between docs, non-default `TextEncoding`s and near-miss `update_text` inputs,
-cursor serialization round-trips.
+## Sync sessions
+
+Sync exchanges are now first-class VM state instead of one-shot reliable
+loops, covering the drop/duplicate/reorder schedules planned in FUZZING.md.
+
+- [x] Add `VmInstr::SyncSession { session, op }` over up to 8 persistent
+  sessions, each holding live `sync::State`s for both sides plus in-flight
+  queues of *encoded* messages (every delivery round-trips the message codec).
+- [x] `VmSyncOp::{Start, Generate, Deliver, SaveStates, Finish}` with
+  `VmSyncFault::{None, Drop, Duplicate, Reorder}` on delivery. Edits,
+  merges, and doc save/loads interleave freely between session steps.
+- [x] `SaveStates` encode/decode round-trips both sync states in place, as a
+  process restart would; decode failure is an invariant violation.
+- [x] `Finish` flushes in-flight messages, then syncs reliably for up to
+  `rounds` rounds; if the protocol quiesces, both docs must have equal heads.
+  The check is skipped when a `Fork` replaced either doc since `Start`
+  (tracked by a per-doc generation counter), since resuming a sync state
+  against an unrelated history is API misuse.
+- [x] Generator starts/continues sessions (~1 in 11 instructions once docs
+  fork); mutator can rewrite session ops and faults; features and structural
+  buckets track each op and fault kind.
+- [x] Regression test: a session with a dropped message, a duplicated
+  delivery, a state round-trip, and a mid-session edit still converges on
+  finish.
+
+Validation: 3,000-iteration coverage run moved `sync.rs` 57% -> 78%,
+`sync/state.rs` 21% -> 54%, `sync/bloom.rs` -> 85%. A 3,000-iteration smoke
+at `--jobs 16` discovered all nine sync-session features with no crashes and
+no false convergence failures.
+
+Next VM extensions from the same coverage triage, not yet implemented:
+`fork_at` + `apply_changes` transfer between docs, non-default
+`TextEncoding`s and near-miss `update_text` inputs, cursor serialization
+round-trips.
 
 ## Deferred until later phases
 
