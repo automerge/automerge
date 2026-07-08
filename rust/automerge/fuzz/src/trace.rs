@@ -42,6 +42,21 @@ pub enum VmInstr {
         into: u8,
         from: u8,
     },
+    /// Fork `from` at a historical point (resolved via `head`) into slot `to`.
+    ForkAt {
+        from: u8,
+        to: u8,
+        head: VmHeadRef,
+    },
+    /// Transfer the changes `into` is missing from `from` via `apply_changes`,
+    /// delivered in an adversarial order. Any complete delivery order must
+    /// leave `into` containing all of `from`'s heads once the causal queue
+    /// drains.
+    ApplyChanges {
+        from: u8,
+        into: u8,
+        order: VmApplyOrder,
+    },
     Change {
         doc: u8,
         actor: u8,
@@ -126,6 +141,21 @@ pub enum VmSyncFault {
     Drop,
     Duplicate,
     Reorder,
+}
+
+#[derive(Clone, Copy, Debug, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VmApplyOrder {
+    InOrder,
+    /// Children before parents: everything waits in the causal queue.
+    Reversed,
+    Shuffled {
+        seed: u8,
+    },
+    /// Every change delivered twice.
+    Duplicated,
+    /// Every other change withheld, leaving the queue with pending changes.
+    DropHalf,
 }
 
 #[derive(Clone, Debug, Hash, serde::Serialize, serde::Deserialize)]

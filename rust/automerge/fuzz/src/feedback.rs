@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::coverage::{CmpKind, CmpObservation};
 use crate::runner::{BehaviorStats, RunReport};
-use crate::trace::{Trace, VmInstr, VmObjRef, VmOp, VmSyncFault, VmSyncOp};
+use crate::trace::{Trace, VmApplyOrder, VmInstr, VmObjRef, VmOp, VmSyncFault, VmSyncOp};
 
 const MAX_BEHAVIOR_BUCKETS: usize = 65536;
 const MAX_STRUCTURAL_BUCKETS: usize = 512;
@@ -84,6 +84,7 @@ struct StructuralKey {
     save_load_instrs: u8,
     fork_instrs: u8,
     merge_instrs: u8,
+    apply_changes_instrs: u8,
     sync_instrs: u8,
     sync_session_instrs: u8,
     observe_instrs: u8,
@@ -398,6 +399,17 @@ fn features(trace: &Trace) -> Vec<&'static str> {
     for instr in &trace.steps {
         match instr {
             VmInstr::Fork { .. } => features.push("fork_doc"),
+            VmInstr::ForkAt { .. } => features.push("fork_at"),
+            VmInstr::ApplyChanges { order, .. } => {
+                features.push("apply_changes");
+                features.push(match order {
+                    VmApplyOrder::InOrder => "apply_changes_in_order",
+                    VmApplyOrder::Reversed => "apply_changes_reversed",
+                    VmApplyOrder::Shuffled { .. } => "apply_changes_shuffled",
+                    VmApplyOrder::Duplicated => "apply_changes_duplicated",
+                    VmApplyOrder::DropHalf => "apply_changes_drop_half",
+                });
+            }
             VmInstr::Merge { .. } => features.push("merge"),
             VmInstr::SaveLoad { .. } => features.push("save_load"),
             VmInstr::Sync { .. } => features.push("sync"),
@@ -487,7 +499,8 @@ fn structural_key(trace: &Trace) -> StructuralKey {
 
     for instr in &trace.steps {
         match instr {
-            VmInstr::Fork { .. } => stats.fork_instrs += 1,
+            VmInstr::Fork { .. } | VmInstr::ForkAt { .. } => stats.fork_instrs += 1,
+            VmInstr::ApplyChanges { .. } => stats.apply_changes_instrs += 1,
             VmInstr::Merge { .. } => stats.merge_instrs += 1,
             VmInstr::SaveLoad { .. } => stats.save_load_instrs += 1,
             VmInstr::Sync { .. } => stats.sync_instrs += 1,
@@ -539,6 +552,7 @@ fn structural_key(trace: &Trace) -> StructuralKey {
         max_obj_depth: bucket(stats.max_obj_depth),
         save_load_instrs: bucket(stats.save_load_instrs),
         fork_instrs: bucket(stats.fork_instrs),
+        apply_changes_instrs: bucket(stats.apply_changes_instrs),
         merge_instrs: bucket(stats.merge_instrs),
         sync_instrs: bucket(stats.sync_instrs),
         sync_session_instrs: bucket(stats.sync_session_instrs),
@@ -574,6 +588,7 @@ struct StructuralStats {
     save_load_instrs: usize,
     fork_instrs: usize,
     merge_instrs: usize,
+    apply_changes_instrs: usize,
     sync_instrs: usize,
     sync_session_instrs: usize,
     observe_instrs: usize,

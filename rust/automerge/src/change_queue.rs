@@ -142,6 +142,16 @@ impl ChangeQueue {
         }
         self.changes = slots.into_iter().flatten().collect::<Vec<_>>();
 
+        crate::sometimes!("change_queue.applied_out_of_order", if topo.len() > 1);
+        crate::sometimes!(
+            "change_queue.still_pending",
+            if !self.changes.is_empty()
+        );
+        crate::sometimes!(
+            "change_queue.drained",
+            if !topo.is_empty() && self.changes.is_empty()
+        );
+
         topo
     }
 }

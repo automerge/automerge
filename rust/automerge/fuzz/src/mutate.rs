@@ -3,7 +3,7 @@ use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 
 use crate::trace::{
-    ActorSpec, MarkExpand, Metadata, Trace, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
+    ActorSpec, MarkExpand, Metadata, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
     VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmValue,
 };
 
@@ -1434,7 +1434,9 @@ fn instr_variants(
 fn instr_doc(instr: &VmInstr) -> Option<u8> {
     match instr {
         VmInstr::Fork { from, .. } => Some(*from),
+        VmInstr::ForkAt { from, .. } => Some(*from),
         VmInstr::Merge { into, .. } => Some(*into),
+        VmInstr::ApplyChanges { into, .. } => Some(*into),
         VmInstr::Change { doc, .. }
         | VmInstr::Transact { doc, .. }
         | VmInstr::SaveLoad { doc }
@@ -2143,6 +2145,26 @@ fn mutate_vm_instruction(instructions: &mut [VmInstr], rng: &mut StdRng) {
                 mutate_sync_op(op, rng);
             }
         }
+        VmInstr::ForkAt { from, to, head } => match rng.random_range(0..3) {
+            0 => *from = mutate_byte(*from, rng),
+            1 => *to = mutate_byte(*to, rng),
+            _ => *head = random_vm_head(rng),
+        },
+        VmInstr::ApplyChanges { from, into, order } => match rng.random_range(0..3) {
+            0 => *from = mutate_byte(*from, rng),
+            1 => *into = mutate_byte(*into, rng),
+            _ => *order = random_apply_order(rng),
+        },
+    }
+}
+
+fn random_apply_order(rng: &mut StdRng) -> VmApplyOrder {
+    match rng.random_range(0..8) {
+        0..=1 => VmApplyOrder::InOrder,
+        2..=3 => VmApplyOrder::Reversed,
+        4..=5 => VmApplyOrder::Shuffled { seed: rng.random() },
+        6 => VmApplyOrder::Duplicated,
+        _ => VmApplyOrder::DropHalf,
     }
 }
 
@@ -2370,6 +2392,10 @@ fn referenced_docs(instructions: &[VmInstr]) -> Vec<u8> {
                     docs.push(*right);
                 }
             }
+            VmInstr::ForkAt { from, to, .. } | VmInstr::ApplyChanges { from, into: to, .. } => {
+                docs.push(*from);
+                docs.push(*to);
+            }
         }
     }
     docs
@@ -2413,6 +2439,17 @@ fn rebase_instr(instr: &mut VmInstr, prefix: &VmBuilder, rng: &mut StdRng) {
                 *left = (*left).min(prefix.docs);
                 *right = (*right).min(prefix.docs.max(1));
             }
+        }
+        VmInstr::ForkAt { from, to, head } => {
+            *from = (*from).min(prefix.docs);
+            *to = (*to).min(prefix.docs.saturating_add(1));
+            if !has_saved_head(prefix) && matches!(head, VmHeadRef::Slot { .. }) {
+                *head = VmHeadRef::Current;
+            }
+        }
+        VmInstr::ApplyChanges { from, into, .. } => {
+            *from = (*from).min(prefix.docs);
+            *into = (*into).min(prefix.docs.max(1));
         }
     }
 }
@@ -2552,6 +2589,18 @@ fn collect_instr_u8(instr: &VmInstr, values: &mut Vec<u8>) {
             values.push(*left);
             values.push(*right);
             values.push(*rounds);
+        }
+        VmInstr::ForkAt { from, to, head } => {
+            values.push(*from);
+            values.push(*to);
+            collect_head_u8(head, values);
+        }
+        VmInstr::ApplyChanges { from, into, order } => {
+            values.push(*from);
+            values.push(*into);
+            if let VmApplyOrder::Shuffled { seed } = order {
+                values.push(*seed);
+            }
         }
         VmInstr::SyncSession { session, op } => {
             values.push(*session);
@@ -2765,6 +2814,19 @@ fn set_instr_u8(instr: &mut VmInstr, target: usize, value: u8, seen: &mut usize)
             maybe_set_u8(left, target, value, seen)
                 || maybe_set_u8(right, target, value, seen)
                 || maybe_set_u8(rounds, target, value, seen)
+        }
+        VmInstr::ForkAt { from, to, head } => {
+            maybe_set_u8(from, target, value, seen)
+                || maybe_set_u8(to, target, value, seen)
+                || set_head_u8(head, target, value, seen)
+        }
+        VmInstr::ApplyChanges { from, into, order } => {
+            maybe_set_u8(from, target, value, seen)
+                || maybe_set_u8(into, target, value, seen)
+                || match order {
+                    VmApplyOrder::Shuffled { seed } => maybe_set_u8(seed, target, value, seen),
+                    _ => false,
+                }
         }
         VmInstr::SyncSession { session, op } => {
             maybe_set_u8(session, target, value, seen)
@@ -3099,7 +3161,7 @@ fn collect_head_refs(trace: &Trace) -> Vec<VmHeadRef> {
     let mut refs = Vec::new();
     for instr in &trace.steps {
         match instr {
-            VmInstr::Observe { head, .. } => refs.push(head.clone()),
+            VmInstr::Observe { head, .. } | VmInstr::ForkAt { head, .. } => refs.push(head.clone()),
             VmInstr::DiffRange { before, after, .. } => {
                 refs.push(before.clone());
                 refs.push(after.clone());
@@ -3117,7 +3179,7 @@ fn count_head_refs(trace: &Trace) -> usize {
 fn set_nth_head_ref(trace: &mut Trace, target: usize, value: VmHeadRef, seen: &mut usize) -> bool {
     for instr in &mut trace.steps {
         match instr {
-            VmInstr::Observe { head, .. } => {
+            VmInstr::Observe { head, .. } | VmInstr::ForkAt { head, .. } => {
                 if maybe_set_head_ref(head, target, value.clone(), seen) {
                     return true;
                 }
@@ -3246,6 +3308,12 @@ impl VmBuilder {
                         push_unique(&mut builder.sync_sessions, *session);
                     }
                 }
+                VmInstr::ForkAt { from, to, .. } => {
+                    builder.docs = builder.docs.max(*from).max(*to);
+                }
+                VmInstr::ApplyChanges { from, into, .. } => {
+                    builder.docs = builder.docs.max(*from).max(*into);
+                }
             }
         }
         builder
@@ -3256,7 +3324,7 @@ impl VmBuilder {
             return self.random_change(rng);
         }
 
-        match rng.random_range(0..11) {
+        match rng.random_range(0..13) {
             0 => {
                 self.docs = self.docs.max(1);
                 VmInstr::Fork { from: 0, to: 1 }
@@ -3291,6 +3359,26 @@ impl VmBuilder {
                 rounds: rng.random_range(1..=16),
             },
             10 if self.docs >= 1 => self.random_sync_session_instr(rng),
+            11 => {
+                let to = rng.random_range(0..=self.docs.saturating_add(1).min(8));
+                self.docs = self.docs.max(to);
+                VmInstr::ForkAt {
+                    from: self.doc(rng),
+                    to,
+                    head: if self.saved_heads > 0 {
+                        VmHeadRef::Slot {
+                            slot: rng.random_range(0..self.saved_heads),
+                        }
+                    } else {
+                        random_vm_head(rng)
+                    },
+                }
+            }
+            12 if self.docs >= 1 => VmInstr::ApplyChanges {
+                from: self.doc(rng),
+                into: self.doc(rng),
+                order: random_apply_order(rng),
+            },
             _ => self.random_change(rng),
         }
     }
@@ -3486,6 +3574,12 @@ impl VmBuilder {
                     self.docs = self.docs.max(*left).max(*right);
                     push_unique(&mut self.sync_sessions, *session);
                 }
+            }
+            VmInstr::ForkAt { from, to, .. } => {
+                self.docs = self.docs.max(*from).max(*to);
+            }
+            VmInstr::ApplyChanges { from, into, .. } => {
+                self.docs = self.docs.max(*from).max(*into);
             }
         }
     }

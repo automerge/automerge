@@ -271,6 +271,8 @@ fn op_counts(trace: &Trace) -> BTreeMap<&'static str, usize> {
 fn step_kind(step: &VmInstr) -> &'static str {
     match step {
         VmInstr::Fork { .. } => "fork",
+        VmInstr::ForkAt { .. } => "fork_at",
+        VmInstr::ApplyChanges { .. } => "apply_changes",
         VmInstr::Change { .. } => "change",
         VmInstr::Transact { commit: true, .. } => "transact_commit",
         VmInstr::Transact { commit: false, .. } => "transact_rollback",

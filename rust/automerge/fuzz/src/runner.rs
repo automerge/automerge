@@ -11,8 +11,8 @@ use automerge::{
 };
 
 use crate::trace::{
-    ActorSpec, MarkExpand, Trace, VmHeadRef, VmHydrated, VmInstr, VmObjRef, VmObserveMode, VmOp,
-    VmSyncFault, VmSyncOp, VmValue,
+    ActorSpec, MarkExpand, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
+    VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmValue,
 };
 
 pub struct Runner {
@@ -573,7 +573,7 @@ impl RunState {
     }
 
     fn fork_doc(&mut self, from: usize, to: usize) -> Result<(), RunError> {
-        let (mut doc, objects, head_slots) = {
+        let (doc, objects, head_slots) = {
             let from_doc = self.doc_mut(from)?;
             (
                 from_doc.doc.fork(),
@@ -581,6 +581,34 @@ impl RunState {
                 from_doc.head_slots.clone(),
             )
         };
+        self.install_doc(to, doc, objects, head_slots);
+        Ok(())
+    }
+
+    fn fork_doc_at(&mut self, from: usize, to: usize, head: &VmHeadRef) -> Result<(), RunError> {
+        if from == to {
+            return Ok(());
+        }
+        let (doc, objects, head_slots) = {
+            let from_doc = self.doc_mut(from)?;
+            let heads = from_doc.resolve_heads(from, head)?;
+            let doc = from_doc
+                .doc
+                .fork_at(&heads)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            (doc, from_doc.objects.clone(), from_doc.head_slots.clone())
+        };
+        self.install_doc(to, doc, objects, head_slots);
+        Ok(())
+    }
+
+    fn install_doc(
+        &mut self,
+        to: usize,
+        mut doc: AutoCommit,
+        objects: Vec<ObjId>,
+        head_slots: Vec<Option<Vec<ChangeHash>>>,
+    ) {
         let actor = self.actors[to % self.actors.len()].clone();
         doc.set_actor(actor);
         if to >= self.docs.len() {
@@ -598,6 +626,74 @@ impl RunState {
             head_slots,
             generation,
         };
+    }
+
+    /// Transfer the changes `into` is missing from `from` through
+    /// `apply_changes`, delivered in an adversarial order. For complete
+    /// delivery orders, `into` must end up containing all of `from`'s heads
+    /// once the causal queue drains.
+    fn apply_changes_transfer(
+        &mut self,
+        from: usize,
+        into: usize,
+        order: &VmApplyOrder,
+    ) -> Result<(), RunError> {
+        if from == into {
+            return Ok(());
+        }
+        if from >= self.docs.len() {
+            return Err(RunError::MissingDoc { doc: from });
+        }
+        if into >= self.docs.len() {
+            return Err(RunError::MissingDoc { doc: into });
+        }
+
+        let into_heads = self.docs[into].doc.get_heads();
+        let from_doc = &mut self.docs[from];
+        let from_heads = from_doc.doc.get_heads();
+        let mut changes = from_doc.doc.get_changes(&into_heads);
+        match order {
+            VmApplyOrder::InOrder => {}
+            VmApplyOrder::Reversed => changes.reverse(),
+            VmApplyOrder::Shuffled { seed } => {
+                let mut state = u64::from(*seed) | 0x9e37_79b9_0000_0001;
+                for index in (1..changes.len()).rev() {
+                    // xorshift64: cheap deterministic shuffle without pulling
+                    // a RNG dependency into the runner.
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    changes.swap(index, (state as usize) % (index + 1));
+                }
+            }
+            VmApplyOrder::Duplicated => {
+                let duplicates = changes.clone();
+                changes.extend(duplicates);
+            }
+            VmApplyOrder::DropHalf => {
+                let mut keep = false;
+                changes.retain(|_| {
+                    keep = !keep;
+                    keep
+                });
+            }
+        }
+
+        let complete = !matches!(order, VmApplyOrder::DropHalf);
+        let into_doc = &mut self.docs[into];
+        into_doc
+            .doc
+            .apply_changes(changes)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        if complete {
+            for head in from_heads {
+                if into_doc.doc.get_change_by_hash(&head).is_none() {
+                    return Err(RunError::Invariant(
+                        "apply_changes lost a change despite complete delivery".to_string(),
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -943,6 +1039,12 @@ impl RunState {
             let result = match instr {
                 VmInstr::Fork { from, to } => self.fork_doc(usize::from(*from), usize::from(*to)),
                 VmInstr::Merge { into, from } => self.merge(usize::from(*into), usize::from(*from)),
+                VmInstr::ForkAt { from, to, head } => {
+                    self.fork_doc_at(usize::from(*from), usize::from(*to), head)
+                }
+                VmInstr::ApplyChanges { from, into, order } => {
+                    self.apply_changes_transfer(usize::from(*from), usize::from(*into), order)
+                }
                 VmInstr::Change {
                     doc,
                     actor,
@@ -1703,6 +1805,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use crate::trace::Metadata;
+    use crate::trace::{VmApplyOrder, VmHeadRef};
     use crate::trace::{VmSyncFault, VmSyncOp};
 
     fn transact_instr(key: u8, value: u8, commit: bool) -> VmInstr {
@@ -1761,6 +1864,51 @@ mod tests {
         let report = Runner::new()
             .run_catching(&trace)
             .expect("session converges");
+        assert_eq!(report.docs, 2);
+    }
+
+    #[test]
+    fn fork_at_and_out_of_order_apply_changes_transfer_everything() {
+        let put = |doc: u8, key: u8, value: u8| VmInstr::Change {
+            doc,
+            actor: doc,
+            ops: vec![VmOp::Put {
+                obj: VmObjRef::Root,
+                key,
+                value: VmValue::Uint { slot: value },
+            }],
+        };
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            steps: vec![
+                put(0, 1, 5),
+                VmInstr::SaveHeads { doc: 0, slot: 0 },
+                put(0, 2, 9),
+                put(0, 3, 2),
+                // Fork doc 1 from doc 0's historical state, then let it
+                // diverge before transferring doc 0's changes children-first.
+                VmInstr::ForkAt {
+                    from: 0,
+                    to: 1,
+                    head: VmHeadRef::Slot { slot: 0 },
+                },
+                put(1, 4, 7),
+                VmInstr::ApplyChanges {
+                    from: 0,
+                    into: 1,
+                    order: VmApplyOrder::Reversed,
+                },
+                // Withholding changes must not trip the completeness check.
+                VmInstr::ApplyChanges {
+                    from: 1,
+                    into: 0,
+                    order: VmApplyOrder::DropHalf,
+                },
+            ],
+        };
+        let report = Runner::new().run_catching(&trace).expect("trace runs");
         assert_eq!(report.docs, 2);
     }
 

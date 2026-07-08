@@ -379,10 +379,37 @@ Validation: 3,000-iteration coverage run moved `sync.rs` 57% -> 78%,
 at `--jobs 16` discovered all nine sync-session features with no crashes and
 no false convergence failures.
 
+## Historical forks and change transfer
+
+- [x] Add `VmInstr::ForkAt { from, to, head }`: fork a document at saved or
+  current heads via `AutoCommit::fork_at`.
+- [x] Add `VmInstr::ApplyChanges { from, into, order }`: transfer the changes
+  `into` is missing through `apply_changes`, delivered in an adversarial
+  order (`VmApplyOrder::{InOrder, Reversed, Shuffled, Duplicated,
+  DropHalf}`). Out-of-order delivery exercises the causal readiness queue;
+  `DropHalf` leaves pending changes for later instructions to complete.
+- [x] Completeness invariant: any complete delivery order must leave `into`
+  containing all of `from`'s heads once the queue drains.
+- [x] `sometimes!` labels in `ChangeQueue::pop_topo_sorted_ready`
+  (`change_queue.{applied_out_of_order,still_pending,drained}`).
+
+Validation: `change_queue.rs` coverage reached 96% (it was essentially
+unexercised before, since merge always delivers in order); the queue labels
+hit thousands of times per short run.
+
+**Found a bug immediately**: `fork_at` at a document's own current heads
+panics with `MissingOps` in `ChangeCollector::from_build_meta_inner` when an
+actor's changes are interleaved with another actor's (sensitive to the actor
+ids: `[2,0,2]`, `[0,1,0]`, `[2,1,2]` panic; `[1,0,1]`, `[0,2,0]` do not).
+Minimized repro committed as an ignored test in
+`rust/automerge/tests/fuzz_crashes.rs`
+(`fork_at_current_heads_after_interleaved_actor_changes`), alongside a
+passing guard that `fork_at` with foreign heads returns an error. Until the
+bug is fixed, fuzz runs will keep saving this crash signature.
+
 Next VM extensions from the same coverage triage, not yet implemented:
-`fork_at` + `apply_changes` transfer between docs, non-default
-`TextEncoding`s and near-miss `update_text` inputs, cursor serialization
-round-trips.
+non-default `TextEncoding`s and near-miss `update_text` inputs, cursor
+serialization round-trips.
 
 ## Deferred until later phases
 
