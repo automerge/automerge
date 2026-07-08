@@ -242,7 +242,7 @@ fn trace_op_count(trace: &Trace) -> usize {
         .steps
         .iter()
         .map(|step| match step {
-            VmInstr::Change { ops, .. } => ops.len(),
+            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.len(),
             _ => 0,
         })
         .sum()
@@ -259,7 +259,7 @@ fn step_counts(trace: &Trace) -> BTreeMap<&'static str, usize> {
 fn op_counts(trace: &Trace) -> BTreeMap<&'static str, usize> {
     let mut counts = BTreeMap::new();
     for step in &trace.steps {
-        if let VmInstr::Change { ops, .. } = step {
+        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = step {
             for op in ops {
                 *counts.entry(op_kind(op)).or_default() += 1;
             }
@@ -272,6 +272,8 @@ fn step_kind(step: &VmInstr) -> &'static str {
     match step {
         VmInstr::Fork { .. } => "fork",
         VmInstr::Change { .. } => "change",
+        VmInstr::Transact { commit: true, .. } => "transact_commit",
+        VmInstr::Transact { commit: false, .. } => "transact_rollback",
         VmInstr::Merge { .. } => "merge",
         VmInstr::SaveLoad { .. } => "save_load",
         VmInstr::Sync { .. } => "sync",

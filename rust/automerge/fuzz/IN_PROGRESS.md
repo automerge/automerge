@@ -322,6 +322,39 @@ main-thread trace saving and batch enumeration; saturated long runs are
 worker-bound and scale better. Trace timeouts (2s wall clock) fire slightly
 more often under high `--jobs` due to CPU contention; they count as rejected.
 
+## Explicit transactions and rollback
+
+Coverage triage showed `src/transaction.rs` (the explicit `Transaction` API,
+including rollback) at 0% because the runner only used `AutoCommit`.
+
+- [x] Add `VmInstr::Transact { doc, actor, ops, commit }`: applies ops inside
+  an explicit `Automerge::transaction()` on a copy of the document.
+- [x] Share op application between paths: `apply_vm_op_tx` is generic over
+  `ReadDoc + Transactable`, used by both `AutoCommit` changes and explicit
+  transactions.
+- [x] Commit path feeds the resulting changes back into the live doc through
+  `AutoCommit::apply_changes`, exercising the change-application queue.
+- [x] Rollback path checks the rollback-is-a-perfect-noop invariant: heads and
+  hydrated state must be untouched afterwards.
+- [x] Generator emits `Transact` for ~15% of changes; the mutator can toggle
+  commit/rollback and position enumeration tries committed and rolled-back
+  transaction variants at every step.
+- [x] `sometimes!` labels in `TransactionInner::rollback`
+  (`tx.rollback.{empty,ops,many_ops,first_change_of_actor}`).
+- [x] Regression test: committed ops land exactly once; rollbacks leave no
+  trace.
+
+Validation: a 3,000-iteration coverage run took `transaction.rs` from 0% to
+30%, `manual_transaction.rs` to 53%, and `transaction/inner.rs` to 83%. A
+5,000-iteration soak at `--jobs 16` (1,900 exec/s) hit the rollback labels
+thousands of times with no invariant failures.
+
+Next VM extensions from the same coverage triage, not yet implemented: sync
+sessions as first-class state (persistent sync states, drop/dup/reorder,
+mid-session edits and state save/load), `fork_at` + `apply_changes` transfer
+between docs, non-default `TextEncoding`s and near-miss `update_text` inputs,
+cursor serialization round-trips.
+
 ## Deferred until later phases
 
 Do not implement these until reliable sync/read-side/rich-text traces have had some runtime testing:

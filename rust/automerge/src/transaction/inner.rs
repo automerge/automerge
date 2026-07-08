@@ -197,6 +197,9 @@ impl TransactionInner {
     /// operations.
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending.len();
+        crate::sometimes!("tx.rollback.empty", if num == 0);
+        crate::sometimes!("tx.rollback.ops", if num > 0);
+        crate::sometimes!("tx.rollback.many_ops", if num > 8);
 
         for o in self.pending.iter().rev() {
             doc.ops.undo_op(o);
@@ -205,6 +208,7 @@ impl TransactionInner {
         //doc.ops_mut().load_checkpoint(self.checkpoint);
 
         if self.seq == 1 {
+            crate::sometimes!("tx.rollback.first_change_of_actor");
             doc.remove_actor(self.actor);
         }
 

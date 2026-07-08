@@ -78,6 +78,7 @@ struct StructuralKey {
     ops: u8,
     actors: u8,
     change_instrs: u8,
+    transact_instrs: u8,
     max_ops_in_instr: u8,
     max_obj_depth: u8,
     save_load_instrs: u8,
@@ -405,7 +406,14 @@ fn features(trace: &Trace) -> Vec<&'static str> {
             VmInstr::UpdateDiffCursor { .. } => features.push("update_diff_cursor"),
             VmInstr::ResetDiffCursor { .. } => features.push("reset_diff_cursor"),
             VmInstr::DiffIncremental { .. } => features.push("diff_incremental"),
-            VmInstr::Change { actor, ops, .. } => {
+            VmInstr::Change { actor, ops, .. } | VmInstr::Transact { actor, ops, .. } => {
+                if let VmInstr::Transact { commit, .. } = instr {
+                    features.push(if *commit {
+                        "transact_commit"
+                    } else {
+                        "transact_rollback"
+                    });
+                }
                 actors.insert(*actor);
                 if ops.is_empty() {
                     features.push("empty_change");
@@ -473,8 +481,12 @@ fn structural_key(trace: &Trace) -> StructuralKey {
             VmInstr::UpdateDiffCursor { .. } => stats.update_diff_cursor_instrs += 1,
             VmInstr::ResetDiffCursor { .. } => stats.reset_diff_cursor_instrs += 1,
             VmInstr::DiffIncremental { .. } => stats.diff_incremental_instrs += 1,
-            VmInstr::Change { ops, .. } => {
-                stats.change_instrs += 1;
+            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => {
+                if matches!(instr, VmInstr::Transact { .. }) {
+                    stats.transact_instrs += 1;
+                } else {
+                    stats.change_instrs += 1;
+                }
                 stats.max_ops_in_instr = stats.max_ops_in_instr.max(ops.len());
                 for op in ops {
                     stats.ops += 1;
@@ -505,6 +517,7 @@ fn structural_key(trace: &Trace) -> StructuralKey {
         ops: bucket(stats.ops),
         actors: bucket(trace.actors.len()),
         change_instrs: bucket(stats.change_instrs),
+        transact_instrs: bucket(stats.transact_instrs),
         max_ops_in_instr: bucket(stats.max_ops_in_instr),
         max_obj_depth: bucket(stats.max_obj_depth),
         save_load_instrs: bucket(stats.save_load_instrs),
@@ -537,6 +550,7 @@ fn structural_key(trace: &Trace) -> StructuralKey {
 struct StructuralStats {
     ops: usize,
     change_instrs: usize,
+    transact_instrs: usize,
     max_ops_in_instr: usize,
     max_obj_depth: usize,
     save_load_instrs: usize,

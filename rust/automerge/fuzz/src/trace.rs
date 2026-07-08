@@ -47,6 +47,16 @@ pub enum VmInstr {
         actor: u8,
         ops: Vec<VmOp>,
     },
+    /// Apply `ops` inside an explicit `Automerge::transaction()` on a copy of
+    /// the document. On `commit: true` the resulting changes are fed back into
+    /// the live document through `apply_changes`; on `commit: false` the
+    /// transaction is rolled back, which must leave the copy untouched.
+    Transact {
+        doc: u8,
+        actor: u8,
+        ops: Vec<VmOp>,
+        commit: bool,
+    },
     SaveLoad {
         doc: u8,
     },

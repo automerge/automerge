@@ -751,6 +751,19 @@ impl RunState {
                     }
                     result
                 }
+                VmInstr::Transact {
+                    doc,
+                    actor,
+                    ops: vm_ops,
+                    commit,
+                } => {
+                    let result =
+                        self.transact(usize::from(*doc), usize::from(*actor), vm_ops, *commit);
+                    if result.is_ok() && *commit {
+                        ops += vm_ops.len();
+                    }
+                    result
+                }
                 VmInstr::SaveLoad { doc } => self.save_load(usize::from(*doc)).map(drop),
                 VmInstr::Observe {
                     doc,
@@ -809,6 +822,63 @@ impl RunState {
             }
         }
         let _ = self.doc_mut(doc)?.doc.commit();
+        Ok(())
+    }
+
+    /// Run `vm_ops` inside an explicit `Automerge::transaction()` on a copy of
+    /// the document. Committed transactions are integrated into the live doc
+    /// via `apply_changes`, exercising the change-application queue; rolled
+    /// back transactions must leave the copy exactly as it was.
+    fn transact(
+        &mut self,
+        doc: usize,
+        actor: usize,
+        vm_ops: &[VmOp],
+        commit: bool,
+    ) -> Result<(), RunError> {
+        let actor_id = self.actors[actor % self.actors.len()].clone();
+        let doc_state = self.doc_mut(doc)?;
+        let heads_before = doc_state.doc.get_heads();
+        let mut plain = doc_state.doc.document().clone();
+        plain.set_actor(actor_id);
+        let before = (!commit).then(|| plain.hydrate(None));
+
+        let mut objects = doc_state.objects.clone();
+        let mut tx = plain.transaction();
+        for op in vm_ops {
+            if let Err(err) = apply_vm_op_tx(&mut tx, &mut objects, op) {
+                if err.is_invariant_or_panic() {
+                    return Err(err);
+                }
+                // Same policy as apply_vm_change: stop issuing ops into a
+                // transaction after the first error.
+                break;
+            }
+        }
+
+        if commit {
+            tx.commit();
+            let changes = plain.get_changes(&heads_before);
+            let doc_state = self.doc_mut(doc)?;
+            doc_state
+                .doc
+                .apply_changes(changes)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            doc_state.objects = objects;
+        } else {
+            tx.rollback();
+            if plain.get_heads() != heads_before {
+                return Err(RunError::Invariant(
+                    "transaction rollback changed document heads".to_string(),
+                ));
+            }
+            let after = plain.hydrate(None);
+            if before.as_ref() != Some(&after) {
+                return Err(RunError::Invariant(
+                    "transaction rollback changed hydrated document".to_string(),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -1079,188 +1149,193 @@ impl DocState {
     }
 
     fn apply_vm_op(&mut self, op: &VmOp) -> Result<(), RunError> {
-        match op {
-            VmOp::Put { obj, key, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                self.doc
-                    .put(&obj, vm_key(*key), value.to_scalar_value())
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::MakeMap { obj, key } => self.vm_make_object(obj, *key, ObjType::Map)?,
-            VmOp::MakeList { obj, key } => self.vm_make_object(obj, *key, ObjType::List)?,
-            VmOp::MakeText { obj, key } => self.vm_make_object(obj, *key, ObjType::Text)?,
-            VmOp::Insert { obj, index, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                self.doc
-                    .insert(
-                        &obj,
-                        usize::from(*index) % (len + 1),
-                        value.to_scalar_value(),
-                    )
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::PutSeq { obj, index, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                if len == 0 {
-                    self.doc
-                        .insert(&obj, 0, value.to_scalar_value())
-                        .map_err(|err| RunError::Automerge(err.to_string()))?;
-                } else {
-                    self.doc
-                        .put(&obj, usize::from(*index) % len, value.to_scalar_value())
-                        .map_err(|err| RunError::Automerge(err.to_string()))?;
-                }
-            }
-            VmOp::SpliceList {
-                obj,
-                index,
-                delete,
-                values,
-            } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                let index = usize::from(*index) % (len + 1);
-                let delete = usize::from(*delete).min(len.saturating_sub(index)) as isize;
-                let values = values
-                    .iter()
-                    .map(VmValue::to_scalar_value)
-                    .collect::<Vec<_>>();
-                self.doc
-                    .splice(&obj, index, delete, values)
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::SpliceText {
-                obj,
-                index,
-                delete,
-                value,
-            } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                let index = usize::from(*index) % (len + 1);
-                let delete = usize::from(*delete).min(len.saturating_sub(index)) as isize;
-                let value = vm_splice_text(*value);
-                self.doc
-                    .splice_text(&obj, index, delete, &value)
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::UpdateText { obj, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let value = vm_text(*value);
-                self.doc
-                    .update_text(&obj, value)
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::Increment { obj, key, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                self.doc
-                    .increment(&obj, vm_key(*key), i64::from(*value))
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::Mark {
-                obj,
-                start,
-                end,
-                name,
-                value,
-                expand,
-            } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                let start = usize::from(*start).min(len);
-                let end = usize::from(*end).min(len).max(start);
-                let mark = Mark::new(vm_mark_name(*name), value.to_scalar_value(), start, end);
-                self.doc
-                    .mark(&obj, mark, (*expand).into())
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::Unmark {
-                obj,
-                start,
-                end,
-                name,
-                expand,
-            } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                let start = usize::from(*start).min(len);
-                let end = usize::from(*end).min(len).max(start);
-                let name = vm_mark_name(*name);
-                self.doc
-                    .unmark(&obj, &name, start, end, (*expand).into())
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::Delete { obj, key } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                self.doc
-                    .delete(&obj, vm_key(*key))
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::DeleteSeq { obj, index } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let len = self.doc.length(&obj);
-                if len > 0 {
-                    self.doc
-                        .delete(&obj, usize::from(*index) % len)
-                        .map_err(|err| RunError::Automerge(err.to_string()))?;
-                }
-            }
-            VmOp::UpdateObject { obj, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                self.doc
-                    .update_object(&obj, &value.to_hydrate_value())
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-            }
-            VmOp::BatchCreate { obj, key, value } => {
-                let obj = self.resolve_vm_obj(obj)?;
-                let new_obj = self
-                    .doc
-                    .batch_create_object(&obj, vm_key(*key), &value.to_hydrate_value(), false)
-                    .map_err(|err| RunError::Automerge(err.to_string()))?;
-                self.objects.push(new_obj);
-            }
-        }
-        Ok(())
-    }
-
-    fn vm_make_object(&mut self, obj: &VmObjRef, key: u8, kind: ObjType) -> Result<(), RunError> {
-        let obj = self.resolve_vm_obj(obj)?;
-        let new_obj = self
-            .doc
-            .put_object(&obj, vm_key(key), kind)
-            .map_err(|err| RunError::Automerge(err.to_string()))?;
-        self.objects.push(new_obj);
-        Ok(())
+        apply_vm_op_tx(&mut self.doc, &mut self.objects, op)
     }
 
     fn resolve_vm_obj(&self, obj: &VmObjRef) -> Result<ObjId, RunError> {
-        match obj {
-            VmObjRef::Root => Ok(ROOT),
-            VmObjRef::Slot { slot } => {
-                if self.objects.is_empty() {
-                    Ok(ROOT)
-                } else {
-                    Ok(self.objects[usize::from(*slot) % self.objects.len()].clone())
-                }
-            }
-            VmObjRef::Recent { back } => {
-                if self.objects.is_empty() {
-                    Ok(ROOT)
-                } else {
-                    let back = usize::from(*back).min(self.objects.len() - 1);
-                    Ok(self.objects[self.objects.len() - 1 - back].clone())
-                }
-            }
-            VmObjRef::Invalid { slot } => self
-                .objects
-                .get(usize::from(*slot).saturating_add(self.objects.len()))
-                .cloned()
-                .ok_or_else(|| RunError::MissingObject {
-                    obj: format!("invalid vm object slot {slot}"),
-                }),
+        resolve_vm_obj(&self.objects, obj)
+    }
+}
+
+/// Apply one VM operation through any transaction-capable document view. This
+/// is shared between the [`AutoCommit`] fast path and explicit
+/// [`automerge::transaction::Transaction`]s run by `Transact` instructions.
+fn apply_vm_op_tx<T: ReadDoc + Transactable>(
+    doc: &mut T,
+    objects: &mut Vec<ObjId>,
+    op: &VmOp,
+) -> Result<(), RunError> {
+    match op {
+        VmOp::Put { obj, key, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            doc.put(&obj, vm_key(*key), value.to_scalar_value())
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
         }
+        VmOp::MakeMap { obj, key } => vm_make_object(doc, objects, obj, *key, ObjType::Map)?,
+        VmOp::MakeList { obj, key } => vm_make_object(doc, objects, obj, *key, ObjType::List)?,
+        VmOp::MakeText { obj, key } => vm_make_object(doc, objects, obj, *key, ObjType::Text)?,
+        VmOp::Insert { obj, index, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            doc.insert(
+                &obj,
+                usize::from(*index) % (len + 1),
+                value.to_scalar_value(),
+            )
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::PutSeq { obj, index, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            if len == 0 {
+                doc.insert(&obj, 0, value.to_scalar_value())
+                    .map_err(|err| RunError::Automerge(err.to_string()))?;
+            } else {
+                doc.put(&obj, usize::from(*index) % len, value.to_scalar_value())
+                    .map_err(|err| RunError::Automerge(err.to_string()))?;
+            }
+        }
+        VmOp::SpliceList {
+            obj,
+            index,
+            delete,
+            values,
+        } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            let index = usize::from(*index) % (len + 1);
+            let delete = usize::from(*delete).min(len.saturating_sub(index)) as isize;
+            let values = values
+                .iter()
+                .map(VmValue::to_scalar_value)
+                .collect::<Vec<_>>();
+            doc.splice(&obj, index, delete, values)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::SpliceText {
+            obj,
+            index,
+            delete,
+            value,
+        } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            let index = usize::from(*index) % (len + 1);
+            let delete = usize::from(*delete).min(len.saturating_sub(index)) as isize;
+            let value = vm_splice_text(*value);
+            doc.splice_text(&obj, index, delete, &value)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::UpdateText { obj, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let value = vm_text(*value);
+            doc.update_text(&obj, value)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::Increment { obj, key, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            doc.increment(&obj, vm_key(*key), i64::from(*value))
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::Mark {
+            obj,
+            start,
+            end,
+            name,
+            value,
+            expand,
+        } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            let start = usize::from(*start).min(len);
+            let end = usize::from(*end).min(len).max(start);
+            let mark = Mark::new(vm_mark_name(*name), value.to_scalar_value(), start, end);
+            doc.mark(&obj, mark, (*expand).into())
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::Unmark {
+            obj,
+            start,
+            end,
+            name,
+            expand,
+        } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            let start = usize::from(*start).min(len);
+            let end = usize::from(*end).min(len).max(start);
+            let name = vm_mark_name(*name);
+            doc.unmark(&obj, &name, start, end, (*expand).into())
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::Delete { obj, key } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            doc.delete(&obj, vm_key(*key))
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::DeleteSeq { obj, index } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let len = doc.length(&obj);
+            if len > 0 {
+                doc.delete(&obj, usize::from(*index) % len)
+                    .map_err(|err| RunError::Automerge(err.to_string()))?;
+            }
+        }
+        VmOp::UpdateObject { obj, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            doc.update_object(&obj, &value.to_hydrate_value())
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::BatchCreate { obj, key, value } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let new_obj = doc
+                .batch_create_object(&obj, vm_key(*key), &value.to_hydrate_value(), false)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            objects.push(new_obj);
+        }
+    }
+    Ok(())
+}
+
+fn vm_make_object<T: ReadDoc + Transactable>(
+    doc: &mut T,
+    objects: &mut Vec<ObjId>,
+    obj: &VmObjRef,
+    key: u8,
+    kind: ObjType,
+) -> Result<(), RunError> {
+    let obj = resolve_vm_obj(objects, obj)?;
+    let new_obj = doc
+        .put_object(&obj, vm_key(key), kind)
+        .map_err(|err| RunError::Automerge(err.to_string()))?;
+    objects.push(new_obj);
+    Ok(())
+}
+
+fn resolve_vm_obj(objects: &[ObjId], obj: &VmObjRef) -> Result<ObjId, RunError> {
+    match obj {
+        VmObjRef::Root => Ok(ROOT),
+        VmObjRef::Slot { slot } => {
+            if objects.is_empty() {
+                Ok(ROOT)
+            } else {
+                Ok(objects[usize::from(*slot) % objects.len()].clone())
+            }
+        }
+        VmObjRef::Recent { back } => {
+            if objects.is_empty() {
+                Ok(ROOT)
+            } else {
+                let back = usize::from(*back).min(objects.len() - 1);
+                Ok(objects[objects.len() - 1 - back].clone())
+            }
+        }
+        VmObjRef::Invalid { slot } => objects
+            .get(usize::from(*slot).saturating_add(objects.len()))
+            .cloned()
+            .ok_or_else(|| RunError::MissingObject {
+                obj: format!("invalid vm object slot {slot}"),
+            }),
     }
 }
 
@@ -1416,5 +1491,43 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         msg.clone()
     } else {
         "non-string panic payload".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trace::Metadata;
+
+    fn transact_instr(key: u8, value: u8, commit: bool) -> VmInstr {
+        VmInstr::Transact {
+            doc: 0,
+            actor: 0,
+            ops: vec![VmOp::Put {
+                obj: VmObjRef::Root,
+                key,
+                value: VmValue::Uint { slot: value },
+            }],
+            commit,
+        }
+    }
+
+    #[test]
+    fn transact_commits_apply_and_rollbacks_leave_no_trace() {
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0)],
+            steps: vec![
+                transact_instr(1, 5, true),
+                transact_instr(2, 9, false),
+                transact_instr(3, 7, false),
+            ],
+        };
+        let report = Runner::new().run_catching(&trace).expect("trace runs");
+        // Only the committed transaction's ops count and only its change lands
+        // in the document; the rollbacks must leave nothing behind.
+        assert_eq!(report.ops, 1);
+        assert_eq!(report.behavior.total_changes, 1);
     }
 }

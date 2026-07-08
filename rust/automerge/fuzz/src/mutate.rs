@@ -1139,15 +1139,15 @@ fn position_variant_count(input: &Trace, position: &Position, ctx: &TraceContext
 }
 
 /// Must agree with the variant list built by [`instr_variants`]: six fixed
-/// replacement instructions, three more when another document exists, plus one
-/// random change.
+/// replacement instructions, three more when another document exists, one
+/// random change, plus a committed and a rolled-back transaction.
 fn instr_variant_count(input: &Trace, step: usize, ctx: &TraceContext) -> usize {
     let Some(instr) = input.steps.get(step) else {
         return 0;
     };
     let doc = instr_doc(instr).unwrap_or(0);
     let has_other_doc = ctx.docs.iter().any(|candidate| *candidate != doc);
-    6 + if has_other_doc { 3 } else { 0 } + 1
+    6 + if has_other_doc { 3 } else { 0 } + 1 + 2
 }
 
 fn constructor_swap_variant_count(op: &VmOp) -> usize {
@@ -1203,7 +1203,7 @@ impl TraceContext {
             .steps
             .iter()
             .filter_map(|instr| match instr {
-                VmInstr::Change { actor, .. } => Some(*actor),
+                VmInstr::Change { actor, .. } | VmInstr::Transact { actor, .. } => Some(*actor),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1250,7 +1250,7 @@ fn trace_positions(trace: &Trace) -> Vec<Position> {
     for (step, instr) in trace.steps.iter().enumerate() {
         positions.push(Position::Instr { step });
         match instr {
-            VmInstr::Change { ops, .. } => {
+            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => {
                 for (op, vm_op) in ops.iter().enumerate() {
                     positions.push(Position::Op { step, op });
                     positions.push(Position::OpObj { step, op });
@@ -1410,6 +1410,24 @@ fn instr_variants(
         actor,
         ops: vec![builder.random_op(rng)],
     });
+    // Re-run the instruction's own ops (or one random op) through an explicit
+    // transaction, once committed and once rolled back.
+    let tx_ops = match instr {
+        VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.clone(),
+        _ => vec![builder.random_op(rng)],
+    };
+    variants.push(VmInstr::Transact {
+        doc,
+        actor,
+        ops: tx_ops.clone(),
+        commit: true,
+    });
+    variants.push(VmInstr::Transact {
+        doc,
+        actor,
+        ops: tx_ops,
+        commit: false,
+    });
     variants
 }
 
@@ -1418,6 +1436,7 @@ fn instr_doc(instr: &VmInstr) -> Option<u8> {
         VmInstr::Fork { from, .. } => Some(*from),
         VmInstr::Merge { into, .. } => Some(*into),
         VmInstr::Change { doc, .. }
+        | VmInstr::Transact { doc, .. }
         | VmInstr::SaveLoad { doc }
         | VmInstr::Observe { doc, .. }
         | VmInstr::SaveHeads { doc, .. }
@@ -1431,14 +1450,14 @@ fn instr_doc(instr: &VmInstr) -> Option<u8> {
 
 fn nth_op_at(trace: &Trace, step: usize, op: usize) -> Option<&VmOp> {
     match trace.steps.get(step)? {
-        VmInstr::Change { ops, .. } => ops.get(op),
+        VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.get(op),
         _ => None,
     }
 }
 
 fn set_op_at(trace: &mut Trace, step: usize, op: usize, replacement: VmOp) -> bool {
     match trace.steps.get_mut(step) {
-        Some(VmInstr::Change { ops, .. }) => ops
+        Some(VmInstr::Change { ops, .. }) | Some(VmInstr::Transact { ops, .. }) => ops
             .get_mut(op)
             .map(|target| *target = replacement)
             .is_some(),
@@ -1447,7 +1466,9 @@ fn set_op_at(trace: &mut Trace, step: usize, op: usize, replacement: VmOp) -> bo
 }
 
 fn set_op_obj_at(trace: &mut Trace, step: usize, op: usize, replacement: VmObjRef) -> bool {
-    let Some(VmInstr::Change { ops, .. }) = trace.steps.get_mut(step) else {
+    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
+        trace.steps.get_mut(step)
+    else {
         return false;
     };
     let Some(op) = ops.get_mut(op) else {
@@ -1477,7 +1498,9 @@ fn set_op_obj_at(trace: &mut Trace, step: usize, op: usize, replacement: VmObjRe
 }
 
 fn set_op_value_at(trace: &mut Trace, step: usize, op: usize, replacement: VmValue) -> bool {
-    let Some(VmInstr::Change { ops, .. }) = trace.steps.get_mut(step) else {
+    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
+        trace.steps.get_mut(step)
+    else {
         return false;
     };
     let Some(op) = ops.get_mut(op) else {
@@ -1496,7 +1519,9 @@ fn set_op_value_at(trace: &mut Trace, step: usize, op: usize, replacement: VmVal
 }
 
 fn set_op_hydrated_at(trace: &mut Trace, step: usize, op: usize, replacement: VmHydrated) -> bool {
-    let Some(VmInstr::Change { ops, .. }) = trace.steps.get_mut(step) else {
+    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
+        trace.steps.get_mut(step)
+    else {
         return false;
     };
     let Some(op) = ops.get_mut(op) else {
@@ -1517,7 +1542,9 @@ fn set_op_mark_expand_at(
     op: usize,
     replacement: MarkExpand,
 ) -> bool {
-    let Some(VmInstr::Change { ops, .. }) = trace.steps.get_mut(step) else {
+    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
+        trace.steps.get_mut(step)
+    else {
         return false;
     };
     let Some(op) = ops.get_mut(op) else {
@@ -1700,7 +1727,7 @@ fn count_ops(trace: &Trace) -> usize {
         .steps
         .iter()
         .map(|instr| match instr {
-            VmInstr::Change { ops, .. } => ops.len(),
+            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.len(),
             _ => 0,
         })
         .sum()
@@ -1709,7 +1736,7 @@ fn count_ops(trace: &Trace) -> usize {
 fn nth_op(trace: &Trace, target: usize) -> Option<&VmOp> {
     let mut seen = 0;
     for instr in &trace.steps {
-        if let VmInstr::Change { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
             for op in ops {
                 if seen == target {
                     return Some(op);
@@ -1724,7 +1751,7 @@ fn nth_op(trace: &Trace, target: usize) -> Option<&VmOp> {
 fn set_nth_op(trace: &mut Trace, target: usize, replacement: VmOp) -> bool {
     let mut seen = 0;
     for instr in &mut trace.steps {
-        if let VmInstr::Change { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
             for op in ops {
                 if seen == target {
                     *op = replacement;
@@ -2061,6 +2088,18 @@ fn mutate_vm_instruction(instructions: &mut [VmInstr], rng: &mut StdRng) {
             2 if !ops.is_empty() => mutate_vm_op(ops, rng),
             _ => ops.push(VmBuilder::default().random_op(rng)),
         },
+        VmInstr::Transact {
+            doc,
+            actor,
+            ops,
+            commit,
+        } => match rng.random_range(0..5) {
+            0 => *doc = mutate_byte(*doc, rng),
+            1 => *actor = mutate_byte(*actor, rng),
+            2 => *commit = !*commit,
+            3 if !ops.is_empty() => mutate_vm_op(ops, rng),
+            _ => ops.push(VmBuilder::default().random_op(rng)),
+        },
         VmInstr::SaveLoad { doc }
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
@@ -2253,6 +2292,7 @@ fn referenced_docs(instructions: &[VmInstr]) -> Vec<u8> {
                 docs.push(*to);
             }
             VmInstr::Change { doc, .. }
+            | VmInstr::Transact { doc, .. }
             | VmInstr::SaveLoad { doc }
             | VmInstr::Observe { doc, .. }
             | VmInstr::SaveHeads { doc, .. }
@@ -2281,7 +2321,7 @@ fn rebase_instr(instr: &mut VmInstr, prefix: &VmBuilder, rng: &mut StdRng) {
             *into = (*into).min(prefix.docs);
             *from = (*from).min(prefix.docs.max(1));
         }
-        VmInstr::Change { doc, ops, .. } => {
+        VmInstr::Change { doc, ops, .. } | VmInstr::Transact { doc, ops, .. } => {
             *doc = (*doc).min(prefix.docs.max(1));
             for op in ops {
                 rebase_op(op, prefix, rng);
@@ -2405,7 +2445,10 @@ fn collect_instr_u8(instr: &VmInstr, values: &mut Vec<u8>) {
             values.push(*from);
             values.push(*to);
         }
-        VmInstr::Change { doc, actor, ops } => {
+        VmInstr::Change { doc, actor, ops }
+        | VmInstr::Transact {
+            doc, actor, ops, ..
+        } => {
             values.push(*doc);
             values.push(*actor);
             for op in ops {
@@ -2608,7 +2651,10 @@ fn set_instr_u8(instr: &mut VmInstr, target: usize, value: u8, seen: &mut usize)
             into: from,
             from: to,
         } => maybe_set_u8(from, target, value, seen) || maybe_set_u8(to, target, value, seen),
-        VmInstr::Change { doc, actor, ops } => {
+        VmInstr::Change { doc, actor, ops }
+        | VmInstr::Transact {
+            doc, actor, ops, ..
+        } => {
             maybe_set_u8(doc, target, value, seen)
                 || maybe_set_u8(actor, target, value, seen)
                 || ops.iter_mut().any(|op| set_op_u8(op, target, value, seen))
@@ -2831,7 +2877,7 @@ fn collect_op_obj_refs(op: &VmOp, refs: &mut Vec<VmObjRef>) {
 fn collect_values(trace: &Trace) -> Vec<VmValue> {
     let mut values = Vec::new();
     for instr in &trace.steps {
-        if let VmInstr::Change { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
             for op in ops {
                 collect_op_values(op, &mut values);
             }
@@ -2859,7 +2905,7 @@ fn collect_op_values(op: &VmOp, values: &mut Vec<VmValue>) {
 fn collect_hydrated_values(trace: &Trace) -> Vec<VmHydrated> {
     let mut values = Vec::new();
     for instr in &trace.steps {
-        if let VmInstr::Change { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
             for op in ops {
                 match op {
                     VmOp::UpdateObject { value, .. } | VmOp::BatchCreate { value, .. } => {
@@ -3014,7 +3060,9 @@ fn swap_op_constructor_reusing_fields(trace: &mut Trace, rng: &mut StdRng) {
         .iter()
         .enumerate()
         .filter_map(|(index, instr)| match instr {
-            VmInstr::Change { ops, .. } if !ops.is_empty() => Some(index),
+            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } if !ops.is_empty() => {
+                Some(index)
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -3022,7 +3070,9 @@ fn swap_op_constructor_reusing_fields(trace: &mut Trace, rng: &mut StdRng) {
         return;
     }
     let instr_index = change_indices[rng.random_range(0..change_indices.len())];
-    let VmInstr::Change { ops, .. } = &mut trace.steps[instr_index] else {
+    let (VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
+        &mut trace.steps[instr_index]
+    else {
         return;
     };
     let op_index = rng.random_range(0..ops.len());
@@ -3066,6 +3116,17 @@ impl VmBuilder {
                     builder.docs = builder.docs.max(*doc);
                     for op in ops {
                         builder.observe_op(op);
+                    }
+                }
+                VmInstr::Transact {
+                    doc, ops, commit, ..
+                } => {
+                    builder.docs = builder.docs.max(*doc);
+                    // Rolled-back transactions create no objects.
+                    if *commit {
+                        for op in ops {
+                            builder.observe_op(op);
+                        }
                     }
                 }
                 VmInstr::SaveLoad { doc }
@@ -3131,12 +3192,27 @@ impl VmBuilder {
 
     fn random_change(&mut self, rng: &mut StdRng) -> VmInstr {
         let op_count = rng.random_range(1..=4);
-        let ops = (0..op_count).map(|_| self.random_op(rng)).collect();
-        VmInstr::Change {
-            doc: self.doc(rng),
-            actor: rng.random_range(0..3),
-            ops,
+        let doc = self.doc(rng);
+        let actor = rng.random_range(0..3);
+        if rng.random_range(0..100) < 15 {
+            let commit = rng.random_range(0..2) == 0;
+            // Generate ops through a scratch builder when rolling back so the
+            // main model does not register objects the rollback discards.
+            let ops = if commit {
+                (0..op_count).map(|_| self.random_op(rng)).collect()
+            } else {
+                let mut scratch = self.clone();
+                (0..op_count).map(|_| scratch.random_op(rng)).collect()
+            };
+            return VmInstr::Transact {
+                doc,
+                actor,
+                ops,
+                commit,
+            };
         }
+        let ops = (0..op_count).map(|_| self.random_op(rng)).collect();
+        VmInstr::Change { doc, actor, ops }
     }
 
     fn random_op(&mut self, rng: &mut StdRng) -> VmOp {
@@ -3254,6 +3330,16 @@ impl VmBuilder {
                 self.docs = self.docs.max(*doc);
                 for op in ops {
                     self.observe_op(op);
+                }
+            }
+            VmInstr::Transact {
+                doc, ops, commit, ..
+            } => {
+                self.docs = self.docs.max(*doc);
+                if *commit {
+                    for op in ops {
+                        self.observe_op(op);
+                    }
                 }
             }
             VmInstr::SaveLoad { doc }
