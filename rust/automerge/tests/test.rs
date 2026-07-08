@@ -125,6 +125,40 @@ fn unmark_at_end_of_remotely_inserted_conflicted_scalar_in_text_from_fuzz_trace(
 }
 
 #[test]
+fn insert_into_replaced_text_run_with_trailing_zero_width_unmark_from_fuzz_trace() {
+    // A zero-width unmark on an empty text object sorts after a later text run. If that
+    // text run has an invisible conflicted sibling after it, inserting into the run must
+    // choose the same op-set position in the fast text-index query and the slow query.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.commit();
+
+    doc.set_actor(ActorId::from(vec![1]));
+    doc.unmark(&text, "comment", 0, 0, ExpandMark::Both)
+        .unwrap();
+    doc.insert(&text, 0, "o").unwrap();
+    doc.commit();
+
+    let mut left = doc.fork();
+    left.set_actor(ActorId::from(vec![1]));
+    left.put(&text, 0, "multi\nline").unwrap();
+    left.commit();
+
+    let mut right = doc.fork();
+    right.set_actor(ActorId::from(vec![2]));
+    right.put(&text, 0, ScalarValue::Null).unwrap();
+    right.commit();
+    right.delete(&text, 0).unwrap();
+    right.commit();
+
+    doc.merge(&mut left).unwrap();
+    doc.merge(&mut right).unwrap();
+
+    doc.insert(&text, 5, ScalarValue::Int(-85)).unwrap();
+}
+
+#[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();
