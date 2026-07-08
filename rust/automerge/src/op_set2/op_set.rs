@@ -472,15 +472,16 @@ impl OpSet {
 
         let index = tx.delta as usize + tx.pv.value.unwrap_or(0) as usize;
 
-        let pos = self
-            .scan_for_sticky_marks(text_iter, tx.pos)
-            .unwrap_or(tx.pos);
+        let (mut elemid, pos) = self.elemid_at(tx.pos, range.end)?;
+        text_iter.advance_by(pos - tx.pos);
+
+        let pre_marks_pos = pos;
+        let pos = self.scan_for_sticky_marks(text_iter, pos).unwrap_or(pos);
+        if pos != pre_marks_pos {
+            elemid = self.elemid_at(pos, range.end)?.0;
+        }
 
         let marks = self.cols.index.mark.rich_text_at(pos, None);
-
-        // An element's ElemId is the id of its *insert* op, but `pos` is the
-        // element's last op (the text index stores widths on top ops).
-        let elemid = self.elemid_at(pos)?;
 
         Some(QueryNth {
             marks: MarkSet::from_query_state(&marks),
@@ -778,24 +779,44 @@ impl OpSet {
         self.iter_range(&(pos..(pos + 1))).next()
     }
 
-    /// The ElemId of the element the op at `pos` belongs to: the op's own id
-    /// for insert ops, its key's elemid otherwise. This only needs to load the
-    /// `insert`, `id_ctr`, and `id_actor` columns.
-    fn elemid_at(&self, pos: usize) -> Option<ElemId> {
-        let prefix_val = self.cols.insert.get(pos)?;
-        let insert = prefix_val.value;
-        if insert {
-            let ctr = self.cols.id_ctr.get(pos)?;
-            let actor = self.cols.id_actor.get(pos)?;
-            Some(ElemId(OpId::new(ctr.into(), usize::from(actor))))
-        } else {
-            let ctr = self.cols.key_ctr.get(pos)??;
-            if ctr == 0 {
-                return Some(ElemId::head());
+    /// The ElemId of the element the op at `pos` belongs to, and the last
+    /// following op position belonging to that same element. The ElemId is the
+    /// op's own id for insert ops, or its key's elemid otherwise.
+    fn elemid_at(&self, pos: usize, end: usize) -> Option<(ElemId, usize)> {
+        let range = pos..end;
+        let mut insert = self.cols.insert.values().iter_range(range.clone());
+        let mut id_ctr = self.cols.id_ctr.iter_range(range.clone());
+        let mut id_actor = self.cols.id_actor.iter_range(range.clone());
+        let mut key_ctr = self.cols.key_ctr.iter_range(range.clone());
+        let mut key_actor = self.cols.key_actor.iter_range(range);
+
+        let mut next_elemid = || {
+            let insert = insert.next()?;
+            let id_ctr = id_ctr.next()?;
+            let id_actor = id_actor.next()?;
+            let key_ctr = key_ctr.next()?;
+            let key_actor = key_actor.next()?;
+            if insert {
+                Some(ElemId(
+                    OpId::try_load(Some(id_actor), Some(i64::from(id_ctr))).ok()?,
+                ))
+            } else {
+                ElemId::try_load(key_actor, key_ctr.map(i64::from))
+                    .ok()
+                    .flatten()
             }
-            let actor = self.cols.key_actor.get(pos)??;
-            Some(ElemId(OpId::new(ctr.into(), usize::from(actor))))
+        };
+
+        let elemid = next_elemid()?;
+        let mut last_pos = pos;
+        for next_pos in (pos + 1)..end {
+            if next_elemid()? == elemid {
+                last_pos = next_pos;
+            } else {
+                break;
+            }
         }
+        Some((elemid, last_pos))
     }
 
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
