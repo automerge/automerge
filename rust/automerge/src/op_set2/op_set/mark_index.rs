@@ -1,8 +1,8 @@
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
-use hexane::v1::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
 use hexane::PackError;
+use hexane::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
@@ -230,14 +230,15 @@ impl MarkIndexColumn {
         self.data.len()
     }
 
-    pub(crate) fn iter(&self) -> hexane::v1::Iter<'_, Option<MarkIdx>> {
+    pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>> {
         self.data.values().iter()
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         let new_values: Vec<Option<MarkIdx>> = self
             .data
-            .value_iter()
+            .values()
+            .iter()
             .map(|v| v.map(|m| m.with_new_actor(idx)))
             .collect();
         let new_cache = self
@@ -358,7 +359,8 @@ pub(crate) mod tests {
     /// Find the column positions of Start and End entries for a given OpId.
     fn find_mark_positions(col: &MarkIndexColumn, target: OpId) -> Vec<usize> {
         col.data
-            .value_iter()
+            .values()
+            .iter()
             .enumerate()
             .filter_map(|(pos, val)| match val {
                 Some(MarkIdx::Start(idv)) | Some(MarkIdx::End(idv)) if idv == target => Some(pos),

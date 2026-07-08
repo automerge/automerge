@@ -15,7 +15,7 @@
 //! The three `do_*` functions are `#[inline(never)]` so they show up
 //! as distinct stack frames in the flamegraph.
 
-use hexane::v1::Column;
+use hexane::Column;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{RngExt, SeedableRng};

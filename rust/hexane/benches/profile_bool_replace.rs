@@ -1,4 +1,4 @@
-use hexane::v1::Column;
+use hexane::Column;
 use rand::{rng, Rng};
 use std::time::Instant;
 

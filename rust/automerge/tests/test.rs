@@ -2758,7 +2758,6 @@ fn should_reload_document_containing_deflated_columns() {
         doc.commit();
     }
 }
-
 #[test]
 fn failed_merge_with_duplicate_sequence_number_does_not_corrupt_save_load() {
     // Minimized from a fuzz crash. The merge returns DuplicateSeqNumber, but it
@@ -3011,4 +3010,69 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         Some(right.get_heads()),
         "right should still advertise its heads even though it cannot satisfy the orphan dep"
     );
+}
+
+#[test]
+fn round_trip_change_with_extra_bytes() {
+    // extra_bytes are stored in a raw arena addressed by prefix-sum byte
+    // ranges in the change graph.  With empty extra bytes all ranges are
+    // zero-length, which masked an inclusive-vs-exclusive offset bug in
+    // change_graph.rs — so this test insists on non-empty, distinct blobs
+    // across adjacent changes.
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    doc.commit();
+    let actor = doc.get_actor().clone();
+    let h1 = doc.get_heads();
+
+    let make = |seq: u64, key: &str, deps: Vec<automerge::ChangeHash>, extra: Vec<u8>| {
+        automerge::Change::from(automerge::ExpandedChange {
+            operations: vec![automerge::legacy::Op {
+                action: automerge::legacy::OpType::Put(format!("v{seq}").as_str().into()),
+                obj: automerge::legacy::ObjectId::Root,
+                key: automerge::legacy::Key::Map(key.into()),
+                pred: automerge::legacy::SortedVec::new(),
+                insert: false,
+            }],
+            actor_id: actor.clone(),
+            hash: None,
+            seq,
+            start_op: std::num::NonZero::new(seq).unwrap(),
+            time: 0,
+            message: None,
+            deps,
+            extra_bytes: extra,
+        })
+    };
+
+    let c2 = make(2, "b", h1, vec![0xCA, 0xFE]);
+    let h2 = c2.hash();
+    let c3 = make(3, "c", vec![h2], vec![0xBA, 0xBE, 0x01]);
+    doc.apply_changes(vec![c2, c3]).unwrap();
+
+    let check = |changes: Vec<automerge::Change>| {
+        let mut got: Vec<(u64, Vec<u8>)> = changes
+            .iter()
+            .filter(|c| c.actor_id() == &actor)
+            .map(|c| (c.seq(), c.extra_bytes().to_vec()))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                (1, vec![]),
+                (2, vec![0xCA, 0xFE]),
+                (3, vec![0xBA, 0xBE, 0x01]),
+            ]
+        );
+    };
+
+    // In-memory graph.
+    check(doc.get_changes(&[]));
+
+    // After a save/load round-trip (rebuilds the change graph and reads
+    // the extra-bytes arena through the prefix-sum meta column).
+    let saved = doc.save();
+    let doc2 = Automerge::load(&saved).unwrap();
+    check(doc2.get_changes(&[]));
 }

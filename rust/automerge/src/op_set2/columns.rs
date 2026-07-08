@@ -7,7 +7,7 @@ use crate::storage::columns::{BadColumnLayout, Columns as ColumnFormat};
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ActorId, SequenceType, TextEncoding};
-use hexane::{v1, PackError};
+use hexane::PackError;
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -15,41 +15,41 @@ use std::ops::Range;
 
 #[derive(Debug, Clone)]
 pub(super) struct Columns {
-    pub(super) id_actor: v1::Column<ActorIdx>,
-    pub(super) id_ctr: v1::DeltaColumn<u32>,
-    pub(super) obj_actor: v1::Column<Option<ActorIdx>>,
-    pub(super) obj_ctr: v1::Column<Option<u32>>,
-    pub(super) key_actor: v1::Column<Option<ActorIdx>>,
-    pub(super) key_ctr: v1::DeltaColumn<Option<u32>>,
-    pub(super) key_str: v1::Column<Option<String>>,
-    pub(super) succ_count: v1::PrefixColumn<u32>,
-    pub(super) succ_actor: v1::Column<ActorIdx>,
-    pub(super) succ_ctr: v1::DeltaColumn<u32>,
-    pub(super) insert: v1::PrefixColumn<bool>,
-    pub(super) action: v1::Column<Action>,
-    pub(super) value_meta: v1::PrefixColumn<ValueMeta>,
-    pub(super) value: v1::RawColumn,
-    pub(super) mark_name: v1::Column<Option<String>>,
-    pub(super) expand: v1::Column<bool>,
+    pub(super) id_actor: hexane::Column<ActorIdx>,
+    pub(super) id_ctr: hexane::DeltaColumn<u32>,
+    pub(super) obj_actor: hexane::Column<Option<ActorIdx>>,
+    pub(super) obj_ctr: hexane::Column<Option<u32>>,
+    pub(super) key_actor: hexane::Column<Option<ActorIdx>>,
+    pub(super) key_ctr: hexane::DeltaColumn<Option<u32>>,
+    pub(super) key_str: hexane::Column<Option<String>>,
+    pub(super) succ_count: hexane::PrefixColumn<u32>,
+    pub(super) succ_actor: hexane::Column<ActorIdx>,
+    pub(super) succ_ctr: hexane::DeltaColumn<u32>,
+    pub(super) insert: hexane::PrefixColumn<bool>,
+    pub(super) action: hexane::Column<Action>,
+    pub(super) value_meta: hexane::PrefixColumn<ValueMeta>,
+    pub(super) value: hexane::RawColumn,
+    pub(super) mark_name: hexane::Column<Option<String>>,
+    pub(super) expand: hexane::Column<bool>,
     pub(super) index: Indexes,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct Indexes {
-    pub(super) text: v1::PrefixColumn<Option<u32>>,
-    pub(super) top: v1::PrefixColumn<bool>,
-    pub(super) visible: v1::Column<bool>,
-    pub(super) inc: v1::Column<Option<i64>>,
+    pub(super) text: hexane::PrefixColumn<Option<u32>>,
+    pub(super) top: hexane::PrefixColumn<bool>,
+    pub(super) visible: hexane::Column<bool>,
+    pub(super) inc: hexane::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
 }
 
 impl Default for Indexes {
     fn default() -> Self {
         Self {
-            text: v1::PrefixColumn::new(),
-            top: v1::PrefixColumn::new(),
-            visible: v1::Column::new(),
-            inc: v1::Column::new(),
+            text: hexane::PrefixColumn::new(),
+            top: hexane::PrefixColumn::new(),
+            visible: hexane::Column::new(),
+            inc: hexane::Column::new(),
             mark: MarkIndexColumn::new(),
         }
     }
@@ -58,22 +58,22 @@ impl Default for Indexes {
 impl Default for Columns {
     fn default() -> Self {
         Self {
-            id_actor: v1::Column::new(),
-            id_ctr: v1::DeltaColumn::new(),
-            obj_actor: v1::Column::new(),
-            obj_ctr: v1::Column::new(),
-            key_actor: v1::Column::new(),
-            key_ctr: v1::DeltaColumn::new(),
-            key_str: v1::Column::new(),
-            succ_count: v1::PrefixColumn::new(),
-            succ_actor: v1::Column::new(),
-            succ_ctr: v1::DeltaColumn::new(),
-            insert: v1::PrefixColumn::new(),
-            action: v1::Column::new(),
-            value_meta: v1::PrefixColumn::new(),
-            value: v1::RawColumn::new(),
-            mark_name: v1::Column::new(),
-            expand: v1::Column::new(),
+            id_actor: hexane::Column::new(),
+            id_ctr: hexane::DeltaColumn::new(),
+            obj_actor: hexane::Column::new(),
+            obj_ctr: hexane::Column::new(),
+            key_actor: hexane::Column::new(),
+            key_ctr: hexane::DeltaColumn::new(),
+            key_str: hexane::Column::new(),
+            succ_count: hexane::PrefixColumn::new(),
+            succ_actor: hexane::Column::new(),
+            succ_ctr: hexane::DeltaColumn::new(),
+            insert: hexane::PrefixColumn::new(),
+            action: hexane::Column::new(),
+            value_meta: hexane::PrefixColumn::new(),
+            value: hexane::RawColumn::new(),
+            mark_name: hexane::Column::new(),
+            expand: hexane::Column::new(),
             index: Indexes::default(),
         }
     }
@@ -256,53 +256,60 @@ impl Columns {
     ) -> Result<Self, PackError> {
         let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 
-        let id_actor = v1::Column::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
+        let id_actor = hexane::Column::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
 
-        let opts = v1::LoadOpts::new().with_length(len);
+        let opts = hexane::LoadOpts::new().with_length(len);
 
-        let id_ctr = v1::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts.into())?;
+        let id_ctr =
+            hexane::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts.into())?;
 
-        let obj_actor = v1::Column::<Option<ActorIdx>>::load_with(
+        let obj_actor = hexane::Column::<Option<ActorIdx>>::load_with(
             data_for(OBJ_ID_ACTOR_COL_SPEC),
             opts.with_fill(None),
         )?;
 
-        let obj_ctr = v1::Column::<Option<u32>>::load_with(
+        let obj_ctr = hexane::Column::<Option<u32>>::load_with(
             data_for(OBJ_ID_COUNTER_COL_SPEC),
             opts.with_fill(None),
         )?;
 
-        let key_actor = v1::Column::<Option<ActorIdx>>::load_with(
+        let key_actor = hexane::Column::<Option<ActorIdx>>::load_with(
             data_for(KEY_ACTOR_COL_SPEC),
             opts.with_fill(None),
         )?;
 
-        let key_ctr = v1::DeltaColumn::<Option<u32>>::load_with(
+        let key_ctr = hexane::DeltaColumn::<Option<u32>>::load_with(
             data_for(KEY_COUNTER_COL_SPEC),
             opts.with_fill(None),
         )?;
-        let key_str = v1::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
-        let insert = v1::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
-        let action = v1::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts.into())?;
-        let mark_name = v1::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+        let key_str = hexane::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
+        let insert =
+            hexane::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
+        let action = hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts.into())?;
+        let mark_name =
+            hexane::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
 
-        let expand = v1::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
+        let expand = hexane::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
 
         let succ_count =
-            v1::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts.into())?;
+            hexane::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts.into())?;
 
         let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
-        let succ_opts = v1::LoadOpts::new().with_length(succ_len);
+        let succ_opts = hexane::LoadOpts::new().with_length(succ_len);
         let succ_actor =
-            v1::Column::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts.into())?;
+            hexane::Column::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts.into())?;
 
-        let succ_ctr =
-            v1::DeltaColumn::<u32>::load_with(data_for(SUCC_COUNTER_COL_SPEC), succ_opts.into())?;
+        let succ_ctr = hexane::DeltaColumn::<u32>::load_with(
+            data_for(SUCC_COUNTER_COL_SPEC),
+            succ_opts.into(),
+        )?;
 
-        let value_meta =
-            v1::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts.into())?;
-        let value = v1::RawColumn::load(data_for(VALUE_COL_SPEC))?;
+        let value_meta = hexane::PrefixColumn::<ValueMeta>::load_with(
+            data_for(VALUE_META_COL_SPEC),
+            opts.into(),
+        )?;
+        let value = hexane::RawColumn::load(data_for(VALUE_COL_SPEC))?;
 
         let index = Indexes::default();
 

@@ -261,7 +261,7 @@ impl Shiftable for ListIter<'_> {
         let id = self.id.shift_next(range.clone());
         let action = self.action.shift_next(range.clone());
         let value = self.value.shift_next(range.clone());
-        let inserts = self.inserts.shift_next(range)?.0;
+        let inserts = self.inserts.shift_next(range)?.total();
         let pos = self.id.pos() - 1;
         Some(List::new(inserts, action?, value?, id?, pos))
     }
@@ -293,7 +293,7 @@ impl<'a> Iterator for ListIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.id.next()?;
-        let inserts = self.inserts.next()?.0;
+        let inserts = self.inserts.next()?.total();
         let action = self.action.next()?;
         let value = self.value.next()?;
         let pos = self.id.pos() - 1;
@@ -302,7 +302,7 @@ impl<'a> Iterator for ListIter<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let id = self.id.nth(n)?;
-        let inserts = self.inserts.nth(n)?.0;
+        let inserts = self.inserts.nth(n)?.total();
         let action = self.action.nth(n)?;
         let value = self.value.nth(n)?;
         let pos = self.id.pos() - 1;

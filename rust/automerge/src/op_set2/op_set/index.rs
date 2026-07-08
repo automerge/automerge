@@ -148,10 +148,10 @@ impl OpBuilder<'_> {
 }
 
 pub(crate) struct Indexes {
-    pub(crate) text: hexane::v1::PrefixColumn<Option<u32>>,
-    pub(crate) top: hexane::v1::PrefixColumn<bool>,
-    pub(crate) visible: hexane::v1::Column<bool>,
-    pub(crate) inc: hexane::v1::Column<Option<i64>>,
+    pub(crate) text: hexane::PrefixColumn<Option<u32>>,
+    pub(crate) top: hexane::PrefixColumn<bool>,
+    pub(crate) visible: hexane::Column<bool>,
+    pub(crate) inc: hexane::Column<Option<i64>>,
     pub(crate) mark: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
 }
@@ -228,12 +228,12 @@ impl IndexBuilder {
             .collect();
 
         let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();
-        let visible = hexane::v1::Column::from_values(visible);
+        let visible = hexane::Column::from_values(visible);
 
         let top: Vec<bool> = self.top.to_vec();
-        let top = hexane::v1::PrefixColumn::from_values(top);
+        let top = hexane::PrefixColumn::from_values(top);
 
-        let inc = hexane::v1::Column::from_values(self.incs);
+        let inc = hexane::Column::from_values(self.incs);
 
         let mut mark = MarkIndexColumn::new();
         mark.extend(0, self.marks);

@@ -5,8 +5,6 @@ use crate::op_set2::op::SuccCursors;
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::OpSet;
 
-use hexane::v1;
-
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -88,7 +86,7 @@ impl Iterator for VisIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct IndexedVisIter<'a> {
-    iter: v1::Iter<'a, bool>,
+    iter: hexane::Iter<'a, bool>,
     vis: usize,
 }
 

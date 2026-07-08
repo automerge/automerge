@@ -98,11 +98,11 @@ impl From<&[u8]> for ValueMeta {
     }
 }
 
-impl hexane::v1::ColumnValue for ValueMeta {
-    type Encoding = hexane::v1::RleEncoding<ValueMeta>;
+impl hexane::ColumnValue for ValueMeta {
+    type Encoding = hexane::RleEncoding<ValueMeta>;
 }
 
-impl hexane::v1::RleValue for ValueMeta {
+impl hexane::RleValue for ValueMeta {
     fn try_unpack(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
         let mut buf = data;
         let start = buf.len();
@@ -115,12 +115,12 @@ impl hexane::v1::RleValue for ValueMeta {
     }
 }
 
-impl hexane::v1::PrefixValue for ValueMeta {
+impl hexane::PrefixValue for ValueMeta {
     type Prefix = u64;
     fn accumulate(target: &mut u64, val: ValueMeta) {
         *target += val.length() as u64;
     }
-    fn accumulate_run(target: &mut u64, run: &hexane::v1::Run<ValueMeta>) {
+    fn accumulate_run(target: &mut u64, run: &hexane::Run<ValueMeta>) {
         *target += run.value.length() as u64 * run.count as u64;
     }
 }
@@ -128,7 +128,7 @@ impl hexane::v1::PrefixValue for ValueMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hexane::v1::PrefixColumn;
+    use hexane::PrefixColumn;
 
     #[test]
     fn column_data_meta_group() {
@@ -144,35 +144,35 @@ mod tests {
         ];
         let col = PrefixColumn::<ValueMeta>::from_values(data);
 
-        // PrefixIter yields (inclusive_prefix, value) — running sum of length()
-        // up to and including the current item.
+        // PrefixIter yields PrefixedValues; total() is the running sum of
+        // length() up to and including the current item.
         let mut iter = col.iter();
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(1));
-        assert_eq!(acc, 0);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(1));
+        assert_eq!(pv.total(), 0);
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(6 + (30 << 4)));
-        assert_eq!(acc, 30);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(6 + (30 << 4)));
+        assert_eq!(pv.total(), 30);
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(6 + (10 << 4)));
-        assert_eq!(acc, 40);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(6 + (10 << 4)));
+        assert_eq!(pv.total(), 40);
 
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(3));
-        assert_eq!(acc, 40);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(3));
+        assert_eq!(pv.total(), 40);
 
         // nth(3) jumps to index 3 (the fourth item)
-        let (acc, v) = col.iter().nth(3).unwrap();
-        assert_eq!(v, ValueMeta(3));
-        assert_eq!(acc, 40);
+        let pv = col.iter().nth(3).unwrap();
+        assert_eq!(pv.value, ValueMeta(3));
+        assert_eq!(pv.total(), 40);
 
         // iter_range(3..5) starts at index 3 with the cumulative prefix carried
         let mut iter = col.iter_range(3..5);
-        let (acc, v) = iter.next().unwrap();
-        assert_eq!(v, ValueMeta(3));
-        assert_eq!(acc, 40);
+        let pv = iter.next().unwrap();
+        assert_eq!(pv.value, ValueMeta(3));
+        assert_eq!(pv.total(), 40);
     }
 }

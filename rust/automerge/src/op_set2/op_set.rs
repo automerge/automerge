@@ -53,7 +53,7 @@ pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{VisIter, VisibleOpIter};
 
-pub(crate) type InsertAcc<'a> = hexane::v1::PrefixIter<'a, bool>;
+pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSet {
@@ -437,7 +437,7 @@ impl OpSet {
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
             if clock.is_none() {
-                self.cols.index.text.prefix_delta(range.clone()) as usize
+                self.cols.index.text.sum_range(range.clone()) as usize
             } else {
                 self.action_value_iter(range.clone(), clock.as_ref())
                     .map(|(action, value, _)| match (action, &value) {
@@ -452,7 +452,7 @@ impl OpSet {
                 .cols
                 .insert
                 .iter_range(range.clone())
-                .map(|(prefix, _)| prefix);
+                .map(|pv| pv.total());
             SkipIter::new(insert, vis).dedup().count()
         } else {
             let key = self.cols.key_str.iter_range(range.clone());
@@ -470,7 +470,7 @@ impl OpSet {
         let mut text_iter = self.cols.index.text.iter_range(range.clone());
         let tx = text_iter.advance_prefix((index.get() - 1) as u64)?;
 
-        let index = tx.delta as usize + tx.value.unwrap_or(0) as usize;
+        let index = tx.delta as usize + tx.pv.value.unwrap_or(0) as usize;
 
         let pos = self
             .scan_for_sticky_marks(text_iter, tx.pos)
@@ -492,7 +492,7 @@ impl OpSet {
 
     fn scan_for_sticky_marks(
         &self,
-        mut text_iter: hexane::v1::PrefixIter<'_, Option<u32>>,
+        mut text_iter: hexane::PrefixIter<'_, Option<u32>>,
         mut pos: usize,
     ) -> Option<usize> {
         let end = text_iter.end_pos();
@@ -501,9 +501,9 @@ impl OpSet {
         let mut found: Vec<(MarkIdx, usize)> = vec![];
 
         while let Some(run) = text_iter.next_run() {
-            match run.value {
-                (_prefix, None) => (), // deleted chars
-                (_prefix, Some(0)) => {
+            match run.value.value {
+                None => (), // deleted chars
+                Some(0) => {
                     for i in 0..run.count {
                         let p = pos + i + 1;
                         let e = expand.shift_next(p..end)?;
@@ -681,12 +681,12 @@ impl OpSet {
         let at_pos = iter.nth(pos);
         let next_run = iter.next_run();
         match (at_pos, next_run) {
-            (Some((_, insert)), Some(run)) if insert && !run.value.1 => pos..pos + run.count + 1,
-            (Some((_, insert)), _) if insert => pos..pos + 1,
-            (Some((pre, _)), run) => {
-                let start = self.cols.insert.get_index_for_total(pre);
+            (Some(pv), Some(run)) if pv.value && !run.value.value => pos..pos + run.count + 1,
+            (Some(pv), _) if pv.value => pos..pos + 1,
+            (Some(pv), run) => {
+                let start = self.cols.insert.get_index_for_total(pv.total());
                 match run {
-                    Some(run) if !run.value.1 => start..pos + run.count + 1,
+                    Some(run) if !run.value.value => start..pos + run.count + 1,
                     _ => start..pos + 1,
                 }
             }
@@ -782,7 +782,8 @@ impl OpSet {
     /// for insert ops, its key's elemid otherwise. This only needs to load the
     /// `insert`, `id_ctr`, and `id_actor` columns.
     fn elemid_at(&self, pos: usize) -> Option<ElemId> {
-        let (_, insert) = self.cols.insert.get(pos)?;
+        let prefix_val = self.cols.insert.get(pos)?;
+        let insert = prefix_val.value;
         if insert {
             let ctr = self.cols.id_ctr.get(pos)?;
             let actor = self.cols.id_actor.get(pos)?;
@@ -834,12 +835,12 @@ impl OpSet {
         if encoding == SequenceType::List {
             assert!(obj_range.contains(&pos)); // safe to unwrap
             let prefix = self.cols.index.top.delta(obj_range.start, pos).unwrap();
-            visible = prefix.value;
+            visible = prefix.pv.value;
             index = prefix.delta;
         } else {
             assert!(obj_range.contains(&pos)); // safe to unwrap
             let prefix = self.cols.index.text.delta(obj_range.start, pos).unwrap();
-            visible = prefix.value.is_some();
+            visible = prefix.pv.value.is_some();
             index = prefix.delta as usize;
         }
         Some(FoundOpId { op, index, visible })
@@ -876,7 +877,7 @@ impl OpSet {
     pub(crate) fn key_str_iter_range(
         &self,
         range: &Range<usize>,
-    ) -> hexane::v1::Iter<'_, Option<String>> {
+    ) -> hexane::Iter<'_, Option<String>> {
         self.cols.key_str.iter_range(range.clone())
     }
 
@@ -989,10 +990,10 @@ impl OpSet {
     }
 
     pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
-        if let Some((prefix, count)) = self.cols.succ_count.get(pos) {
-            let start = (prefix - count as u64) as usize;
-            let len = count as usize;
-            let end = prefix as usize;
+        if let Some(sc) = self.cols.succ_count.get(pos) {
+            let start = sc.prefix() as usize;
+            let len = sc.value as usize;
+            let end = sc.total() as usize;
             let succ = SuccCursors {
                 len,
                 succ_actor: self.cols.succ_actor.iter_range(start..end),
@@ -1390,10 +1391,10 @@ impl ResolvedAction {
 }
 
 pub(crate) struct IterObjIds<'a> {
-    v1_ctr: hexane::v1::Iter<'a, Option<u32>>,
-    v1_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
-    next_ctr: Option<hexane::v1::Run<Option<u32>>>,
-    next_actor: Option<hexane::v1::Run<Option<ActorIdx>>>,
+    v1_ctr: hexane::Iter<'a, Option<u32>>,
+    v1_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    next_ctr: Option<hexane::Run<Option<u32>>>,
+    next_actor: Option<hexane::Run<Option<ActorIdx>>>,
     pos: usize,
 }
 
@@ -1607,10 +1608,10 @@ mod tests {
             .iter()
             .flat_map(|o| o.succs.iter().map(|s| s.counter() as u32))
             .collect();
-        let group_col = hexane::v1::PrefixColumn::<u32>::from_values(group_counts);
-        let actor_col = hexane::v1::Column::<ActorIdx>::from_values(succ_actors);
-        let counter_col = hexane::v1::DeltaColumn::<u32>::from_values(succ_counters);
-        let inc_col = hexane::v1::Column::<Option<i64>>::fill(actor_col.len(), None);
+        let group_col = hexane::PrefixColumn::<u32>::from_values(group_counts);
+        let actor_col = hexane::Column::<ActorIdx>::from_values(succ_actors);
+        let counter_col = hexane::DeltaColumn::<u32>::from_values(succ_counters);
+        let inc_col = hexane::Column::<Option<i64>>::fill(actor_col.len(), None);
 
         let mut group_iter = group_col.iter();
         let mut actor_iter = actor_col.iter();
@@ -1619,7 +1620,7 @@ mod tests {
 
         // first encode the succs
         for test_op in test_ops {
-            let (_prefix, group_count) = group_iter.next().unwrap();
+            let group_count = group_iter.next().unwrap().value;
             let op = super::super::op::Op {
                 pos: 0,
                 id: test_op.id,

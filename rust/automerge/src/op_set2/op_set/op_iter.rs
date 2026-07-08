@@ -73,8 +73,6 @@ pub(crate) enum ReadOpError {
     MissingKey,
     #[error("missing value: {0}")]
     MissingValue(&'static str),
-    #[error("error reading value column: {0}")]
-    ReadValue(#[from] hexane::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
 }
@@ -268,8 +266,8 @@ impl<'a> KeyRef<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct OpIdIter<'a> {
-    pub(super) actor: hexane::v1::Iter<'a, ActorIdx>,
-    ctr: hexane::v1::DeltaIter<'a, u32>,
+    pub(super) actor: hexane::Iter<'a, ActorIdx>,
+    ctr: hexane::DeltaIter<'a, u32>,
 }
 
 impl OpIdIterState {
@@ -282,16 +280,16 @@ impl OpIdIterState {
 }
 
 pub(crate) struct OpIdIterState {
-    actor_state: hexane::v1::column::IterState,
-    ctr_state: hexane::v1::DeltaIterState,
+    actor_state: hexane::column::IterState,
+    ctr_state: hexane::DeltaIterState,
 }
 
 pub(crate) struct CtrWalker<'a> {
-    ctr: hexane::v1::FindByRange<'a>,
+    ctr: hexane::FindByRange<'a>,
 }
 
 impl<'a> CtrWalker<'a> {
-    pub(crate) fn new(col: &'a hexane::v1::DeltaColumn<u32>, range: Range<usize>) -> Self {
+    pub(crate) fn new(col: &'a hexane::DeltaColumn<u32>, range: Range<usize>) -> Self {
         let ctr = col.find_by_range(range.start as u32..range.end as u32);
         Self { ctr }
     }
@@ -309,7 +307,7 @@ impl Iterator for CtrWalker<'_> {
 
 pub(crate) struct SuccWalker<'a> {
     acc: usize,
-    count: hexane::v1::PrefixIter<'a, u32>,
+    count: hexane::PrefixIter<'a, u32>,
     ctr: Peekable<CtrWalker<'a>>,
 }
 
@@ -329,16 +327,13 @@ impl Iterator for SuccWalker<'_> {
         }
         let delta = *self.ctr.peek()? - self.acc;
         let c = self.count.advance_prefix(delta as u64)?;
-        self.acc = c.total as usize;
+        self.acc = c.pv.total() as usize;
         Some(c.pos)
     }
 }
 
 impl<'a> OpIdIter<'a> {
-    pub(crate) fn new(
-        actor: hexane::v1::Iter<'a, ActorIdx>,
-        ctr: hexane::v1::DeltaIter<'a, u32>,
-    ) -> Self {
+    pub(crate) fn new(actor: hexane::Iter<'a, ActorIdx>, ctr: hexane::DeltaIter<'a, u32>) -> Self {
         Self { actor, ctr }
     }
 
@@ -407,10 +402,10 @@ impl Iterator for OpIdIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct InsertIter<'a> {
-    iter: hexane::v1::Iter<'a, bool>,
+    iter: hexane::Iter<'a, bool>,
 }
 
-pub(crate) struct InsertIterState(hexane::v1::column::IterState);
+pub(crate) struct InsertIterState(hexane::column::IterState);
 
 impl InsertIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<InsertIter<'a>, AutomergeError> {
@@ -421,7 +416,7 @@ impl InsertIterState {
 }
 
 impl<'a> InsertIter<'a> {
-    pub(crate) fn new(iter: hexane::v1::Iter<'a, bool>) -> Self {
+    pub(crate) fn new(iter: hexane::Iter<'a, bool>) -> Self {
         Self { iter }
     }
 
@@ -452,15 +447,15 @@ impl Iterator for InsertIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a> {
-    key_str: hexane::v1::Iter<'a, Option<String>>,
-    key_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
-    key_ctr: hexane::v1::DeltaIter<'a, Option<u32>>,
+    key_str: hexane::Iter<'a, Option<String>>,
+    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaIter<'a, Option<u32>>,
 }
 
 pub(crate) struct KeyIterState {
-    key_str: hexane::v1::IterState,
-    key_actor: hexane::v1::column::IterState,
-    key_ctr: hexane::v1::DeltaIterState,
+    key_str: hexane::IterState,
+    key_actor: hexane::column::IterState,
+    key_ctr: hexane::DeltaIterState,
 }
 
 impl KeyIterState {
@@ -475,9 +470,9 @@ impl KeyIterState {
 
 impl<'a> KeyIter<'a> {
     pub(crate) fn new(
-        key_str: hexane::v1::Iter<'a, Option<String>>,
-        key_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
-        key_ctr: hexane::v1::DeltaIter<'a, Option<u32>>,
+        key_str: hexane::Iter<'a, Option<String>>,
+        key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        key_ctr: hexane::DeltaIter<'a, Option<u32>>,
     ) -> Self {
         Self {
             key_str,
@@ -541,13 +536,13 @@ impl<'a> Iterator for KeyIter<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ObjIdIter<'a> {
-    obj_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::v1::Iter<'a, Option<u32>>,
+    obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::Iter<'a, Option<u32>>,
 }
 
 pub(crate) struct ObjIdIterState {
-    obj_actor: hexane::v1::column::IterState,
-    obj_ctr: hexane::v1::column::IterState,
+    obj_actor: hexane::column::IterState,
+    obj_ctr: hexane::column::IterState,
 }
 
 impl ObjIdIterState {
@@ -561,15 +556,15 @@ impl ObjIdIterState {
 
 impl<'a> ObjIdIter<'a> {
     pub(crate) fn new(
-        obj_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
-        obj_ctr: hexane::v1::Iter<'a, Option<u32>>,
+        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        obj_ctr: hexane::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
     }
 
     pub(crate) fn new_range(
-        obj_actor: hexane::v1::Iter<'a, Option<ActorIdx>>,
-        obj_ctr: hexane::v1::Iter<'a, Option<u32>>,
+        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        obj_ctr: hexane::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
     }
@@ -634,13 +629,13 @@ impl Iterator for ObjIdIter<'_> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MarkInfoIter<'a> {
-    name: hexane::v1::Iter<'a, Option<String>>,
-    expand: hexane::v1::Iter<'a, bool>,
+    name: hexane::Iter<'a, Option<String>>,
+    expand: hexane::Iter<'a, bool>,
 }
 
 pub(crate) struct MarkInfoIterState {
-    name: hexane::v1::IterState,
-    expand: hexane::v1::column::IterState,
+    name: hexane::IterState,
+    expand: hexane::column::IterState,
 }
 
 impl MarkInfoIterState {
@@ -662,8 +657,8 @@ impl Shiftable for MarkInfoIter<'_> {
 
 impl<'a> MarkInfoIter<'a> {
     pub(crate) fn new(
-        name: hexane::v1::Iter<'a, Option<String>>,
-        expand: hexane::v1::Iter<'a, bool>,
+        name: hexane::Iter<'a, Option<String>>,
+        expand: hexane::Iter<'a, bool>,
     ) -> Self {
         Self { name, expand }
     }
@@ -756,11 +751,11 @@ impl Shiftable for ActionValueIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ActionIter<'a> {
-    iter: hexane::v1::Iter<'a, Action>,
+    iter: hexane::Iter<'a, Action>,
 }
 
 pub(crate) struct ActionIterState {
-    state: hexane::v1::column::IterState,
+    state: hexane::column::IterState,
 }
 
 impl ActionIterState {
@@ -778,7 +773,7 @@ impl Shiftable for ActionIter<'_> {
 }
 
 impl<'a> ActionIter<'a> {
-    pub(crate) fn new(iter: hexane::v1::Iter<'a, Action>) -> Self {
+    pub(crate) fn new(iter: hexane::Iter<'a, Action>) -> Self {
         Self { iter }
     }
 
@@ -811,12 +806,12 @@ impl Iterator for ActionIter<'_> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValueIter<'a> {
-    meta: hexane::v1::PrefixIter<'a, op_set2::meta::ValueMeta>,
-    raw: hexane::v1::RawColumnIter<'a>,
+    meta: hexane::PrefixIter<'a, op_set2::meta::ValueMeta>,
+    raw: hexane::RawColumnIter<'a>,
 }
 
 pub(crate) struct ValueIterState {
-    meta: hexane::v1::PrefixIterState<op_set2::meta::ValueMeta>,
+    meta: hexane::PrefixIterState<op_set2::meta::ValueMeta>,
     raw: usize,
 }
 
@@ -831,28 +826,28 @@ impl ValueIterState {
 
 impl Shiftable for ValueIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let (prefix, meta) = self.meta.shift_next(range)?;
-        let length = meta.length();
-        let value_advance = prefix as usize - length;
-        self.raw.seek_to(value_advance);
-        let raw = self.raw.take(length);
+        let pv = self.meta.shift_next(range)?;
+        let meta = pv.value;
+        self.raw.seek_to(pv.prefix() as usize);
+        let raw = self.raw.take(meta.length());
         ScalarValue::from_raw(meta, raw).ok()
     }
 }
 
 impl<'a> ValueIter<'a> {
     pub(crate) fn new(
-        meta: hexane::v1::PrefixIter<'a, op_set2::meta::ValueMeta>,
-        raw: hexane::v1::RawColumnIter<'a>,
+        meta: hexane::PrefixIter<'a, op_set2::meta::ValueMeta>,
+        raw: hexane::RawColumnIter<'a>,
     ) -> Self {
         Self { meta, raw }
     }
 
     pub(crate) fn try_next(&mut self) -> Result<ScalarValue<'a>, ReadOpError> {
-        let (_prefix, meta) = self
+        let meta = self
             .meta
             .next()
-            .ok_or(ReadOpError::MissingValue("value_meta"))?;
+            .ok_or(ReadOpError::MissingValue("value_meta"))?
+            .value;
         let raw = self.raw.take(meta.length());
         Ok(ScalarValue::from_raw(meta, raw)?)
     }
@@ -861,14 +856,13 @@ impl<'a> ValueIter<'a> {
         if n == 0 {
             self.try_next()
         } else {
-            let (prefix, meta) = self
+            let pv = self
                 .meta
                 .nth(n)
                 .ok_or(ReadOpError::MissingValue("value_meta"))?;
-            let raw_len = meta.length();
-            let raw_pos = prefix as usize;
-            self.raw.seek_to(raw_pos - raw_len);
-            let raw = self.raw.take(raw_len);
+            let meta = pv.value;
+            self.raw.seek_to(pv.prefix() as usize);
+            let raw = self.raw.take(meta.length());
             Ok(ScalarValue::from_raw(meta, raw)?)
         }
     }
@@ -895,17 +889,17 @@ impl<'a> Iterator for ValueIter<'a> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct SuccIterIter<'a> {
-    count: hexane::v1::PrefixIter<'a, u32>,
-    actor: hexane::v1::Iter<'a, ActorIdx>,
-    ctr: hexane::v1::DeltaIter<'a, u32>,
-    incs: hexane::v1::Iter<'a, Option<i64>>,
+    count: hexane::PrefixIter<'a, u32>,
+    actor: hexane::Iter<'a, ActorIdx>,
+    ctr: hexane::DeltaIter<'a, u32>,
+    incs: hexane::Iter<'a, Option<i64>>,
 }
 
 pub(crate) struct SuccIterIterState {
-    count: hexane::v1::PrefixIterState<u32>,
-    actor: hexane::v1::column::IterState,
-    ctr: hexane::v1::DeltaIterState,
-    incs: hexane::v1::column::IterState,
+    count: hexane::PrefixIterState<u32>,
+    actor: hexane::column::IterState,
+    ctr: hexane::DeltaIterState,
+    incs: hexane::column::IterState,
 }
 
 impl SuccIterIterState {
@@ -921,13 +915,13 @@ impl SuccIterIterState {
 
 impl<'a> SuccIterIter<'a> {
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let (prefix, num_succ) = self.count.shift_next(range)?;
-        let num_succ = num_succ as usize;
-        let sub_pos = prefix as usize;
+        let pv = self.count.shift_next(range)?;
+        let num_succ = pv.value as usize;
+        let sub_start = pv.prefix() as usize;
 
-        self.actor.advance_to(sub_pos - num_succ);
-        self.ctr.advance_to(sub_pos - num_succ);
-        self.incs.advance_to(sub_pos - num_succ);
+        self.actor.advance_to(sub_start);
+        self.ctr.advance_to(sub_start);
+        self.incs.advance_to(sub_start);
 
         let iter = SuccCursors {
             len: num_succ,
@@ -944,10 +938,10 @@ impl<'a> SuccIterIter<'a> {
     }
 
     pub(crate) fn new(
-        count: hexane::v1::PrefixIter<'a, u32>,
-        actor: hexane::v1::Iter<'a, ActorIdx>,
-        ctr: hexane::v1::DeltaIter<'a, u32>,
-        incs: hexane::v1::Iter<'a, Option<i64>>,
+        count: hexane::PrefixIter<'a, u32>,
+        actor: hexane::Iter<'a, ActorIdx>,
+        ctr: hexane::DeltaIter<'a, u32>,
+        incs: hexane::Iter<'a, Option<i64>>,
     ) -> Self {
         Self {
             count,
@@ -959,11 +953,11 @@ impl<'a> SuccIterIter<'a> {
 
     #[inline(never)]
     pub(crate) fn try_next(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let (_prefix, num_succ) = self
+        let num_succ = self
             .count
             .next()
-            .ok_or(ReadOpError::MissingValue("succ_count"))?;
-        let num_succ = num_succ as usize;
+            .ok_or(ReadOpError::MissingValue("succ_count"))?
+            .value as usize;
 
         let result = SuccCursors {
             len: num_succ,
@@ -983,13 +977,12 @@ impl<'a> SuccIterIter<'a> {
         if n == 0 {
             self.try_next()
         } else {
-            let (prefix, num_succ) = self
+            let pv = self
                 .count
                 .nth(n)
                 .ok_or(ReadOpError::MissingValue("succ_count"))?;
-            let num_succ = num_succ as usize;
-            let sub_pos = prefix as usize;
-            let items_before = sub_pos - num_succ;
+            let num_succ = pv.value as usize;
+            let items_before = pv.prefix() as usize;
             let actor_pos = self.actor.pos();
             let seek = items_before - actor_pos;
 
@@ -1166,10 +1159,10 @@ mod tests {
         let o31 = ObjId(OpId::new(3, 1));
         let o32 = ObjId(OpId::new(3, 2));
         let objs = [r, r, r, r, o11, o11, o12, o21, o21, o21, o22, o22, o32, o32];
-        let v1_actor = hexane::v1::Column::<Option<ActorIdx>>::from_values(
+        let v1_actor = hexane::Column::<Option<ActorIdx>>::from_values(
             objs.iter().map(|o| o.actor()).collect::<Vec<_>>(),
         );
-        let v1_ctr = hexane::v1::Column::<Option<u32>>::from_values(
+        let v1_ctr = hexane::Column::<Option<u32>>::from_values(
             objs.iter()
                 .map(|o| o.counter().map(|c| c as u32))
                 .collect::<Vec<_>>(),
