@@ -50,7 +50,6 @@ enum CacheHitSource {
 
 #[derive(Debug)]
 pub enum RunError {
-    MissingActor { actor: usize },
     MissingDoc { doc: usize },
     MissingObject { obj: String },
     MissingHeads { doc: usize, slot: u8 },
@@ -59,6 +58,12 @@ pub enum RunError {
     Invariant(String),
     Timeout { step: usize, elapsed_ms: u128 },
     Panic(String),
+}
+
+impl Default for Runner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Runner {
@@ -104,7 +109,7 @@ impl Runner {
         crate::coverage::reset_edge_counters();
         let collect_cmps = self.should_collect_cmps();
         crate::coverage::begin_cmp_observations(collect_cmps);
-        let (mut state, ops) = self.execute_trace_steps(trace, true)?;
+        let (mut state, ops) = self.execute_trace_steps(trace)?;
 
         for doc in 0..state.docs.len() {
             state.save_load(doc)?;
@@ -176,15 +181,7 @@ impl Runner {
         Ok(())
     }
 
-    fn execute_trace_steps(
-        &mut self,
-        trace: &Trace,
-        use_cache: bool,
-    ) -> Result<(RunState, usize), RunError> {
-        if !use_cache {
-            return self.execute_trace_steps_from_scratch(trace);
-        }
-
+    fn execute_trace_steps(&mut self, trace: &Trace) -> Result<(RunState, usize), RunError> {
         let started = Instant::now();
         let timeout = trace_timeout();
         let (mut state, mut ops, start_step, mut prefix_hash, source) = self.cached_start(trace);
@@ -714,11 +711,7 @@ impl RunState {
         actor: usize,
         vm_ops: &[VmOp],
     ) -> Result<(), RunError> {
-        let actor_id = self
-            .actors
-            .get(actor % self.actors.len())
-            .cloned()
-            .ok_or(RunError::MissingActor { actor })?;
+        let actor_id = self.actors[actor % self.actors.len()].clone();
         self.doc_mut(doc)?.doc.set_actor(actor_id);
         for op in vm_ops {
             if let Err(err) = self.doc_mut(doc)?.apply_vm_op(op) {
@@ -757,7 +750,7 @@ impl DocState {
             .doc
             .object_type(&obj)
             .map_err(|err| RunError::Automerge(err.to_string()))?;
-        let budget = usize::from(budget.max(1).min(32));
+        let budget = usize::from(budget.clamp(1, 32));
 
         match mode {
             VmObserveMode::Shallow => self.observe_shallow(&obj, budget),
@@ -1295,7 +1288,6 @@ impl RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingActor { actor } => write!(f, "missing actor {actor}"),
             Self::MissingDoc { doc } => write!(f, "missing document {doc}"),
             Self::MissingObject { obj } => write!(f, "missing object {obj:?}"),
             Self::MissingHeads { doc, slot } => {

@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use automerge_fuzz::coverage::CoverageReporter;
+use automerge_fuzz::crash_view::show_crashes;
 use automerge_fuzz::feedback::FeedbackState;
 use automerge_fuzz::mutate::{
-    mutate, mutation_batch_with_hints, normalize_trace, prefix_extension_batch, MutationBatch,
+    mutate, mutation_batch, normalize_trace, prefix_extension_batch, MutationBatch,
     MAX_VM_INSTRUCTIONS,
 };
 use automerge_fuzz::trace::Trace;
@@ -16,10 +17,6 @@ use automerge_fuzz::{RunError, Runner};
 use clap::{Parser, Subcommand};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-
-mod crash_view;
-
-use crash_view::show_crashes;
 
 #[derive(Debug, Parser)]
 #[command(name = "trace_fuzz")]
@@ -399,13 +396,8 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                         .saturating_mul(effort_power(corpus_power[index]))
                         .saturating_div(2)
                         .max(1);
-                    let batch = mutation_batch_with_hints(
-                        trace,
-                        &corpus,
-                        &mut rng,
-                        effort,
-                        feedback.comparison_u8_values(),
-                    );
+                    let batch =
+                        mutation_batch(trace, &mut rng, effort, feedback.comparison_u8_values());
                     pending_mutations.push_batch(priority, batch);
                 }
             }
@@ -467,9 +459,8 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                     boring = 0;
                     let priority = reason_priority(&reason);
                     if !is_coverage_reason(&reason) {
-                        let batch = mutation_batch_with_hints(
+                        let batch = mutation_batch(
                             &saved_for_batch,
-                            &corpus,
                             &mut rng,
                             scheduled_effort(priority)
                                 * mutation_effort_multiplier
@@ -523,9 +514,8 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                 rejected += 1;
                 boring = boring.saturating_add(1);
                 if rejected % 8 == 0 {
-                    let batch = mutation_batch_with_hints(
+                    let batch = mutation_batch(
                         &candidate,
-                        &corpus,
                         &mut rng,
                         mutation_effort_multiplier,
                         feedback.comparison_u8_values(),
@@ -546,9 +536,8 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
             let recent_start = corpus.len().saturating_sub(16);
             let recent = corpus[recent_start..].to_vec();
             for trace in &recent {
-                let batch = mutation_batch_with_hints(
+                let batch = mutation_batch(
                     trace,
-                    &corpus,
                     &mut rng,
                     4 * mutation_effort_multiplier,
                     feedback.comparison_u8_values(),
@@ -591,9 +580,8 @@ fn fuzz(options: FuzzOptions) -> Result<(), Box<dyn std::error::Error>> {
                             completed,
                         )?;
                         for trace in &recent_valid {
-                            let batch = mutation_batch_with_hints(
+                            let batch = mutation_batch(
                                 trace,
-                                &corpus,
                                 &mut rng,
                                 4 * mutation_effort_multiplier,
                                 feedback.comparison_u8_values(),
@@ -933,14 +921,20 @@ fn load_traces_from_dir(
 
     eprintln!("loading traces from {}", dir.display());
     let before = traces.len();
-    for entry in fs::read_dir(dir)?.take(limit) {
-        let entry = entry?;
-        let path = entry.path();
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
         if path.extension().and_then(|ext| ext.to_str()) == Some("amtrace") {
-            let mut trace = load_trace(path)?;
-            normalize_trace(&mut trace);
-            traces.push(trace);
+            paths.push(path);
         }
+    }
+    // Sort so the corpus (and therefore a seeded fuzz run) does not depend on
+    // filesystem iteration order.
+    paths.sort();
+    for path in paths.into_iter().take(limit) {
+        let mut trace = load_trace(path)?;
+        normalize_trace(&mut trace);
+        traces.push(trace);
     }
     eprintln!(
         "loaded {} traces from {}",

@@ -1,14 +1,63 @@
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 
 use crate::trace::{
     ActorSpec, MarkExpand, Metadata, Trace, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
     VmObserveMode, VmOp, VmValue,
 };
 
-pub const MAX_TRACE_STEPS: usize = 512;
 pub const MAX_VM_INSTRUCTIONS: usize = 256;
+
+impl Trace {
+    pub fn generate(seed: u64, steps: usize) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut builder = VmBuilder::default();
+
+        // Give generated traces a small amount of useful initial structure, but
+        // keep it in the same VM representation as mutated traces.
+        let list_key = builder.allocate_object(ObjKind::List);
+        let text_key = builder.allocate_object(ObjKind::Text);
+        let mut instructions = vec![VmInstr::Change {
+            doc: 0,
+            actor: 0,
+            ops: vec![
+                VmOp::Put {
+                    obj: VmObjRef::Root,
+                    key: 2,
+                    value: VmValue::Uint { slot: seed as u8 },
+                },
+                VmOp::MakeList {
+                    obj: VmObjRef::Root,
+                    key: list_key,
+                },
+                VmOp::MakeText {
+                    obj: VmObjRef::Root,
+                    key: text_key,
+                },
+            ],
+        }];
+
+        for _ in 0..steps {
+            instructions.push(builder.random_instr(&mut rng));
+            if rng.random_range(0..100) < 15 {
+                instructions.push(VmInstr::SaveLoad { doc: 0 });
+            }
+        }
+        instructions.push(VmInstr::SaveLoad { doc: 0 });
+
+        Self {
+            version: 1,
+            metadata: Metadata {
+                seed: Some(seed),
+                parent: None,
+                reason: Some("generated".to_string()),
+            },
+            actors: vec![ActorSpec::new(0), ActorSpec::new(1), ActorSpec::new(2)],
+            steps: instructions,
+        }
+    }
+}
 
 pub fn normalize_trace(trace: &mut Trace) {
     if trace.steps.len() > MAX_VM_INSTRUCTIONS {
@@ -17,16 +66,8 @@ pub fn normalize_trace(trace: &mut Trace) {
 }
 
 pub fn mutate(input: &Trace, rng: &mut StdRng) -> Trace {
-    mutate_with_donor(input, None, rng)
-}
-
-pub fn mutate_with_donor(input: &Trace, _donor: Option<&Trace>, rng: &mut StdRng) -> Trace {
     let mut trace = input.clone();
-    trace.metadata = Metadata {
-        seed: trace.metadata.seed,
-        parent: trace.metadata.parent.clone(),
-        reason: Some("mutated".to_string()),
-    };
+    trace.metadata.reason = Some("mutated".to_string());
 
     ensure_actor_count(&mut trace, 3);
 
@@ -42,16 +83,6 @@ pub fn mutate_with_donor(input: &Trace, _donor: Option<&Trace>, rng: &mut StdRng
 
 pub fn mutation_batch(
     input: &Trace,
-    donors: &[Trace],
-    rng: &mut StdRng,
-    effort: usize,
-) -> MutationBatch {
-    mutation_batch_with_hints(input, donors, rng, effort, &[])
-}
-
-pub fn mutation_batch_with_hints(
-    input: &Trace,
-    _donors: &[Trace],
     rng: &mut StdRng,
     effort: usize,
     comparison_u8_values: &[u8],
@@ -355,7 +386,7 @@ impl<'a, 'rng> MutationBatchBuilder<'a, 'rng> {
             }
         }
 
-        let obj_refs = unique_obj_refs(collect_obj_refs(self.input));
+        let obj_refs = dedup_preserving(collect_obj_refs(self.input));
         for dest in 0..count_obj_refs(self.input) {
             for value in &obj_refs {
                 self.push_plan(MutationPlan::CopyObj {
@@ -368,7 +399,7 @@ impl<'a, 'rng> MutationBatchBuilder<'a, 'rng> {
             }
         }
 
-        let head_refs = unique_head_refs(collect_head_refs(self.input));
+        let head_refs = dedup_preserving(collect_head_refs(self.input));
         for dest in 0..count_head_refs(self.input) {
             for value in &head_refs {
                 self.push_plan(MutationPlan::CopyHead {
@@ -1176,20 +1207,20 @@ impl TraceContext {
         actors.extend([0, 1, 2]);
         actors.sort_unstable();
         actors.dedup();
-        let mut obj_refs = unique_obj_refs(collect_obj_refs(trace));
+        let mut obj_refs = dedup_preserving(collect_obj_refs(trace));
         if !obj_refs.iter().any(|obj| matches!(obj, VmObjRef::Root)) {
             obj_refs.push(VmObjRef::Root);
         }
-        let mut head_refs = unique_head_refs(collect_head_refs(trace));
+        let mut head_refs = dedup_preserving(collect_head_refs(trace));
         head_refs.extend([VmHeadRef::Empty, VmHeadRef::Current]);
-        head_refs = unique_head_refs(head_refs);
+        head_refs = dedup_preserving(head_refs);
         let mut values = collect_values(trace);
         values.extend([
             VmValue::Null,
             VmValue::Bool { slot: 0 },
             VmValue::Uint { slot: 0 },
         ]);
-        values = unique_values(values);
+        values = dedup_preserving(values);
         let mut hydrated = collect_hydrated_values(trace);
         hydrated.extend([
             VmHydrated::Scalar {
@@ -1199,7 +1230,7 @@ impl TraceContext {
             VmHydrated::List { seed: 0, depth: 1 },
             VmHydrated::Text { slot: 0 },
         ]);
-        hydrated = unique_hydrated(hydrated);
+        hydrated = dedup_preserving(hydrated);
         Self {
             docs,
             actors,
@@ -1567,110 +1598,14 @@ fn unique_u8s(mut values: Vec<u8>) -> Vec<u8> {
     values
 }
 
-fn unique_obj_refs(values: Vec<VmObjRef>) -> Vec<VmObjRef> {
+fn dedup_preserving<T: PartialEq>(values: Vec<T>) -> Vec<T> {
     let mut unique = Vec::new();
     for value in values {
-        if !unique.iter().any(|existing| same_obj_ref(existing, &value)) {
+        if !unique.contains(&value) {
             unique.push(value);
         }
     }
     unique
-}
-
-fn unique_head_refs(values: Vec<VmHeadRef>) -> Vec<VmHeadRef> {
-    let mut unique = Vec::new();
-    for value in values {
-        if !unique
-            .iter()
-            .any(|existing| same_head_ref(existing, &value))
-        {
-            unique.push(value);
-        }
-    }
-    unique
-}
-
-fn unique_values(values: Vec<VmValue>) -> Vec<VmValue> {
-    let mut unique = Vec::new();
-    for value in values {
-        if !unique.iter().any(|existing| same_value(existing, &value)) {
-            unique.push(value);
-        }
-    }
-    unique
-}
-
-fn unique_hydrated(values: Vec<VmHydrated>) -> Vec<VmHydrated> {
-    let mut unique = Vec::new();
-    for value in values {
-        if !unique
-            .iter()
-            .any(|existing| same_hydrated(existing, &value))
-        {
-            unique.push(value);
-        }
-    }
-    unique
-}
-
-fn same_obj_ref(left: &VmObjRef, right: &VmObjRef) -> bool {
-    match (left, right) {
-        (VmObjRef::Root, VmObjRef::Root) => true,
-        (VmObjRef::Slot { slot: left }, VmObjRef::Slot { slot: right }) => left == right,
-        (VmObjRef::Recent { back: left }, VmObjRef::Recent { back: right }) => left == right,
-        (VmObjRef::Invalid { slot: left }, VmObjRef::Invalid { slot: right }) => left == right,
-        _ => false,
-    }
-}
-
-fn same_head_ref(left: &VmHeadRef, right: &VmHeadRef) -> bool {
-    match (left, right) {
-        (VmHeadRef::Empty, VmHeadRef::Empty) | (VmHeadRef::Current, VmHeadRef::Current) => true,
-        (VmHeadRef::Slot { slot: left }, VmHeadRef::Slot { slot: right }) => left == right,
-        _ => false,
-    }
-}
-
-fn same_value(left: &VmValue, right: &VmValue) -> bool {
-    match (left, right) {
-        (VmValue::Null, VmValue::Null) => true,
-        (VmValue::Bool { slot: left }, VmValue::Bool { slot: right })
-        | (VmValue::Int { slot: left }, VmValue::Int { slot: right })
-        | (VmValue::Uint { slot: left }, VmValue::Uint { slot: right })
-        | (VmValue::Str { slot: left }, VmValue::Str { slot: right })
-        | (VmValue::Counter { slot: left }, VmValue::Counter { slot: right }) => left == right,
-        _ => false,
-    }
-}
-
-fn same_hydrated(left: &VmHydrated, right: &VmHydrated) -> bool {
-    match (left, right) {
-        (VmHydrated::Scalar { value: left }, VmHydrated::Scalar { value: right }) => {
-            same_value(left, right)
-        }
-        (
-            VmHydrated::Map {
-                seed: left_seed,
-                depth: left_depth,
-            },
-            VmHydrated::Map {
-                seed: right_seed,
-                depth: right_depth,
-            },
-        )
-        | (
-            VmHydrated::List {
-                seed: left_seed,
-                depth: left_depth,
-            },
-            VmHydrated::List {
-                seed: right_seed,
-                depth: right_depth,
-            },
-        ) => left_seed == right_seed && left_depth == right_depth,
-        (VmHydrated::Text { slot: left }, VmHydrated::Text { slot: right }) => left == right,
-        _ => false,
-    }
 }
 
 #[derive(Clone)]
@@ -1742,6 +1677,9 @@ fn map_tuple(op: &VmOp) -> Option<(VmObjRef, u8)> {
 
 fn seq_tuple(op: &VmOp) -> Option<(VmObjRef, u8, SeqKind)> {
     match op {
+        // VmBuilder allocates MakeList/MakeText keys equal to the object slot
+        // the runner will assign, so the key doubles as a slot reference to the
+        // created sequence.
         VmOp::MakeList { key, .. } => Some((VmObjRef::Slot { slot: *key }, 0, SeqKind::List)),
         VmOp::MakeText { key, .. } => Some((VmObjRef::Slot { slot: *key }, 0, SeqKind::Text)),
         VmOp::Insert { obj, index, .. }
@@ -2053,11 +1991,6 @@ fn mutate_once(trace: &mut Trace, rng: &mut StdRng) {
 }
 
 fn trim_trace(trace: &mut Trace, rng: &mut StdRng) {
-    while trace.steps.len() > MAX_TRACE_STEPS {
-        let index = rng.random_range(0..trace.steps.len());
-        trace.steps.remove(index);
-    }
-
     while trace.steps.len() > MAX_VM_INSTRUCTIONS {
         let index = rng.random_range(0..trace.steps.len());
         trace.steps.remove(index);
@@ -2181,7 +2114,7 @@ fn mutate_vm_instruction(instructions: &mut [VmInstr], rng: &mut StdRng) {
             1 => *object = random_vm_obj(rng, 16),
             2 => *mode = random_observe_mode(rng),
             3 => *head = random_vm_head(rng),
-            _ => *budget = mutate_byte(*budget, rng).max(1).min(32),
+            _ => *budget = mutate_byte(*budget, rng).clamp(1, 32),
         },
         VmInstr::SaveHeads { doc, slot } => mutate_u8_pair(doc, slot, rng),
         VmInstr::DiffRange { doc, before, after } => match rng.random_range(0..3) {
@@ -3131,240 +3064,9 @@ fn swap_op_constructor_reusing_fields(trace: &mut Trace, rng: &mut StdRng) {
         return;
     };
     let op_index = rng.random_range(0..ops.len());
-    let replacement = constructor_swap(&ops[op_index], rng);
-    ops[op_index] = replacement;
-}
-
-fn constructor_swap(op: &VmOp, rng: &mut StdRng) -> VmOp {
-    match op {
-        VmOp::Put { obj, key, value } => match rng.random_range(0..3) {
-            0 => VmOp::Delete {
-                obj: obj.clone(),
-                key: *key,
-            },
-            1 => VmOp::Increment {
-                obj: obj.clone(),
-                key: *key,
-                value: rng.random(),
-            },
-            _ => VmOp::Put {
-                obj: obj.clone(),
-                key: *key,
-                value: value.clone(),
-            },
-        },
-        VmOp::Delete { obj, key } => VmOp::Put {
-            obj: obj.clone(),
-            key: *key,
-            value: random_vm_value(rng),
-        },
-        VmOp::Insert { obj, index, value } | VmOp::PutSeq { obj, index, value } => {
-            match rng.random_range(0..4) {
-                0 => VmOp::DeleteSeq {
-                    obj: obj.clone(),
-                    index: *index,
-                },
-                1 => VmOp::PutSeq {
-                    obj: obj.clone(),
-                    index: *index,
-                    value: value.clone(),
-                },
-                2 => VmOp::SpliceList {
-                    obj: obj.clone(),
-                    index: *index,
-                    delete: 1,
-                    values: vec![value.clone()],
-                },
-                _ => VmOp::Insert {
-                    obj: obj.clone(),
-                    index: *index,
-                    value: value.clone(),
-                },
-            }
-        }
-        VmOp::SpliceList {
-            obj,
-            index,
-            delete,
-            values,
-        } => match rng.random_range(0..3) {
-            0 => VmOp::DeleteSeq {
-                obj: obj.clone(),
-                index: *index,
-            },
-            1 => VmOp::PutSeq {
-                obj: obj.clone(),
-                index: *index,
-                value: values
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| random_vm_value(rng)),
-            },
-            _ => VmOp::SpliceList {
-                obj: obj.clone(),
-                index: *index,
-                delete: *delete,
-                values: values.clone(),
-            },
-        },
-        VmOp::DeleteSeq { obj, index } => VmOp::PutSeq {
-            obj: obj.clone(),
-            index: *index,
-            value: random_vm_value(rng),
-        },
-        VmOp::SpliceText {
-            obj,
-            index,
-            delete,
-            value,
-        } => match rng.random_range(0..3) {
-            0 => VmOp::Mark {
-                obj: obj.clone(),
-                start: *index,
-                end: index.saturating_add(1),
-                name: rng.random(),
-                value: VmValue::Null,
-                expand: random_mark_expand(rng),
-            },
-            1 => VmOp::Unmark {
-                obj: obj.clone(),
-                start: *index,
-                end: index.saturating_add(1),
-                name: rng.random(),
-                expand: random_mark_expand(rng),
-            },
-            _ => VmOp::SpliceText {
-                obj: obj.clone(),
-                index: *index,
-                delete: *delete,
-                value: *value,
-            },
-        },
-        VmOp::Mark {
-            obj,
-            start,
-            end,
-            name,
-            value,
-            expand,
-        } => VmOp::Unmark {
-            obj: obj.clone(),
-            start: *start,
-            end: *end,
-            name: *name,
-            expand: *expand,
-        }
-        .with_fallback_mark(obj, *start, *end, *name, value.clone(), *expand, rng),
-        VmOp::Unmark {
-            obj,
-            start,
-            end,
-            name,
-            expand,
-        } => VmOp::Mark {
-            obj: obj.clone(),
-            start: *start,
-            end: *end,
-            name: *name,
-            value: random_vm_value(rng),
-            expand: *expand,
-        },
-        VmOp::MakeMap { obj, key } => VmOp::Put {
-            obj: obj.clone(),
-            key: *key,
-            value: random_vm_value(rng),
-        },
-        VmOp::MakeList { obj, key } | VmOp::MakeText { obj, key } => VmOp::Delete {
-            obj: obj.clone(),
-            key: *key,
-        },
-        VmOp::Increment { obj, key, .. } => VmOp::Put {
-            obj: obj.clone(),
-            key: *key,
-            value: VmValue::Counter { slot: rng.random() },
-        },
-        VmOp::UpdateText { obj, value } => VmOp::SpliceText {
-            obj: obj.clone(),
-            index: 0,
-            delete: 0,
-            value: *value,
-        },
-        VmOp::UpdateObject { obj, value } => VmOp::BatchCreate {
-            obj: obj.clone(),
-            key: rng.random(),
-            value: value.clone(),
-        },
-        VmOp::BatchCreate { obj, key, value } => VmOp::UpdateObject {
-            obj: obj.clone(),
-            value: value.clone(),
-        }
-        .with_fallback_batch_create(obj, *key, value.clone(), rng),
-    }
-}
-
-trait ConstructorSwapFallback {
-    fn with_fallback_mark(
-        self,
-        obj: &VmObjRef,
-        start: u8,
-        end: u8,
-        name: u8,
-        value: VmValue,
-        expand: MarkExpand,
-        rng: &mut StdRng,
-    ) -> VmOp;
-
-    fn with_fallback_batch_create(
-        self,
-        obj: &VmObjRef,
-        key: u8,
-        value: VmHydrated,
-        rng: &mut StdRng,
-    ) -> VmOp;
-}
-
-impl ConstructorSwapFallback for VmOp {
-    fn with_fallback_mark(
-        self,
-        obj: &VmObjRef,
-        start: u8,
-        end: u8,
-        name: u8,
-        value: VmValue,
-        expand: MarkExpand,
-        rng: &mut StdRng,
-    ) -> VmOp {
-        if rng.random_range(0..2) == 0 {
-            self
-        } else {
-            VmOp::Mark {
-                obj: obj.clone(),
-                start,
-                end,
-                name,
-                value,
-                expand,
-            }
-        }
-    }
-
-    fn with_fallback_batch_create(
-        self,
-        obj: &VmObjRef,
-        key: u8,
-        value: VmHydrated,
-        rng: &mut StdRng,
-    ) -> VmOp {
-        if rng.random_range(0..2) == 0 {
-            self
-        } else {
-            VmOp::BatchCreate {
-                obj: obj.clone(),
-                key,
-                value,
-            }
-        }
-    }
+    let mut variants = constructor_swap_variants(&ops[op_index], rng);
+    let variant = rng.random_range(0..variants.len());
+    ops[op_index] = variants.swap_remove(variant);
 }
 
 fn repair_trace(trace: &mut Trace, rng: &mut StdRng) {
@@ -3774,5 +3476,83 @@ fn random_mark_expand(rng: &mut StdRng) -> MarkExpand {
 fn ensure_actor_count(trace: &mut Trace, count: usize) {
     while trace.actors.len() < count {
         trace.actors.push(ActorSpec::new(trace.actors.len()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The typed-field copy plans address fields by ordinal, so the collect_*
+    /// and set_nth_* visitors must walk fields in exactly the same order. Use a
+    /// generated trace (which contains a mix of instruction and op kinds) to
+    /// check that setting the nth u8 field changes the nth collected value.
+    #[test]
+    fn u8_field_visitors_stay_aligned() {
+        let trace = Trace::generate(42, 200);
+        let fields = collect_u8_fields(&trace);
+        assert_eq!(fields.len(), count_u8_fields(&trace));
+        assert!(!fields.is_empty());
+
+        for target in 0..fields.len() {
+            let mut mutated = trace.clone();
+            let mut seen = 0;
+            let sentinel = fields[target].wrapping_add(1);
+            assert!(set_nth_u8_field(&mut mutated, target, sentinel, &mut seen));
+            let mutated_fields = collect_u8_fields(&mutated);
+            assert_eq!(mutated_fields.len(), fields.len());
+            for (index, (before, after)) in fields.iter().zip(&mutated_fields).enumerate() {
+                if index == target {
+                    assert_eq!(*after, sentinel);
+                } else {
+                    assert_eq!(after, before);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn obj_and_head_ref_visitors_stay_aligned() {
+        let trace = Trace::generate(43, 200);
+
+        let obj_refs = collect_obj_refs(&trace);
+        assert_eq!(obj_refs.len(), count_obj_refs(&trace));
+        for target in 0..obj_refs.len() {
+            let mut mutated = trace.clone();
+            let mut seen = 0;
+            let sentinel = VmObjRef::Invalid { slot: 0xab };
+            assert!(set_nth_obj_ref(
+                &mut mutated,
+                target,
+                sentinel.clone(),
+                &mut seen
+            ));
+            assert_eq!(collect_obj_refs(&mutated)[target], sentinel);
+        }
+
+        let head_refs = collect_head_refs(&trace);
+        assert_eq!(head_refs.len(), count_head_refs(&trace));
+        for target in 0..head_refs.len() {
+            let mut mutated = trace.clone();
+            let mut seen = 0;
+            let sentinel = VmHeadRef::Slot { slot: 0xcd };
+            assert!(set_nth_head_ref(
+                &mut mutated,
+                target,
+                sentinel.clone(),
+                &mut seen
+            ));
+            assert_eq!(collect_head_refs(&mutated)[target], sentinel);
+        }
+    }
+
+    #[test]
+    fn generate_is_deterministic() {
+        let a = Trace::generate(7, 50);
+        let b = Trace::generate(7, 50);
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
     }
 }

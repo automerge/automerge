@@ -11,7 +11,7 @@ struct DocumentChunk {
 }
 
 fn add_header(typ: u8, data: &[u8]) -> Vec<u8> {
-    let mut input = vec![u8::from(typ)];
+    let mut input = vec![typ];
     leb128::write::unsigned(&mut input, data.len() as u64).unwrap();
     input.extend(data.as_ref());
     let hash_result = Sha256::digest(input.clone());
@@ -27,10 +27,10 @@ impl<'a> Arbitrary<'a> for DocumentChunk {
         let input = u.bytes(u.len())?;
         let contents = add_header(0, input);
 
-        return Ok(DocumentChunk { bytes: contents });
+        Ok(DocumentChunk { bytes: contents })
     }
 }
 
 fuzz_target!(|doc: DocumentChunk| {
-    Automerge::load(&doc.bytes);
+    let _ = Automerge::load(&doc.bytes);
 });

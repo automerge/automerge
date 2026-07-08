@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use automerge_fuzz::trace::{Trace, VmInstr, VmOp};
-use automerge_fuzz::trace_io::load_trace;
-use automerge_fuzz::Runner;
+use crate::trace::{Trace, VmInstr, VmOp};
+use crate::trace_io::load_trace;
+use crate::Runner;
 
 pub fn show_crashes(
     corpus_dir: &Path,
