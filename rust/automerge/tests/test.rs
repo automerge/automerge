@@ -91,6 +91,40 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn unmark_at_end_of_remotely_inserted_conflicted_scalar_in_text_from_fuzz_trace() {
+    // A scalar inserted into a text object on a remote fork is overwritten concurrently
+    // by two actors, then merged. Unmarking at the document's reported length must not
+    // trip the op-set insert-index consistency assertion.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.commit();
+
+    let mut inserted = doc.fork();
+    inserted.set_actor(ActorId::from(vec![1]));
+    inserted.insert(&text, 0, ScalarValue::Uint(155)).unwrap();
+    inserted.commit();
+
+    let mut left = inserted.fork();
+    left.set_actor(ActorId::from(vec![2]));
+    left.put(&text, 0, ScalarValue::Uint(187)).unwrap();
+    left.commit();
+
+    let mut right = inserted.fork();
+    right.set_actor(ActorId::from(vec![3]));
+    right.put(&text, 0, ScalarValue::Boolean(false)).unwrap();
+    right.commit();
+
+    inserted.merge(&mut left).unwrap();
+    inserted.merge(&mut right).unwrap();
+    doc.merge(&mut inserted).unwrap();
+
+    let len = doc.length(&text);
+    doc.unmark(&text, "color", len, len, ExpandMark::Before)
+        .unwrap();
+}
+
+#[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();

@@ -480,8 +480,13 @@ impl Columns {
         self.index.text.splice(
             pos,
             0,
-            ops.clone()
-                .map(|s| Some(O::width(s, SequenceType::Text, text_encoding) as u32)),
+            ops.clone().map(|s| {
+                if O::top(s) {
+                    Some(O::width(s, SequenceType::Text, text_encoding) as u32)
+                } else {
+                    None
+                }
+            }),
         );
         self.index.top.splice(pos, 0, ops.clone().map(O::top));
         self.index
