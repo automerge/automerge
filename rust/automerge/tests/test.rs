@@ -159,6 +159,27 @@ fn insert_into_replaced_text_run_with_trailing_zero_width_unmark_from_fuzz_trace
 }
 
 #[test]
+fn update_text_after_marking_text_with_hidden_scalar() {
+    // minimized from a fuzz crash
+    // an invisible empty-string scalar, and a mark over the visible character.
+    // Updating the text must not trip the op-set insert-index consistency check.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    doc.insert(&text, 0, ScalarValue::Str("".into())).unwrap();
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), ScalarValue::Boolean(true), 0, 1),
+        ExpandMark::Before,
+    )
+    .unwrap();
+
+    doc.update_text(&text, "hello").unwrap();
+    assert_eq!(doc.text(&text).unwrap(), "hello");
+}
+
+#[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();

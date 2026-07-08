@@ -507,6 +507,14 @@ impl OpSet {
                 Some(0) => {
                     for i in 0..run.count {
                         let p = pos + i + 1;
+                        // Zero-width text-index entries can be sticky mark ops,
+                        // but they can also be visible text elements such as an
+                        // empty string scalar. Only mark ops are transparent for
+                        // this scan; a visible non-mark element is a real insertion
+                        // boundary.
+                        if self.get(p).is_some_and(|op| !op.is_mark()) {
+                            return found.last().map(|p| p.1);
+                        }
                         let e = expand.shift_next(p..end)?;
                         if let Some(Some(m)) = marks.shift_next(p..end) {
                             // can't insert between mark start/end pair
