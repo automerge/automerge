@@ -474,6 +474,8 @@ fn features(trace: &Trace) -> Vec<&'static str> {
                         }
                         VmOp::SpliceText { .. } => features.push("text_insert"),
                         VmOp::UpdateText { .. } => features.push("text_update"),
+                        VmOp::EditText { .. } => features.push("text_edit"),
+                        VmOp::UpdateSpans { .. } => features.push("update_spans"),
                         VmOp::Increment { .. } => features.push("increment"),
                         VmOp::Mark { .. } => features.push("mark"),
                         VmOp::Unmark { .. } => features.push("unmark"),
@@ -489,6 +491,15 @@ fn features(trace: &Trace) -> Vec<&'static str> {
 
     if actors.len() > 1 {
         features.push("multiple_actors");
+    }
+
+    if let Some(encoding) = trace.text_encoding {
+        features.push(match encoding {
+            crate::trace::VmTextEncoding::CodePoint => "encoding_code_point",
+            crate::trace::VmTextEncoding::Utf8 => "encoding_utf8",
+            crate::trace::VmTextEncoding::Utf16 => "encoding_utf16",
+            crate::trace::VmTextEncoding::Grapheme => "encoding_grapheme",
+        });
     }
 
     features
@@ -529,7 +540,9 @@ fn structural_key(trace: &Trace) -> StructuralKey {
                         VmOp::Insert { .. } => stats.list_inserts += 1,
                         VmOp::SpliceList { .. } => stats.list_splices += 1,
                         VmOp::SpliceText { .. } => stats.text_splices += 1,
-                        VmOp::UpdateText { .. } => stats.text_updates += 1,
+                        VmOp::UpdateText { .. }
+                        | VmOp::EditText { .. }
+                        | VmOp::UpdateSpans { .. } => stats.text_updates += 1,
                         VmOp::Increment { .. } => stats.puts += 1,
                         VmOp::Mark { .. } => stats.marks += 1,
                         VmOp::Unmark { .. } => stats.unmarks += 1,
@@ -623,6 +636,8 @@ fn vm_op_obj_depth(op: &VmOp) -> usize {
         | VmOp::SpliceList { obj, .. }
         | VmOp::SpliceText { obj, .. }
         | VmOp::UpdateText { obj, .. }
+        | VmOp::EditText { obj, .. }
+        | VmOp::UpdateSpans { obj, .. }
         | VmOp::Increment { obj, .. }
         | VmOp::Mark { obj, .. }
         | VmOp::Unmark { obj, .. }

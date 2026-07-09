@@ -4,7 +4,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::trace::{
     ActorSpec, MarkExpand, Metadata, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
-    VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmValue,
+    VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmTextEncoding, VmValue,
 };
 
 pub const MAX_VM_INSTRUCTIONS: usize = 256;
@@ -54,8 +54,19 @@ impl Trace {
                 reason: Some("generated".to_string()),
             },
             actors: vec![ActorSpec::new(0), ActorSpec::new(1), ActorSpec::new(2)],
+            text_encoding: random_text_encoding(&mut rng),
             steps: instructions,
         }
+    }
+}
+
+fn random_text_encoding(rng: &mut StdRng) -> Option<VmTextEncoding> {
+    match rng.random_range(0..8) {
+        0 => Some(VmTextEncoding::Utf8),
+        1 => Some(VmTextEncoding::Utf16),
+        2 => Some(VmTextEncoding::Grapheme),
+        3 => Some(VmTextEncoding::CodePoint),
+        _ => None,
     }
 }
 
@@ -1163,7 +1174,9 @@ fn constructor_swap_variant_count(op: &VmOp) -> usize {
         VmOp::MakeMap { .. } => 1,
         VmOp::MakeList { .. } | VmOp::MakeText { .. } => 1,
         VmOp::Increment { .. } => 1,
-        VmOp::UpdateText { .. } => 1,
+        VmOp::UpdateText { .. } => 2,
+        VmOp::EditText { .. } => 3,
+        VmOp::UpdateSpans { .. } => 2,
         VmOp::UpdateObject { .. } => 1,
         VmOp::BatchCreate { .. } => 2,
     }
@@ -1490,6 +1503,8 @@ fn set_op_obj_at(trace: &mut Trace, step: usize, op: usize, replacement: VmObjRe
         | VmOp::SpliceList { obj, .. }
         | VmOp::SpliceText { obj, .. }
         | VmOp::UpdateText { obj, .. }
+        | VmOp::EditText { obj, .. }
+        | VmOp::UpdateSpans { obj, .. }
         | VmOp::Increment { obj, .. }
         | VmOp::Mark { obj, .. }
         | VmOp::Unmark { obj, .. }
@@ -1925,12 +1940,42 @@ fn constructor_swap_variants(op: &VmOp, rng: &mut StdRng) -> Vec<VmOp> {
             key: *key,
             value: VmValue::Counter { slot: rng.random() },
         }],
-        VmOp::UpdateText { obj, value } => vec![VmOp::SpliceText {
-            obj: obj.clone(),
-            index: 0,
-            delete: 0,
-            value: *value,
-        }],
+        VmOp::UpdateText { obj, value } => vec![
+            VmOp::EditText {
+                obj: obj.clone(),
+                seed: *value,
+            },
+            VmOp::SpliceText {
+                obj: obj.clone(),
+                index: 0,
+                delete: 0,
+                value: *value,
+            },
+        ],
+        VmOp::EditText { obj, seed } => vec![
+            VmOp::UpdateText {
+                obj: obj.clone(),
+                value: *seed,
+            },
+            VmOp::UpdateSpans {
+                obj: obj.clone(),
+                seed: *seed,
+            },
+            VmOp::EditText {
+                obj: obj.clone(),
+                seed: seed.wrapping_add(1),
+            },
+        ],
+        VmOp::UpdateSpans { obj, seed } => vec![
+            VmOp::EditText {
+                obj: obj.clone(),
+                seed: *seed,
+            },
+            VmOp::UpdateSpans {
+                obj: obj.clone(),
+                seed: seed.wrapping_add(1),
+            },
+        ],
         VmOp::UpdateObject { obj, value } => vec![VmOp::BatchCreate {
             obj: obj.clone(),
             key: rng.random(),
@@ -1961,6 +2006,10 @@ fn mutation_rounds(rng: &mut StdRng) -> usize {
 }
 
 fn mutate_once(trace: &mut Trace, rng: &mut StdRng) {
+    if rng.random_range(0..100) < 2 {
+        trace.text_encoding = random_text_encoding(rng);
+        return;
+    }
     match rng.random_range(0..100) {
         // Add small semantic state-space expansions. These are not saved seeds
         // or copied genes; they are grammar-level transitions that create the
@@ -2257,6 +2306,12 @@ fn mutate_vm_op(ops: &mut [VmOp], rng: &mut StdRng) {
             0 => *obj = random_vm_obj(rng, 16),
             _ => *value = mutate_byte(*value, rng),
         },
+        VmOp::EditText { obj, seed } | VmOp::UpdateSpans { obj, seed } => {
+            match rng.random_range(0..2) {
+                0 => *obj = random_vm_obj(rng, 16),
+                _ => *seed = mutate_byte(*seed, rng),
+            }
+        }
         VmOp::Increment { obj, key, value } => match rng.random_range(0..3) {
             0 => *obj = random_vm_obj(rng, 16),
             1 => *key = mutate_byte(*key, rng),
@@ -2473,6 +2528,8 @@ fn rebase_op(op: &mut VmOp, prefix: &VmBuilder, rng: &mut StdRng) {
         }
         VmOp::SpliceText { obj, .. }
         | VmOp::UpdateText { obj, .. }
+        | VmOp::EditText { obj, .. }
+        | VmOp::UpdateSpans { obj, .. }
         | VmOp::Mark { obj, .. }
         | VmOp::Unmark { obj, .. } => {
             *obj = rebase_obj_ref(obj, prefix, ObjNeed::Text, rng);
@@ -2659,6 +2716,10 @@ fn collect_op_u8(op: &VmOp, values: &mut Vec<u8>) {
         VmOp::UpdateText { obj, value } => {
             collect_obj_u8(obj, values);
             values.push(*value);
+        }
+        VmOp::EditText { obj, seed } | VmOp::UpdateSpans { obj, seed } => {
+            collect_obj_u8(obj, values);
+            values.push(*seed);
         }
         VmOp::Increment { obj, key, value } => {
             collect_obj_u8(obj, values);
@@ -2895,6 +2956,9 @@ fn set_op_u8(op: &mut VmOp, target: usize, value: u8, seen: &mut usize) -> bool 
         VmOp::UpdateText { obj, value: v } => {
             set_obj_u8(obj, target, value, seen) || maybe_set_u8(v, target, value, seen)
         }
+        VmOp::EditText { obj, seed } | VmOp::UpdateSpans { obj, seed } => {
+            set_obj_u8(obj, target, value, seen) || maybe_set_u8(seed, target, value, seen)
+        }
         VmOp::Increment { obj, key, value: v } => {
             set_obj_u8(obj, target, value, seen)
                 || maybe_set_u8(key, target, value, seen)
@@ -3022,6 +3086,8 @@ fn collect_op_obj_refs(op: &VmOp, refs: &mut Vec<VmObjRef>) {
         | VmOp::SpliceList { obj, .. }
         | VmOp::SpliceText { obj, .. }
         | VmOp::UpdateText { obj, .. }
+        | VmOp::EditText { obj, .. }
+        | VmOp::UpdateSpans { obj, .. }
         | VmOp::Increment { obj, .. }
         | VmOp::Mark { obj, .. }
         | VmOp::Unmark { obj, .. }
@@ -3120,6 +3186,8 @@ fn set_op_obj_ref(op: &mut VmOp, target: usize, value: VmObjRef, seen: &mut usiz
         | VmOp::SpliceList { obj, .. }
         | VmOp::SpliceText { obj, .. }
         | VmOp::UpdateText { obj, .. }
+        | VmOp::EditText { obj, .. }
+        | VmOp::UpdateSpans { obj, .. }
         | VmOp::Increment { obj, .. }
         | VmOp::Mark { obj, .. }
         | VmOp::Unmark { obj, .. }
@@ -3437,7 +3505,7 @@ impl VmBuilder {
         if !self.texts.is_empty() {
             // Text splices are relatively cheap and build large histories. Bias
             // toward them over update_text, which pays text-diff costs.
-            choices.extend([7, 7, 8, 10, 11]);
+            choices.extend([7, 7, 8, 10, 11, 16, 16, 17]);
         }
 
         match choices[rng.random_range(0..choices.len())] {
@@ -3518,6 +3586,14 @@ impl VmBuilder {
             14 => VmOp::UpdateObject {
                 obj: self.random_any_ref(rng),
                 value: random_vm_hydrated(rng),
+            },
+            16 => VmOp::EditText {
+                obj: self.random_text_ref(rng),
+                seed: rng.random(),
+            },
+            17 => VmOp::UpdateSpans {
+                obj: self.random_text_ref(rng),
+                seed: rng.random(),
             },
             _ => {
                 let obj = self.random_map_ref(rng);

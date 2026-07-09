@@ -5,7 +5,20 @@ pub struct Trace {
     pub metadata: Metadata,
     #[serde(default)]
     pub actors: Vec<ActorSpec>,
+    /// Text encoding the documents are created (and reloaded) with. `None`
+    /// means the default `UnicodeCodePoint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_encoding: Option<VmTextEncoding>,
     pub steps: Vec<VmInstr>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmTextEncoding {
+    CodePoint,
+    Utf8,
+    Utf16,
+    Grapheme,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -203,6 +216,19 @@ pub enum VmOp {
     UpdateText {
         obj: VmObjRef,
         value: u8,
+    },
+    /// `update_text` with a small edit derived from the object's *current*
+    /// text: near-identical before/after strings drive the Myers diff much
+    /// deeper than swapping between canned strings does.
+    EditText {
+        obj: VmObjRef,
+        seed: u8,
+    },
+    /// Replace a text object's rich content (text spans, marks, and block
+    /// markers) via `update_spans`, which drives the block/marks diff path.
+    UpdateSpans {
+        obj: VmObjRef,
+        seed: u8,
     },
     Increment {
         obj: VmObjRef,

@@ -300,6 +300,8 @@ fn op_kind(op: &VmOp) -> &'static str {
         VmOp::SpliceList { .. } => "splice_list",
         VmOp::SpliceText { .. } => "splice_text",
         VmOp::UpdateText { .. } => "update_text",
+        VmOp::EditText { .. } => "edit_text",
+        VmOp::UpdateSpans { .. } => "update_spans",
         VmOp::Increment { .. } => "increment",
         VmOp::Mark { .. } => "mark",
         VmOp::Unmark { .. } => "unmark",

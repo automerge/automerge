@@ -1,18 +1,20 @@
 use automerge::hydrate;
-use automerge::marks::{ExpandMark, Mark};
+use automerge::marks::{ExpandMark, Mark, MarkSet, UpdateSpansConfig};
 use automerge::sync::{self, SyncDoc};
 use automerge::transaction::Transactable;
+use automerge::Span;
 use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use automerge::{
-    ActorId, AutoCommit, ChangeHash, MoveCursor, ObjId, ObjType, ReadDoc, ScalarValue, ROOT,
+    ActorId, AutoCommit, ChangeHash, Cursor, LoadOptions, MoveCursor, ObjId, ObjType, ReadDoc,
+    ScalarValue, TextEncoding, ROOT,
 };
 
 use crate::trace::{
-    ActorSpec, MarkExpand, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
-    VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmValue,
+    MarkExpand, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef, VmObserveMode, VmOp,
+    VmSyncFault, VmSyncOp, VmTextEncoding, VmValue,
 };
 
 pub struct Runner {
@@ -285,7 +287,7 @@ impl Runner {
     ) -> Result<(RunState, usize), RunError> {
         let started = Instant::now();
         let timeout = trace_timeout();
-        let mut state = RunState::new(&trace.actors);
+        let mut state = RunState::new(trace);
         let mut ops = 0usize;
         let mut prefix_hash = initial_prefix_hash(trace);
         for (step_index, step) in trace.steps.iter().enumerate() {
@@ -312,13 +314,7 @@ impl Runner {
             && self.prefix_cache.is_empty()
             && self.checkpoint_cache.is_empty()
         {
-            return (
-                RunState::new(&trace.actors),
-                0,
-                0,
-                initial_prefix_hash(trace),
-                None,
-            );
+            return (RunState::new(trace), 0, 0, initial_prefix_hash(trace), None);
         }
 
         let mut hash = initial_prefix_hash(trace);
@@ -355,13 +351,7 @@ impl Runner {
         if let Some((state, ops, completed, hash, source)) = best {
             (state, ops, completed, hash, Some(source))
         } else {
-            (
-                RunState::new(&trace.actors),
-                0,
-                0,
-                initial_prefix_hash(trace),
-                None,
-            )
+            (RunState::new(trace), 0, 0, initial_prefix_hash(trace), None)
         }
     }
 
@@ -442,6 +432,7 @@ fn initial_prefix_hash(trace: &Trace) -> u64 {
     let mut hash = FNV_OFFSET;
     combine_prefix_hash(&mut hash, u64::from(trace.version));
     combine_prefix_hash(&mut hash, structural_hash(&trace.actors));
+    combine_prefix_hash(&mut hash, structural_hash(&trace.text_encoding));
     hash
 }
 
@@ -508,6 +499,7 @@ struct RunState {
     actors: Vec<ActorId>,
     docs: Vec<DocState>,
     sessions: Vec<Option<SyncSession>>,
+    text_encoding: TextEncoding,
 }
 
 #[derive(Clone)]
@@ -548,17 +540,28 @@ impl SyncSession {
     }
 }
 
+fn vm_text_encoding(encoding: Option<VmTextEncoding>) -> TextEncoding {
+    match encoding {
+        None | Some(VmTextEncoding::CodePoint) => TextEncoding::UnicodeCodePoint,
+        Some(VmTextEncoding::Utf8) => TextEncoding::Utf8CodeUnit,
+        Some(VmTextEncoding::Utf16) => TextEncoding::Utf16CodeUnit,
+        Some(VmTextEncoding::Grapheme) => TextEncoding::GraphemeCluster,
+    }
+}
+
 impl RunState {
-    fn new(actors: &[ActorSpec]) -> Self {
-        let actors = if actors.is_empty() {
+    fn new(trace: &Trace) -> Self {
+        let actors = if trace.actors.is_empty() {
             vec![ActorId::from(vec![0])]
         } else {
-            actors
+            trace
+                .actors
                 .iter()
                 .map(|actor| ActorId::from(actor.bytes.clone()))
                 .collect()
         };
-        let mut doc = AutoCommit::new();
+        let text_encoding = vm_text_encoding(trace.text_encoding);
+        let mut doc = AutoCommit::new_with_encoding(text_encoding);
         doc.set_actor(actors[0].clone());
         Self {
             actors,
@@ -569,6 +572,7 @@ impl RunState {
                 generation: 0,
             }],
             sessions: vec![None; MAX_SYNC_SESSIONS],
+            text_encoding,
         }
     }
 
@@ -612,8 +616,9 @@ impl RunState {
         let actor = self.actors[to % self.actors.len()].clone();
         doc.set_actor(actor);
         if to >= self.docs.len() {
+            let text_encoding = self.text_encoding;
             self.docs.resize_with(to + 1, || DocState {
-                doc: AutoCommit::new(),
+                doc: AutoCommit::new_with_encoding(text_encoding),
                 objects: Vec::new(),
                 head_slots: Vec::new(),
                 generation: 0,
@@ -1011,13 +1016,16 @@ impl RunState {
     }
 
     fn save_load(&mut self, doc: usize) -> Result<SaveLoadOutcome, RunError> {
+        let text_encoding = self.text_encoding;
         let doc_state = self.doc_mut(doc)?;
         let before = doc_state
             .doc
             .hydrate(&ROOT, None)
             .map_err(|err| RunError::Automerge(err.to_string()))?;
         let bytes = doc_state.doc.save();
-        let loaded = AutoCommit::load(&bytes).map_err(|err| RunError::Load(err.to_string()))?;
+        let loaded =
+            AutoCommit::load_with_options(&bytes, LoadOptions::new().text_encoding(text_encoding))
+                .map_err(|err| RunError::Load(err.to_string()))?;
         let after = loaded
             .hydrate(&ROOT, None)
             .map_err(|err| RunError::Automerge(err.to_string()))?;
@@ -1398,7 +1406,27 @@ impl DocState {
         if len > 0 {
             let pos = len / 2;
             if let Ok(cursor) = self.doc.get_cursor(obj, pos, at) {
-                let _ = self.doc.get_cursor_position(obj, &cursor, at);
+                let position = self.doc.get_cursor_position(obj, &cursor, at).ok();
+                // Round-trip the cursor through both serialized forms; a
+                // decoded cursor must resolve to the same position.
+                let bytes = cursor.to_bytes();
+                let decoded = Cursor::try_from(&bytes[..]).map_err(|err| {
+                    RunError::Invariant(format!("cursor failed to decode its own bytes: {err}"))
+                })?;
+                let text = cursor.to_string();
+                let parsed = Cursor::try_from(text.as_str()).map_err(|err| {
+                    RunError::Invariant(format!(
+                        "cursor failed to parse its own string form: {err}"
+                    ))
+                })?;
+                for copy in [decoded, parsed] {
+                    let round_tripped = self.doc.get_cursor_position(obj, &copy, at).ok();
+                    if round_tripped != position {
+                        return Err(RunError::Invariant(
+                            "cursor round trip changed its position".to_string(),
+                        ));
+                    }
+                }
             }
             let move_cursor = if obj_type == ObjType::Text {
                 MoveCursor::After
@@ -1537,6 +1565,21 @@ fn apply_vm_op_tx<T: ReadDoc + Transactable>(
             let obj = resolve_vm_obj(objects, obj)?;
             let value = vm_text(*value);
             doc.update_text(&obj, value)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::EditText { obj, seed } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let current = doc
+                .text(&obj)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            let edited = vm_edit_text(&current, *seed);
+            doc.update_text(&obj, edited)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+        }
+        VmOp::UpdateSpans { obj, seed } => {
+            let obj = resolve_vm_obj(objects, obj)?;
+            let spans = vm_spans(*seed);
+            doc.update_spans(&obj, UpdateSpansConfig::default(), spans)
                 .map_err(|err| RunError::Automerge(err.to_string()))?;
         }
         VmOp::Increment { obj, key, value } => {
@@ -1701,6 +1744,9 @@ fn vm_string(slot: u8) -> String {
         "🦊🐻",
         "multi\nline",
         "abcdefghijklmnopqrstuvwxyz",
+        "e\u{0301}e\u{0301}",
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
+        "a\u{0301}\u{0302}\u{0303}",
     ];
     STRINGS[usize::from(slot) % STRINGS.len()].to_string()
 }
@@ -1711,6 +1757,79 @@ fn vm_text(slot: u8) -> String {
     } else {
         vm_string(slot)
     }
+}
+
+/// A small edit of `current`, biased toward boundary-hostile insertions
+/// (astral plane, ZWJ sequences, combining marks) so the Myers text diff and
+/// the width indexes see near-identical strings under every encoding.
+fn vm_edit_text(current: &str, seed: u8) -> String {
+    const INSERTS: &[&str] = &[
+        "x",
+        " ",
+        "\u{1F98A}",
+        "\u{0301}",
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+        "\u{4E2D}",
+        "e\u{0301}",
+        "\r\n",
+    ];
+    let chars: Vec<char> = current.chars().collect();
+    let insert = INSERTS[usize::from(seed) % INSERTS.len()];
+    let pos = if chars.is_empty() {
+        0
+    } else {
+        usize::from(seed) % (chars.len() + 1)
+    };
+    let rebuild = |range: std::ops::Range<usize>, middle: &str| -> String {
+        let mut out: String = chars[..range.start].iter().collect();
+        out.push_str(middle);
+        out.extend(&chars[range.end..]);
+        out
+    };
+    let target = pos.min(chars.len().saturating_sub(1));
+    match seed % 5 {
+        0 => rebuild(pos..pos, insert),
+        1 if !chars.is_empty() => rebuild(target..target + 1, ""),
+        2 if !chars.is_empty() => rebuild(target..target + 1, insert),
+        3 => {
+            // Duplicate the first half: a large but highly similar edit.
+            let half: String = chars[..chars.len() / 2].iter().collect();
+            format!("{half}{current}")
+        }
+        _ => format!("{current}{insert}"),
+    }
+}
+
+/// A deterministic sequence of rich-text spans: several text runs carrying
+/// different mark sets, occasionally interrupted by a block marker. Drives
+/// `update_spans` and the block/marks diff path in text_diff.rs.
+fn vm_spans(seed: u8) -> Vec<Span> {
+    const MARK_NAMES: &[&str] = &["bold", "italic", "link", "comment"];
+    let run_count = 1 + usize::from(seed % 4);
+    let mut spans = Vec::new();
+    for run in 0..run_count {
+        let mix = seed.wrapping_add(run as u8);
+        if mix % 5 == 4 {
+            let mut block = std::collections::HashMap::new();
+            block.insert("type", hydrate::Value::scalar(vm_string(mix)));
+            spans.push(Span::Block(block.into()));
+            continue;
+        }
+        let marks: Option<std::sync::Arc<MarkSet>> = if mix % 3 == 0 {
+            None
+        } else {
+            let name = MARK_NAMES[usize::from(mix) % MARK_NAMES.len()].to_string();
+            let value = ScalarValue::Boolean(mix % 2 == 0);
+            Some(std::sync::Arc::new(
+                std::iter::once((name, value)).collect::<MarkSet>(),
+            ))
+        };
+        spans.push(Span::Text {
+            text: vm_splice_text(mix),
+            marks,
+        });
+    }
+    spans
 }
 
 fn vm_splice_text(slot: u8) -> String {
@@ -1804,7 +1923,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::Metadata;
+    use crate::trace::{ActorSpec, Metadata};
     use crate::trace::{VmApplyOrder, VmHeadRef};
     use crate::trace::{VmSyncFault, VmSyncOp};
 
@@ -1818,6 +1937,103 @@ mod tests {
                 value: VmValue::Uint { slot: value },
             }],
             commit,
+        }
+    }
+
+    #[test]
+    fn update_spans_rewrites_rich_text() {
+        let mut steps = vec![VmInstr::Change {
+            doc: 0,
+            actor: 0,
+            ops: vec![
+                VmOp::MakeText {
+                    obj: VmObjRef::Root,
+                    key: 0,
+                },
+                VmOp::SpliceText {
+                    obj: VmObjRef::Slot { slot: 0 },
+                    index: 0,
+                    delete: 0,
+                    value: 3,
+                },
+            ],
+        }];
+        // Repeated update_spans with different seeds exercises the block/marks
+        // diff path, including span replaces and mark changes over existing
+        // content.
+        for seed in 0..16u8 {
+            steps.push(VmInstr::Change {
+                doc: 0,
+                actor: 0,
+                ops: vec![VmOp::UpdateSpans {
+                    obj: VmObjRef::Slot { slot: 0 },
+                    seed,
+                }],
+            });
+            steps.push(VmInstr::SaveLoad { doc: 0 });
+        }
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0)],
+            text_encoding: None,
+            steps,
+        };
+        Runner::new()
+            .run_catching(&trace)
+            .expect("update_spans runs");
+    }
+
+    #[test]
+    fn hostile_text_edits_run_under_every_encoding() {
+        use crate::trace::VmTextEncoding;
+        for encoding in [
+            None,
+            Some(VmTextEncoding::CodePoint),
+            Some(VmTextEncoding::Utf8),
+            Some(VmTextEncoding::Utf16),
+            Some(VmTextEncoding::Grapheme),
+        ] {
+            let mut steps = vec![VmInstr::Change {
+                doc: 0,
+                actor: 0,
+                ops: vec![VmOp::MakeText {
+                    obj: VmObjRef::Root,
+                    key: 0,
+                }],
+            }];
+            // Cycle splices and near-miss edits through the hostile string
+            // tables (ZWJ families, combining marks, astral plane), with a
+            // save/load after each edit so the width indexes are rebuilt.
+            for seed in 0..24u8 {
+                steps.push(VmInstr::Change {
+                    doc: 0,
+                    actor: 0,
+                    ops: vec![
+                        VmOp::SpliceText {
+                            obj: VmObjRef::Slot { slot: 0 },
+                            index: seed,
+                            delete: seed % 3,
+                            value: seed,
+                        },
+                        VmOp::EditText {
+                            obj: VmObjRef::Slot { slot: 0 },
+                            seed,
+                        },
+                    ],
+                });
+                steps.push(VmInstr::SaveLoad { doc: 0 });
+            }
+            let trace = Trace {
+                version: 1,
+                metadata: Metadata::default(),
+                actors: vec![ActorSpec::new(0)],
+                text_encoding: encoding,
+                steps,
+            };
+            Runner::new()
+                .run_catching(&trace)
+                .unwrap_or_else(|err| panic!("encoding {encoding:?} failed: {err}"));
         }
     }
 
@@ -1837,6 +2053,7 @@ mod tests {
             version: 1,
             metadata: Metadata::default(),
             actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            text_encoding: None,
             steps: vec![
                 put(1, 5),
                 VmInstr::Fork { from: 0, to: 1 },
@@ -1882,6 +2099,7 @@ mod tests {
             version: 1,
             metadata: Metadata::default(),
             actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            text_encoding: None,
             steps: vec![
                 put(0, 1, 5),
                 VmInstr::SaveHeads { doc: 0, slot: 0 },
@@ -1918,6 +2136,7 @@ mod tests {
             version: 1,
             metadata: Metadata::default(),
             actors: vec![ActorSpec::new(0)],
+            text_encoding: None,
             steps: vec![
                 transact_instr(1, 5, true),
                 transact_instr(2, 9, false),

@@ -407,9 +407,41 @@ Minimized repro committed as an ignored test in
 passing guard that `fork_at` with foreign heads returns an error. Until the
 bug is fixed, fuzz runs will keep saving this crash signature.
 
-Next VM extensions from the same coverage triage, not yet implemented:
-non-default `TextEncoding`s and near-miss `update_text` inputs, cursor
-serialization round-trips.
+## Text encodings, rich text, and cursors
+
+Coverage triage flagged the text subsystem (`text_diff.rs` 20%,
+`text_value.rs` 27%, `cursor.rs` 9%) as almost untouched because the runner
+only ever used the default encoding, canned `update_text` strings, and never
+serialized cursors.
+
+- [x] `Trace::text_encoding` (`VmTextEncoding::{CodePoint, Utf8, Utf16,
+  Grapheme}`): documents are created and reloaded with the chosen encoding.
+  Generated ~half the time, occasionally flipped by the mutator, and folded
+  into the prefix-cache hash.
+- [x] `VmOp::EditText { obj, seed }`: `update_text` with a small edit derived
+  from the object's *current* text (insert/delete/replace/duplicate),
+  biased toward boundary-hostile strings (astral plane, ZWJ families,
+  combining marks) so the Myers diff sees near-identical before/after inputs.
+- [x] `VmOp::UpdateSpans { obj, seed }`: rewrites rich content (text runs with
+  mark sets, occasional block markers) via `update_spans`, driving the
+  block/marks diff path.
+- [x] Cursor round-trip invariant in the `Cursors` observe mode: a cursor
+  round-tripped through both `to_bytes`/`try_from` and `to_string`/`try_from`
+  must resolve to the same position.
+- [x] Extended the hostile-string tables with decomposed accents, stacked
+  combining marks, and multi-person ZWJ sequences.
+- [x] Features and structural buckets track encodings, `text_edit`, and
+  `update_spans`.
+
+Validation: `text_diff.rs` 20% -> 90%, `cursor.rs` 9% -> 66%, `text_value.rs`
+27% -> 44%. Regression tests cover hostile edits under all four encodings and
+repeated `update_spans` rewrites. No crashes in short soak runs.
+
+The trace fuzzer has now covered the reachable-but-unreached surface from the
+original coverage triage (transactions, sync sessions, historical forks +
+change transfer, text). Remaining low-coverage core files are old-format
+`legacy/` and `columnar/` encoding paths, reachable only by loading crafted
+bytes — the raw-byte `load` fuzz target's domain, not the trace fuzzer's.
 
 ## Deferred until later phases
 
