@@ -301,6 +301,7 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn from_raw(
         meta: super::meta::ValueMeta,
         raw: &'a [u8],

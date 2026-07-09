@@ -49,8 +49,8 @@ pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
     OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
-pub(crate) use op_query::{OpQuery, OpQueryTerm};
-pub(crate) use top_op::TopOpIter;
+pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
+pub(crate) use top_op::{SkipToTopIter, TopOps};
 pub(crate) use visible::{VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
@@ -374,8 +374,7 @@ impl OpSet {
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        let iter = self.iter_obj(obj).visible_slow(clock).top_ops();
-        Keys::new(self, iter)
+        Keys::new(self, self.top_ops(obj, clock))
     }
 
     pub(crate) fn spans(&self, obj: &ObjId, clock: Option<Clock>) -> SpansInternal<'_> {
@@ -903,6 +902,42 @@ impl OpSet {
         self.cols.insert.iter_range(range.clone())
     }
 
+    pub(crate) fn insert_iter_range(&self, range: &Range<usize>) -> InsertIter<'_> {
+        InsertIter::new(self.cols.insert.values().iter_range(range.clone()))
+    }
+
+    pub(crate) fn top_index_range(&self, range: &Range<usize>) -> hexane::Iter<'_, bool> {
+        self.cols.index.top.values().iter_range(range.clone())
+    }
+
+    /// Checks whether every op in the given range is "top" (i.e. every op has
+    /// no successor and there are no conflicts).
+    pub(crate) fn all_of_range_is_top(&self, range: &Range<usize>) -> bool {
+        // Lets span iteration skip top-filtering entirely for dense current docs.
+        range.is_empty()
+            || self
+                .cols
+                .index
+                .top
+                .delta(range.start, range.end)
+                .is_some_and(|delta| delta.delta == range.len())
+    }
+
+    pub(crate) fn obj_id_iter_range(&self, range: &Range<usize>) -> ObjIdIter<'_> {
+        ObjIdIter::new_range(
+            self.cols.obj_actor.iter_range(range.clone()),
+            self.cols.obj_ctr.iter_range(range.clone()),
+        )
+    }
+
+    pub(crate) fn key_iter_range(&self, range: &Range<usize>) -> KeyIter<'_> {
+        KeyIter::new(
+            self.cols.key_str.iter_range(range.clone()),
+            self.cols.key_actor.iter_range(range.clone()),
+            self.cols.key_ctr.iter_range(range.clone()),
+        )
+    }
+
     pub(crate) fn key_str_iter_range(
         &self,
         range: &Range<usize>,
@@ -961,12 +996,12 @@ impl OpSet {
         })
     }
 
-    pub(crate) fn top_ops<'a>(
-        &'a self,
-        obj: &ObjId,
-        clock: Option<Clock>,
-    ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>> {
-        self.iter_obj(obj).visible_slow(clock).top_ops()
+    pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
+        let range = self.scope_to_obj(obj);
+        let fast = TopOps::new(self, clock.clone(), range);
+        #[cfg(feature = "slow_path_assertions")]
+        top_op::assert_matches_slow(self, obj, clock, fast.clone());
+        fast
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
@@ -1889,8 +1924,10 @@ mod tests {
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.top_ops().collect::<Vec<_>>();
+            let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
+            let ops = opset
+                .top_ops(&ObjId(OpId::new(1, 1)), Some(clock.clone()))
+                .collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
             assert_eq!(&test_ops[7], &ops[2]);
@@ -1926,8 +1963,9 @@ mod tests {
             assert_eq!(&test_ops[7..8], key3);
             assert!(key4.is_none());
 
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.visible_slow(None).top_ops().collect::<Vec<_>>();
+            let ops = opset
+                .top_ops(&ObjId(OpId::new(1, 1)), Some(clock))
+                .collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
             assert_eq!(&test_ops[7], &ops[2]);

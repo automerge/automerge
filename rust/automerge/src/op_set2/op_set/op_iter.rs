@@ -433,6 +433,12 @@ impl<'a> InsertIter<'a> {
     }
 }
 
+impl Shiftable for InsertIter<'_> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
+        self.iter.shift_next(range)
+    }
+}
+
 impl Iterator for InsertIter<'_> {
     type Item = bool;
 
@@ -519,6 +525,15 @@ impl<'a> KeyIter<'a> {
             key_actor: self.key_actor.suspend(),
             key_ctr: self.key_ctr.suspend(),
         }
+    }
+}
+
+impl<'a> Shiftable for KeyIter<'a> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
+        let key_str = self.key_str.shift_next(range.clone())?;
+        let key_actor = self.key_actor.shift_next(range.clone())?;
+        let key_ctr = self.key_ctr.shift_next(range)?;
+        KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from)).ok()
     }
 }
 
@@ -612,6 +627,14 @@ impl<'a> ObjIdIter<'a> {
             obj_actor: self.obj_actor.suspend(),
             obj_ctr: self.obj_ctr.suspend(),
         }
+    }
+}
+
+impl Shiftable for ObjIdIter<'_> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
+        let actor = self.obj_actor.shift_next(range.clone())?;
+        let ctr = self.obj_ctr.shift_next(range)?;
+        ObjId::try_load(actor, ctr.map(i64::from)).ok()
     }
 }
 
@@ -725,6 +748,7 @@ impl<'a> ActionValueIter<'a> {
 impl<'a> Iterator for ActionValueIter<'a> {
     type Item = (Action, ScalarValue<'a>, usize);
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let action = self.action.next();
         let value = self.value.next();
@@ -732,6 +756,7 @@ impl<'a> Iterator for ActionValueIter<'a> {
         Some((action?, value?, pos - 1))
     }
 
+    #[inline(always)]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let action = self.action.nth(n);
         let value = self.value.nth(n);
@@ -842,6 +867,7 @@ impl<'a> ValueIter<'a> {
         Self { meta, raw }
     }
 
+    #[inline(always)]
     pub(crate) fn try_next(&mut self) -> Result<ScalarValue<'a>, ReadOpError> {
         let meta = self
             .meta
@@ -878,6 +904,7 @@ impl<'a> ValueIter<'a> {
 impl<'a> Iterator for ValueIter<'a> {
     type Item = ScalarValue<'a>;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().ok()
     }

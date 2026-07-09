@@ -1,6 +1,6 @@
 use crate::clock::ClockRange;
 use crate::exid::ExId;
-use crate::op_set2::op_set::VisIter;
+use crate::op_set2::op_set::{SkipToTopIter, VisIter};
 use crate::op_set2::OpSet;
 use crate::types::OpId;
 
@@ -107,6 +107,10 @@ impl<I: Iterator + Debug + Clone, S: Skipper> SkipIter<I, S> {
     pub(crate) fn new(iter: I, skip: S) -> Self {
         Self { iter, skip }
     }
+
+    pub(crate) fn inner(&self) -> &I {
+        &self.iter
+    }
 }
 
 impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable for SkipIter<I, S> {
@@ -123,8 +127,11 @@ impl<I: Iterator + Debug + Clone, S: Skipper> Iterator for SkipIter<I, S> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let skip = self.skip.next()?;
-        let item = self.iter.nth(skip)?;
-        Some(item)
+        if skip == 0 {
+            self.iter.next()
+        } else {
+            self.iter.nth(skip)
+        }
     }
 }
 
@@ -247,26 +254,105 @@ where
     }
 }
 
+/// A [`BoolColumnSkipper`] is an iterator that iterates over usize values
+/// represnting ranges of `false` values in a boolean column. This can then
+/// be used by other iterators to skip past elements for which the boolean
+/// column is false
 #[derive(Clone, Default, Debug)]
-struct PastSkipper<'a> {
-    before: VisIter<'a>,
-    after: VisIter<'a>,
+pub(crate) struct BoolColumnSkipper<'a> {
+    iter: hexane::Iter<'a, bool>,
+    range: Range<usize>,
+    cursor: usize,
+    pending: usize,
+    exhausted: bool,
+}
+
+impl<'a> BoolColumnSkipper<'a> {
+    pub(crate) fn new(iter: hexane::Iter<'a, bool>, range: Range<usize>) -> Self {
+        let cursor = range.start;
+        Self {
+            iter,
+            range,
+            cursor,
+            pending: 0,
+            exhausted: false,
+        }
+    }
+}
+
+impl Skipper for BoolColumnSkipper<'_> {}
+
+impl Shiftable for BoolColumnSkipper<'_> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.range = range.clone();
+        self.cursor = range.start;
+        self.pending = 0;
+        self.exhausted = false;
+
+        let Some(value) = self.iter.shift_next(range.clone()) else {
+            self.exhausted = true;
+            return Some(range.end.saturating_sub(range.start));
+        };
+
+        self.cursor = range.start + 1;
+        if value {
+            Some(0)
+        } else {
+            Some(1 + self.next().unwrap_or(0))
+        }
+    }
+}
+
+impl Iterator for BoolColumnSkipper<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.exhausted {
+            return None;
+        }
+        if self.pending > 0 {
+            self.pending -= 1;
+            self.cursor += 1;
+            Some(0)
+        } else {
+            let mut skipped = 0;
+            while let Some(run) = self.iter.next_run() {
+                if run.value && run.count > 0 {
+                    self.pending = run.count - 1;
+                    let pos = self.cursor + skipped;
+                    self.cursor = pos + 1;
+                    return Some(skipped);
+                }
+                skipped += run.count;
+            }
+            self.exhausted = true;
+            let skip = self.range.end.saturating_sub(self.cursor);
+            self.cursor = self.range.end.saturating_add(1);
+            Some(skip)
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+struct PastSkipper<S> {
+    before: S,
+    after: S,
     state: (Diff, usize),
 }
 
 #[derive(Clone, Debug)]
-enum DiffSkipper<'a> {
-    Diff(PastSkipper<'a>),
-    Current(VisIter<'a>),
+enum DiffSkipper<S> {
+    Diff(PastSkipper<S>),
+    Current(S),
 }
 
-impl Default for DiffSkipper<'_> {
+impl<S: Default> Default for DiffSkipper<S> {
     fn default() -> Self {
-        Self::Current(VisIter::default())
+        Self::Current(S::default())
     }
 }
 
-impl<'a> DiffSkipper<'a> {
+impl<'a> DiffSkipper<VisIter<'a>> {
     fn new(op_set: &'a OpSet, clock: ClockRange, range: Range<usize>) -> Self {
         match clock {
             ClockRange::Current(clock) => {
@@ -281,8 +367,23 @@ impl<'a> DiffSkipper<'a> {
     }
 }
 
-impl<'a> PastSkipper<'a> {
-    fn new(before: VisIter<'a>, after: VisIter<'a>) -> Self {
+impl<'a> DiffSkipper<SkipToTopIter<'a>> {
+    fn new_top(op_set: &'a OpSet, clock: ClockRange, range: Range<usize>) -> Self {
+        match clock {
+            ClockRange::Current(clock) => {
+                DiffSkipper::Current(SkipToTopIter::new(op_set, clock, range))
+            }
+            ClockRange::Diff(before, after) => {
+                let before = SkipToTopIter::new(op_set, Some(before), range.clone());
+                let after = SkipToTopIter::new(op_set, Some(after), range);
+                DiffSkipper::Diff(PastSkipper::new(before, after))
+            }
+        }
+    }
+}
+
+impl<S: Skipper> PastSkipper<S> {
+    fn new(before: S, after: S) -> Self {
         Self {
             before,
             after,
@@ -326,7 +427,10 @@ impl<'a> PastSkipper<'a> {
     }
 }
 
-impl Iterator for DiffSkipper<'_> {
+impl<S> Iterator for DiffSkipper<S>
+where
+    S: Skipper,
+{
     type Item = (Diff, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -337,7 +441,10 @@ impl Iterator for DiffSkipper<'_> {
     }
 }
 
-impl Iterator for PastSkipper<'_> {
+impl<S> Iterator for PastSkipper<S>
+where
+    S: Skipper,
+{
     type Item = (Diff, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -347,7 +454,10 @@ impl Iterator for PastSkipper<'_> {
     }
 }
 
-impl Shiftable for DiffSkipper<'_> {
+impl<S> Shiftable for DiffSkipper<S>
+where
+    S: Skipper + Shiftable + Debug,
+{
     fn shift_next(&mut self, range: Range<usize>) -> Option<(Diff, usize)> {
         match self {
             Self::Current(iter) => Some((Diff::Add, iter.shift_next(range)?)),
@@ -356,7 +466,10 @@ impl Shiftable for DiffSkipper<'_> {
     }
 }
 
-impl Shiftable for PastSkipper<'_> {
+impl<S> Shiftable for PastSkipper<S>
+where
+    S: Skipper + Shiftable + Debug,
+{
     fn shift_next(&mut self, range: Range<usize>) -> Option<(Diff, usize)> {
         let skip_before = self.before.shift_next(range.clone());
         let skip_after = self.after.shift_next(range.clone());
@@ -366,30 +479,60 @@ impl Shiftable for PastSkipper<'_> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DiffIter<'a, I: Iterator + Debug + Clone> {
+pub(crate) struct DiffIter<'a, I: Iterator + Debug + Clone, S = VisIter<'a>>
+where
+    S: Skipper,
+{
     iter: I,
-    skipper: DiffSkipper<'a>,
+    skipper: DiffSkipper<S>,
+    _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-impl<I: Iterator + Debug + Clone + Default> Default for DiffIter<'_, I> {
+impl<I, S> Default for DiffIter<'_, I, S>
+where
+    I: Iterator + Debug + Clone + Default,
+    S: Skipper + Default,
+    DiffSkipper<S>: Default,
+{
     fn default() -> Self {
         Self {
             iter: I::default(),
             skipper: DiffSkipper::default(),
+            _phantom: Default::default(),
         }
     }
 }
 
-impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I> {
+impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I, VisIter<'a>> {
     pub(crate) fn new(op_set: &'a OpSet, iter: I, clock: ClockRange, range: Range<usize>) -> Self {
         Self {
             iter,
             skipper: DiffSkipper::new(op_set, clock, range),
+            _phantom: Default::default(),
         }
     }
 }
 
-impl<I: Iterator + Debug + Clone + Shiftable> Shiftable for DiffIter<'_, I> {
+impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I, SkipToTopIter<'a>> {
+    pub(crate) fn new_top(
+        op_set: &'a OpSet,
+        iter: I,
+        clock: ClockRange,
+        range: Range<usize>,
+    ) -> Self {
+        Self {
+            iter,
+            skipper: DiffSkipper::new_top(op_set, clock, range),
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<I, S> Shiftable for DiffIter<'_, I, S>
+where
+    I: Iterator + Debug + Clone + Shiftable,
+    S: Skipper + Shiftable + Debug,
+{
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let (diff, skip) = self.skipper.shift_next(range.clone())?;
         let start = range.start + skip;
@@ -398,12 +541,21 @@ impl<I: Iterator + Debug + Clone + Shiftable> Shiftable for DiffIter<'_, I> {
     }
 }
 
-impl<I: Iterator + Debug + Clone> Iterator for DiffIter<'_, I> {
+impl<I, S> Iterator for DiffIter<'_, I, S>
+where
+    I: Iterator + Debug + Clone,
+    S: Skipper,
+{
     type Item = (Diff, I::Item);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (diff, skip) = self.skipper.next()?;
-        let item = self.iter.nth(skip);
+        // nth(0) is noticeably slower for column iterators than next().
+        let item = if skip == 0 {
+            self.iter.next()
+        } else {
+            self.iter.nth(skip)
+        };
         Some((diff, item?))
     }
 }

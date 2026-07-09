@@ -302,6 +302,147 @@ fn load_incremental_into_empty_doc_preserves_utf8_text_encoding() {
 }
 
 #[test]
+fn spans_match_text_after_merge_of_conflicting_text_overwrites_from_fuzz_trace() {
+    // A text element is concurrently overwritten by two strings. The visible
+    // text reconstructed from spans() should match text(), i.e. spans() should
+    // not emit the losing side of the conflict.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.insert(&text, 0, "base").unwrap();
+    doc.commit();
+
+    let mut left = doc.fork();
+    left.set_actor(ActorId::from(vec![1]));
+    left.put(&text, 0, "left").unwrap();
+    left.commit();
+
+    let mut right = doc.fork();
+    right.set_actor(ActorId::from(vec![2]));
+    right.put(&text, 0, "right").unwrap();
+    right.commit();
+
+    left.merge(&mut right).unwrap();
+
+    let from_text = left.text(&text).unwrap();
+    let from_spans = left
+        .spans(&text)
+        .unwrap()
+        .filter_map(|span| match span {
+            automerge::iter::Span::Text { text, .. } => Some(text),
+            automerge::iter::Span::Block(_) => None,
+        })
+        .collect::<String>();
+
+    assert_eq!(from_spans, from_text);
+}
+
+#[test]
+fn doc_iter_spans_skip_losing_conflicting_text_overwrites_after_object_shift() {
+    // DocIter reuses one SpansDiff while shifting between objects. The fast
+    // all-top path for the root object must not be reused for a conflicted text
+    // object reached later.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.insert(&text, 0, "base").unwrap();
+    doc.commit();
+
+    let mut left = doc.fork();
+    left.set_actor(ActorId::from(vec![1]));
+    left.put(&text, 0, "left").unwrap();
+    left.commit();
+
+    let mut right = doc.fork();
+    right.set_actor(ActorId::from(vec![2]));
+    right.put(&text, 0, "right").unwrap();
+    right.commit();
+
+    left.merge(&mut right).unwrap();
+
+    let from_text = left.text(&text).unwrap();
+    let from_doc_iter = left
+        .iter()
+        .filter_map(|item| match item.item {
+            automerge::iter::DocItem::Text(automerge::iter::Span::Text { text, .. }) => Some(text),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert_eq!(from_doc_iter, from_text);
+}
+
+#[test]
+fn diff_spans_preserve_marks_on_inserted_text() {
+    // Historical top scanning must group inserted ops by elemid_or_key(), not
+    // raw key, so mark ops sharing an insertion key with text ops are retained.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.commit();
+    let before = doc.get_heads();
+
+    doc.splice_text(&text, 0, 0, "abc").unwrap();
+    doc.mark(
+        &text,
+        Mark {
+            start: 0,
+            end: 3,
+            name: "bold".into(),
+            value: ScalarValue::from(1),
+        },
+        ExpandMark::After,
+    )
+    .unwrap();
+    let after = doc.get_heads();
+
+    let patches = doc.diff(&before, &after);
+    let has_marked_splice = patches.iter().any(|patch| {
+        matches!(
+            &patch.action,
+            PatchAction::SpliceText { marks: Some(_), .. }
+        )
+    });
+
+    assert!(has_marked_splice);
+}
+
+#[test]
+fn diff_spans_skip_losing_conflicting_text_overwrites() {
+    // The diff path uses SpansDiff rather than SpansInternal. It should apply
+    // the same top-op filtering and avoid emitting the losing text value.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.insert(&text, 0, "base").unwrap();
+    doc.commit();
+    let before = doc.get_heads();
+
+    let mut left = doc.fork();
+    left.set_actor(ActorId::from(vec![1]));
+    left.put(&text, 0, "left").unwrap();
+    left.commit();
+
+    let mut right = doc.fork();
+    right.set_actor(ActorId::from(vec![2]));
+    right.put(&text, 0, "right").unwrap();
+    right.commit();
+
+    left.merge(&mut right).unwrap();
+    let after = left.get_heads();
+
+    let spliced_text = left
+        .diff(&before, &after)
+        .into_iter()
+        .filter_map(|patch| match patch.action {
+            PatchAction::SpliceText { value, .. } => Some(value.make_string()),
+            _ => None,
+        })
+        .collect::<String>();
+
+    assert_eq!(spliced_text, left.text(&text).unwrap());
+}
+
+#[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();

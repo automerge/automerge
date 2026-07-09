@@ -1386,12 +1386,7 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut top_ops = self
-            .ops()
-            .iter_obj(&obj.id)
-            .visible_slow(clock)
-            .top_ops()
-            .marks();
+        let mut top_ops = self.ops().top_ops(&obj.id, clock).marks();
 
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             // Really we should return an error here but we don't in order to stay
@@ -1729,12 +1724,7 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self
-            .ops
-            .iter_obj(&obj.id)
-            .visible_slow(clock)
-            .top_ops()
-            .marks();
+        let mut iter = self.ops.top_ops(&obj.id, clock).marks();
         iter.nth(index);
         match iter.get_marks() {
             Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),

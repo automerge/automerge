@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::iter::tools::{Shiftable, Skipper};
+use crate::iter::tools::{BoolColumnSkipper, Shiftable, Skipper};
 
 impl Shiftable for VisIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
@@ -37,13 +37,7 @@ impl Shiftable for ScanVisIter<'_> {
 
 impl Shiftable for IndexedVisIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
-        let val = self.iter.shift_next(range)?;
-        self.vis = 0;
-        if val {
-            Some(0)
-        } else {
-            Some(1 + self.next().unwrap_or(0))
-        }
+        self.iter.shift_next(range)
     }
 }
 
@@ -86,14 +80,15 @@ impl Iterator for VisIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct IndexedVisIter<'a> {
-    iter: hexane::Iter<'a, bool>,
-    vis: usize,
+    iter: BoolColumnSkipper<'a>,
 }
 
 impl<'a> IndexedVisIter<'a> {
     fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
-        let iter = op_set.cols.index.visible.iter_range(range);
-        Self { iter, vis: 0 }
+        let iter = op_set.cols.index.visible.iter_range(range.clone());
+        Self {
+            iter: BoolColumnSkipper::new(iter, range),
+        }
     }
 }
 
@@ -101,21 +96,7 @@ impl Iterator for IndexedVisIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.vis > 0 {
-            self.vis -= 1;
-            Some(0)
-        } else {
-            let mut skip = 0;
-            while let Some(run) = self.iter.next_run() {
-                if run.value && run.count > 0 {
-                    self.vis = run.count - 1;
-                    break;
-                } else {
-                    skip += run.count;
-                }
-            }
-            Some(skip)
-        }
+        self.iter.next()
     }
 }
 
