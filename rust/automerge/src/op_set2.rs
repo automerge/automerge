@@ -13,6 +13,4 @@ pub(crate) use types::{ActorIdx, KeyRef, MarkData, OpType, PropRef};
 pub use types::{ChangeMetadata, ScalarValue, ValueRef};
 
 pub(crate) use meta::ValueMeta;
-pub(crate) use op_set::{
-    OpIter, OpQuery, OpQueryTerm, OpSet, ReadOpError, TopOpIter, VisibleOpIter,
-};
+pub(crate) use op_set::{OpQuery, OpQueryTerm, OpSet, ReadOpError, TopOps};

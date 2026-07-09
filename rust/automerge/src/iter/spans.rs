@@ -2,7 +2,7 @@ use crate::clock::{Clock, ClockRange};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
-use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet};
+use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, SkipToTopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
 use crate::patches::PatchLog;
 use crate::types::{ObjId, OpId, TextEncoding};
@@ -45,9 +45,69 @@ impl SpanDiff {
     }
 }
 
+// The DiffIter/SkipToTopIter iterators use the top index to jump  from one top
+// op to the next while generating a diff. In many cases this is unnecessary
+// overhead as every op in the range being iterated is already top. In this
+// case we avoid the overhead of SkipToTopIter and stream action/value columns
+// directly.
+#[derive(Debug, Clone)]
+// Boxing the variants leads to losing a few milliseconds on some iteration benchmarks
+#[expect(clippy::large_enum_variant)]
+enum SpansActionValue<'a> {
+    Current(Unshift<ActionValueIter<'a>>),
+    Diff(Unshift<DiffIter<'a, ActionValueIter<'a>, SkipToTopIter<'a>>>),
+}
+
+impl Default for SpansActionValue<'_> {
+    fn default() -> Self {
+        Self::Diff(Default::default())
+    }
+}
+
+impl<'a> SpansActionValue<'a> {
+    fn new(op_set: &'a OpSet, clock: &ClockRange, range: Range<usize>) -> Self {
+        let value = op_set.value_iter_range(&range);
+        let action = op_set.action_iter_range(&range);
+        let iter = ActionValueIter::new(action, value);
+        if matches!(clock, ClockRange::Current(None)) && op_set.all_of_range_is_top(&range) {
+            Self::Current(Unshift::new(iter))
+        } else {
+            Self::Diff(Unshift::new(DiffIter::new_top(
+                op_set,
+                iter,
+                clock.clone(),
+                range,
+            )))
+        }
+    }
+
+    fn shift(&mut self, op_set: &'a OpSet, clock: &ClockRange, range: Range<usize>) {
+        if matches!(self, Self::Current(_)) && !op_set.all_of_range_is_top(&range) {
+            *self = Self::new(op_set, clock, range);
+        } else {
+            match self {
+                Self::Current(iter) => iter.shift(range),
+                Self::Diff(iter) => iter.shift(range),
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for SpansActionValue<'a> {
+    type Item = (Diff, (Action, ScalarValue<'a>, usize));
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Current(iter) => Some((Diff::Add, iter.next()?)),
+            Self::Diff(iter) => iter.next(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SpansDiff<'a> {
-    action_value: Unshift<DiffIter<'a, ActionValueIter<'a>>>,
+    action_value: SpansActionValue<'a>,
     mark_info: MarkInfoIter<'a>,
     op_id: OpIdIter<'a>,
     marks: RichTextDiff<'a>,
@@ -60,6 +120,7 @@ pub(crate) struct SpansDiff<'a> {
 impl Iterator for SpansDiff<'_> {
     type Item = SpanDiff;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(span) = self.state.pop() {
             return Some(span);
@@ -90,7 +151,8 @@ impl<'a> SpansDiff<'a> {
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.mark_info.set_max(range.end);
         self.op_id.set_max(range.end);
-        self.action_value.shift(range);
+        self.action_value
+            .shift(self.op_set?, &self.clock, range.clone());
 
         self.marks = Default::default();
         self.state = SpanState::empty(self.state.encoding);
@@ -107,14 +169,7 @@ impl<'a> SpansDiff<'a> {
         let op_id = op_set.id_iter_range(&range);
         let mark_info = op_set.mark_info_iter_range(&range);
 
-        let skip = {
-            let value = op_set.value_iter_range(&range);
-            let action = op_set.action_iter_range(&range);
-            let iter = ActionValueIter::new(action, value);
-            DiffIter::new(op_set, iter, clock.clone(), range)
-        };
-
-        let action_value = Unshift::new(skip);
+        let action_value = SpansActionValue::new(op_set, &clock, range.clone());
         let marks = Default::default();
         let state = SpanState::empty(encoding);
         let op_set = Some(op_set);
@@ -162,6 +217,7 @@ impl<'a> SpansDiff<'a> {
         self.state.push_marks(current);
     }
 
+    #[inline(always)]
     fn process_action_val_diff(
         &mut self,
         diff: Diff,
@@ -169,6 +225,9 @@ impl<'a> SpansDiff<'a> {
     ) -> Option<SpanDiff> {
         self.pos = av.2;
         match av {
+            (Action::Set, ScalarValue::Str(s), _) if diff == Diff::Add => {
+                self.state.push_unmarked_add_str(&s)
+            }
             (Action::Set, ScalarValue::Str(s), _) => self.state.push_str(diff, &s),
             (Action::MakeMap, _, _) => self.push_block(diff),
             (Action::Mark, value, _) => {
@@ -429,6 +488,7 @@ impl SpanState {
         }
     }
 
+    #[inline(always)]
     fn push_str(&mut self, diff: Diff, s: &str) -> Option<SpanDiff> {
         debug_assert!(self.next_diff.is_none());
 
@@ -448,6 +508,29 @@ impl SpanState {
         next_text.len += self.encoding.width(s);
 
         span
+    }
+
+    // Avoid mark/diff comparisons in the common path of appending unmarked
+    // current text to an existing text span.
+    #[inline(always)]
+    fn push_unmarked_add_str(&mut self, s: &str) -> Option<SpanDiff> {
+        debug_assert!(self.next_diff.is_none());
+        if matches!(self.marks, MarkDiff::Nothing) {
+            if let Some(next) = &mut self.next_text {
+                if next.diff == Diff::Add && matches!(next.marks, MarkDiff::Nothing) {
+                    next.buff.push_str(s);
+                    next.len += self.encoding.width(s);
+                    return None;
+                }
+            } else {
+                let mut next = NextText::new(Diff::Add, &self.marks);
+                next.buff.push_str(s);
+                next.len += self.encoding.width(s);
+                self.next_text = Some(next);
+                return None;
+            }
+        }
+        self.push_str(Diff::Add, s)
     }
 
     fn diff_width(&self, diff: Diff, s: &str) -> usize {
