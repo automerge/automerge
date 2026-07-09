@@ -8,8 +8,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use automerge::{
-    ActorId, AutoCommit, ChangeHash, Cursor, LoadOptions, MoveCursor, ObjId, ObjType, ReadDoc,
-    ScalarValue, TextEncoding, ROOT,
+    ActorId, AutoCommit, ChangeHash, Cursor, LoadOptions, MoveCursor, ObjId, ObjType, Patch,
+    PatchAction, ReadDoc, ScalarValue, TextEncoding, ROOT,
 };
 
 use crate::trace::{
@@ -115,6 +115,10 @@ impl Runner {
 
         let mut behavior = BehaviorStats {
             docs: state.docs.len(),
+            diff_checks: state.diff_checks,
+            diff_unsupported: state.diff_unsupported,
+            total_patches: state.total_patches,
+            merge_checks: state.merge_checks,
             ..BehaviorStats::default()
         };
         let text_encoding = state.text_encoding;
@@ -160,6 +164,57 @@ pub struct BehaviorStats {
     pub list_marks: usize,
     pub text_marks: usize,
     pub max_saved_bytes: usize,
+    /// Number of diffs checked by applying their patches to hydrated state.
+    pub diff_checks: usize,
+    /// Diffs containing patch actions hydrate cannot currently apply (marks or
+    /// conflict-only actions), and therefore excluded from the oracle.
+    pub diff_unsupported: usize,
+    pub total_patches: usize,
+    /// Number of explicit merges checked in both directions for convergence.
+    pub merge_checks: usize,
+}
+
+struct PatchCheck {
+    patches: usize,
+    checked: bool,
+}
+
+/// Use hydrated values as a model for root diffs: applying a supported patch
+/// stream to the state at `before` must exactly produce the state at `after`.
+/// Hydrate deliberately does not yet implement standalone mark/conflict patch
+/// actions, so those streams are measured but excluded rather than producing
+/// harness false positives.
+fn verify_diff_patches(
+    mut before: hydrate::Value,
+    after: hydrate::Value,
+    patches: Vec<Patch>,
+    text_encoding: TextEncoding,
+) -> Result<PatchCheck, RunError> {
+    let patch_count = patches.len();
+    let supported = !patches.iter().any(|patch| {
+        matches!(
+            &patch.action,
+            PatchAction::Mark { .. } | PatchAction::Conflict { .. }
+        )
+    });
+    if !supported {
+        return Ok(PatchCheck {
+            patches: patch_count,
+            checked: false,
+        });
+    }
+    before
+        .apply_patches(text_encoding, patches)
+        .map_err(|err| RunError::Invariant(format!("diff patches failed to apply: {err}")))?;
+    if before != after {
+        return Err(RunError::Invariant(
+            "applying diff patches did not produce the target hydrated state".to_string(),
+        ));
+    }
+    Ok(PatchCheck {
+        patches: patch_count,
+        checked: true,
+    })
 }
 
 fn walk_hydrated(value: &hydrate::Value, depth: usize, stats: &mut BehaviorStats) {
@@ -502,6 +557,10 @@ struct RunState {
     docs: Vec<DocState>,
     sessions: Vec<Option<SyncSession>>,
     text_encoding: TextEncoding,
+    diff_checks: usize,
+    diff_unsupported: usize,
+    total_patches: usize,
+    merge_checks: usize,
 }
 
 #[derive(Clone)]
@@ -575,6 +634,10 @@ impl RunState {
             }],
             sessions: vec![None; MAX_SYNC_SESSIONS],
             text_encoding,
+            diff_checks: 0,
+            diff_unsupported: 0,
+            total_patches: 0,
+            merge_checks: 0,
         }
     }
 
@@ -714,6 +777,51 @@ impl RunState {
         if from >= self.docs.len() {
             return Err(RunError::MissingDoc { doc: from });
         }
+
+        // Check the CRDT law, not just the API call: when both directions
+        // accept a history, merging the same pair in opposite directions must
+        // converge to the same heads and value. A rejected direction rejects
+        // this VM instruction because mutation can construct actor-sequence
+        // collisions outside Automerge's collaboration model.
+        let mut into_first = self.docs[into].doc.clone();
+        let mut from_peer = self.docs[from].doc.clone();
+        let mut from_first = self.docs[from].doc.clone();
+        let mut into_peer = self.docs[into].doc.clone();
+        let forward = into_first.merge(&mut from_peer);
+        let reverse = from_first.merge(&mut into_peer);
+        match (forward, reverse) {
+            (Ok(_), Ok(_)) => {
+                if into_first.get_heads() != from_first.get_heads()
+                    || into_first
+                        .hydrate(&ROOT, None)
+                        .map_err(|err| RunError::Automerge(err.to_string()))?
+                        != from_first
+                            .hydrate(&ROOT, None)
+                            .map_err(|err| RunError::Automerge(err.to_string()))?
+                {
+                    return Err(RunError::Invariant(
+                        "merge directions did not converge".to_string(),
+                    ));
+                }
+                self.merge_checks = self.merge_checks.saturating_add(1);
+            }
+            // Reusing one actor on divergent branches is outside Automerge's
+            // collaboration model and can make either merge reject a duplicate
+            // sequence number. Reject the VM instruction without changing the
+            // live docs; the convergence oracle only applies when both merge
+            // directions accept the history.
+            (Err(forward), Err(_)) | (Err(forward), Ok(_)) => {
+                return Err(RunError::Automerge(format!(
+                    "merge oracle rejected generated history: {forward}"
+                )));
+            }
+            (Ok(_), Err(reverse)) => {
+                return Err(RunError::Automerge(format!(
+                    "reverse merge oracle rejected generated history: {reverse}"
+                )));
+            }
+        }
+
         let (low, high) = self.docs.split_at_mut(into.max(from));
         let (into_doc, from_doc) = if into < from {
             (&mut low[into], &mut high[0])
@@ -754,10 +862,23 @@ impl RunState {
         before: &VmHeadRef,
         after: &VmHeadRef,
     ) -> Result<(), RunError> {
-        let doc_state = self.doc_mut(doc)?;
-        let before = doc_state.resolve_heads(doc, before)?;
-        let after = doc_state.resolve_heads(doc, after)?;
-        let _ = doc_state.doc.diff(&before, &after);
+        let text_encoding = self.text_encoding;
+        let outcome = {
+            let doc_state = self.doc_mut(doc)?;
+            let before = doc_state.resolve_heads(doc, before)?;
+            let after = doc_state.resolve_heads(doc, after)?;
+            let before_value = doc_state
+                .doc
+                .hydrate(&ROOT, Some(&before))
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            let after_value = doc_state
+                .doc
+                .hydrate(&ROOT, Some(&after))
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            let patches = doc_state.doc.diff(&before, &after);
+            verify_diff_patches(before_value, after_value, patches, text_encoding)?
+        };
+        self.record_patch_check(outcome);
         Ok(())
     }
 
@@ -772,8 +893,33 @@ impl RunState {
     }
 
     fn diff_incremental(&mut self, doc: usize) -> Result<(), RunError> {
-        let _ = self.doc_mut(doc)?.doc.diff_incremental();
+        let text_encoding = self.text_encoding;
+        let outcome = {
+            let doc_state = self.doc_mut(doc)?;
+            let before = doc_state.doc.diff_cursor();
+            let after = doc_state.doc.get_heads();
+            let before_value = doc_state
+                .doc
+                .hydrate(&ROOT, Some(&before))
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            let after_value = doc_state
+                .doc
+                .hydrate(&ROOT, Some(&after))
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            let patches = doc_state.doc.diff_incremental();
+            verify_diff_patches(before_value, after_value, patches, text_encoding)?
+        };
+        self.record_patch_check(outcome);
         Ok(())
+    }
+
+    fn record_patch_check(&mut self, outcome: PatchCheck) {
+        self.total_patches = self.total_patches.saturating_add(outcome.patches);
+        if outcome.checked {
+            self.diff_checks = self.diff_checks.saturating_add(1);
+        } else {
+            self.diff_unsupported = self.diff_unsupported.saturating_add(1);
+        }
     }
 
     fn sync(&mut self, left: usize, right: usize, rounds: u8) -> Result<(), RunError> {
@@ -942,6 +1088,13 @@ impl RunState {
                     *state = decoded;
                 }
             }
+            VmSyncOp::SetReadOnly { left, read_only } => {
+                let Some(session) = self.sessions[slot].as_mut() else {
+                    return Ok(());
+                };
+                let (_, state, _) = session.side_mut(*left);
+                state.set_read_only(*read_only);
+            }
             VmSyncOp::Finish { rounds } => return self.sync_session_finish(slot, *rounds),
         }
         Ok(())
@@ -1008,11 +1161,32 @@ impl RunState {
         if quiesced && clean {
             let left_heads = self.docs[session.left].doc.get_heads();
             let right_heads = self.docs[session.right].doc.get_heads();
-            if left_heads != right_heads {
-                return Err(RunError::Invariant(
-                    "sync session quiesced without converging".to_string(),
-                ));
+            match (session.left_state.read_only, session.right_state.read_only) {
+                (false, false) if left_heads != right_heads => {
+                    return Err(RunError::Invariant(
+                        "sync session quiesced without converging".to_string(),
+                    ));
+                }
+                // A read-only side publishes but does not receive. At
+                // quiescence the writable peer must therefore contain every
+                // change advertised by the read-only peer.
+                (true, false) => self.check_heads_present(session.right, &left_heads)?,
+                (false, true) => self.check_heads_present(session.left, &right_heads)?,
+                (true, true) | (false, false) => {}
             }
+        }
+        Ok(())
+    }
+
+    fn check_heads_present(&mut self, doc: usize, heads: &[ChangeHash]) -> Result<(), RunError> {
+        let doc_state = self.doc_mut(doc)?;
+        if heads
+            .iter()
+            .any(|head| doc_state.doc.get_change_by_hash(head).is_none())
+        {
+            return Err(RunError::Invariant(
+                "directional sync lost a read-only peer change".to_string(),
+            ));
         }
         Ok(())
     }
@@ -1024,8 +1198,9 @@ impl RunState {
             .doc
             .hydrate(&ROOT, None)
             .map_err(|err| RunError::Automerge(err.to_string()))?;
+        let heads_before = doc_state.doc.get_heads();
         let bytes = doc_state.doc.save();
-        let loaded =
+        let mut loaded =
             AutoCommit::load_with_options(&bytes, LoadOptions::new().text_encoding(text_encoding))
                 .map_err(|err| RunError::Load(err.to_string()))?;
         let after = loaded
@@ -1034,6 +1209,11 @@ impl RunState {
         if before != after {
             return Err(RunError::Invariant(
                 "save/load changed hydrated document".to_string(),
+            ));
+        }
+        if heads_before != loaded.get_heads() {
+            return Err(RunError::Invariant(
+                "save/load changed document heads".to_string(),
             ));
         }
         doc_state.doc = loaded;
@@ -1777,6 +1957,9 @@ impl VmValue {
             Self::Uint { slot } => ScalarValue::Uint(u64::from(*slot)),
             Self::Str { slot } => ScalarValue::Str(vm_string(*slot).into()),
             Self::Counter { slot } => ScalarValue::counter(i64::from(*slot) - 128),
+            Self::Timestamp { slot } => ScalarValue::Timestamp(vm_signed(*slot)),
+            Self::F64 { slot } => ScalarValue::F64(vm_f64(*slot)),
+            Self::Bytes { slot } => ScalarValue::Bytes(vm_bytes(*slot)),
         }
     }
 }
@@ -1801,6 +1984,49 @@ fn vm_key(slot: u8) -> String {
 fn vm_mark_name(slot: u8) -> String {
     const NAMES: &[&str] = &["bold", "italic", "link", "comment", "color"];
     NAMES[usize::from(slot) % NAMES.len()].to_string()
+}
+
+fn vm_signed(slot: u8) -> i64 {
+    const VALUES: &[i64] = &[
+        0,
+        1,
+        -1,
+        i64::MIN,
+        i64::MAX,
+        1_000,
+        -1_000,
+        1_700_000_000_000,
+    ];
+    VALUES[usize::from(slot) % VALUES.len()]
+}
+
+fn vm_f64(slot: u8) -> f64 {
+    const VALUES: &[f64] = &[
+        0.0,
+        -0.0,
+        1.0,
+        -1.0,
+        f64::MIN,
+        f64::MAX,
+        f64::MIN_POSITIVE,
+        f64::EPSILON,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    VALUES[usize::from(slot) % VALUES.len()]
+}
+
+fn vm_bytes(slot: u8) -> Vec<u8> {
+    const VALUES: &[&[u8]] = &[
+        b"",
+        b"a",
+        b"hello\0world",
+        &[0xff],
+        &[0, 1, 2, 3, 127, 128, 254, 255],
+        &[0; 32],
+        &[0xff; 32],
+    ];
+    VALUES[usize::from(slot) % VALUES.len()].to_vec()
 }
 
 fn vm_string(slot: u8) -> String {
@@ -2192,6 +2418,132 @@ mod tests {
     }
 
     #[test]
+    fn diff_patches_reconstruct_hydrated_target() {
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0)],
+            text_encoding: None,
+            steps: vec![
+                VmInstr::Change {
+                    doc: 0,
+                    actor: 0,
+                    ops: vec![
+                        VmOp::Put {
+                            obj: VmObjRef::Root,
+                            key: 0,
+                            value: VmValue::Uint { slot: 1 },
+                        },
+                        VmOp::MakeList {
+                            obj: VmObjRef::Root,
+                            key: 1,
+                        },
+                    ],
+                },
+                VmInstr::SaveHeads { doc: 0, slot: 0 },
+                VmInstr::Change {
+                    doc: 0,
+                    actor: 0,
+                    ops: vec![
+                        VmOp::Put {
+                            obj: VmObjRef::Root,
+                            key: 0,
+                            value: VmValue::Bytes { slot: 4 },
+                        },
+                        VmOp::SpliceList {
+                            obj: VmObjRef::Slot { slot: 0 },
+                            index: 0,
+                            delete: 0,
+                            values: vec![VmValue::Timestamp { slot: 3 }, VmValue::F64 { slot: 2 }],
+                        },
+                    ],
+                },
+                VmInstr::DiffRange {
+                    doc: 0,
+                    before: VmHeadRef::Slot { slot: 0 },
+                    after: VmHeadRef::Current,
+                },
+            ],
+        };
+        let report = Runner::new().run_catching(&trace).expect("diff checks");
+        assert_eq!(report.behavior.diff_checks, 1);
+        assert!(report.behavior.total_patches >= 2);
+    }
+
+    #[test]
+    fn every_scalar_kind_round_trips_through_storage() {
+        let values = vec![
+            VmValue::Null,
+            VmValue::Bool { slot: 0 },
+            VmValue::Int { slot: 0 },
+            VmValue::Uint { slot: u8::MAX },
+            VmValue::Str { slot: 8 },
+            VmValue::Counter { slot: 0 },
+            VmValue::Timestamp { slot: 4 },
+            VmValue::F64 { slot: 8 },
+            VmValue::Bytes { slot: 6 },
+        ];
+        let ops = values
+            .into_iter()
+            .enumerate()
+            .map(|(key, value)| VmOp::Put {
+                obj: VmObjRef::Root,
+                key: key as u8,
+                value,
+            })
+            .collect();
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0)],
+            text_encoding: None,
+            steps: vec![VmInstr::Change {
+                doc: 0,
+                actor: 0,
+                ops,
+            }],
+        };
+        Runner::new()
+            .run_catching(&trace)
+            .expect("all scalar kinds save/load");
+    }
+
+    #[test]
+    fn read_only_sync_is_directional() {
+        let put = |doc: u8, actor: u8, key: u8| VmInstr::Change {
+            doc,
+            actor,
+            ops: vec![VmOp::Put {
+                obj: VmObjRef::Root,
+                key,
+                value: VmValue::Uint { slot: key },
+            }],
+        };
+        let session = |op| VmInstr::SyncSession { session: 0, op };
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            text_encoding: None,
+            steps: vec![
+                put(0, 0, 0),
+                VmInstr::Fork { from: 0, to: 1 },
+                put(0, 0, 1),
+                put(1, 1, 2),
+                session(VmSyncOp::Start { left: 0, right: 1 }),
+                session(VmSyncOp::SetReadOnly {
+                    left: true,
+                    read_only: true,
+                }),
+                session(VmSyncOp::Finish { rounds: 32 }),
+            ],
+        };
+        Runner::new()
+            .run_catching(&trace)
+            .expect("writable peer receives read-only peer changes");
+    }
+
+    #[test]
     fn faulty_sync_session_converges_on_finish() {
         let put = |key: u8, value: u8| VmInstr::Change {
             doc: 0,
@@ -2278,10 +2630,12 @@ mod tests {
                     into: 0,
                     order: VmApplyOrder::DropHalf,
                 },
+                VmInstr::Merge { into: 0, from: 1 },
             ],
         };
         let report = Runner::new().run_catching(&trace).expect("trace runs");
         assert_eq!(report.docs, 2);
+        assert_eq!(report.behavior.merge_checks, 1);
     }
 
     #[test]

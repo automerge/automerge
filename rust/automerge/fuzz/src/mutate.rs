@@ -53,11 +53,25 @@ impl Trace {
                 parent: None,
                 reason: Some("generated".to_string()),
             },
-            actors: vec![ActorSpec::new(0), ActorSpec::new(1), ActorSpec::new(2)],
+            actors: generated_actors(seed),
             text_encoding: random_text_encoding(&mut rng),
             steps: instructions,
         }
     }
+}
+
+fn generated_actors(seed: u64) -> Vec<ActorSpec> {
+    vec![
+        ActorSpec {
+            bytes: vec![seed as u8],
+        },
+        ActorSpec {
+            bytes: seed.to_le_bytes().to_vec(),
+        },
+        ActorSpec {
+            bytes: vec![0xff, (seed >> 8) as u8, 0],
+        },
+    ]
 }
 
 fn random_text_encoding(rng: &mut StdRng) -> Option<VmTextEncoding> {
@@ -85,6 +99,9 @@ pub fn mutate(input: &Trace, rng: &mut StdRng) -> Trace {
     let rounds = mutation_rounds(rng);
     for _ in 0..rounds {
         mutate_once(&mut trace, rng);
+        if rng.random_range(0..8) == 0 {
+            mutate_actor(&mut trace, rng);
+        }
         repair_trace(&mut trace, rng);
         trim_trace(&mut trace, rng);
     }
@@ -2233,12 +2250,19 @@ fn mutate_sync_op(op: &mut VmSyncOp, rng: &mut StdRng) {
             }
         }
         VmSyncOp::SaveStates => *op = random_sync_op(rng),
+        VmSyncOp::SetReadOnly { left, read_only } => {
+            if rng.random_range(0..2) == 0 {
+                *left = !*left;
+            } else {
+                *read_only = !*read_only;
+            }
+        }
         VmSyncOp::Finish { rounds } => *rounds = mutate_byte(*rounds, rng).max(1),
     }
 }
 
 fn random_sync_op(rng: &mut StdRng) -> VmSyncOp {
-    match rng.random_range(0..8) {
+    match rng.random_range(0..10) {
         0 => VmSyncOp::Start {
             left: rng.random_range(0..4),
             right: rng.random_range(0..4),
@@ -2251,6 +2275,10 @@ fn random_sync_op(rng: &mut StdRng) -> VmSyncOp {
             fault: random_sync_fault(rng),
         },
         5 => VmSyncOp::SaveStates,
+        6..=7 => VmSyncOp::SetReadOnly {
+            left: rng.random_range(0..2) == 0,
+            read_only: rng.random_range(0..2) == 0,
+        },
         _ => VmSyncOp::Finish {
             rounds: rng.random_range(1..=16),
         },
@@ -2396,6 +2424,26 @@ fn mutate_u8_pair(left: &mut u8, right: &mut u8, rng: &mut StdRng) {
         *left = mutate_byte(*left, rng);
     } else {
         *right = mutate_byte(*right, rng);
+    }
+}
+
+fn mutate_actor(trace: &mut Trace, rng: &mut StdRng) {
+    ensure_actor_count(trace, 3);
+    let index = rng.random_range(0..trace.actors.len());
+    let bytes = &mut trace.actors[index].bytes;
+    if bytes.is_empty() {
+        bytes.push(rng.random());
+        return;
+    }
+    match rng.random_range(0..4) {
+        0 if bytes.len() < 64 => bytes.push(rng.random()),
+        1 if bytes.len() > 1 => {
+            bytes.truncate(rng.random_range(1..bytes.len()));
+        }
+        _ => {
+            let byte = rng.random_range(0..bytes.len());
+            bytes[byte] = mutate_byte(bytes[byte], rng);
+        }
     }
 }
 
@@ -2667,7 +2715,10 @@ fn collect_instr_u8(instr: &VmInstr, values: &mut Vec<u8>) {
                     values.push(*right);
                 }
                 VmSyncOp::Finish { rounds } => values.push(*rounds),
-                VmSyncOp::Generate { .. } | VmSyncOp::Deliver { .. } | VmSyncOp::SaveStates => {}
+                VmSyncOp::Generate { .. }
+                | VmSyncOp::Deliver { .. }
+                | VmSyncOp::SaveStates
+                | VmSyncOp::SetReadOnly { .. } => {}
             }
         }
     }
@@ -2789,7 +2840,10 @@ fn collect_value_u8(value: &VmValue, values: &mut Vec<u8>) {
         | VmValue::Int { slot }
         | VmValue::Uint { slot }
         | VmValue::Str { slot }
-        | VmValue::Counter { slot } => values.push(*slot),
+        | VmValue::Counter { slot }
+        | VmValue::Timestamp { slot }
+        | VmValue::F64 { slot }
+        | VmValue::Bytes { slot } => values.push(*slot),
     }
 }
 
@@ -2897,9 +2951,10 @@ fn set_instr_u8(instr: &mut VmInstr, target: usize, value: u8, seen: &mut usize)
                             || maybe_set_u8(right, target, value, seen)
                     }
                     VmSyncOp::Finish { rounds } => maybe_set_u8(rounds, target, value, seen),
-                    VmSyncOp::Generate { .. } | VmSyncOp::Deliver { .. } | VmSyncOp::SaveStates => {
-                        false
-                    }
+                    VmSyncOp::Generate { .. }
+                    | VmSyncOp::Deliver { .. }
+                    | VmSyncOp::SaveStates
+                    | VmSyncOp::SetReadOnly { .. } => false,
                 }
         }
     }
@@ -3032,7 +3087,10 @@ fn set_value_u8(value: &mut VmValue, target: usize, new_value: u8, seen: &mut us
         | VmValue::Int { slot }
         | VmValue::Uint { slot }
         | VmValue::Str { slot }
-        | VmValue::Counter { slot } => maybe_set_u8(slot, target, new_value, seen),
+        | VmValue::Counter { slot }
+        | VmValue::Timestamp { slot }
+        | VmValue::F64 { slot }
+        | VmValue::Bytes { slot } => maybe_set_u8(slot, target, new_value, seen),
     }
 }
 
@@ -3764,13 +3822,16 @@ fn random_vm_obj(rng: &mut StdRng, objects: u8) -> VmObjRef {
 }
 
 fn random_vm_value(rng: &mut StdRng) -> VmValue {
-    match rng.random_range(0..6) {
+    match rng.random_range(0..9) {
         0 => VmValue::Null,
         1 => VmValue::Bool { slot: rng.random() },
         2 => VmValue::Int { slot: rng.random() },
         3 => VmValue::Uint { slot: rng.random() },
         4 => VmValue::Counter { slot: rng.random() },
-        _ => VmValue::Str { slot: rng.random() },
+        5 => VmValue::Str { slot: rng.random() },
+        6 => VmValue::Timestamp { slot: rng.random() },
+        7 => VmValue::F64 { slot: rng.random() },
+        _ => VmValue::Bytes { slot: rng.random() },
     }
 }
 

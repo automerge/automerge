@@ -480,15 +480,49 @@ change transfer, text). Remaining low-coverage core files are old-format
 `legacy/` and `columnar/` encoding paths, reachable only by loading crafted
 bytes — the raw-byte `load` fuzz target's domain, not the trace fuzzer's.
 
+## Semantic state-space and stronger oracles
+
+The trace harness is for valid library behavior rather than hostile-input or
+security testing. Raw malformed bytes stay in the separate `load` target.
+
+- [x] Generate all ordinary public scalar kinds, including timestamp, f64, and
+  bytes, with boundary-heavy but valid values.
+- [x] Generate and mutate varied multibyte actor IDs instead of only one-byte
+  actor IDs.
+- [x] Add persistent-sync read-only transitions. At quiescence, writable peers
+  must contain every change published by a read-only peer; two writable peers
+  must converge normally.
+- [x] Check every accepted explicit merge in both directions. The resulting
+  heads and hydrated values must agree. Histories rejected due to generated
+  actor-sequence collisions are discarded rather than treated as CRDT bugs.
+- [x] Turn diff execution into an oracle: apply supported root diff patches to
+  the hydrated `before` state and require the exact hydrated `after` state.
+  Mark/conflict-only patch streams are counted but skipped because hydrate does
+  not currently implement those standalone patch actions.
+- [x] Strengthen save/load checks to require preserved heads as well as an
+  equal hydrated document.
+- [x] Track diff checks, unsupported diff streams, patch counts, and merge
+  checks as behavioral novelty dimensions.
+- [x] Track semantic feature-pair coverage, not just individual features, and
+  report `feature_pairs` in status and JSONL statistics. This retains traces
+  combining mechanisms and gives fixed-seed A/B runs a direct interaction
+  coverage metric.
+
+Validation: all fuzz-crate tests pass, including focused regressions for all
+scalar kinds, directional read-only sync, and hydrated diff reconstruction. A
+fresh deterministic 3,000-iteration smoke run reached 64 semantic features and
+2,012 feature pairs; the new patch oracle also produced repeatable semantic
+patch/hydrate failures for investigation.
+
 ## Deferred until later phases
 
-Do not implement these until reliable sync/read-side/rich-text traces have had some runtime testing:
+Remaining follow-up work:
 
-- sync schedules with drop/duplicate/reorder/save-load-between-rounds,
-- finer-grained coverage attribution,
-- richer state-aware mutation operators,
-- minimization,
-- large generated corpus management.
+- finer-grained source-coverage attribution,
+- automatic crash/invariant minimization,
+- validity-aware actor ownership across forks (to avoid spending executions on
+  duplicate actor sequence histories),
+- compact/curated generated corpus management.
 
 ## Notes
 

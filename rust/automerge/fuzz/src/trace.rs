@@ -142,8 +142,12 @@ pub enum VmSyncOp {
     Deliver { to_left: bool, fault: VmSyncFault },
     /// Encode/decode both sync states in place, as a process restart would.
     SaveStates,
+    /// Toggle whether one side accepts incoming changes. Read-only peers still
+    /// publish their own changes, which makes this a directional sync mode.
+    SetReadOnly { left: bool, read_only: bool },
     /// Deliver everything in flight, then sync reliably for up to `rounds`
-    /// rounds. If the protocol quiesces, both docs must have equal heads.
+    /// rounds. Writable peers must converge; in directional read-only mode the
+    /// writable peer must contain everything published by the read-only peer.
     Finish { rounds: u8 },
 }
 
@@ -308,6 +312,9 @@ pub enum VmValue {
     Uint { slot: u8 },
     Str { slot: u8 },
     Counter { slot: u8 },
+    Timestamp { slot: u8 },
+    F64 { slot: u8 },
+    Bytes { slot: u8 },
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]

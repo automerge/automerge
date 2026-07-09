@@ -1165,7 +1165,7 @@ fn print_fuzz_status(
 ) {
     let elapsed = elapsed.as_secs_f64().max(0.001);
     println!(
-        "{prefix}={iterations} exec/s={:.0} corpus={corpus_len} valid={} interesting={} checkpoints={} coverage_saved={} crashes={} rejected={} behavior={} features={} coverage_buckets={} cmp_buckets={} cmp_values={} sometimes={} sometimes_buckets={} buckets={}",
+        "{prefix}={iterations} exec/s={:.0} corpus={corpus_len} valid={} interesting={} checkpoints={} coverage_saved={} crashes={} rejected={} behavior={} features={} feature_pairs={} merge_checks={} diff_checks={} diff_unsupported={} patches={} coverage_buckets={} cmp_buckets={} cmp_values={} sometimes={} sometimes_buckets={} buckets={}",
         iterations as f64 / elapsed,
         tally.valid,
         tally.interesting,
@@ -1175,6 +1175,11 @@ fn print_fuzz_status(
         tally.rejected,
         feedback.behavior_bucket_count(),
         feedback.feature_count(),
+        feedback.feature_pair_count(),
+        feedback.merge_check_count(),
+        feedback.diff_check_count(),
+        feedback.unsupported_diff_count(),
+        feedback.patch_count(),
         feedback.coverage_bucket_count(),
         feedback.comparison_bucket_count(),
         feedback.comparison_value_count(),
@@ -1210,6 +1215,11 @@ fn report_event(
         "rejected": tally.rejected,
         "behavior_buckets": feedback.behavior_bucket_count(),
         "features": feedback.feature_count(),
+        "feature_pairs": feedback.feature_pair_count(),
+        "merge_checks": feedback.merge_check_count(),
+        "diff_checks": feedback.diff_check_count(),
+        "diff_unsupported": feedback.unsupported_diff_count(),
+        "patches": feedback.patch_count(),
         "coverage_buckets": feedback.coverage_bucket_count(),
         "cmp_buckets": feedback.comparison_bucket_count(),
         "cmp_values": feedback.comparison_value_count(),

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::coverage::{CmpKind, CmpObservation};
 use crate::runner::{BehaviorStats, RunReport};
-use crate::trace::{Trace, VmApplyOrder, VmInstr, VmObjRef, VmOp, VmSyncFault, VmSyncOp};
+use crate::trace::{Trace, VmApplyOrder, VmInstr, VmObjRef, VmOp, VmSyncFault, VmSyncOp, VmValue};
 
 const MAX_BEHAVIOR_BUCKETS: usize = 65536;
 const MAX_STRUCTURAL_BUCKETS: usize = 512;
@@ -14,6 +14,7 @@ const RARE_COUNTER_RETAIN_THRESHOLD: usize = 64;
 #[derive(Default)]
 pub struct FeedbackState {
     features: HashSet<&'static str>,
+    feature_pairs: HashSet<(&'static str, &'static str)>,
     sometimes_labels: HashSet<&'static str>,
     sometimes_count_buckets: HashSet<(&'static str, u8)>,
     sometimes_counts: BTreeMap<&'static str, u64>,
@@ -22,6 +23,10 @@ pub struct FeedbackState {
     comparison_buckets: HashSet<ComparisonKey>,
     comparison_u8_values: Vec<u8>,
     comparison_u8_value_set: HashSet<u8>,
+    diff_checks: u64,
+    diff_unsupported: u64,
+    patches_checked: u64,
+    merge_checks: u64,
     behaviors: HashSet<BehaviorKey>,
     structures: HashSet<StructuralKey>,
 }
@@ -41,6 +46,10 @@ struct BehaviorKey {
     list_marks: u8,
     text_marks: u8,
     max_saved_bytes: u8,
+    diff_checks: u8,
+    diff_unsupported: u8,
+    total_patches: u8,
+    merge_checks: u8,
 }
 
 fn behavior_key(stats: &BehaviorStats) -> BehaviorKey {
@@ -59,6 +68,10 @@ fn behavior_key(stats: &BehaviorStats) -> BehaviorKey {
         list_marks: bucket(stats.list_marks),
         text_marks: bucket(stats.text_marks),
         max_saved_bytes: bucket(stats.max_saved_bytes),
+        diff_checks: bucket(stats.diff_checks),
+        diff_unsupported: bucket(stats.diff_unsupported),
+        total_patches: bucket(stats.total_patches),
+        merge_checks: bucket(stats.merge_checks),
     }
 }
 
@@ -114,6 +127,18 @@ impl FeedbackState {
     }
 
     pub fn consider(&mut self, trace: &Trace, report: &RunReport) -> Option<String> {
+        self.diff_checks = self
+            .diff_checks
+            .saturating_add(report.behavior.diff_checks as u64);
+        self.diff_unsupported = self
+            .diff_unsupported
+            .saturating_add(report.behavior.diff_unsupported as u64);
+        self.patches_checked = self
+            .patches_checked
+            .saturating_add(report.behavior.total_patches as u64);
+        self.merge_checks = self
+            .merge_checks
+            .saturating_add(report.behavior.merge_checks as u64);
         for hit in &report.sometimes_hits {
             *self.sometimes_counts.entry(hit.name).or_default() += hit.count;
         }
@@ -142,7 +167,7 @@ impl FeedbackState {
         let behavior = behavior_key(&report.behavior);
         if self.behaviors.len() < MAX_BEHAVIOR_BUCKETS && !self.behaviors.contains(&behavior) {
             let reason = format!(
-                "new behavior bucket docs={} heads={} changes={} objects={} depth={} text={} seq={} conflicts={} marks={} saved={}",
+                "new behavior bucket docs={} heads={} changes={} objects={} depth={} text={} seq={} conflicts={} marks={} saved={} diffs={} unsupported={} patches={} merge_checks={}",
                 behavior.docs,
                 behavior.max_heads,
                 behavior.total_changes,
@@ -153,15 +178,42 @@ impl FeedbackState {
                 behavior.conflicted_props,
                 behavior.list_marks.max(behavior.text_marks),
                 behavior.max_saved_bytes,
+                behavior.diff_checks,
+                behavior.diff_unsupported,
+                behavior.total_patches,
+                behavior.merge_checks,
             );
             self.behaviors.insert(behavior);
             return Some(reason);
         }
 
-        for feature in features(trace) {
-            if self.features.insert(feature) {
-                return Some(format!("new feature {feature}"));
+        let mut trace_features = features(trace);
+        trace_features.sort_unstable();
+        trace_features.dedup();
+        let mut first_new_feature = None;
+        for feature in &trace_features {
+            if self.features.insert(*feature) && first_new_feature.is_none() {
+                first_new_feature = Some(*feature);
             }
+        }
+
+        // Individual feature coverage saturates quickly. Retaining new pairs
+        // keeps histories that combine mechanisms (for example read-only sync
+        // + state persistence, or text marks + concurrent deletes), which is
+        // where CRDT bugs disproportionately live.
+        let mut new_pairs = 0usize;
+        for (index, left) in trace_features.iter().enumerate() {
+            for right in trace_features.iter().skip(index + 1) {
+                if self.feature_pairs.insert((*left, *right)) {
+                    new_pairs += 1;
+                }
+            }
+        }
+        if let Some(feature) = first_new_feature {
+            return Some(format!("new feature {feature}"));
+        }
+        if new_pairs != 0 {
+            return Some(format!("new feature pairs {new_pairs}"));
         }
 
         let key = structural_key(trace);
@@ -271,8 +323,28 @@ impl FeedbackState {
         self.features.len()
     }
 
+    pub fn feature_pair_count(&self) -> usize {
+        self.feature_pairs.len()
+    }
+
     pub fn behavior_bucket_count(&self) -> usize {
         self.behaviors.len()
+    }
+
+    pub fn diff_check_count(&self) -> u64 {
+        self.diff_checks
+    }
+
+    pub fn unsupported_diff_count(&self) -> u64 {
+        self.diff_unsupported
+    }
+
+    pub fn patch_count(&self) -> u64 {
+        self.patches_checked
+    }
+
+    pub fn merge_check_count(&self) -> u64 {
+        self.merge_checks
     }
 
     pub fn structural_bucket_count(&self) -> usize {
@@ -425,6 +497,12 @@ fn features(trace: &Trace) -> Vec<&'static str> {
                         VmSyncFault::Reorder => "sync_session_reorder",
                     },
                     VmSyncOp::SaveStates => "sync_session_save_states",
+                    VmSyncOp::SetReadOnly {
+                        read_only: true, ..
+                    } => "sync_session_read_only",
+                    VmSyncOp::SetReadOnly {
+                        read_only: false, ..
+                    } => "sync_session_read_write",
                     VmSyncOp::Finish { .. } => "sync_session_finish",
                 });
             }
@@ -452,6 +530,16 @@ fn features(trace: &Trace) -> Vec<&'static str> {
                 for op in ops {
                     if vm_op_obj_depth(op) > 0 {
                         features.push("non_root_object_ref");
+                    }
+                    match op {
+                        VmOp::Put { value, .. }
+                        | VmOp::Insert { value, .. }
+                        | VmOp::PutSeq { value, .. }
+                        | VmOp::Mark { value, .. } => features.push(value_feature(value)),
+                        VmOp::SpliceList { values, .. } => {
+                            features.extend(values.iter().map(value_feature));
+                        }
+                        _ => {}
                     }
                     match op {
                         VmOp::Put { .. } => features.push("put"),
@@ -492,6 +580,19 @@ fn features(trace: &Trace) -> Vec<&'static str> {
     if actors.len() > 1 {
         features.push("multiple_actors");
     }
+    if trace.actors.iter().any(|actor| actor.bytes.len() > 16) {
+        features.push("long_actor_id");
+    }
+    if trace.actors.iter().any(|actor| actor.bytes.len() > 1) {
+        features.push("multibyte_actor_id");
+    }
+    if trace.actors.iter().enumerate().any(|(index, left)| {
+        trace.actors.iter().skip(index + 1).any(|right| {
+            left.bytes.starts_with(&right.bytes) || right.bytes.starts_with(&left.bytes)
+        })
+    }) {
+        features.push("actor_id_prefix_pair");
+    }
 
     if let Some(encoding) = trace.text_encoding {
         features.push(match encoding {
@@ -503,6 +604,20 @@ fn features(trace: &Trace) -> Vec<&'static str> {
     }
 
     features
+}
+
+fn value_feature(value: &VmValue) -> &'static str {
+    match value {
+        VmValue::Null => "scalar_null",
+        VmValue::Bool { .. } => "scalar_bool",
+        VmValue::Int { .. } => "scalar_int",
+        VmValue::Uint { .. } => "scalar_uint",
+        VmValue::Str { .. } => "scalar_string",
+        VmValue::Counter { .. } => "scalar_counter",
+        VmValue::Timestamp { .. } => "scalar_timestamp",
+        VmValue::F64 { .. } => "scalar_f64",
+        VmValue::Bytes { .. } => "scalar_bytes",
+    }
 }
 
 fn structural_key(trace: &Trace) -> StructuralKey {
