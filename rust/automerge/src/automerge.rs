@@ -604,7 +604,7 @@ impl Automerge {
             }
             hashes.push(hash);
         }
-        let mut f = Self::new();
+        let mut f = Self::new_with_encoding(self.text_encoding());
         f.set_actor(ActorId::random());
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;

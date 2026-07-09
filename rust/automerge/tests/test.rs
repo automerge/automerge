@@ -3,8 +3,9 @@ use automerge::sync::{Message, MessageVersion, State};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
-    ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
+    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
+    LoadOptions, ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue,
+    SequenceTree, TextEncoding, Value, ROOT,
 };
 
 const B: usize = 16;
@@ -246,6 +247,32 @@ fn rollback_after_save_load_of_deep_hydrated_root_map_from_fuzz_trace() {
     tx.rollback();
 
     assert_eq!(plain.hydrate(None), before);
+}
+
+#[test]
+fn fork_at_preserves_text_encoding() {
+    // Minimized from a fuzz crash: an empty text object created under grapheme
+    // cluster encoding, forked at the document's current heads, hydrates
+    // differently after save/load.
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::GraphemeCluster);
+    doc.set_actor(ActorId::from(vec![0]));
+    doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.commit();
+
+    let heads = doc.get_heads();
+    let mut forked = doc.fork_at(&heads).unwrap();
+    forked.set_actor(ActorId::from(vec![2]));
+
+    let before = forked.hydrate(&ROOT, None).unwrap();
+    let bytes = forked.save();
+    let loaded = AutoCommit::load_with_options(
+        &bytes,
+        LoadOptions::new().text_encoding(TextEncoding::GraphemeCluster),
+    )
+    .unwrap();
+    let after = loaded.hydrate(&ROOT, None).unwrap();
+
+    assert_eq!(after, before);
 }
 
 #[test]
