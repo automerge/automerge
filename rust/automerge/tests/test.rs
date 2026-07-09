@@ -276,6 +276,32 @@ fn fork_at_preserves_text_encoding() {
 }
 
 #[test]
+fn load_incremental_into_empty_doc_preserves_utf8_text_encoding() {
+    // Minimized from a fuzz crash: sync into an empty UTF-8 document uses the
+    // same empty-document load_incremental fast path. That path must preserve
+    // the receiver's text encoding.
+    let mut source = AutoCommit::new_with_encoding(TextEncoding::Utf8CodeUnit);
+    source.set_actor(ActorId::from(vec![1]));
+    source.put_object(ROOT, "text", ObjType::Text).unwrap();
+    source.commit();
+
+    let mut receiver = AutoCommit::new_with_encoding(TextEncoding::Utf8CodeUnit);
+    receiver.set_actor(ActorId::from(vec![0]));
+    receiver.load_incremental(&source.save()).unwrap();
+
+    let before = receiver.hydrate(&ROOT, None).unwrap();
+    let bytes = receiver.save();
+    let loaded = AutoCommit::load_with_options(
+        &bytes,
+        LoadOptions::new().text_encoding(TextEncoding::Utf8CodeUnit),
+    )
+    .unwrap();
+    let after = loaded.hydrate(&ROOT, None).unwrap();
+
+    assert_eq!(after, before);
+}
+
+#[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();
