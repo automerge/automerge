@@ -71,5 +71,33 @@ describe("Automerge", () => {
       const actualHeads = new Set(Automerge.getHeads(doc1))
       assert.deepEqual(actualHeads, expectedHeads)
     })
+    // Regression test for issue #1270:
+    // clone() + changeAt() with a splice should not produce duplicate content
+    it("should not duplicate splice results with clone + changeAt", () => {
+      let doc = Automerge.change(
+        Automerge.init<{ text: string }>(),
+        doc => {
+          doc.text = ""
+        },
+      )
+      const heads = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, doc =>
+        Automerge.splice(doc, ["text"], 0, 0, "def"),
+      )
+
+      const result = Automerge.changeAt(
+        Automerge.clone(doc),
+        heads,
+        doc => {
+          Automerge.splice(doc, ["text"], 0, 0, "abc")
+        },
+      )
+
+      assert.strictEqual(
+        result.newDoc.text,
+        "abcdef",
+        `Expected "abcdef" but got "${result.newDoc.text}"`,
+      )
+    })
   })
 })
