@@ -916,6 +916,7 @@ impl Automerge {
             let mut doc = Self::load_with_options(
                 data,
                 LoadOptions::new()
+                    .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check),
             )?;
