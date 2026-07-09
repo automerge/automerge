@@ -117,6 +117,7 @@ impl Runner {
             docs: state.docs.len(),
             ..BehaviorStats::default()
         };
+        let text_encoding = state.text_encoding;
         for doc in 0..state.docs.len() {
             let outcome = state.save_load(doc)?;
             behavior.max_saved_bytes = behavior.max_saved_bytes.max(outcome.saved_bytes);
@@ -125,6 +126,7 @@ impl Runner {
             behavior.max_heads = behavior.max_heads.max(doc_state.doc.get_heads().len());
             behavior.total_changes += doc_state.doc.get_changes_meta(&[]).len();
             behavior.text_marks += doc_state.count_text_marks();
+            doc_state.check_text_invariants(text_encoding)?;
         }
 
         let docs = state.docs.len();
@@ -1203,6 +1205,72 @@ impl RunState {
 }
 
 impl DocState {
+    /// Cross-check text objects this doc created against fresh recomputations.
+    ///
+    /// Two oracles, both aimed at multi-code-point / grapheme accounting:
+    /// * the `Span::Text` runs from `spans()`, concatenated, must equal
+    ///   `text()` (sound under every encoding). Block/object markers embedded
+    ///   in the sequence appear in `spans()` but not in `text()`, so only the
+    ///   text runs are compared.
+    /// * `length()` (the internal width index) must equal the width of
+    ///   `text()` recomputed from scratch. This is only checked when the text
+    ///   has no embedded blocks (whose sequence width need not match any
+    ///   code-unit count) and is not grapheme-encoded: the grapheme encoding
+    ///   stores each spliced value's clusters separately, so re-segmenting the
+    ///   rendered string can legitimately merge clusters across splice
+    ///   boundaries and change the count.
+    fn check_text_invariants(&mut self, encoding: TextEncoding) -> Result<(), RunError> {
+        let objects: Vec<ObjId> = self.objects.iter().rev().take(16).cloned().collect();
+        for obj in objects {
+            if self.doc.object_type(&obj) != Ok(ObjType::Text) {
+                continue;
+            }
+            let Ok(text) = self.doc.text(&obj) else {
+                continue;
+            };
+            // Embedded objects and block markers appear in spans() (as
+            // `Span::Block`, or as the U+FFFC object-replacement placeholder
+            // inside a text run) but are omitted from text(). Ignore them when
+            // reconciling the two, and skip the width check when present since
+            // their sequence width need not match any code-unit count.
+            let mut has_embedded = false;
+            if let Ok(spans) = self.doc.spans(&obj) {
+                let mut text_runs = String::new();
+                for span in spans {
+                    match span {
+                        Span::Text { text, .. } => text_runs.push_str(&text),
+                        Span::Block(_) => has_embedded = true,
+                    }
+                }
+                if text_runs.contains(OBJECT_REPLACEMENT) {
+                    has_embedded = true;
+                }
+                let text_runs = strip_object_placeholders(&text_runs);
+                let text_visible = strip_object_placeholders(&text);
+                if text_runs != text_visible {
+                    return Err(RunError::Invariant(
+                        "spans text runs do not reconstruct text()".to_string(),
+                    ));
+                }
+            }
+            if !has_embedded && encoding != TextEncoding::GraphemeCluster {
+                let expected = match encoding {
+                    TextEncoding::UnicodeCodePoint => text.chars().count(),
+                    TextEncoding::Utf8CodeUnit => text.len(),
+                    TextEncoding::Utf16CodeUnit => text.chars().map(char::len_utf16).sum(),
+                    TextEncoding::GraphemeCluster => unreachable!(),
+                };
+                let actual = self.doc.length(&obj);
+                if actual != expected {
+                    return Err(RunError::Invariant(format!(
+                        "text length {actual} != recomputed width {expected} for {encoding:?}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Best-effort count of mark spans on text objects this doc created
     /// itself. Objects merged in from other docs are not tracked here, so this
     /// undercounts; it only needs to be deterministic for bucketing.
@@ -1741,12 +1809,16 @@ fn vm_string(slot: u8) -> String {
         "a",
         "hello",
         "hello world",
-        "🦊🐻",
+        "\u{1F98A}\u{1F43B}",
         "multi\nline",
         "abcdefghijklmnopqrstuvwxyz",
-        "e\u{0301}e\u{0301}",
-        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}",
-        "a\u{0301}\u{0302}\u{0303}",
+        "e\u{0301}e\u{0301}", // decomposed accents
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}", // ZWJ family
+        "a\u{0301}\u{0302}\u{0303}", // stacked combining marks
+        "\u{1F469}\u{1F3FF}\u{200D}\u{1F692}", // skin tone + ZWJ profession
+        "\u{1F1FA}\u{1F1F8}\u{1F1EB}\u{1F1F7}", // two flags (4 regional indicators)
+        "\u{1F1E6}",          // dangling regional indicator
+        "a\u{0301}\r\n\u{FE0F}", // mixed hostile boundaries
     ];
     STRINGS[usize::from(slot) % STRINGS.len()].to_string()
 }
@@ -1759,22 +1831,45 @@ fn vm_text(slot: u8) -> String {
     }
 }
 
-/// A small edit of `current`, biased toward boundary-hostile insertions
-/// (astral plane, ZWJ sequences, combining marks) so the Myers text diff and
-/// the width indexes see near-identical strings under every encoding.
+/// The Unicode object-replacement character, used by Automerge's `spans()` and
+/// text APIs to stand in for embedded objects / block markers.
+const OBJECT_REPLACEMENT: char = '\u{fffc}';
+
+fn strip_object_placeholders(text: &str) -> String {
+    text.chars().filter(|c| *c != OBJECT_REPLACEMENT).collect()
+}
+
+/// Composable fragments that break or fuse grapheme clusters when placed next
+/// to existing text: lone combining marks, ZWJ, variation selectors, skin-tone
+/// modifiers, regional indicators (which pair into flags), tag characters, and
+/// astral bases. Inserting these at code-point boundaries — including *inside*
+/// an existing grapheme — is what stresses the width index and the grapheme
+/// re-segmentation in text_diff / text_value.
+const HOSTILE_FRAGMENTS: &[&str] = &[
+    "x",
+    " ",
+    "\u{1F98A}",                                   // astral base (fox)
+    "\u{0301}",                                    // lone combining acute
+    "\u{0301}\u{0302}\u{0303}",                    // stacked combining marks
+    "\u{200D}",                                    // lone zero-width joiner
+    "\u{FE0F}",                                    // emoji variation selector
+    "\u{FE0E}",                                    // text variation selector
+    "\u{1F3FB}",                                   // lone skin-tone modifier
+    "\u{1F1E6}",                                   // single regional indicator (dangling)
+    "\u{1F1E6}\u{1F1FA}",                          // regional indicator pair (flag)
+    "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", // ZWJ family cluster
+    "\u{4E2D}",                                    // BMP CJK
+    "e\u{0301}",                                   // base + combining
+    "\r\n",                                        // CRLF (one grapheme)
+    "\u{E0067}\u{E0062}\u{E0073}",                 // tag characters (subdivision flag)
+];
+
+/// A small edit of `current`, biased toward boundary-hostile insertions so the
+/// Myers text diff, the grapheme re-segmentation, and the width indexes see
+/// near-identical strings that fuse or split clusters across the edit.
 fn vm_edit_text(current: &str, seed: u8) -> String {
-    const INSERTS: &[&str] = &[
-        "x",
-        " ",
-        "\u{1F98A}",
-        "\u{0301}",
-        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
-        "\u{4E2D}",
-        "e\u{0301}",
-        "\r\n",
-    ];
     let chars: Vec<char> = current.chars().collect();
-    let insert = INSERTS[usize::from(seed) % INSERTS.len()];
+    let insert = HOSTILE_FRAGMENTS[usize::from(seed) % HOSTILE_FRAGMENTS.len()];
     let pos = if chars.is_empty() {
         0
     } else {
@@ -1787,16 +1882,30 @@ fn vm_edit_text(current: &str, seed: u8) -> String {
         out
     };
     let target = pos.min(chars.len().saturating_sub(1));
-    match seed % 5 {
+    match seed % 8 {
+        // Insert at a code-point boundary, which may land inside a grapheme.
         0 => rebuild(pos..pos, insert),
+        // Delete a single code point, which may split a grapheme.
         1 if !chars.is_empty() => rebuild(target..target + 1, ""),
+        // Replace a single code point.
         2 if !chars.is_empty() => rebuild(target..target + 1, insert),
+        // Duplicate the first half: a large but highly similar edit.
         3 => {
-            // Duplicate the first half: a large but highly similar edit.
             let half: String = chars[..chars.len() / 2].iter().collect();
             format!("{half}{current}")
         }
-        _ => format!("{current}{insert}"),
+        // Prepend a fragment that fuses with the first existing cluster.
+        4 => format!("{insert}{current}"),
+        // Append a fragment that fuses with the last existing cluster.
+        5 => format!("{current}{insert}"),
+        // Swap two adjacent code points, which can break or join clusters.
+        6 if chars.len() >= 2 => {
+            let mut swapped = chars.clone();
+            let index = target.min(swapped.len() - 2);
+            swapped.swap(index, index + 1);
+            swapped.into_iter().collect()
+        }
+        _ => format!("{current}{current}"),
     }
 }
 
@@ -1937,6 +2046,51 @@ mod tests {
                 value: VmValue::Uint { slot: value },
             }],
             commit,
+        }
+    }
+
+    #[test]
+    fn hostile_fragment_edits_keep_text_accounting_consistent() {
+        use crate::trace::VmTextEncoding;
+        // Build up a text object with layered grapheme-fusing edits under every
+        // encoding; check_text_invariants runs in the save/load pass and
+        // asserts spans/text and width/length stay consistent throughout.
+        for encoding in [
+            None,
+            Some(VmTextEncoding::CodePoint),
+            Some(VmTextEncoding::Utf8),
+            Some(VmTextEncoding::Utf16),
+            Some(VmTextEncoding::Grapheme),
+        ] {
+            let mut steps = vec![VmInstr::Change {
+                doc: 0,
+                actor: 0,
+                ops: vec![VmOp::MakeText {
+                    obj: VmObjRef::Root,
+                    key: 0,
+                }],
+            }];
+            for seed in 0..40u8 {
+                steps.push(VmInstr::Change {
+                    doc: 0,
+                    actor: 0,
+                    ops: vec![VmOp::EditText {
+                        obj: VmObjRef::Slot { slot: 0 },
+                        seed,
+                    }],
+                });
+            }
+            steps.push(VmInstr::SaveLoad { doc: 0 });
+            let trace = Trace {
+                version: 1,
+                metadata: Metadata::default(),
+                actors: vec![ActorSpec::new(0)],
+                text_encoding: encoding,
+                steps,
+            };
+            Runner::new()
+                .run_catching(&trace)
+                .unwrap_or_else(|err| panic!("encoding {encoding:?} failed: {err}"));
         }
     }
 

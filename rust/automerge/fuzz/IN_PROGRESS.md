@@ -437,6 +437,43 @@ Validation: `text_diff.rs` 20% -> 90%, `cursor.rs` 9% -> 66%, `text_value.rs`
 27% -> 44%. Regression tests cover hostile edits under all four encodings and
 repeated `update_spans` rewrites. No crashes in short soak runs.
 
+## Pathological text and text-accounting invariants
+
+The earlier text work reached the code but fed it shallow content (whole canned
+strings) and had no oracle for width/grapheme accounting. This closes both.
+
+- [x] `HOSTILE_FRAGMENTS`: composable grapheme-breaking/fusing pieces (lone
+  combining marks, ZWJ, variation selectors, skin-tone modifiers, regional
+  indicators that pair into flags, tag characters, astral bases). `vm_edit_text`
+  now inserts these at code-point boundaries — including *inside* an existing
+  grapheme — and appends/prepends fragments that fuse with neighbouring
+  clusters, plus adjacent code-point swaps. Whole-string tables gained
+  skin-tone+ZWJ, multi-flag, and dangling-regional-indicator entries.
+- [x] Two text-accounting invariants in the save/load pass
+  (`check_text_invariants`):
+  - the `Span::Text` runs from `spans()` must reconstruct `text()` (sound under
+    every encoding);
+  - `length()` (the internal width index) must equal the width of `text()`
+    recomputed from scratch — checked only when the text has no embedded
+    objects and is not grapheme-encoded (the grapheme store segments each
+    spliced value independently, so re-segmenting the whole string can
+    legitimately merge clusters).
+  Both filter the U+FFFC object-replacement placeholder, which `spans()`
+  emits for embedded objects/blocks but `text()` omits.
+
+Both invariants were validated against all 1,463 committed known-good traces
+with zero false positives before being trusted (the first two drafts *did*
+false-positive on embedded objects — see below). `delete.in.multicharacter`
+(delete landing mid-multi-code-unit element) is now hit routinely, and
+`text_diff.rs` holds at ~92%. A clean 8,000-iteration soak found no crashes.
+`text_value.rs` coverage is encoding-dependent (each trace fixes one encoding)
+and accumulates across a multi-seed soak rather than in a single run.
+
+Note: designing a sound text oracle is subtle — `text()` omits embedded
+objects and block markers that `spans()` and `length()` both count, and the
+grapheme encoding stores per-splice segmentation. The invariants above encode
+those caveats; do not tighten them without re-validating against the corpus.
+
 The trace fuzzer has now covered the reachable-but-unreached surface from the
 original coverage triage (transactions, sync sessions, historical forks +
 change transfer, text). Remaining low-coverage core files are old-format
