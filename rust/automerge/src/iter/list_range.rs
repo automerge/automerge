@@ -164,6 +164,9 @@ impl<'a> Iterator for ListDiff<'a> {
 
             if let Some(mut last) = last_visible {
                 last.update(state.expose);
+                // Deleting the winning value exposes `last`, so its put
+                // patch must carry the remaining register's conflict state.
+                last.conflict = state.num_new > 1;
                 if last.diff.is_visible() {
                     self.index += 1;
                 }

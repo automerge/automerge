@@ -92,6 +92,42 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn diff_preserves_conflict_after_winning_value_is_deleted_from_fuzz_trace() {
+    // Three actors concurrently assign a map property. Deleting the winning value reveals another
+    // value, but the property remains conflicted because two concurrent values still exist.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let mut second = doc.fork();
+    second.set_actor(ActorId::from(vec![1]));
+    let mut third = doc.fork();
+    third.set_actor(ActorId::from(vec![2]));
+
+    doc.put(ROOT, "key", false).unwrap();
+    doc.commit();
+    second.put(ROOT, "key", ScalarValue::Null).unwrap();
+    second.commit();
+    third.put(ROOT, "key", -88).unwrap();
+    third.commit();
+    doc.merge(&mut second).unwrap();
+    doc.merge(&mut third).unwrap();
+    let before_heads = doc.get_heads();
+
+    third.delete(ROOT, "key").unwrap();
+    third.commit();
+    doc.merge(&mut third).unwrap();
+    let current_heads = doc.get_heads();
+
+    let mut actual = doc.hydrate(&ROOT, Some(&before_heads)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
+    let patches = doc.diff(&before_heads, &current_heads);
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn incremental_put_seq_in_text_applies_to_hydrated_value_from_fuzz_trace() {
     //  Updating a text element with a scalar produces a PutSeq patch, which must update the
     //  rendered hydrated text.
