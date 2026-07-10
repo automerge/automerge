@@ -92,10 +92,29 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn diff_incremental_respects_isolated_heads_from_fuzz_trace() {
+    //  Once the document is isolated at its empty heads, both ends of the incremental diff are
+    //  empty and it must not emit patches for changes hidden by the isolation scope.
+    let mut doc = AutoCommit::new();
+    doc.put_object(ROOT, "map", ObjType::Map).unwrap();
+    doc.commit();
+    doc.isolate(&[]);
+
+    let mut actual = doc.hydrate(&ROOT, None).unwrap();
+    let expected = actual.clone();
+    let patches = doc.diff_incremental();
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_trace() {
-    // Minimized from fuzz crash 0. An increment resolves a conflict between a
-    // counter and a scalar in favor of the counter. Rebuilding that history in
-    // fork_at must produce the same top value as rebuilding it during load.
+    // An increment resolves a conflict between a counter and a scalar in favor of the counter.
+    // Rebuilding that history in fork_at must produce the same top value as rebuilding it during
+    // load.
     let mut doc = AutoCommit::new();
     doc.set_actor(ActorId::from(vec![0]));
     let mut counter = AutoCommit::new();
