@@ -99,6 +99,21 @@ impl TransactionInner {
         self.pending.len()
     }
 
+    fn exid_to_obj(&self, doc: &Automerge, id: &ExId) -> Result<ObjMeta, AutomergeError> {
+        let obj = doc.exid_to_obj(id)?;
+        let created_in_transaction = self.pending.iter().any(|op| op.id() == obj.id.0);
+        if !obj.id.is_root()
+            && !created_in_transaction
+            && self
+                .scope
+                .as_ref()
+                .is_some_and(|scope| !scope.covers(&obj.id.0))
+        {
+            return Err(AutomergeError::InvalidObjId(id.to_string()));
+        }
+        Ok(obj)
+    }
+
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
     ///
@@ -218,7 +233,7 @@ impl TransactionInner {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         let value = value.into();
         let prop = prop.into();
         match (&prop, obj.typ) {
@@ -252,7 +267,7 @@ impl TransactionInner {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         let prop = prop.into();
         match (&prop, obj.typ) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
@@ -307,7 +322,7 @@ impl TransactionInner {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
         };
@@ -325,7 +340,7 @@ impl TransactionInner {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
         };
@@ -507,7 +522,7 @@ impl TransactionInner {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
+        let obj = self.exid_to_obj(doc, obj)?;
         self.local_op(doc, patch_log, &obj, prop.into(), OpType::Increment(value))?;
         Ok(())
     }
@@ -519,7 +534,7 @@ impl TransactionInner {
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         let prop = prop.into();
         if obj.typ == ObjType::Text {
             let index = prop.as_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
@@ -554,7 +569,7 @@ impl TransactionInner {
         del: isize,
         vals: impl IntoIterator<Item = impl Into<hydrate::Value>>,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -596,7 +611,7 @@ impl TransactionInner {
         del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -748,7 +763,7 @@ impl TransactionInner {
         mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         if ObjType::Text != obj.typ {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -834,7 +849,7 @@ impl TransactionInner {
         ex_obj: &ExId,
         index: usize,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = self.exid_to_obj(doc, ex_obj)?;
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -871,7 +886,7 @@ impl TransactionInner {
         text: &ExId,
         index: usize,
     ) -> Result<(), AutomergeError> {
-        let text_obj = doc.exid_to_obj(text)?;
+        let text_obj = self.exid_to_obj(doc, text)?;
 
         if text_obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(text_obj.typ));
@@ -984,7 +999,7 @@ impl TransactionInner {
         obj: &ExId,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError> {
-        let obj_meta = doc.exid_to_obj(obj)?;
+        let obj_meta = self.exid_to_obj(doc, obj)?;
         match (obj_meta.typ, new_value) {
             (ObjType::Map, crate::hydrate::Value::Map(map)) => {
                 Ok(self.update_map(doc, patch_log, obj, map)?)
@@ -1013,7 +1028,7 @@ impl TransactionInner {
         new_value: &crate::hydrate::Map,
     ) -> Result<(), AutomergeError> {
         let mut delenda = HashSet::new();
-        let obj = doc.exid_to_obj(map)?;
+        let obj = self.exid_to_obj(doc, map)?;
         let current_vals = doc
             .ops()
             .map_range(&obj.id, .., self.scope.clone())
@@ -1178,7 +1193,7 @@ impl TransactionInner {
         value: &hydrate::Value,
         insert: bool,
     ) -> Result<ExId, AutomergeError> {
-        let parent = doc.exid_to_obj(ex_parent)?;
+        let parent = self.exid_to_obj(doc, ex_parent)?;
 
         match (&prop, insert, parent.typ) {
             (Prop::Map(_), _, ObjType::Map) => Ok(()),
