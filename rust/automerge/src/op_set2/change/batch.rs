@@ -717,18 +717,40 @@ impl<'a> ValueState<'a> {
                     }
                 }
                 (Some(d), Some(c)) if d.deleted => {
-                    // A non-inserting text operation can replace an existing
-                    // element. If the incoming operation deletes the old
-                    // value and exposes its replacement, log that replacement
-                    // just as we do for list elements.
-                    log.put_seq(obj, index, c.value, c.id, c.conflict, false);
+                    // A text update replaces one Automerge sequence element, but that element can
+                    // render as more than one unit in the configured text encoding. Express the
+                    // update as a deletion and insertion so materialized text removes the full
+                    // width of the old value.
+                    log.replace_seq(
+                        obj,
+                        index,
+                        &d.value,
+                        c.value,
+                        c.id,
+                        c.conflict,
+                        false,
+                        self.seq_type,
+                        self.text_encoding,
+                        self.marks.current().export(),
+                    );
                 }
                 (Some(d), Some(c)) if d.id == c.id => {
                     // Counter increments do not change the rendered text.
                 }
                 (Some(d), Some(c)) if c.id > d.id => {
                     let conflict = !d.deleted || c.conflict;
-                    log.put_seq(obj, index, c.value, c.id, conflict, false);
+                    log.replace_seq(
+                        obj,
+                        index,
+                        &d.value,
+                        c.value,
+                        c.id,
+                        conflict,
+                        false,
+                        self.seq_type,
+                        self.text_encoding,
+                        self.marks.current().export(),
+                    );
                 }
                 (Some(d), Some(_)) if !d.conflict => {
                     log.flag_conflict(obj, &Prop::from(index));

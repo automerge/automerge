@@ -246,9 +246,92 @@ fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_t
 }
 
 #[test]
+fn transaction_patches_replace_multi_character_string_in_text_from_fuzz_trace() {
+    // A string scalar is one text sequence element even when it renders as multiple characters.
+    // Transaction patches must replace its entire rendered width, not just the first character.
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+    tx.insert(&text, 0, "ab").unwrap();
+    tx.commit();
+
+    let mut actual = doc.hydrate(None);
+    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    tx.put(&text, 1, f64::MAX).unwrap();
+    let (_, mut patch_log) = tx.commit();
+    let expected = doc.hydrate(None);
+    let patches = doc.make_patches(&mut patch_log);
+    assert!(matches!(
+        patches.as_slice(),
+        [
+            Patch {
+                action: PatchAction::DeleteSeq {
+                    index: 0,
+                    length: 2
+                },
+                ..
+            },
+            Patch {
+                action: PatchAction::SpliceText { index: 0, value, .. },
+                ..
+            }
+        ] if value.make_string() == "\u{fffc}"
+    ));
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn merge_patches_replace_multi_character_string_in_text_from_fuzz_trace() {
+    // A string scalar is one text sequence element even when it renders as multiple characters.
+    // Replacing it must remove its entire rendered width from an existing hydrated value.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.insert(&text, 0, "ab").unwrap();
+    doc.commit();
+
+    let mut branch = doc.fork();
+    branch.put(&text, 0, ScalarValue::Null).unwrap();
+    branch.commit();
+
+    let mut doc = doc.document().clone();
+    let mut branch = branch.document().clone();
+    let mut actual = doc.hydrate(None);
+    let mut patch_log = PatchLog::active();
+    doc.merge_and_log_patches(&mut branch, &mut patch_log)
+        .unwrap();
+    let expected = doc.hydrate(None);
+    let patches = doc.make_patches(&mut patch_log);
+    assert!(matches!(
+        patches.as_slice(),
+        [
+            Patch {
+                action: PatchAction::DeleteSeq {
+                    index: 0,
+                    length: 2
+                },
+                ..
+            },
+            Patch {
+                action: PatchAction::SpliceText { index: 0, value, .. },
+                ..
+            }
+        ] if value.make_string() == "\u{fffc}"
+    ));
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn merge_patches_include_text_element_update_from_fuzz_trace() {
     // A remote branch replaces a character in a text object with a scalar. Merging with patch
-    // logging must emit the PutSeq patch needed to update an existing hydrated view.
+    // logging must emit the deletion and splice needed to update an existing hydrated view.
     let mut doc = AutoCommit::new();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "a").unwrap();
