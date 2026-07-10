@@ -69,8 +69,12 @@ impl OwnedTransaction {
     /// Unlike [`super::Transaction::commit`], no `PatchLog` clone is needed — it is moved out.
     pub fn commit(mut self) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(&mut self.doc, None, None);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash = super::commit_transaction(
+            tx,
+            &mut self.doc,
+            &mut self.patch_log,
+            CommitOptions::default(),
+        );
         (self.doc, hash, self.patch_log)
     }
 
@@ -80,8 +84,7 @@ impl OwnedTransaction {
         options: CommitOptions,
     ) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(&mut self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash = super::commit_transaction(tx, &mut self.doc, &mut self.patch_log, options);
         (self.doc, hash, self.patch_log)
     }
 

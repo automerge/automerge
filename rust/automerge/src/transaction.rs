@@ -15,6 +15,21 @@ pub use result::Success;
 
 pub type Result<O, E> = std::result::Result<Success<O>, Failure<E>>;
 
+fn commit_transaction(
+    tx: TransactionInner,
+    doc: &mut crate::Automerge,
+    patch_log: &mut crate::PatchLog,
+    options: CommitOptions,
+) -> Option<crate::ChangeHash> {
+    let historical_heads = tx.get_scope().as_ref().map(|_| tx.get_deps());
+    let hash = tx.commit(doc, options.message, options.time);
+    if let Some(heads) = historical_heads {
+        patch_log.heads = Some(hash.map_or(heads, |hash| vec![hash]));
+    }
+    patch_log.finish_transaction(&doc.ops().actors);
+    hash
+}
+
 /// Generate a `ReadDoc` impl for `Transaction` and `OwnedTransaction`, which are expected to
 /// have `inner: Option<TransactionInner>`, `doc` (owned or borrowed `Automerge`), and a
 /// `get_scope` method.
