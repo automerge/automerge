@@ -66,8 +66,8 @@ impl Transaction<'_> {
     /// the new heads.
     pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(self.doc, None, None);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash =
+            super::commit_transaction(tx, self.doc, &mut self.patch_log, CommitOptions::default());
         // TODO - remove this clone
         (hash, self.patch_log.clone())
     }
@@ -90,8 +90,7 @@ impl Transaction<'_> {
     /// ```
     pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash = super::commit_transaction(tx, self.doc, &mut self.patch_log, options);
         // TODO - remove this clone
         (hash, self.patch_log.clone())
     }
