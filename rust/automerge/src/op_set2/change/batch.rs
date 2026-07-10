@@ -559,12 +559,13 @@ impl OpValueOption {
             self.expose();
         } else {
             let conflict = self.is_visible();
+            let expose = !deleted && self.is_deleted();
             *self = Self(Some(OpValue {
                 value,
                 id,
                 conflict,
                 deleted,
-                expose: false,
+                expose,
             }));
         }
     }

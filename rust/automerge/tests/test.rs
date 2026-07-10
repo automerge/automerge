@@ -92,6 +92,46 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn merge_patches_clear_conflict_after_losing_list_value_is_deleted_from_fuzz_trace() {
+    // Minimized from a fuzz crash. Deleting the losing value from a conflicted
+    // list register leaves the winning value unchanged, but must emit a PutSeq
+    // patch to clear the materialized conflict flag.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![2]));
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, ScalarValue::Null).unwrap();
+    doc.commit();
+
+    let mut left = doc.fork();
+    left.set_actor(ActorId::from(vec![3]));
+    left.put(&list, 0, 10).unwrap();
+    left.commit();
+    let mut right = doc.fork();
+    right.set_actor(ActorId::from(vec![2]));
+    right.put(&list, 0, "a").unwrap();
+    right.commit();
+
+    doc.merge(&mut left).unwrap();
+    doc.merge(&mut right).unwrap();
+    right.delete(&list, 0).unwrap();
+    right.commit();
+
+    let mut doc = doc.document().clone();
+    let mut right = right.document().clone();
+    let mut actual = doc.hydrate(None);
+    let mut patch_log = PatchLog::active();
+    doc.merge_and_log_patches(&mut right, &mut patch_log)
+        .unwrap();
+    let expected = doc.hydrate(None);
+    let patches = doc.make_patches(&mut patch_log);
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn bundle_with_mark_columns_decodes_from_fuzz_trace() {
     // Minimized from a fuzz crash. A mark populates both the expand and mark-name
     // operation columns; the bundle must write their metadata in normalized order.
