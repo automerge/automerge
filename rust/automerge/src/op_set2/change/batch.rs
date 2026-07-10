@@ -1,7 +1,7 @@
 use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
-use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef};
+use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
@@ -68,8 +68,9 @@ impl<'a> Untangler<'a> {
 
     fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
         let mut deleted = false;
-        if let Some(v) = self.pred.remove(&doc_op.id) {
-            for (id, inc) in v {
+        if let Some(mut successors) = self.pred.remove(&doc_op.id) {
+            normalize_increment_successors(doc_op.is_counter(), &mut successors);
+            for (id, inc) in successors {
                 deleted |= inc.is_none();
                 succ.push(doc_op.add_succ(id, inc));
             }
@@ -267,8 +268,10 @@ impl<'a> Untangler<'a> {
         let mut last_e = None;
         let value = ValueState::new(obj, encoding, text_encoding);
         for (i, op) in change_ops.iter_mut().enumerate() {
-            if let Some(v) = pred.remove(&op.id()) {
-                op.succ = v;
+            if let Some(mut successors) = pred.remove(&op.id()) {
+                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
+                normalize_increment_successors(is_counter, &mut successors);
+                op.succ = successors;
             }
             if let KeyRef::Seq(e) = op.key() {
                 if op.insert() {
@@ -424,8 +427,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 
     fn change_op(&mut self, ops: &mut [ChangeOp], pos: usize) {
-        if let Some(v) = self.pred.remove(&ops[pos].id()) {
-            ops[pos].succ = v
+        if let Some(mut successors) = self.pred.remove(&ops[pos].id()) {
+            let is_counter = matches!(ops[pos].bld.value, OpScalarValue::Counter(_));
+            normalize_increment_successors(is_counter, &mut successors);
+            ops[pos].succ = successors
         }
 
         self.advance_doc_op(pos, ops);
@@ -479,11 +484,24 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 }
 
+fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
+    if !is_counter {
+        for (_, increment) in successors {
+            // Increment operations preserve and update counter predecessors,
+            // but act as ordinary overwrites for non-counter predecessors.
+            if increment.is_some() {
+                *increment = None;
+            }
+        }
+    }
+}
+
 fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
     if let Some(d) = doc_op {
         let mut deleted = false;
-        if let Some(v) = pred.remove(&d.id) {
-            for (id, inc) in v {
+        if let Some(mut successors) = pred.remove(&d.id) {
+            normalize_increment_successors(d.is_counter(), &mut successors);
+            for (id, inc) in successors {
                 deleted |= inc.is_none();
                 succ.push(d.add_succ(id, inc));
             }

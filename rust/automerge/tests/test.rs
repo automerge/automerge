@@ -92,6 +92,37 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_trace() {
+    // Minimized from fuzz crash 0. An increment resolves a conflict between a
+    // counter and a scalar in favor of the counter. Rebuilding that history in
+    // fork_at must produce the same top value as rebuilding it during load.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::from(vec![0]));
+    let mut counter = AutoCommit::new();
+    counter.set_actor(ActorId::from(vec![1]));
+    counter.put(ROOT, "key", ScalarValue::counter(34)).unwrap();
+    counter.commit();
+    let mut scalar = AutoCommit::new();
+    scalar.set_actor(ActorId::from(vec![2]));
+    scalar.put(ROOT, "key", ScalarValue::Null).unwrap();
+    scalar.commit();
+
+    doc.merge(&mut counter).unwrap();
+    doc.merge(&mut scalar).unwrap();
+    doc.increment(ROOT, "key", -59).unwrap();
+    doc.commit();
+
+    let heads = doc.get_heads();
+    let mut fork = doc.fork_at(&heads).unwrap();
+    let before = fork.hydrate(&ROOT, None).unwrap();
+    let bytes = fork.save_nocompress();
+    let loaded = AutoCommit::load_with_options(&bytes, LoadOptions::new()).unwrap();
+    let after = loaded.hydrate(&ROOT, None).unwrap();
+
+    assert_eq!(before, after);
+}
+
+#[test]
 fn merge_patches_include_text_element_update_from_fuzz_trace() {
     // A remote branch replaces a character in a text object with a scalar. Merging with patch
     // logging must emit the PutSeq patch needed to update an existing hydrated view.
