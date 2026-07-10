@@ -47,7 +47,7 @@ pub struct PatchLog {
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
-    pub(crate) heads: Option<Vec<ChangeHash>>,
+    pub(crate) heads_clock: Option<Clock>,
     pub(crate) actors: Vec<ActorId>,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
@@ -230,7 +230,7 @@ impl PatchLog {
             events: Vec::new(),
             expose: HashSet::new(),
             completed_patches: Vec::new(),
-            heads: None,
+            heads_clock: None,
             path_map: Default::default(),
             path_hint: 0,
             actors: vec![],
@@ -290,9 +290,12 @@ impl PatchLog {
         if !self.events.is_empty() || !self.expose.is_empty() {
             self.migrate_actors(&doc.ops.actors)
                 .expect("AutoCommit's patch log always belongs to its document");
-            let previous_heads = self.heads.replace(heads.to_vec());
+            let clock = doc
+                .clock_at(heads)
+                .expect("known hashes always have clocks");
+            let previous_heads = self.heads_clock.replace(clock);
             let patches = self.make_current_patches(doc);
-            self.heads = previous_heads;
+            self.heads_clock = previous_heads;
             self.completed_patches.extend(patches);
             self.events.clear();
             self.expose.clear();
@@ -508,7 +511,7 @@ impl PatchLog {
     }
 
     fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        let clock = self.heads.as_ref().map(|h| doc.change_graph.clock_at(h));
+        let clock = self.heads_clock.clone();
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
         self.events
@@ -544,7 +547,7 @@ impl PatchLog {
             completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
-            heads: None,
+            heads_clock: None,
             actors: self.actors.clone(),
             speculative_actor: None,
         }

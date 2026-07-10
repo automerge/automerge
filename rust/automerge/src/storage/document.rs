@@ -5,7 +5,9 @@ use std::{borrow::Cow, ops::Range};
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
-use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
+use crate::op_set2::change::{
+    ChangeCollector, CollectedChanges, IndexedChangeCollector, OutOfMemory,
+};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
@@ -28,6 +30,10 @@ pub(crate) struct Document<'a> {
     header: Header,
     actors: Vec<ActorId>,
     heads: Vec<ChangeHash>,
+    /// The node index of each head, positionally corresponding to `heads`.
+    /// `None` if the document was produced by an old implementation which
+    /// did not write the head-index suffix.
+    head_indexes: Option<Vec<u64>>,
     pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
     change_metadata: RawColumns<Uncompressed>,
@@ -129,10 +135,15 @@ impl<'a> Document<'a> {
 
         // parse the suffix, which may be empty if this document was produced by an older version
         // of the JS automerge implementation
-        let (i, Range { start: suffix, .. }) = parse::range_only_unless_empty(
-            |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
-            i,
-        )?;
+        let (i, suffix, head_indexes) = if i.is_empty() {
+            (i, 0, None)
+        } else {
+            let (i, parsed) = parse::range_of(
+                |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
+                i,
+            )?;
+            (i, parsed.range.start, Some(parsed.value))
+        };
 
         let compression::Decompressed {
             change_bytes,
@@ -174,6 +185,7 @@ impl<'a> Document<'a> {
                 header,
                 actors,
                 heads,
+                head_indexes,
                 op_metadata,
                 op_bytes,
                 change_metadata,
@@ -271,6 +283,7 @@ impl<'a> Document<'a> {
             compressed_bytes,
             header,
             heads,
+            head_indexes: Some(head_indices),
             op_metadata,
             op_bytes,
             change_metadata,
@@ -296,6 +309,10 @@ impl<'a> Document<'a> {
 
     pub(crate) fn actors(&self) -> &[ActorId] {
         &self.actors
+    }
+
+    pub(crate) fn head_indexes(&self) -> Option<&[u64]> {
+        self.head_indexes.as_deref()
     }
 
     pub(crate) fn heads(&self) -> &[ChangeHash] {
@@ -324,27 +341,71 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
+        build_hash_graph: bool,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
 
+        // an unchecked load pairs the heads with their nodes via the head
+        // index suffix, so refuse to skip if it is absent
+        let head_indexes = if build_hash_graph {
+            None
+        } else {
+            Some(
+                self.head_indexes()
+                    .ok_or(ReconstructError::MissingHeadIndexes)?,
+            )
+        };
+
         let mut index = op_set.index_builder();
 
-        let change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
-        let mut change_collector = change_collector.with_index(&mut index);
-
-        change_collector.process_ops(&op_set)?;
-
-        let changes = change_collector.collect(&op_set)?;
-
-        self.verify_changes(&changes, mode)?;
+        let changes = if build_hash_graph {
+            let collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
+            let mut change_collector = IndexedChangeCollector::new(collector, &mut index);
+            change_collector.process_ops(&op_set)?;
+            let changes = change_collector.collect(&op_set)?;
+            self.verify_changes(&changes, mode)?;
+            Some(changes)
+        } else {
+            // the column walk skips the per-op validation the checked
+            // path gets from materializing every op — run the structural
+            // checks it depends on first
+            op_set.column_validation()?;
+            // walk the columns directly: no per-op materialization and no
+            // per-change op buffering at all
+            index.process_columns(&op_set)?;
+            None
+        };
 
         let (indexes, mut mark_order_validator) = index.finish();
+
+        // the fast unchecked path must build the exact same indexes as the
+        // op-at-a-time path — cross-check on every debug checked load
+        #[cfg(debug_assertions)]
+        if changes.is_some() {
+            let mut by_cols = op_set.index_builder();
+            by_cols
+                .process_columns(&op_set)
+                .expect("debug cross-check: process_columns failed");
+            let (by_cols_indexes, _) = by_cols.finish();
+            indexes.assert_same(&by_cols_indexes);
+        }
+
         op_set.set_indexes(indexes);
 
-        let change_graph = change_cols.finalize(&changes.changes);
+        let change_graph = match &changes {
+            Some(changes) => change_cols.finalize(&changes.changes),
+            None => {
+                let head_indexes = head_indexes.expect("checked above");
+                change_cols
+                    .finalize_unchecked(self.heads(), head_indexes)
+                    .map_err(|_| ReconstructError::BadHeadIndexes)?
+            }
+        };
 
-        debug_assert_eq!(changes.changes.len(), change_graph.len());
+        if let Some(changes) = &changes {
+            debug_assert_eq!(changes.changes.len(), change_graph.len());
+        }
 
         debug_assert!(op_set.validate_top_index());
 
@@ -368,7 +429,7 @@ impl<'a> Document<'a> {
         let change_cols = ChangeGraphCols::load(self)?;
 
         let mut mark_order = MarkOrderValidator::default();
-        let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
+        let mut change_collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
         change_collector.process_ops(&op_set, &mut mark_order)?;
         let changes = change_collector.collect(&op_set)?.changes;
         if let Some(err) = mark_order.take_error() {
@@ -390,6 +451,10 @@ pub(crate) enum ReconstructError {
     InvalidChanges(#[from] crate::storage::load::change_collector::Error),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
+    #[error("cannot skip building the hash graph: the document has no head index suffix")]
+    MissingHeadIndexes,
+    #[error("the document's head indexes are invalid")]
+    BadHeadIndexes,
     // FIXME - i need to do this check
     //#[error("succ out of order")]
     //SuccOutOfOrder,
@@ -399,6 +464,8 @@ pub(crate) enum ReconstructError {
     PackErr(#[from] PackError),
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
+    #[error(transparent)]
+    InvalidColumns(#[from] crate::op_set2::op_set::ColumnValidationError),
     #[error("invalid actor id {0}")]
     InvalidActorId(usize),
     #[error("invalid column length {0:?}")]

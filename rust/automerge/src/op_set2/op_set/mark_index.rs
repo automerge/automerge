@@ -267,18 +267,38 @@ impl MarkIndexColumn {
         self.cache = new_cache;
     }
 
+    /// Assemble from a pre-built column and cache (the streaming index
+    /// builder encodes the column directly).
+    pub(crate) fn from_parts(
+        data: PrefixColumn<Option<MarkIdx>>,
+        cache: HashMap<OpId, MarkData<'static>>,
+    ) -> Self {
+        Self { data, cache }
+    }
+
+    /// Debug-only drift guard companion to `Indexes::assert_same`.
+    #[cfg(any(debug_assertions, test))]
+    pub(crate) fn assert_same(&self, other: &Self) {
+        assert_eq!(
+            self.data.save(),
+            other.data.save(),
+            "index drift: mark column"
+        );
+        assert_eq!(self.cache, other.cache, "index drift: mark cache");
+    }
+
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let mark_values: Vec<Option<MarkIdx>> = values
-            .into_iter()
-            .map(|v| match v? {
-                MarkIndexBuilder::Start(id, mark) => {
-                    self.cache.insert(id, mark);
-                    Some(MarkIdx::Start(id))
-                }
-                MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
-            })
-            .collect();
-        self.data.splice(index, 0, mark_values);
+        let cache = &mut self.cache;
+        let mark_values = values.into_iter().map(|v| match v? {
+            MarkIndexBuilder::Start(id, mark) => {
+                cache.insert(id, mark);
+                Some(MarkIdx::Start(id))
+            }
+            MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
+        });
+        // marks are sparse: encode the (mostly None) runs in bulk
+        self.data
+            .splice_runs(index, 0, super::index::runs(mark_values));
     }
 
     pub(crate) fn undo(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {

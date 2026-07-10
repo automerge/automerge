@@ -33,14 +33,14 @@ fn simple_update_text() {
 fn update_text_big_ole_graphemes() {
     let actor1 = ActorId::from_str("aaaaaa").unwrap();
     let actor2 = ActorId::from_str("bbbbbb").unwrap();
-    let mut doc = AutoCommit::new().with_actor(actor1);
+    let mut doc = AutoCommit::new().with_actor(actor1).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // <200d> is a "zero-width joiner" which is used to combine multiple graphemes into one.
     // combining man+woman+boy should render as a single emoji of a familry of three
     doc.splice_text(&text, 0, 0, "left👨‍👩‍👦right").unwrap();
 
-    let mut doc2 = doc.fork().with_actor(actor2);
+    let mut doc2 = doc.fork().with_actor(actor2).unwrap();
     // man, woman, girl - a different family of three
     doc2.update_text(&text, "left👨‍👩‍👧right").unwrap();
 
@@ -648,7 +648,7 @@ fn update_text_change_at() {
     doc.update_text(&text, "a\n").unwrap();
     let initial_heads = doc.get_heads();
     doc.update_text(&text, "a\nb\n").unwrap();
-    doc.isolate(&initial_heads);
+    doc.isolate(&initial_heads).unwrap();
     doc.update_text(&text, "a\nc\n").unwrap();
     doc.integrate();
 
@@ -875,7 +875,9 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
 
     // Hard code actor ID to avoid flakes in patch ordering
     let actor = ActorId::from_str("aaaaaa").unwrap();
-    let mut doc = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint).with_actor(actor);
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint)
+        .with_actor(actor)
+        .unwrap();
 
     let beginning = doc.get_heads();
 
@@ -888,7 +890,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
     doc.splice_text(&name, 0, 0, &new_name).unwrap();
 
     // Create a concurrent change at the root
-    doc.isolate(&beginning);
+    doc.isolate(&beginning).unwrap();
     let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
     doc.splice_text(&color, 0, 0, "red").unwrap();
     doc.integrate();
@@ -903,7 +905,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
     let mut hydrated = doc.hydrate(&ROOT, None).unwrap();
 
     // Create another concurrent change
-    doc.isolate(&beginning);
+    doc.isolate(&beginning).unwrap();
     let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
     doc.splice_text(&color, 0, 0, "unset").unwrap();
     doc.commit();
@@ -953,7 +955,8 @@ fn splicing_into_multibyte_characters() {
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let actor = doc.get_actor().clone();
     doc.splice_text(&text, 0, 0, "A").unwrap();
-    let parent_hash = doc.commit().unwrap();
+    let parent_id = doc.commit().unwrap();
+    let parent_hash = doc.change_id_to_hash(&parent_id).unwrap().unwrap();
 
     // We have to construct this change using the legacy API because we intentionally make it
     // impossible to create these kind of changes. The notable thing here is that there is

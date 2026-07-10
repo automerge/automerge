@@ -1,7 +1,7 @@
 use crate::exid::ExId;
 use crate::patches::PatchLog;
-use crate::ChangeHash;
 use crate::{automerge::Automerge, AutomergeError};
+use crate::{ChangeHash, ChangeId};
 
 use super::{CommitOptions, TransactionArgs, TransactionInner};
 
@@ -35,14 +35,40 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    /// Get the hash of the change that contains the given opid.
+    /// Get the [`ChangeId`] of the change that contains the given opid.
     ///
     /// Returns none if the opid:
     /// - is the root object id
     /// - does not exist in this document
     /// - is for an operation in this transaction
-    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
-        self.doc.hash_for_opid(opid)
+    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
+        self.doc.change_id_for_opid(opid)
+    }
+
+    /// See [`Automerge::change_id_to_hash`]
+    pub fn change_id_to_hash(&self, id: &ChangeId) -> Result<Option<ChangeHash>, AutomergeError> {
+        self.doc.change_id_to_hash(id)
+    }
+
+    /// See [`Automerge::hash_to_change_id`]
+    pub fn hash_to_change_id(&self, hash: &ChangeHash) -> Result<Option<ChangeId>, AutomergeError> {
+        self.doc.hash_to_change_id(hash)
+    }
+
+    /// See [`Automerge::hashes_to_change_ids`]
+    pub fn hashes_to_change_ids(
+        &self,
+        hashes: &[ChangeHash],
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        self.doc.hashes_to_change_ids(hashes)
+    }
+
+    /// See [`Automerge::change_ids_to_hashes`]
+    pub fn change_ids_to_hashes(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.doc.change_ids_to_hashes(ids)
     }
 }
 
@@ -58,18 +84,24 @@ impl<'a> Transaction<'a> {
 
 impl Transaction<'_> {
     /// Get the heads of the document before this transaction was started.
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    pub fn get_heads(&self) -> Vec<ChangeId> {
         self.doc.get_heads()
     }
 
-    /// Commit the operations performed in this transaction, returning the hashes corresponding to
-    /// the new heads.
-    pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
+    /// Commit the operations performed in this transaction, returning the id of
+    /// the new change.
+    pub fn commit(mut self) -> (Option<ChangeId>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash =
             super::commit_transaction(tx, self.doc, &mut self.patch_log, CommitOptions::default());
+        let id = hash.map(|h| {
+            self.doc
+                .hash_to_change_id(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
         // TODO - remove this clone
-        (hash, self.patch_log.clone())
+        (id, self.patch_log.clone())
     }
 
     /// Commit the operations in this transaction with some options.
@@ -88,11 +120,17 @@ impl Transaction<'_> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
+    pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeId>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = super::commit_transaction(tx, self.doc, &mut self.patch_log, options);
+        let id = hash.map(|h| {
+            self.doc
+                .hash_to_change_id(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
         // TODO - remove this clone
-        (hash, self.patch_log.clone())
+        (id, self.patch_log.clone())
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -110,12 +148,12 @@ impl Transaction<'_> {
         f(tx, self.doc, &mut self.patch_log)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Option<crate::types::Clock> {
         if let Some(h) = heads {
-            // a transaction is in flight: its pending ops are in the op set
-            // but not under the graph's heads, so the current-heads
-            // shortcut in `scope_at` would wrongly expose them
-            Some(self.doc.change_graph.clock_at(h))
+            // a transaction is in flight: its pending ops are in the op
+            // set but not under the graph's heads, so a current-heads
+            // shortcut must not be used here
+            Some(self.doc.clock_for_ids(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }

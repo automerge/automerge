@@ -121,6 +121,8 @@ pub trait ColumnEncoding: Default {
     {
         let mut encoder = Self::encoder();
         encoder.max_segments(max);
+        // (constructed via `encoder()`, not `with_max_segments`, because
+        // `Self::Encoder` isn't bound by `Default` here)
         while let Some(run) = iter.next_run() {
             let value = <Self::Value as ColumnValueRef>::to_owned(run.value);
             let value = f(value);
@@ -185,6 +187,19 @@ pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
     /// `into_column` can build the column directly without re-decoding.
     /// Must be called before appending.  The default is a no-op.
     fn max_segments(&mut self, _max: usize) {}
+
+    /// Create an encoder with an explicit slab segment budget already set,
+    /// so [`into_column`](Self::into_column) is a direct slab handoff.
+    fn with_max_segments(mut self, max: usize) -> Self {
+        self.max_segments(max);
+        self
+    }
+
+    /// Create an encoder with the default slab segment budget
+    /// ([`DEFAULT_MAX_SEG`](crate::column::DEFAULT_MAX_SEG)) already set.
+    fn with_segments(self) -> Self {
+        self.with_max_segments(crate::column::DEFAULT_MAX_SEG)
+    }
 
     /// Build a [`Column`] from the encoder's contents.
     ///

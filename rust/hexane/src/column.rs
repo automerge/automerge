@@ -477,6 +477,16 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         }
     }
 
+    /// Reposition the iterator window to `range`.
+    ///
+    /// After this call the iterator yields the items in `range` and then
+    /// returns `None`. Equivalent to `set_max(range.end)` followed by
+    /// `advance_to(range.start)`.
+    pub fn shift(&mut self, range: Range<usize>) {
+        self.set_max(range.end);
+        self.advance_to(range.start);
+    }
+
     pub fn advance_by(&mut self, amount: usize) {
         self.advance_to(self.pos + amount)
     }
@@ -1227,6 +1237,16 @@ where
         let _ = self.splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
+    /// Splice `(value, count)` runs in — the run-aware fast path for bulk
+    /// uniform data.
+    pub fn splice_runs<V, I>(&mut self, index: usize, del: usize, runs: I)
+    where
+        V: AsColumnRef<T>,
+        I: IntoIterator<Item = (V, usize)>,
+    {
+        let _ = self.splice_inner(index, del, runs);
+    }
+
     /// Returns the affected slab range (post-merge), mirroring
     /// `Column::splice_inner`.
     ///
@@ -1360,7 +1380,9 @@ where
 
     fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
         let max = self.max_segments;
-        let min = self.max_segments / 4;
+        // clamped so that even at tiny max_segments a slab emptied by a
+        // deletion (0 segments) always merges away
+        let min = (self.max_segments / 4).max(1);
         if let Some(a) = self.slabs.get(index_a).map(|s| s.segments) {
             if let Some(b) = self.slabs.get(index_b).map(|s| s.segments) {
                 if (a < min || b < min) && a + b <= max {

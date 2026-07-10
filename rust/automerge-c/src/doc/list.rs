@@ -92,7 +92,15 @@ pub unsafe extern "C" fn AMlistGet(
     match heads.as_ref() {
         None => to_result((doc.get(obj_id, pos), pos)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result((doc.get_at(obj_id, pos, &heads), pos)),
+            Ok(heads) => to_result((
+                doc.get_at(
+                    obj_id,
+                    pos,
+                    &doc.hashes_to_change_ids(&heads)
+                        .expect("C documents always have a checked hash graph"),
+                ),
+                pos,
+            )),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -133,7 +141,14 @@ pub unsafe extern "C" fn AMlistGetAll(
     match heads.as_ref() {
         None => to_result(doc.get_all(obj_id, pos)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.get_all_at(obj_id, pos, &heads)),
+            Ok(heads) => to_result(
+                doc.get_all_at(
+                    obj_id,
+                    pos,
+                    &doc.hashes_to_change_ids(&heads)
+                        .expect("C documents always have a checked hash graph"),
+                ),
+            ),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -629,7 +644,14 @@ pub unsafe extern "C" fn AMlistRange(
     match heads.as_ref() {
         None => to_result(doc.list_range(obj_id, range)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.list_range_at(obj_id, range, &heads)),
+            Ok(heads) => to_result(
+                doc.list_range_at(
+                    obj_id,
+                    range,
+                    &doc.hashes_to_change_ids(&heads)
+                        .expect("C documents always have a checked hash graph"),
+                ),
+            ),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }

@@ -4364,3 +4364,125 @@ fn golden_format_delta_opt_i64() {
     let loaded = DeltaColumn::<Option<i64>>::load(fixture).unwrap();
     assert_eq!(loaded.to_vec(), values);
 }
+
+#[test]
+fn next_run_merges_across_slabs_strings_and_prefix() {
+    // Slab cuts land on run boundaries, so adjacent slabs holding equal
+    // values arise from edits: here replacing the value just before a slab
+    // boundary with the value just after it. next_run must merge the two
+    // physical runs — a caller should never observe slab boundaries.
+    let vals: Vec<Option<String>> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|s| Some(s.to_string()))
+        .collect();
+    let mut col = Column::<Option<String>>::from_values_with_max_segments(vals, 2);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+    // replace "b" (end of slab 1) with "c" (start of slab 2)
+    col.splice(1, 1, vec![Some("c".to_string())]);
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+    assert!(
+        !col.slab_lens().contains(&0),
+        "splices must never leave empty slabs behind"
+    );
+    let mut iter = col.iter();
+    let runs: Vec<(usize, Option<String>)> = std::iter::from_fn(|| {
+        iter.next_run()
+            .map(|r| (r.count, r.value.map(|s| s.to_string())))
+    })
+    .collect();
+    assert_eq!(
+        runs,
+        vec![
+            (1, Some("a".to_string())),
+            (2, Some("c".to_string())),
+            (1, Some("d".to_string())),
+        ],
+        "equal-valued runs must merge across slab boundaries"
+    );
+
+    // Same shape for the bool prefix column (the automerge insert column):
+    // deleting the `true` at the start of slab 2 leaves false|false at the
+    // boundary.
+    let mut col = PrefixColumn::<bool>::with_max_segments(2);
+    col.splice(0, 0, vec![true, false, true, false]);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+    col.splice(2, 1, Vec::<bool>::new());
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+    assert!(
+        !col.values().slab_lens().contains(&0),
+        "splices must never leave empty slabs behind"
+    );
+    let mut iter = col.iter();
+    let runs: Vec<(usize, bool)> =
+        std::iter::from_fn(|| iter.next_run().map(|r| (r.count, r.value.value))).collect();
+    assert_eq!(
+        runs,
+        vec![(1, true), (2, false)],
+        "prefix iter runs must merge across slab boundaries"
+    );
+}
+
+#[test]
+fn next_run_never_yields_adjacent_equal_runs_at_default_config() {
+    // ~150 runs at the default max_segments so slabs split naturally, then
+    // an edit makes the values on both sides of the first slab boundary
+    // equal. The contract: next_run coalesces runs regardless of slab
+    // layout, so consecutive runs never carry equal values.
+    let vals: Vec<Option<String>> = (0..300).map(|i| Some(format!("k{}", i / 2))).collect();
+    let mut col = Column::<Option<String>>::from_values(vals);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    let boundary = col.slab_lens()[0];
+    let after: Option<String> = col.get(boundary).flatten().map(|v| v.to_string());
+    col.splice(boundary - 1, 1, vec![after]);
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+
+    let mut iter = col.iter();
+    let mut total = 0;
+    let mut prev: Option<Option<String>> = None;
+    while let Some(run) = iter.next_run() {
+        let value = run.value.map(|s| s.to_string());
+        if let Some(prev) = &prev {
+            assert_ne!(prev, &value, "adjacent runs must never be equal");
+        }
+        total += run.count;
+        prev = Some(value);
+    }
+    assert_eq!(total, 300);
+
+    // same contract for the bool prefix column: delete the `true` at (or
+    // just before) the first slab boundary, leaving false|false across it
+    let vals: Vec<bool> = (0..300).map(|i| i % 2 == 0).collect();
+    let mut col = PrefixColumn::<bool>::new();
+    col.splice(0, 0, vals);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    let boundary = col.values().slab_lens()[0];
+    let at_boundary = col.get(boundary).map(|pv| pv.value).unwrap_or(false);
+    let del = if at_boundary { boundary } else { boundary - 1 };
+    col.splice(del, 1, Vec::<bool>::new());
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+
+    let mut iter = col.iter();
+    let mut total = 0;
+    let mut prev: Option<bool> = None;
+    while let Some(run) = iter.next_run() {
+        let value = run.value.value;
+        if let Some(prev) = prev {
+            assert_ne!(prev, value, "adjacent runs must never be equal");
+        }
+        total += run.count;
+        prev = Some(value);
+    }
+    assert_eq!(total, 299);
+}

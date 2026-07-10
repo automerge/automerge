@@ -154,6 +154,20 @@ impl<'a> OpIter<'a> {
         }))
     }
 
+    /// Reposition every column iterator to `range` without consuming an
+    /// item. Forward-only.
+    pub(crate) fn shift(&mut self, range: Range<usize>) {
+        self.id.shift(range.clone());
+        self.obj.shift(range.clone());
+        self.key.shift(range.clone());
+        self.succ.shift(range.clone());
+        self.insert.shift(range.clone());
+        self.action.shift(range.clone());
+        self.value.shift(range.clone());
+        self.marks.shift(range.clone());
+        self.pos = range.start;
+    }
+
     #[allow(unused)]
     pub(crate) fn suspend(&self) -> OpIterState {
         OpIterState {
@@ -372,6 +386,11 @@ impl<'a> OpIdIter<'a> {
         self.ctr.set_max(pos);
     }
 
+    pub(crate) fn shift(&mut self, range: Range<usize>) {
+        self.actor.shift(range.clone());
+        self.ctr.shift(range);
+    }
+
     fn suspend(&self) -> OpIdIterState {
         OpIdIterState {
             actor_state: self.actor.suspend(),
@@ -426,6 +445,10 @@ impl<'a> InsertIter<'a> {
 
     fn try_nth(&mut self, n: usize) -> Result<bool, ReadOpError> {
         self.iter.nth(n).ok_or(ReadOpError::MissingValue("insert"))
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.iter.shift(range);
     }
 
     fn suspend(&self) -> InsertIterState {
@@ -517,6 +540,12 @@ impl<'a> KeyIter<'a> {
             .nth(n)
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
         KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from))
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.key_str.shift(range.clone());
+        self.key_actor.shift(range.clone());
+        self.key_ctr.shift(range);
     }
 
     fn suspend(&self) -> KeyIterState {
@@ -622,6 +651,11 @@ impl<'a> ObjIdIter<'a> {
         ObjId::try_load(actor, ctr.map(i64::from))
     }
 
+    fn shift(&mut self, range: Range<usize>) {
+        self.obj_actor.shift(range.clone());
+        self.obj_ctr.shift(range);
+    }
+
     fn suspend(&self) -> ObjIdIterState {
         ObjIdIterState {
             obj_actor: self.obj_actor.suspend(),
@@ -711,6 +745,11 @@ impl<'a> MarkInfoIter<'a> {
             .nth(n)
             .ok_or(ReadOpError::MissingValue("mark_name"))?;
         Ok((mark_name, expand))
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.name.shift(range.clone());
+        self.expand.shift(range);
     }
 
     fn suspend(&self) -> MarkInfoIterState {
@@ -810,6 +849,10 @@ impl<'a> ActionIter<'a> {
         self.iter.nth(n).ok_or(ReadOpError::MissingValue("action"))
     }
 
+    fn shift(&mut self, range: Range<usize>) {
+        self.iter.shift(range);
+    }
+
     fn suspend(&self) -> ActionIterState {
         ActionIterState {
             state: self.iter.suspend(),
@@ -891,6 +934,11 @@ impl<'a> ValueIter<'a> {
             let raw = self.raw.take(meta.length());
             Ok(ScalarValue::from_raw(meta, raw)?)
         }
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.meta.shift(range);
+        self.raw.seek_to(self.meta.prefix() as usize);
     }
 
     fn suspend(&self) -> ValueIterState {
@@ -1032,6 +1080,14 @@ impl<'a> SuccIterIter<'a> {
         }
     }
 
+    fn shift(&mut self, range: Range<usize>) {
+        self.count.shift(range);
+        let sub_start = self.count.prefix() as usize;
+        self.actor.advance_to(sub_start);
+        self.ctr.advance_to(sub_start);
+        self.incs.advance_to(sub_start);
+    }
+
     fn suspend(&self) -> SuccIterIterState {
         SuccIterIterState {
             count: self.count.suspend(),
@@ -1069,7 +1125,7 @@ mod tests {
         let actor3 = ActorId::try_from("cccccccc").unwrap();
         let actor4 = ActorId::try_from("dddddddd").unwrap();
 
-        let mut doc = Automerge::new().with_actor(actor1);
+        let mut doc = Automerge::new().with_actor(actor1).unwrap();
         let mut tx = doc.transaction();
         tx.put(&ROOT, "key1", "val1").unwrap();
         tx.put(&ROOT, "key2", "val2").unwrap();
@@ -1082,17 +1138,17 @@ mod tests {
         tx.put(&ROOT, "key9", "val9").unwrap();
         tx.commit();
 
-        let mut doc2 = doc.fork().with_actor(actor2);
+        let mut doc2 = doc.fork().with_actor(actor2).unwrap();
         let mut tx = doc2.transaction();
         tx.put(&ROOT, "key5", "val10B").unwrap(); // 10
         tx.commit();
 
-        let mut doc3 = doc.fork().with_actor(actor3);
+        let mut doc3 = doc.fork().with_actor(actor3).unwrap();
         let mut tx = doc3.transaction();
         tx.delete(&ROOT, "key5").unwrap(); // 10
         tx.commit();
 
-        let mut doc4 = doc.fork().with_actor(actor4);
+        let mut doc4 = doc.fork().with_actor(actor4).unwrap();
         let mut tx = doc4.transaction();
         tx.put(&ROOT, "key5", "val10D").unwrap(); // 10
         tx.commit();

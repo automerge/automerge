@@ -480,6 +480,16 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.splice(index, del, values);
     }
 
+    /// Splice `(value, count)` runs in — the run-aware fast path for bulk
+    /// uniform data.
+    pub fn splice_runs<V, I>(&mut self, index: usize, del: usize, runs: I)
+    where
+        V: crate::AsColumnRef<T>,
+        I: IntoIterator<Item = (V, usize)>,
+    {
+        self.col.splice_runs(index, del, runs);
+    }
+
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────
 
     /// **Exclusive** prefix sum at `index` — the sum of values at
@@ -864,6 +874,22 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         if target > self.pos() {
             self.nth(target - self.pos() - 1);
         }
+    }
+
+    /// Reposition the iterator window to `range`.
+    ///
+    /// After this call the iterator yields the items in `range` and then
+    /// returns `None`. Equivalent to `set_max(range.end)` followed by
+    /// `advance_to(range.start)`.
+    pub fn shift(&mut self, range: std::ops::Range<usize>) {
+        self.set_max(range.end);
+        self.advance_to(range.start);
+    }
+
+    /// The accumulated prefix over all items before the current position —
+    /// i.e. the exclusive prefix of the item that `next()` would yield.
+    pub fn prefix(&self) -> T::Prefix {
+        self.total.clone()
     }
 
     pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<'a, T>> {

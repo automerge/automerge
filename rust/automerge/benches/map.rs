@@ -181,6 +181,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 || {
                     repeated_put(size)
                         .get_changes(&[])
+                        .unwrap()
                         .into_iter()
                         .collect::<Vec<_>>()
                 },
@@ -199,6 +200,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     || {
                         repeated_increment(size)
                             .get_changes(&[])
+                            .unwrap()
                             .into_iter()
                             .collect::<Vec<_>>()
                     },
@@ -220,6 +222,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     || {
                         increasing_put(size)
                             .get_changes(&[])
+                            .unwrap()
                             .into_iter()
                             .collect::<Vec<_>>()
                     },
@@ -241,6 +244,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     || {
                         decreasing_put(size)
                             .get_changes(&[])
+                            .unwrap()
                             .into_iter()
                             .collect::<Vec<_>>()
                     },

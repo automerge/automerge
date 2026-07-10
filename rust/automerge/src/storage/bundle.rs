@@ -181,17 +181,20 @@ mod test {
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "aaa", "aaa").unwrap();
-        let (Some(h0), _) = tx.commit() else { panic!() };
+        let (Some(c0), _) = tx.commit() else { panic!() };
+        let h0 = doc.change_id_to_hash(&c0).unwrap().unwrap();
 
         let mut d2 = doc.fork();
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "bbb", "bbb").unwrap();
-        let (Some(h1), _) = tx.commit() else { panic!() };
+        let (Some(c1), _) = tx.commit() else { panic!() };
+        let h1 = doc.change_id_to_hash(&c1).unwrap().unwrap();
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "ccc", "ccc").unwrap();
-        let (Some(h2), _) = tx.commit() else { panic!() };
+        let (Some(c2), _) = tx.commit() else { panic!() };
+        let h2 = doc.change_id_to_hash(&c2).unwrap().unwrap();
 
         let bundle = doc.bundle([h0, h1, h2]).unwrap();
         let changes = bundle.to_changes().unwrap();

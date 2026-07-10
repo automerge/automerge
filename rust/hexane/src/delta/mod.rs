@@ -970,6 +970,16 @@ impl<'a, T: DeltaValue> DeltaIter<'a, T> {
         }
     }
 
+    /// Reposition the iterator window to `range`.
+    ///
+    /// After this call the iterator yields the items in `range` and then
+    /// returns `None`. Equivalent to `set_max(range.end)` followed by
+    /// `advance_to(range.start)`.
+    pub fn shift(&mut self, range: Range<usize>) {
+        self.set_max(range.end);
+        self.advance_to(range.start);
+    }
+
     pub fn advance_by(&mut self, amount: usize) {
         if amount > 0 {
             self.nth(amount - 1);

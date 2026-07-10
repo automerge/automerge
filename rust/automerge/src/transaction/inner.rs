@@ -183,11 +183,11 @@ impl TransactionInner {
 
     pub(crate) fn export(mut self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
         self.deps.sort_unstable();
-        let deps_index = self
-            .deps
-            .iter()
-            .filter_map(|hash| Some(change_graph.hash_to_index(hash)? as u64))
-            .collect();
+        // deps of a local commit are always resolvable: they are either
+        // the current heads or the committing actor's last change
+        let deps_index = change_graph
+            .dep_indexes(&self.deps)
+            .expect("commit deps are always resolvable");
         let meta = self.change_meta(deps_index);
         let stored = build_change(&self.pending, &meta, change_graph, &op_set.actors);
         Change::new(stored)

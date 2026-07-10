@@ -112,6 +112,12 @@ impl<I: Iterator> Iterator for PeekShift<I> {
     }
 }
 
+impl<T: hexane::PrefixValue> Shiftable for hexane::PrefixIter<'_, T> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        hexane::PrefixIter::shift_next(self, range)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct SkipWrap<I: Iterator<Item = usize>> {
     pub(crate) pos: usize,

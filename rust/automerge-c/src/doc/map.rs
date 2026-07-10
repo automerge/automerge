@@ -72,7 +72,15 @@ pub unsafe extern "C" fn AMmapGet(
     match heads.as_ref() {
         None => to_result((doc.get(obj_id, key), key)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result((doc.get_at(obj_id, key, &heads), key)),
+            Ok(heads) => to_result((
+                doc.get_at(
+                    obj_id,
+                    key,
+                    &doc.hashes_to_change_ids(&heads)
+                        .expect("C documents always have a checked hash graph"),
+                ),
+                key,
+            )),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -114,7 +122,14 @@ pub unsafe extern "C" fn AMmapGetAll(
     match heads.as_ref() {
         None => to_result(doc.get_all(obj_id, key)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.get_all_at(obj_id, key, &heads)),
+            Ok(heads) => to_result(
+                doc.get_all_at(
+                    obj_id,
+                    key,
+                    &doc.hashes_to_change_ids(&heads)
+                        .expect("C documents always have a checked hash graph"),
+                ),
+            ),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -523,7 +538,14 @@ pub unsafe extern "C" fn AMmapRange(
             };
             let bounds = begin..end;
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                to_result(
+                    doc.map_range_at(
+                        obj_id,
+                        bounds,
+                        &doc.hashes_to_change_ids(&heads)
+                            .expect("C documents always have a checked hash graph"),
+                    ),
+                )
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
@@ -531,7 +553,14 @@ pub unsafe extern "C" fn AMmapRange(
         (false, true) => {
             let bounds = to_str!(begin).to_string()..;
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                to_result(
+                    doc.map_range_at(
+                        obj_id,
+                        bounds,
+                        &doc.hashes_to_change_ids(&heads)
+                            .expect("C documents always have a checked hash graph"),
+                    ),
+                )
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
@@ -539,7 +568,14 @@ pub unsafe extern "C" fn AMmapRange(
         (true, false) => {
             let bounds = ..to_str!(end).to_string();
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                to_result(
+                    doc.map_range_at(
+                        obj_id,
+                        bounds,
+                        &doc.hashes_to_change_ids(&heads)
+                            .expect("C documents always have a checked hash graph"),
+                    ),
+                )
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
@@ -547,7 +583,14 @@ pub unsafe extern "C" fn AMmapRange(
         (true, true) => {
             let bounds = ..;
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                to_result(
+                    doc.map_range_at(
+                        obj_id,
+                        bounds,
+                        &doc.hashes_to_change_ids(&heads)
+                            .expect("C documents always have a checked hash graph"),
+                    ),
+                )
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }

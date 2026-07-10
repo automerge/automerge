@@ -8,7 +8,7 @@ use automerge::{
 };
 
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
-    doc.set_actor(ActorId::from(actor.to_vec()));
+    doc.set_actor(ActorId::from(actor.to_vec())).unwrap();
     doc.commit();
 }
 
@@ -77,7 +77,11 @@ fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
 
     let mut left_state = sync::State::new();
     let mut right_state = sync::State::new();
-    let message = left.sync().generate_sync_message(&mut left_state).unwrap();
+    let message = left
+        .sync()
+        .generate_sync_message(&mut left_state)
+        .unwrap()
+        .unwrap();
     right
         .sync()
         .receive_sync_message(&mut right_state, message)
@@ -85,6 +89,7 @@ fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
     let message = right
         .sync()
         .generate_sync_message(&mut right_state)
+        .unwrap()
         .unwrap();
     left.sync()
         .receive_sync_message(&mut left_state, message)

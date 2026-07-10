@@ -11,7 +11,7 @@ use super::super::ValueMeta;
 use super::{length_prefixed_bytes, shift_range};
 use super::{ActorMapper, ChangeOpsColumns};
 
-use crate::change_graph::{ChangeGraph, ChangeGraphCols};
+use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
 use crate::op_set2::op_set::{IndexBuilder, MarkOrderValidator};
@@ -29,12 +29,39 @@ use crate::{
 #[error("out of memory")]
 pub(crate) struct OutOfMemory;
 
+/// Drives a single pass over the op set, building the op index and
+/// (optionally) collecting the ops of every change so the change graph's
+/// hashes can be computed. Loading with `skip_hash_graph` uses the
+/// index-only form, which does none of the per-change buffering.
 pub(crate) struct IndexedChangeCollector<'a> {
     pub(crate) index: &'a mut IndexBuilder,
-    pub(crate) collector: ChangeCollector<'a>,
+    collector: Option<ChangeCollector<'a>>,
+    last: Option<(ObjId, KeyRef<'a>)>,
 }
 
 impl<'a> IndexedChangeCollector<'a> {
+    pub(crate) fn new(collector: ChangeCollector<'a>, index: &'a mut IndexBuilder) -> Self {
+        IndexedChangeCollector {
+            index,
+            collector: Some(collector),
+            last: None,
+        }
+    }
+
+    /// Build only the op index; ops are not buffered per change and
+    /// [`Self::collect`] may not be called.
+    ///
+    /// Kept as the op-at-a-time reference implementation for
+    /// [`IndexBuilder::process_columns`]; only used by its equality tests.
+    #[cfg(test)]
+    pub(crate) fn index_only(index: &'a mut IndexBuilder) -> Self {
+        IndexedChangeCollector {
+            index,
+            collector: None,
+            last: None,
+        }
+    }
+
     pub(crate) fn process_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
         let mut iter = op_set.iter();
 
@@ -47,26 +74,35 @@ impl<'a> IndexedChangeCollector<'a> {
 
             for id in op_succ {
                 self.index.process_succ(op_is_counter, id);
-                self.collector.process_succ(op_id, id);
+                if let Some(collector) = &mut self.collector {
+                    collector.process_succ(op_id, id);
+                }
             }
         }
         Ok(())
     }
 
     pub(crate) fn collect(self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
-        self.collector.collect(op_set)
+        self.collector
+            .expect("collect requires change collection")
+            .collect(op_set)
     }
 
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
         let next = Some((op.obj, op.elemid_or_key()));
-        let flush = self.collector.last != next;
+        let flush = self.last != next;
         if flush {
             self.index.flush();
         }
         self.index.process_op(&op);
-        self.collector.process_op_internal(op, flush);
+        if let Some(collector) = &mut self.collector {
+            collector.process_op_internal(op, flush);
+            if flush {
+                collector.last = next.clone();
+            }
+        }
         if flush {
-            self.collector.last = next;
+            self.last = next;
         }
     }
 }
@@ -560,24 +596,17 @@ impl<'a> ChangeBuilder<'a> {
 }
 
 impl<'a> ChangeCollector<'a> {
-    pub(crate) fn with_index(self, index: &'a mut IndexBuilder) -> IndexedChangeCollector<'a> {
-        IndexedChangeCollector {
-            collector: self,
-            index,
-        }
-    }
-
-    pub(crate) fn try_new(
-        change_cols: &'a ChangeGraphCols,
-        op_set: &'a OpSet,
-    ) -> Result<ChangeCollector<'a>, OutOfMemory> {
+    pub(crate) fn try_new<I>(
+        changes: I,
+        actors: &'a [ActorId],
+    ) -> Result<ChangeCollector<'a>, OutOfMemory>
+    where
+        I: ExactSizeIterator<Item = BuildChangeMetadata<'a>>,
+    {
         let mut meta = Vec::new();
-        meta.try_reserve(change_cols.len())
-            .map_err(|_| OutOfMemory)?;
-        for c in change_cols.iter() {
-            meta.push(c);
-        }
-        ChangeCollector::try_from_change_meta(meta, &op_set.actors)
+        meta.try_reserve(changes.len()).map_err(|_| OutOfMemory)?;
+        meta.extend(changes);
+        ChangeCollector::try_from_change_meta(meta, actors)
     }
 
     pub(crate) fn process_ops(
@@ -656,8 +685,21 @@ impl<'a> ChangeCollector<'a> {
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         have_deps: &[ChangeHash],
-    ) -> Vec<Change> {
-        let changes = change_graph.get_build_metadata_clock(have_deps);
+    ) -> Result<Vec<Change>, AutomergeError> {
+        let changes = change_graph.get_build_metadata_clock(have_deps)?;
+        Self::from_build_meta(op_set, change_graph, changes)
+    }
+
+    /// Like [`Self::exclude_hashes`] but keyed by a clock computed without
+    /// hashes, so the exclusion set can name pre-load changes on an
+    /// unchecked graph. Building the returned changes still requires their
+    /// deps' hashes to be known.
+    pub(crate) fn exclude_seq_clock(
+        op_set: &'a OpSet,
+        change_graph: &'a ChangeGraph,
+        clock: crate::clock::SeqClock,
+    ) -> Result<Vec<Change>, AutomergeError> {
+        let changes = change_graph.get_build_metadata_for_seq_clock(clock);
         Self::from_build_meta(op_set, change_graph, changes)
     }
 
@@ -665,24 +707,32 @@ impl<'a> ChangeCollector<'a> {
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         have_deps: &[ChangeHash],
-    ) -> Vec<ChangeMetadata<'a>> {
-        let changes = change_graph.get_build_metadata_clock(have_deps);
+    ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError> {
+        let changes = change_graph.get_build_metadata_clock(have_deps)?;
         changes
             .into_iter()
-            .map(|c| ChangeMetadata {
-                actor: Cow::Borrowed(&op_set.actors[c.actor]),
-                seq: c.seq,
-                start_op: c.start_op,
-                max_op: c.max_op,
-                timestamp: c.timestamp,
-                message: c.message,
-                deps: c
-                    .deps
-                    .iter()
-                    .filter_map(|n| change_graph.index_to_hash(*n as usize).cloned())
-                    .collect(),
-                hash: change_graph.index_to_hash(c.builder).cloned().unwrap(),
-                extra: c.extra,
+            .map(|c| {
+                Ok(ChangeMetadata {
+                    actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                    seq: c.seq,
+                    start_op: c.start_op,
+                    max_op: c.max_op,
+                    timestamp: c.timestamp,
+                    message: c.message,
+                    deps: c
+                        .deps
+                        .iter()
+                        .map(|n| {
+                            change_graph
+                                .index_to_hash(*n as usize)
+                                .ok_or(AutomergeError::UncheckedHashGraph)
+                        })
+                        .collect::<Result<_, _>>()?,
+                    hash: change_graph
+                        .try_index_to_hash(c.builder)
+                        .map_err(AutomergeError::from)?,
+                    extra: c.extra,
+                })
             })
             .collect()
     }
@@ -696,24 +746,32 @@ impl<'a> ChangeCollector<'a> {
         I: IntoIterator<Item = ChangeHash>,
     {
         let changes = change_graph.get_build_metadata(hashes)?;
-        Ok(changes
+        changes
             .into_iter()
-            .map(|c| ChangeMetadata {
-                actor: Cow::Borrowed(&op_set.actors[c.actor]),
-                seq: c.seq,
-                start_op: c.start_op,
-                max_op: c.max_op,
-                timestamp: c.timestamp,
-                message: c.message,
-                deps: c
-                    .deps
-                    .iter()
-                    .filter_map(|n| change_graph.index_to_hash(*n as usize).cloned())
-                    .collect(),
-                hash: change_graph.index_to_hash(c.builder).cloned().unwrap(),
-                extra: c.extra,
+            .map(|c| -> Result<_, AutomergeError> {
+                Ok(ChangeMetadata {
+                    actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                    seq: c.seq,
+                    start_op: c.start_op,
+                    max_op: c.max_op,
+                    timestamp: c.timestamp,
+                    message: c.message,
+                    deps: c
+                        .deps
+                        .iter()
+                        .map(|n| {
+                            change_graph
+                                .index_to_hash(*n as usize)
+                                .ok_or(AutomergeError::UncheckedHashGraph)
+                        })
+                        .collect::<Result<_, _>>()?,
+                    hash: change_graph
+                        .try_index_to_hash(c.builder)
+                        .map_err(AutomergeError::from)?,
+                    extra: c.extra,
+                })
             })
-            .collect())
+            .collect::<Result<_, _>>()
     }
 
     pub(crate) fn for_hashes<I>(
@@ -725,14 +783,22 @@ impl<'a> ChangeCollector<'a> {
         I: IntoIterator<Item = ChangeHash>,
     {
         let changes = change_graph.get_build_metadata(hashes)?;
-        Ok(Self::from_build_meta(op_set, change_graph, changes))
+        Self::from_build_meta(op_set, change_graph, changes)
     }
 
     fn from_build_meta(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         changes: Vec<BuildChangeMetadata<'a>>,
-    ) -> Vec<Change> {
+    ) -> Result<Vec<Change>, AutomergeError> {
+        // building a change embeds its deps' hashes, which must all be known
+        for c in &changes {
+            for dep in &c.deps {
+                if change_graph.index_to_hash(*dep as usize).is_none() {
+                    return Err(AutomergeError::UncheckedHashGraph);
+                }
+            }
+        }
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
         #[cfg(debug_assertions)]
         {
@@ -753,7 +819,7 @@ impl<'a> ChangeCollector<'a> {
                 bundle_changes.iter().map(|c| c.hash()).collect();
             debug_assert_eq!(r1_hashes, bundle_hashes);
         }
-        r1
+        Ok(r1)
     }
 
     fn from_build_meta_inner(

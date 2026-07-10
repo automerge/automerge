@@ -60,18 +60,27 @@
 //! automerge will pick a winning value in a random but deterministic way, but
 //! the conflicting value is still available via the [`ReadDoc::get_all()`] method.
 //!
-//! ### Change hashes and historical values
+//! ### Change ids and historical values
 //!
-//! Like git, points in the history of a document are identified by hash. Unlike
-//! git there can be multiple hashes representing a particular point (because
-//! automerge supports concurrent changes). These hashes can be obtained using
+//! Points in the history of a document are identified by [`ChangeId`], the
+//! pair of the actor which made a change and the sequence number of the change
+//! in that actor's history (displayed as `seq@actor`). Because automerge
+//! supports concurrent changes there can be multiple ids representing a
+//! particular point. The current heads of a document can be obtained using
 //! either [`Automerge::get_heads()`] or [`AutoCommit::get_heads()`] (note these
 //! methods are not part of [`ReadDoc`] because in the case of [`AutoCommit`] it
 //! requires a mutable reference to the document).
 //!
-//! These hashes can be used to read values from the document at a particular
-//! point in history using the various `*_at()` methods on [`ReadDoc`] which take a
-//! slice of [`ChangeHash`] as an argument.
+//! These ids can be used to read values from the document at a particular
+//! point in history using the various `*_at()` methods on [`ReadDoc`] which
+//! take a slice of [`ChangeId`] as an argument. Ids naming changes the
+//! document does not contain are silently skipped by these methods.
+//!
+//! Changes are still content-addressed by [`ChangeHash`] internally and in the
+//! sync protocol (see [`Change::hash()`], [`Change::deps()`]). To move between
+//! the two representations use [`Automerge::hashes_to_change_ids()`] and
+//! [`Automerge::change_ids_to_hashes()`] (or their singular counterparts
+//! [`Automerge::hash_to_change_id()`] and [`Automerge::change_id_to_hash()`]).
 //!
 //! ### Actor IDs
 //!
@@ -264,6 +273,7 @@ mod automerge;
 mod autoserde;
 mod change;
 mod change_graph;
+mod change_id;
 mod change_queue;
 mod clock;
 mod columnar;
@@ -296,6 +306,7 @@ pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
 pub use change_graph::Fragment;
+pub use change_id::{ChangeId, ParseChangeIdError};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;

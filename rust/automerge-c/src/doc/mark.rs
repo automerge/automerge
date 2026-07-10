@@ -200,7 +200,13 @@ pub unsafe extern "C" fn AMmarks(
     match heads.as_ref() {
         None => to_result(doc.marks(obj_id)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.marks_at(obj_id, &heads)),
+            Ok(heads) => to_result(
+                doc.marks_at(
+                    obj_id,
+                    &doc.hashes_to_change_ids(&heads)
+                        .expect("C documents always have a checked hash graph"),
+                ),
+            ),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }

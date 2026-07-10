@@ -25,9 +25,11 @@ const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identif
 
 impl Automerge {
     fn generate_sync_message_v1(&self, sync_state: &mut State) -> Option<Message> {
-        let our_heads = self.get_heads();
+        let our_heads = self.heads_hashes();
 
-        let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
+        let our_need = self
+            .get_missing_deps_hashes(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
+            .unwrap();
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
             heads.iter().collect::<HashSet<_>>()
@@ -45,7 +47,7 @@ impl Automerge {
                 if !first_have
                     .last_sync
                     .iter()
-                    .all(|hash| self.get_change_by_hash(hash).is_some())
+                    .all(|hash| self.get_change_by_hash(hash).unwrap().is_some())
                 {
                     let reset_msg = Message {
                         heads: our_heads,
@@ -123,7 +125,7 @@ impl Automerge {
     }
 
     fn make_bloom_filter_v1(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self.get_changes(&last_sync);
+        let new_changes = self.get_changes_hashes(&last_sync).unwrap();
         let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
@@ -139,7 +141,7 @@ impl Automerge {
         if have.is_empty() {
             Ok(need
                 .iter()
-                .filter_map(|hash| self.get_change_by_hash(hash))
+                .filter_map(|hash| self.get_change_by_hash(hash).unwrap())
                 .collect())
         } else {
             let mut last_sync_hashes = HashSet::new();
@@ -152,7 +154,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes);
+            let changes = self.get_changes_hashes(&last_sync_hashes).unwrap();
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -187,7 +189,7 @@ impl Automerge {
             let mut changes_to_send = Vec::new();
             for hash in need {
                 if !hashes_to_send.contains(hash) {
-                    if let Some(change) = self.get_change_by_hash(hash) {
+                    if let Some(change) = self.get_change_by_hash(hash).unwrap() {
                         changes_to_send.push(change);
                     }
                 }
@@ -208,7 +210,7 @@ impl Automerge {
         message: Message,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_heads();
+        let before_heads = self.heads_hashes();
 
         let Message {
             heads: message_heads,
@@ -222,7 +224,7 @@ impl Automerge {
             self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
+                &self.heads_hashes().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }
@@ -236,7 +238,7 @@ impl Automerge {
 
         let known_heads = message_heads
             .iter()
-            .filter(|head| self.get_change_by_hash(head).is_some())
+            .filter(|head| self.get_change_by_hash(head).unwrap().is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads.clone_from(&message_heads);
@@ -570,7 +572,7 @@ fn sync_v1_to_v2(
             tracing::debug!(decoded=?decoded, "receiving decoded message on v2");
             v2.receive_sync_message(b_sync_state, decoded).unwrap()
         }
-        let b_to_a = v2.generate_sync_message(b_sync_state);
+        let b_to_a = v2.generate_sync_message(b_sync_state).unwrap();
         let b_to_a_is_none = b_to_a.is_none();
         if let Some(msg) = b_to_a {
             tracing::debug!(msg=?msg, "sending message from v2 to v1");
@@ -598,7 +600,7 @@ fn sync_v2_to_v1(
     let mut iterations = 0;
 
     loop {
-        let a_to_b = v2.generate_sync_message(v2_sync_state);
+        let a_to_b = v2.generate_sync_message(v2_sync_state).unwrap();
         let a_to_b_is_none = a_to_b.is_none();
         if iterations > MAX_ITER {
             panic!("failed to sync in {} iterations", MAX_ITER);

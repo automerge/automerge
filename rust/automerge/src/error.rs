@@ -31,6 +31,10 @@ pub enum AutomergeError {
     InvalidCharacter(usize),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
+    #[error("invalid change id `{0}`")]
+    InvalidChangeId(String),
+    #[error("the hash graph has not been built, call rebuild_hash_graph() first")]
+    UncheckedHashGraph,
     #[error("index {0} is out of bounds")]
     InvalidIndex(usize),
     #[error("invalid obj id `{0}`")]

@@ -110,7 +110,14 @@ fn load_next_change<'a>(
     match chunk {
         storage::Chunk::Document(d) => {
             tracing::trace!("loading document chunk");
-            if !d.heads().iter().all(|h| current.has_change(h)) {
+            // on an unchecked graph we can't always tell whether we have a
+            // head; conservatively reconstruct, the apply path will
+            // deduplicate or error
+            if !d
+                .heads()
+                .iter()
+                .all(|h| current.has_change(h).unwrap_or(false))
+            {
                 let new_changes = match d.reconstruct_changes(text_encoding) {
                     Ok(c) => c,
                     Err(ReconstructError::InvalidMarkOrderChanges {

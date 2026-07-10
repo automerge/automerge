@@ -422,10 +422,6 @@ impl OpSet {
         self.cols.len()
     }
 
-    pub(crate) fn sub_len(&self) -> usize {
-        self.cols.sub_len()
-    }
-
     pub(crate) fn seq_length(
         &self,
         obj: &ObjId,
@@ -931,6 +927,10 @@ impl OpSet {
         self.cols.key_str.iter_range(range.clone())
     }
 
+    pub(crate) fn key_str_iter(&self) -> hexane::Iter<'_, Option<String>> {
+        self.cols.key_str.iter()
+    }
+
     pub(crate) fn action_value_iter(
         &self,
         range: Range<usize>,
@@ -1051,15 +1051,138 @@ impl OpSet {
         }
     }
 
+    /// Structural validation of the op columns for loads that skip the
+    /// full per-op scan (`skip_hash_graph`).
+    ///
+    /// The checked path materializes every op via `try_next()`, which
+    /// validates cross-column invariants as a side effect; the column-walk
+    /// path touches only a few columns, so anything it skips must be
+    /// validated here or it surfaces later as a panic. Everything checked
+    /// below is run- or length-level — no per-op decoding:
+    ///
+    /// - every op column has the same length (also enforced by
+    ///   `with_length` at load; kept as defense in depth)
+    /// - the succ id columns are as long as the succ_count column's total
+    /// - the raw value column is as long as the value meta column's total
+    /// - every actor index (id, obj, key, succ) is in range — nothing else
+    ///   checks these for op columns; a bad index panics at first use
+    /// - object ids are fully null or fully set (a half-null id silently
+    ///   truncates `iter_obj_ids`) and strictly increasing, which also
+    ///   guarantees each object's ops are contiguous
+    pub(crate) fn column_validation(&self) -> Result<(), ColumnValidationError> {
+        use ColumnValidationError::*;
+        let cols = &self.cols;
+        let n = cols.id_actor.len();
+
+        let check = |name, len| {
+            if len == n {
+                Ok(())
+            } else {
+                Err(ColumnLength(name, len, n))
+            }
+        };
+        check("id_ctr", cols.id_ctr.len())?;
+        check("obj_actor", cols.obj_actor.len())?;
+        check("obj_ctr", cols.obj_ctr.len())?;
+        check("key_actor", cols.key_actor.len())?;
+        check("key_ctr", cols.key_ctr.len())?;
+        check("key_str", cols.key_str.len())?;
+        check("insert", cols.insert.len())?;
+        check("action", cols.action.len())?;
+        check("value_meta", cols.value_meta.len())?;
+        check("mark_name", cols.mark_name.len())?;
+        check("expand", cols.expand.len())?;
+        check("succ_count", cols.succ_count.len())?;
+
+        let succ_total = cols.succ_count.get_prefix(n) as usize;
+        if cols.succ_actor.len() != succ_total {
+            return Err(ColumnLength(
+                "succ_actor",
+                cols.succ_actor.len(),
+                succ_total,
+            ));
+        }
+        if cols.succ_ctr.len() != succ_total {
+            return Err(ColumnLength("succ_ctr", cols.succ_ctr.len(), succ_total));
+        }
+
+        let raw_total = cols.value_meta.get_prefix(n);
+        if cols.value.len() as u64 != raw_total {
+            return Err(RawValueLength(cols.value.len(), raw_total));
+        }
+
+        let num_actors = self.actors.len();
+        let mut it = cols.id_actor.iter();
+        while let Some(run) = it.next_run() {
+            if run.value.0 as usize >= num_actors {
+                return Err(ActorOutOfRange("id_actor", run.value.0, num_actors));
+            }
+        }
+        let mut it = cols.succ_actor.iter();
+        while let Some(run) = it.next_run() {
+            if run.value.0 as usize >= num_actors {
+                return Err(ActorOutOfRange("succ_actor", run.value.0, num_actors));
+            }
+        }
+        let mut it = cols.obj_actor.iter();
+        while let Some(run) = it.next_run() {
+            if let Some(a) = run.value {
+                if a.0 as usize >= num_actors {
+                    return Err(ActorOutOfRange("obj_actor", a.0, num_actors));
+                }
+            }
+        }
+        let mut it = cols.key_actor.iter();
+        while let Some(run) = it.next_run() {
+            if let Some(a) = run.value {
+                if a.0 as usize >= num_actors {
+                    return Err(ActorOutOfRange("key_actor", a.0, num_actors));
+                }
+            }
+        }
+
+        // walk the (obj_ctr, obj_actor) run pairs; both columns are length
+        // n so they exhaust together
+        let mut ctr = cols.obj_ctr.iter();
+        let mut actor = cols.obj_actor.iter();
+        let mut next_ctr = ctr.next_run();
+        let mut next_actor = actor.next_run();
+        let mut pos = 0;
+        let mut prev: Option<ObjId> = None;
+        while let (Some(mut rc), Some(mut ra)) = (next_ctr, next_actor) {
+            let obj = ObjId::load(rc.value.map(|c| c as u64), ra.value).ok_or(InvalidObjId(pos))?;
+            if prev.is_some_and(|p| obj <= p) {
+                return Err(ObjOutOfOrder(pos));
+            }
+            prev = Some(obj);
+            let count = rc.count.min(ra.count);
+            pos += count;
+            rc.count -= count;
+            ra.count -= count;
+            next_ctr = if rc.count == 0 {
+                ctr.next_run()
+            } else {
+                Some(rc)
+            };
+            next_actor = if ra.count == 0 {
+                actor.next_run()
+            } else {
+                Some(ra)
+            };
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn iter_obj_ids(&self) -> IterObjIds<'_> {
-        let mut v1_ctr = self.cols.obj_ctr.iter();
-        let mut v1_actor = self.cols.obj_actor.iter();
-        let next_ctr = v1_ctr.next_run();
-        let next_actor = v1_actor.next_run();
+        let mut ctr = self.cols.obj_ctr.iter();
+        let mut actor = self.cols.obj_actor.iter();
+        let next_ctr = ctr.next_run();
+        let next_actor = actor.next_run();
 
         IterObjIds {
-            v1_ctr,
-            v1_actor,
+            ctr,
+            actor,
             next_ctr,
             next_actor,
             pos: 0,
@@ -1532,9 +1655,23 @@ impl ResolvedAction {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ColumnValidationError {
+    #[error("column {0} has length {1}, expected {2}")]
+    ColumnLength(&'static str, usize, usize),
+    #[error("raw value column has {0} bytes but the value meta column expects {1}")]
+    RawValueLength(usize, u64),
+    #[error("column {0} references actor index {1} but the document has {2} actors")]
+    ActorOutOfRange(&'static str, u32, usize),
+    #[error("op {0} has a partially null object id")]
+    InvalidObjId(usize),
+    #[error("ops out of order: the object id at op {0} does not increase")]
+    ObjOutOfOrder(usize),
+}
+
 pub(crate) struct IterObjIds<'a> {
-    v1_ctr: hexane::Iter<'a, Option<u32>>,
-    v1_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    ctr: hexane::Iter<'a, Option<u32>>,
+    actor: hexane::Iter<'a, Option<ActorIdx>>,
     next_ctr: Option<hexane::Run<Option<u32>>>,
     next_actor: Option<hexane::Run<Option<ActorIdx>>>,
     pos: usize,
@@ -1552,18 +1689,18 @@ impl Iterator for IterObjIds<'_> {
                         run2.count -= run1.count;
                         self.next_actor = Some(run2);
                         self.pos += run1.count;
-                        self.next_ctr = self.v1_ctr.next_run();
+                        self.next_ctr = self.ctr.next_run();
                     }
                     Ordering::Greater => {
                         run1.count -= run2.count;
                         self.next_ctr = Some(run1);
                         self.pos += run2.count;
-                        self.next_actor = self.v1_actor.next_run();
+                        self.next_actor = self.actor.next_run();
                     }
                     Ordering::Equal => {
                         self.pos += run1.count;
-                        self.next_ctr = self.v1_ctr.next_run();
-                        self.next_actor = self.v1_actor.next_run();
+                        self.next_ctr = self.ctr.next_run();
+                        self.next_actor = self.actor.next_run();
                     }
                 }
                 let end = self.pos;
@@ -2049,5 +2186,75 @@ mod tests {
             assert_eq!(&test_ops[7], &ops[2]);
             assert_eq!(3, ops.len());
         });
+    }
+    #[test]
+    fn column_validation_accepts_valid_docs() {
+        use crate::transaction::Transactable;
+        let mut doc = crate::Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx
+            .put_object(crate::ROOT, "text", crate::ObjType::Text)
+            .unwrap();
+        tx.splice_text(&text, 0, 0, "hello world").unwrap();
+        let list = tx
+            .put_object(crate::ROOT, "list", crate::ObjType::List)
+            .unwrap();
+        tx.insert(&list, 0, 1).unwrap();
+        tx.put(crate::ROOT, "c", crate::ScalarValue::Counter(1.into()))
+            .unwrap();
+        tx.increment(crate::ROOT, "c", 2).unwrap();
+        tx.commit();
+        let reloaded = crate::Automerge::load(&doc.save()).unwrap();
+        reloaded.ops().column_validation().unwrap();
+    }
+
+    #[test]
+    fn column_validation_rejects_out_of_range_actors() {
+        use crate::transaction::Transactable;
+        let mut doc = crate::Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(crate::ROOT, "k", "v").unwrap();
+        tx.put(crate::ROOT, "k", "w").unwrap();
+        tx.commit();
+        let reloaded = crate::Automerge::load(&doc.save()).unwrap();
+        let mut op_set = reloaded.ops().clone();
+        // shift every actor index up by one without adding an actor
+        op_set.cols.rewrite_with_new_actor(0);
+        assert!(matches!(
+            op_set.column_validation(),
+            Err(ColumnValidationError::ActorOutOfRange("id_actor", _, _))
+        ));
+    }
+
+    #[test]
+    fn column_validation_rejects_disordered_and_half_null_obj_ids() {
+        use crate::transaction::Transactable;
+        let mut doc = crate::Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx
+            .put_object(crate::ROOT, "list", crate::ObjType::List)
+            .unwrap();
+        tx.insert(&list, 0, 1).unwrap();
+        tx.insert(&list, 1, 2).unwrap();
+        tx.commit();
+        let reloaded = crate::Automerge::load(&doc.save()).unwrap();
+
+        // move the list object's ctr below root's ops: out of order
+        let mut op_set = reloaded.ops().clone();
+        let n = op_set.len();
+        op_set.cols.obj_ctr.splice(n - 1, 1, [Some(0u32)]);
+        op_set.cols.obj_actor.splice(n - 1, 1, [Some(ActorIdx(0))]);
+        assert!(matches!(
+            op_set.column_validation(),
+            Err(ColumnValidationError::ObjOutOfOrder(_))
+        ));
+
+        // null out only the actor half of the object id
+        let mut op_set = reloaded.ops().clone();
+        op_set.cols.obj_actor.splice(n - 1, 1, [None::<ActorIdx>]);
+        assert!(matches!(
+            op_set.column_validation(),
+            Err(ColumnValidationError::InvalidObjId(_))
+        ));
     }
 }
