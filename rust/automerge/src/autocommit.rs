@@ -179,7 +179,7 @@ impl AutoCommit {
     /// [`Self::reset_diff_cursor()`]
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        let heads = self.doc.get_heads();
+        let heads = self.get_heads();
         if !heads.is_empty() {
             self.patch_log.set_active(true);
             self.patch_log.truncate();
@@ -327,7 +327,7 @@ impl AutoCommit {
     /// ```
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         self.ensure_transaction_closed();
-        let heads = self.doc.get_heads();
+        let heads = self.get_heads();
         let diff_cursor = self.diff_cursor();
         let patches = self.diff(&diff_cursor, &heads);
         self.update_diff_cursor();
