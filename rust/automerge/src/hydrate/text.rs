@@ -42,6 +42,12 @@ impl Text {
                 }
                 Ok(())
             }
+            PatchAction::PutSeq { index, value, .. } => {
+                self.value.remove(index);
+                let value = super::Value::new(value.0, text_encoding);
+                self.value.splice(index, value.as_str());
+                Ok(())
+            }
             PatchAction::DeleteSeq { index, length } => {
                 for _ in 0..length {
                     self.value.remove(index);

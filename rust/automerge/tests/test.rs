@@ -92,6 +92,31 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn incremental_put_seq_in_text_applies_to_hydrated_value_from_fuzz_trace() {
+    //  Updating a text element with a scalar produces a PutSeq patch, which must update the
+    //  rendered hydrated text.
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::GraphemeCluster);
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    doc.commit();
+    let before_heads = doc.get_heads();
+    doc.update_diff_cursor();
+
+    doc.put(&text, 0, ScalarValue::Null).unwrap();
+    doc.commit();
+    let current_heads = doc.get_heads();
+
+    let mut actual = doc.hydrate(&ROOT, Some(&before_heads)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
+    let patches = doc.diff_incremental();
+    actual
+        .apply_patches(TextEncoding::GraphemeCluster, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn current_state_diff_with_block_applies_to_hydrated_value_from_fuzz_trace() {
     // Minimized from a fuzz crash. Hydrated text represents a block only
     // as an object-replacement character, so applying its current-state
