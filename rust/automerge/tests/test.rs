@@ -92,6 +92,34 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn merge_patches_include_text_element_update_from_fuzz_trace() {
+    // A remote branch replaces a character in a text object with a scalar. Merging with patch
+    // logging must emit the PutSeq patch needed to update an existing hydrated view.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    doc.commit();
+
+    let mut branch = doc.fork();
+    branch.put(&text, 0, ScalarValue::Int(10)).unwrap();
+    branch.commit();
+
+    let mut doc = doc.document().clone();
+    let mut branch = branch.document().clone();
+    let mut actual = doc.hydrate(None);
+    let mut patch_log = PatchLog::active();
+    doc.merge_and_log_patches(&mut branch, &mut patch_log)
+        .unwrap();
+    let expected = doc.hydrate(None);
+    let patches = doc.make_patches(&mut patch_log);
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn diff_preserves_conflict_after_winning_value_is_deleted_from_fuzz_trace() {
     // Three actors concurrently assign a map property. Deleting the winning value reveals another
     // value, but the property remains conflicted because two concurrent values still exist.
