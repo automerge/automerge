@@ -1165,7 +1165,7 @@ fn print_fuzz_status(
 ) {
     let elapsed = elapsed.as_secs_f64().max(0.001);
     println!(
-        "{prefix}={iterations} exec/s={:.0} corpus={corpus_len} valid={} interesting={} checkpoints={} coverage_saved={} crashes={} rejected={} behavior={} features={} feature_pairs={} merge_checks={} diff_checks={} diff_unsupported={} patches={} coverage_buckets={} cmp_buckets={} cmp_values={} sometimes={} sometimes_buckets={} buckets={}",
+        "{prefix}={iterations} exec/s={:.0} corpus={corpus_len} valid={} interesting={} checkpoints={} coverage_saved={} crashes={} rejected={} behavior={} features={} feature_pairs={} merge_checks={} diff_checks={} diff_unsupported={} patches={} persist={} bundles={} isolation={} historical_tx={} coverage_buckets={} cmp_buckets={} cmp_values={} sometimes={} sometimes_buckets={} buckets={}",
         iterations as f64 / elapsed,
         tally.valid,
         tally.interesting,
@@ -1180,6 +1180,10 @@ fn print_fuzz_status(
         feedback.diff_check_count(),
         feedback.unsupported_diff_count(),
         feedback.patch_count(),
+        feedback.persistence_transfer_count(),
+        feedback.bundle_transfer_count(),
+        feedback.isolation_transition_count(),
+        feedback.historical_transaction_count(),
         feedback.coverage_bucket_count(),
         feedback.comparison_bucket_count(),
         feedback.comparison_value_count(),
@@ -1220,6 +1224,10 @@ fn report_event(
         "diff_checks": feedback.diff_check_count(),
         "diff_unsupported": feedback.unsupported_diff_count(),
         "patches": feedback.patch_count(),
+        "persistence_transfers": feedback.persistence_transfer_count(),
+        "bundle_transfers": feedback.bundle_transfer_count(),
+        "isolation_transitions": feedback.isolation_transition_count(),
+        "historical_transactions": feedback.historical_transaction_count(),
         "coverage_buckets": feedback.coverage_bucket_count(),
         "cmp_buckets": feedback.comparison_bucket_count(),
         "cmp_values": feedback.comparison_value_count(),

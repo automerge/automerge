@@ -4,7 +4,7 @@ use rand::{Rng, SeedableRng};
 
 use crate::trace::{
     ActorSpec, MarkExpand, Metadata, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef,
-    VmObserveMode, VmOp, VmSyncFault, VmSyncOp, VmTextEncoding, VmValue,
+    VmObserveMode, VmOp, VmPersistMode, VmSyncFault, VmSyncOp, VmTextEncoding, VmValue,
 };
 
 pub const MAX_VM_INSTRUCTIONS: usize = 256;
@@ -1233,7 +1233,9 @@ impl TraceContext {
             .steps
             .iter()
             .filter_map(|instr| match instr {
-                VmInstr::Change { actor, .. } | VmInstr::Transact { actor, .. } => Some(*actor),
+                VmInstr::Change { actor, .. }
+                | VmInstr::Transact { actor, .. }
+                | VmInstr::TransactAt { actor, .. } => Some(*actor),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1280,7 +1282,9 @@ fn trace_positions(trace: &Trace) -> Vec<Position> {
     for (step, instr) in trace.steps.iter().enumerate() {
         positions.push(Position::Instr { step });
         match instr {
-            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => {
+            VmInstr::Change { ops, .. }
+            | VmInstr::Transact { ops, .. }
+            | VmInstr::TransactAt { ops, .. } => {
                 for (op, vm_op) in ops.iter().enumerate() {
                     positions.push(Position::Op { step, op });
                     positions.push(Position::OpObj { step, op });
@@ -1443,7 +1447,9 @@ fn instr_variants(
     // Re-run the instruction's own ops (or one random op) through an explicit
     // transaction, once committed and once rolled back.
     let tx_ops = match instr {
-        VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.clone(),
+        VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. } => ops.clone(),
         _ => vec![builder.random_op(rng)],
     };
     variants.push(VmInstr::Transact {
@@ -1469,6 +1475,9 @@ fn instr_doc(instr: &VmInstr) -> Option<u8> {
         VmInstr::ApplyChanges { into, .. } => Some(*into),
         VmInstr::Change { doc, .. }
         | VmInstr::Transact { doc, .. }
+        | VmInstr::TransactAt { doc, .. }
+        | VmInstr::Isolate { doc, .. }
+        | VmInstr::Integrate { doc }
         | VmInstr::SaveLoad { doc }
         | VmInstr::Observe { doc, .. }
         | VmInstr::SaveHeads { doc, .. }
@@ -1476,6 +1485,7 @@ fn instr_doc(instr: &VmInstr) -> Option<u8> {
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
         | VmInstr::DiffIncremental { doc } => Some(*doc),
+        VmInstr::Persist { into, .. } => Some(*into),
         VmInstr::Sync { left, .. } => Some(*left),
         VmInstr::SyncSession { op, .. } => match op {
             VmSyncOp::Start { left, .. } => Some(*left),
@@ -1486,14 +1496,18 @@ fn instr_doc(instr: &VmInstr) -> Option<u8> {
 
 fn nth_op_at(trace: &Trace, step: usize, op: usize) -> Option<&VmOp> {
     match trace.steps.get(step)? {
-        VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.get(op),
+        VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. } => ops.get(op),
         _ => None,
     }
 }
 
 fn set_op_at(trace: &mut Trace, step: usize, op: usize, replacement: VmOp) -> bool {
     match trace.steps.get_mut(step) {
-        Some(VmInstr::Change { ops, .. }) | Some(VmInstr::Transact { ops, .. }) => ops
+        Some(VmInstr::Change { ops, .. })
+        | Some(VmInstr::Transact { ops, .. })
+        | Some(VmInstr::TransactAt { ops, .. }) => ops
             .get_mut(op)
             .map(|target| *target = replacement)
             .is_some(),
@@ -1502,8 +1516,11 @@ fn set_op_at(trace: &mut Trace, step: usize, op: usize, replacement: VmOp) -> bo
 }
 
 fn set_op_obj_at(trace: &mut Trace, step: usize, op: usize, replacement: VmObjRef) -> bool {
-    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
-        trace.steps.get_mut(step)
+    let Some(
+        VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. },
+    ) = trace.steps.get_mut(step)
     else {
         return false;
     };
@@ -1536,8 +1553,11 @@ fn set_op_obj_at(trace: &mut Trace, step: usize, op: usize, replacement: VmObjRe
 }
 
 fn set_op_value_at(trace: &mut Trace, step: usize, op: usize, replacement: VmValue) -> bool {
-    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
-        trace.steps.get_mut(step)
+    let Some(
+        VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. },
+    ) = trace.steps.get_mut(step)
     else {
         return false;
     };
@@ -1557,8 +1577,11 @@ fn set_op_value_at(trace: &mut Trace, step: usize, op: usize, replacement: VmVal
 }
 
 fn set_op_hydrated_at(trace: &mut Trace, step: usize, op: usize, replacement: VmHydrated) -> bool {
-    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
-        trace.steps.get_mut(step)
+    let Some(
+        VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. },
+    ) = trace.steps.get_mut(step)
     else {
         return false;
     };
@@ -1580,8 +1603,11 @@ fn set_op_mark_expand_at(
     op: usize,
     replacement: MarkExpand,
 ) -> bool {
-    let Some(VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
-        trace.steps.get_mut(step)
+    let Some(
+        VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. },
+    ) = trace.steps.get_mut(step)
     else {
         return false;
     };
@@ -1765,7 +1791,9 @@ fn count_ops(trace: &Trace) -> usize {
         .steps
         .iter()
         .map(|instr| match instr {
-            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => ops.len(),
+            VmInstr::Change { ops, .. }
+            | VmInstr::Transact { ops, .. }
+            | VmInstr::TransactAt { ops, .. } => ops.len(),
             _ => 0,
         })
         .sum()
@@ -1774,7 +1802,10 @@ fn count_ops(trace: &Trace) -> usize {
 fn nth_op(trace: &Trace, target: usize) -> Option<&VmOp> {
     let mut seen = 0;
     for instr in &trace.steps {
-        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. } = instr
+        {
             for op in ops {
                 if seen == target {
                     return Some(op);
@@ -1789,7 +1820,10 @@ fn nth_op(trace: &Trace, target: usize) -> Option<&VmOp> {
 fn set_nth_op(trace: &mut Trace, target: usize, replacement: VmOp) -> bool {
     let mut seen = 0;
     for instr in &mut trace.steps {
-        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. } = instr
+        {
             for op in ops {
                 if seen == target {
                     *op = replacement;
@@ -2172,6 +2206,33 @@ fn mutate_vm_instruction(instructions: &mut [VmInstr], rng: &mut StdRng) {
             3 if !ops.is_empty() => mutate_vm_op(ops, rng),
             _ => ops.push(VmBuilder::default().random_op(rng)),
         },
+        VmInstr::TransactAt {
+            doc,
+            actor,
+            head,
+            ops,
+            commit,
+        } => match rng.random_range(0..6) {
+            0 => *doc = mutate_byte(*doc, rng),
+            1 => *actor = mutate_byte(*actor, rng),
+            2 => *head = random_vm_head(rng),
+            3 => *commit = !*commit,
+            4 if !ops.is_empty() => mutate_vm_op(ops, rng),
+            _ => ops.push(VmBuilder::default().random_op(rng)),
+        },
+        VmInstr::Persist { from, into, mode } => match rng.random_range(0..3) {
+            0 => *from = mutate_byte(*from, rng),
+            1 => *into = mutate_byte(*into, rng),
+            _ => *mode = random_persist_mode(rng),
+        },
+        VmInstr::Isolate { doc, head } => {
+            if rng.random_range(0..2) == 0 {
+                *doc = mutate_byte(*doc, rng);
+            } else {
+                *head = random_vm_head(rng);
+            }
+        }
+        VmInstr::Integrate { doc } => *doc = mutate_byte(*doc, rng),
         VmInstr::SaveLoad { doc }
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
@@ -2220,6 +2281,18 @@ fn mutate_vm_instruction(instructions: &mut [VmInstr], rng: &mut StdRng) {
             0 => *from = mutate_byte(*from, rng),
             1 => *into = mutate_byte(*into, rng),
             _ => *order = random_apply_order(rng),
+        },
+    }
+}
+
+fn random_persist_mode(rng: &mut StdRng) -> VmPersistMode {
+    match rng.random_range(0..5) {
+        0..=1 => VmPersistMode::Incremental,
+        2..=3 => VmPersistMode::SaveAfter {
+            since: random_vm_head(rng),
+        },
+        _ => VmPersistMode::Bundle {
+            since: random_vm_head(rng),
         },
     }
 }
@@ -2478,6 +2551,9 @@ fn referenced_docs(instructions: &[VmInstr]) -> Vec<u8> {
             }
             VmInstr::Change { doc, .. }
             | VmInstr::Transact { doc, .. }
+            | VmInstr::TransactAt { doc, .. }
+            | VmInstr::Isolate { doc, .. }
+            | VmInstr::Integrate { doc }
             | VmInstr::SaveLoad { doc }
             | VmInstr::Observe { doc, .. }
             | VmInstr::SaveHeads { doc, .. }
@@ -2485,6 +2561,10 @@ fn referenced_docs(instructions: &[VmInstr]) -> Vec<u8> {
             | VmInstr::UpdateDiffCursor { doc }
             | VmInstr::ResetDiffCursor { doc }
             | VmInstr::DiffIncremental { doc } => docs.push(*doc),
+            VmInstr::Persist { from, into, .. } => {
+                docs.push(*from);
+                docs.push(*into);
+            }
             VmInstr::Sync { left, right, .. } => {
                 docs.push(*left);
                 docs.push(*right);
@@ -2522,6 +2602,15 @@ fn rebase_instr(instr: &mut VmInstr, prefix: &VmBuilder, rng: &mut StdRng) {
                 rebase_op(op, prefix, rng);
             }
         }
+        VmInstr::TransactAt { doc, head, ops, .. } => {
+            *doc = (*doc).min(prefix.docs.max(1));
+            if !has_saved_head(prefix) && matches!(head, VmHeadRef::Slot { .. }) {
+                *head = VmHeadRef::Current;
+            }
+            for op in ops {
+                rebase_op(op, prefix, rng);
+            }
+        }
         VmInstr::Observe {
             doc, object, head, ..
         } => {
@@ -2532,11 +2621,31 @@ fn rebase_instr(instr: &mut VmInstr, prefix: &VmBuilder, rng: &mut StdRng) {
             }
         }
         VmInstr::SaveLoad { doc }
+        | VmInstr::Integrate { doc }
         | VmInstr::SaveHeads { doc, .. }
         | VmInstr::DiffRange { doc, .. }
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
         | VmInstr::DiffIncremental { doc } => *doc = (*doc).min(prefix.docs.max(1)),
+        VmInstr::Isolate { doc, head } => {
+            *doc = (*doc).min(prefix.docs.max(1));
+            if !has_saved_head(prefix) && matches!(head, VmHeadRef::Slot { .. }) {
+                *head = VmHeadRef::Current;
+            }
+        }
+        VmInstr::Persist { from, into, mode } => {
+            *from = (*from).min(prefix.docs.max(1));
+            *into = (*into).min(prefix.docs.max(1));
+            let head = match mode {
+                VmPersistMode::Incremental => None,
+                VmPersistMode::SaveAfter { since } | VmPersistMode::Bundle { since } => Some(since),
+            };
+            if let Some(head) = head {
+                if !has_saved_head(prefix) && matches!(head, VmHeadRef::Slot { .. }) {
+                    *head = VmHeadRef::Current;
+                }
+            }
+        }
         VmInstr::SyncSession { op, .. } => {
             if let VmSyncOp::Start { left, right } = op {
                 *left = (*left).min(prefix.docs);
@@ -2662,6 +2771,9 @@ fn collect_instr_u8(instr: &VmInstr, values: &mut Vec<u8>) {
         VmInstr::Change { doc, actor, ops }
         | VmInstr::Transact {
             doc, actor, ops, ..
+        }
+        | VmInstr::TransactAt {
+            doc, actor, ops, ..
         } => {
             values.push(*doc);
             values.push(*actor);
@@ -2670,9 +2782,24 @@ fn collect_instr_u8(instr: &VmInstr, values: &mut Vec<u8>) {
             }
         }
         VmInstr::SaveLoad { doc }
+        | VmInstr::Integrate { doc }
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
         | VmInstr::DiffIncremental { doc } => values.push(*doc),
+        VmInstr::Isolate { doc, head } => {
+            values.push(*doc);
+            collect_head_u8(head, values);
+        }
+        VmInstr::Persist { from, into, mode } => {
+            values.push(*from);
+            values.push(*into);
+            match mode {
+                VmPersistMode::Incremental => {}
+                VmPersistMode::SaveAfter { since } | VmPersistMode::Bundle { since } => {
+                    collect_head_u8(since, values)
+                }
+            }
+        }
         VmInstr::Observe { doc, budget, .. } => {
             values.push(*doc);
             values.push(*budget);
@@ -2901,15 +3028,32 @@ fn set_instr_u8(instr: &mut VmInstr, target: usize, value: u8, seen: &mut usize)
         VmInstr::Change { doc, actor, ops }
         | VmInstr::Transact {
             doc, actor, ops, ..
+        }
+        | VmInstr::TransactAt {
+            doc, actor, ops, ..
         } => {
             maybe_set_u8(doc, target, value, seen)
                 || maybe_set_u8(actor, target, value, seen)
                 || ops.iter_mut().any(|op| set_op_u8(op, target, value, seen))
         }
         VmInstr::SaveLoad { doc }
+        | VmInstr::Integrate { doc }
         | VmInstr::UpdateDiffCursor { doc }
         | VmInstr::ResetDiffCursor { doc }
         | VmInstr::DiffIncremental { doc } => maybe_set_u8(doc, target, value, seen),
+        VmInstr::Isolate { doc, head } => {
+            maybe_set_u8(doc, target, value, seen) || set_head_u8(head, target, value, seen)
+        }
+        VmInstr::Persist { from, into, mode } => {
+            maybe_set_u8(from, target, value, seen)
+                || maybe_set_u8(into, target, value, seen)
+                || match mode {
+                    VmPersistMode::Incremental => false,
+                    VmPersistMode::SaveAfter { since } | VmPersistMode::Bundle { since } => {
+                        set_head_u8(since, target, value, seen)
+                    }
+                }
+        }
         VmInstr::Observe { doc, budget, .. } => {
             maybe_set_u8(doc, target, value, seen) || maybe_set_u8(budget, target, value, seen)
         }
@@ -3121,7 +3265,9 @@ fn collect_obj_refs(trace: &Trace) -> Vec<VmObjRef> {
     let mut refs = Vec::new();
     for instr in &trace.steps {
         match instr {
-            VmInstr::Change { ops, .. } => {
+            VmInstr::Change { ops, .. }
+            | VmInstr::Transact { ops, .. }
+            | VmInstr::TransactAt { ops, .. } => {
                 for op in ops {
                     collect_op_obj_refs(op, &mut refs);
                 }
@@ -3159,7 +3305,10 @@ fn collect_op_obj_refs(op: &VmOp, refs: &mut Vec<VmObjRef>) {
 fn collect_values(trace: &Trace) -> Vec<VmValue> {
     let mut values = Vec::new();
     for instr in &trace.steps {
-        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. } = instr
+        {
             for op in ops {
                 collect_op_values(op, &mut values);
             }
@@ -3187,7 +3336,10 @@ fn collect_op_values(op: &VmOp, values: &mut Vec<VmValue>) {
 fn collect_hydrated_values(trace: &Trace) -> Vec<VmHydrated> {
     let mut values = Vec::new();
     for instr in &trace.steps {
-        if let VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } = instr {
+        if let VmInstr::Change { ops, .. }
+        | VmInstr::Transact { ops, .. }
+        | VmInstr::TransactAt { ops, .. } = instr
+        {
             for op in ops {
                 match op {
                     VmOp::UpdateObject { value, .. } | VmOp::BatchCreate { value, .. } => {
@@ -3214,7 +3366,9 @@ fn count_obj_refs(trace: &Trace) -> usize {
 fn set_nth_obj_ref(trace: &mut Trace, target: usize, value: VmObjRef, seen: &mut usize) -> bool {
     for instr in &mut trace.steps {
         match instr {
-            VmInstr::Change { ops, .. } => {
+            VmInstr::Change { ops, .. }
+            | VmInstr::Transact { ops, .. }
+            | VmInstr::TransactAt { ops, .. } => {
                 if ops
                     .iter_mut()
                     .any(|op| set_op_obj_ref(op, target, value.clone(), seen))
@@ -3287,7 +3441,16 @@ fn collect_head_refs(trace: &Trace) -> Vec<VmHeadRef> {
     let mut refs = Vec::new();
     for instr in &trace.steps {
         match instr {
-            VmInstr::Observe { head, .. } | VmInstr::ForkAt { head, .. } => refs.push(head.clone()),
+            VmInstr::Observe { head, .. }
+            | VmInstr::ForkAt { head, .. }
+            | VmInstr::TransactAt { head, .. }
+            | VmInstr::Isolate { head, .. } => refs.push(head.clone()),
+            VmInstr::Persist { mode, .. } => match mode {
+                VmPersistMode::Incremental => {}
+                VmPersistMode::SaveAfter { since } | VmPersistMode::Bundle { since } => {
+                    refs.push(since.clone())
+                }
+            },
             VmInstr::DiffRange { before, after, .. } => {
                 refs.push(before.clone());
                 refs.push(after.clone());
@@ -3305,8 +3468,22 @@ fn count_head_refs(trace: &Trace) -> usize {
 fn set_nth_head_ref(trace: &mut Trace, target: usize, value: VmHeadRef, seen: &mut usize) -> bool {
     for instr in &mut trace.steps {
         match instr {
-            VmInstr::Observe { head, .. } | VmInstr::ForkAt { head, .. } => {
+            VmInstr::Observe { head, .. }
+            | VmInstr::ForkAt { head, .. }
+            | VmInstr::TransactAt { head, .. }
+            | VmInstr::Isolate { head, .. } => {
                 if maybe_set_head_ref(head, target, value.clone(), seen) {
+                    return true;
+                }
+            }
+            VmInstr::Persist { mode, .. } => {
+                let head = match mode {
+                    VmPersistMode::Incremental => None,
+                    VmPersistMode::SaveAfter { since } | VmPersistMode::Bundle { since } => {
+                        Some(since)
+                    }
+                };
+                if head.is_some_and(|head| maybe_set_head_ref(head, target, value.clone(), seen)) {
                     return true;
                 }
             }
@@ -3344,7 +3521,11 @@ fn swap_op_constructor_reusing_fields(trace: &mut Trace, rng: &mut StdRng) {
         .iter()
         .enumerate()
         .filter_map(|(index, instr)| match instr {
-            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } if !ops.is_empty() => {
+            VmInstr::Change { ops, .. }
+            | VmInstr::Transact { ops, .. }
+            | VmInstr::TransactAt { ops, .. }
+                if !ops.is_empty() =>
+            {
                 Some(index)
             }
             _ => None,
@@ -3354,8 +3535,9 @@ fn swap_op_constructor_reusing_fields(trace: &mut Trace, rng: &mut StdRng) {
         return;
     }
     let instr_index = change_indices[rng.random_range(0..change_indices.len())];
-    let (VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. }) =
-        &mut trace.steps[instr_index]
+    let (VmInstr::Change { ops, .. }
+    | VmInstr::Transact { ops, .. }
+    | VmInstr::TransactAt { ops, .. }) = &mut trace.steps[instr_index]
     else {
         return;
     };
@@ -3406,6 +3588,9 @@ impl VmBuilder {
                 }
                 VmInstr::Transact {
                     doc, ops, commit, ..
+                }
+                | VmInstr::TransactAt {
+                    doc, ops, commit, ..
                 } => {
                     builder.docs = builder.docs.max(*doc);
                     // Rolled-back transactions create no objects.
@@ -3416,6 +3601,8 @@ impl VmBuilder {
                     }
                 }
                 VmInstr::SaveLoad { doc }
+                | VmInstr::Integrate { doc }
+                | VmInstr::Isolate { doc, .. }
                 | VmInstr::DiffRange { doc, .. }
                 | VmInstr::UpdateDiffCursor { doc }
                 | VmInstr::ResetDiffCursor { doc }
@@ -3425,6 +3612,9 @@ impl VmBuilder {
                     builder.saved_heads = builder.saved_heads.max(slot.saturating_add(1));
                 }
                 VmInstr::Observe { doc, .. } => builder.docs = builder.docs.max(*doc),
+                VmInstr::Persist { from, into, .. } => {
+                    builder.docs = builder.docs.max(*from).max(*into);
+                }
                 VmInstr::Sync { left, right, .. } => {
                     builder.docs = builder.docs.max(*left).max(*right);
                 }
@@ -3450,7 +3640,7 @@ impl VmBuilder {
             return self.random_change(rng);
         }
 
-        match rng.random_range(0..13) {
+        match rng.random_range(0..17) {
             0 => {
                 self.docs = self.docs.max(1);
                 VmInstr::Fork { from: 0, to: 1 }
@@ -3505,6 +3695,35 @@ impl VmBuilder {
                 into: self.doc(rng),
                 order: random_apply_order(rng),
             },
+            13 if self.docs >= 1 => VmInstr::Persist {
+                from: self.doc(rng),
+                into: self.doc(rng),
+                mode: random_persist_mode(rng),
+            },
+            14 => VmInstr::Isolate {
+                doc: self.doc(rng),
+                head: random_vm_head(rng),
+            },
+            15 => VmInstr::Integrate { doc: self.doc(rng) },
+            16 => {
+                let doc = self.doc(rng);
+                let actor = rng.random_range(0..3);
+                let commit = rng.random_range(0..2) == 0;
+                let op_count = rng.random_range(1..=4);
+                let ops = if commit {
+                    (0..op_count).map(|_| self.random_op(rng)).collect()
+                } else {
+                    let mut scratch = self.clone();
+                    (0..op_count).map(|_| scratch.random_op(rng)).collect()
+                };
+                VmInstr::TransactAt {
+                    doc,
+                    actor,
+                    head: random_vm_head(rng),
+                    ops,
+                    commit,
+                }
+            }
             _ => self.random_change(rng),
         }
     }
@@ -3682,6 +3901,9 @@ impl VmBuilder {
             }
             VmInstr::Transact {
                 doc, ops, commit, ..
+            }
+            | VmInstr::TransactAt {
+                doc, ops, commit, ..
             } => {
                 self.docs = self.docs.max(*doc);
                 if *commit {
@@ -3691,6 +3913,8 @@ impl VmBuilder {
                 }
             }
             VmInstr::SaveLoad { doc }
+            | VmInstr::Integrate { doc }
+            | VmInstr::Isolate { doc, .. }
             | VmInstr::DiffRange { doc, .. }
             | VmInstr::UpdateDiffCursor { doc }
             | VmInstr::ResetDiffCursor { doc }
@@ -3699,6 +3923,9 @@ impl VmBuilder {
             VmInstr::SaveHeads { doc, slot } => {
                 self.docs = self.docs.max(*doc);
                 self.saved_heads = self.saved_heads.max(slot.saturating_add(1));
+            }
+            VmInstr::Persist { from, into, .. } => {
+                self.docs = self.docs.max(*from).max(*into);
             }
             VmInstr::Sync { left, right, .. } => {
                 self.docs = self.docs.max(*left).max(*right);

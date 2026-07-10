@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::coverage::{CmpKind, CmpObservation};
 use crate::runner::{BehaviorStats, RunReport};
-use crate::trace::{Trace, VmApplyOrder, VmInstr, VmObjRef, VmOp, VmSyncFault, VmSyncOp, VmValue};
+use crate::trace::{
+    Trace, VmApplyOrder, VmInstr, VmObjRef, VmOp, VmPersistMode, VmSyncFault, VmSyncOp, VmValue,
+};
 
 const MAX_BEHAVIOR_BUCKETS: usize = 65536;
 const MAX_STRUCTURAL_BUCKETS: usize = 512;
@@ -27,6 +29,10 @@ pub struct FeedbackState {
     diff_unsupported: u64,
     patches_checked: u64,
     merge_checks: u64,
+    persistence_transfers: u64,
+    bundle_transfers: u64,
+    isolation_transitions: u64,
+    historical_transactions: u64,
     behaviors: HashSet<BehaviorKey>,
     structures: HashSet<StructuralKey>,
 }
@@ -50,6 +56,10 @@ struct BehaviorKey {
     diff_unsupported: u8,
     total_patches: u8,
     merge_checks: u8,
+    persistence_transfers: u8,
+    bundle_transfers: u8,
+    isolation_transitions: u8,
+    historical_transactions: u8,
 }
 
 fn behavior_key(stats: &BehaviorStats) -> BehaviorKey {
@@ -72,6 +82,10 @@ fn behavior_key(stats: &BehaviorStats) -> BehaviorKey {
         diff_unsupported: bucket(stats.diff_unsupported),
         total_patches: bucket(stats.total_patches),
         merge_checks: bucket(stats.merge_checks),
+        persistence_transfers: bucket(stats.persistence_transfers),
+        bundle_transfers: bucket(stats.bundle_transfers),
+        isolation_transitions: bucket(stats.isolation_transitions),
+        historical_transactions: bucket(stats.historical_transactions),
     }
 }
 
@@ -92,6 +106,9 @@ struct StructuralKey {
     actors: u8,
     change_instrs: u8,
     transact_instrs: u8,
+    transact_at_instrs: u8,
+    persist_instrs: u8,
+    isolate_instrs: u8,
     max_ops_in_instr: u8,
     max_obj_depth: u8,
     save_load_instrs: u8,
@@ -139,6 +156,18 @@ impl FeedbackState {
         self.merge_checks = self
             .merge_checks
             .saturating_add(report.behavior.merge_checks as u64);
+        self.persistence_transfers = self
+            .persistence_transfers
+            .saturating_add(report.behavior.persistence_transfers as u64);
+        self.bundle_transfers = self
+            .bundle_transfers
+            .saturating_add(report.behavior.bundle_transfers as u64);
+        self.isolation_transitions = self
+            .isolation_transitions
+            .saturating_add(report.behavior.isolation_transitions as u64);
+        self.historical_transactions = self
+            .historical_transactions
+            .saturating_add(report.behavior.historical_transactions as u64);
         for hit in &report.sometimes_hits {
             *self.sometimes_counts.entry(hit.name).or_default() += hit.count;
         }
@@ -167,7 +196,7 @@ impl FeedbackState {
         let behavior = behavior_key(&report.behavior);
         if self.behaviors.len() < MAX_BEHAVIOR_BUCKETS && !self.behaviors.contains(&behavior) {
             let reason = format!(
-                "new behavior bucket docs={} heads={} changes={} objects={} depth={} text={} seq={} conflicts={} marks={} saved={} diffs={} unsupported={} patches={} merge_checks={}",
+                "new behavior bucket docs={} heads={} changes={} objects={} depth={} text={} seq={} conflicts={} marks={} saved={} diffs={} unsupported={} patches={} merge_checks={} persist={} bundles={} isolation={} historical_tx={}",
                 behavior.docs,
                 behavior.max_heads,
                 behavior.total_changes,
@@ -182,6 +211,10 @@ impl FeedbackState {
                 behavior.diff_unsupported,
                 behavior.total_patches,
                 behavior.merge_checks,
+                behavior.persistence_transfers,
+                behavior.bundle_transfers,
+                behavior.isolation_transitions,
+                behavior.historical_transactions,
             );
             self.behaviors.insert(behavior);
             return Some(reason);
@@ -347,6 +380,22 @@ impl FeedbackState {
         self.merge_checks
     }
 
+    pub fn persistence_transfer_count(&self) -> u64 {
+        self.persistence_transfers
+    }
+
+    pub fn bundle_transfer_count(&self) -> u64 {
+        self.bundle_transfers
+    }
+
+    pub fn isolation_transition_count(&self) -> u64 {
+        self.isolation_transitions
+    }
+
+    pub fn historical_transaction_count(&self) -> u64 {
+        self.historical_transactions
+    }
+
     pub fn structural_bucket_count(&self) -> usize {
         self.structures.len()
     }
@@ -483,6 +532,16 @@ fn features(trace: &Trace) -> Vec<&'static str> {
                 });
             }
             VmInstr::Merge { .. } => features.push("merge"),
+            VmInstr::Persist { mode, .. } => {
+                features.push("persist");
+                features.push(match mode {
+                    VmPersistMode::Incremental => "persist_incremental",
+                    VmPersistMode::SaveAfter { .. } => "persist_save_after",
+                    VmPersistMode::Bundle { .. } => "persist_bundle",
+                });
+            }
+            VmInstr::Isolate { .. } => features.push("isolate"),
+            VmInstr::Integrate { .. } => features.push("integrate"),
             VmInstr::SaveLoad { .. } => features.push("save_load"),
             VmInstr::Sync { .. } => features.push("sync"),
             VmInstr::SyncSession { op, .. } => {
@@ -512,13 +571,24 @@ fn features(trace: &Trace) -> Vec<&'static str> {
             VmInstr::UpdateDiffCursor { .. } => features.push("update_diff_cursor"),
             VmInstr::ResetDiffCursor { .. } => features.push("reset_diff_cursor"),
             VmInstr::DiffIncremental { .. } => features.push("diff_incremental"),
-            VmInstr::Change { actor, ops, .. } | VmInstr::Transact { actor, ops, .. } => {
-                if let VmInstr::Transact { commit, .. } = instr {
-                    features.push(if *commit {
+            VmInstr::Change { actor, ops, .. }
+            | VmInstr::Transact { actor, ops, .. }
+            | VmInstr::TransactAt { actor, ops, .. } => {
+                match instr {
+                    VmInstr::Transact { commit, .. } => features.push(if *commit {
                         "transact_commit"
                     } else {
                         "transact_rollback"
-                    });
+                    }),
+                    VmInstr::TransactAt { commit, .. } => {
+                        features.push("transact_at");
+                        features.push(if *commit {
+                            "owned_transact_commit"
+                        } else {
+                            "owned_transact_rollback"
+                        });
+                    }
+                    _ => {}
                 }
                 actors.insert(*actor);
                 if ops.is_empty() {
@@ -637,11 +707,15 @@ fn structural_key(trace: &Trace) -> StructuralKey {
             VmInstr::UpdateDiffCursor { .. } => stats.update_diff_cursor_instrs += 1,
             VmInstr::ResetDiffCursor { .. } => stats.reset_diff_cursor_instrs += 1,
             VmInstr::DiffIncremental { .. } => stats.diff_incremental_instrs += 1,
-            VmInstr::Change { ops, .. } | VmInstr::Transact { ops, .. } => {
-                if matches!(instr, VmInstr::Transact { .. }) {
-                    stats.transact_instrs += 1;
-                } else {
-                    stats.change_instrs += 1;
+            VmInstr::Persist { .. } => stats.persist_instrs += 1,
+            VmInstr::Isolate { .. } | VmInstr::Integrate { .. } => stats.isolate_instrs += 1,
+            VmInstr::Change { ops, .. }
+            | VmInstr::Transact { ops, .. }
+            | VmInstr::TransactAt { ops, .. } => {
+                match instr {
+                    VmInstr::Transact { .. } => stats.transact_instrs += 1,
+                    VmInstr::TransactAt { .. } => stats.transact_at_instrs += 1,
+                    _ => stats.change_instrs += 1,
                 }
                 stats.max_ops_in_instr = stats.max_ops_in_instr.max(ops.len());
                 for op in ops {
@@ -676,6 +750,9 @@ fn structural_key(trace: &Trace) -> StructuralKey {
         actors: bucket(trace.actors.len()),
         change_instrs: bucket(stats.change_instrs),
         transact_instrs: bucket(stats.transact_instrs),
+        transact_at_instrs: bucket(stats.transact_at_instrs),
+        persist_instrs: bucket(stats.persist_instrs),
+        isolate_instrs: bucket(stats.isolate_instrs),
         max_ops_in_instr: bucket(stats.max_ops_in_instr),
         max_obj_depth: bucket(stats.max_obj_depth),
         save_load_instrs: bucket(stats.save_load_instrs),
@@ -711,6 +788,9 @@ struct StructuralStats {
     ops: usize,
     change_instrs: usize,
     transact_instrs: usize,
+    transact_at_instrs: usize,
+    persist_instrs: usize,
+    isolate_instrs: usize,
     max_ops_in_instr: usize,
     max_obj_depth: usize,
     save_load_instrs: usize,

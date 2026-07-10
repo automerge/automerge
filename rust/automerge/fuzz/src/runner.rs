@@ -8,13 +8,13 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use automerge::{
-    ActorId, AutoCommit, ChangeHash, Cursor, LoadOptions, MoveCursor, ObjId, ObjType, Patch,
-    PatchAction, ReadDoc, ScalarValue, TextEncoding, ROOT,
+    ActorId, AutoCommit, Bundle, ChangeHash, Cursor, LoadOptions, MoveCursor, ObjId, ObjType,
+    Patch, PatchAction, PatchLog, ReadDoc, ScalarValue, TextEncoding, ROOT,
 };
 
 use crate::trace::{
     MarkExpand, Trace, VmApplyOrder, VmHeadRef, VmHydrated, VmInstr, VmObjRef, VmObserveMode, VmOp,
-    VmSyncFault, VmSyncOp, VmTextEncoding, VmValue,
+    VmPersistMode, VmSyncFault, VmSyncOp, VmTextEncoding, VmValue,
 };
 
 pub struct Runner {
@@ -119,6 +119,10 @@ impl Runner {
             diff_unsupported: state.diff_unsupported,
             total_patches: state.total_patches,
             merge_checks: state.merge_checks,
+            persistence_transfers: state.persistence_transfers,
+            bundle_transfers: state.bundle_transfers,
+            isolation_transitions: state.isolation_transitions,
+            historical_transactions: state.historical_transactions,
             ..BehaviorStats::default()
         };
         let text_encoding = state.text_encoding;
@@ -172,6 +176,10 @@ pub struct BehaviorStats {
     pub total_patches: usize,
     /// Number of explicit merges checked in both directions for convergence.
     pub merge_checks: usize,
+    pub persistence_transfers: usize,
+    pub bundle_transfers: usize,
+    pub isolation_transitions: usize,
+    pub historical_transactions: usize,
 }
 
 struct PatchCheck {
@@ -561,6 +569,10 @@ struct RunState {
     diff_unsupported: usize,
     total_patches: usize,
     merge_checks: usize,
+    persistence_transfers: usize,
+    bundle_transfers: usize,
+    isolation_transitions: usize,
+    historical_transactions: usize,
 }
 
 #[derive(Clone)]
@@ -638,6 +650,10 @@ impl RunState {
             diff_unsupported: 0,
             total_patches: 0,
             merge_checks: 0,
+            persistence_transfers: 0,
+            bundle_transfers: 0,
+            isolation_transitions: 0,
+            historical_transactions: 0,
         }
     }
 
@@ -791,18 +807,29 @@ impl RunState {
         let reverse = from_first.merge(&mut into_peer);
         match (forward, reverse) {
             (Ok(_), Ok(_)) => {
-                if into_first.get_heads() != from_first.get_heads()
-                    || into_first
-                        .hydrate(&ROOT, None)
-                        .map_err(|err| RunError::Automerge(err.to_string()))?
-                        != from_first
-                            .hydrate(&ROOT, None)
-                            .map_err(|err| RunError::Automerge(err.to_string()))?
+                let into_plain = into_first.document().clone();
+                let from_plain = from_first.document().clone();
+                if into_plain.get_heads() != from_plain.get_heads()
+                    || into_plain.hydrate(None) != from_plain.hydrate(None)
                 {
                     return Err(RunError::Invariant(
                         "merge directions did not converge".to_string(),
                     ));
                 }
+
+                // Independently exercise the explicit patch-logging merge API
+                // and check that its patches materialize the merged state.
+                let mut logged_into = self.docs[into].doc.document().clone();
+                let mut logged_from = self.docs[from].doc.document().clone();
+                let before = logged_into.hydrate(None);
+                let mut patch_log = PatchLog::active();
+                logged_into
+                    .merge_and_log_patches(&mut logged_from, &mut patch_log)
+                    .map_err(|err| RunError::Automerge(err.to_string()))?;
+                let after = logged_into.hydrate(None);
+                let patches = logged_into.make_patches(&mut patch_log);
+                let outcome = verify_diff_patches(before, after, patches, self.text_encoding)?;
+                self.record_patch_check(outcome);
                 self.merge_checks = self.merge_checks.saturating_add(1);
             }
             // Reusing one actor on divergent branches is outside Automerge's
@@ -946,8 +973,8 @@ impl RunState {
         // are no more messages to send, so both documents must have identical
         // heads.
         if quiesced {
-            let left_heads = self.doc_mut(left)?.doc.get_heads();
-            let right_heads = self.doc_mut(right)?.doc.get_heads();
+            let left_heads = self.doc_mut(left)?.doc.document().get_heads();
+            let right_heads = self.doc_mut(right)?.doc.document().get_heads();
             if left_heads != right_heads {
                 return Err(RunError::Invariant(
                     "sync quiesced with mismatched document heads".to_string(),
@@ -1159,8 +1186,8 @@ impl RunState {
         let clean = self.docs[session.left].generation == session.left_generation
             && self.docs[session.right].generation == session.right_generation;
         if quiesced && clean {
-            let left_heads = self.docs[session.left].doc.get_heads();
-            let right_heads = self.docs[session.right].doc.get_heads();
+            let left_heads = self.docs[session.left].doc.document().get_heads();
+            let right_heads = self.docs[session.right].doc.document().get_heads();
             match (session.left_state.read_only, session.right_state.read_only) {
                 (false, false) if left_heads != right_heads => {
                     return Err(RunError::Invariant(
@@ -1191,6 +1218,143 @@ impl RunState {
         Ok(())
     }
 
+    fn persist(&mut self, from: usize, into: usize, mode: &VmPersistMode) -> Result<(), RunError> {
+        if from >= self.docs.len() {
+            return Err(RunError::MissingDoc { doc: from });
+        }
+        if into >= self.docs.len() {
+            return Err(RunError::MissingDoc { doc: into });
+        }
+        let mut prerequisite_heads = None;
+        let bytes = match mode {
+            VmPersistMode::Incremental => self.docs[from].doc.save_incremental(),
+            VmPersistMode::SaveAfter { since } => {
+                let heads = self.docs[from].resolve_heads(from, since)?;
+                prerequisite_heads = Some(heads.clone());
+                self.docs[from].doc.save_after(&heads)
+            }
+            VmPersistMode::Bundle { since } => {
+                let heads = self.docs[from].resolve_heads(from, since)?;
+                prerequisite_heads = Some(heads.clone());
+                let hashes = self.docs[from]
+                    .doc
+                    .get_changes(&heads)
+                    .into_iter()
+                    .map(|change| change.hash())
+                    .collect::<Vec<_>>();
+                let bundle = self.docs[from]
+                    .doc
+                    .bundle(hashes)
+                    .map_err(|err| RunError::Automerge(err.to_string()))?;
+                // Exercise the structured bundle views as well as the encoded
+                // load path, and require the bundle to decode its own bytes.
+                let _ = bundle.actors();
+                let _ = bundle.authors();
+                let _ = bundle.deps();
+                let _ = bundle.iter_changes().count();
+                let bytes = bundle.bytes().to_vec();
+                let decoded = Bundle::try_from(bytes.as_slice()).map_err(|err| {
+                    RunError::Invariant(format!("bundle failed to decode: {err}"))
+                })?;
+                let _ = decoded.to_changes().map_err(|err| {
+                    RunError::Invariant(format!("bundle failed to reconstruct changes: {err}"))
+                })?;
+                bytes
+            }
+        };
+        let can_complete = prerequisite_heads.as_ref().is_some_and(|heads| {
+            heads
+                .iter()
+                .all(|head| self.docs[into].doc.get_change_by_hash(head).is_some())
+        });
+        let source_heads = self.docs[from].doc.document().get_heads();
+        self.load_incremental_with_oracle(into, &bytes)?;
+        self.persistence_transfers = self.persistence_transfers.saturating_add(1);
+        if matches!(mode, VmPersistMode::Bundle { .. }) {
+            self.bundle_transfers = self.bundle_transfers.saturating_add(1);
+        }
+        if can_complete
+            && source_heads
+                .iter()
+                .any(|head| self.docs[into].doc.get_change_by_hash(head).is_none())
+        {
+            return Err(RunError::Invariant(
+                "persistence transfer lost a source change".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn load_incremental_with_oracle(&mut self, into: usize, bytes: &[u8]) -> Result<(), RunError> {
+        let text_encoding = self.text_encoding;
+        let before = self.docs[into]
+            .doc
+            .hydrate(&ROOT, None)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        let mut plain = self.docs[into].doc.document().clone();
+        let mut patch_log = PatchLog::active();
+        plain
+            .load_incremental_log_patches(bytes, &mut patch_log)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        let expected = plain.hydrate(None);
+        let expected_heads = plain.get_heads();
+        let patches = plain.make_patches(&mut patch_log);
+        let outcome = verify_diff_patches(before, expected.clone(), patches, text_encoding)?;
+        self.record_patch_check(outcome);
+
+        self.docs[into]
+            .doc
+            .load_incremental(bytes)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        let actual = self.docs[into]
+            .doc
+            .hydrate(&ROOT, None)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        if actual != expected || self.docs[into].doc.document().get_heads() != expected_heads {
+            return Err(RunError::Invariant(
+                "AutoCommit and Automerge incremental loads disagreed".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn isolate(&mut self, doc: usize, head: &VmHeadRef) -> Result<(), RunError> {
+        let doc_state = self.doc_mut(doc)?;
+        let heads = doc_state.resolve_heads(doc, head)?;
+        doc_state.doc.isolate(&heads);
+        if doc_state.doc.get_heads() != heads {
+            return Err(RunError::Invariant(
+                "isolated AutoCommit did not expose requested heads".to_string(),
+            ));
+        }
+        // Exercise reads through the isolated scope. `hydrate` currently takes
+        // its explicit heads argument directly rather than consulting the
+        // AutoCommit isolation scope, so it is checked explicitly at `heads`
+        // instead of being used as an isolation oracle here.
+        let _ = doc_state.doc.keys(&ROOT).count();
+        let _ = doc_state.doc.hydrate(&ROOT, Some(&heads));
+        self.isolation_transitions = self.isolation_transitions.saturating_add(1);
+        Ok(())
+    }
+
+    fn integrate(&mut self, doc: usize) -> Result<(), RunError> {
+        let doc_state = self.doc_mut(doc)?;
+        let expected = doc_state.doc.document().hydrate(None);
+        let expected_heads = doc_state.doc.document().get_heads();
+        doc_state.doc.integrate();
+        let actual = doc_state
+            .doc
+            .hydrate(&ROOT, None)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        if doc_state.doc.get_heads() != expected_heads || actual != expected {
+            return Err(RunError::Invariant(
+                "integrating AutoCommit did not restore current state".to_string(),
+            ));
+        }
+        self.isolation_transitions = self.isolation_transitions.saturating_add(1);
+        Ok(())
+    }
+
     fn save_load(&mut self, doc: usize) -> Result<SaveLoadOutcome, RunError> {
         let text_encoding = self.text_encoding;
         let doc_state = self.doc_mut(doc)?;
@@ -1198,8 +1362,25 @@ impl RunState {
             .doc
             .hydrate(&ROOT, None)
             .map_err(|err| RunError::Automerge(err.to_string()))?;
-        let heads_before = doc_state.doc.get_heads();
-        let bytes = doc_state.doc.save();
+        let heads_before = doc_state.doc.document().get_heads();
+        let nocompressed = doc_state.doc.save_nocompress();
+        let nocompressed_loaded = AutoCommit::load_with_options(
+            &nocompressed,
+            LoadOptions::new().text_encoding(text_encoding),
+        )
+        .map_err(|err| RunError::Load(err.to_string()))?;
+        let nocompressed_after = nocompressed_loaded
+            .hydrate(&ROOT, None)
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        if nocompressed_after != before {
+            return Err(RunError::Invariant(
+                "save_nocompress/load changed hydrated document".to_string(),
+            ));
+        }
+        let bytes = doc_state
+            .doc
+            .save_and_verify()
+            .map_err(|err| RunError::Invariant(format!("save_and_verify failed: {err}")))?;
         let mut loaded =
             AutoCommit::load_with_options(&bytes, LoadOptions::new().text_encoding(text_encoding))
                 .map_err(|err| RunError::Load(err.to_string()))?;
@@ -1260,6 +1441,30 @@ impl RunState {
                     }
                     result
                 }
+                VmInstr::TransactAt {
+                    doc,
+                    actor,
+                    head,
+                    ops: vm_ops,
+                    commit,
+                } => {
+                    let result = self.transact_at_owned(
+                        usize::from(*doc),
+                        usize::from(*actor),
+                        head,
+                        vm_ops,
+                        *commit,
+                    );
+                    if result.is_ok() && *commit {
+                        ops += vm_ops.len();
+                    }
+                    result
+                }
+                VmInstr::Persist { from, into, mode } => {
+                    self.persist(usize::from(*from), usize::from(*into), mode)
+                }
+                VmInstr::Isolate { doc, head } => self.isolate(usize::from(*doc), head),
+                VmInstr::Integrate { doc } => self.integrate(usize::from(*doc)),
                 VmInstr::SaveLoad { doc } => self.save_load(usize::from(*doc)).map(drop),
                 VmInstr::Observe {
                     doc,
@@ -1334,14 +1539,17 @@ impl RunState {
         commit: bool,
     ) -> Result<(), RunError> {
         let actor_id = self.actors[actor % self.actors.len()].clone();
-        let doc_state = self.doc_mut(doc)?;
-        let heads_before = doc_state.doc.get_heads();
-        let mut plain = doc_state.doc.document().clone();
+        let (heads_before, mut plain, mut objects) = {
+            let doc_state = self.doc_mut(doc)?;
+            let plain = doc_state.doc.document().clone();
+            (plain.get_heads(), plain, doc_state.objects.clone())
+        };
         plain.set_actor(actor_id);
-        let before = (!commit).then(|| plain.hydrate(None));
+        let before = plain.hydrate(None);
 
-        let mut objects = doc_state.objects.clone();
-        let mut tx = plain.transaction();
+        let mut tx = plain
+            .transaction_log_patches(PatchLog::active())
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
         for op in vm_ops {
             if let Err(err) = apply_vm_op_tx(&mut tx, &mut objects, op) {
                 if err.is_invariant_or_panic() {
@@ -1354,7 +1562,11 @@ impl RunState {
         }
 
         if commit {
-            tx.commit();
+            let (_, mut patch_log) = tx.commit();
+            let after = plain.hydrate(None);
+            let patches = plain.make_patches(&mut patch_log);
+            let outcome = verify_diff_patches(before, after, patches, self.text_encoding)?;
+            self.record_patch_check(outcome);
             let changes = plain.get_changes(&heads_before);
             let doc_state = self.doc_mut(doc)?;
             doc_state
@@ -1370,12 +1582,75 @@ impl RunState {
                 ));
             }
             let after = plain.hydrate(None);
-            if before.as_ref() != Some(&after) {
+            if before != after {
                 return Err(RunError::Invariant(
                     "transaction rollback changed hydrated document".to_string(),
                 ));
             }
         }
+        Ok(())
+    }
+
+    fn transact_at_owned(
+        &mut self,
+        doc: usize,
+        actor: usize,
+        head: &VmHeadRef,
+        vm_ops: &[VmOp],
+        commit: bool,
+    ) -> Result<(), RunError> {
+        let actor_id = self.actors[actor % self.actors.len()].clone();
+        let (live_heads, historical_heads, mut plain, mut objects) = {
+            let doc_state = self.doc_mut(doc)?;
+            let historical_heads = doc_state.resolve_heads(doc, head)?;
+            let plain = doc_state.doc.document().clone();
+            (
+                plain.get_heads(),
+                historical_heads,
+                plain,
+                doc_state.objects.clone(),
+            )
+        };
+        plain.set_actor(actor_id);
+        let historical = plain.hydrate(Some(&historical_heads));
+        let full_before = (!commit).then(|| plain.hydrate(None));
+        let mut tx = plain
+            .into_transaction(Some(PatchLog::active()), Some(&historical_heads))
+            .map_err(|err| RunError::Automerge(err.to_string()))?;
+        for op in vm_ops {
+            if let Err(err) = apply_vm_op_tx(&mut tx, &mut objects, op) {
+                if err.is_invariant_or_panic() {
+                    return Err(err);
+                }
+                break;
+            }
+        }
+
+        if commit {
+            let (plain, hash, mut patch_log) = tx.commit();
+            let branch_heads = hash.map_or_else(|| historical_heads.clone(), |hash| vec![hash]);
+            let branch_after = plain.hydrate(Some(&branch_heads));
+            let patches = plain.make_patches(&mut patch_log);
+            let outcome =
+                verify_diff_patches(historical, branch_after, patches, self.text_encoding)?;
+            self.record_patch_check(outcome);
+            let changes = plain.get_changes(&live_heads);
+            let doc_state = self.doc_mut(doc)?;
+            doc_state
+                .doc
+                .apply_changes(changes)
+                .map_err(|err| RunError::Automerge(err.to_string()))?;
+            doc_state.objects = objects;
+        } else {
+            let (plain, _) = tx.rollback();
+            if plain.get_heads() != live_heads || full_before.as_ref() != Some(&plain.hydrate(None))
+            {
+                return Err(RunError::Invariant(
+                    "owned historical transaction rollback changed document".to_string(),
+                ));
+            }
+        }
+        self.historical_transactions = self.historical_transactions.saturating_add(1);
         Ok(())
     }
 
@@ -2415,6 +2690,118 @@ mod tests {
                 .run_catching(&trace)
                 .unwrap_or_else(|err| panic!("encoding {encoding:?} failed: {err}"));
         }
+    }
+
+    #[test]
+    fn persistence_transfers_round_trip_incremental_save_after_and_bundle() {
+        let put = |doc: u8, actor: u8, key: u8, value: u8| VmInstr::Change {
+            doc,
+            actor,
+            ops: vec![VmOp::Put {
+                obj: VmObjRef::Root,
+                key,
+                value: VmValue::Uint { slot: value },
+            }],
+        };
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            text_encoding: None,
+            steps: vec![
+                put(0, 0, 0, 1),
+                VmInstr::SaveHeads { doc: 0, slot: 0 },
+                VmInstr::Fork { from: 0, to: 1 },
+                VmInstr::Fork { from: 0, to: 2 },
+                VmInstr::Fork { from: 0, to: 3 },
+                put(0, 0, 1, 2),
+                VmInstr::Persist {
+                    from: 0,
+                    into: 1,
+                    mode: VmPersistMode::Incremental,
+                },
+                VmInstr::Persist {
+                    from: 0,
+                    into: 2,
+                    mode: VmPersistMode::SaveAfter {
+                        since: VmHeadRef::Slot { slot: 0 },
+                    },
+                },
+                VmInstr::Persist {
+                    from: 0,
+                    into: 3,
+                    mode: VmPersistMode::Bundle {
+                        since: VmHeadRef::Slot { slot: 0 },
+                    },
+                },
+            ],
+        };
+        let report = Runner::new()
+            .run_catching(&trace)
+            .expect("all persistence transfers run");
+        assert_eq!(report.docs, 4);
+        assert!(report.behavior.diff_checks >= 3);
+    }
+
+    #[test]
+    fn isolation_and_owned_historical_transactions_preserve_views() {
+        let trace = Trace {
+            version: 1,
+            metadata: Metadata::default(),
+            actors: vec![ActorSpec::new(0), ActorSpec::new(1)],
+            text_encoding: None,
+            steps: vec![
+                VmInstr::Change {
+                    doc: 0,
+                    actor: 0,
+                    ops: vec![VmOp::Put {
+                        obj: VmObjRef::Root,
+                        key: 0,
+                        value: VmValue::Uint { slot: 1 },
+                    }],
+                },
+                VmInstr::SaveHeads { doc: 0, slot: 0 },
+                VmInstr::Change {
+                    doc: 0,
+                    actor: 0,
+                    ops: vec![VmOp::Put {
+                        obj: VmObjRef::Root,
+                        key: 1,
+                        value: VmValue::Uint { slot: 2 },
+                    }],
+                },
+                VmInstr::Isolate {
+                    doc: 0,
+                    head: VmHeadRef::Slot { slot: 0 },
+                },
+                VmInstr::Integrate { doc: 0 },
+                VmInstr::TransactAt {
+                    doc: 0,
+                    actor: 1,
+                    head: VmHeadRef::Slot { slot: 0 },
+                    ops: vec![VmOp::Put {
+                        obj: VmObjRef::Root,
+                        key: 2,
+                        value: VmValue::Bytes { slot: 4 },
+                    }],
+                    commit: true,
+                },
+                VmInstr::TransactAt {
+                    doc: 0,
+                    actor: 1,
+                    head: VmHeadRef::Slot { slot: 0 },
+                    ops: vec![VmOp::Delete {
+                        obj: VmObjRef::Root,
+                        key: 0,
+                    }],
+                    commit: false,
+                },
+            ],
+        };
+        let report = Runner::new()
+            .run_catching(&trace)
+            .expect("historical views and owned transactions run");
+        assert!(report.behavior.diff_checks >= 1);
     }
 
     #[test]

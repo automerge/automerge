@@ -514,6 +514,36 @@ fresh deterministic 3,000-iteration smoke run reached 64 semantic features and
 2,012 feature pairs; the new patch oracle also produced repeatable semantic
 patch/hydrate failures for investigation.
 
+## Additional valid API state
+
+- [x] Add `Persist` traces covering `save_incremental`/`load_incremental`,
+  `save_after`/`load_incremental`, and bundle creation, structured iteration,
+  codec round-trip, reconstruction, and incremental loading.
+- [x] Cross-check incremental loading through both `Automerge` and
+  `AutoCommit`, including heads and hydrated state.
+- [x] Use active `PatchLog`s while loading incremental bytes and require the
+  resulting supported patches to materialize the post-load state.
+- [x] Add `Isolate`/`Integrate` trace events and check historical/current head
+  transitions. Historical hydration is exercised with explicit heads because
+  `AutoCommit::hydrate` currently does not consult the isolation scope.
+- [x] Add owned historical transactions via `Automerge::into_transaction`, for
+  both commit and rollback. Committed patch logs are checked against the
+  historical branch state; rollback must preserve the full document.
+- [x] Run ordinary borrowed transactions with active patch logs and check their
+  patches.
+- [x] Exercise `merge_and_log_patches` and verify its patch stream independently
+  of the bidirectional merge-convergence oracle.
+- [x] Exercise `save_nocompress` and `save_and_verify` as part of every explicit
+  save/load boundary.
+- [x] Track successful persistence transfers, bundles, isolation transitions,
+  and historical transactions in status output and JSONL statistics.
+
+Focused persistence and historical-view regressions bring the fuzz crate to 14
+passing tests. A fresh 250-iteration smoke run executed 451 persistence
+transfers, 2 bundle transfers, 2,083 isolation transitions, and 194 historical
+transactions; only previously identified diff/patch invariant signatures were
+saved.
+
 ## Deferred until later phases
 
 Remaining follow-up work:

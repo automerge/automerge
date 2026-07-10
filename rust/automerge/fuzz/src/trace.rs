@@ -85,6 +85,28 @@ pub enum VmInstr {
         ops: Vec<VmOp>,
         commit: bool,
     },
+    /// Run an owned transaction against a historical view of the document.
+    TransactAt {
+        doc: u8,
+        actor: u8,
+        head: VmHeadRef,
+        ops: Vec<VmOp>,
+        commit: bool,
+    },
+    /// Transfer encoded changes through one of Automerge's persistence APIs.
+    Persist {
+        from: u8,
+        into: u8,
+        mode: VmPersistMode,
+    },
+    /// Restrict an AutoCommit view to historical heads until `Integrate`.
+    Isolate {
+        doc: u8,
+        head: VmHeadRef,
+    },
+    Integrate {
+        doc: u8,
+    },
     SaveLoad {
         doc: u8,
     },
@@ -158,6 +180,17 @@ pub enum VmSyncFault {
     Drop,
     Duplicate,
     Reorder,
+}
+
+#[derive(Clone, Debug, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VmPersistMode {
+    /// `save_incremental` followed by `load_incremental`.
+    Incremental,
+    /// `save_after` followed by `load_incremental`.
+    SaveAfter { since: VmHeadRef },
+    /// Bundle selected changes, round-trip the bundle codec, then load it.
+    Bundle { since: VmHeadRef },
 }
 
 #[derive(Clone, Copy, Debug, Hash, serde::Serialize, serde::Deserialize)]

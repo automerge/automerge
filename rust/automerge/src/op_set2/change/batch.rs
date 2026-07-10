@@ -609,6 +609,7 @@ impl OpValueOption {
             crate::sometimes!("delete.succ_after_deleted_value", if deleted && self.is_deleted());
             let conflict = self.is_visible();
             let expose = !deleted && self.is_deleted();
+            crate::sometimes!("conflict.value.visible_sibling", if conflict);
             *self = Self(Some(OpValue {
                 value,
                 id,
