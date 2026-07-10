@@ -458,15 +458,16 @@ impl PatchLog {
         let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
-            // ignore events on objects in the expose queue
-            // incremental updates are ignored and a observation
-            // of the final state is used b/c observers did not see
-            // past state changes
+            // Observe exposed objects which sort before this event first. One
+            // of them may have been at the front of the queue, hiding the fact
+            // that this event's object is also waiting to be exposed.
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
+            // Ignore incremental events on exposed objects and observe their
+            // final state instead, because observers did not see their hidden
+            // state changes.
             if expose_queue.should_skip(&exid) {
                 continue;
             }
-            // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
 
             patch_builder.log_event(doc, exid, event);
         }

@@ -92,6 +92,33 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn reverse_diff_of_replaced_lists_applies_to_hydrated_value_from_fuzz_trace() {
+    // Minimized from a fuzz crash. Both lists are replaced, then the old
+    // second list is changed while hidden. A reverse diff must not emit a
+    // deletion against the empty replacement list in the hydrated value.
+    let mut doc = AutoCommit::new();
+    doc.put_object(ROOT, "first", ObjType::List).unwrap();
+    let old_second = doc.put_object(ROOT, "second", ObjType::List).unwrap();
+    doc.commit();
+    let historical_heads = doc.get_heads();
+
+    doc.put_object(ROOT, "first", ObjType::List).unwrap();
+    doc.put_object(ROOT, "second", ObjType::Text).unwrap();
+    doc.insert(&old_second, 0, 1).unwrap();
+    doc.commit();
+    let current_heads = doc.get_heads();
+
+    let mut actual = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&historical_heads)).unwrap();
+    let patches = doc.diff(&current_heads, &historical_heads);
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn unmark_at_end_of_remotely_inserted_conflicted_scalar_in_text_from_fuzz_trace() {
     // A scalar inserted into a text object on a remote fork is overwritten concurrently
     // by two actors, then merged. Unmarking at the document's reported length must not
