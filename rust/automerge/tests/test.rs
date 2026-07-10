@@ -92,10 +92,27 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn fork_at_rejects_edit_to_object_outside_isolation_from_fuzz_trace() {
+    // The list was created after the empty heads, so editing it while isolated at those heads must
+    // be rejected rather than creating a change which references an actor absent from its history.
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.commit();
+    doc.isolate(&[]);
+
+    let result = doc.insert(&list, 0, 1);
+    let heads = doc.get_heads();
+    let fork = doc.fork_at(&heads);
+
+    assert!(matches!(result, Err(AutomergeError::InvalidObjId(_))));
+    assert!(fork.is_ok());
+}
+
+#[test]
 fn historical_owned_transaction_omits_patches_for_unreachable_object_from_fuzz_trace() {
     // Minimized from fuzz crash 2. The text object does not exist at the empty
-    // historical heads, so a transaction which edits it creates an unreachable
-    // operation and must not emit a patch with a path through the hidden object.
+    // historical heads, so the edit must be rejected and must not emit a patch
+    // with a path through the hidden object.
     let mut source = AutoCommit::new();
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.commit();
@@ -105,7 +122,8 @@ fn historical_owned_transaction_omits_patches_for_unreachable_object_from_fuzz_t
     let mut tx = doc
         .into_transaction(Some(PatchLog::active()), Some(&[]))
         .unwrap();
-    tx.insert(&text, 0, ScalarValue::counter(-104)).unwrap();
+    let result = tx.insert(&text, 0, ScalarValue::counter(-104));
+    assert!(matches!(result, Err(AutomergeError::InvalidObjId(_))));
     let (doc, hash, mut patch_log) = tx.commit();
     let branch_heads = hash.into_iter().collect::<Vec<_>>();
     let expected = doc.hydrate(Some(&branch_heads));
