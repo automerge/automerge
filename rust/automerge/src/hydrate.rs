@@ -101,9 +101,13 @@ impl Value {
                 .get_mut(s)
                 .ok_or_else(|| HydrateError::ApplyInvalidProp(patch.clone()))?
                 .apply(path, text_encoding, patch),
+            // Hydrated text represents embedded block objects only by their
+            // replacement characters, so patches to a block's contents do
+            // not affect the hydrated text value.
+            (Some(Prop::Seq(_)), Value::Text(_)) => Ok(()),
             (None, Value::Map(map)) => map.apply(text_encoding, patch),
             (None, Value::List(list)) => list.apply(text_encoding, patch),
-            (None, Value::Text(text)) => text.apply(patch),
+            (None, Value::Text(text)) => text.apply(text_encoding, patch),
             _ => Err(HydrateError::Fail),
         }
     }
