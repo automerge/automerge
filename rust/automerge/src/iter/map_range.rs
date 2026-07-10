@@ -274,6 +274,10 @@ impl<'a> Iterator for MapDiff<'a> {
             if diff.is_del() {
                 if let Some(mut last) = last_visible.take() {
                     last.update(expose);
+                    // Deleting the winning value exposes `last`, so its put
+                    // patch must describe the conflict state after deletion,
+                    // not merely whether the conflict is newly created.
+                    last.conflict = num_new > 1;
                     return Some(last);
                 }
             }
