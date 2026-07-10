@@ -20,12 +20,26 @@ impl std::fmt::Debug for Text {
 }
 
 impl Text {
-    pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
+    pub(crate) fn apply(
+        &mut self,
+        text_encoding: TextEncoding,
+        patch: PatchAction,
+    ) -> Result<(), HydrateError> {
         match patch {
             PatchAction::SpliceText { index, value, .. } => {
                 self.value
                     .splice_text_value(index, &value)
                     .map_err(|_| HydrateError::InvalidEncoding)?;
+                Ok(())
+            }
+            PatchAction::Insert { index, values } => {
+                let mut index = index;
+                for value in values.iter() {
+                    let value = super::Value::new(value.0.clone(), text_encoding);
+                    let text = value.as_str();
+                    self.value.splice(index, text);
+                    index += text_encoding.width(text);
+                }
                 Ok(())
             }
             PatchAction::DeleteSeq { index, length } => {

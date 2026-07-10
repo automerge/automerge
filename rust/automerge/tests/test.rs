@@ -92,6 +92,34 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn current_state_diff_with_block_applies_to_hydrated_value_from_fuzz_trace() {
+    // Minimized from a fuzz crash. Hydrated text represents a block only
+    // as an object-replacement character, so applying its current-state
+    // patches must handle the block insertion and ignore its nested contents.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.update_spans(
+        &text,
+        automerge::marks::UpdateSpansConfig::default(),
+        [automerge::iter::Span::Block(automerge::hydrate_map! {
+            "type" => "paragraph",
+        })],
+    )
+    .unwrap();
+    doc.commit();
+    let current_heads = doc.get_heads();
+
+    let mut actual = doc.hydrate(&ROOT, Some(&[])).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
+    let patches = doc.diff(&[], &current_heads);
+    actual
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn reverse_diff_of_replaced_lists_applies_to_hydrated_value_from_fuzz_trace() {
     // Minimized from a fuzz crash. Both lists are replaced, then the old
     // second list is changed while hidden. A reverse diff must not emit a
