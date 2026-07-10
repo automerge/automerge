@@ -474,8 +474,8 @@ impl BundleOpsColumns {
             (ops::PRED_COUNT, &self.pred_count),
             (ops::PRED_ACTOR, &self.pred_actor),
             (ops::PRED_CTR, &self.pred_ctr),
-            (ops::MARK_NAME, &self.mark_name),
             (ops::EXPAND, &self.expand),
+            (ops::MARK_NAME, &self.mark_name),
         ]
         .into_iter()
         .filter(|(_, range)| !range.is_empty())

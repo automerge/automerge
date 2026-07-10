@@ -92,6 +92,26 @@ use automerge_test::{
 use pretty_assertions::assert_eq;
 
 #[test]
+fn bundle_with_mark_columns_decodes_from_fuzz_trace() {
+    // Minimized from a fuzz crash. A mark populates both the expand and mark-name
+    // operation columns; the bundle must write their metadata in normalized order.
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 1),
+        ExpandMark::Both,
+    )
+    .unwrap();
+    doc.commit();
+
+    let hashes = doc.get_changes(&[]).into_iter().map(|change| change.hash());
+    let bundle = doc.bundle(hashes).unwrap();
+    automerge::Bundle::try_from(bundle.bytes()).unwrap();
+}
+
+#[test]
 fn fork_at_rejects_edit_to_object_outside_isolation_from_fuzz_trace() {
     // The list was created after the empty heads, so editing it while isolated at those heads must
     // be rejected rather than creating a change which references an actor absent from its history.
