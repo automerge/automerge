@@ -299,6 +299,7 @@ impl TransactionInner {
         mut op: TxOp,
         succ: &[SuccInsert],
         range: Range<usize>,
+        replaced: Option<hydrate::Value>,
     ) {
         let added = doc.ops_mut().splice(op.pos, &[&op]);
 
@@ -309,7 +310,7 @@ impl TransactionInner {
             op.reset_range = Some(range);
         }
 
-        self.finalize_op(doc.text_encoding(), patch_log, &op, None);
+        self.finalize_op(doc.text_encoding(), patch_log, &op, None, replaced.as_ref());
 
         self.pending.push(op);
     }
@@ -379,7 +380,7 @@ impl TransactionInner {
         };
 
         doc.ops_mut().splice(op.pos, &[&op]);
-        self.finalize_op(doc.text_encoding(), patch_log, &op, marks);
+        self.finalize_op(doc.text_encoding(), patch_log, &op, marks, None);
 
         self.pending.push(op);
 
@@ -409,7 +410,7 @@ impl TransactionInner {
             index: op.index,
         };
         doc.ops_mut().splice(op.pos, &[&op]);
-        self.finalize_op(doc.text_encoding(), patch_log, &op, None);
+        self.finalize_op(doc.text_encoding(), patch_log, &op, None, None);
         self.pending.push(op);
         inserted
     }
@@ -463,7 +464,7 @@ impl TransactionInner {
             .map(|op| op.add_succ(id, inc_value))
             .collect();
 
-        self.insert_local_op(doc, patch_log, op, &succ, query.range);
+        self.insert_local_op(doc, patch_log, op, &succ, query.range, None);
 
         Ok(Some(id))
     }
@@ -500,8 +501,24 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
+        let replaced = if obj.typ == ObjType::Text {
+            query
+                .ops
+                .first()
+                .map(|op| op.hydrate_value(doc.text_encoding()))
+        } else {
+            None
+        };
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::list(id, *obj, query.end_pos, index, resolved_action, eid, pred);
+        let op = TxOp::list(
+            id,
+            *obj,
+            query.end_pos,
+            query.index,
+            resolved_action,
+            eid,
+            pred,
+        );
         let inc_value = op.get_increment_value();
         let succ = query
             .ops
@@ -509,7 +526,7 @@ impl TransactionInner {
             .map(|op| op.add_succ(id, inc_value))
             .collect::<Vec<_>>();
 
-        self.insert_local_op(doc, patch_log, op, &succ, query.range);
+        self.insert_local_op(doc, patch_log, op, &succ, query.range, replaced);
 
         Ok(Some(id))
     }
@@ -949,6 +966,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         op: &TxOp,
         marks: Option<Arc<MarkSet>>,
+        replaced: Option<&hydrate::Value>,
     ) {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;
@@ -979,6 +997,21 @@ impl TransactionInner {
                 }
             } else if let Some(value) = op.get_increment_value() {
                 patch_log.increment(obj, op.prop(), value, op.id());
+            } else if let (ObjType::Text, PropRef::Seq(index), Some(replaced)) =
+                (obj_typ, op.prop(), replaced)
+            {
+                patch_log.replace_seq(
+                    obj,
+                    index,
+                    replaced,
+                    op.hydrate_value(encoding),
+                    op.id(),
+                    false,
+                    false,
+                    SequenceType::Text,
+                    encoding,
+                    marks,
+                );
             } else {
                 patch_log.put(
                     obj,
@@ -1383,7 +1416,7 @@ impl<'a> BatchInsertion<'a> {
         let id = self.inner.next_id();
         let op = factory(self.next_pos(), id);
         self.inner
-            .finalize_op(self.doc.text_encoding(), self.patch_log, &op, None);
+            .finalize_op(self.doc.text_encoding(), self.patch_log, &op, None, None);
         self.inner.pending.push(op);
         id
     }

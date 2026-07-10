@@ -4,7 +4,7 @@ use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
-use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
+use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
 use crate::{ChangeHash, Patch};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
@@ -369,6 +369,33 @@ impl PatchLog {
                 conflict,
             },
         ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn replace_seq(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        old_value: &Value,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+        seq_type: SequenceType,
+        text_encoding: TextEncoding,
+        marks: Option<Arc<MarkSet>>,
+    ) {
+        if seq_type == SequenceType::List {
+            self.put_seq(obj, index, value, id, conflict, expose);
+            return;
+        }
+
+        self.delete_seq(obj, index, old_value.width(seq_type, text_encoding));
+        if value.is_object() {
+            self.insert_and_maybe_expose(obj, index, value, id, conflict, expose);
+        } else {
+            self.splice(obj, index, value.as_str(), marks);
+        }
     }
 
     pub(crate) fn splice(
