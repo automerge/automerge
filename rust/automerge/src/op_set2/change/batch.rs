@@ -697,6 +697,23 @@ impl<'a> ValueState<'a> {
                         _ => log.insert(obj, index, c.value, c.id, c.conflict),
                     }
                 }
+                (Some(d), Some(c)) if d.deleted => {
+                    // A non-inserting text operation can replace an existing
+                    // element. If the incoming operation deletes the old
+                    // value and exposes its replacement, log that replacement
+                    // just as we do for list elements.
+                    log.put_seq(obj, index, c.value, c.id, c.conflict, false);
+                }
+                (Some(d), Some(c)) if d.id == c.id => {
+                    // Counter increments do not change the rendered text.
+                }
+                (Some(d), Some(c)) if c.id > d.id => {
+                    let conflict = !d.deleted || c.conflict;
+                    log.put_seq(obj, index, c.value, c.id, conflict, false);
+                }
+                (Some(d), Some(_)) if !d.conflict => {
+                    log.flag_conflict(obj, &Prop::from(index));
+                }
                 (Some(d), None) if d.deleted => {
                     let w = d.value.width(self.seq_type, self.text_encoding);
                     log.delete_seq(obj, index, w);
