@@ -681,15 +681,6 @@ impl<'a> ChangeCollector<'a> {
         Self::try_from_change_meta(changes, actors).unwrap()
     }
 
-    pub(crate) fn exclude_hashes(
-        op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
-        have_deps: &[ChangeHash],
-    ) -> Result<Vec<Change>, AutomergeError> {
-        let changes = change_graph.get_build_metadata_clock(have_deps)?;
-        Self::from_build_meta(op_set, change_graph, changes)
-    }
-
     /// Like [`Self::exclude_hashes`] but keyed by a clock computed without
     /// hashes, so the exclusion set can name pre-load changes on an
     /// unchecked graph. Building the returned changes still requires their

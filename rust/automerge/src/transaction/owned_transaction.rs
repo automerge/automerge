@@ -1,7 +1,7 @@
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
-use crate::{AutomergeError, ChangeHash, ChangeId, PatchLogMismatch};
+use crate::{AutomergeError, ChangeHash, PatchLogMismatch};
 
 use super::{CommitOptions, TransactionInner};
 
@@ -49,51 +49,25 @@ impl OwnedTransaction {
         })
     }
 
-    /// Get the [`ChangeId`] of the change that contains the given opid.
+    /// Get the hash of the change that contains the given opid.
     ///
-    /// Returns none if the opid:
+    /// Returns `Ok(None)` if the opid:
     /// - is the root object id
     /// - does not exist in this document
     /// - is for an operation in this transaction
-    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
-        self.doc.change_id_for_opid(opid)
-    }
-
-    /// See [`Automerge::change_id_to_hash`]
-    pub fn change_id_to_hash(&self, id: &ChangeId) -> Result<Option<ChangeHash>, AutomergeError> {
-        self.doc.change_id_to_hash(id)
-    }
-
-    /// See [`Automerge::hash_to_change_id`]
-    pub fn hash_to_change_id(&self, hash: &ChangeHash) -> Result<Option<ChangeId>, AutomergeError> {
-        self.doc.hash_to_change_id(hash)
-    }
-
-    /// See [`Automerge::hashes_to_change_ids`]
-    pub fn hashes_to_change_ids(
-        &self,
-        hashes: &[ChangeHash],
-    ) -> Result<Vec<ChangeId>, AutomergeError> {
-        self.doc.hashes_to_change_ids(hashes)
-    }
-
-    /// See [`Automerge::change_ids_to_hashes`]
-    pub fn change_ids_to_hashes(
-        &self,
-        ids: &[ChangeId],
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.doc.change_ids_to_hashes(ids)
+    pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
+        self.doc.hash_for_opid(opid)
     }
 
     /// Get the heads of the document before this transaction was started.
-    pub fn get_heads(&self) -> Vec<ChangeId> {
+    pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
     }
 
-    /// Commit the transaction, returning the document, commit id, and patch log.
+    /// Commit the transaction, returning the document, commit hash, and patch log.
     ///
     /// Unlike [`super::Transaction::commit`], no `PatchLog` clone is needed — it is moved out.
-    pub fn commit(mut self) -> (Automerge, Option<ChangeId>, PatchLog) {
+    pub fn commit(mut self) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = super::commit_transaction(
             tx,
@@ -101,29 +75,17 @@ impl OwnedTransaction {
             &mut self.patch_log,
             CommitOptions::default(),
         );
-        let id = hash.map(|h| {
-            self.doc
-                .hash_to_change_id(&h)
-                .expect("hash of a newly committed change is always known")
-                .expect("newly committed change must be in the document")
-        });
-        (self.doc, id, self.patch_log)
+        (self.doc, hash, self.patch_log)
     }
 
     /// Commit with options.
     pub fn commit_with(
         mut self,
         options: CommitOptions,
-    ) -> (Automerge, Option<ChangeId>, PatchLog) {
+    ) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = super::commit_transaction(tx, &mut self.doc, &mut self.patch_log, options);
-        let id = hash.map(|h| {
-            self.doc
-                .hash_to_change_id(&h)
-                .expect("hash of a newly committed change is always known")
-                .expect("newly committed change must be in the document")
-        });
-        (self.doc, id, self.patch_log)
+        (self.doc, hash, self.patch_log)
     }
 
     /// Rollback the transaction, returning the document and number of cancelled ops.
@@ -141,12 +103,12 @@ impl OwnedTransaction {
         f(tx, &mut self.doc, &mut self.patch_log)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Option<crate::types::Clock> {
+    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
         if let Some(h) = heads {
             // a transaction is in flight: its pending ops are in the op
-            // set but not under the graph's heads, so a current-heads
-            // shortcut must not be used here
-            Some(self.doc.clock_for_ids(h))
+            // set but not under the graph's heads, so the current-heads
+            // shortcut in `Automerge::clock_at` must not be used here
+            Some(self.doc.change_graph.clock_for_heads_lossy(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }
@@ -204,7 +166,7 @@ mod tests {
         tx.put(ROOT, "x", 42).unwrap();
         let (doc, id, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
         assert!(id.is_some());
-        let hash = doc.change_id_to_hash(&id.unwrap()).unwrap().unwrap();
+        let hash = id.unwrap();
         let change = doc.get_change_by_hash(&hash).unwrap().unwrap();
         assert_eq!(change.message(), Some("test commit"));
     }

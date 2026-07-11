@@ -1,6 +1,6 @@
 use automerge::{
-    transaction::Transactable, ActorId, AutoCommit, Automerge, AutomergeError, LoadOptions,
-    ReadDoc, ROOT,
+    transaction::Transactable, ActorId, AutoCommit, Automerge, AutomergeError, ChangeHash,
+    LoadOptions, ReadDoc, ROOT,
 };
 
 fn unchecked_opts() -> LoadOptions<'static> {
@@ -18,6 +18,19 @@ fn saved_doc() -> (Vec<u8>, AutoCommit) {
     }
     let bytes = doc.save();
     (bytes, doc)
+}
+
+/// The hash of the checked doc's first (pre-load, non-head) change
+fn early_hash(orig: &mut AutoCommit) -> ChangeHash {
+    let mut hashes: Vec<_> = orig
+        .get_changes(&[])
+        .unwrap()
+        .into_iter()
+        .map(|c| c.hash())
+        .collect();
+    let head = orig.get_heads()[0];
+    hashes.retain(|h| *h != head);
+    hashes[0]
 }
 
 /// A doc with two concurrent branches, saved with two heads
@@ -48,26 +61,24 @@ fn unchecked_load_reads_work() {
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(2));
 
-    // heads are available as ids and match the checked doc
+    // the heads are known (paired via the document's head index suffix)
+    // and match the checked doc
     let mut heads = doc.get_heads();
     let mut orig_heads = orig.get_heads();
     heads.sort();
     orig_heads.sort();
     assert_eq!(heads, orig_heads);
 
-    // historical reads via pre-load ChangeIds work without hashes
-    let early_id = doc.change_id_for_opid(&doc.get(ROOT, "k").unwrap().unwrap().1);
-    assert!(early_id.is_some());
-    let ids: Vec<_> = (1..=3)
-        .map(|seq| {
-            // build ids by parsing seq@actor
-            format!("{}@61616161", seq).parse().unwrap()
-        })
-        .collect::<Vec<automerge::ChangeId>>();
-    let (v1, _) = doc.get_at(ROOT, "k", &ids[0..1]).unwrap().unwrap();
-    assert_eq!(v1.to_i64(), Some(0));
-    let (v2, _) = doc.get_at(ROOT, "k", &ids[1..2]).unwrap().unwrap();
-    assert_eq!(v2.to_i64(), Some(1));
+    // historical reads at the load heads work
+    let (v, _) = doc.get_at(ROOT, "k", &heads).unwrap().unwrap();
+    assert_eq!(v.to_i64(), Some(2));
+
+    // hashes this document has never seen are silently skipped by the
+    // `*_at` methods, exactly like on a checked document
+    assert!(doc
+        .get_at(ROOT, "k", &[ChangeHash([7; 32])])
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -76,11 +87,8 @@ fn unchecked_load_transactions_work() {
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
 
     doc.put(ROOT, "k", 100).unwrap();
-    let id = doc.commit().unwrap();
-    assert_eq!(doc.get_heads(), vec![id.clone()]);
-
-    // the new change's hash is known
-    assert!(doc.change_id_to_hash(&id).unwrap().is_some());
+    let hash = doc.commit().unwrap();
+    assert_eq!(doc.get_heads(), vec![hash]);
 
     // a second commit chains on the first (same fresh actor)
     doc.put(ROOT, "k", 101).unwrap();
@@ -88,17 +96,9 @@ fn unchecked_load_transactions_work() {
 }
 
 #[test]
-fn unchecked_transaction_at_post_load_works_pre_load_errors() {
+fn unchecked_transaction_at_load_heads_works() {
     let (bytes, _) = saved_doc();
     let mut doc = Automerge::load_with_options(&bytes, unchecked_opts()).unwrap();
-
-    // isolate at a pre-load change errors
-    let early: automerge::ChangeId = "1@61616161".parse().unwrap();
-    let err = doc
-        .transaction_at(automerge::PatchLog::active(), &[early])
-        .err()
-        .unwrap();
-    assert!(matches!(err, AutomergeError::UncheckedHashGraph));
 
     // isolating at the load heads works: their hashes come from the
     // document's head index suffix
@@ -110,9 +110,9 @@ fn unchecked_transaction_at_post_load_works_pre_load_errors() {
     // make a post-load change, then isolate at it
     let mut tx = doc.transaction();
     tx.put(ROOT, "k", 50).unwrap();
-    let (id, _) = tx.commit();
-    let id = id.unwrap();
-    let tx = doc.transaction_at(automerge::PatchLog::active(), &[id]);
+    let (hash, _) = tx.commit();
+    let hash = hash.unwrap();
+    let tx = doc.transaction_at(automerge::PatchLog::active(), &[hash]);
     assert!(tx.is_ok());
     drop(tx);
 }
@@ -139,7 +139,8 @@ fn unchecked_save_incremental_is_infallible() {
 
 #[test]
 fn unchecked_save_after_narrow_failure() {
-    let (bytes, _) = saved_doc();
+    let (bytes, mut orig) = saved_doc();
+    let early = early_hash(&mut orig);
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
     let load_heads = doc.get_heads();
 
@@ -148,8 +149,8 @@ fn unchecked_save_after_narrow_failure() {
 
     // everything since the load heads is exportable
     assert!(doc.save_after(&load_heads).is_ok());
-    // exporting pre-load history is not
-    let early: automerge::ChangeId = "1@61616161".parse().unwrap();
+    // exporting pre-load history is not: the early hash is unknown, so the
+    // pre-load changes must be emitted, and their hashes are unavailable
     assert!(matches!(
         doc.save_after(std::slice::from_ref(&early)),
         Err(AutomergeError::UncheckedHashGraph)
@@ -221,31 +222,43 @@ fn unchecked_set_actor_errors_for_non_head_tip() {
 }
 
 #[test]
-fn unchecked_converters() {
+fn unchecked_hash_lookups() {
     let (bytes, mut orig) = saved_doc();
-    let doc = Automerge::load_with_options(&bytes, unchecked_opts()).unwrap();
+    let early = early_hash(&mut orig);
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
 
-    let head_id = &orig.get_heads()[0];
-    let head_hash = orig.change_id_to_hash(head_id).unwrap().unwrap();
+    // the load heads are known hashes
+    let head = orig.get_heads()[0];
+    assert_eq!(doc.get_heads(), vec![head]);
 
-    // the load heads are paired with their nodes via the document's head
-    // index suffix, so they convert both ways
-    assert_eq!(doc.change_id_to_hash(head_id).unwrap(), Some(head_hash));
-    assert_eq!(
-        doc.hash_to_change_id(&head_hash).unwrap().as_ref(),
-        Some(head_id)
-    );
+    // the current op belongs to the head change, whose hash is known
+    let opid = doc.get(ROOT, "k").unwrap().unwrap().1;
+    assert_eq!(doc.hash_for_opid(&opid).unwrap(), Some(head));
 
-    // anything strictly before the load heads cannot be converted
-    let early: automerge::ChangeId = "1@61616161".parse().unwrap();
+    // an op from a pre-load, non-head change errors rather than guessing
+    let mut with_obj = AutoCommit::new()
+        .with_actor(ActorId::from(&b"cccc"[..]))
+        .unwrap();
+    let list = with_obj
+        .put_object(ROOT, "list", automerge::ObjType::List)
+        .unwrap();
+    with_obj.commit();
+    with_obj.insert(&list, 0, 1).unwrap();
+    with_obj.commit();
+    let bytes = with_obj.save();
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    let (_, list) = doc.get(ROOT, "list").unwrap().unwrap();
     assert!(matches!(
-        doc.change_id_to_hash(&early),
+        doc.hash_for_opid(&list),
         Err(AutomergeError::UncheckedHashGraph)
     ));
-    // a hash that's definitely garbage is still ambiguous on an unchecked doc
-    assert!(doc
-        .hash_to_change_id(&automerge::ChangeHash([7; 32]))
-        .is_err());
+
+    // pre-load, non-head hashes exist but can't be resolved: fallible
+    // methods that would need to enumerate them refuse
+    assert!(matches!(
+        doc.get_changes(&[early]),
+        Err(AutomergeError::UncheckedHashGraph)
+    ));
 }
 
 #[test]
@@ -261,14 +274,19 @@ fn rebuild_hash_graph_unlocks_everything() {
     doc.rebuild_hash_graph().unwrap();
     assert!(doc.hash_graph_is_checked());
 
-    // conversions now work and agree with the checked doc
-    let orig_heads = orig.get_heads();
-    let orig_hashes = orig.change_ids_to_hashes(&orig_heads).unwrap();
-    let via_rebuilt = doc.change_ids_to_hashes(&orig_heads).unwrap();
-    assert_eq!(orig_hashes, via_rebuilt);
+    // pre-load hashes now resolve: exporting everything works
+    let all = doc.get_changes(&[]).unwrap();
+    assert_eq!(all.len(), 4);
+    let orig_hashes: Vec<_> = orig
+        .get_changes(&[])
+        .unwrap()
+        .iter()
+        .map(|c| c.hash())
+        .collect();
+    for h in &orig_hashes {
+        assert!(all.iter().any(|c| c.hash() == *h));
+    }
 
-    // export works
-    assert!(doc.get_changes(&[]).is_ok());
     // and the doc round-trips
     let reloaded = AutoCommit::load(&doc.save()).unwrap();
     drop(reloaded);
@@ -280,11 +298,11 @@ fn unchecked_multi_head_commit_and_roundtrip() {
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
     assert_eq!(doc.get_heads().len(), 2);
 
-    // committing merges both pre-load heads as deps (exercises the
-    // canonical pre-head pairing in dep serialization)
+    // committing merges both pre-load heads as deps (their hashes come
+    // from the head index pairing)
     doc.put(ROOT, "merged", true).unwrap();
-    let id = doc.commit().unwrap();
-    assert_eq!(doc.get_heads(), vec![id]);
+    let hash = doc.commit().unwrap();
+    assert_eq!(doc.get_heads(), vec![hash]);
 
     // the incremental bytes (whose deps embed the pre-load head hashes)
     // apply cleanly onto a checked copy: dep hashes must be exactly right
@@ -302,22 +320,23 @@ fn unchecked_multi_head_commit_and_roundtrip() {
     let reloaded = AutoCommit::load(&saved).unwrap();
     drop(reloaded);
 
-    // and rebuilding validates the whole graph
+    // and rebuilding validates the whole graph: the original heads resolve
     doc.rebuild_hash_graph().unwrap();
-    let orig_heads_hashes = {
-        let h = orig.get_heads();
-        orig.change_ids_to_hashes(&h).unwrap()
-    };
-    // pre-load heads now resolve to their true hashes
-    let mut resolved = Vec::new();
-    for h in &orig_heads_hashes {
-        resolved.push(doc.hash_to_change_id(h).unwrap().unwrap());
-    }
-    assert_eq!(resolved.len(), 2);
+    let mut orig_heads = orig.get_heads();
+    orig_heads.sort();
+    let mut rebuilt_pre_heads: Vec<_> = doc
+        .get_changes(&[])
+        .unwrap()
+        .iter()
+        .map(|c| c.hash())
+        .filter(|h| orig_heads.contains(h))
+        .collect();
+    rebuilt_pre_heads.sort();
+    assert_eq!(rebuilt_pre_heads, orig_heads);
 }
 
 #[test]
-fn unchecked_diff_works_hash_free() {
+fn unchecked_diff_works() {
     let (bytes, _) = saved_doc();
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
 
@@ -329,8 +348,8 @@ fn unchecked_diff_works_hash_free() {
     let patches = doc.diff(&before, &after);
     assert!(!patches.is_empty());
 
-    // diff spanning pre-load history also works (ids resolve via seq_index)
-    let early: automerge::ChangeId = "1@61616161".parse().unwrap();
-    let patches = doc.diff(&[early], &after);
+    // unknown hashes are silently skipped, so this diffs from the empty
+    // document — same semantics as a checked doc given a foreign hash
+    let patches = doc.diff(&[ChangeHash([7; 32])], &after);
     assert!(!patches.is_empty());
 }

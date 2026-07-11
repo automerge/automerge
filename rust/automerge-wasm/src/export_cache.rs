@@ -140,8 +140,7 @@ impl<'a> ExportCache<'a> {
         let mut buffer = String::new();
         let mut parent_prop = JsValue::null();
         let result = JsValue::from(&o);
-        let head_ids = heads.map(|h| self.doc.to_ids(h));
-        let iter = self.doc.doc.iter_at(obj, head_ids.as_deref());
+        let iter = self.doc.doc.iter_at(obj, heads);
         for DocObjItem { obj, item } in iter {
             if obj != current_obj_id {
                 if !buffer.is_empty() {

@@ -163,11 +163,7 @@ pub unsafe extern "C" fn AMcommit(
     if let Some(timestamp) = timestamp.as_ref() {
         options.set_time(*timestamp);
     }
-    let id = doc.commit_with(options);
-    to_result(id.and_then(|id| {
-        doc.change_id_to_hash(&id)
-            .expect("C documents always have a checked hash graph")
-    }))
+    to_result(doc.commit_with(options))
 }
 
 /// \memberof AMdoc
@@ -210,12 +206,7 @@ pub unsafe extern "C" fn AMemptyChange(
     if let Some(timestamp) = timestamp.as_ref() {
         options.set_time(*timestamp);
     }
-    let id = doc.empty_change(options);
-    to_result(
-        doc.change_id_to_hash(&id)
-            .expect("C documents always have a checked hash graph")
-            .expect("newly created change must be in the document"),
-    )
+    to_result(doc.empty_change(options))
 }
 
 /// \memberof AMdoc
@@ -262,12 +253,7 @@ pub unsafe extern "C" fn AMfork(doc: *mut AMdoc, heads: *const AMitems) -> *mut 
     match heads.as_ref() {
         None => to_result(doc.fork()),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => {
-                let ids = doc
-                    .hashes_to_change_ids(&heads)
-                    .expect("C documents always have a checked hash graph");
-                to_result(doc.fork_at(&ids))
-            }
+            Ok(heads) => to_result(doc.fork_at(&heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -384,10 +370,7 @@ pub unsafe extern "C" fn AMgetChanges(doc: *mut AMdoc, have_deps: *const AMitems
         },
         None => Vec::<am::ChangeHash>::new(),
     };
-    let ids = doc
-        .hashes_to_change_ids(&have_deps)
-        .expect("C documents always have a checked hash graph");
-    to_result(doc.get_changes(&ids))
+    to_result(doc.get_changes(&have_deps))
 }
 
 /// \memberof AMdoc
@@ -446,17 +429,9 @@ pub unsafe extern "C" fn AMgetCursor(
     match heads.as_ref() {
         None => to_result(doc.get_cursor(obj_id, position, None)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(
-                doc.get_cursor(
-                    obj_id,
-                    position,
-                    Some(
-                        doc.hashes_to_change_ids(&heads)
-                            .expect("C documents always have a checked hash graph")
-                            .as_slice(),
-                    ),
-                ),
-            ),
+            Ok(heads) => {
+                to_result(doc.get_cursor(obj_id, position, Some(heads.clone().as_slice())))
+            }
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -500,17 +475,11 @@ pub unsafe extern "C" fn AMgetCursorPosition(
     match heads.as_ref() {
         None => to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), None)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(
-                doc.get_cursor_position(
-                    obj_id,
-                    cursor.as_ref(),
-                    Some(
-                        doc.hashes_to_change_ids(&heads)
-                            .expect("C documents always have a checked hash graph")
-                            .as_slice(),
-                    ),
-                ),
-            ),
+            Ok(heads) => to_result(doc.get_cursor_position(
+                obj_id,
+                cursor.as_ref(),
+                Some(heads.clone().as_slice()),
+            )),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -531,13 +500,9 @@ pub unsafe extern "C" fn AMgetCursorPosition(
 #[no_mangle]
 pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    let heads = doc.get_heads();
-    let mut heads = doc
-        .change_ids_to_hashes(&heads)
-        .expect("C documents always have a checked hash graph");
-    // C callers expect heads sorted by hash
-    heads.sort_unstable();
-    to_result(Ok::<Vec<am::ChangeHash>, am::AutomergeError>(heads))
+    to_result(Ok::<Vec<am::ChangeHash>, am::AutomergeError>(
+        doc.get_heads(),
+    ))
 }
 
 /// \memberof AMdoc
@@ -568,9 +533,7 @@ pub unsafe extern "C" fn AMgetMissingDeps(doc: *mut AMdoc, heads: *const AMitems
             }
         },
     };
-    let ids = doc
-        .hashes_to_change_ids(heads.as_slice())
-        .expect("C documents always have a checked hash graph");
+    let ids = heads.as_slice().to_vec();
     to_result(
         doc.get_missing_deps(&ids)
             .expect("C documents always have a checked hash graph"),
@@ -628,13 +591,7 @@ pub unsafe extern "C" fn AMkeys(
     match heads.as_ref() {
         None => to_result(doc.keys(obj_id)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(
-                doc.keys_at(
-                    obj_id,
-                    &doc.hashes_to_change_ids(&heads)
-                        .expect("C documents always have a checked hash graph"),
-                ),
-            ),
+            Ok(heads) => to_result(doc.keys_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -712,15 +669,7 @@ pub unsafe extern "C" fn AMloadIncremental(
 #[no_mangle]
 pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMresult {
     let dest = to_doc_mut!(dest);
-    let result = dest.merge(to_doc_mut!(src));
-    to_result(result.map(|ids| {
-        let mut heads = dest
-            .change_ids_to_hashes(&ids)
-            .expect("C documents always have a checked hash graph");
-        // C callers expect heads sorted by hash
-        heads.sort_unstable();
-        heads
-    }))
+    to_result(dest.merge(to_doc_mut!(src)))
 }
 
 /// \memberof AMdoc
@@ -755,11 +704,7 @@ pub unsafe extern "C" fn AMobjSize(
             }
             Some(heads) => {
                 if let Ok(heads) = <Vec<am::ChangeHash>>::try_from(heads) {
-                    return doc.length_at(
-                        obj_id,
-                        &doc.hashes_to_change_ids(&heads)
-                            .expect("C documents always have a checked hash graph"),
-                    );
+                    return doc.length_at(obj_id, &heads);
                 }
             }
         }
@@ -820,13 +765,7 @@ pub unsafe extern "C" fn AMobjItems(
     match heads.as_ref() {
         None => to_result(doc.values(obj_id)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(
-                doc.values_at(
-                    obj_id,
-                    &doc.hashes_to_change_ids(&heads)
-                        .expect("C documents always have a checked hash graph"),
-                ),
-            ),
+            Ok(heads) => to_result(doc.values_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -1082,13 +1021,7 @@ pub unsafe extern "C" fn AMtext(
     match heads.as_ref() {
         None => to_result(doc.text(obj_id)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(
-                doc.text_at(
-                    obj_id,
-                    &doc.hashes_to_change_ids(&heads)
-                        .expect("C documents always have a checked hash graph"),
-                ),
-            ),
+            Ok(heads) => to_result(doc.text_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }

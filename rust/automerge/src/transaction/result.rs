@@ -1,13 +1,13 @@
 use crate::patches::PatchLog;
-use crate::ChangeId;
+use crate::ChangeHash;
 
 /// The result of a successful, and committed, transaction.
 #[derive(Debug)]
 pub struct Success<O> {
     /// The result of the transaction.
     pub result: O,
-    /// The id of the change, will be `None` if the transaction did not create any operations
-    pub change_id: Option<ChangeId>,
+    /// The hash of the change, will be `None` if the transaction did not create any operations
+    pub hash: Option<ChangeHash>,
     pub patch_log: PatchLog,
 }
 

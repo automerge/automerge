@@ -174,7 +174,7 @@ impl SyncDoc for Automerge {
         &self,
         sync_state: &mut State,
     ) -> Result<Option<Message>, AutomergeError> {
-        let our_heads = self.heads_hashes();
+        let our_heads = self.get_heads();
 
         let our_need = if sync_state.read_only {
             vec![]
@@ -399,7 +399,7 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.heads_hashes();
+        let before_heads = self.get_heads();
 
         let Message {
             heads: message_heads,
@@ -431,7 +431,7 @@ impl Automerge {
             self.load_incremental_log_patches(&message_changes.join(), patch_log)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.heads_hashes().into_iter().collect(),
+                &self.get_heads().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }
@@ -1067,8 +1067,8 @@ mod tests {
             doc2.commit();
         }
 
-        let head1 = doc1.heads_hashes()[0];
-        let head2 = doc2.heads_hashes()[0];
+        let head1 = doc1.get_heads()[0];
+        let head2 = doc2.get_heads()[0];
 
         //// both sides report what they have but have no shared peer state
         let msg1to2 = doc1
@@ -1227,8 +1227,8 @@ mod tests {
             doc2copy.put(crate::ROOT, "x", val2).unwrap();
             doc2copy.commit();
 
-            let n1_bloom = BloomFilter::from_hashes(doc1copy.heads_hashes().into_iter());
-            if n1_bloom.contains_hash(&doc2copy.heads_hashes()[0]) {
+            let n1_bloom = BloomFilter::from_hashes(doc1copy.get_heads().into_iter());
+            if n1_bloom.contains_hash(&doc2copy.get_heads()[0]) {
                 break (doc1copy, doc2copy);
             }
             i += 1;
@@ -1275,7 +1275,7 @@ mod tests {
 
         doc1.put(crate::ROOT, "x", 5).unwrap();
         doc1.commit();
-        let bloom = BloomFilter::from_hashes(doc1.heads_hashes().into_iter());
+        let bloom = BloomFilter::from_hashes(doc1.get_heads().into_iter());
 
         // search for false positive; see comment above
         let mut i = 0;
@@ -1287,7 +1287,7 @@ mod tests {
             doc.put(crate::ROOT, "x", format!("{} at 89abdef", i))
                 .unwrap();
             doc.commit();
-            if bloom.contains_hash(&doc.heads_hashes()[0]) {
+            if bloom.contains_hash(&doc.get_heads()[0]) {
                 break doc;
             }
             i += 1;
@@ -1302,7 +1302,7 @@ mod tests {
                 .unwrap();
             doc.put(crate::ROOT, "x", format!("{} again", i)).unwrap();
             doc.commit();
-            if bloom.contains_hash(&doc.heads_hashes()[0]) {
+            if bloom.contains_hash(&doc.get_heads()[0]) {
                 break doc;
             }
             i += 1;
@@ -1629,7 +1629,7 @@ mod tests {
         // doc1 makes local changes
         doc1.put(crate::ROOT, "key", "value1").unwrap();
         doc1.commit();
-        let doc1_heads_after = doc1.heads_hashes();
+        let doc1_heads_after = doc1.get_heads();
 
         // Sync again — should converge, doc1's new heads communicated
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
@@ -1641,7 +1641,7 @@ mod tests {
         // doc1 makes more changes
         doc1.put(crate::ROOT, "key", "value2").unwrap();
         doc1.commit();
-        let doc1_heads_after2 = doc1.heads_hashes();
+        let doc1_heads_after2 = doc1.get_heads();
 
         // Sync again
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
@@ -1684,8 +1684,8 @@ mod tests {
             doc2.put(crate::ROOT, "doc2_counter", round as i64).unwrap();
             doc2.commit();
 
-            let doc1_heads = doc1.heads_hashes();
-            let doc2_heads = doc2.heads_hashes();
+            let doc1_heads = doc1.get_heads();
+            let doc2_heads = doc2.get_heads();
 
             // Must converge each round (sync helper panics after 10 iterations)
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);

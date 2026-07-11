@@ -1,7 +1,6 @@
 use std::{borrow::Cow, num::NonZeroU64};
 
 use crate::{
-    change_id::ChangeId,
     columnar::Key as StoredKey,
     storage::{
         change::{Unverified, Verified},
@@ -85,11 +84,6 @@ impl Change {
 
     pub fn hash(&self) -> ChangeHash {
         self.stored.hash()
-    }
-
-    /// The [`ChangeId`] identifying this change: its (actor, seq) pair.
-    pub fn id(&self) -> ChangeId {
-        ChangeId::new(self.seq(), self.actor_id().clone(), 0)
     }
 
     pub fn seq(&self) -> u64 {

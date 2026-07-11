@@ -956,7 +956,7 @@ fn splicing_into_multibyte_characters() {
     let actor = doc.get_actor().clone();
     doc.splice_text(&text, 0, 0, "A").unwrap();
     let parent_id = doc.commit().unwrap();
-    let parent_hash = doc.change_id_to_hash(&parent_id).unwrap().unwrap();
+    let parent_hash = parent_id;
 
     // We have to construct this change using the legacy API because we intentionally make it
     // impossible to create these kind of changes. The notable thing here is that there is

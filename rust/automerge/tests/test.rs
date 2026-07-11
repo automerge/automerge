@@ -3197,17 +3197,17 @@ fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
 
     doc1.put(&ROOT, "concurrent1", "123").unwrap();
     assert!(doc1.get_heads().len() == 1);
-    let hash_b = doc1.get_heads()[0].clone();
+    let hash_b = doc1.get_heads()[0];
 
     doc3.load_incremental(&doc1.save()).unwrap();
     assert!(doc3.get_heads().len() == 1);
-    let hash_c = doc3.get_heads()[0].clone();
+    let hash_c = doc3.get_heads()[0];
 
     assert_eq!(hash_b, hash_c);
 
     doc2.put(&ROOT, "concurrent2", "abc").unwrap();
     assert!(doc2.get_heads().len() == 1);
-    let hash_d = doc2.get_heads()[0].clone();
+    let hash_d = doc2.get_heads()[0];
 
     doc2.merge(&mut doc1).unwrap();
     let heads = doc2.get_heads();
@@ -3239,7 +3239,7 @@ fn test_get_last_local_change_generation() {
 fn confirm_last_change(doc: &mut AutoCommit) {
     let heads = doc.get_heads();
     let change = doc.get_last_local_change().unwrap().unwrap();
-    assert_eq!(vec![change.id()], heads);
+    assert_eq!(vec![change.hash()], heads);
 }
 
 #[test]
@@ -3718,16 +3718,12 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
         .put(ROOT, "stale_missing", ScalarValue::Uint(1))
         .unwrap();
     stale_branch.commit();
-    let stale_missing_id = stale_branch.get_heads()[0].clone();
-    let stale_missing = stale_branch
-        .change_id_to_hash(&stale_missing_id)
-        .unwrap()
-        .unwrap();
+    let stale_missing = stale_branch.get_heads()[0];
     stale_branch
         .put(ROOT, "stale_orphan", ScalarValue::Uint(2))
         .unwrap();
     stale_branch.commit();
-    let stale_orphan = stale_branch.get_changes(&[stale_missing_id]).unwrap();
+    let stale_orphan = stale_branch.get_changes(&[stale_missing]).unwrap();
     assert_eq!(stale_orphan.len(), 1);
 
     receiver.apply_changes_batch(stale_orphan).unwrap();
@@ -3775,22 +3771,14 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         .put(ROOT, "missing", ScalarValue::Uint(1))
         .unwrap();
     orphan_source.commit();
-    let missing_id = orphan_source.get_heads()[0].clone();
-    let missing = orphan_source
-        .change_id_to_hash(&missing_id)
-        .unwrap()
-        .unwrap();
+    let missing = orphan_source.get_heads()[0];
 
     orphan_source
         .put(ROOT, "orphan", ScalarValue::Uint(2))
         .unwrap();
     orphan_source.commit();
-    let orphan_head_id = orphan_source.get_heads()[0].clone();
-    let orphan_head = orphan_source
-        .change_id_to_hash(&orphan_head_id)
-        .unwrap()
-        .unwrap();
-    let orphan_change = orphan_source.get_changes(&[missing_id]).unwrap();
+    let orphan_head = orphan_source.get_heads()[0];
+    let orphan_change = orphan_source.get_changes(&[missing]).unwrap();
     assert_eq!(orphan_change.len(), 1);
 
     // Queue a change whose dependency is not present in `left`. This is a
@@ -3822,7 +3810,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
 
     let mut right_state = State::new();
     let left_heads = left.get_heads();
-    right_state.their_heads = Some(left.change_ids_to_hashes(&left_heads).unwrap());
+    right_state.their_heads = Some(left_heads.clone());
     right_state.their_need = Some(vec![missing]);
     right_state.their_have = Some(vec![]);
 
@@ -3834,7 +3822,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         message.map(|message| message.heads),
         Some({
             let right_heads = right.get_heads();
-            right.change_ids_to_hashes(&right_heads).unwrap()
+            right_heads.clone()
         }),
         "right should still advertise its heads even though it cannot satisfy the orphan dep"
     );
@@ -3851,8 +3839,7 @@ fn round_trip_change_with_extra_bytes() {
     doc.put(ROOT, "a", 1).unwrap();
     doc.commit();
     let actor = doc.get_actor().clone();
-    let h1_ids = doc.get_heads();
-    let h1 = doc.change_ids_to_hashes(&h1_ids).unwrap();
+    let h1 = doc.get_heads();
 
     let make = |seq: u64, key: &str, deps: Vec<automerge::ChangeHash>, extra: Vec<u8>| {
         automerge::Change::from(automerge::ExpandedChange {

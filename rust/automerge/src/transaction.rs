@@ -26,10 +26,7 @@ fn commit_transaction(
     if let Some(heads) = historical_heads {
         let heads = hash.map_or(heads, |hash| vec![hash]);
         // a freshly committed transaction's heads are always known
-        let clock = doc
-            .clock_at(&heads)
-            .expect("known hashes always have clocks");
-        patch_log.heads_clock = Some(clock);
+        patch_log.heads_clock = Some(doc.change_graph.clock_for_heads_lossy(&heads));
     }
     patch_log.finish_transaction(&doc.ops().actors);
     hash
@@ -48,7 +45,7 @@ macro_rules! impl_read_doc_for_tx {
             fn keys_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> crate::iter::Keys<'_> {
                 self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
             }
@@ -56,7 +53,7 @@ macro_rules! impl_read_doc_for_tx {
             fn iter_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: Option<&[crate::ChangeId]>,
+                heads: Option<&[crate::ChangeHash]>,
             ) -> crate::iter::DocIter<'_> {
                 self.doc.iter_for(obj.as_ref(), self.get_scope(heads))
             }
@@ -78,7 +75,7 @@ macro_rules! impl_read_doc_for_tx {
                 &'b self,
                 obj: O,
                 range: R,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> crate::iter::MapRange<'b> {
                 self.doc
                     .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
@@ -97,7 +94,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 range: R,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> crate::iter::ListRange<'_> {
                 self.doc
                     .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
@@ -110,7 +107,7 @@ macro_rules! impl_read_doc_for_tx {
             fn values_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> crate::iter::Values<'_> {
                 self.doc
                     .values_for(obj.as_ref(), self.get_scope(Some(heads)))
@@ -123,7 +120,7 @@ macro_rules! impl_read_doc_for_tx {
             fn length_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> usize {
                 self.doc
                     .length_for(obj.as_ref(), self.get_scope(Some(heads)))
@@ -146,7 +143,7 @@ macro_rules! impl_read_doc_for_tx {
             fn text_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<String, crate::AutomergeError> {
                 self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
             }
@@ -161,7 +158,7 @@ macro_rules! impl_read_doc_for_tx {
             fn spans_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
                 self.doc
                     .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
@@ -171,7 +168,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 position: I,
-                at: Option<&[crate::ChangeId]>,
+                at: Option<&[crate::ChangeHash]>,
             ) -> Result<crate::Cursor, crate::AutomergeError> {
                 self.doc.get_cursor_for(
                     obj.as_ref(),
@@ -188,7 +185,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 position: I,
-                at: Option<&[crate::ChangeId]>,
+                at: Option<&[crate::ChangeHash]>,
                 move_cursor: crate::cursor::MoveCursor,
             ) -> Result<crate::Cursor, crate::AutomergeError> {
                 self.doc.get_cursor_for(
@@ -203,7 +200,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 address: &crate::Cursor,
-                at: Option<&[crate::ChangeId]>,
+                at: Option<&[crate::ChangeHash]>,
             ) -> Result<usize, crate::AutomergeError> {
                 self.doc
                     .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
@@ -219,7 +216,7 @@ macro_rules! impl_read_doc_for_tx {
             fn marks_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<Vec<crate::marks::Mark>, crate::AutomergeError> {
                 self.doc
                     .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
@@ -228,7 +225,7 @@ macro_rules! impl_read_doc_for_tx {
             fn hydrate<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: Option<&[crate::ChangeId]>,
+                heads: Option<&[crate::ChangeHash]>,
             ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
                 self.doc.hydrate_obj(obj.as_ref(), heads)
             }
@@ -237,7 +234,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 index: usize,
-                heads: Option<&[crate::ChangeId]>,
+                heads: Option<&[crate::ChangeHash]>,
             ) -> Result<crate::marks::MarkSet, crate::AutomergeError> {
                 self.doc
                     .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
@@ -256,7 +253,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 prop: P,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<Option<(crate::Value<'_>, crate::exid::ExId)>, crate::AutomergeError> {
                 self.doc
                     .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
@@ -275,7 +272,7 @@ macro_rules! impl_read_doc_for_tx {
                 &self,
                 obj: O,
                 prop: P,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<Vec<(crate::Value<'_>, crate::exid::ExId)>, crate::AutomergeError> {
                 self.doc
                     .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
@@ -291,7 +288,7 @@ macro_rules! impl_read_doc_for_tx {
             fn parents_at<O: AsRef<crate::exid::ExId>>(
                 &self,
                 obj: O,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<crate::automerge::Parents<'_>, crate::AutomergeError> {
                 self.doc
                     .parents_for(obj.as_ref(), self.get_scope(Some(heads)))
@@ -299,7 +296,7 @@ macro_rules! impl_read_doc_for_tx {
 
             fn get_missing_deps(
                 &self,
-                heads: &[crate::ChangeId],
+                heads: &[crate::ChangeHash],
             ) -> Result<Vec<crate::ChangeHash>, crate::AutomergeError> {
                 self.doc.get_missing_deps(heads)
             }

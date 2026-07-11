@@ -1502,8 +1502,7 @@ fn update_spans_which_inserts_at_the_end_of_expand_mark_doesnt_generate_mark_cha
     )
     .unwrap();
 
-    let change_id = doc.commit().expect("a change should be produced");
-    let change_hash = doc.change_id_to_hash(&change_id).unwrap().unwrap();
+    let change_hash = doc.commit().expect("a change should be produced");
     let change = doc.get_change_by_hash(&change_hash).unwrap().unwrap();
     assert_eq!(change.decode().operations.len(), 2); // There should be two insertion ops
 }

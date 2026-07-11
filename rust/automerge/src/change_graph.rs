@@ -249,21 +249,6 @@ impl ChangeGraph {
         heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
     }
 
-    /// The (actor index, seq) pairs of the current heads.
-    pub(crate) fn head_ids(&self) -> Vec<(usize, u64)> {
-        self.heads
-            .iter()
-            .map(|h| {
-                let n = self
-                    .nodes_by_hash
-                    .get(h)
-                    .expect("every head has a known node");
-                let i = n.0 as usize;
-                (usize::from(self.actors[i]), self.seq[i] as u64)
-            })
-            .collect()
-    }
-
     /// The node index of each head, in the same order as [`Self::heads`].
     ///
     /// The document format writes heads and head indices as positionally
@@ -725,40 +710,6 @@ impl ChangeGraph {
             .map_err(|_| AutomergeError::UncheckedHashGraph)
     }
 
-    /// The node for the change with the given (actor index, seq), if any.
-    ///
-    /// This never needs hashes so it works on unchecked graphs.
-    fn actor_seq_to_node(&self, actor: usize, seq: u64) -> Option<NodeIdx> {
-        if seq == 0 {
-            return None;
-        }
-        self.seq_index
-            .get(actor)
-            .and_then(|v| v.get(seq as usize - 1))
-            .copied()
-    }
-
-    /// Whether the change with the given (actor index, seq) is in this
-    /// document. Hash-free.
-    pub(crate) fn has_actor_seq(&self, actor: usize, seq: u64) -> bool {
-        self.actor_seq_to_node(actor, seq).is_some()
-    }
-
-    pub(crate) fn actor_seq_for_hash(
-        &self,
-        hash: &ChangeHash,
-    ) -> Result<Option<(usize, u64)>, UncheckedHashes> {
-        let node = match self.lookup_hash(hash) {
-            HashLookup::Found(n) => n,
-            HashLookup::Absent => return Ok(None),
-            HashLookup::Unknown => return Err(UncheckedHashes),
-        };
-        let i = node.0 as usize;
-        let actor = usize::from(self.actors[i]);
-        let seq = self.seq[i] as u64;
-        Ok(Some((actor, seq)))
-    }
-
     fn update_heads(&mut self, change: &Change) {
         for d in change.deps() {
             self.heads.remove(d);
@@ -1060,19 +1011,27 @@ impl ChangeGraph {
         Ok(self.clock_for_nodes(nodes))
     }
 
-    /// Compute the clock for the changes identified by (actor index, seq)
-    /// pairs, silently skipping pairs which aren't in this document.
+    /// Clock for `heads`, silently skipping hashes not in this document —
+    /// the pre-unchecked-load semantics of every `*_at` read.
     ///
-    /// This never needs hashes so it works on unchecked graphs.
-    pub(crate) fn clock_for_actor_seqs<I: IntoIterator<Item = (usize, u64)>>(
-        &self,
-        ids: I,
-    ) -> Clock {
-        let nodes = ids
-            .into_iter()
-            .filter_map(|(actor, seq)| self.actor_seq_to_node(actor, seq))
+    /// Hashes known on an unchecked graph (the load heads and any change
+    /// added since) resolve normally, so historical reads at the load heads
+    /// work without the hash graph.
+    pub(crate) fn clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> Clock {
+        let nodes = heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h).copied())
             .collect();
         self.clock_for_nodes(nodes)
+    }
+
+    /// Like [`Self::clock_for_heads_lossy`] but returning the seq clock.
+    pub(crate) fn seq_clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> SeqClock {
+        let nodes = heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h).copied())
+            .collect();
+        self.calculate_clock(nodes)
     }
 
     fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
@@ -1094,21 +1053,6 @@ impl ChangeGraph {
     ) -> Result<SeqClock, UncheckedHashes> {
         let nodes = self.heads_to_nodes(heads)?;
         Ok(self.calculate_clock(nodes))
-    }
-
-    /// Like [`Self::seq_clock_for_heads`] but keyed by (actor index, seq)
-    /// pairs, silently skipping pairs not in this document.
-    ///
-    /// This never needs hashes so it works on unchecked graphs.
-    pub(crate) fn seq_clock_for_actor_seqs<I: IntoIterator<Item = (usize, u64)>>(
-        &self,
-        ids: I,
-    ) -> SeqClock {
-        let nodes = ids
-            .into_iter()
-            .filter_map(|(actor, seq)| self.actor_seq_to_node(actor, seq))
-            .collect();
-        self.calculate_clock(nodes)
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
