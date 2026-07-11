@@ -734,6 +734,12 @@ impl ChangeGraphCols {
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.is_empty());
 
+        // The encoded change columns only contain each change's maximum op.
+        // `load()` estimates op counts from dependencies, but that is ambiguous
+        // for an isolated actor whose first change can start above counter 1.
+        // Reconstruction has the verified changes, so use their exact lengths.
+        graph.num_ops = changes.iter().map(|change| change.len() as u64).collect();
+
         for c in changes {
             let hash = c.hash();
             let node_idx = NodeIdx(graph.hashes.len() as u32);
