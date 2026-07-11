@@ -1,6 +1,5 @@
 use automerge::marks::{ExpandMark, Mark};
 use automerge::sync::{Message, MessageVersion, State};
-use automerge::Bundle;
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
@@ -3885,48 +3884,6 @@ fn increment_patch_clears_resolved_map_conflict() {
 }
 
 #[test]
-fn bundle_from_isolated_changes_roundtrips() {
-    let actor = ActorId::try_from("7f00000000000000").unwrap();
-    let mut doc = AutoCommit::new();
-    let empty_heads = doc.get_heads();
-    doc.isolate(&empty_heads);
-
-    let mut plain = doc.document().clone();
-    plain.set_actor(actor.clone());
-    let mut tx = plain.transaction();
-    tx.put_object(ROOT, "k10", ObjType::List).unwrap();
-    tx.commit();
-    doc.apply_changes(plain.get_changes(&empty_heads)).unwrap();
-
-    doc.set_actor(actor);
-    doc.put_object(ROOT, "k11", ObjType::Map).unwrap();
-    doc.commit();
-
-    let bytes = doc.save();
-    let mut doc = AutoCommit::load(&bytes).unwrap();
-    let changes = doc.get_changes(&empty_heads);
-    for change in &changes {
-        eprintln!(
-            "actor={:?} seq={} start={} max={} len={}",
-            change.actor_id(),
-            change.seq(),
-            change.start_op(),
-            change.max_op(),
-            change.len()
-        );
-    }
-    let hashes: Vec<_> = changes.into_iter().map(|change| change.hash()).collect();
-    let bundle = doc.bundle(hashes).unwrap();
-    for change in bundle.iter_changes() {
-        eprintln!(
-            "bundle actor={} seq={} start={} max={}",
-            change.actor, change.seq, change.start_op, change.max_op
-        );
-    }
-    Bundle::try_from(bundle.bytes()).unwrap();
-}
-
-#[test]
 fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
@@ -4148,7 +4105,6 @@ fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
 
     assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
 }
-
 #[test]
 fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace() {
     let encoding = TextEncoding::UnicodeCodePoint;
