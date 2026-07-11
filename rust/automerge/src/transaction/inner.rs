@@ -453,6 +453,8 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
+        let increment_replacement =
+            increment_replacement(&query.ops, &resolved_action, doc.text_encoding());
         let pred = query.ops.iter().map(|op| op.id).collect();
         let op = TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred);
 
@@ -464,7 +466,14 @@ impl TransactionInner {
             .map(|op| op.add_succ(id, inc_value))
             .collect();
 
-        self.insert_local_op(doc, patch_log, op, &succ, query.range, None);
+        self.insert_local_op(
+            doc,
+            patch_log,
+            op,
+            &succ,
+            query.range,
+            increment_replacement,
+        );
 
         Ok(Some(id))
     }
@@ -501,14 +510,17 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let replaced = if obj.typ == ObjType::Text {
-            query
-                .ops
-                .first()
-                .map(|op| op.hydrate_value(doc.text_encoding()))
-        } else {
-            None
-        };
+        let replaced = increment_replacement(&query.ops, &resolved_action, doc.text_encoding())
+            .or_else(|| {
+                if obj.typ == ObjType::Text {
+                    query
+                        .ops
+                        .first()
+                        .map(|op| op.hydrate_value(doc.text_encoding()))
+                } else {
+                    None
+                }
+            });
         let pred = query.ops.iter().map(|op| op.id).collect();
         let op = TxOp::list(
             id,
@@ -996,7 +1008,15 @@ impl TransactionInner {
                     PropRef::Map(key) => patch_log.delete_map(obj, &key),
                 }
             } else if let Some(value) = op.get_increment_value() {
-                patch_log.increment(obj, op.prop(), value, op.id());
+                if let Some(replaced) = replaced {
+                    // Incrementing the visible counter also supersedes every
+                    // conflicting value in the register. An Increment patch
+                    // alone cannot clear the hydrated conflict flag, so emit
+                    // the fully materialized counter value instead.
+                    patch_log.put(obj, op.prop(), replaced.clone(), op.id(), false, false);
+                } else {
+                    patch_log.increment(obj, op.prop(), value, op.id());
+                }
             } else if let (ObjType::Text, PropRef::Seq(index), Some(replaced)) =
                 (obj_typ, op.prop(), replaced)
             {
@@ -1551,6 +1571,29 @@ fn batch_bfs(
         }
     }
     Ok(())
+}
+
+fn increment_replacement(
+    ops: &[Op<'_>],
+    action: &ResolvedAction,
+    text_encoding: TextEncoding,
+) -> Option<hydrate::Value> {
+    let increment = match action {
+        ResolvedAction::ConflictResolution(OpType::Increment(increment))
+        | ResolvedAction::VisibleUpdate(OpType::Increment(increment))
+            if ops.len() > 1 =>
+        {
+            increment
+        }
+        _ => return None,
+    };
+    let counter = ops.iter().find(|op| op.is_counter())?;
+    match counter.hydrate_value(text_encoding) {
+        hydrate::Value::Scalar(ScalarValue::Counter(counter)) => Some(hydrate::Value::scalar(
+            ScalarValue::counter(i64::from(counter) + increment),
+        )),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

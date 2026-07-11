@@ -3849,3 +3849,36 @@ fn fork_at_foreign_heads_errors_instead_of_panicking() {
     b.commit();
     assert!(b.fork_at(&heads_a).is_err());
 }
+
+#[test]
+fn increment_patch_clears_resolved_map_conflict() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.set_actor(ActorId::try_from("01").unwrap());
+    doc.put(ROOT, "key", ScalarValue::Null).unwrap();
+    doc.commit();
+
+    let mut concurrent = AutoCommit::new_with_encoding(encoding);
+    concurrent.set_actor(ActorId::try_from("02").unwrap());
+    concurrent
+        .put(ROOT, "key", ScalarValue::counter(-1000))
+        .unwrap();
+    concurrent.commit();
+    doc.merge(&mut concurrent).unwrap();
+
+    // Incrementing the visible counter resolves the concurrent null value as
+    // well as changing the counter. The patch must therefore replace the
+    // conflicted register entry, not merely apply an Increment action to it.
+    let mut plain = doc.document().clone();
+    plain.set_actor(ActorId::try_from("03").unwrap());
+    let before = plain.hydrate(None);
+    let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
+    tx.increment(ROOT, "key", 28).unwrap();
+    let (_, mut patch_log) = tx.commit();
+    let expected = plain.hydrate(None);
+    let patches = plain.make_patches(&mut patch_log);
+    let mut actual = before;
+    actual.apply_patches(encoding, patches).unwrap();
+    assert_eq!(actual, expected);
+}
