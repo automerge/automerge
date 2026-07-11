@@ -159,6 +159,10 @@ impl ChangeGraph {
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
         }
+        for fragment in &mut self.fragments {
+            fragment.clock.remove_actor(idx)
+        }
+        self.fragment_top.remove_actor(idx);
     }
 
     pub(crate) fn len(&self) -> usize {
