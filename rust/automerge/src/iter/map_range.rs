@@ -281,7 +281,14 @@ impl<'a> Iterator for MapDiff<'a> {
                     return Some(last);
                 }
             }
-            return Some(map.diff_item(value, inc, diff, conflict, expose));
+            let mut item = map.diff_item(value, inc, diff, conflict, expose);
+            if diff == Diff::Same && num_old > 1 && num_new == 1 {
+                // The surviving value is unchanged, but removing the other
+                // visible values clears its conflict flag. Emit a Put so a
+                // hydrated-state consumer can observe that metadata change.
+                item.diff = Diff::Add;
+            }
+            return Some(item);
         }
         None
     }
