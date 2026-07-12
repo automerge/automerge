@@ -4226,3 +4226,78 @@ fn diff_exposes_list_object_when_conflict_winner_is_removed() {
 
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
+    let encoding = TextEncoding::Utf8CodeUnit;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.set_actor(ActorId::try_from("fe004faf").unwrap());
+    let text = doc
+        .batch_create_object(
+            ROOT,
+            "k31",
+            &automerge::hydrate::Value::text(encoding, "👩🏿‍🚒"),
+            false,
+        )
+        .unwrap();
+    doc.commit();
+
+    let mut plain = doc.document().clone();
+    let mut actual = plain.hydrate(None);
+    let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
+    let index = 195 % (tx.length(&text) + 1);
+    tx.insert(&text, index, ScalarValue::Uint(150)).unwrap();
+    let (_, mut patch_log) = tx.commit();
+
+    let expected = plain.hydrate(None);
+    let patches = plain.make_patches(&mut patch_log);
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn transaction_patches_split_block_at_normalized_utf8_index() {
+    let encoding = TextEncoding::Utf8CodeUnit;
+    let mut source = AutoCommit::new_with_encoding(encoding);
+    let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
+    source.splice_text(&text, 0, 0, "👩🏿‍🚒").unwrap();
+    source.commit();
+    let mut doc = source.document().clone();
+
+    let mut actual = doc.hydrate(None);
+    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    tx.split_block(&text, 3).unwrap();
+    let (_, mut patch_log) = tx.commit();
+    let expected = doc.hydrate(None);
+    actual
+        .apply_patches(encoding, doc.make_patches(&mut patch_log))
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn transaction_patches_mark_at_normalized_utf8_indexes() {
+    let encoding = TextEncoding::Utf8CodeUnit;
+    let mut source = AutoCommit::new_with_encoding(encoding);
+    let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
+    source.splice_text(&text, 0, 0, "👩🏿‍🚒").unwrap();
+    source.commit();
+    let mut doc = source.document().clone();
+
+    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    tx.mark(
+        &text,
+        Mark::new("bold".into(), ScalarValue::Boolean(true), 3, 5),
+        ExpandMark::None,
+    )
+    .unwrap();
+    let (_, mut patch_log) = tx.commit();
+    let patches = doc.make_patches(&mut patch_log);
+    let PatchAction::Mark { marks } = &patches[0].action else {
+        panic!("expected a mark patch, got {:?}", patches[0]);
+    };
+
+    assert_eq!((marks[0].start, marks[0].end), (4, 8));
+}

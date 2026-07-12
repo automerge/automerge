@@ -368,6 +368,7 @@ impl TransactionInner {
 
         let marks = query.marks;
         let pos = query.pos;
+        let index = query.index;
         let elemid = query.elemid;
 
         //let key = query.elemid.into();
@@ -813,8 +814,8 @@ impl TransactionInner {
         let action = OpType::MarkBegin(expand.before(), mark.old_data());
         let begin = self.do_insert(doc, patch_log, &obj, SequenceType::Text, mark.start, action)?;
 
-        if mark.start == mark.end {
-            self.insert_mark_end_after(doc, patch_log, &obj, &begin, expand.after());
+        let end = if mark.start == mark.end {
+            self.insert_mark_end_after(doc, patch_log, &obj, &begin, expand.after())
         } else {
             // The mark end must be inserted *after* the begin in the op set. When
             // the mark's [start, end) range lies within a single multi-width text
@@ -828,7 +829,7 @@ impl TransactionInner {
                 .ops()
                 .query_insert_at(&obj.id, mark.end, SequenceType::Text, self.scope.clone())?
                 .pos;
-            let end = if end_pos > begin.pos {
+            if end_pos > begin.pos {
                 self.do_insert(
                     doc,
                     patch_log,
@@ -839,19 +840,24 @@ impl TransactionInner {
                 )?
             } else {
                 self.insert_mark_end_after(doc, patch_log, &obj, &begin, expand.after())
-            };
-            // Invariant: the MarkEnd op must sort after its MarkBegin. Violating it
-            // inverts the mark index (see `MarkIndexSpanner`) and yields a document
-            // that fails to reload.
-            debug_assert!(
-                end.pos > begin.pos,
-                "mark end (pos {}) must follow its begin (pos {})",
-                end.pos,
-                begin.pos
-            );
-        }
+            }
+        };
+        // Invariant: the MarkEnd op must sort after its MarkBegin. Violating it
+        // inverts the mark index (see `MarkIndexSpanner`) and yields a document
+        // that fails to reload.
+        debug_assert!(
+            end.pos > begin.pos,
+            "mark end (pos {}) must follow its begin (pos {})",
+            end.pos,
+            begin.pos
+        );
         if patch_log.is_active() {
-            patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set());
+            patch_log.mark(
+                obj.id,
+                begin.index,
+                end.index.saturating_sub(begin.index),
+                &mark.into_mark_set(),
+            );
         }
         Ok(())
     }
@@ -888,6 +894,7 @@ impl TransactionInner {
                 .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?;
 
         let pos = query.pos;
+        let index = query.index;
 
         let id = self.next_id();
 
