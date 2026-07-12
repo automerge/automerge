@@ -3948,3 +3948,203 @@ fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
 
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn incremental_diff_survives_isolate_integrate_roundtrip() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.set_actor(ActorId::try_from("7f").unwrap());
+    let list = doc.put_object(ROOT, "k6", ObjType::List).unwrap();
+    doc.commit();
+
+    let _ = doc.diff_incremental();
+
+    doc.splice(
+        &list,
+        0,
+        0,
+        [ScalarValue::Boolean(false), ScalarValue::Int(1000)],
+    )
+    .unwrap();
+    doc.commit();
+
+    doc.isolate(&[]);
+    doc.integrate();
+
+    let before = doc.diff_cursor();
+    let after = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&before)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&after)).unwrap();
+    let patches = doc.diff_incremental();
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_text_diff_survives_isolate_integrate_roundtrip() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.commit();
+
+    let _ = doc.diff_incremental();
+
+    doc.splice_text(&text, 0, 0, "hello").unwrap();
+    doc.commit();
+
+    doc.isolate(&[]);
+    doc.integrate();
+
+    let before = doc.diff_cursor();
+    let after = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&before)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&after)).unwrap();
+    let patches = doc.diff_incremental();
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_diff_discards_edits_inside_deleted_map() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    let map = doc.put_object(ROOT, "container", ObjType::Map).unwrap();
+    let text = doc.put_object(&map, "text", ObjType::Text).unwrap();
+    doc.commit();
+
+    let _ = doc.diff_incremental();
+
+    doc.splice_text(&text, 0, 0, "hello").unwrap();
+    doc.commit();
+    let before_delete = doc.get_heads();
+
+    doc.delete(ROOT, "container").unwrap();
+    doc.commit();
+
+    // Move behind the object's creation, then forward to the state immediately
+    // before its deletion. The second transition exposes the map and text from
+    // a view whose clock did not yet cover either object.
+    doc.isolate(&[]);
+    doc.isolate(&before_delete);
+
+    let before = doc.diff_cursor();
+    let after = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&before)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&after)).unwrap();
+    let patches = doc.diff_incremental();
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_counter_diff_survives_isolate_integrate_roundtrip() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    let map = doc.put_object(ROOT, "container", ObjType::Map).unwrap();
+    doc.put(&map, "count", ScalarValue::counter(0)).unwrap();
+    doc.commit();
+
+    let _ = doc.diff_incremental();
+
+    doc.increment(&map, "count", 1).unwrap();
+    doc.commit();
+    doc.isolate(&[]);
+    doc.integrate();
+
+    let before = doc.diff_cursor();
+    let after = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&before)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&after)).unwrap();
+    actual
+        .apply_patches(encoding, doc.diff_incremental())
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_deep_text_diff_survives_isolate_integrate_roundtrip() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    let outer = doc.put_object(ROOT, "outer", ObjType::Map).unwrap();
+    let inner = doc.put_object(&outer, "inner", ObjType::Map).unwrap();
+    let text = doc.put_object(&inner, "text", ObjType::Text).unwrap();
+    doc.commit();
+
+    let _ = doc.diff_incremental();
+
+    doc.splice_text(&text, 0, 0, "deep").unwrap();
+    doc.commit();
+    doc.isolate(&[]);
+    doc.integrate();
+
+    let before = doc.diff_cursor();
+    let after = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&before)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&after)).unwrap();
+    actual
+        .apply_patches(encoding, doc.diff_incremental())
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_sibling_text_diffs_survive_isolate_integrate_roundtrip() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    let left = doc.put_object(ROOT, "left", ObjType::Text).unwrap();
+    let right = doc.put_object(ROOT, "right", ObjType::Text).unwrap();
+    doc.commit();
+
+    let _ = doc.diff_incremental();
+
+    doc.splice_text(&left, 0, 0, "L").unwrap();
+    doc.splice_text(&right, 0, 0, "R").unwrap();
+    doc.commit();
+    doc.isolate(&[]);
+    doc.integrate();
+
+    let before = doc.diff_cursor();
+    let after = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&before)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&after)).unwrap();
+    actual
+        .apply_patches(encoding, doc.diff_incremental())
+        .unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, "base").unwrap();
+    doc.commit();
+    let beginning = doc.get_heads();
+
+    let first = doc.put_object(&list, 0, ObjType::Text).unwrap();
+    doc.splice_text(&first, 0, 0, "first").unwrap();
+    doc.commit();
+    let _ = doc.diff_incremental();
+    let mut actual = doc.hydrate(&ROOT, None).unwrap();
+
+    doc.isolate(&beginning);
+    let second = doc.put_object(&list, 0, ObjType::Text).unwrap();
+    doc.splice_text(&second, 0, 0, "second").unwrap();
+    doc.commit();
+    doc.integrate();
+
+    let patches = doc.diff_incremental();
+    assert!(patches
+        .iter()
+        .any(|patch| matches!(patch.action, PatchAction::Conflict { prop: Prop::Seq(0) })));
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
+}

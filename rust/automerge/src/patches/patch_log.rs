@@ -41,8 +41,9 @@ use super::PatchBuilder;
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    pub(crate) events: Vec<(ObjId, Event)>,
-    expose: HashSet<OpId>,
+    events: Vec<(EpochCounter, ObjId, Event)>,
+    expose: HashSet<(EpochCounter, OpId)>,
+    epoch: EpochCounter,
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
@@ -52,6 +53,47 @@ pub struct PatchLog {
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
     /// so these must be removed from the patch log too (see [`PatchLog::finish_transaction`]).
     speculative_actor: Option<ActorId>,
+}
+
+/// Partitions patch log event ordering into epochs.
+///
+/// Patch log events normally satisfy the invariant that an operation being
+/// recorded does not happen before an operation already in the log. In other
+/// words, the log normally moves only "forward" through history.
+///
+/// Before generating patches we sort events by object ID. Processing all
+/// events for an object together ensures that exposed objects exist before
+/// their contents are modified, and allows nearby insertions to be coalesced.
+/// The forward-moving invariant makes this reordering safe.
+///
+/// This forward moving invariant can be violated by a "history transition". A
+/// history transition is a movement of the document's current view to a
+/// set of heads which may have a "happens before" relation to the current
+/// heads. `AutoCommit::patch_to` performs such a transition when isolating a
+/// document to look at an earlier point in history, and when integrating that
+/// view again. A transition makes the global object sort unsafe. For example,
+/// suppose a text object is created and set to `"hello"`, the document is
+/// isolated to before that object was created, and is then integrated again.
+/// The chronological events are
+///
+/// * splice "hello" into text
+/// * delete text object from root
+/// * restore text object in root
+/// * splice "hello" into text`
+///
+/// Sorting only by object moves both root events before both text events, so
+/// the two splices are applied together and incorrectly produce `"hellohello"`.
+///
+/// `EpochCounter` records these transition boundaries. Events and exposed
+/// objects are ordered first by epoch and then by object ID, preserving history
+/// transitions while retaining the per-object ordering within each epoch.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct EpochCounter(u64);
+
+impl EpochCounter {
+    fn next(self) -> Self {
+        Self(self.0.checked_add(1).expect("patch log epoch overflow"))
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -226,8 +268,9 @@ impl PatchLog {
     pub fn new(active: bool) -> Self {
         PatchLog {
             active,
-            expose: HashSet::default(),
-            events: vec![],
+            events: Vec::new(),
+            expose: HashSet::new(),
+            epoch: EpochCounter::default(),
             heads: None,
             path_map: Default::default(),
             path_hint: 0,
@@ -262,13 +305,28 @@ impl PatchLog {
         self.active
     }
 
+    fn push_event(&mut self, obj: ObjId, event: Event) {
+        self.events.push((self.epoch, obj, event));
+    }
+
+    fn events_len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Starts a new event-ordering epoch before moving the document's view.
+    ///
+    /// This prevents the per-object sort in `make_patches` from reordering
+    /// events across an isolate/integrate (or other history) transition.
+    pub(crate) fn begin_epoch(&mut self) {
+        self.epoch = self.epoch.next();
+    }
+
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
-        self.events.push((obj, Event::DeleteSeq { index, num }))
+        self.push_event(obj, Event::DeleteSeq { index, num })
     }
 
     pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
-        self.events
-            .push((obj, Event::DeleteMap { key: key.into() }))
+        self.push_event(obj, Event::DeleteMap { key: key.into() })
     }
 
     pub(crate) fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
@@ -280,6 +338,7 @@ impl PatchLog {
 
     pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
         self.events.push((
+            self.epoch,
             obj,
             Event::IncrementMap {
                 key: key.into(),
@@ -290,8 +349,7 @@ impl PatchLog {
     }
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
-        self.events
-            .push((obj, Event::IncrementSeq { index, n, id }))
+        self.push_event(obj, Event::IncrementSeq { index, n, id })
     }
 
     pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
@@ -302,12 +360,11 @@ impl PatchLog {
     }
 
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
-        self.events
-            .push((obj, Event::FlagConflictMap { key: key.into() }))
+        self.push_event(obj, Event::FlagConflictMap { key: key.into() })
     }
 
     pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
-        self.events.push((obj, Event::FlagConflictSeq { index }))
+        self.push_event(obj, Event::FlagConflictSeq { index })
     }
 
     pub(crate) fn put(
@@ -335,9 +392,10 @@ impl PatchLog {
         expose: bool,
     ) {
         if expose && value.is_object() {
-            self.expose.insert(id);
+            self.expose.insert((self.epoch, id));
         }
         self.events.push((
+            self.epoch,
             obj,
             Event::PutMap {
                 key: key.into(),
@@ -358,9 +416,10 @@ impl PatchLog {
         expose: bool,
     ) {
         if expose && value.is_object() {
-            self.expose.insert(id);
+            self.expose.insert((self.epoch, id));
         }
         self.events.push((
+            self.epoch,
             obj,
             Event::PutSeq {
                 index,
@@ -406,6 +465,7 @@ impl PatchLog {
         marks: Option<Arc<MarkSet>>,
     ) {
         self.events.push((
+            self.epoch,
             obj,
             Event::Splice {
                 index,
@@ -416,13 +476,15 @@ impl PatchLog {
     }
 
     pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
-        if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
-            tail_marks.add(index, len, marks);
-            return;
+        if let Some((epoch, _, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
+            if *epoch == self.epoch {
+                tail_marks.add(index, len, marks);
+                return;
+            }
         }
         let mut acc = MarkAccumulator::default();
         acc.add(index, len, marks);
-        self.events.push((obj, Event::Mark { marks: acc }))
+        self.push_event(obj, Event::Mark { marks: acc })
     }
 
     pub(crate) fn insert_and_maybe_expose(
@@ -435,7 +497,7 @@ impl PatchLog {
         expose: bool,
     ) {
         if expose && value.is_object() {
-            self.expose.insert(id);
+            self.expose.insert((self.epoch, id));
         }
         self.insert(obj, index, value, id, conflict)
     }
@@ -454,11 +516,11 @@ impl PatchLog {
             id,
             conflict,
         };
-        self.events.push((obj, event))
+        self.push_event(obj, event)
     }
 
     fn get_path_map(&mut self) -> BTreeMap<ObjId, (Prop, ObjId)> {
-        if self.path_hint != self.events.len() {
+        if self.path_hint != self.events_len() {
             self.path_hint = 0;
             self.path_map = BTreeMap::default();
         }
@@ -466,57 +528,47 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let clock = self.heads.as_ref().map(|h| doc.clock_at(h));
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
-        Self::make_patches_inner(&self.events, expose, path_map, doc, clock, text_encoding)
-    }
-
-    fn make_patches_inner(
-        events: &[(ObjId, Event)],
-        mut expose_queue: ExposeQueue,
-        path_map: BTreeMap<ObjId, (Prop, ObjId)>,
-        doc: &Automerge,
-        clock: Option<Clock>,
-        text_encoding: TextEncoding,
-    ) -> Vec<Patch> {
+        self.events
+            .sort_by(|(epoch_a, obj_a, _), (epoch_b, obj_b, _)| {
+                (epoch_a, obj_a).cmp(&(epoch_b, obj_b))
+            });
+        let mut expose = ExposeQueue(
+            self.expose
+                .iter()
+                .map(|(epoch, id)| (*epoch, doc.id_to_exid(*id)))
+                .collect(),
+        );
         let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
-        for (obj, event) in events {
-            let exid = doc.id_to_exid(obj.0);
-            // Observe exposed objects which sort before this event first. One
-            // of them may have been at the front of the queue, hiding the fact
-            // that this event's object is also waiting to be exposed.
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
-            // Ignore incremental events on exposed objects and observe their
-            // final state instead, because observers did not see their hidden
-            // state changes.
-            if expose_queue.should_skip(&exid) {
+        for (epoch, obj, event) in &self.events {
+            let key = (*epoch, doc.id_to_exid(obj.0));
+            expose.pump_queue(&key, &mut patch_builder, doc, clock.as_ref());
+            if expose.should_skip(&key) {
                 continue;
             }
-
-            patch_builder.log_event(doc, exid, event);
+            patch_builder.log_event(doc, key.1, event);
         }
-        // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(&mut patch_builder, doc, clock.as_ref());
-
+        expose.flush_queue(&mut patch_builder, doc, clock.as_ref());
         patch_builder.take_patches()
     }
 
     pub(crate) fn truncate(&mut self) {
         self.active = true;
-        self.events.truncate(0);
+        self.events.clear();
+        self.expose.clear();
+        self.epoch = EpochCounter::default();
         self.path_hint = 0;
         self.path_map = Default::default();
-        self.expose.clear();
     }
 
     pub(crate) fn branch(&mut self) -> Self {
         Self {
             active: self.active,
+            events: Vec::new(),
             expose: HashSet::new(),
-            events: Default::default(),
+            epoch: self.epoch,
             path_map: Default::default(),
             path_hint: 0,
             heads: None,
@@ -529,29 +581,38 @@ impl PatchLog {
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
-            .map(|(o, e)| (o.with_new_actor(index), e.with_new_actor(index)))
+            .map(|(epoch, obj, event)| {
+                (
+                    epoch,
+                    obj.with_new_actor(index),
+                    event.with_new_actor(index),
+                )
+            })
             .collect();
-
         let dirty = std::mem::take(&mut self.expose);
         self.expose = dirty
             .into_iter()
-            .map(|id| id.with_new_actor(index))
+            .map(|(epoch, id)| (epoch, id.with_new_actor(index)))
             .collect();
     }
 
     fn remove_actor(&mut self, index: usize) {
         self.actors.remove(index);
-
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
-            .filter_map(|(o, e)| Some((o.without_actor(index)?, e.without_actor(index)?)))
+            .filter_map(|(epoch, obj, event)| {
+                Some((
+                    epoch,
+                    obj.without_actor(index)?,
+                    event.without_actor(index)?,
+                ))
+            })
             .collect();
-
         let dirty = std::mem::take(&mut self.expose);
         self.expose = dirty
             .into_iter()
-            .filter_map(|id| id.without_actor(index))
+            .filter_map(|(epoch, id)| Some((epoch, id.without_actor(index)?)))
             .collect();
     }
 
@@ -635,25 +696,27 @@ impl PatchLog {
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.events.extend(other.events);
+        self.expose.extend(other.expose);
+        self.epoch = self.epoch.max(other.epoch);
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
         self.path_map = hint;
-        self.path_hint = self.events.len();
+        self.path_hint = self.events_len();
     }
 }
 
-impl AsRef<OpId> for &(ObjId, Event) {
+impl AsRef<OpId> for &(EpochCounter, ObjId, Event) {
     fn as_ref(&self) -> &OpId {
-        &self.0 .0
+        &self.1 .0
     }
 }
 
 #[derive(Clone, Default, PartialEq, Debug)]
-struct ExposeQueue(BTreeSet<ExId>);
+struct ExposeQueue(BTreeSet<(EpochCounter, ExId)>);
 
 impl ExposeQueue {
-    fn should_skip(&self, obj: &ExId) -> bool {
+    fn should_skip(&self, obj: &(EpochCounter, ExId)) -> bool {
         if let Some(exposed) = self.0.first() {
             exposed == obj
         } else {
@@ -663,7 +726,7 @@ impl ExposeQueue {
 
     fn pump_queue(
         &mut self,
-        obj: &ExId,
+        obj: &(EpochCounter, ExId),
         patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
         clock: Option<&Clock>,
@@ -687,23 +750,24 @@ impl ExposeQueue {
         }
     }
 
-    fn insert(&mut self, obj: ExId) -> bool {
+    fn insert(&mut self, obj: (EpochCounter, ExId)) -> bool {
         self.0.insert(obj)
     }
 
-    fn remove(&mut self, obj: &ExId) -> bool {
+    fn remove(&mut self, obj: &(EpochCounter, ExId)) -> bool {
         self.0.remove(obj)
     }
 
     fn flush_obj(
         &mut self,
-        exid: ExId,
+        key: (EpochCounter, ExId),
         patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
         clock: Option<&Clock>,
     ) -> Option<()> {
+        let (epoch, exid) = key;
         let id = exid.to_internal_obj();
-        self.remove(&exid);
+        self.remove(&(epoch, exid.clone()));
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
                 let text = doc.text_for(&exid, clock.cloned()).ok()?;
@@ -717,7 +781,7 @@ impl ExposeQueue {
                     let conflict = item.conflict;
                     let index = item.index;
                     if value.is_object() {
-                        self.insert(id.clone());
+                        self.insert((epoch, id.clone()));
                     }
                     patch_builder.insert(exid.clone(), index, (value, id), conflict);
                 }
@@ -727,7 +791,7 @@ impl ExposeQueue {
                     let value = m.value.to_value();
                     let id = m.id();
                     if value.is_object() {
-                        self.insert(id.clone());
+                        self.insert((epoch, id.clone()));
                     }
                     patch_builder.put(exid.clone(), m.key.into(), (value, id), m.conflict);
                 }

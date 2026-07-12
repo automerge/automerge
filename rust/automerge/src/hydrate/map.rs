@@ -51,6 +51,15 @@ impl Map {
                     .increment(value)?;
                 Ok(())
             }
+            PatchAction::Conflict {
+                prop: Prop::Map(key),
+            } => {
+                self.0
+                    .get_mut(&key)
+                    .ok_or(HydrateError::InvalidKey(key))?
+                    .conflict = true;
+                Ok(())
+            }
             _ => Err(HydrateError::InvalidMapOp),
         }
     }
