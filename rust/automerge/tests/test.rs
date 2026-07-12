@@ -4346,3 +4346,48 @@ fn queued_change_does_not_collide_with_later_local_change() {
 
     AutoCommit::load(&local.save()).unwrap();
 }
+
+#[test]
+fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let actor1 = ActorId::try_from("7f0000000000008027").unwrap();
+    let actor2 = ActorId::try_from("fe004faf").unwrap();
+    let mut target = AutoCommit::new_with_encoding(encoding).with_actor(actor1);
+    let object = target
+        .batch_create_object(
+            ROOT,
+            "value",
+            &automerge::hydrate::Value::text(encoding, "a"),
+            false,
+        )
+        .unwrap();
+    target.commit();
+
+    let mut left = target.fork();
+    left.put(&object, 0, "🦊🐻").unwrap();
+    left.commit();
+
+    let mut right = target.fork().with_actor(actor2);
+    right
+        .put(&object, 0, ScalarValue::Bytes(vec![0; 32]))
+        .unwrap();
+    right.commit();
+
+    target.merge(&mut left).unwrap();
+    target.merge(&mut right).unwrap();
+    right.delete(&object, 0).unwrap();
+    right.commit();
+
+    let mut logged_target = target.document().clone();
+    let mut logged_right = right.document().clone();
+    let mut actual = logged_target.hydrate(None);
+    let mut patch_log = PatchLog::active();
+    logged_target
+        .merge_and_log_patches(&mut logged_right, &mut patch_log)
+        .unwrap();
+    let expected = logged_target.hydrate(None);
+    actual
+        .apply_patches(encoding, logged_target.make_patches(&mut patch_log))
+        .unwrap();
+    assert_eq!(actual, expected);
+}
