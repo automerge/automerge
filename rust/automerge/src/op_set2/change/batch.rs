@@ -1058,7 +1058,15 @@ impl Automerge {
             if self.queue.has_hash(&c.hash()) {
                 continue;
             }
-            if self.has_actor_seq(&c) || self.queue.has_actor_seq(&c) {
+            if self.has_actor_seq(&c) {
+                self.queue
+                    .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
+                return Err(AutomergeError::DuplicateSeqNumber(
+                    c.seq(),
+                    c.actor_id().clone(),
+                ));
+            }
+            if self.queue.has_actor_seq(&c) {
                 return Err(AutomergeError::DuplicateSeqNumber(
                     c.seq(),
                     c.actor_id().clone(),
