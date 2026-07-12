@@ -29,7 +29,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod found_op;
-mod index;
+pub(crate) mod index;
 mod insert;
 mod mark_index;
 mod marks;
@@ -100,8 +100,9 @@ impl OpSet {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn index_builder(&self) -> IndexBuilder {
-        IndexBuilder::new(self, self.text_encoding)
+        IndexBuilder::new(self.text_encoding)
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
@@ -927,10 +928,6 @@ impl OpSet {
         self.cols.key_str.iter_range(range.clone())
     }
 
-    pub(crate) fn key_str_iter(&self) -> hexane::Iter<'_, Option<String>> {
-        self.cols.key_str.iter()
-    }
-
     pub(crate) fn action_value_iter(
         &self,
         range: Range<usize>,
@@ -1312,8 +1309,27 @@ impl OpSet {
         }
     }
 
+    /// Load the op columns and build the op indexes in the same decode
+    /// pass. The returned builder is not yet finished — the caller calls
+    /// `finish()` once (for a checked load) change collection is done.
+    pub(crate) fn load_indexed(
+        doc: &Document<'_>,
+        text_encoding: TextEncoding,
+    ) -> Result<(Self, IndexBuilder), ReadOpError> {
+        let data = doc.op_raw_bytes();
+        let actors = doc.actors().to_vec();
+        let (cols, index) =
+            Columns::load_indexed(doc.op_metadata.clone().as_map(), data, text_encoding)?;
+        let op_set = OpSet {
+            actors,
+            cols,
+            obj_info: ObjIndex::default(),
+            text_encoding,
+        };
+        Ok((op_set, index))
+    }
+
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
-        // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
         let actors = doc.actors().to_vec();
         Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)

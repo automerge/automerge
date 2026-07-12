@@ -5,9 +5,7 @@ use std::{borrow::Cow, ops::Range};
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
-use crate::op_set2::change::{
-    ChangeCollector, CollectedChanges, IndexedChangeCollector, OutOfMemory,
-};
+use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
@@ -343,7 +341,9 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
         build_hash_graph: bool,
     ) -> Result<Automerge, ReconstructError> {
-        let mut op_set = OpSet::load(self, text_encoding)?;
+        // the op indexes are built during column load, in the same
+        // decode pass (obj id validation happens inside the walk)
+        let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
 
         // an unchecked load pairs the heads with their nodes via the head
@@ -357,40 +357,22 @@ impl<'a> Document<'a> {
             )
         };
 
-        let mut index = op_set.index_builder();
+        // structural checks the op scan doesn't cover (actor index
+        // ranges, succ / raw value totals) — cheap, and needed by both
+        // paths now that neither materializes every op for the index
+        op_set.column_validation()?;
 
         let changes = if build_hash_graph {
-            let collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
-            let mut change_collector = IndexedChangeCollector::new(collector, &mut index);
-            change_collector.process_ops(&op_set)?;
-            let changes = change_collector.collect(&op_set)?;
+            let mut collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
+            collector.process_all_ops(&op_set)?;
+            let changes = collector.collect(&op_set)?;
             self.verify_changes(&changes, mode)?;
             Some(changes)
         } else {
-            // the column walk skips the per-op validation the checked
-            // path gets from materializing every op — run the structural
-            // checks it depends on first
-            op_set.column_validation()?;
-            // walk the columns directly: no per-op materialization and no
-            // per-change op buffering at all
-            index.process_columns(&op_set)?;
             None
         };
 
         let (indexes, mut mark_order_validator) = index.finish();
-
-        // the fast unchecked path must build the exact same indexes as the
-        // op-at-a-time path — cross-check on every debug checked load
-        #[cfg(debug_assertions)]
-        if changes.is_some() {
-            let mut by_cols = op_set.index_builder();
-            by_cols
-                .process_columns(&op_set)
-                .expect("debug cross-check: process_columns failed");
-            let (by_cols_indexes, _) = by_cols.finish();
-            indexes.assert_same(&by_cols_indexes);
-        }
-
         op_set.set_indexes(indexes);
 
         let change_graph = match &changes {

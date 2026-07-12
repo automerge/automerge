@@ -1476,6 +1476,7 @@ impl ChangeGraphCols {
         }
 
         let len = actors.len();
+
         let opts = hexane::LoadOpts::new().with_length(len);
 
         let timestamps =
@@ -1483,7 +1484,7 @@ impl ChangeGraphCols {
         let messages =
             hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
         let extra_bytes_meta =
-            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts.into())?;
+            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts)?;
 
         if max_ops.len() != len {
             return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));

@@ -75,6 +75,12 @@ pub(crate) enum ReadOpError {
     MissingValue(&'static str),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
+    #[error(transparent)]
+    PackErr(#[from] hexane::PackError),
+    #[error("op {0} has a partially null object id")]
+    InvalidObjId(usize),
+    #[error("ops out of order: the object id at op {0} does not increase")]
+    ObjOutOfOrder(usize),
 }
 
 impl ExactSizeIterator for OpIter<'_> {
@@ -152,20 +158,6 @@ impl<'a> OpIter<'a> {
             mark_name,
             succ_cursors,
         }))
-    }
-
-    /// Reposition every column iterator to `range` without consuming an
-    /// item. Forward-only.
-    pub(crate) fn shift(&mut self, range: Range<usize>) {
-        self.id.shift(range.clone());
-        self.obj.shift(range.clone());
-        self.key.shift(range.clone());
-        self.succ.shift(range.clone());
-        self.insert.shift(range.clone());
-        self.action.shift(range.clone());
-        self.value.shift(range.clone());
-        self.marks.shift(range.clone());
-        self.pos = range.start;
     }
 
     #[allow(unused)]
@@ -386,11 +378,6 @@ impl<'a> OpIdIter<'a> {
         self.ctr.set_max(pos);
     }
 
-    pub(crate) fn shift(&mut self, range: Range<usize>) {
-        self.actor.shift(range.clone());
-        self.ctr.shift(range);
-    }
-
     fn suspend(&self) -> OpIdIterState {
         OpIdIterState {
             actor_state: self.actor.suspend(),
@@ -445,10 +432,6 @@ impl<'a> InsertIter<'a> {
 
     fn try_nth(&mut self, n: usize) -> Result<bool, ReadOpError> {
         self.iter.nth(n).ok_or(ReadOpError::MissingValue("insert"))
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        self.iter.shift(range);
     }
 
     fn suspend(&self) -> InsertIterState {
@@ -540,12 +523,6 @@ impl<'a> KeyIter<'a> {
             .nth(n)
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
         KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from))
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        self.key_str.shift(range.clone());
-        self.key_actor.shift(range.clone());
-        self.key_ctr.shift(range);
     }
 
     fn suspend(&self) -> KeyIterState {
@@ -651,11 +628,6 @@ impl<'a> ObjIdIter<'a> {
         ObjId::try_load(actor, ctr.map(i64::from))
     }
 
-    fn shift(&mut self, range: Range<usize>) {
-        self.obj_actor.shift(range.clone());
-        self.obj_ctr.shift(range);
-    }
-
     fn suspend(&self) -> ObjIdIterState {
         ObjIdIterState {
             obj_actor: self.obj_actor.suspend(),
@@ -745,11 +717,6 @@ impl<'a> MarkInfoIter<'a> {
             .nth(n)
             .ok_or(ReadOpError::MissingValue("mark_name"))?;
         Ok((mark_name, expand))
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        self.name.shift(range.clone());
-        self.expand.shift(range);
     }
 
     fn suspend(&self) -> MarkInfoIterState {
@@ -849,10 +816,6 @@ impl<'a> ActionIter<'a> {
         self.iter.nth(n).ok_or(ReadOpError::MissingValue("action"))
     }
 
-    fn shift(&mut self, range: Range<usize>) {
-        self.iter.shift(range);
-    }
-
     fn suspend(&self) -> ActionIterState {
         ActionIterState {
             state: self.iter.suspend(),
@@ -934,11 +897,6 @@ impl<'a> ValueIter<'a> {
             let raw = self.raw.take(meta.length());
             Ok(ScalarValue::from_raw(meta, raw)?)
         }
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        self.meta.shift(range);
-        self.raw.seek_to(self.meta.prefix() as usize);
     }
 
     fn suspend(&self) -> ValueIterState {
@@ -1078,14 +1036,6 @@ impl<'a> SuccIterIter<'a> {
 
             Ok(result)
         }
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        self.count.shift(range);
-        let sub_start = self.count.prefix() as usize;
-        self.actor.advance_to(sub_start);
-        self.ctr.advance_to(sub_start);
-        self.incs.advance_to(sub_start);
     }
 
     fn suspend(&self) -> SuccIterIterState {

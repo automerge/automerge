@@ -33,21 +33,15 @@ pub(crate) struct OutOfMemory;
 /// (optionally) collecting the ops of every change so the change graph's
 /// hashes can be computed. Loading with `skip_hash_graph` uses the
 /// index-only form, which does none of the per-change buffering.
+#[cfg(test)]
 pub(crate) struct IndexedChangeCollector<'a> {
     pub(crate) index: &'a mut IndexBuilder,
     collector: Option<ChangeCollector<'a>>,
     last: Option<(ObjId, KeyRef<'a>)>,
 }
 
+#[cfg(test)]
 impl<'a> IndexedChangeCollector<'a> {
-    pub(crate) fn new(collector: ChangeCollector<'a>, index: &'a mut IndexBuilder) -> Self {
-        IndexedChangeCollector {
-            index,
-            collector: Some(collector),
-            last: None,
-        }
-    }
-
     /// Build only the op index; ops are not buffered per change and
     /// [`Self::collect`] may not be called.
     ///
@@ -80,12 +74,6 @@ impl<'a> IndexedChangeCollector<'a> {
             }
         }
         Ok(())
-    }
-
-    pub(crate) fn collect(self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
-        self.collector
-            .expect("collect requires change collection")
-            .collect(op_set)
     }
 
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
@@ -955,6 +943,27 @@ impl<'a> ChangeCollector<'a> {
             changes.push(Change::from(change));
         }
         Ok(changes)
+    }
+
+    /// Walk every op, buffering them per change — the op-scan drive for
+    /// the checked load path. Index building happens during column load
+    /// now, so this only collects.
+    pub(crate) fn process_all_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
+        let mut iter = op_set.iter();
+        while let Some(op) = iter.try_next()? {
+            let op_id = op.id;
+            let op_succ = op.succ();
+            let next = Some((op.obj, op.elemid_or_key()));
+            let flush = self.last != next;
+            self.process_op_internal(op, flush);
+            if flush {
+                self.last = next;
+            }
+            for id in op_succ {
+                self.process_succ(op_id, id);
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn collect(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {

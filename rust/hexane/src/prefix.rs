@@ -6,7 +6,7 @@ use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 use crate::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::PackError;
-use crate::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
+use crate::{ColumnValueRef, RleValue, Run};
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
 
@@ -309,7 +309,24 @@ impl PrefixValue for bool {
 
 impl<T: PrefixValue> PrefixColumn<T> {
     /// Deserialize with options. See [`LoadOpts`](crate::LoadOpts).
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, crate::PackError> {
+    /// Streaming load — the [`Column::load_iter`] of prefix columns:
+    /// pull the canonical runs during the decode pass, then
+    /// [`finalize`](PrefixColumnLoadIter::finalize) into the finished
+    /// `PrefixColumn` (per-slab prefix weights included).
+    pub fn load_iter<'a, F>(data: &'a [u8], opts: crate::LoadOpts<F>) -> PrefixColumnLoadIter<'a, T>
+    where
+        F: crate::MaybeFill<T::Get<'a>>,
+    {
+        PrefixColumnLoadIter(Column::load_iter(data, opts))
+    }
+
+    pub fn load_with<'a, F>(
+        data: &'a [u8],
+        opts: crate::LoadOpts<F>,
+    ) -> Result<Self, crate::PackError>
+    where
+        F: crate::MaybeFill<T::Get<'a>>,
+    {
         let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
         Ok(Self { col })
     }
@@ -988,6 +1005,35 @@ impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+/// Streaming prefix-column load — see [`PrefixColumn::load_iter`].
+pub struct PrefixColumnLoadIter<'a, T: PrefixValue>(
+    crate::column::ColumnLoadIter<'a, T, PrefixWeightFn<T>>,
+);
+
+impl<'a, T: PrefixValue> PrefixColumnLoadIter<'a, T> {
+    /// The next canonical run, or `None` at end of input.
+    pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
+        self.0.try_next_run()
+    }
+
+    /// The next single value, stepping through runs.
+    pub fn try_next(&mut self) -> Result<Option<T::Get<'a>>, crate::PackError> {
+        self.0.try_next()
+    }
+
+    /// Drain and validate whatever was not pulled, apply the length check
+    /// from the load options, and return the finished column.
+    pub fn finalize(self) -> Result<PrefixColumn<T>, crate::PackError> {
+        Ok(PrefixColumn::from_column(self.0.finalize()?))
+    }
+}
+
+impl<'a, T: PrefixValue> crate::encoding::RunSrc<'a, T> for PrefixColumnLoadIter<'a, T> {
+    fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
+        PrefixColumnLoadIter::try_next_run(self)
+    }
+}
 
 #[cfg(test)]
 mod tests {

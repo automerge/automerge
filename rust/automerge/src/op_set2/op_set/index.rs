@@ -4,11 +4,15 @@ use crate::op_set2::op_set::OpIdIter;
 use crate::op_set2::op_set::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::MarkData;
+#[cfg(test)]
+use crate::op_set2::OpSet;
 use crate::op_set2::ValueMeta;
-use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet, ReadOpError};
-use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
+use crate::op_set2::{ChangeOp, Op, OpBuilder, ReadOpError};
+#[cfg(test)]
+use crate::types::SequenceType;
+use crate::types::{ObjId, ObjType, OpId, TextEncoding};
 use hexane::encoder::{BoolEncoder, RleEncoder};
-use hexane::EncoderApi;
+use hexane::{EncoderApi, RunSrc};
 use std::collections::HashMap;
 
 /// Streaming index builder.
@@ -160,6 +164,7 @@ impl ObjInfo {
 }
 
 impl Op<'_> {
+    #[cfg(test)]
     pub(crate) fn obj_info(&self) -> Option<ObjInfo> {
         let obj_type = ObjType::try_from(self.action).ok()?;
         let parent = self.obj;
@@ -190,8 +195,111 @@ pub(crate) struct Indexes {
     pub(crate) obj_info: ObjIndex,
 }
 
+/// Object ranges derived by zipping the obj_actor / obj_ctr run streams,
+/// validating as it goes: ids must be fully null or fully set, and
+/// strictly increasing (which also guarantees each object's ops are
+/// contiguous). This replaces `column_validation`'s obj walk on the load
+/// path.
+pub(crate) struct ObjRunWalk<A, C> {
+    actor: A,
+    ctr: C,
+    actor_head: Option<(Option<crate::op_set2::ActorIdx>, usize)>,
+    ctr_head: Option<(Option<u32>, usize)>,
+    pos: usize,
+    prev: Option<ObjId>,
+}
+
+impl<A, C> ObjRunWalk<A, C> {
+    pub(crate) fn new(actor: A, ctr: C) -> Self {
+        Self {
+            actor,
+            ctr,
+            actor_head: None,
+            ctr_head: None,
+            pos: 0,
+            prev: None,
+        }
+    }
+
+    fn try_next_obj<'a>(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError>
+    where
+        A: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+        C: RunSrc<'a, Option<u32>>,
+    {
+        if self.actor_head.is_none() {
+            self.actor_head = self.actor.try_next_run()?.map(|r| (r.value, r.count));
+        }
+        if self.ctr_head.is_none() {
+            self.ctr_head = self.ctr.try_next_run()?.map(|r| (r.value, r.count));
+        }
+        let (Some((actor, a_left)), Some((ctr, c_left))) = (self.actor_head, self.ctr_head) else {
+            return Ok(None);
+        };
+        let obj =
+            ObjId::load(ctr.map(|c| c as u64), actor).ok_or(ReadOpError::InvalidObjId(self.pos))?;
+        if self.prev.is_some_and(|p| obj <= p) {
+            return Err(ReadOpError::ObjOutOfOrder(self.pos));
+        }
+        self.prev = Some(obj);
+        let count = a_left.min(c_left);
+        self.pos += count;
+        self.actor_head = (a_left > count).then_some((actor, a_left - count));
+        self.ctr_head = (c_left > count).then_some((ctr, c_left - count));
+        Ok(Some((obj, count)))
+    }
+}
+
+/// Forward-only access to the columns the rare-op path needs — everything
+/// that is not carried by the index run stream itself. Built either from a
+/// loaded op set or from the phase-1 columns during a fused load.
+pub(crate) struct RareOps<'a> {
+    ids: OpIdIter<'a>,
+    marks: super::MarkInfoIter<'a>,
+    succ_ids: OpIdIter<'a>,
+    raw: hexane::RawColumnIter<'a>,
+}
+
+impl<'a> RareOps<'a> {
+    pub(crate) fn new(
+        ids: OpIdIter<'a>,
+        marks: super::MarkInfoIter<'a>,
+        succ_ids: OpIdIter<'a>,
+        raw: hexane::RawColumnIter<'a>,
+    ) -> Self {
+        Self {
+            ids,
+            marks,
+            succ_ids,
+            raw,
+        }
+    }
+
+    fn id_at(&mut self, pos: usize) -> Result<OpId, ReadOpError> {
+        self.ids
+            .shift_next(pos..pos + 1)
+            .ok_or(ReadOpError::MissingValue("id"))
+    }
+
+    fn mark_at(&mut self, pos: usize) -> Result<Option<&'a str>, ReadOpError> {
+        self.marks
+            .shift_next(pos..pos + 1)
+            .map(|(name, _expand)| name)
+            .ok_or(ReadOpError::MissingValue("mark_name"))
+    }
+
+    fn raw_at(&mut self, start: usize, len: usize) -> &'a [u8] {
+        self.raw.seek_to(start);
+        self.raw.take(len)
+    }
+
+    fn value_at(&mut self, meta: ValueMeta, start: usize) -> Result<ScalarValue<'a>, ReadOpError> {
+        let raw = self.raw_at(start, meta.length());
+        Ok(ScalarValue::from_raw(meta, raw)?)
+    }
+}
+
 impl IndexBuilder {
-    pub(crate) fn new(_op_set: &OpSet, encoding: TextEncoding) -> Self {
+    pub(crate) fn new(encoding: TextEncoding) -> Self {
         Self {
             counters: HashMap::new(),
             group: Vec::new(),
@@ -213,6 +321,11 @@ impl IndexBuilder {
     /// of the current group's first op.
     fn ops_flushed(&self) -> usize {
         self.visible.len()
+    }
+
+    /// Total ops processed so far (flushed and buffered).
+    pub(crate) fn ops_len(&self) -> usize {
+        self.ops_flushed() + self.group.len()
     }
 
     /// Number of inc entries already flushed — the absolute inc index of
@@ -260,6 +373,56 @@ impl IndexBuilder {
         self.counters.clear();
     }
 
+    /// The shared per-op path: both the op-at-a-time reference builder
+    /// ([`Self::process_op`]) and the rare path of the column walk feed
+    /// through here.
+    #[allow(clippy::too_many_arguments)]
+    fn process_op_parts(
+        &mut self,
+        id: OpId,
+        mark_index: Option<MarkIndexBuilder>,
+        inc_value: Option<i64>,
+        obj_info: Option<ObjInfo>,
+        succ_vis: u32,
+        width: u32,
+    ) {
+        self.mark_order.check_mark(
+            obj_info.map(|o| o.parent).unwrap_or_default(),
+            id,
+            &mark_index,
+        );
+        self.group_marks.push(match mark_index {
+            Some(MarkIndexBuilder::Start(mark_id, mark)) => {
+                self.mark_cache.insert(mark_id, mark);
+                Some(MarkIdx::Start(mark_id))
+            }
+            Some(MarkIndexBuilder::End(mark_id)) => Some(MarkIdx::End(mark_id)),
+            None => None,
+        });
+
+        let count = self.counters.remove(&id);
+
+        if let Some(i) = inc_value {
+            let incs_flushed = self.incs_flushed();
+            let ops_flushed = self.ops_flushed();
+            for (inc_idx, op_idx) in count.into_iter().flatten() {
+                // group-local: a counter and its increments share a register
+                self.group_incs[inc_idx - incs_flushed] = Some(i);
+                self.group[op_idx - ops_flushed].succ -= 1;
+            }
+        }
+
+        if let Some(obj_info) = obj_info {
+            self.obj_info.insert(id, obj_info);
+        }
+
+        self.group.push(GroupOp {
+            succ: succ_vis,
+            width,
+        });
+    }
+
+    #[cfg(test)]
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
@@ -314,50 +477,87 @@ impl IndexBuilder {
             || !self.counters.is_empty()
     }
 
-    /// Build the index by walking columns directly instead of materializing
-    /// every op.
+    /// Build the index from a loaded op set's columns — the equality
+    /// test's way of running [`Self::process_columns`] over in-memory
+    /// iterators to compare against the op-at-a-time reference builder.
+    /// Production always builds indexes during column load.
+    #[cfg(test)]
+    pub(crate) fn process_op_set(&mut self, op_set: &OpSet) -> Result<(), ReadOpError> {
+        let rare = RareOps::new(
+            OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
+            super::MarkInfoIter::new(op_set.cols.mark_name.iter(), op_set.cols.expand.iter()),
+            OpIdIter::new(op_set.cols.succ_actor.iter(), op_set.cols.succ_ctr.iter()),
+            op_set.cols.value.iter(),
+        );
+        self.process_columns(
+            ObjRunWalk::new(op_set.cols.obj_actor.iter(), op_set.cols.obj_ctr.iter()),
+            op_set.cols.action.iter(),
+            op_set.cols.value_meta.values().iter(),
+            op_set.cols.succ_count.values().iter(),
+            op_set.cols.insert.values().iter(),
+            op_set.cols.key_str.iter(),
+            rare,
+        )
+    }
+
+    /// Build the index by walking column run streams directly instead of
+    /// materializing every op.
     ///
     /// Per op this touches only the action, succ-count and value-meta
-    /// columns, advanced run-at-a-time. Register boundaries come from run
-    /// lengths: the key_str column for maps (each run is one key's
-    /// register) and the insert column for sequences (a register is one
+    /// streams, advanced run-at-a-time. Register boundaries come from run
+    /// lengths: the key_str stream for maps (each run is one key's
+    /// register) and the insert stream for sequences (a register is one
     /// `true` followed by zero or more `false`s). Uniform runs of
     /// single-op registers stream straight to the encoders; everything
     /// else goes through the same per-register buffer as the op-at-a-time
     /// path. Rare ops (marks, object creation, increments, counters) are
-    /// materialized individually.
-    pub(crate) fn process_columns(&mut self, op_set: &OpSet) -> Result<(), ReadOpError> {
-        let mut iter = IndexIter::new(op_set);
-        let mut bounds = BoundaryIter::new(op_set);
-        let mut op_iter = op_set.iter();
-        let mut succ_id_iter =
-            OpIdIter::new(op_set.cols.succ_actor.iter(), op_set.cols.succ_ctr.iter());
+    /// materialized individually from the [`RareOps`] columns.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn process_columns<'a, OA, OC, A, M, S, I, K>(
+        &mut self,
+        mut objs: ObjRunWalk<OA, OC>,
+        action: A,
+        meta: M,
+        succ: S,
+        inserts: I,
+        keys: K,
+        mut rare: RareOps<'_>,
+    ) -> Result<(), ReadOpError>
+    where
+        OA: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+        OC: RunSrc<'a, Option<u32>>,
+        A: RunSrc<'a, Action>,
+        M: RunSrc<'a, ValueMeta>,
+        S: RunSrc<'a, u32>,
+        I: RunSrc<'a, bool>,
+        K: RunSrc<'a, Option<String>>,
+    {
         let objrep = self.text_encoding.width("\u{fffc}") as u32;
+        let mut iter = IndexIter::new(action, meta, succ);
+        let mut bounds = BoundaryIter::new(inserts, keys);
+        let mut pos = 0;
 
-        for (obj, range) in op_set.iter_obj_ids() {
+        while let Some((obj, obj_len)) = objs.try_next_obj()? {
             let seq = matches!(
                 self.obj_info.object_type(&obj),
                 Some(ObjType::List) | Some(ObjType::Text)
             );
+            bounds.start_obj(seq, obj_len)?;
 
-            iter.shift(range.clone());
-            bounds.shift(seq, range.clone());
-
-            let mut pos = range.start;
-            while let Some((group_len, repeat)) = bounds.next_batch() {
+            while let Some((group_len, repeat)) = bounds.next_batch()? {
                 if group_len == 1 && repeat > 1 {
                     // a stretch of single-op registers: every op is its own
                     // group, so uniform runs bypass the buffer entirely
                     let mut remaining = repeat;
                     while remaining > 0 {
                         let run = iter
-                            .next_run(remaining)
+                            .next_run(remaining)?
                             .ok_or(ReadOpError::MissingValue("index columns"))?;
                         remaining -= run.count;
                         if self.is_rare(&run) {
-                            self.rare_run(&run, pos, &mut op_iter, &mut succ_id_iter, true)?;
+                            self.rare_run(&run, pos, obj, objrep, &mut rare, true)?;
                         } else {
-                            self.stream_singletons(&run, objrep, pos, &mut op_iter)?;
+                            self.stream_singletons(&run, objrep, &mut rare)?;
                         }
                         pos += run.count;
                     }
@@ -366,13 +566,13 @@ impl IndexBuilder {
                         let mut remaining = group_len;
                         while remaining > 0 {
                             let run = iter
-                                .next_run(remaining)
+                                .next_run(remaining)?
                                 .ok_or(ReadOpError::MissingValue("index columns"))?;
                             remaining -= run.count;
                             if self.is_rare(&run) {
-                                self.rare_run(&run, pos, &mut op_iter, &mut succ_id_iter, false)?;
+                                self.rare_run(&run, pos, obj, objrep, &mut rare, false)?;
                             } else {
-                                self.buffer_run(&run, objrep, pos, &mut op_iter)?;
+                                self.buffer_run(&run, objrep, &mut rare)?;
                             }
                             pos += run.count;
                         }
@@ -384,14 +584,35 @@ impl IndexBuilder {
         Ok(())
     }
 
+    /// The text width of one op in a long-string run, from the raw value
+    /// bytes (mirrors `Op::as_str`: only `Set` string values render as
+    /// their text, everything else is an object replacement char; marks
+    /// are rare and never reach here).
+    fn str_width(
+        &mut self,
+        run: &IndexRun,
+        i: usize,
+        objrep: u32,
+        rare: &mut RareOps<'_>,
+    ) -> Result<u32, ReadOpError> {
+        if run.action != Action::Set {
+            return Ok(objrep);
+        }
+        let len = run.meta.length();
+        let value = rare.value_at(run.meta, run.raw_prefix as usize + i * len)?;
+        Ok(match &value {
+            ScalarValue::Str(s) => self.text_encoding.width(s) as u32,
+            _ => objrep,
+        })
+    }
+
     /// Stream a uniform run of single-op registers straight to the
     /// encoders — no per-op work at all in the common case.
     fn stream_singletons(
         &mut self,
         run: &IndexRun,
         objrep: u32,
-        pos: usize,
-        op_iter: &mut super::OpIter<'_>,
+        rare: &mut RareOps<'_>,
     ) -> Result<(), ReadOpError> {
         debug_assert!(self.group.is_empty());
         let vis = run.succ == 0;
@@ -407,11 +628,9 @@ impl IndexBuilder {
             // a 1-byte utf8 string is ascii: width 1 in every encoding
             self.text.append_n(Some(1), run.count);
         } else {
-            op_iter.shift(pos..pos + run.count);
-            for _ in 0..run.count {
-                let op = op_iter.try_next()?.ok_or(ReadOpError::MissingValue("op"))?;
-                self.text
-                    .append(Some(op.width(SequenceType::Text, self.text_encoding) as u32));
+            for i in 0..run.count {
+                let w = self.str_width(run, i, objrep, rare)?;
+                self.text.append(Some(w));
             }
         }
         Ok(())
@@ -422,16 +641,14 @@ impl IndexBuilder {
         &mut self,
         run: &IndexRun,
         objrep: u32,
-        pos: usize,
-        op_iter: &mut super::OpIter<'_>,
+        rare: &mut RareOps<'_>,
     ) -> Result<(), ReadOpError> {
         if run.meta.type_code() == ValueType::String && run.meta.length() > 1 {
-            op_iter.shift(pos..pos + run.count);
-            for _ in 0..run.count {
-                let op = op_iter.try_next()?.ok_or(ReadOpError::MissingValue("op"))?;
+            for i in 0..run.count {
+                let width = self.str_width(run, i, objrep, rare)?;
                 self.group.push(GroupOp {
                     succ: run.succ,
-                    width: op.width(SequenceType::Text, self.text_encoding) as u32,
+                    width,
                 });
             }
         } else {
@@ -455,30 +672,77 @@ impl IndexBuilder {
         Ok(())
     }
 
-    /// Materialize each op of a rare run and feed it through the same
-    /// per-op path the op-at-a-time builder uses. With `singletons` each
-    /// op is its own register and is flushed immediately.
+    /// Materialize each op of a rare run from the [`RareOps`] columns and
+    /// feed it through the same per-op path the op-at-a-time builder uses.
+    /// With `singletons` each op is its own register and is flushed
+    /// immediately.
     fn rare_run(
         &mut self,
         run: &IndexRun,
         pos: usize,
-        op_iter: &mut super::OpIter<'_>,
-        succ_id_iter: &mut OpIdIter<'_>,
+        obj: ObjId,
+        objrep: u32,
+        rare: &mut RareOps<'_>,
         singletons: bool,
     ) -> Result<(), ReadOpError> {
-        op_iter.shift(pos..pos + run.count);
+        let len = run.meta.length();
         for i in 0..run.count {
-            let op = op_iter.try_next()?.ok_or(ReadOpError::MissingValue("op"))?;
-            let is_counter = matches!(op.value, ScalarValue::Counter(_));
-            self.process_op(&op);
+            let p = pos + i;
+            let id = rare.id_at(p)?;
+            let value = rare.value_at(run.meta, run.raw_prefix as usize + i * len)?;
+
+            // mirrors `Op::mark_index`
+            let mark_index = if run.action == Action::Mark {
+                match rare.mark_at(p)? {
+                    Some(name) => Some(MarkIndexBuilder::Start(
+                        id,
+                        MarkData {
+                            name: std::borrow::Cow::Owned(name.to_string()),
+                            value: value.clone().into_owned(),
+                        },
+                    )),
+                    None => Some(MarkIndexBuilder::End(id.prev())),
+                }
+            } else {
+                None
+            };
+
+            // mirrors `OpBuilder::get_increment_value`
+            let inc_value = match (run.action, &value) {
+                (Action::Increment, ScalarValue::Int(n)) => Some(*n),
+                (Action::Increment, ScalarValue::Uint(n)) => Some(*n as i64),
+                _ => None,
+            };
+
+            let obj_info = ObjType::try_from(run.action).ok().map(|obj_type| ObjInfo {
+                parent: obj,
+                obj_type,
+            });
+
+            // mirrors `OpBuilder::width` / `as_str`
+            let width = match (run.action, &value) {
+                (Action::Mark, _) => 0,
+                (Action::Set, ScalarValue::Str(s)) => self.text_encoding.width(s) as u32,
+                _ => objrep,
+            };
+
+            let is_counter = matches!(value, ScalarValue::Counter(_));
+            let succ_vis = if run.action == Action::Increment {
+                u32::MAX
+            } else {
+                run.succ
+            };
+
+            self.process_op_parts(id, mark_index, inc_value, obj_info, succ_vis, width);
+
             if run.succ > 0 {
                 if is_counter {
                     let start = run.succ_prefix as usize + i * run.succ as usize;
                     let end = start + run.succ as usize;
-                    let mut next_id = succ_id_iter.shift_next(start..end);
-                    while let Some(id) = next_id {
-                        self.process_succ(true, id);
-                        next_id = succ_id_iter.next();
+                    let mut next_id = rare.succ_ids.shift_next(start..end);
+                    while let Some(succ_id) = next_id {
+                        self.process_succ(true, succ_id);
+                        next_id = rare.succ_ids.next();
                     }
                 } else {
                     self.group_incs
@@ -518,9 +782,9 @@ impl IndexBuilder {
 }
 
 impl Indexes {
-    /// Debug-only drift guard: the column-walking builder must produce
-    /// exactly the same indexes as the op-at-a-time builder.
-    #[cfg(any(debug_assertions, test))]
+    /// Test-only drift guard: the column-walking builder must produce
+    /// exactly the same indexes as the op-at-a-time reference builder.
+    #[cfg(test)]
     pub(crate) fn assert_same(&self, other: &Self) {
         assert_eq!(
             self.visible.save(),
@@ -536,91 +800,197 @@ impl Indexes {
 }
 
 /// Yields the register lengths of the current object: key_str runs for
-/// maps (each run is one key's register — hexane guarantees adjacent runs
-/// never carry equal values), insert-run structure for sequences (a
-/// register is one `true` followed by zero or more `false`s).
-#[derive(Debug)]
-struct BoundaryIter<'a> {
+/// maps (each run is one key's register — the run streams are canonical,
+/// so adjacent runs never carry equal values), insert-run structure for
+/// sequences (a register is one `true` followed by zero or more
+/// `false`s).
+///
+/// The sources are consumed strictly sequentially, so runs that span an
+/// object boundary are clipped against the current object, and whichever
+/// stream an object does not consult (inserts for maps, keys for
+/// sequences) is drained lazily to stay position-aligned.
+struct BoundaryIter<I, K> {
+    inserts: I,
+    keys: K,
+    insert_head: Option<(bool, usize)>,
+    key_head: Option<usize>,
+    /// items owed to each stream by objects that did not consult it
+    insert_owed: usize,
+    keys_owed: usize,
     seq: bool,
-    inserts: hexane::Iter<'a, bool>,
-    keys: hexane::Iter<'a, Option<String>>,
+    /// ops left in the current object
+    remaining: usize,
     /// pending trues from the current insert run; all but the last are
     /// singleton registers, the last stays open for its trailing falses
     ones: usize,
 }
 
-impl<'a> BoundaryIter<'a> {
-    fn new(op_set: &'a OpSet) -> Self {
+impl<I, K> BoundaryIter<I, K> {
+    fn new(inserts: I, keys: K) -> Self {
         Self {
+            inserts,
+            keys,
+            insert_head: None,
+            key_head: None,
+            insert_owed: 0,
+            keys_owed: 0,
             seq: false,
-            inserts: op_set.cols.insert.values().iter(),
-            keys: op_set.key_str_iter(),
+            remaining: 0,
             ones: 0,
         }
     }
 
-    fn shift(&mut self, seq: bool, range: std::ops::Range<usize>) {
+    fn start_obj(&mut self, seq: bool, len: usize) -> Result<(), ReadOpError> {
+        debug_assert_eq!(self.remaining, 0);
+        debug_assert_eq!(self.ones, 0);
         self.seq = seq;
-        self.ones = 0;
+        self.remaining = len;
         if seq {
-            self.inserts.shift(range);
+            self.keys_owed += len;
         } else {
-            self.keys.shift(range);
+            self.insert_owed += len;
         }
+        Ok(())
+    }
+
+    /// Pull the next insert run, clipped to the current object, after
+    /// draining anything owed by objects that didn't consult this stream.
+    fn next_insert_run<'a>(&mut self) -> Result<Option<(bool, usize)>, ReadOpError>
+    where
+        I: RunSrc<'a, bool>,
+    {
+        while self.insert_owed > 0 {
+            let (value, left) = match self.insert_head.take() {
+                Some(h) => h,
+                None => match self.inserts.try_next_run()? {
+                    Some(r) => (r.value, r.count),
+                    None => return Err(ReadOpError::MissingValue("insert")),
+                },
+            };
+            let take = left.min(self.insert_owed);
+            self.insert_owed -= take;
+            if left > take {
+                self.insert_head = Some((value, left - take));
+            }
+        }
+        if self.remaining == 0 {
+            return Ok(None);
+        }
+        let (value, left) = match self.insert_head.take() {
+            Some(h) => h,
+            None => match self.inserts.try_next_run()? {
+                Some(r) => (r.value, r.count),
+                None => return Err(ReadOpError::MissingValue("insert")),
+            },
+        };
+        let take = left.min(self.remaining);
+        self.remaining -= take;
+        if left > take {
+            self.insert_head = Some((value, left - take));
+        }
+        Ok(Some((value, take)))
+    }
+
+    /// Pull the next key run length, clipped to the current object, after
+    /// draining anything owed.
+    fn next_key_run<'a>(&mut self) -> Result<Option<usize>, ReadOpError>
+    where
+        K: RunSrc<'a, Option<String>>,
+    {
+        while self.keys_owed > 0 {
+            let left = match self.key_head.take() {
+                Some(h) => h,
+                None => match self.keys.try_next_run()? {
+                    Some(r) => r.count,
+                    None => return Err(ReadOpError::MissingValue("key_str")),
+                },
+            };
+            let take = left.min(self.keys_owed);
+            self.keys_owed -= take;
+            if left > take {
+                self.key_head = Some(left - take);
+            }
+        }
+        if self.remaining == 0 {
+            return Ok(None);
+        }
+        let left = match self.key_head.take() {
+            Some(h) => h,
+            None => match self.keys.try_next_run()? {
+                Some(r) => r.count,
+                None => return Err(ReadOpError::MissingValue("key_str")),
+            },
+        };
+        let take = left.min(self.remaining);
+        self.remaining -= take;
+        if left > take {
+            self.key_head = Some(left - take);
+        }
+        Ok(Some(take))
     }
 
     /// The next batch of registers as `(len, repeat)`: `repeat` consecutive
     /// registers of `len` ops each. `repeat > 1` only for single-op
     /// registers (a run of inserts), which is the batch the streaming fast
     /// path feeds on.
-    fn next_batch(&mut self) -> Option<(usize, usize)> {
+    fn next_batch<'a>(&mut self) -> Result<Option<(usize, usize)>, ReadOpError>
+    where
+        I: RunSrc<'a, bool>,
+        K: RunSrc<'a, Option<String>>,
+    {
         if self.seq {
             self.next_seq()
         } else {
-            self.keys.next_run().map(|r| (r.count, 1))
+            Ok(self.next_key_run()?.map(|count| (count, 1)))
         }
     }
 
-    fn next_seq(&mut self) -> Option<(usize, usize)> {
+    fn next_seq<'a>(&mut self) -> Result<Option<(usize, usize)>, ReadOpError>
+    where
+        I: RunSrc<'a, bool>,
+    {
         loop {
             // more than one pending true: all but the last are singleton
             // registers, the last stays open for its trailing falses
             if self.ones > 1 {
                 let repeat = self.ones - 1;
                 self.ones = 1;
-                return Some((1, repeat));
+                return Ok(Some((1, repeat)));
             }
-            match self.inserts.next_run() {
-                Some(run) if run.value => self.ones += run.count,
-                Some(run) => {
+            match self.next_insert_run()? {
+                Some((true, count)) => self.ones += count,
+                Some((false, count)) => {
                     // falses close the one pending true (if any); `ones`
                     // is 0 only for a defensive headless run
-                    let result = self.ones + run.count;
+                    let result = self.ones + count;
                     self.ones = 0;
-                    return Some((result, 1));
+                    return Ok(Some((result, 1)));
                 }
                 None if self.ones > 0 => {
                     self.ones = 0;
-                    return Some((1, 1));
+                    return Ok(Some((1, 1)));
                 }
-                None => return None,
+                None => return Ok(None),
             }
         }
     }
 }
 
-/// The per-op columns consumed by [`IndexBuilder::process_columns`] —
+/// The per-op streams consumed by [`IndexBuilder::process_columns`] —
 /// action, value *meta* and succ count — advanced run-at-a-time. The raw
-/// value bytes are never touched here: rare ops that need them are
-/// materialized individually by the consumer.
-#[derive(Debug)]
-pub(crate) struct IndexIter<'a> {
-    action: hexane::Iter<'a, Action>,
-    meta: hexane::PrefixIter<'a, ValueMeta>,
-    succ: hexane::PrefixIter<'a, u32>,
+/// value bytes are never touched here: rare ops and long-string widths
+/// read them through [`RareOps`] at offsets derived from the meta stream.
+struct IndexIter<A, M, S> {
+    action: A,
+    meta: M,
+    succ: S,
     action_head: Option<(Action, usize)>,
     meta_head: Option<(ValueMeta, usize)>,
-    succ_head: Option<(u32, u64, usize)>,
+    succ_head: Option<(u32, usize)>,
+    /// absolute succ-column offset at the current position
+    succ_prefix: u64,
+    /// absolute raw value byte offset at the current position
+    raw_prefix: u64,
 }
 
 /// A block of consecutive ops sharing one action, one value meta and one
@@ -633,68 +1003,64 @@ pub(crate) struct IndexRun {
     pub(crate) succ: u32,
     /// absolute succ-column offset of the first op's succ entries
     pub(crate) succ_prefix: u64,
+    /// absolute raw value byte offset of the first op's value
+    pub(crate) raw_prefix: u64,
 }
 
-impl<'a> IndexIter<'a> {
-    fn new(op_set: &'a OpSet) -> Self {
+impl<A, M, S> IndexIter<A, M, S> {
+    fn new(action: A, meta: M, succ: S) -> Self {
         Self {
-            action: op_set.cols.action.iter(),
-            meta: op_set.cols.value_meta.iter(),
-            succ: op_set.cols.succ_count.iter(),
+            action,
+            meta,
+            succ,
             action_head: None,
             meta_head: None,
             succ_head: None,
+            succ_prefix: 0,
+            raw_prefix: 0,
         }
-    }
-
-    fn shift(&mut self, range: std::ops::Range<usize>) {
-        self.action.shift(range.clone());
-        self.meta.shift(range.clone());
-        self.succ.shift(range);
-        self.action_head = None;
-        self.meta_head = None;
-        self.succ_head = None;
     }
 
     /// The next run of at most `max` ops sharing action, meta and succ.
-    fn next_run(&mut self, max: usize) -> Option<IndexRun> {
+    fn next_run<'a>(&mut self, max: usize) -> Result<Option<IndexRun>, ReadOpError>
+    where
+        A: RunSrc<'a, Action>,
+        M: RunSrc<'a, ValueMeta>,
+        S: RunSrc<'a, u32>,
+    {
         if self.action_head.is_none() {
-            let run = self.action.next_run()?;
-            self.action_head = Some((run.value, run.count));
+            self.action_head = self.action.try_next_run()?.map(|r| (r.value, r.count));
         }
         if self.meta_head.is_none() {
-            let run = self.meta.next_run()?;
-            self.meta_head = Some((run.value.value, run.count));
+            self.meta_head = self.meta.try_next_run()?.map(|r| (r.value, r.count));
         }
         if self.succ_head.is_none() {
-            let run = self.succ.next_run()?;
-            // total is the inclusive prefix over the whole run
-            let end = run.value.total();
-            let start = end - (run.value.value as u64 * run.count as u64);
-            self.succ_head = Some((run.value.value, start, run.count));
+            self.succ_head = self.succ.try_next_run()?.map(|r| (r.value, r.count));
         }
-        let (action, a_left) = self.action_head.unwrap();
-        let (meta, m_left) = self.meta_head.unwrap();
-        let (succ, s_prefix, s_left) = self.succ_head.unwrap();
+        let (Some((action, a_left)), Some((meta, m_left)), Some((succ, s_left))) =
+            (self.action_head, self.meta_head, self.succ_head)
+        else {
+            return Ok(None);
+        };
 
         let count = max.min(a_left).min(m_left).min(s_left);
         debug_assert!(count > 0);
 
         self.action_head = (a_left > count).then_some((action, a_left - count));
         self.meta_head = (m_left > count).then_some((meta, m_left - count));
-        self.succ_head = (s_left > count).then_some((
-            succ,
-            s_prefix + succ as u64 * count as u64,
-            s_left - count,
-        ));
+        self.succ_head = (s_left > count).then_some((succ, s_left - count));
 
-        Some(IndexRun {
+        let run = IndexRun {
             count,
             action,
             meta,
             succ,
-            succ_prefix: s_prefix,
-        })
+            succ_prefix: self.succ_prefix,
+            raw_prefix: self.raw_prefix,
+        };
+        self.succ_prefix += succ as u64 * count as u64;
+        self.raw_prefix += meta.length() as u64 * count as u64;
+        Ok(Some(run))
     }
 }
 
@@ -713,6 +1079,7 @@ pub(crate) fn runs<T: PartialEq>(
     })
 }
 
+#[cfg(test)]
 fn vis_num(op: &Op<'_>) -> u32 {
     if op.is_inc() {
         u32::MAX
@@ -739,7 +1106,7 @@ mod tests {
         let (ops_indexes, _) = by_ops.finish();
 
         let mut by_cols = op_set.index_builder();
-        by_cols.process_columns(op_set).unwrap();
+        by_cols.process_op_set(op_set).unwrap();
         let (cols_indexes, _) = by_cols.finish();
 
         ops_indexes.assert_same(&cols_indexes);

@@ -15,9 +15,9 @@ use std::ops::Range;
 pub(crate) mod batch;
 pub(crate) mod collector;
 
-pub(crate) use collector::{
-    BuildChangeMetadata, ChangeCollector, CollectedChanges, IndexedChangeCollector, OutOfMemory,
-};
+#[cfg(test)]
+pub(crate) use collector::IndexedChangeCollector;
+pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges, OutOfMemory};
 
 pub(crate) trait GetHash {
     fn get_hash(&self, index: usize) -> Option<ChangeHash>;

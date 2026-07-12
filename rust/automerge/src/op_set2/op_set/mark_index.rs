@@ -276,8 +276,8 @@ impl MarkIndexColumn {
         Self { data, cache }
     }
 
-    /// Debug-only drift guard companion to `Indexes::assert_same`.
-    #[cfg(any(debug_assertions, test))]
+    /// Test-only drift guard companion to `Indexes::assert_same`.
+    #[cfg(test)]
     pub(crate) fn assert_same(&self, other: &Self) {
         assert_eq!(
             self.data.save(),

@@ -164,7 +164,7 @@ let bytes = Column::<u64>::from_values(vec![1, 2, 3]).save();
 // Expect an exact length; treat empty input as "3 zeros".
 let col = Column::<u64>::load_with(
     &bytes,
-    LoadOpts::new().with_length(3).with_fill::<u64>(0),
+    LoadOpts::new().with_length(3).with_fill(0u64),
 ).unwrap();
 assert_eq!(col.len(), 3);
 ```

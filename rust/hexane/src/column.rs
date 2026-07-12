@@ -8,7 +8,7 @@ use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
 use crate::PackError;
-use crate::{AsColumnRef, ColumnValueRef, TypedLoadOpts};
+use crate::{AsColumnRef, ColumnValueRef, LoadOpts, MaybeFill, Run};
 
 /// Type alias for the slab tail metadata of a column value type.
 pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
@@ -419,6 +419,12 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
 }
 
 impl<T: ColumnValueRef> ExactSizeIterator for Iter<'_, T> {}
+
+impl<'a, T: ColumnValueRef> crate::encoding::RunSrc<'a, T> for Iter<'a, T> {
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        Ok(self.next_run())
+    }
+}
 
 impl<T: ColumnValueRef> std::fmt::Debug for Iter<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -887,72 +893,48 @@ where
     }
 
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_verified(data, DEFAULT_MAX_SEG, None)
+        Self::load_iter(data, LoadOpts::new()).finalize()
     }
 
     /// Deserialize with options.  Supports:
     ///   * `with_length(n)` — validate the column has exactly `n` items.
-    ///   * `with_fill(v)` — when data is empty and length is set, fill
-    ///     with `v` instead of returning empty.
-    ///   * `with_validation(f)` — validate each decoded value.
+    ///   * `with_fill(v)` — when data is empty and `length` is set, read
+    ///     as `length` copies of `v` instead of an empty column.
     ///   * `with_max_segments(n)` — override the slab segment budget.
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, PackError> {
-        if data.is_empty() {
-            return match (opts.length, opts.fill) {
-                (Some(0) | None, _) => Ok(Self::new()),
-                (Some(len), Some(value)) => Ok(Self::fill(len, value)),
-                (Some(len), None) => Err(PackError::InvalidLength(0, len)),
-            };
-        }
-        let col = Self::load_verified(data, opts.max_segments, opts.validate)?;
-        if let Some(expected) = opts.length {
-            if col.len() != expected {
-                return Err(PackError::InvalidLength(col.len(), expected));
-            }
-        }
-        Ok(col)
-    }
-
-    pub(crate) fn load_verified(
-        data: &[u8],
-        max_segments: usize,
-        validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
-    ) -> Result<Self, PackError> {
-        assert!(max_segments >= 2, "max_segments must be at least 2");
-        let slabs = T::Encoding::load_and_verify(data, max_segments, validate)?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
-        Ok(Self {
-            slabs,
-            index,
-            total_len,
-            max_segments,
-            counter: 0,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub(crate) fn load_verified_fold<'a, P, F>(
-        data: &'a [u8],
-        max_segments: usize,
-        validate: Option<F>,
-    ) -> Result<Self, PackError>
+    pub fn load_with<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> Result<Self, PackError>
     where
-        P: Default + Copy,
-        F: Fn(P, usize, T::Get<'a>) -> Result<P, String>,
+        F: MaybeFill<T::Get<'a>>,
     {
-        assert!(max_segments >= 2, "max_segments must be at least 2");
-        let slabs = T::Encoding::load_and_verify_fold(data, max_segments, validate)?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
-        Ok(Self {
-            slabs,
-            index,
-            total_len,
-            max_segments,
-            counter: 0,
+        Self::load_iter(data, opts).finalize()
+    }
+
+    /// Streaming load: decode + validate the saved bytes run by run while
+    /// the column's slabs build underneath (the loader's byte-copy
+    /// mechanics), then [`finalize`](ColumnLoadIter::finalize) into the
+    /// column.
+    ///
+    /// Pulling runs is optional — `load_iter(data, opts).finalize()` is a
+    /// plain load — but consumers that need the data anyway (like an
+    /// index builder) can walk the canonical runs during the same decode
+    /// pass. A fill option on empty data reads as one run of `length`
+    /// copies of the fill value.
+    pub fn load_iter<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> ColumnLoadIter<'a, T, WF, Idx>
+    where
+        F: MaybeFill<T::Get<'a>>,
+    {
+        assert!(opts.max_segments >= 2, "max_segments must be at least 2");
+        let fill = match (data.is_empty(), opts.length) {
+            (true, Some(len)) => opts.fill.fill_value().map(|value| (value, len)),
+            _ => None,
+        };
+        ColumnLoadIter {
+            iter: T::Encoding::load_iter(data, opts.max_segments),
+            fill,
+            fill_emitted: false,
+            length: opts.length,
+            max_segments: opts.max_segments,
             _phantom: PhantomData,
-        })
+        }
     }
 
     /// Build a column directly from pre-encoded slabs, skipping the
@@ -1418,6 +1400,97 @@ where
     /// prefix-sum range overlaps `[lo, hi]`.
     pub fn find_by_value_range(&self, lo: i64, hi: i64) -> FindByValueRange<'_> {
         self.index.find_by_value_range(lo, hi)
+    }
+}
+
+// ── ColumnLoadIter ──────────────────────────────────────────────────────────
+
+/// Streaming column load — see [`Column::load_iter`].
+///
+/// Yields the canonical runs of the input (adjacent equal runs merged, so
+/// consumers get the "adjacent runs never carry equal values" contract)
+/// while the slabs build underneath. All methods return `Result` — the
+/// bytes are untrusted.
+pub struct ColumnLoadIter<'a, T, WF = LenWeight, Idx = SlabBTree<<WF as WeightFn<T>>::Weight>>
+where
+    T: ColumnValueRef,
+    WF: WeightFn<T>,
+{
+    iter: <T::Encoding as ColumnEncoding>::LoadIter<'a>,
+    /// engaged when the data was absent and the load options carried a
+    /// fill: the column reads as `.1` copies of `.0`
+    fill: Option<(T::Get<'a>, usize)>,
+    fill_emitted: bool,
+    length: Option<usize>,
+    max_segments: usize,
+    _phantom: PhantomData<(WF, Idx)>,
+}
+
+impl<'a, T, WF, Idx> ColumnLoadIter<'a, T, WF, Idx>
+where
+    T: ColumnValueRef,
+    WF: WeightFn<T>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    /// The next canonical run, or `None` at end of input. A fill emits
+    /// its entire contents as one run.
+    pub fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        use crate::encoding::LoadIterApi;
+        if let Some((value, len)) = self.fill {
+            if self.fill_emitted || len == 0 {
+                return Ok(None);
+            }
+            self.fill_emitted = true;
+            return Ok(Some(Run { count: len, value }));
+        }
+        self.iter.try_next_run()
+    }
+
+    /// The next single value, stepping through runs. (Fill sources only
+    /// support run-at-a-time access.)
+    pub fn try_next(&mut self) -> Result<Option<T::Get<'a>>, PackError> {
+        use crate::encoding::LoadIterApi;
+        debug_assert!(self.fill.is_none(), "per-item stepping over a fill");
+        self.iter.try_next()
+    }
+
+    /// Drain and validate whatever was not pulled, apply the length check
+    /// from the load options, and return the finished column.
+    pub fn finalize(self) -> Result<Column<T, WF, Idx>, PackError> {
+        use crate::encoding::LoadIterApi;
+        if let Some((value, len)) = self.fill {
+            if len == 0 {
+                return Ok(Column::with_max_segments(self.max_segments));
+            }
+            return Ok(Column::fill(len, value));
+        }
+        let slabs = self.iter.finalize()?;
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        if let Some(expected) = self.length {
+            if total_len != expected {
+                return Err(PackError::InvalidLength(total_len, expected));
+            }
+        }
+        let index = Idx::from_weights(slabs.iter().map(WF::compute));
+        Ok(Column {
+            slabs,
+            index,
+            total_len,
+            max_segments: self.max_segments,
+            counter: 0,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<'a, T, WF, Idx> crate::encoding::RunSrc<'a, T> for ColumnLoadIter<'a, T, WF, Idx>
+where
+    T: ColumnValueRef,
+    WF: WeightFn<T>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        ColumnLoadIter::try_next_run(self)
     }
 }
 

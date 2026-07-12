@@ -2067,13 +2067,13 @@ fn load_with_empty_data_and_fill_gives_filled_nullable() {
 
 #[test]
 fn load_with_empty_data_length_without_fill_errors() {
-    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5).into());
+    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5));
     assert!(matches!(err, Err(crate::PackError::InvalidLength(0, 5))));
 }
 
 #[test]
 fn load_with_empty_data_and_zero_length() {
-    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0).into()).unwrap();
+    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0)).unwrap();
     assert_eq!(col.len(), 0);
 }
 
@@ -2081,7 +2081,7 @@ fn load_with_empty_data_and_zero_length() {
 fn load_with_length_mismatch_errors() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2)]);
     let data = col.save();
-    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5).into());
+    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5));
     assert!(matches!(err, Err(crate::PackError::InvalidLength(2, 5))));
 }
 
@@ -2089,27 +2089,11 @@ fn load_with_length_mismatch_errors() {
 fn load_with_length_match_succeeds() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), None, Some(3)]);
     let data = col.save();
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(1)));
     assert_eq!(loaded.get(1), Some(None));
     assert_eq!(loaded.get(2), Some(Some(3)));
-}
-
-#[test]
-fn load_with_validation_rejects_bad_values() {
-    let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(999), None]);
-    let data = col.save();
-    fn reject_large(v: Option<u64>) -> Option<String> {
-        match v {
-            Some(n) if n > 100 => Some(format!("too large: {}", n)),
-            _ => None,
-        }
-    }
-    let err =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_validation(reject_large));
-    assert!(matches!(err, Err(crate::PackError::InvalidValue(_))));
 }
 
 #[test]
@@ -2124,14 +2108,13 @@ fn load_with_no_validation_accepts_all() {
 fn load_with_length() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), Some(3)]);
     let data = col.save();
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.len(), 3);
 }
 
 #[test]
 fn load_with_opts_is_copy() {
-    let opts = LoadOpts::new().with_length(5).with_fill::<bool>(false);
+    let opts = LoadOpts::new().with_length(5).with_fill(false);
     let opts2 = opts; // copy
     let _ = opts; // still usable
     let _ = opts2;
@@ -2149,8 +2132,7 @@ fn prefix_column_load_with_empty_and_fill() {
 fn prefix_column_load_with_roundtrip() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false, true]);
     let data = col.save();
-    let loaded =
-        PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.save(), data);
 }
 
@@ -2158,7 +2140,7 @@ fn prefix_column_load_with_roundtrip() {
 fn prefix_column_load_with_length_mismatch() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false]);
     let data = col.save();
-    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10).into());
+    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10));
     assert!(err.is_err());
 }
 
@@ -2166,7 +2148,7 @@ fn prefix_column_load_with_length_mismatch() {
 fn delta_column_load_with_roundtrip() {
     let col = DeltaColumn::<Option<u64>>::from_values(vec![Some(10), None, Some(30)]);
     let data = col.save();
-    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new().into()).unwrap();
+    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new()).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(10)));
     assert_eq!(loaded.get(1), Some(None));
@@ -4204,7 +4186,7 @@ fn max_segments_one_rejected() {
 #[should_panic(expected = "max_segments must be at least 2")]
 fn max_segments_one_rejected_at_load() {
     let bytes = Column::<u64>::from_values((0..50).collect()).save();
-    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1).into());
+    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1));
 }
 
 #[test]
@@ -4218,7 +4200,7 @@ fn max_segments_two_full_cycle() {
     col.insert(10, 999u64);
     let bytes = col.save();
     let mut loaded =
-        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2).into()).unwrap();
+        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2)).unwrap();
     loaded.remove(0);
     loaded.push(7);
     assert_eq!(loaded.len(), 100);
@@ -4485,4 +4467,171 @@ fn next_run_never_yields_adjacent_equal_runs_at_default_config() {
         prev = Some(value);
     }
     assert_eq!(total, 299);
+}
+
+// ── streaming load (load_iter-backed load_with) ─────────────────────────────
+
+fn assert_load_roundtrip_bytes<T>(saved: &[u8], expected_len: usize)
+where
+    T: crate::RleValue
+        + crate::ColumnValueRef<Encoding = crate::RleEncoding<T>>
+        + for<'a> crate::ColumnValueRef<Get<'a> = T>
+        + Clone
+        + PartialEq
+        + std::fmt::Debug
+        + 'static,
+{
+    for max_seg in [2usize, 4, 8, 64] {
+        let col =
+            Column::<T>::load_with(saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        assert_eq!(col.len(), expected_len, "len, max_seg={max_seg}");
+        assert_eq!(col.save(), saved, "save roundtrip, max_seg={max_seg}");
+    }
+}
+
+#[test]
+fn load_roundtrips_across_shapes() {
+    // long literal run (forces literal splitting), repeats, mixed
+    for vals in [
+        (0..300).collect::<Vec<u64>>(),
+        (0..300).map(|i| i / 50).collect(),
+        (0..300).map(|i| if i % 7 == 0 { i } else { 9 }).collect(),
+    ] {
+        let saved = Column::<u64>::from_values(vals.clone()).save();
+        assert_load_roundtrip_bytes::<u64>(&saved, vals.len());
+    }
+
+    let nullable: Vec<Option<u64>> = (0..200)
+        .map(|i| if i % 5 == 0 { None } else { Some(i / 3) })
+        .collect();
+    let saved = Column::<Option<u64>>::from_values(nullable.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col =
+            Column::<Option<u64>>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg))
+                .unwrap();
+        assert_eq!(col.to_vec(), nullable);
+        assert_eq!(col.save(), saved);
+    }
+
+    let strings: Vec<String> = (0..100)
+        .map(|i| {
+            if i % 4 == 0 {
+                "repeated".to_string()
+            } else {
+                format!("item_{i}")
+            }
+        })
+        .collect();
+    let saved = Column::<String>::from_values(strings.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col = Column::<String>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg))
+            .unwrap();
+        assert_eq!(col.to_vec(), strings);
+        assert_eq!(col.save(), saved);
+    }
+
+    let bools: Vec<bool> = (0..500).map(|i| (i / 13) % 2 == 0).collect();
+    let saved = Column::<bool>::from_values(bools.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col =
+            Column::<bool>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        assert_eq!(col.to_vec(), bools);
+        assert_eq!(col.save(), saved);
+    }
+
+    // prefix column: weights must come out right for prefix queries
+    let counts: Vec<u32> = (0..400).map(|i| (i % 5) as u32).collect();
+    let saved = PrefixColumn::<u32>::from_values(counts.clone()).save();
+    let col = PrefixColumn::<u32>::load_with(&saved, LoadOpts::new()).unwrap();
+    let mut total = 0u64;
+    for (pos, c) in counts.iter().enumerate() {
+        assert_eq!(col.get_prefix(pos), total, "prefix at {pos}");
+        total += *c as u64;
+    }
+    assert_eq!(col.get_prefix(counts.len()), total);
+}
+
+#[test]
+fn load_empty_and_fill_and_length() {
+    let col =
+        Column::<u64>::load_with(&[], LoadOpts::new().with_length(5).with_fill(7u64)).unwrap();
+    assert_eq!(col.to_vec(), vec![7u64; 5]);
+    assert!(Column::<u64>::load_with(&[], LoadOpts::new().with_length(5)).is_err());
+
+    // length mismatch caught
+    let saved = Column::<u64>::from_values((0..10).collect()).save();
+    assert!(Column::<u64>::load_with(&saved, LoadOpts::new().with_length(11)).is_err());
+}
+
+#[test]
+fn load_accepts_non_canonical_input() {
+    // The loader accepts non-canonical run structure (document
+    // compatibility with sloppier encoders) and byte-copies it into
+    // slabs; the load *iterator*, however, merges adjacent equal runs so
+    // its consumers keep the "adjacent runs never equal" contract.
+    let cases: &[(&[u8], &[u64])] = &[
+        (&[0x01, 0x05], &[5]),                      // repeat with count 1
+        (&[0x02, 0x05, 0x02, 0x05], &[5, 5, 5, 5]), // adjacent equal repeats
+        (&[0x02, 0x05, 0x7f, 0x05], &[5, 5, 5]),    // repeat then equal literal
+    ];
+    for (bytes, expected) in cases {
+        let col = Column::<u64>::load_with(bytes, LoadOpts::new()).unwrap();
+        assert_eq!(&col.to_vec(), expected, "values for {bytes:?}");
+
+        // the run stream is canonical even though the slab bytes are not
+        let mut it = crate::RleEncoding::<u64>::load_iter(bytes, 64);
+        let mut prev: Option<u64> = None;
+        while let Some(run) = crate::LoadIterApi::try_next_run(&mut it).unwrap() {
+            assert_ne!(prev, Some(run.value), "adjacent equal runs for {bytes:?}");
+            prev = Some(run.value);
+        }
+    }
+}
+
+#[test]
+fn load_rejects_bad_contents() {
+    // null in non-nullable
+    assert!(Column::<u64>::load_with(&[0x00, 0x01], LoadOpts::new()).is_err());
+    // truncated value bytes
+    assert!(Column::<u64>::load_with(&[0x02], LoadOpts::new()).is_err());
+    // invalid utf8 in a string column: repeat count 2, len 1, 0xff
+    assert!(Column::<String>::load_with(&[0x02, 0x01, 0xff], LoadOpts::new()).is_err());
+}
+
+#[test]
+fn load_iter_partial_consume_then_error() {
+    use crate::encoding::LoadIterApi;
+    // one valid run followed by a malformed tail: the error surfaces when
+    // the iterator reaches it, not before
+    let mut bytes = Column::<u64>::from_values(vec![5, 5, 5]).save();
+    bytes.extend_from_slice(&[0x03]); // repeat header with missing value
+    let mut iter = crate::RleEncoding::<u64>::load_iter(&bytes, 64);
+    let first = LoadIterApi::try_next_run(&mut iter);
+    match first {
+        Err(_) => {}
+        Ok(_) => assert!(LoadIterApi::try_next_run(&mut iter).is_err()),
+    }
+
+    // per-item stepping over valid bytes
+    let good = Column::<u64>::from_values(vec![5, 5, 5]).save();
+    let mut it = crate::RleEncoding::<u64>::load_iter(&good, 64);
+    let mut vals = vec![];
+    while let Some(v) = LoadIterApi::try_next(&mut it).unwrap() {
+        vals.push(v);
+    }
+    assert_eq!(vals, vec![5, 5, 5]);
+}
+
+proptest! {
+    #[test]
+    fn load_roundtrip_proptest_streaming(
+        values in prop::collection::vec(prop::option::of(0u64..50), 0..600),
+        max_seg in 2usize..32,
+    ) {
+        let saved = Column::<Option<u64>>::from_values(values.clone()).save();
+        let col = Column::<Option<u64>>::load_with(
+            &saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        prop_assert_eq!(col.to_vec(), values);
+        prop_assert_eq!(col.save(), saved);
+    }
 }

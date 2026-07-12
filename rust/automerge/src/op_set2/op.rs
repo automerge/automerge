@@ -1085,6 +1085,7 @@ impl<'a> Op<'a> {
         (self.value().into_value(), self.exid(op_set))
     }
 
+    #[cfg(test)]
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
         match (self.action, &self.value) {
             (Action::Increment, ScalarValue::Int(i)) => Some(*i),

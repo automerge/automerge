@@ -13,9 +13,6 @@ use crate::{AsColumnRef, ColumnValueRef, Run};
 pub type ValidateFn<P, V> =
     for<'a> fn(P, usize, <V as ColumnValueRef>::Get<'a>) -> Result<P, String>;
 
-/// Simple per-value validation function (no accumulator).
-pub type SimpleValidateFn<V> = for<'a> fn(<V as ColumnValueRef>::Get<'a>) -> Option<String>;
-
 /// Trait abstracting the byte-level encoding strategy for a column.
 ///
 /// Implementors provide `get`, bulk encoding/decoding, split/merge, and
@@ -47,42 +44,6 @@ pub trait ColumnEncoding: Default {
     /// Returns `Ok(())` if the encoding is canonical, or `Err(description)` if
     /// any invariant is violated.  This is intended for testing and debugging.
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<Self::Tail>, PackError>;
-
-    /// Decode and validate raw bytes, splitting into slabs.
-    ///
-    /// Walks the wire format, validates every encoded value is well-formed,
-    /// rejects nulls in non-nullable column types, and splits the data into
-    /// slabs respecting `max_segments`.
-    ///
-    /// If `validate` is `Some`, each decoded value is also passed to the
-    /// function during the same pass.  Returns
-    /// [`PackError::InvalidValue`] if the function returns `Some(msg)`.
-    ///
-    /// Returns a Vec of Slabs on success.
-    fn load_and_verify_fold<'a, F, P: Default + Copy>(
-        data: &'a [u8],
-        max_segments: usize,
-        validate: Option<F>,
-    ) -> Result<Vec<Slab<Self::Tail>>, PackError>
-    where
-        F: Fn(P, usize, <Self::Value as ColumnValueRef>::Get<'a>) -> Result<P, String>;
-
-    fn load_and_verify(
-        data: &[u8],
-        max_segments: usize,
-        validate: Option<SimpleValidateFn<Self::Value>>,
-    ) -> Result<Vec<Slab<Self::Tail>>, PackError> {
-        Self::load_and_verify_fold(
-            data,
-            max_segments,
-            validate.map(|f| {
-                move |_, _c, v| match f(v) {
-                    Some(s) => Err(s),
-                    _ => Ok(()),
-                }
-            }),
-        )
-    }
 
     /// Merge slab `b`'s data into accumulator `acc`.
     /// `a_tail` and `a_segments` describe the current state of `acc`.
@@ -149,10 +110,58 @@ pub trait ColumnEncoding: Default {
     /// Create a new empty encoder.
     fn encoder<'a>() -> Self::Encoder<'a>;
 
+    /// Streaming load iterator: decode + validate saved bytes run by run.
+    type LoadIter<'a>: LoadIterApi<'a, Self::Value>;
+
+    /// Create a load iterator over saved bytes. `max_segments` is the
+    /// slab budget for the slabs it builds as the stream is consumed.
+    fn load_iter(data: &[u8], max_segments: usize) -> Self::LoadIter<'_>;
+
     fn encode<V: AsColumnRef<Self::Value>>(values: impl Iterator<Item = V>) -> Slab<Self::Tail> {
         let mut slab = Self::empty_slab();
         Self::splice_slab(&mut slab, 0, 0, values.map(|v| (v, 1)), usize::MAX);
         slab
+    }
+}
+
+/// Streaming decode + validate over saved column bytes.
+///
+/// The load-side dual of [`EncoderApi`]: yields the canonical runs of the
+/// input while performing the same structural validation as a full load.
+/// Consuming the stream to the end validates the whole input. Everything
+/// returns `Result` — the bytes are untrusted.
+pub trait LoadIterApi<'a, T: ColumnValueRef> {
+    /// The next canonical run, or `None` at end of input.
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError>;
+
+    /// The next single value, stepping through runs.
+    fn try_next(&mut self) -> Result<Option<T::Get<'a>>, PackError>;
+
+    /// Drain and validate whatever the consumer did not pull, and return
+    /// the finished slabs (built with the loader's byte-copy mechanics as
+    /// the stream was consumed).
+    fn finalize(self) -> Result<Vec<Slab<<T::Encoding as ColumnEncoding>::Tail>>, PackError>
+    where
+        Self: Sized;
+}
+
+/// A source of value runs — an in-memory column iterator or a streaming
+/// load iterator, unified for consumers generic over "some run stream"
+/// (like an index builder walking columns while they load).
+///
+/// The single method is fallible because load sources are still
+/// validating untrusted bytes; in-memory iterators always return `Ok`.
+/// When the concrete type is known, prefer its inherent methods (which
+/// also offer per-item stepping, and are infallible on in-memory
+/// iterators).
+pub trait RunSrc<'a, T: ColumnValueRef> {
+    /// The next canonical run, or `None` at end of input.
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError>;
+}
+
+impl<'a, T: ColumnValueRef, S: RunSrc<'a, T> + ?Sized> RunSrc<'a, T> for &mut S {
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        (**self).try_next_run()
     }
 }
 

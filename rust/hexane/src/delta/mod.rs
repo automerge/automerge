@@ -9,8 +9,8 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::column::Column;
+use crate::LoadOpts;
 use crate::PackError;
-use crate::TypedLoadOpts;
 pub use indexed::IndexedDeltaWeightFn;
 
 // ── DeltaValue trait ────────────────────────────────────────────────────────
@@ -599,7 +599,10 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<Option<i64>>) -> Result<Self, PackError> {
+    pub fn load_with<F>(data: &[u8], opts: LoadOpts<F>) -> Result<Self, PackError>
+    where
+        F: crate::MaybeFill<Option<i64>>,
+    {
         if data.is_empty() {
             let col = Column::load_with(data, opts)?;
             return Ok(Self {
@@ -608,11 +611,6 @@ impl<T: DeltaValue> DeltaColumn<T> {
             });
         }
         let validate = |running: i64, count: usize, val: Option<i64>| {
-            if let Some(f) = opts.validate {
-                if let Some(msg) = f(val) {
-                    return Err(msg);
-                }
-            }
             match val {
                 None => {
                     if !T::NULLABLE {
@@ -634,12 +632,12 @@ impl<T: DeltaValue> DeltaColumn<T> {
                 }
             }
         };
-        let col = Column::load_verified_fold(data, opts.max_segments, Some(validate))?;
-        if let Some(expected) = opts.length {
-            if col.len() != expected {
-                return Err(PackError::InvalidLength(col.len(), expected));
-            }
+        let mut iter = Column::load_iter(data, opts);
+        let mut running: i64 = 0;
+        while let Some(run) = iter.try_next_run()? {
+            running = validate(running, run.count, run.value).map_err(PackError::InvalidValue)?;
         }
+        let col = iter.finalize()?;
         Ok(Self {
             col,
             _phantom: PhantomData,
@@ -647,7 +645,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
     }
 
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_with(data, crate::LoadOpts::default().into())
+        Self::load_with(data, crate::LoadOpts::default())
     }
 
     pub fn len(&self) -> usize {
