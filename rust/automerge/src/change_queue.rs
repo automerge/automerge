@@ -77,6 +77,46 @@ impl ChangeQueue {
             .contains(&(c.actor_id().clone(), c.seq()))
     }
 
+    /// Remove queued changes at or after an incompatible actor sequence,
+    /// together with changes which transitively depend on that branch.
+    pub(crate) fn remove_actor_branch_from(&mut self, actor: &ActorId, seq: u64) {
+        let mut removed = self
+            .changes
+            .iter()
+            .filter(|change| change.actor_id() == actor && change.seq() >= seq)
+            .map(Change::hash)
+            .collect::<HashSet<_>>();
+
+        let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
+        for change in &self.changes {
+            for dep in change.deps() {
+                dependents.entry(*dep).or_default().push(change.hash());
+            }
+        }
+
+        let mut to_remove = removed.iter().copied().collect::<VecDeque<_>>();
+        while let Some(hash) = to_remove.pop_front() {
+            if let Some(children) = dependents.remove(&hash) {
+                for child in children {
+                    if removed.insert(child) {
+                        to_remove.push_back(child);
+                    }
+                }
+            }
+        }
+
+        self.changes.retain(|change| {
+            if removed.contains(&change.hash()) {
+                self.hashes.remove(&change.hash());
+                self.incoming_actor_seqs
+                    .remove(&(change.actor_id().clone(), change.seq()));
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     pub(crate) fn extend(&mut self, batch: ChangeBatch) {
         for c in batch.changes {
             let incoming_actor_seq = (c.actor_id().clone(), c.seq());

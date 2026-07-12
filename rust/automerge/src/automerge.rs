@@ -441,6 +441,12 @@ impl Automerge {
             }
         }
 
+        // A local change claims this actor sequence. Any queued change at the
+        // same or a later sequence belongs to an incompatible actor branch;
+        // retaining it would allow save() to encode duplicate sequence numbers.
+        let actor = self.ops.actors[actor_index].clone();
+        self.queue.remove_actor_branch_from(&actor, seq);
+
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
 

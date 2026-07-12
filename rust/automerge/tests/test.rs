@@ -4301,3 +4301,48 @@ fn transaction_patches_mark_at_normalized_utf8_indexes() {
 
     assert_eq!((marks[0].start, marks[0].end), (4, 8));
 }
+
+#[test]
+fn queued_change_does_not_collide_with_later_local_change() {
+    let actor = ActorId::try_from("7f00000000000000").unwrap();
+    let mut local = AutoCommit::new().with_actor(actor.clone());
+    local.put(ROOT, "base", 0).unwrap();
+    local.commit();
+    let base = local.get_heads();
+
+    let mut remote = local.fork().with_actor(actor.clone());
+
+    // Both branches independently create sequence number 2 for the same actor.
+    local.put(ROOT, "local-2", 2).unwrap();
+    local.commit();
+    remote.put(ROOT, "remote-2", 2).unwrap();
+    remote.commit();
+    remote.put(ROOT, "remote-3", 3).unwrap();
+    remote.commit();
+    remote.set_actor(ActorId::try_from("03").unwrap());
+    remote.put(ROOT, "dependent", 4).unwrap();
+    remote.commit();
+
+    let remote_changes = remote.get_changes(&base);
+    let remote_2 = remote_changes[0].clone();
+    let remote_3 = remote_changes[1].clone();
+    let dependent = remote_changes[2].clone();
+
+    // Sequence 3 and a change which transitively depends on it are queued
+    // because the remote sequence-2 dependency is absent.
+    local.apply_changes([remote_3, dependent]).unwrap();
+    // Sequence 2 conflicts with the local sequence 2. The queued sequence 3
+    // belongs to that rejected branch and can never become valid.
+    assert!(matches!(
+        local.apply_changes([remote_2]),
+        Err(AutomergeError::DuplicateSeqNumber(2, _))
+    ));
+    assert!(local.get_missing_deps(&[]).is_empty());
+
+    // The next local change also receives sequence 3. If the incompatible
+    // queued change was retained, saving includes both sequence-3 changes.
+    local.put(ROOT, "local-3", 3).unwrap();
+    local.commit();
+
+    AutoCommit::load(&local.save()).unwrap();
+}
