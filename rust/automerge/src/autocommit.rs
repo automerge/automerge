@@ -763,7 +763,7 @@ impl AutoCommit {
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {
-            self.patch_log.begin_epoch();
+            self.patch_log.finish_current_view(&self.doc, &before);
             let clock = self.doc.clock_range(&before, after);
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
         }
