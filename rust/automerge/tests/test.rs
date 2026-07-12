@@ -4077,6 +4077,36 @@ fn incremental_sibling_text_diffs_survive_isolate_integrate_roundtrip() {
 }
 
 #[test]
+fn incremental_patches_survive_nested_edit_and_list_shift_across_isolation() {
+    let mut doc = AutoCommit::new();
+    let items = doc.put_object(ROOT, "items", ObjType::List).unwrap();
+    let a = doc.insert_object(&items, 0, ObjType::Map).unwrap();
+    doc.put(&a, "id", "a").unwrap();
+    doc.put(&a, "n", 1).unwrap();
+    let b = doc.insert_object(&items, 1, ObjType::Map).unwrap();
+    doc.put(&b, "id", "b").unwrap();
+    doc.put(&b, "n", 2).unwrap();
+    doc.commit();
+    let beginning = doc.get_heads();
+
+    let z = doc.insert_object(&items, 0, ObjType::Map).unwrap();
+    doc.put(&z, "id", "z").unwrap();
+    doc.put(&z, "n", 0).unwrap();
+    doc.commit();
+    doc.update_diff_cursor();
+    let mut actual = doc.hydrate(&ROOT, None).unwrap();
+
+    doc.isolate(&beginning);
+    doc.put(&a, "n", 99).unwrap();
+    doc.commit();
+    doc.integrate();
+
+    let patches = doc.diff_incremental();
+    actual.apply_patches(doc.text_encoding(), patches).unwrap();
+    assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
+}
+
+#[test]
 fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
     let encoding = TextEncoding::Utf16CodeUnit;
     let mut doc = AutoCommit::new_with_encoding(encoding);
@@ -4110,36 +4140,6 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
         assert_eq!(reconstructed.get_heads(), expected_heads);
         assert_eq!(reconstructed.hydrate(&ROOT, None).unwrap(), expected);
     }
-}
-
-#[test]
-fn incremental_patches_survive_nested_edit_and_list_shift_across_isolation() {
-    let mut doc = AutoCommit::new();
-    let items = doc.put_object(ROOT, "items", ObjType::List).unwrap();
-    let a = doc.insert_object(&items, 0, ObjType::Map).unwrap();
-    doc.put(&a, "id", "a").unwrap();
-    doc.put(&a, "n", 1).unwrap();
-    let b = doc.insert_object(&items, 1, ObjType::Map).unwrap();
-    doc.put(&b, "id", "b").unwrap();
-    doc.put(&b, "n", 2).unwrap();
-    doc.commit();
-    let beginning = doc.get_heads();
-
-    let z = doc.insert_object(&items, 0, ObjType::Map).unwrap();
-    doc.put(&z, "id", "z").unwrap();
-    doc.put(&z, "n", 0).unwrap();
-    doc.commit();
-    doc.update_diff_cursor();
-    let mut actual = doc.hydrate(&ROOT, None).unwrap();
-
-    doc.isolate(&beginning);
-    doc.put(&a, "n", 99).unwrap();
-    doc.commit();
-    doc.integrate();
-
-    let patches = doc.diff_incremental();
-    actual.apply_patches(doc.text_encoding(), patches).unwrap();
-    assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
 }
 
 #[test]
