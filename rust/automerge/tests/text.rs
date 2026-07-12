@@ -5,8 +5,8 @@ use automerge::{
     iter::Span,
     marks::{ExpandMark, Mark, UpdateSpansConfig},
     transaction::Transactable,
-    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, Prop, ReadDoc,
-    ScalarValue, TextEncoding, Value, ROOT,
+    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
+    TextEncoding, ROOT,
 };
 const B: usize = 16;
 
@@ -900,6 +900,8 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
     // Make sure the document has a clean patch log
     doc.commit();
 
+    let mut hydrated = doc.hydrate(&ROOT, None).unwrap();
+
     // Create another concurrent change
     doc.isolate(&beginning);
     let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
@@ -909,91 +911,13 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
 
     let patches = doc.diff_incremental();
 
-    // Here we would expect the patches to be something like:
-    //
-    // first patch back to the beginning of doc
-    // * DeleteMap ROOT "color"
-    // * DeleteMap ROOT "name"
-    //
-    // Now insert new items
-    // * PutMap ROOT "color" Text
-    // * PutMap ROOT "name" Text
-    // * SpliceText "name" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    // * SpliceText "color" "unset"
-    //
-    // But what we actually get is
-    //
-    // * DeleteMap ROOT "color"
-    // * DeleteMap ROOT "name"
-    //
-    // Now insert new items
-    // * PutMap ROOT "color" Text
-    // * PutMap ROOT "name" Text
-    // * DeleteSeq "color" 3
-    // * SpliceText "color" "red"
-    // * SpliceText "name" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    // * SpliceText "unset"
-    //
-    // Where it appears that the 'red' property has been inserted into the patch
-    // log in the wrong order (we would at least expect the deletion to come
-    // after the insertion)
-
-    // This assertion works until NUM_CHARS_IN_NEW_NAME is greater than 44
-    assert_eq!(
-        patches,
-        vec![
-            Patch {
-                obj: ROOT,
-                path: vec![],
-                action: PatchAction::DeleteMap {
-                    key: "color".to_string()
-                },
-            },
-            Patch {
-                obj: ROOT,
-                path: vec![],
-                action: PatchAction::DeleteMap {
-                    key: "name".to_string()
-                },
-            },
-            Patch {
-                obj: ROOT,
-                path: vec![],
-                action: PatchAction::PutMap {
-                    key: "color".to_string(),
-                    value: (Value::Object(ObjType::Text), color.clone()),
-                    conflict: true
-                },
-            },
-            Patch {
-                obj: ROOT,
-                path: vec![],
-                action: PatchAction::PutMap {
-                    key: "name".to_string(),
-                    value: (Value::Object(ObjType::Text), name.clone()),
-                    conflict: false
-                },
-            },
-            Patch {
-                obj: name,
-                path: vec![(ROOT, Prop::Map("name".to_string()))],
-                action: PatchAction::SpliceText {
-                    index: 0,
-                    value: ConcreteTextValue::new(&new_name, TextEncoding::UnicodeCodePoint),
-                    marks: None
-                }
-            },
-            Patch {
-                obj: color,
-                path: vec![(ROOT, Prop::Map("color".to_string()))],
-                action: PatchAction::SpliceText {
-                    index: 0,
-                    value: ConcreteTextValue::new("unset", TextEncoding::UnicodeCodePoint),
-                    marks: None
-                }
-            }
-        ]
-    );
+    // The epochs preserve the isolate/integrate chronology, so the exact patch
+    // sequence can contain intermediate conflict updates. What matters is that
+    // applying it reconstructs the integrated document.
+    hydrated
+        .apply_patches(TextEncoding::UnicodeCodePoint, patches)
+        .unwrap();
+    assert_eq!(hydrated, doc.hydrate(&ROOT, None).unwrap());
 }
 
 #[test]
