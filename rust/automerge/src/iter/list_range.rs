@@ -163,7 +163,8 @@ impl<'a> Iterator for ListDiff<'a> {
             }
 
             if let Some(mut last) = last_visible {
-                last.update(state.expose);
+                let newly_visible = last.diff == Diff::Same;
+                last.update(state.expose || newly_visible);
                 // Deleting the winning value exposes `last`, so its put
                 // patch must carry the remaining register's conflict state.
                 last.conflict = state.num_new > 1;
@@ -172,11 +173,17 @@ impl<'a> Iterator for ListDiff<'a> {
                 }
                 return Some(last);
             } else {
-                let list = state.diff_item(list.id, value, self.index, diff);
-                if diff.is_visible() {
+                let mut item = state.diff_item(list.id, value, self.index, diff);
+                if diff == Diff::Same && state.num_old > 1 && state.num_new == 1 {
+                    // The surviving value is unchanged, but removing the other
+                    // visible values clears its conflict flag. Emit a Put and,
+                    // for objects, expose children which are unchanged too.
+                    item.update(true);
+                }
+                if item.diff.is_visible() {
                     self.index += 1;
                 }
-                return Some(list);
+                return Some(item);
             }
         }
         None

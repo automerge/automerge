@@ -4148,3 +4148,81 @@ fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
 
     assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
 }
+
+#[test]
+fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let actor = ActorId::try_from("7f").unwrap();
+    let mut doc = AutoCommit::new_with_encoding(encoding).with_actor(actor.clone());
+    let mut peer = doc
+        .fork()
+        .with_actor(ActorId::try_from("7f00000000000000").unwrap());
+    peer.set_actor(actor);
+    peer.put_object(ROOT, "k4", ObjType::Text).unwrap();
+    peer.commit();
+
+    let mut local_sync = State::new();
+    let mut peer_sync = State::new();
+    for _ in 0..7 {
+        if let Some(message) = doc.sync().generate_sync_message(&mut local_sync) {
+            peer.sync()
+                .receive_sync_message(&mut peer_sync, message)
+                .unwrap();
+        }
+        if let Some(message) = peer.sync().generate_sync_message(&mut peer_sync) {
+            doc.sync()
+                .receive_sync_message(&mut local_sync, message)
+                .unwrap();
+        }
+    }
+
+    doc.isolate(&[]);
+    doc.set_actor(ActorId::try_from("ff0000").unwrap());
+    let value = automerge::hydrate::Value::text(encoding, "hello world");
+    doc.batch_create_object(ROOT, "k4", &value, false).unwrap();
+    doc.commit();
+    let isolated = doc.get_heads();
+    doc.integrate();
+
+    let integrated = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&integrated)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&isolated)).unwrap();
+    let patches = doc.diff(&integrated, &isolated);
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn diff_exposes_list_object_when_conflict_winner_is_removed() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut doc =
+        AutoCommit::new_with_encoding(encoding).with_actor(ActorId::try_from("7f").unwrap());
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, "base").unwrap();
+    doc.commit();
+    let base = doc.get_heads();
+
+    let mut peer = doc
+        .fork()
+        .with_actor(ActorId::try_from("7f00000000000000").unwrap());
+    peer.put_object(&list, 0, ObjType::Text).unwrap();
+    peer.commit();
+    doc.merge(&mut peer).unwrap();
+
+    doc.isolate(&base);
+    doc.set_actor(ActorId::try_from("ff0000").unwrap());
+    let value = automerge::hydrate::Value::text(encoding, "hello world");
+    doc.batch_create_object(&list, 0, &value, false).unwrap();
+    doc.commit();
+    let isolated = doc.get_heads();
+    doc.integrate();
+
+    let integrated = doc.get_heads();
+    let mut actual = doc.hydrate(&ROOT, Some(&integrated)).unwrap();
+    let expected = doc.hydrate(&ROOT, Some(&isolated)).unwrap();
+    let patches = doc.diff(&integrated, &isolated);
+    actual.apply_patches(encoding, patches).unwrap();
+
+    assert_eq!(actual, expected);
+}
