@@ -530,6 +530,7 @@ struct OpValue {
     deleted: bool,
     conflict: bool,
     expose: bool,
+    replaced: Option<Value>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -548,15 +549,16 @@ impl OpValueOption {
         }
     }
 
-    fn expose(&mut self) {
+    fn expose(&mut self, replaced: Value) {
         if let Self(Some(ov)) = self {
             ov.expose = true;
+            ov.replaced = Some(replaced);
         }
     }
 
     fn set(&mut self, value: Value, id: OpId, deleted: bool) {
         if deleted && self.is_visible() {
-            self.expose();
+            self.expose(value);
         } else {
             let conflict = self.is_visible();
             let expose = !deleted && self.is_deleted();
@@ -566,6 +568,7 @@ impl OpValueOption {
                 conflict,
                 deleted,
                 expose,
+                replaced: None,
             }));
         }
     }
@@ -754,6 +757,24 @@ impl<'a> ValueState<'a> {
                 }
                 (Some(d), Some(_)) if !d.conflict => {
                     log.flag_conflict(obj, &Prop::from(index));
+                }
+                (Some(d), None) if d.expose => {
+                    let replaced = d
+                        .replaced
+                        .clone()
+                        .expect("exposed value must record the value it replaces");
+                    log.replace_seq(
+                        obj,
+                        index,
+                        &replaced,
+                        d.value,
+                        d.id,
+                        d.conflict,
+                        true,
+                        self.seq_type,
+                        self.text_encoding,
+                        self.marks.current().export(),
+                    );
                 }
                 (Some(d), None) if d.deleted => {
                     let w = d.value.width(self.seq_type, self.text_encoding);
