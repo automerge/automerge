@@ -273,7 +273,8 @@ impl<'a> Iterator for MapDiff<'a> {
 
             if diff.is_del() {
                 if let Some(mut last) = last_visible.take() {
-                    last.update(expose);
+                    let newly_visible = last.diff == Diff::Same;
+                    last.update(expose || newly_visible);
                     // Deleting the winning value exposes `last`, so its put
                     // patch must describe the conflict state after deletion,
                     // not merely whether the conflict is newly created.
@@ -286,7 +287,9 @@ impl<'a> Iterator for MapDiff<'a> {
                 // The surviving value is unchanged, but removing the other
                 // visible values clears its conflict flag. Emit a Put so a
                 // hydrated-state consumer can observe that metadata change.
-                item.diff = Diff::Add;
+                // If it is an object, its unchanged children will not produce
+                // events of their own, so expose its complete state.
+                item.update(true);
             }
             return Some(item);
         }
