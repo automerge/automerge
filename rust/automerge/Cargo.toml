@@ -24,7 +24,9 @@ leb128 = "^0.2.5"
 sha2 = "^0.11.0-rc.5"
 thiserror = "^2.0.12"
 itertools = "0.14.0"
-flate2 = "^1.0.22"
+# zlib-rs backend: pure Rust (works on wasm), ~25% faster inflate than the
+# default miniz_oxide backend natively and ~2x faster on wasm
+flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
 smol_str = { version = "0.3", features = ["serde"] }
 tracing = { version = "^0.1.29" }
 rustc-hash = "^2.1.1"

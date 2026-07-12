@@ -78,6 +78,8 @@ exceptions = [
     # these are needed by cbindgen and its dependancies
     # should be revied more fully before release
     { allow = ["MPL-2.0"], name = "cbindgen" },
+    # pure-Rust zlib used by flate2's zlib-rs backend
+    { allow = ["Zlib"], name = "zlib-rs" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
