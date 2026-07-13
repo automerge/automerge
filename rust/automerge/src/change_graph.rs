@@ -1283,7 +1283,6 @@ impl ChangeGraph {
         }
     }
 
-
     pub(crate) fn remove_ancestors(
         &self,
         changes: &mut BTreeSet<ChangeHash>,
@@ -1453,8 +1452,7 @@ impl ChangeGraphCols {
 
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let timestamps =
-            hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
+        let timestamps = hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
         let messages =
             hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
         let extra_bytes_meta =
@@ -2067,7 +2065,8 @@ mod tests {
         use crate::ROOT;
 
         let mut doc = Automerge::new();
-        doc.set_actor(crate::ActorId::from(b"alice" as &[u8])).unwrap();
+        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]))
+            .unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "counter", 0i64).unwrap();
         tx.commit();

@@ -374,8 +374,8 @@ impl IndexBuilder {
     }
 
     /// The shared per-op path: both the op-at-a-time reference builder
-    /// ([`Self::process_op`]) and the rare path of the column walk feed
-    /// through here.
+    /// (the test-only `process_op`) and the rare path of the column walk
+    /// feed through here.
     #[allow(clippy::too_many_arguments)]
     fn process_op_parts(
         &mut self,

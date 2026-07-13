@@ -3947,7 +3947,9 @@ fn increment_patch_clears_resolved_map_conflict() {
     doc.commit();
 
     let mut concurrent = AutoCommit::new_with_encoding(encoding);
-    concurrent.set_actor(ActorId::try_from("02").unwrap()).unwrap();
+    concurrent
+        .set_actor(ActorId::try_from("02").unwrap())
+        .unwrap();
     concurrent
         .put(ROOT, "key", ScalarValue::counter(-1000))
         .unwrap();
@@ -4345,7 +4347,8 @@ fn diff_exposes_list_object_when_conflict_winner_is_removed() {
 fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
     let encoding = TextEncoding::Utf8CodeUnit;
     let mut doc = AutoCommit::new_with_encoding(encoding);
-    doc.set_actor(ActorId::try_from("fe004faf").unwrap()).unwrap();
+    doc.set_actor(ActorId::try_from("fe004faf").unwrap())
+        .unwrap();
     let text = doc
         .batch_create_object(
             ROOT,

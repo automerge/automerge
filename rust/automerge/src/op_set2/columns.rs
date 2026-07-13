@@ -94,7 +94,6 @@ fn debug_cmp<I: Debug + PartialEq>(tag: &str, a: Vec<I>, b: Vec<I>) -> bool {
     }
 }
 
-
 impl Columns {
     #[cfg(test)]
     pub(super) fn debug_cmp(&self, other: &Self) {

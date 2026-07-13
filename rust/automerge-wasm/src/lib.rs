@@ -1568,7 +1568,10 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
-    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, error::Merge> {
+    pub fn generate_sync_message(
+        &mut self,
+        state: &mut SyncState,
+    ) -> Result<JsValue, error::Merge> {
         let message = self.doc.sync().generate_sync_message(&mut state.0)?;
         if let Some(message) = message {
             let message = message.encode();
@@ -1732,9 +1735,7 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
         let marks = if let Some(heads) = heads {
-            self.doc
-                .marks_at(obj, &heads)
-                .map_err(to_js_err)?
+            self.doc.marks_at(obj, &heads).map_err(to_js_err)?
         } else {
             self.doc.marks(obj).map_err(to_js_err)?
         };

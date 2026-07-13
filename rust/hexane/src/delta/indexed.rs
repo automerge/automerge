@@ -57,11 +57,7 @@ impl<I: DeltaInner> WeightFn<I> for IndexedDeltaWeightFn {
     /// is what lets [`DeltaColumn`] validate the finished aggregates per
     /// *slab* rather than per run.
     #[inline]
-    fn accumulate_run(
-        w: &mut SlabAgg,
-        count: usize,
-        value: I::Get<'_>,
-    ) -> Result<(), PackError> {
+    fn accumulate_run(w: &mut SlabAgg, count: usize, value: I::Get<'_>) -> Result<(), PackError> {
         let Some(v) = I::to_opt(value) else {
             // a null run holds the partial where it is
             if w.len == 0 {

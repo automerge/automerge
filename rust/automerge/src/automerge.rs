@@ -1469,7 +1469,7 @@ impl Automerge {
         if !self.hash_graph_is_checked() {
             return Err(AutomergeError::UncheckedHashGraph);
         }
-        Ok(        fragments
+        Ok(fragments
             .into_iter()
             .filter_map(|f| {
                 if f.head.fragment_level() == 0 && f.members.len() == 1 {

@@ -4569,13 +4569,13 @@ fn load_rejects_non_canonical_input() {
     // have merged or never emitted — is a load error, both when draining
     // (`load_with`) and when pulling the run stream.
     let cases: &[&[u8]] = &[
-        &[0x01, 0x05],                   // repeat with count 1
-        &[0x02, 0x05, 0x02, 0x05],       // adjacent equal repeats
-        &[0x02, 0x05, 0x7f, 0x05],       // repeat then equal literal
-        &[0x7f, 0x05, 0x7f, 0x05],       // adjacent literal runs
-        &[0x7e, 0x05, 0x05],             // literal with consecutive equal values
-        &[0x7f, 0x05, 0x02, 0x05],       // literal then equal repeat
-        &[0x00, 0x00],                   // null run with count 0 (nullable col below)
+        &[0x01, 0x05],             // repeat with count 1
+        &[0x02, 0x05, 0x02, 0x05], // adjacent equal repeats
+        &[0x02, 0x05, 0x7f, 0x05], // repeat then equal literal
+        &[0x7f, 0x05, 0x7f, 0x05], // adjacent literal runs
+        &[0x7e, 0x05, 0x05],       // literal with consecutive equal values
+        &[0x7f, 0x05, 0x02, 0x05], // literal then equal repeat
+        &[0x00, 0x00],             // null run with count 0 (nullable col below)
     ];
     for bytes in cases {
         assert!(
@@ -4663,8 +4663,7 @@ fn load_accumulates_prefix_weights() {
     let vals: Vec<u64> = (0..5_000).map(|_| xorshift(&mut seed) % 7).collect();
     let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
     // small max_segments → many slabs → many boundary attributions
-    let col =
-        PrefixColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+    let col = PrefixColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
 
     let mut running = 0u128;
     for (i, &v) in vals.iter().enumerate() {
@@ -4684,8 +4683,7 @@ fn load_accumulates_prefix_weights_partial_consume() {
     let vals: Vec<u64> = (0..2_000).map(|_| xorshift(&mut seed) % 5).collect();
     let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
 
-    let mut iter =
-        PrefixColumn::<u64>::load_iter(&saved, LoadOpts::new().with_max_segments(4));
+    let mut iter = PrefixColumn::<u64>::load_iter(&saved, LoadOpts::new().with_max_segments(4));
     for _ in 0..25 {
         iter.try_next_run().unwrap().unwrap();
     }
@@ -4713,8 +4711,7 @@ fn load_accumulates_delta_agg_weights() {
     let mut seed = 0xDE17Au64;
     let vals: Vec<u64> = (0..3_000).map(|_| xorshift(&mut seed) % 100).collect();
     let saved = DeltaColumn::<u64>::from_values(vals.clone()).save();
-    let col =
-        DeltaColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+    let col = DeltaColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
 
     assert_eq!(col.iter().collect::<Vec<_>>(), vals);
     // find_by_value prunes slabs via the accumulated min/max aggregates
@@ -4745,11 +4742,8 @@ fn load_accumulates_delta_agg_weights_nullable() {
         })
         .collect();
     let saved = DeltaColumn::<Option<i64>>::from_values(vals.clone()).save();
-    let col = DeltaColumn::<Option<i64>>::load_with(
-        &saved,
-        LoadOpts::new().with_max_segments(4),
-    )
-    .unwrap();
+    let col = DeltaColumn::<Option<i64>>::load_with(&saved, LoadOpts::new().with_max_segments(4))
+        .unwrap();
 
     assert_eq!(col.iter().collect::<Vec<_>>(), vals);
     for target in -100i64..100 {

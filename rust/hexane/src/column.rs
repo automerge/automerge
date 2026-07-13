@@ -125,7 +125,11 @@ impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     // `compute` is O(1) here, so the loader keeps its fast drain path
     // (`ACCUMULATES = false`); this impl exists for completeness.
     #[inline]
-    fn accumulate_run(weight: &mut usize, count: usize, _value: T::Get<'_>) -> Result<(), PackError> {
+    fn accumulate_run(
+        weight: &mut usize,
+        count: usize,
+        _value: T::Get<'_>,
+    ) -> Result<(), PackError> {
         *weight += count;
         Ok(())
     }

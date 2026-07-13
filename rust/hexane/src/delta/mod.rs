@@ -15,26 +15,6 @@ pub use indexed::IndexedDeltaWeightFn;
 
 // ── DeltaValue trait ────────────────────────────────────────────────────────
 
-/// Trait for value types that can be stored in a delta-encoded column.
-///
-/// All `DeltaColumn`s store deltas internally as `Option<i64>` regardless
-/// of `T`; this trait maps `T` to and from that inner representation.
-///
-/// # Value domain
-///
-/// All realized values in a column must lie within a 2^63-wide range —
-/// for unsigned types that means `< 2^63`.  This is not an accumulator
-/// limitation but the wire format's closure boundary: deltas are stored
-/// as `i64`, and deleting an element makes its two neighbours adjacent,
-/// so *any* pair of values in the column may end up needing their
-/// difference encoded as a single delta.  If values could span 2^63 or
-/// more, a deletion could produce a delta that doesn't fit the wire
-/// format.
-///
-/// Unsigned [`to_i64`](Self::to_i64) implementations **panic** outside
-/// this domain (a precondition violation on the writer's own data);
-/// [`load`](DeltaColumn::load) **rejects** out-of-domain data with an
-/// error (untrusted bytes must never panic).
 /// Sealed inner storage type of a [`DeltaColumn`]: `i64` when `T` is
 /// non-nullable, `Option<i64>` when nullable. The wire format is
 /// identical either way (nullable RLE of `i64` deltas — a non-nullable
@@ -84,6 +64,27 @@ impl DeltaInner for Option<i64> {
     }
 }
 
+/// Trait for value types that can be stored in a delta-encoded column.
+///
+/// Deltas are stored internally as [`Self::Inner`] (`i64` for
+/// non-nullable types, `Option<i64>` for nullable ones); this trait maps
+/// `T` to and from that inner representation.
+///
+/// # Value domain
+///
+/// All realized values in a column must lie within a 2^63-wide range —
+/// for unsigned types that means `< 2^63`.  This is not an accumulator
+/// limitation but the wire format's closure boundary: deltas are stored
+/// as `i64`, and deleting an element makes its two neighbours adjacent,
+/// so *any* pair of values in the column may end up needing their
+/// difference encoded as a single delta.  If values could span 2^63 or
+/// more, a deletion could produce a delta that doesn't fit the wire
+/// format.
+///
+/// Unsigned [`to_i64`](Self::to_i64) implementations **panic** outside
+/// this domain (a precondition violation on the writer's own data);
+/// [`load`](DeltaColumn::load) **rejects** out-of-domain data with an
+/// error (untrusted bytes must never panic).
 pub trait DeltaValue: Copy + PartialEq + Default + Debug {
     /// Whether this type supports null values.
     const NULLABLE: bool;
@@ -222,7 +223,11 @@ impl DeltaValue for usize {
     type Inner = i64;
     const MIN_I64: i64 = 0;
     // 32-bit targets (wasm) have a smaller usize domain
-    const MAX_I64: i64 = if usize::BITS >= 64 { i64::MAX } else { usize::MAX as i64 };
+    const MAX_I64: i64 = if usize::BITS >= 64 {
+        i64::MAX
+    } else {
+        usize::MAX as i64
+    };
     /// # Panics
     ///
     /// Panics for values `> i64::MAX` — see the [`DeltaValue`] domain
@@ -766,7 +771,8 @@ impl<T: DeltaValue> DeltaColumn<T> {
             // Null sentinel: elide iff every entry is null.
             None => {
                 let null = T::Inner::from_opt(None);
-                self.col.save_to_unless(out, crate::AsColumnRef::as_column_ref(&null))
+                self.col
+                    .save_to_unless(out, crate::AsColumnRef::as_column_ref(&null))
             }
             // Realized sentinel v: uniform iff the first delta realizes v
             // and every later delta is zero.
