@@ -274,7 +274,6 @@ impl<'a> BundleChangeWriter<'a> {
     fn add(&mut self, change: &BundleMetadata<'a>, mapper: &mut ActorMapper<'_>) {
         assert!(self.len < self.cap);
         mapper.process_actor(change.actor);
-        self.seen.insert(change.hash, self.len);
         self.len += 1;
         self.actor.append(ActorIdx::from(change.actor));
         self.seq.append(change.seq as i64);
@@ -287,13 +286,20 @@ impl<'a> BundleChangeWriter<'a> {
         self.extra.extend_from_slice(&change.extra);
         self.dep_count.append(change.deps.len() as u32);
         for d in &change.deps {
-            let dep_idx = if let Some(i) = self.seen.get(d) {
-                *i as i64
-            } else {
-                let index = self.cap + self.external.len();
-                self.seen.insert(*d, index);
-                self.external.push(*d);
-                index as i64
+            let dep_idx = match d {
+                // members are added in topological (member-list) order, so
+                // a member's dep index is its position in that list
+                super::DepRef::Internal(pos) => *pos as i64,
+                super::DepRef::External(h) => {
+                    if let Some(i) = self.seen.get(h) {
+                        *i as i64
+                    } else {
+                        let index = self.cap + self.external.len();
+                        self.seen.insert(*h, index);
+                        self.external.push(*h);
+                        index as i64
+                    }
+                }
             };
             self.deps.append(dep_idx);
         }

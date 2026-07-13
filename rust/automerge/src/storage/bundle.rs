@@ -17,7 +17,7 @@ pub use builder::BundleChangeIter;
 
 pub(crate) use builder::{BundleBuilder, BundleChangeIterUnverified, OpIter, OpIterUnverified};
 pub(crate) use error::ParseError;
-pub(crate) use meta::BundleMetadata;
+pub(crate) use meta::{BundleMetadata, DepRef};
 pub(crate) use storage::BundleStorage;
 
 /// EXPERIMENTAL: A set of changes compressed into a bundle
@@ -47,6 +47,20 @@ impl Bundle {
     {
         let changes = change_graph
             .get_bundle_metadata(hashes)
+            .collect::<Result<_, _>>()?;
+        Ok(Self::from_meta(op_set, changes))
+    }
+
+    /// Build a bundle from member nodes directly — only the boundary
+    /// (external dep) hashes need to be known, so this works in the
+    /// fragment-hashes state. `nodes` must be sorted ascending.
+    pub(crate) fn for_nodes(
+        op_set: &OpSet,
+        change_graph: &ChangeGraph,
+        nodes: Vec<crate::change_graph::NodeIdx>,
+    ) -> Result<Bundle, AutomergeError> {
+        let changes = change_graph
+            .bundle_metadata_for_nodes(nodes)
             .collect::<Result<_, _>>()?;
         Ok(Self::from_meta(op_set, changes))
     }

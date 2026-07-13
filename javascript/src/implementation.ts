@@ -246,6 +246,16 @@ export function rebuildHashGraph<T>(doc: Doc<T>): void {
   _state(doc).handle.rebuildHashGraph()
 }
 
+/**
+ * How much of the document's change-hash graph is known:
+ * `"checked"` (everything works), `"fragmentHashes"` (fragment APIs
+ * work; other hash-dependent APIs throw until {@link rebuildHashGraph}),
+ * or `"unchecked"`.
+ */
+export function hashGraphState<T>(doc: Doc<T>): "checked" | "fragmentHashes" | "unchecked" {
+  return _state(doc).handle.hashGraphState()
+}
+
 export function getChangesSince<T>(state: Doc<T>, heads: Heads): Change[] {
   const n = _state(state)
   return n.handle.getChanges(heads)

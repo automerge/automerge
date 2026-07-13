@@ -662,6 +662,11 @@ impl AutoCommit {
         self.doc.dump()
     }
 
+    /// See [`Automerge::hash_graph_state`]
+    pub fn hash_graph_state(&self) -> crate::HashGraphState {
+        self.doc.hash_graph_state()
+    }
+
     /// EXPERIMENTAL: Return the fragments covering the document history at
     /// the given levels, ordered oldest to newest.
     ///

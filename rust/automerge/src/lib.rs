@@ -295,7 +295,7 @@ pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
-pub use change_graph::Fragment;
+pub use change_graph::{ChangeId, Fragment, HashGraphState};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;

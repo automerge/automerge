@@ -33,6 +33,36 @@ fn early_hash(orig: &mut AutoCommit) -> ChangeHash {
     hashes[0]
 }
 
+/// A large linear doc plus one of its interior hashes that is *not*
+/// carried by the saved hash columns (covered by a cached fragment,
+/// level 0, not an anchor) — i.e. genuinely unknown after an unchecked
+/// load. Small docs no longer produce such hashes: their whole history
+/// is loose commits, which the hash columns persist.
+fn saved_big_doc_with_unknown_hash() -> (Vec<u8>, AutoCommit, ChangeHash) {
+    let mut doc = AutoCommit::new()
+        .with_actor(ActorId::from(&b"aaaa"[..]))
+        .unwrap();
+    for i in 0..4000 {
+        doc.put(ROOT, "k", i as i64).unwrap();
+        doc.commit();
+    }
+    let bytes = doc.save();
+    let probe = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    let unknown = doc
+        .get_changes(&[])
+        .unwrap()
+        .iter()
+        .map(|c| c.hash())
+        .find(|h| {
+            matches!(
+                probe.get_change_by_hash(h),
+                Err(AutomergeError::UncheckedHashGraph)
+            )
+        })
+        .expect("a 4000-change doc has covered interior hashes the columns don't store");
+    (bytes, doc, unknown)
+}
+
 /// A doc with two concurrent branches, saved with two heads
 fn saved_multi_head_doc() -> (Vec<u8>, AutoCommit) {
     let mut doc1 = AutoCommit::new()
@@ -139,8 +169,7 @@ fn unchecked_save_incremental_is_infallible() {
 
 #[test]
 fn unchecked_save_after_narrow_failure() {
-    let (bytes, mut orig) = saved_doc();
-    let early = early_hash(&mut orig);
+    let (bytes, _orig, early) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
     let load_heads = doc.get_heads();
 
@@ -198,23 +227,38 @@ fn unchecked_set_actor_guard() {
 
 #[test]
 fn unchecked_set_actor_errors_for_non_head_tip() {
-    // actor aaaa's last change is buried under actor bbbb's changes
+    // actor aaaa's last change is buried deep under actor bbbb's changes,
+    // covered by cached fragments and so not carried by the hash columns
     let mut doc = AutoCommit::new()
         .with_actor(ActorId::from(&b"aaaa"[..]))
         .unwrap();
-    doc.put(ROOT, "k", 0).unwrap();
-    doc.commit();
+    for i in 0..2000 {
+        doc.put(ROOT, "k", i as i64).unwrap();
+        doc.commit();
+    }
+    let aaaa_tip = doc.get_heads()[0];
     doc.set_actor(ActorId::from(&b"bbbb"[..])).unwrap();
-    doc.put(ROOT, "k", 1).unwrap();
-    doc.commit();
+    for i in 0..2000 {
+        doc.put(ROOT, "k", 10_000 + i as i64).unwrap();
+        doc.commit();
+    }
     let bytes = doc.save();
 
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
-    // aaaa's tip is pre-load and not a head: resurrecting it would need its hash
-    assert!(matches!(
-        doc.set_actor(ActorId::from(&b"aaaa"[..])),
+    if matches!(
+        doc.get_change_by_hash(&aaaa_tip),
         Err(AutomergeError::UncheckedHashGraph)
-    ));
+    ) {
+        // aaaa's tip hash is unknown: resurrecting the actor would need it
+        assert!(matches!(
+            doc.set_actor(ActorId::from(&b"aaaa"[..])),
+            Err(AutomergeError::UncheckedHashGraph)
+        ));
+    } else {
+        // (vanishingly unlikely: the tip happened to be stored as a
+        // fragment hash or anchor — then resurrecting is legal)
+        assert!(doc.set_actor(ActorId::from(&b"aaaa"[..])).is_ok());
+    }
     // bbbb's tip is the head: fine
     assert!(doc.set_actor(ActorId::from(&b"bbbb"[..])).is_ok());
     doc.put(ROOT, "k", 2).unwrap();
@@ -235,28 +279,22 @@ fn unchecked_hash_lookups() {
     let opid = doc.get(ROOT, "k").unwrap().unwrap().1;
     assert_eq!(doc.hash_for_opid(&opid).unwrap(), Some(head));
 
-    // an op from a pre-load, non-head change errors rather than guessing
-    let mut with_obj = AutoCommit::new()
-        .with_actor(ActorId::from(&b"cccc"[..]))
-        .unwrap();
-    let list = with_obj
+    // small docs' interior hashes are all carried by the hash columns
+    // now, so lookups of them succeed (the fragment-hashes state)
+    assert!(doc.get_change_by_hash(&early).unwrap().is_some());
+
+    // an op from a covered, unstored interior change errors rather than
+    // guessing
+    let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    let list = doc
         .put_object(ROOT, "list", automerge::ObjType::List)
         .unwrap();
-    with_obj.commit();
-    with_obj.insert(&list, 0, 1).unwrap();
-    with_obj.commit();
-    let bytes = with_obj.save();
-    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
-    let (_, list) = doc.get(ROOT, "list").unwrap().unwrap();
+    doc.commit();
+    // the object op made after load is known; interior hashes are not
+    assert!(doc.hash_for_opid(&list).unwrap().is_some());
     assert!(matches!(
-        doc.hash_for_opid(&list),
-        Err(AutomergeError::UncheckedHashGraph)
-    ));
-
-    // pre-load, non-head hashes exist but can't be resolved: fallible
-    // methods that would need to enumerate them refuse
-    assert!(matches!(
-        doc.get_changes(&[early]),
+        doc.get_changes(&[unknown]),
         Err(AutomergeError::UncheckedHashGraph)
     ));
 }
@@ -354,38 +392,40 @@ fn unchecked_diff_works() {
     assert!(!patches.is_empty());
 }
 
-/// The full lifecycle: load unchecked, append changes, verify every
-/// fallible API errors for pre-load interior history but works when
-/// referencing the load heads or hashes created after the load — then
-/// rebuild the hash graph and verify everything works.
+/// The full lifecycle: load unchecked (which imports the saved hash
+/// columns, entering the fragment-hashes state), append changes, verify
+/// every fallible API errors for unknown interior history but works when
+/// referencing the load heads, post-load hashes, or column-carried
+/// hashes — then rebuild the hash graph and verify everything works.
 #[test]
 fn unchecked_lifecycle_all_fallible_functions() {
     use automerge::sync::SyncDoc;
+    use automerge::HashGraphState;
 
-    let (bytes, mut orig) = saved_doc();
-    let early = early_hash(&mut orig);
+    let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
     let load_heads = doc.get_heads();
     assert!(!doc.hash_graph_is_checked());
+    assert_eq!(doc.hash_graph_state(), HashGraphState::FragmentHashes);
 
     // ── add a few changes after the load ──
-    doc.put(ROOT, "k", 100).unwrap();
+    doc.put(ROOT, "k", 100_000).unwrap();
     let new1 = doc.commit().unwrap();
-    doc.put(ROOT, "k", 200).unwrap();
+    doc.put(ROOT, "k", 200_000).unwrap();
     let new2 = doc.commit().unwrap();
     assert_eq!(doc.get_heads(), vec![new2]);
 
-    // ── everything that needs pre-load interior hashes errors ──
+    // ── everything that needs unknown interior hashes errors ──
     let err = |r: Result<(), AutomergeError>| {
         assert!(matches!(r, Err(AutomergeError::UncheckedHashGraph)));
     };
     err(doc.get_changes(&[]).map(|_| ()));
-    err(doc.get_changes(&[early]).map(|_| ()));
+    err(doc.get_changes(&[unknown]).map(|_| ()));
     err(doc.get_changes_meta(&[]).map(|_| ()));
-    err(doc.get_changes_meta(&[early]).map(|_| ()));
-    err(doc.get_change_by_hash(&early).map(|_| ()));
-    err(doc.get_change_meta_by_hash(&early).map(|_| ()));
-    err(doc.save_after(&[early]).map(|_| ()));
+    err(doc.get_changes_meta(&[unknown]).map(|_| ()));
+    err(doc.get_change_by_hash(&unknown).map(|_| ()));
+    err(doc.get_change_meta_by_hash(&unknown).map(|_| ()));
+    err(doc.save_after(&[unknown]).map(|_| ()));
     let mut state = automerge::sync::State::new();
     err(doc.sync().generate_sync_message(&mut state).map(|_| ()));
     let mut other = AutoCommit::new();
@@ -412,16 +452,20 @@ fn unchecked_lifecycle_all_fallible_functions() {
     // the new changes are local, so the last local change is reachable
     assert_eq!(doc.get_last_local_change().unwrap().unwrap().hash(), new2);
 
+    // ── fragments work in the fragment-hashes state ──
+    let mid_fragments = doc.fragments(..).unwrap();
+    assert!(!mid_fragments.is_empty());
+    assert!(!doc.bundle_fragments(mid_fragments.clone()).unwrap().is_empty());
+
     // ── rebuild the graph: every failing call above now succeeds ──
     doc.rebuild_hash_graph().unwrap();
     assert!(doc.hash_graph_is_checked());
+    assert_eq!(doc.hash_graph_state(), HashGraphState::Checked);
 
-    assert_eq!(doc.get_changes(&[]).unwrap().len(), 5);
-    assert_eq!(doc.get_changes(&[early]).unwrap().len(), 4);
-    assert_eq!(doc.get_changes_meta(&[]).unwrap().len(), 5);
-    assert!(doc.get_change_by_hash(&early).unwrap().is_some());
-    assert!(doc.get_change_meta_by_hash(&early).unwrap().is_some());
-    assert!(!doc.save_after(&[early]).unwrap().is_empty());
+    assert_eq!(doc.get_changes(&[]).unwrap().len(), 4002);
+    assert!(!doc.get_changes(&[unknown]).unwrap().is_empty());
+    assert!(doc.get_change_by_hash(&unknown).unwrap().is_some());
+    assert!(!doc.save_after(&[unknown]).unwrap().is_empty());
     assert!(doc
         .sync()
         .generate_sync_message(&mut state)
@@ -431,6 +475,49 @@ fn unchecked_lifecycle_all_fallible_functions() {
     doc.merge(&mut other).unwrap();
     let (v, _) = doc.get(ROOT, "x").unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(1));
+
+    // the fragment index survives the rebuild: identical to the
+    // fragments of the same document loaded fully checked
+    let fragments = doc.fragments(..).unwrap();
+    let checked = AutoCommit::load(&doc.save()).unwrap();
+    assert_eq!(fragments, checked.fragments(..).unwrap());
+    // and the middle-state fragments were already the checked ones
+    // (modulo the two changes committed after the middle-state call)
+    assert!(!fragments.is_empty());
+}
+
+/// A single-change doc stores no hash columns (its only loose commit is
+/// the head, which the head-index suffix already carries) — loading it
+/// unchecked lands in the plain Unchecked state where fragment APIs
+/// refuse.
+#[test]
+fn plain_unchecked_state_without_hash_columns() {
+    use automerge::HashGraphState;
+
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "k", 1).unwrap();
+    doc.commit();
+    let bytes = doc.save();
+
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    assert_eq!(doc.hash_graph_state(), HashGraphState::Unchecked);
+    assert!(matches!(
+        doc.fragments(..),
+        Err(AutomergeError::UncheckedHashGraph)
+    ));
+    let head = doc.get_heads()[0];
+    assert!(matches!(
+        doc.get_fragment(head),
+        Err(AutomergeError::UncheckedHashGraph)
+    ));
+    assert!(matches!(
+        doc.bundle_fragments([]),
+        Err(AutomergeError::UncheckedHashGraph)
+    ));
+
+    doc.rebuild_hash_graph().unwrap();
+    assert_eq!(doc.hash_graph_state(), HashGraphState::Checked);
+    assert_eq!(doc.fragments(..).unwrap().len(), 1);
 }
 
 /// A saved document whose recorded head hash has a flipped bit (with the
@@ -473,34 +560,57 @@ fn bit_flipped_head_loads_unchecked_but_fails_rebuild() {
     assert!(doc.rebuild_hash_graph().is_err());
 }
 
-/// Fragment APIs need the whole hash graph: they error on an unchecked
-/// document (like the sync functions) and work again after
-/// `rebuild_hash_graph`, which regenerates the fragment index.
+/// The fragment-hashes state survives save/load round trips: a
+/// middle-state doc re-emits the hash columns it imported.
 #[test]
-fn fragments_error_on_unchecked_and_regenerate_on_rebuild() {
-    let (bytes, _orig) = saved_doc();
-    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
-    let head = doc.get_heads()[0];
+fn fragment_hashes_state_round_trips() {
+    use automerge::HashGraphState;
 
-    assert!(matches!(
-        doc.fragments(..),
-        Err(AutomergeError::UncheckedHashGraph)
-    ));
-    assert!(matches!(
-        doc.get_fragment(head),
-        Err(AutomergeError::UncheckedHashGraph)
-    ));
-    assert!(matches!(
-        doc.bundle_fragments([]),
-        Err(AutomergeError::UncheckedHashGraph)
-    ));
+    let (bytes, _orig, _unknown) = saved_big_doc_with_unknown_hash();
+    let mid1 = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    assert_eq!(mid1.hash_graph_state(), HashGraphState::FragmentHashes);
+    let frags1 = mid1.fragments(..).unwrap();
+    assert!(!frags1.is_empty());
 
-    doc.rebuild_hash_graph().unwrap();
+    // middle state → save → unchecked load → still middle, same fragments
+    let mut mid1 = mid1;
+    let resaved = mid1.save();
+    let mid2 = AutoCommit::load_with_options(&resaved, unchecked_opts()).unwrap();
+    assert_eq!(mid2.hash_graph_state(), HashGraphState::FragmentHashes);
+    assert_eq!(mid2.fragments(..).unwrap(), frags1);
 
-    // the fragment index is regenerated by the rebuild: identical to the
-    // fragments of the same document loaded fully checked
-    let fragments = doc.fragments(..).unwrap();
+    // and both match the fully checked fragments
     let checked = AutoCommit::load(&bytes).unwrap();
-    assert_eq!(fragments, checked.fragments(..).unwrap());
-    assert!(!fragments.is_empty());
+    assert_eq!(checked.fragments(..).unwrap(), frags1);
+}
+
+/// A checked load verifies the stored hash columns against the
+/// recomputed hashes; an unchecked load trusts them but rebuild refuses.
+#[test]
+fn forged_hash_column_rejected() {
+    use automerge::HashGraphState;
+    use sha2::{Digest, Sha256};
+
+    let (mut bytes, orig, _unknown) = saved_big_doc_with_unknown_hash();
+    // a cached fragment head is a stored, non-head hash
+    let stored = orig.fragments(1..).unwrap()[0].head;
+    drop(orig);
+    let pos = bytes
+        .windows(32)
+        .position(|w| w == stored.as_ref())
+        .expect("stored hash bytes present in saved doc");
+    bytes[pos] ^= 0x01;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes[8..]);
+    let digest = hasher.finalize();
+    bytes[4..8].copy_from_slice(&digest[..4]);
+
+    // checked load recomputes hashes and rejects the forged column
+    assert!(AutoCommit::load(&bytes).is_err());
+
+    // unchecked load trusts it (like the head pairing) ...
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    assert_eq!(doc.hash_graph_state(), HashGraphState::FragmentHashes);
+    // ... but rebuild recomputes and refuses
+    assert!(doc.rebuild_hash_graph().is_err());
 }

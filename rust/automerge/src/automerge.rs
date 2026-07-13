@@ -31,7 +31,7 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
+use crate::{AutomergeError, Change, Cursor, Fragment, HashGraphState, ObjType, Prop};
 
 pub(crate) mod current_state;
 
@@ -1414,6 +1414,12 @@ impl Automerge {
         Ok(patch_log.make_patches(self))
     }
 
+    /// How much of the change-hash graph is known — see
+    /// [`HashGraphState`].
+    pub fn hash_graph_state(&self) -> HashGraphState {
+        self.change_graph.state()
+    }
+
     /// EXPERIMENTAL: Return the fragments covering the document history at
     /// the given levels, ordered oldest to newest.
     ///
@@ -1427,13 +1433,13 @@ impl Automerge {
         &self,
         levels: R,
     ) -> Result<Vec<Fragment>, AutomergeError> {
-        if !self.hash_graph_is_checked() {
+        if self.hash_graph_state() == HashGraphState::Unchecked {
             return Err(AutomergeError::UncheckedHashGraph);
         }
         // these produce fragments newest to oldest
         let mut fragments: Vec<_> = self
             .change_graph
-            .fragments(&self.get_heads(), levels)
+            .fragments(&self.get_heads(), levels, &self.ops.actors)
             .collect();
         // but we want to return them oldest to newest
         fragments.reverse();
@@ -1448,10 +1454,10 @@ impl Automerge {
     /// loaded with [`LoadOptions::skip_hash_graph`].
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
-        if !self.hash_graph_is_checked() {
+        if self.hash_graph_state() == HashGraphState::Unchecked {
             return Err(AutomergeError::UncheckedHashGraph);
         }
-        Ok(self.change_graph.get_fragment(head))
+        Ok(self.change_graph.get_fragment(head, &self.ops.actors))
     }
 
     /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
@@ -1466,7 +1472,7 @@ impl Automerge {
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        if !self.hash_graph_is_checked() {
+        if self.hash_graph_state() == HashGraphState::Unchecked {
             return Err(AutomergeError::UncheckedHashGraph);
         }
         Ok(fragments
@@ -1476,7 +1482,18 @@ impl Automerge {
                     // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
                     Some(self.get_change_by_hash(&f.head).ok()??.bytes().to_vec())
                 } else {
-                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
+                    // members are (actor, seq) ids; bundles are built from
+                    // nodes so only boundary hashes are required
+                    let mut nodes = f
+                        .members
+                        .iter()
+                        .map(|id| self.change_graph.node_for_change_id(id, &self.ops.actors))
+                        .collect::<Option<Vec<_>>>()?;
+                    nodes.sort_unstable();
+                    let bundle =
+                        crate::storage::Bundle::for_nodes(&self.ops, &self.change_graph, nodes)
+                            .ok()?;
+                    Some(bundle.bytes().to_vec())
                 }
             })
             .collect())

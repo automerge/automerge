@@ -376,7 +376,9 @@ impl<'a> Document<'a> {
         op_set.set_indexes(indexes);
 
         let change_graph = match &changes {
-            Some(changes) => change_cols.finalize(&changes.changes),
+            Some(changes) => change_cols
+                .finalize(&changes.changes)
+                .map_err(|_| ReconstructError::InvalidHashColumns)?,
             None => {
                 let head_indexes = head_indexes.expect("checked above");
                 change_cols
@@ -450,6 +452,8 @@ pub(crate) enum ReconstructError {
     InvalidColumns(#[from] crate::op_set2::op_set::ColumnValidationError),
     #[error("invalid actor id {0}")]
     InvalidActorId(usize),
+    #[error("the document's change-hash columns are invalid")]
+    InvalidHashColumns,
     #[error("invalid column length {0:?}")]
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]

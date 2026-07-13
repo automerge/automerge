@@ -12,7 +12,7 @@ pub use bundle::{Bundle, BundleChange, BundleChangeIter};
 pub use load::VerificationMode;
 
 pub(crate) use {
-    bundle::{BundleMetadata, BundleStorage},
+    bundle::{BundleMetadata, BundleStorage, DepRef},
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     chunk::{CheckSum, Chunk, ChunkType, Header},
     columns::{ColumnSpec, Columns, RawColumn, RawColumns},

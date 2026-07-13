@@ -168,13 +168,20 @@ export type ChangeMetadata = {
   hash: Hash;
 };
 
+export type ChangeId = {
+  actor: Actor;
+  seq: number;
+};
+
 export type FragmentMeta = {
   head: Hash;
   level: number;
   boundary: Heads;
   checkpoints: Heads;
-  members: Heads;
+  members: ChangeId[];
 };
+
+export type HashGraphState = "checked" | "fragmentHashes" | "unchecked";
 
 export type Commit = {
   head: Hash;
@@ -1521,6 +1528,18 @@ impl Automerge {
         Ok(())
     }
 
+    /// How much of the change-hash graph is known: "checked",
+    /// "fragmentHashes" (fragments work, other hash APIs throw) or
+    /// "unchecked".
+    #[wasm_bindgen(js_name = hashGraphState, unchecked_return_type = "HashGraphState")]
+    pub fn hash_graph_state(&self) -> String {
+        match self.doc.hash_graph_state() {
+            am::HashGraphState::Checked => "checked".into(),
+            am::HashGraphState::FragmentHashes => "fragmentHashes".into(),
+            am::HashGraphState::Unchecked => "unchecked".into(),
+        }
+    }
+
     #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
     pub fn get_actor_id(&self) -> String {
         self.doc.get_actor().to_string()
@@ -2083,8 +2102,44 @@ fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
         AR::from(fragment.checkpoints.as_slice()),
     )
     .unwrap();
-    js_set(&obj, "members", AR::from(fragment.members.as_slice())).unwrap();
+    let members: Array = fragment
+        .members
+        .iter()
+        .map(|m| {
+            let id: JsValue = Object::new().into();
+            js_set(&id, "actor", m.actor.to_string()).unwrap();
+            js_set(&id, "seq", m.seq as f64).unwrap();
+            id
+        })
+        .collect();
+    js_set(&obj, "members", members).unwrap();
     obj
+}
+
+fn js_to_change_ids(value: JS) -> Result<Vec<am::ChangeId>, error::BadJSChangeIds> {
+    let arr = value
+        .0
+        .dyn_into::<Array>()
+        .map_err(|_| error::BadJSChangeIds::NotArray)?;
+    arr.iter()
+        .map(|v| {
+            let actor = js_get(&v, "actor")
+                .ok()
+                .and_then(|a| a.0.as_string())
+                .ok_or(error::BadJSChangeIds::BadActor)?;
+            let actor = automerge::ActorId::from(
+                hex::decode(actor)
+                    .map_err(|_| error::BadJSChangeIds::BadActor)?
+                    .to_vec(),
+            );
+            let seq = js_get(&v, "seq")
+                .ok()
+                .and_then(|s| s.0.as_f64())
+                .filter(|s| *s >= 1.0 && s.fract() == 0.0)
+                .ok_or(error::BadJSChangeIds::BadSeq)? as u64;
+            Ok(am::ChangeId { actor, seq })
+        })
+        .collect()
 }
 
 struct Commit {
@@ -2202,8 +2257,7 @@ impl TryFrom<JS> for am::Fragment {
         let checkpoints = js_get(&value.0, "checkpoints")?
             .try_into()
             .map_err(error::BadJSFragmentInput::BadCheckpoints)?;
-        let members = js_get(&value.0, "members")?
-            .try_into()
+        let members = js_to_change_ids(js_get(&value.0, "members")?)
             .map_err(error::BadJSFragmentInput::BadMembers)?;
         Ok(Self {
             head,
@@ -2389,7 +2443,7 @@ pub mod error {
         #[error("bad fragment checkpoints: {0}")]
         BadCheckpoints(BadChangeHashes),
         #[error("bad fragment members: {0}")]
-        BadMembers(BadChangeHashes),
+        BadMembers(super::error::BadJSChangeIds),
         #[error("bad fragment bytes: {0}")]
         BadBytes(BadUint8Array),
     }
@@ -2958,6 +3012,22 @@ pub mod error {
         SerdeWasm(#[from] serde_wasm_bindgen::Error),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSChangeIds {
+        #[error("members must be an array of {{actor, seq}}")]
+        NotArray,
+        #[error("bad actor in change id")]
+        BadActor,
+        #[error("bad seq in change id")]
+        BadSeq,
+    }
+
+    impl From<BadJSChangeIds> for JsValue {
+        fn from(e: BadJSChangeIds) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
     }
 
     #[derive(Debug, thiserror::Error)]
