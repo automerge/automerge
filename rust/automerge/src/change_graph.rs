@@ -54,6 +54,13 @@ pub(crate) struct ChangeGraphCols {
     saved_hashes: Vec<(u32, ChangeHash)>,
 }
 
+impl ChangeGraphCols {
+    /// Whether the document carried hash columns (fragment hashes)
+    pub(crate) fn has_saved_hashes(&self) -> bool {
+        !self.saved_hashes.is_empty()
+    }
+}
+
 const CACHE_STEP: u32 = 16;
 
 /// The hashes of the changes in a [`ChangeGraph`], which may be incomplete.
@@ -373,7 +380,6 @@ impl ChangeGraph {
         self.hashes.state()
     }
 
-
     pub(crate) fn max_op(&self) -> u64 {
         self.max_op as u64
     }
@@ -499,10 +505,8 @@ impl ChangeGraph {
         // unknown anyway.
         let stored = self.stored_hashes();
         if !stored.is_empty() {
-            let index = hexane::DeltaEncoder::<u64>::encode_to(
-                out,
-                stored.iter().map(|(i, _)| *i as u64),
-            );
+            let index =
+                hexane::DeltaEncoder::<u64>::encode_to(out, stored.iter().map(|(i, _)| *i as u64));
             // one identical meta entry per hash — a single RLE run whose
             // only job is making the raw value column structurally legal
             let hash_meta = hexane::Encoder::<ValueMeta>::encode_to(
@@ -515,10 +519,7 @@ impl ChangeGraph {
             }
             cols.push(RawColumn::new(HASH_INDEX_COL_SPEC, index));
             cols.push(RawColumn::new(HASH_META_COL_SPEC, hash_meta));
-            cols.push(RawColumn::new(
-                HASH_VAL_COL_SPEC,
-                hash_raw_start..out.len(),
-            ));
+            cols.push(RawColumn::new(HASH_VAL_COL_SPEC, hash_raw_start..out.len()));
         }
 
         cols.into_iter().collect()
@@ -1790,24 +1791,24 @@ impl ChangeGraphCols {
         Ok(ChangeGraphCols {
             saved_hashes,
             graph: ChangeGraph {
-            edges,
-            hashes,
-            actors,
-            parents,
-            seq,
-            max_ops,
-            max_op,
-            num_ops,
-            timestamps,
-            messages,
-            extra_bytes_meta,
-            extra_bytes_raw,
-            heads,
-            nodes_by_hash,
-            clock_cache,
-            seq_index,
-            fragments,
-            fragment_top,
+                edges,
+                hashes,
+                actors,
+                parents,
+                seq,
+                max_ops,
+                max_op,
+                num_ops,
+                timestamps,
+                messages,
+                extra_bytes_meta,
+                extra_bytes_raw,
+                heads,
+                nodes_by_hash,
+                clock_cache,
+                seq_index,
+                fragments,
+                fragment_top,
             },
         })
     }
@@ -2059,10 +2060,7 @@ mod tests {
         }
     }
 
-    fn member_hash(
-        hash_of: &BTreeMap<(ActorId, u64), ChangeHash>,
-        id: &ChangeId,
-    ) -> ChangeHash {
+    fn member_hash(hash_of: &BTreeMap<(ActorId, u64), ChangeHash>, id: &ChangeId) -> ChangeHash {
         hash_of[&(id.actor.clone(), id.seq)]
     }
 
@@ -2120,9 +2118,7 @@ mod tests {
 
             // id must be in members
             assert!(
-                f.members
-                    .iter()
-                    .any(|m| member_hash(hash_of, m) == f.head),
+                f.members.iter().any(|m| member_hash(hash_of, m) == f.head),
                 "fragment id {:?} not found in its own members",
                 f.head
             );
@@ -2309,16 +2305,22 @@ mod tests {
 
         // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
         let l = &loose[0];
-        let got = graph.get_fragment(l.head, &builder.actors).expect("loose fragment exists");
+        let got = graph
+            .get_fragment(l.head, &builder.actors)
+            .expect("loose fragment exists");
         assert_eq!(got, *l);
 
         // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
         let c = &cached[0];
-        let got = graph.get_fragment(c.head, &builder.actors).expect("cached fragment exists");
+        let got = graph
+            .get_fragment(c.head, &builder.actors)
+            .expect("cached fragment exists");
         assert_eq!(got, *c);
 
         // unknown hash returns None
-        assert!(graph.get_fragment(ChangeHash([0xff; 32]), &builder.actors).is_none());
+        assert!(graph
+            .get_fragment(ChangeHash([0xff; 32]), &builder.actors)
+            .is_none());
     }
 
     #[test]

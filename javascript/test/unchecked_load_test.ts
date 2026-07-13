@@ -13,7 +13,7 @@ function savedDoc(): { saved: Uint8Array; loadHeads: string[] } {
   return { saved: Automerge.save(doc), loadHeads: Automerge.getHeads(doc) }
 }
 
-describe("unchecked loads (skipHashGraph)", () => {
+describe("unchecked loads (hashGraphRebuild: none)", () => {
   it("errors on unknown history, works for known hashes and fragments, and recovers after rebuildHashGraph", () => {
     // a large doc: interior changes covered by cached fragments are not
     // carried by the saved hash columns, so they stay unknown after an
@@ -27,7 +27,7 @@ describe("unchecked loads (skipHashGraph)", () => {
     const saved = Automerge.save(doc)
     const loadHeads = Automerge.getHeads(doc)
 
-    let mid = Automerge.load<DocType>(saved, { skipHashGraph: true })
+    let mid = Automerge.load<DocType>(saved, { hashGraphRebuild: "none" })
     assert.equal(Automerge.hashGraphState(mid), "fragmentHashes")
     assert.deepEqual(Automerge.getHeads(mid), loadHeads)
 
@@ -51,14 +51,20 @@ describe("unchecked loads (skipHashGraph)", () => {
 
     // unknown interior history throws
     assert.throws(() => Automerge.getAllChanges(mid), /hash graph/)
-    assert.throws(() => Automerge.getChangesSince(mid, [unknown!]), /hash graph/)
+    assert.throws(
+      () => Automerge.getChangesSince(mid, [unknown!]),
+      /hash graph/,
+    )
     assert.throws(
       () => Automerge.generateSyncMessage(mid, Automerge.initSyncState()),
       /hash graph/,
     )
     let other = Automerge.init<DocType>()
     other = Automerge.change(other, d => (d.x = 1))
-    assert.throws(() => Automerge.merge(Automerge.clone(mid), other), /hash graph/)
+    assert.throws(
+      () => Automerge.merge(Automerge.clone(mid), other),
+      /hash graph/,
+    )
 
     // known hashes work
     assert.equal(Automerge.getChangesSince(mid, loadHeads).length, 2)
@@ -79,7 +85,7 @@ describe("unchecked loads (skipHashGraph)", () => {
     assert.equal(Automerge.hashGraphState(mid), "checked")
     assert.equal(Automerge.getAllChanges(mid).length, 3002)
     assert.ok(Automerge.getChangesSince(mid, [unknown!]).length > 0)
-    const [, msg] = ((s) => [s, Automerge.generateSyncMessage(mid, s)[1]])(
+    const [, msg] = (s => [s, Automerge.generateSyncMessage(mid, s)[1]])(
       Automerge.initSyncState(),
     )
     assert.notEqual(msg, null)
@@ -92,13 +98,48 @@ describe("unchecked loads (skipHashGraph)", () => {
     doc = Automerge.change(doc, d => (d.k = 1))
     const saved = Automerge.save(doc)
 
-    const loaded = Automerge.load<DocType>(saved, { skipHashGraph: true })
+    const loaded = Automerge.load<DocType>(saved, { hashGraphRebuild: "none" })
     assert.equal(Automerge.hashGraphState(loaded), "unchecked")
     assert.throws(() => Automerge.getFragmentMetadata(loaded), /hash graph/)
 
     Automerge.rebuildHashGraph(loaded)
     assert.equal(Automerge.hashGraphState(loaded), "checked")
     assert.equal(Automerge.getFragmentMetadata(loaded).length, 1)
+  })
+
+  it("hashGraphRebuild: 'fragments' uses stored hashes or falls back to a rebuild", () => {
+    // a large doc carries hash columns: fragments mode lands in the
+    // middle state with working fragment APIs, no rebuild
+    let big = Automerge.init<DocType>()
+    for (let i = 0; i < 3000; i++) {
+      big = Automerge.change(big, d => (d.k = i))
+    }
+    const bigSaved = Automerge.save(big)
+    const mid = Automerge.load<DocType>(bigSaved, {
+      hashGraphRebuild: "fragments",
+    })
+    assert.equal(Automerge.hashGraphState(mid), "fragmentHashes")
+    assert.ok(Automerge.getFragmentMetadata(mid).length > 0)
+
+    // a single-change doc has no hash columns: full rebuild instead
+    let small = Automerge.init<DocType>()
+    small = Automerge.change(small, d => (d.k = 1))
+    const smallSaved = Automerge.save(small)
+    const checked = Automerge.load<DocType>(smallSaved, {
+      hashGraphRebuild: "fragments",
+    })
+    assert.equal(Automerge.hashGraphState(checked), "checked")
+    assert.equal(Automerge.getFragmentMetadata(checked).length, 1)
+  })
+
+  it("rejects an unknown hashGraphRebuild value", () => {
+    const { saved } = savedDoc()
+    assert.throws(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () =>
+        Automerge.load<DocType>(saved, { hashGraphRebuild: "sideways" } as any),
+      /hashGraphRebuild/,
+    )
   })
 
   it("loads a doc with a bit-flipped head unchecked, but rebuildHashGraph rejects it", () => {
@@ -121,7 +162,7 @@ describe("unchecked loads (skipHashGraph)", () => {
     assert.throws(() => Automerge.load(flipped))
 
     // an unchecked load takes the recorded heads on trust
-    const doc = Automerge.load<DocType>(flipped, { skipHashGraph: true })
+    const doc = Automerge.load<DocType>(flipped, { hashGraphRebuild: "none" })
     assert.equal(doc.k, 2)
     assert.notDeepEqual(Automerge.getHeads(doc), [head])
 

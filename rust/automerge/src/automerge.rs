@@ -77,6 +77,30 @@ pub enum OnPartialLoad {
     Error,
 }
 
+/// How much of the change hash graph to rebuild when loading a document
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HashGraphRebuild {
+    /// Don't rebuild the hash graph at all.
+    ///
+    /// This is the fastest option: no change is re-serialized and hashed, and
+    /// the head hashes are not verified. The document is left with an
+    /// unchecked hash graph (see [`LoadOptions::hash_graph`]).
+    None,
+    /// Use the fragment hashes stored in the document if they are present,
+    /// falling back to a full rebuild (as in [`HashGraphRebuild::Full`]) if they
+    /// are not.
+    ///
+    /// When the stored hashes are used the load is as fast as
+    /// [`HashGraphRebuild::None`] and the document comes up in the
+    /// [`HashGraphState::FragmentHashes`] state, where fragment generation
+    /// works without a rebuild.
+    Fragments,
+    /// Rebuild the full hash graph from the loaded changes, verifying the
+    /// document's recorded heads. This is the default.
+    #[default]
+    Full,
+}
+
 /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
 #[derive(Debug)]
 pub enum StringMigration {
@@ -93,7 +117,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
-    skip_hash_graph: bool,
+    hash_graph: HashGraphRebuild,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -162,25 +186,27 @@ impl<'a> LoadOptions<'a> {
         }
     }
 
-    /// Skip building the hash graph while loading.
+    /// How to handle the change hash graph while loading.
     ///
-    /// This makes loading faster (no change is re-serialized and hashed, and
-    /// the head hashes are not verified) at the cost of leaving the document
-    /// with an unchecked hash graph: any operation which needs the hash of a
-    /// pre-load change (exporting changes, syncing, isolating at pre-load
-    /// heads, ...) will return [`AutomergeError::UncheckedHashGraph`] until
+    /// [`HashGraphRebuild::None`] makes loading faster (no change is re-serialized
+    /// and hashed, and the head hashes are not verified) at the cost of
+    /// leaving the document with an unchecked hash graph: any operation which
+    /// needs the hash of a pre-load change (exporting changes, syncing,
+    /// isolating at pre-load heads, ...) will return
+    /// [`AutomergeError::UncheckedHashGraph`] until
     /// [`Automerge::rebuild_hash_graph`] is called.
     ///
     /// Reading — current state, or historical state at the load heads — as
     /// well as making new transactions and saving all work on an unchecked
     /// document.
     ///
-    /// The default is `false`.
-    pub fn skip_hash_graph(self, skip: bool) -> Self {
-        Self {
-            skip_hash_graph: skip,
-            ..self
-        }
+    /// [`HashGraphRebuild::Fragments`] loads like [`HashGraphRebuild::None`] when the
+    /// document carries stored fragment hashes (fragment generation works
+    /// immediately), and falls back to a full rebuild when it doesn't.
+    ///
+    /// The default is [`HashGraphRebuild::Full`].
+    pub fn hash_graph(self, hash_graph: HashGraphRebuild) -> Self {
+        Self { hash_graph, ..self }
     }
 }
 
@@ -192,7 +218,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
-            skip_hash_graph: false,
+            hash_graph: HashGraphRebuild::Full,
         }
     }
 }
@@ -868,7 +894,7 @@ impl Automerge {
                 match d.reconstruct(
                     options.verification_mode,
                     options.text_encoding,
-                    !options.skip_hash_graph,
+                    options.hash_graph,
                 ) {
                     Ok(doc) => doc,
                     Err(ReconstructError::InvalidMarkOrderDoc {
@@ -1426,7 +1452,7 @@ impl Automerge {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
-    /// loaded with [`LoadOptions::skip_hash_graph`] — fragments need the
+    /// loaded with [`LoadOptions::hash_graph`] — fragments need the
     /// whole hash graph.
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(
@@ -1451,7 +1477,7 @@ impl Automerge {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
-    /// loaded with [`LoadOptions::skip_hash_graph`].
+    /// loaded with [`LoadOptions::hash_graph`].
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
         if self.hash_graph_state() == HashGraphState::Unchecked {
@@ -1466,7 +1492,7 @@ impl Automerge {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
-    /// loaded with [`LoadOptions::skip_hash_graph`].
+    /// loaded with [`LoadOptions::hash_graph`].
     #[doc(hidden)]
     pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
@@ -1502,14 +1528,14 @@ impl Automerge {
     /// Whether this document's hash graph has been built and validated.
     ///
     /// This is `true` for every document except those loaded with
-    /// [`LoadOptions::skip_hash_graph`] which have not yet had
+    /// [`LoadOptions::hash_graph`] which have not yet had
     /// [`Self::rebuild_hash_graph`] called on them.
     pub fn hash_graph_is_checked(&self) -> bool {
         self.change_graph.is_checked()
     }
 
     /// Build and validate the hash graph of a document loaded with
-    /// [`LoadOptions::skip_hash_graph`].
+    /// [`LoadOptions::hash_graph`].
     ///
     /// This performs the work the load skipped: every change is
     /// reconstructed and hashed and the heads are verified against the
@@ -1561,7 +1587,7 @@ impl Automerge {
     /// The heads are the hashes of the changes which have no successors in
     /// this document — collectively they identify the current state. The
     /// heads are always known, even on a document loaded with
-    /// [`crate::LoadOptions::skip_hash_graph`].
+    /// [`crate::LoadOptions::hash_graph`].
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();

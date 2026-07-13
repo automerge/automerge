@@ -1,10 +1,10 @@
 use automerge::{
     transaction::Transactable, ActorId, AutoCommit, Automerge, AutomergeError, ChangeHash,
-    LoadOptions, ReadDoc, ROOT,
+    HashGraphRebuild, LoadOptions, ReadDoc, ROOT,
 };
 
 fn unchecked_opts() -> LoadOptions<'static> {
-    LoadOptions::new().skip_hash_graph(true)
+    LoadOptions::new().hash_graph(HashGraphRebuild::None)
 }
 
 /// A doc with 3 sequential changes by one actor
@@ -455,7 +455,10 @@ fn unchecked_lifecycle_all_fallible_functions() {
     // ── fragments work in the fragment-hashes state ──
     let mid_fragments = doc.fragments(..).unwrap();
     assert!(!mid_fragments.is_empty());
-    assert!(!doc.bundle_fragments(mid_fragments.clone()).unwrap().is_empty());
+    assert!(!doc
+        .bundle_fragments(mid_fragments.clone())
+        .unwrap()
+        .is_empty());
 
     // ── rebuild the graph: every failing call above now succeeds ──
     doc.rebuild_hash_graph().unwrap();
@@ -613,4 +616,34 @@ fn forged_hash_column_rejected() {
     assert_eq!(doc.hash_graph_state(), HashGraphState::FragmentHashes);
     // ... but rebuild recomputes and refuses
     assert!(doc.rebuild_hash_graph().is_err());
+}
+
+/// `HashGraphRebuild::Fragments` uses the stored hash columns when they exist
+/// (as fast as `Skip`, fragments work immediately) and falls back to a
+/// full checked rebuild when they don't.
+#[test]
+fn fragments_mode_uses_columns_or_rebuilds() {
+    use automerge::HashGraphState;
+
+    let fragments_opts = || LoadOptions::new().hash_graph(HashGraphRebuild::Fragments);
+
+    // a doc with hash columns comes up in the middle state
+    let (bytes, orig, unknown) = saved_big_doc_with_unknown_hash();
+    let doc = AutoCommit::load_with_options(&bytes, fragments_opts()).unwrap();
+    assert_eq!(doc.hash_graph_state(), HashGraphState::FragmentHashes);
+    assert_eq!(doc.fragments(..).unwrap(), orig.fragments(..).unwrap());
+    // interior history stays unknown — no silent rebuild happened
+    assert!(matches!(
+        doc.get_change_by_hash(&unknown),
+        Err(AutomergeError::UncheckedHashGraph)
+    ));
+
+    // a doc without hash columns (single change) gets a full rebuild
+    let mut small = AutoCommit::new();
+    small.put(ROOT, "k", 1).unwrap();
+    small.commit();
+    let small_bytes = small.save();
+    let doc = AutoCommit::load_with_options(&small_bytes, fragments_opts()).unwrap();
+    assert_eq!(doc.hash_graph_state(), HashGraphState::Checked);
+    assert_eq!(doc.fragments(..).unwrap().len(), 1);
 }

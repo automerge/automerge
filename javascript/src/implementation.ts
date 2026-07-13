@@ -213,12 +213,16 @@ export type InitOptions<T> = {
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
   /**
-   * Skip building the change-hash graph for a much faster load. APIs
-   * that need change hashes ({@link getChanges}, {@link merge}, sync,
-   * ...) will throw until {@link rebuildHashGraph} is called on the
-   * document.
+   * How much of the change-hash graph to rebuild on load. `"full"`
+   * (the default) rebuilds and verifies it. `"none"` skips the rebuild
+   * for a much faster load; APIs that need change hashes
+   * ({@link getChanges}, {@link merge}, sync, ...) will throw until
+   * {@link rebuildHashGraph} is called on the document. `"fragments"`
+   * uses the fragment hashes stored in the document if present (fast,
+   * and fragment APIs work immediately), falling back to a full
+   * rebuild if not.
    */
-  skipHashGraph?: boolean
+  hashGraphRebuild?: "full" | "fragments" | "none"
   /** @hidden */
   convertImmutableStringsToText?: boolean
 }
@@ -238,7 +242,7 @@ function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
 
 /**
  * Build the hash graph on a document that was loaded with
- * `skipHashGraph: true`, re-enabling the hash-based APIs. The recomputed
+ * `hashGraphRebuild: "none"`, re-enabling the hash-based APIs. The recomputed
  * head hashes are verified against the heads recorded in the document.
  * No-op if the graph is already built.
  */
@@ -252,7 +256,9 @@ export function rebuildHashGraph<T>(doc: Doc<T>): void {
  * work; other hash-dependent APIs throw until {@link rebuildHashGraph}),
  * or `"unchecked"`.
  */
-export function hashGraphState<T>(doc: Doc<T>): "checked" | "fragmentHashes" | "unchecked" {
+export function hashGraphState<T>(
+  doc: Doc<T>,
+): "checked" | "fragmentHashes" | "unchecked" {
   return _state(doc).handle.hashGraphState()
 }
 
@@ -742,13 +748,13 @@ export function load<T>(
   const allowMissingDeps = opts.allowMissingChanges || false
   const convertImmutableStringsToText =
     opts.convertImmutableStringsToText || false
-  const skipHashGraph = opts.skipHashGraph || false
+  const hashGraphRebuild = opts.hashGraphRebuild
   const handle = ApiHandler.load(data, {
     actor,
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
-    skipHashGraph,
+    hashGraphRebuild,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)

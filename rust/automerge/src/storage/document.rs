@@ -10,7 +10,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{ActorId, Automerge, Change, ChangeHash, HashGraphRebuild, TextEncoding};
 
 mod compression;
 
@@ -339,12 +339,22 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
-        build_hash_graph: bool,
+        hash_graph: HashGraphRebuild,
     ) -> Result<Automerge, ReconstructError> {
         // the op indexes are built during column load, in the same
         // decode pass (obj id validation happens inside the walk)
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
+
+        let build_hash_graph = match hash_graph {
+            HashGraphRebuild::Full => true,
+            HashGraphRebuild::None => false,
+            // use the stored fragment hashes when the document has them;
+            // otherwise fall back to a full rebuild
+            HashGraphRebuild::Fragments => {
+                !change_cols.has_saved_hashes() || self.head_indexes().is_none()
+            }
+        };
 
         // an unchecked load pairs the heads with their nodes via the head
         // index suffix, so refuse to skip if it is absent

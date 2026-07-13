@@ -290,7 +290,9 @@ pub mod transaction;
 mod types;
 mod value;
 
-pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
+pub use crate::automerge::{
+    Automerge, HashGraphRebuild, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
+};
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};

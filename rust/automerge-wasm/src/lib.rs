@@ -370,9 +370,13 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
-  /** Skip building the change-hash graph for a much faster load.
-   * Hash-based APIs throw until `rebuildHashGraph()` is called. */
-  skipHashGraph?: boolean;
+  /** How much of the change-hash graph to rebuild on load. "full" (the
+   * default) rebuilds and verifies it. "none" skips the rebuild for a
+   * much faster load; hash-based APIs throw until `rebuildHashGraph()`
+   * is called. "fragments" uses the fragment hashes stored in the
+   * document if present (fast, and fragment APIs work immediately),
+   * falling back to a full rebuild if not. */
+  hashGraphRebuild?: "full" | "fragments" | "none";
 };
 
 // if recursive is false do not diff child objects
@@ -1517,7 +1521,7 @@ impl Automerge {
     }
 
     /// Build the hash graph on a document that was loaded with
-    /// `skipHashGraph: true`, re-enabling the hash-based APIs. The
+    /// `hashGraphRebuild: "none"`, re-enabling the hash-based APIs. The
     /// recomputed head hashes are verified against the heads recorded in
     /// the document. No-op if the graph is already built.
     #[wasm_bindgen(js_name = rebuildHashGraph)]
@@ -1892,16 +1896,24 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
-    let skip_hash_graph = js_get(&options, "skipHashGraph")
+    let hash_graph = match js_get(&options, "hashGraphRebuild")
         .ok()
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .filter(|v| !v.is_undefined() && !v.is_null())
+    {
+        None => am::HashGraphRebuild::Full,
+        Some(v) => match v.as_string().as_deref() {
+            Some("none") => am::HashGraphRebuild::None,
+            Some("fragments") => am::HashGraphRebuild::Fragments,
+            Some("full") => am::HashGraphRebuild::Full,
+            _ => return Err(error::Load::BadHashGraph),
+        },
+    };
     let mut doc = am::AutoCommit::load_with_options(
         &data,
         am::LoadOptions::new()
             .on_partial_load(on_partial_load)
             .verification_mode(verification_mode)
-            .skip_hash_graph(skip_hash_graph)
+            .hash_graph(hash_graph)
             .migrate_strings(string_migration)
             .text_encoding(TextEncoding::Utf16CodeUnit),
     )?;
@@ -2847,6 +2859,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error("hashGraphRebuild must be one of \"full\", \"fragments\" or \"none\"")]
+        BadHashGraph,
     }
 
     impl From<Load> for JsValue {
