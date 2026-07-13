@@ -134,8 +134,19 @@ pub trait LoadIterApi<'a, T: ColumnValueRef> {
     /// The next canonical run, or `None` at end of input.
     fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError>;
 
-    /// The next single value, stepping through runs.
-    fn try_next(&mut self) -> Result<Option<T::Get<'a>>, PackError>;
+    /// Number of slabs already cut and completed behind the stream.
+    ///
+    /// Together with [`completed_slab_len`](Self::completed_slab_len) this
+    /// lets a caller attribute the runs it pulls to individual slabs (for
+    /// incremental weight accumulation) without re-decoding them later.
+    /// Cutting happens at segment granularity and every yielded run is
+    /// one wire segment (canonical input is enforced), so a run never
+    /// spans a slab boundary and a cut is visible as soon as the run
+    /// that triggered it is yielded.
+    fn slabs_completed(&self) -> usize;
+
+    /// Item count of completed slab `i`.
+    fn completed_slab_len(&self, i: usize) -> usize;
 
     /// Drain and validate whatever the consumer did not pull, and return
     /// the finished slabs (built with the loader's byte-copy mechanics as
@@ -151,9 +162,6 @@ pub trait LoadIterApi<'a, T: ColumnValueRef> {
 ///
 /// The single method is fallible because load sources are still
 /// validating untrusted bytes; in-memory iterators always return `Ok`.
-/// When the concrete type is known, prefer its inherent methods (which
-/// also offer per-item stepping, and are infallible on in-memory
-/// iterators).
 pub trait RunSrc<'a, T: ColumnValueRef> {
     /// The next canonical run, or `None` at end of input.
     fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError>;

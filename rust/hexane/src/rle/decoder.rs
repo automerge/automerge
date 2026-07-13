@@ -118,6 +118,9 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
         }
     }
 
+    // multiple monomorphized callers (pull path + drain path) — without
+    // the hint LLVM stops inlining this into the per-segment hot loops
+    #[inline(always)]
     pub(crate) fn try_next_segment(&mut self) -> Result<Option<RleSegment<'a, T>>, PackError> {
         if self.remaining > 0 && matches!(self.state, RleDecoderState::Literal) {
             self.remaining -= 1;
@@ -301,6 +304,16 @@ pub(crate) enum RleSegment<'a, T: RleValue> {
         value: T::Get<'a>,
         bytes: usize,
     },
+}
+
+// Hand-written (not derived) so the impls don't demand `T: Copy` —
+// `T::Get<'a>` is `Copy` by trait contract even when `T` (e.g. `String`)
+// is not.
+impl<T: RleValue> Copy for RleSegment<'_, T> {}
+impl<T: RleValue> Clone for RleSegment<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<'a, T: RleValue> RleSegment<'a, T> {

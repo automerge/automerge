@@ -87,6 +87,25 @@ pub trait WeightFn<T: ColumnValueRef>: Sealed {
     /// non-invertible aggregates like min/max.
     type Weight: Clone + Default + std::fmt::Debug;
     fn compute(slab: &Slab<TailOf<T>>) -> Self::Weight;
+
+    /// `true` when `compute` has to re-decode the slab bytes (prefix sums,
+    /// delta aggregates).  The streaming loader then builds each slab's
+    /// weight incrementally via [`accumulate_run`](Self::accumulate_run)
+    /// as runs stream past, instead of a second decode pass at the end.
+    const ACCUMULATES: bool = false;
+
+    /// Fold a run of `count` copies of `value` into an in-progress slab
+    /// weight (starting from `Default`).  Must agree exactly with
+    /// [`compute`](Self::compute); runs may arrive split into pieces.
+    ///
+    /// Only called during load, so it is fallible: weight functions whose
+    /// arithmetic can overflow on hostile bytes (delta aggregates) return
+    /// an error instead of wrapping or panicking.
+    fn accumulate_run(
+        weight: &mut Self::Weight,
+        count: usize,
+        value: T::Get<'_>,
+    ) -> Result<(), PackError>;
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -101,6 +120,14 @@ impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     #[inline]
     fn compute(slab: &Slab<TailOf<T>>) -> usize {
         slab.len
+    }
+
+    // `compute` is O(1) here, so the loader keeps its fast drain path
+    // (`ACCUMULATES = false`); this impl exists for completeness.
+    #[inline]
+    fn accumulate_run(weight: &mut usize, count: usize, _value: T::Get<'_>) -> Result<(), PackError> {
+        *weight += count;
+        Ok(())
     }
 }
 
@@ -916,8 +943,8 @@ where
     /// Pulling runs is optional — `load_iter(data, opts).finalize()` is a
     /// plain load — but consumers that need the data anyway (like an
     /// index builder) can walk the canonical runs during the same decode
-    /// pass. A fill option on empty data reads as one run of `length`
-    /// copies of the fill value.
+    /// pass. A fill option on empty data emits one run and writes one
+    /// slab.
     pub fn load_iter<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> ColumnLoadIter<'a, T, WF, Idx>
     where
         F: MaybeFill<T::Get<'a>>,
@@ -933,6 +960,9 @@ where
             fill_emitted: false,
             length: opts.length,
             max_segments: opts.max_segments,
+            weights: Vec::new(),
+            cur_weight: WF::Weight::default(),
+            cur_emitted: 0,
             _phantom: PhantomData,
         }
     }
@@ -1407,10 +1437,11 @@ where
 
 /// Streaming column load — see [`Column::load_iter`].
 ///
-/// Yields the canonical runs of the input (adjacent equal runs merged, so
-/// consumers get the "adjacent runs never carry equal values" contract)
-/// while the slabs build underneath. All methods return `Result` — the
-/// bytes are untrusted.
+/// Yields the input's runs while the slabs build underneath. The input
+/// must be canonical — non-canonical structure (adjacent mergeable runs,
+/// count-0 runs, count-1 repeats) is a load error — so consumers get the
+/// "adjacent runs never carry equal values" contract by construction.
+/// All methods return `Result` — the bytes are untrusted.
 pub struct ColumnLoadIter<'a, T, WF = LenWeight, Idx = SlabBTree<<WF as WeightFn<T>>::Weight>>
 where
     T: ColumnValueRef,
@@ -1418,11 +1449,18 @@ where
 {
     iter: <T::Encoding as ColumnEncoding>::LoadIter<'a>,
     /// engaged when the data was absent and the load options carried a
-    /// fill: the column reads as `.1` copies of `.0`
+    /// fill: emit one run, write one slab
     fill: Option<(T::Get<'a>, usize)>,
     fill_emitted: bool,
     length: Option<usize>,
     max_segments: usize,
+    /// per-slab weights accumulated as runs stream past — only when
+    /// `WF::ACCUMULATES`, sparing `finalize` the `WF::compute` re-decode
+    weights: Vec<WF::Weight>,
+    /// weight of the slab currently being cut
+    cur_weight: WF::Weight,
+    /// items already attributed to the slab currently being cut
+    cur_emitted: usize,
     _phantom: PhantomData<(WF, Idx)>,
 }
 
@@ -1443,26 +1481,52 @@ where
             self.fill_emitted = true;
             return Ok(Some(Run { count: len, value }));
         }
-        self.iter.try_next_run()
+        let run = self.iter.try_next_run()?;
+        if WF::ACCUMULATES {
+            if let Some(run) = &run {
+                self.attribute(run.count, run.value)?;
+            }
+        }
+        Ok(run)
     }
 
-    /// The next single value, stepping through runs. (Fill sources only
-    /// support run-at-a-time access.)
-    pub fn try_next(&mut self) -> Result<Option<T::Get<'a>>, PackError> {
+    /// Attribute a pulled run's items to the current slab's weight.
+    /// Every run is exactly one wire segment (canonical input is
+    /// enforced by the loader), so a run never spans a slab boundary —
+    /// if this run's segment completed a slab, the cut landed at the
+    /// run's end and the weight closes with it.
+    fn attribute(&mut self, count: usize, value: T::Get<'a>) -> Result<(), PackError> {
         use crate::encoding::LoadIterApi;
-        debug_assert!(self.fill.is_none(), "per-item stepping over a fill");
-        self.iter.try_next()
+        WF::accumulate_run(&mut self.cur_weight, count, value)?;
+        self.cur_emitted += count;
+        if self.weights.len() < self.iter.slabs_completed() {
+            debug_assert_eq!(
+                self.cur_emitted,
+                self.iter.completed_slab_len(self.weights.len())
+            );
+            self.weights.push(std::mem::take(&mut self.cur_weight));
+            self.cur_emitted = 0;
+        }
+        Ok(())
     }
 
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
-    pub fn finalize(self) -> Result<Column<T, WF, Idx>, PackError> {
+    pub fn finalize(mut self) -> Result<Column<T, WF, Idx>, PackError> {
         use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));
             }
             return Ok(Column::fill(len, value));
+        }
+        if WF::ACCUMULATES {
+            // `iter.finalize()` below drains and validates whatever is
+            // left, but its fast discard loop never materializes runs —
+            // accumulating weights need every run to pass through
+            // `attribute`, so eat the tail here first (the finalize
+            // below then only flushes the last slab)
+            while self.try_next_run()?.is_some() {}
         }
         let slabs = self.iter.finalize()?;
         let total_len: usize = slabs.iter().map(|s| s.len).sum();
@@ -1471,7 +1535,74 @@ where
                 return Err(PackError::InvalidLength(total_len, expected));
             }
         }
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
+        let index = if WF::ACCUMULATES {
+            let mut weights = self.weights;
+            // the final slab is only cut by `finalize` itself; whatever is
+            // not yet attributed to a closed slab belongs to it
+            if weights.len() < slabs.len() {
+                weights.push(self.cur_weight);
+            }
+            debug_assert_eq!(weights.len(), slabs.len());
+            Idx::from_weights(weights)
+        } else {
+            Idx::from_weights(slabs.iter().map(WF::compute))
+        };
+        Ok(Column {
+            slabs,
+            index,
+            total_len,
+            max_segments: self.max_segments,
+            counter: 0,
+            _phantom: PhantomData,
+        })
+    }
+
+    /// Like [`finalize`](Self::finalize), but runs `check` over every
+    /// slab's weight (in column order) *before* any weight enters the
+    /// index — so callers can validate aggregates (e.g. delta domain
+    /// bounds) before they reach the index's merge arithmetic.
+    pub fn finalize_with(
+        mut self,
+        mut check: impl FnMut(&WF::Weight) -> Result<(), PackError>,
+    ) -> Result<Column<T, WF, Idx>, PackError> {
+        use crate::encoding::LoadIterApi;
+        if let Some((value, len)) = self.fill {
+            if len == 0 {
+                return Ok(Column::with_max_segments(self.max_segments));
+            }
+            return Ok(Column::fill(len, value));
+        }
+        if WF::ACCUMULATES {
+            // `iter.finalize()` below drains and validates whatever is
+            // left, but its fast discard loop never materializes runs —
+            // accumulating weights need every run to pass through
+            // `attribute`, so eat the tail here first (the finalize
+            // below then only flushes the last slab)
+            while self.try_next_run()?.is_some() {}
+        }
+        let slabs = self.iter.finalize()?;
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        if let Some(expected) = self.length {
+            if total_len != expected {
+                return Err(PackError::InvalidLength(total_len, expected));
+            }
+        }
+        let weights: Vec<WF::Weight> = if WF::ACCUMULATES {
+            let mut weights = self.weights;
+            // the final slab is only cut by `finalize` itself; whatever is
+            // not yet attributed to a closed slab belongs to it
+            if weights.len() < slabs.len() {
+                weights.push(self.cur_weight);
+            }
+            debug_assert_eq!(weights.len(), slabs.len());
+            weights
+        } else {
+            slabs.iter().map(WF::compute).collect()
+        };
+        for w in &weights {
+            check(w)?;
+        }
+        let index = Idx::from_weights(weights);
         Ok(Column {
             slabs,
             index,

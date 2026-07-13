@@ -798,8 +798,6 @@ pub struct BoolLoadIter<'a> {
     data: &'a [u8],
     pos: usize,
     run_index: usize,
-    /// partially consumed run for per-item stepping
-    pending: Option<Run<bool>>,
     // ── slab-cutting state, identical to the block loader ──
     slabs: Vec<Slab>,
     slab_start: usize,
@@ -815,7 +813,6 @@ impl<'a> BoolLoadIter<'a> {
             data,
             pos: 0,
             run_index: 0,
-            pending: None,
             slabs: Vec::new(),
             slab_start: 0,
             slab_items: 0,
@@ -842,9 +839,6 @@ impl<'a> BoolLoadIter<'a> {
     /// The next run, or `None` at end of input.
     #[inline]
     pub fn try_next_run(&mut self) -> Result<Option<Run<bool>>, PackError> {
-        if let Some(run) = self.pending.take() {
-            return Ok(Some(run));
-        }
         loop {
             if self.pos >= self.data.len() {
                 return Ok(None);
@@ -877,25 +871,9 @@ impl<'a> BoolLoadIter<'a> {
         }
     }
 
-    /// The next single value, stepping through runs.
-    pub fn try_next(&mut self) -> Result<Option<bool>, PackError> {
-        let Some(mut run) = (match self.pending.take() {
-            Some(run) => Some(run),
-            None => self.try_next_run()?,
-        }) else {
-            return Ok(None);
-        };
-        if run.count > 1 {
-            run.count -= 1;
-            self.pending = Some(run);
-        }
-        Ok(Some(run.value))
-    }
-
     /// Drain and validate whatever the consumer did not pull, flush the
     /// final slab, and return the finished slabs.
     pub fn finalize(mut self) -> Result<Vec<Slab>, PackError> {
-        debug_assert!(self.pending.is_none() || self.pos >= self.data.len());
         let data = self.data;
         let mut slabs = std::mem::take(&mut self.slabs);
         let mut pos = self.pos;
@@ -949,8 +927,12 @@ impl<'a> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a> {
         BoolLoadIter::try_next_run(self)
     }
 
-    fn try_next(&mut self) -> Result<Option<bool>, PackError> {
-        BoolLoadIter::try_next(self)
+    fn slabs_completed(&self) -> usize {
+        self.slabs.len()
+    }
+
+    fn completed_slab_len(&self, i: usize) -> usize {
+        self.slabs[i].len
     }
 
     fn finalize(self) -> Result<Vec<Slab>, PackError> {

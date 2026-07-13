@@ -213,6 +213,21 @@ impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
             prefix: T::slab_sum(slab),
         }
     }
+
+    // `compute` re-decodes the slab (`slab_sum`); let the streaming
+    // loader accumulate weights as the runs go past instead.
+    const ACCUMULATES: bool = true;
+
+    #[inline]
+    fn accumulate_run(
+        weight: &mut Self::Weight,
+        count: usize,
+        value: T::Get<'_>,
+    ) -> Result<(), crate::PackError> {
+        weight.len += count;
+        T::accumulate_run(&mut weight.prefix, &Run { count, value });
+        Ok(())
+    }
 }
 
 // ── PrefixValue impls using decoders ─────────────────────────────────────────
@@ -1015,11 +1030,6 @@ impl<'a, T: PrefixValue> PrefixColumnLoadIter<'a, T> {
     /// The next canonical run, or `None` at end of input.
     pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
         self.0.try_next_run()
-    }
-
-    /// The next single value, stepping through runs.
-    pub fn try_next(&mut self) -> Result<Option<T::Get<'a>>, crate::PackError> {
-        self.0.try_next()
     }
 
     /// Drain and validate whatever was not pulled, apply the length check

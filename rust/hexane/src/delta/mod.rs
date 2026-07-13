@@ -35,9 +35,69 @@ pub use indexed::IndexedDeltaWeightFn;
 /// this domain (a precondition violation on the writer's own data);
 /// [`load`](DeltaColumn::load) **rejects** out-of-domain data with an
 /// error (untrusted bytes must never panic).
+/// Sealed inner storage type of a [`DeltaColumn`]: `i64` when `T` is
+/// non-nullable, `Option<i64>` when nullable. The wire format is
+/// identical either way (nullable RLE of `i64` deltas — a non-nullable
+/// column simply never contains null runs, and `Column<i64>` *rejects*
+/// them at decode). Delta logic is written against `to_opt`/`from_opt`;
+/// for `i64` the null branches are statically dead and compile away,
+/// which removes the `Option` widening tax (16-byte values, per-run
+/// discriminant compares) from non-nullable columns.
+pub trait DeltaInner:
+    crate::RleValue<Encoding = crate::RleEncoding<Self>>
+    + crate::AsColumnRef<Self>
+    + crate::sealed::Sealed
+    + Copy
+    + Debug
+    + Sized
+    + 'static
+{
+    /// View a decoded value as an optional delta.
+    fn to_opt(v: Self::Get<'_>) -> Option<i64>;
+    /// Build a storable value from an optional delta. `None` means null —
+    /// unreachable for `i64`, whose columns cannot contain nulls.
+    fn from_opt(v: Option<i64>) -> Self;
+}
+
+impl crate::sealed::Sealed for i64 {}
+impl crate::sealed::Sealed for Option<i64> {}
+
+impl DeltaInner for i64 {
+    #[inline]
+    fn to_opt(v: i64) -> Option<i64> {
+        Some(v)
+    }
+    #[inline]
+    fn from_opt(v: Option<i64>) -> i64 {
+        v.expect("null delta in a non-nullable delta column")
+    }
+}
+
+impl DeltaInner for Option<i64> {
+    #[inline]
+    fn to_opt(v: Option<i64>) -> Option<i64> {
+        v
+    }
+    #[inline]
+    fn from_opt(v: Option<i64>) -> Option<i64> {
+        v
+    }
+}
+
 pub trait DeltaValue: Copy + PartialEq + Default + Debug {
     /// Whether this type supports null values.
     const NULLABLE: bool;
+
+    /// The inner column storage type: `i64` for non-nullable `Self`,
+    /// `Option<i64>` for nullable — see [`DeltaInner`].
+    type Inner: DeltaInner;
+
+    /// Inclusive bounds of the realized-value domain, as `i64`. Must
+    /// accept exactly the values [`try_from_i64`](Self::try_from_i64)
+    /// accepts; [`load`](DeltaColumn::load) validates each slab's
+    /// realized min/max aggregate against them.
+    const MIN_I64: i64;
+    const MAX_I64: i64;
 
     /// Convert to `i64` for delta computation. Returns `None` for null values.
     ///
@@ -74,6 +134,9 @@ pub trait DeltaValue: Copy + PartialEq + Default + Debug {
 
 impl DeltaValue for u32 {
     const NULLABLE: bool = false;
+    type Inner = i64;
+    const MIN_I64: i64 = 0;
+    const MAX_I64: i64 = u32::MAX as i64;
     fn to_i64(self) -> Option<i64> {
         Some(self as i64)
     }
@@ -90,6 +153,9 @@ impl DeltaValue for u32 {
 
 impl DeltaValue for u64 {
     const NULLABLE: bool = false;
+    type Inner = i64;
+    const MIN_I64: i64 = 0;
+    const MAX_I64: i64 = i64::MAX;
     /// # Panics
     ///
     /// Panics for values `> i64::MAX` — see the [`DeltaValue`] domain
@@ -118,6 +184,9 @@ impl DeltaValue for u64 {
 
 impl DeltaValue for i32 {
     const NULLABLE: bool = false;
+    type Inner = i64;
+    const MIN_I64: i64 = i32::MIN as i64;
+    const MAX_I64: i64 = i32::MAX as i64;
     fn to_i64(self) -> Option<i64> {
         Some(self as i64)
     }
@@ -134,6 +203,9 @@ impl DeltaValue for i32 {
 
 impl DeltaValue for i64 {
     const NULLABLE: bool = false;
+    type Inner = i64;
+    const MIN_I64: i64 = i64::MIN;
+    const MAX_I64: i64 = i64::MAX;
     fn to_i64(self) -> Option<i64> {
         Some(self)
     }
@@ -147,6 +219,10 @@ impl DeltaValue for i64 {
 
 impl DeltaValue for usize {
     const NULLABLE: bool = false;
+    type Inner = i64;
+    const MIN_I64: i64 = 0;
+    // 32-bit targets (wasm) have a smaller usize domain
+    const MAX_I64: i64 = if usize::BITS >= 64 { i64::MAX } else { usize::MAX as i64 };
     /// # Panics
     ///
     /// Panics for values `> i64::MAX` — see the [`DeltaValue`] domain
@@ -176,6 +252,9 @@ impl DeltaValue for usize {
 
 impl DeltaValue for Option<u32> {
     const NULLABLE: bool = true;
+    type Inner = Option<i64>;
+    const MIN_I64: i64 = u32::MIN_I64;
+    const MAX_I64: i64 = u32::MAX_I64;
     fn to_i64(self) -> Option<i64> {
         self.map(|v| v as i64)
     }
@@ -194,6 +273,9 @@ impl DeltaValue for Option<u32> {
 
 impl DeltaValue for Option<u64> {
     const NULLABLE: bool = true;
+    type Inner = Option<i64>;
+    const MIN_I64: i64 = u64::MIN_I64;
+    const MAX_I64: i64 = u64::MAX_I64;
     /// # Panics
     ///
     /// Panics for `Some(v)` with `v > i64::MAX` — see [`DeltaValue`].
@@ -216,6 +298,9 @@ impl DeltaValue for Option<u64> {
 
 impl DeltaValue for Option<i32> {
     const NULLABLE: bool = true;
+    type Inner = Option<i64>;
+    const MIN_I64: i64 = i32::MIN_I64;
+    const MAX_I64: i64 = i32::MAX_I64;
     fn to_i64(self) -> Option<i64> {
         self.map(|v| v as i64)
     }
@@ -232,6 +317,9 @@ impl DeltaValue for Option<i32> {
 
 impl DeltaValue for Option<i64> {
     const NULLABLE: bool = true;
+    type Inner = Option<i64>;
+    const MIN_I64: i64 = i64::MIN;
+    const MAX_I64: i64 = i64::MAX;
     fn to_i64(self) -> Option<i64> {
         self
     }
@@ -245,6 +333,9 @@ impl DeltaValue for Option<i64> {
 
 impl DeltaValue for Option<usize> {
     const NULLABLE: bool = true;
+    type Inner = Option<i64>;
+    const MIN_I64: i64 = usize::MIN_I64;
+    const MAX_I64: i64 = usize::MAX_I64;
     /// # Panics
     ///
     /// Panics for `Some(v)` with `v > i64::MAX` — see [`DeltaValue`].
@@ -533,9 +624,10 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 
 // ── DeltaColumn ────────────────────────────────────────────────────────────
 //
-// Deltas are always stored as `Column<Option<i64>, IndexedDeltaWeightFn>`
-// regardless of `T`.  `T` only affects how realized values are materialized
-// on read (and validated on load).  The `SlabAgg` aggregate (len + total +
+// Deltas are stored as `Column<T::Inner, IndexedDeltaWeightFn>` — `i64`
+// for non-nullable `T`, `Option<i64>` for nullable (see [`DeltaInner`]);
+// the wire bytes are identical either way.  `T` only affects how realized
+// values are materialized on read (and validated on load).  The `SlabAgg` aggregate (len + total +
 // min/max offsets) unlocks `find_by_value` / `find_by_range` via min/max
 // pruning.
 
@@ -546,7 +638,7 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 /// Writes outside the domain panic; [`load`](DeltaColumn::load) rejects
 /// out-of-domain data with an error.
 pub struct DeltaColumn<T: DeltaValue> {
-    pub(crate) col: Column<Option<i64>, IndexedDeltaWeightFn>,
+    pub(crate) col: Column<T::Inner, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
 }
 
@@ -592,52 +684,40 @@ impl<T: DeltaValue> DeltaColumn<T> {
     pub fn from_values(values: Vec<T>) -> Self {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
-        col.splice(0, 0, deltas_from(&inner, 0));
+        col.splice(0, 0, deltas_from::<T::Inner>(&inner, 0));
         Self {
             col,
             _phantom: PhantomData,
         }
     }
 
-    pub fn load_with<F>(data: &[u8], opts: LoadOpts<F>) -> Result<Self, PackError>
+    pub fn load_with<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> Result<Self, PackError>
     where
-        F: crate::MaybeFill<Option<i64>>,
+        F: crate::MaybeFill<<T::Inner as crate::ColumnValueRef>::Get<'a>>,
     {
-        if data.is_empty() {
-            let col = Column::load_with(data, opts)?;
-            return Ok(Self {
-                col,
-                _phantom: PhantomData,
-            });
-        }
-        let validate = |running: i64, count: usize, val: Option<i64>| {
-            match val {
-                None => {
-                    if !T::NULLABLE {
-                        return Err("unexpected null in non-nullable delta column".into());
-                    }
-                    Ok(running)
-                }
-                Some(d) => {
-                    // Checked: hostile bytes can encode deltas whose running
-                    // sum overflows i64 — that must be a load error, never a
-                    // debug-panic or a silent release-mode wrap.
-                    let new_running = i64::try_from(count)
-                        .ok()
-                        .and_then(|c| d.checked_mul(c))
-                        .and_then(|x| running.checked_add(x))
-                        .ok_or_else(|| "delta running sum overflows i64".to_string())?;
-                    T::try_from_i64(new_running)?;
-                    Ok(new_running)
-                }
+        // Non-nullable T stores `Column<i64>`, whose decoder rejects null
+        // runs at the segment level — no run-level null scan needed.
+        let iter = InnerColumn::<T>::load_iter(data, opts);
+        // Domain validation per slab: the aggregates accumulated during
+        // the load (exact — `accumulate_run` errors on any within-slab
+        // overflow) hold each slab's realized min/max as offsets from its
+        // start. Walking them with a widened running sum catches both
+        // out-of-domain values and cross-slab overflow, before any
+        // aggregate reaches the index's merge arithmetic. On valid data
+        // `running` never leaves the domain; i128 keeps the comparisons
+        // exact when a hostile slab would wrap them.
+        let (lo, hi) = (T::MIN_I64 as i128, T::MAX_I64 as i128);
+        let mut running: i128 = 0;
+        let col = iter.finalize_with(|w| {
+            if w.len == 0 {
+                return Ok(());
             }
-        };
-        let mut iter = Column::load_iter(data, opts);
-        let mut running: i64 = 0;
-        while let Some(run) = iter.try_next_run()? {
-            running = validate(running, run.count, run.value).map_err(PackError::InvalidValue)?;
-        }
-        let col = iter.finalize()?;
+            if running + (w.min_offset as i128) < lo || running + (w.max_offset as i128) > hi {
+                return Err(PackError::InvalidValue("delta value out of domain".into()));
+            }
+            running += w.total as i128;
+            Ok(())
+        })?;
         Ok(Self {
             col,
             _phantom: PhantomData,
@@ -684,16 +764,19 @@ impl<T: DeltaValue> DeltaColumn<T> {
     pub fn save_to_unless(&self, out: &mut Vec<u8>, value: T) -> std::ops::Range<usize> {
         match value.to_i64() {
             // Null sentinel: elide iff every entry is null.
-            None => self.col.save_to_unless(out, None),
+            None => {
+                let null = T::Inner::from_opt(None);
+                self.col.save_to_unless(out, crate::AsColumnRef::as_column_ref(&null))
+            }
             // Realized sentinel v: uniform iff the first delta realizes v
             // and every later delta is zero.
             Some(v) => {
                 let uniform = self.col.is_empty() || {
                     let mut it = self.col.iter();
-                    let mut ok = it.next() == Some(Some(v));
+                    let mut ok = it.next().map(T::Inner::to_opt) == Some(Some(v));
                     while ok {
                         match it.next_run() {
-                            Some(run) if run.value != Some(0) => ok = false,
+                            Some(run) if T::Inner::to_opt(run.value) != Some(0) => ok = false,
                             Some(_) => {}
                             None => break,
                         }
@@ -816,7 +899,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         // null run + a recomputed boundary delta to keep the realized value
         // of `next_val` intact.
         let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
-        let iter = SpliceDeltaIter::new(values, prev, skip, next_val);
+        let iter = SpliceDeltaIter::<_, T::Inner>::new(values, prev, skip, next_val);
         self.col.splice_inner(index, total_del, iter)
     }
 
@@ -839,17 +922,21 @@ impl<T: DeltaValue> DeltaColumn<T> {
         // between `index + del` and the next non-null — no loop needed.
         match iter.inner.next_run() {
             None => (prev, 0, None),
-            Some(run) if run.value.is_none() => {
+            Some(run) if T::Inner::to_opt(run.value).is_none() => {
                 (prev, run.count, iter.next().map(|_| iter.running))
             }
-            Some(run) => (prev, 0, Some(iter.running + run.value.unwrap())),
+            Some(run) => (
+                prev,
+                0,
+                Some(iter.running + T::Inner::to_opt(run.value).unwrap()),
+            ),
         }
     }
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
 
-type InnerColumn = Column<Option<i64>, IndexedDeltaWeightFn>;
+type InnerColumn<T> = Column<<T as DeltaValue>::Inner, IndexedDeltaWeightFn>;
 
 /// Iterator over realized values in a [`DeltaColumn`].
 ///
@@ -858,9 +945,9 @@ type InnerColumn = Column<Option<i64>, IndexedDeltaWeightFn>;
 /// B-tree to jump directly to the target position and reset the
 /// running prefix in O(log n), avoiding an O(n) replay.
 pub struct DeltaIter<'a, T: DeltaValue> {
-    inner: Iter<'a, Option<i64>>,
+    inner: Iter<'a, T::Inner>,
     running: i64,
-    col: Option<&'a InnerColumn>,
+    col: Option<&'a InnerColumn<T>>,
     _phantom: PhantomData<T>,
 }
 
@@ -880,7 +967,7 @@ impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
 
     #[inline]
     fn next(&mut self) -> Option<T> {
-        match self.inner.next()? {
+        match T::Inner::to_opt(self.inner.next()?) {
             None => Some(T::null_value()),
             Some(d) => {
                 self.running += d;
@@ -911,11 +998,12 @@ impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
             n -= self.pos() - pos;
         }
         while let Some(run) = self.inner.next_run_max(n + 1) {
-            if let Some(delta) = run.value {
-                self.running += delta * run.count as i64;
+            let delta = T::Inner::to_opt(run.value);
+            if let Some(d) = delta {
+                self.running += d * run.count as i64;
             }
             if run.count > n {
-                return Some(match run.value {
+                return Some(match delta {
                     None => T::null_value(),
                     Some(_) => T::from_i64(self.running),
                 });
@@ -1034,16 +1122,16 @@ impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T> {
 /// Iterator that maps realized values to their delta encoding relative to
 /// a running `prev_realized`.  Null values pass through as `None` and leave
 /// `prev_realized` untouched.  No allocation.
-pub(crate) fn deltas_from<'a>(
+pub(crate) fn deltas_from<'a, I: DeltaInner>(
     values: &'a [Option<i64>],
     mut prev_realized: i64,
-) -> impl Iterator<Item = Option<i64>> + 'a {
+) -> impl Iterator<Item = I> + 'a {
     values.iter().map(move |v| match v {
-        None => None,
+        None => I::from_opt(None),
         Some(r) => {
             let d = *r - prev_realized;
             prev_realized = *r;
-            Some(d)
+            I::from_opt(Some(d))
         }
     })
 }
@@ -1055,12 +1143,13 @@ pub(crate) fn deltas_from<'a>(
 /// when a boundary non-null follows the splice — emits a bulk
 /// `(None, skip)` and a recomputed boundary delta against the post-splice
 /// running.
-struct SpliceDeltaIter<I> {
-    iter: I,
+struct SpliceDeltaIter<It, Out> {
+    iter: It,
     running: i64,
     skip: usize,
     next_val: Option<i64>,
     phase: SplicePhase,
+    _out: PhantomData<Out>,
 }
 
 enum SplicePhase {
@@ -1070,30 +1159,31 @@ enum SplicePhase {
     Done,
 }
 
-impl<I: Iterator<Item = Option<i64>>> SpliceDeltaIter<I> {
-    fn new(iter: I, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
+impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> SpliceDeltaIter<It, Out> {
+    fn new(iter: It, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
         Self {
             iter,
             running: prev,
             skip,
             next_val,
             phase: SplicePhase::Values,
+            _out: PhantomData,
         }
     }
 }
 
-impl<I: Iterator<Item = Option<i64>>> Iterator for SpliceDeltaIter<I> {
-    type Item = (Option<i64>, usize);
+impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> Iterator for SpliceDeltaIter<It, Out> {
+    type Item = (Out, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.phase {
                 SplicePhase::Values => match self.iter.next() {
-                    Some(None) => return Some((None, 1)),
+                    Some(None) => return Some((Out::from_opt(None), 1)),
                     Some(Some(r)) => {
                         let d = r - self.running;
                         self.running = r;
-                        return Some((Some(d), 1));
+                        return Some((Out::from_opt(Some(d)), 1));
                     }
                     None => {
                         self.phase = if self.next_val.is_some() {
@@ -1105,12 +1195,16 @@ impl<I: Iterator<Item = Option<i64>>> Iterator for SpliceDeltaIter<I> {
                 },
                 SplicePhase::NullRun => {
                     self.phase = SplicePhase::Boundary;
-                    return Some((None, self.skip));
+                    // don't construct a null for a zero-length run — the
+                    // non-nullable inner type can't represent one
+                    if self.skip > 0 {
+                        return Some((Out::from_opt(None), self.skip));
+                    }
                 }
                 SplicePhase::Boundary => {
                     self.phase = SplicePhase::Done;
                     let next = self.next_val.expect("boundary phase requires next_val");
-                    return Some((Some(next - self.running), 1));
+                    return Some((Out::from_opt(Some(next - self.running)), 1));
                 }
                 SplicePhase::Done => return None,
             }
@@ -1282,6 +1376,39 @@ mod overflow_tests {
         assert!(
             DeltaColumn::<i64>::load(&bytes).is_err(),
             "overflowing running sum should be a load error"
+        );
+    }
+
+    #[test]
+    fn delta_load_rejects_wrapped_within_slab_overflow() {
+        // A single run {delta: 2^62, count: 8}: true partials climb to
+        // 2^65 (overflow), but *wrapping* math lands back on 0, making
+        // the slab aggregate read as a plausible {min: 0, max: 2^62}.
+        // Checked accumulation must reject it instead.
+        use crate::encoding::EncoderApi;
+        let bytes =
+            crate::Encoder::<Option<i64>>::encode(std::iter::repeat(Some(1i64 << 62)).take(8));
+        assert!(
+            DeltaColumn::<u64>::load(&bytes).is_err(),
+            "wrapped within-slab overflow must be a load error"
+        );
+    }
+
+    #[test]
+    fn delta_load_rejects_cross_slab_overflow() {
+        // Each slab's partials fit i64, but the running sum across slabs
+        // exceeds the domain — only the per-slab aggregate walk sees it.
+        use crate::encoding::EncoderApi;
+        let bytes = crate::Encoder::<Option<i64>>::encode([
+            Some((1i64 << 62) - 1),
+            Some(1),
+            Some((1i64 << 62) - 1),
+            Some(1),
+        ]);
+        let opts = crate::LoadOpts::new().with_max_segments(2);
+        assert!(
+            DeltaColumn::<u64>::load_with(&bytes, opts).is_err(),
+            "cross-slab running-sum overflow must be a load error"
         );
     }
 

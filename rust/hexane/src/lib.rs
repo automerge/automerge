@@ -500,6 +500,7 @@ impl ColumnValue for i64 {
 }
 
 impl RleValue for i64 {
+    #[inline(always)]
     fn try_unpack(data: &[u8]) -> Result<(usize, i64), PackError> {
         let mut buf = data;
         let start = buf.len();

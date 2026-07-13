@@ -4564,28 +4564,44 @@ fn load_empty_and_fill_and_length() {
 }
 
 #[test]
-fn load_accepts_non_canonical_input() {
-    // The loader accepts non-canonical run structure (document
-    // compatibility with sloppier encoders) and byte-copies it into
-    // slabs; the load *iterator*, however, merges adjacent equal runs so
-    // its consumers keep the "adjacent runs never equal" contract.
-    let cases: &[(&[u8], &[u64])] = &[
-        (&[0x01, 0x05], &[5]),                      // repeat with count 1
-        (&[0x02, 0x05, 0x02, 0x05], &[5, 5, 5, 5]), // adjacent equal repeats
-        (&[0x02, 0x05, 0x7f, 0x05], &[5, 5, 5]),    // repeat then equal literal
+fn load_rejects_non_canonical_input() {
+    // Non-canonical run structure — anything a canonical encoder would
+    // have merged or never emitted — is a load error, both when draining
+    // (`load_with`) and when pulling the run stream.
+    let cases: &[&[u8]] = &[
+        &[0x01, 0x05],                   // repeat with count 1
+        &[0x02, 0x05, 0x02, 0x05],       // adjacent equal repeats
+        &[0x02, 0x05, 0x7f, 0x05],       // repeat then equal literal
+        &[0x7f, 0x05, 0x7f, 0x05],       // adjacent literal runs
+        &[0x7e, 0x05, 0x05],             // literal with consecutive equal values
+        &[0x7f, 0x05, 0x02, 0x05],       // literal then equal repeat
+        &[0x00, 0x00],                   // null run with count 0 (nullable col below)
     ];
-    for (bytes, expected) in cases {
-        let col = Column::<u64>::load_with(bytes, LoadOpts::new()).unwrap();
-        assert_eq!(&col.to_vec(), expected, "values for {bytes:?}");
-
-        // the run stream is canonical even though the slab bytes are not
+    for bytes in cases {
+        assert!(
+            Column::<u64>::load_with(bytes, LoadOpts::new()).is_err(),
+            "load should reject {bytes:?}"
+        );
         let mut it = crate::RleEncoding::<u64>::load_iter(bytes, 64);
-        let mut prev: Option<u64> = None;
-        while let Some(run) = crate::LoadIterApi::try_next_run(&mut it).unwrap() {
-            assert_ne!(prev, Some(run.value), "adjacent equal runs for {bytes:?}");
-            prev = Some(run.value);
+        let mut errored = false;
+        loop {
+            match crate::LoadIterApi::try_next_run(&mut it) {
+                Err(_) => {
+                    errored = true;
+                    break;
+                }
+                Ok(None) => break,
+                Ok(Some(_)) => {}
+            }
         }
+        assert!(errored, "run stream should reject {bytes:?}");
     }
+    // adjacent null runs (needs a nullable column)
+    let adjacent_nulls: &[u8] = &[0x00, 0x01, 0x00, 0x01];
+    assert!(Column::<Option<u64>>::load_with(adjacent_nulls, LoadOpts::new()).is_err());
+    // count-0 null run
+    let zero_null: &[u8] = &[0x00, 0x00];
+    assert!(Column::<Option<u64>>::load_with(zero_null, LoadOpts::new()).is_err());
 }
 
 #[test]
@@ -4612,14 +4628,12 @@ fn load_iter_partial_consume_then_error() {
         Ok(_) => assert!(LoadIterApi::try_next_run(&mut iter).is_err()),
     }
 
-    // per-item stepping over valid bytes
+    // run iteration over valid bytes
     let good = Column::<u64>::from_values(vec![5, 5, 5]).save();
     let mut it = crate::RleEncoding::<u64>::load_iter(&good, 64);
-    let mut vals = vec![];
-    while let Some(v) = LoadIterApi::try_next(&mut it).unwrap() {
-        vals.push(v);
-    }
-    assert_eq!(vals, vec![5, 5, 5]);
+    let run = LoadIterApi::try_next_run(&mut it).unwrap().unwrap();
+    assert_eq!((run.count, run.value), (3, 5));
+    assert!(LoadIterApi::try_next_run(&mut it).unwrap().is_none());
 }
 
 proptest! {
@@ -4633,5 +4647,119 @@ proptest! {
             &saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
         prop_assert_eq!(col.to_vec(), values);
         prop_assert_eq!(col.save(), saved);
+    }
+}
+
+// ── Incremental weight accumulation during load ─────────────────────────────
+//
+// `WF::ACCUMULATES` weights (prefix sums, delta aggregates) are built as
+// runs stream past the loader instead of a `WF::compute` re-decode at
+// `finalize`. Every query below descends the index through the
+// accumulated weights, so a mismatch with `compute` semantics fails.
+
+#[test]
+fn load_accumulates_prefix_weights() {
+    let mut seed = 0x5EEDu64;
+    let vals: Vec<u64> = (0..5_000).map(|_| xorshift(&mut seed) % 7).collect();
+    let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
+    // small max_segments → many slabs → many boundary attributions
+    let col =
+        PrefixColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+
+    let mut running = 0u128;
+    for (i, &v) in vals.iter().enumerate() {
+        let pv = col.get(i).unwrap();
+        assert_eq!(pv.value, v, "value at {i}");
+        assert_eq!(pv.prefix(), running, "prefix at {i}");
+        running += v as u128;
+        assert_eq!(pv.total(), running, "total at {i}");
+    }
+}
+
+#[test]
+fn load_accumulates_prefix_weights_partial_consume() {
+    // consumer pulls some runs before finalize; the weights must come
+    // out the same as an untouched load
+    let mut seed = 0xACC0u64;
+    let vals: Vec<u64> = (0..2_000).map(|_| xorshift(&mut seed) % 5).collect();
+    let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
+
+    let mut iter =
+        PrefixColumn::<u64>::load_iter(&saved, LoadOpts::new().with_max_segments(4));
+    for _ in 0..25 {
+        iter.try_next_run().unwrap().unwrap();
+    }
+    let col = iter.finalize().unwrap();
+
+    let mut running = 0u128;
+    for (i, &v) in vals.iter().enumerate() {
+        let pv = col.get(i).unwrap();
+        assert_eq!((pv.value, pv.total()), (v, running + v as u128), "at {i}");
+        running += v as u128;
+    }
+}
+
+#[test]
+fn prefix_load_rejects_non_canonical_input() {
+    // Adjacent equal repeat runs are a load error for accumulating
+    // (prefix/delta) columns too — the canonicality check runs at the
+    // wire level, beneath the weight machinery.
+    let bytes: Vec<u8> = [0x02, 0x05].repeat(200);
+    assert!(PrefixColumn::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(4)).is_err());
+}
+
+#[test]
+fn load_accumulates_delta_agg_weights() {
+    let mut seed = 0xDE17Au64;
+    let vals: Vec<u64> = (0..3_000).map(|_| xorshift(&mut seed) % 100).collect();
+    let saved = DeltaColumn::<u64>::from_values(vals.clone()).save();
+    let col =
+        DeltaColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+
+    assert_eq!(col.iter().collect::<Vec<_>>(), vals);
+    // find_by_value prunes slabs via the accumulated min/max aggregates
+    // and realizes values from the accumulated totals
+    for target in 0..100 {
+        let got: Vec<usize> = col.find_by_value(target).collect();
+        let want: Vec<usize> = vals
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v == target)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(got, want, "find_by_value({target})");
+    }
+}
+
+#[test]
+fn load_accumulates_delta_agg_weights_nullable() {
+    let mut seed = 0x0511u64;
+    let vals: Vec<Option<i64>> = (0..3_000)
+        .map(|_| {
+            let r = xorshift(&mut seed);
+            if r % 10 == 0 {
+                None
+            } else {
+                Some((r % 200) as i64 - 100)
+            }
+        })
+        .collect();
+    let saved = DeltaColumn::<Option<i64>>::from_values(vals.clone()).save();
+    let col = DeltaColumn::<Option<i64>>::load_with(
+        &saved,
+        LoadOpts::new().with_max_segments(4),
+    )
+    .unwrap();
+
+    assert_eq!(col.iter().collect::<Vec<_>>(), vals);
+    for target in -100i64..100 {
+        let got: Vec<usize> = col.find_by_value(Some(target)).collect();
+        let want: Vec<usize> = vals
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v == Some(target))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(got, want, "find_by_value({target})");
     }
 }

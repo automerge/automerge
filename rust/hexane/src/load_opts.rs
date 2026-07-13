@@ -95,4 +95,5 @@ impl<F> LoadOpts<F> {
         self.max_segments = n;
         self
     }
+
 }

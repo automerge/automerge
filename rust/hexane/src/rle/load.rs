@@ -67,26 +67,27 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(
 
 /// Streaming decode + validate over saved RLE bytes.
 ///
-/// Yields the **canonical** runs of the input (adjacent equal runs are
-/// merged on the fly, so consumers get the same "adjacent runs never
-/// carry equal values" contract a column iterator provides) while
-/// building the output slabs with the same byte-copy mechanics as the
-/// block loader: byte ranges of the input are copied verbatim, with a
-/// literal-run header rewrite when a cut lands inside a literal run.
-/// Deliberately lenient about run *structure* (document compatibility
-/// with sloppier encoders) and strict about run *contents*: value decode
-/// errors and nulls in non-nullable columns fail. All methods return
-/// `Result` — the bytes are untrusted.
+/// Yields the runs of the input while building the output slabs with
+/// the same byte-copy mechanics as the block loader: byte ranges of the
+/// input are copied verbatim, with a literal-run header rewrite when a
+/// cut lands inside a literal run. The input must be **canonical** —
+/// non-canonical structure (mergeable adjacent runs, count-0 runs,
+/// count-1 repeats) is a load error, as are value decode errors and
+/// nulls in non-nullable columns — so consumers get the "adjacent runs
+/// never carry equal values" contract by construction. All methods
+/// return `Result` — the bytes are untrusted.
 ///
 /// [`finalize`](Self::finalize) drains whatever the consumer did not pull
 /// (validating it) and returns the finished slabs.
 pub struct RleLoadIter<'a, T: RleValue> {
     decoder: RleDecoder<'a, T>,
     input: &'a [u8],
-    /// one-run lookahead for merging adjacent equal runs
-    peeked: Option<crate::Run<T::Get<'a>>>,
-    /// partially consumed run for per-item stepping
-    pending: Option<crate::Run<T::Get<'a>>>,
+    /// canonical-form validation state: the last value-bearing segment
+    /// and the previous literal value within the current literal run —
+    /// non-canonical structure (mergeable adjacent runs, count-0 runs,
+    /// count-1 repeats) is a load error
+    prev: Option<RleSegment<'a, T>>,
+    prev_lit: Option<T::Get<'a>>,
     cut: CutState,
     target_segments: usize,
 }
@@ -108,9 +109,10 @@ struct CutState {
 impl CutState {
     /// Per-segment slab bookkeeping; yields the segment's run, if any.
     /// `#[inline(always)]` so a caller that discards the run compiles down
-    /// to the bare bookkeeping. Callers reject nulls in non-nullable
-    /// columns *before* tracking (keeping this infallible lets the
-    /// discard path fold completely).
+    /// to the bare bookkeeping. Callers run `validate_after` (which
+    /// rejects nulls in non-nullable columns, among other things)
+    /// *before* tracking — keeping this infallible lets the discard
+    /// path fold completely.
     #[inline(always)]
     fn track<'a, T: RleValue>(
         &mut self,
@@ -180,27 +182,34 @@ impl<'a, T: RleValue> RleLoadIter<'a, T> {
         Self {
             decoder: RleDecoder::new(data),
             input: data,
-            peeked: None,
-            pending: None,
+            prev: None,
+            prev_lit: None,
             cut: CutState::default(),
             target_segments: max_segments / 2,
         }
     }
 
-    /// The next wire-level run (LitHead skipped, empty runs skipped),
-    /// before canonical merging.
+    /// The next canonical run, or `None` at end of input. Non-canonical
+    /// structure — anything a canonical encoder would have merged or
+    /// never emitted — is a load error (`validate_after`), so the run
+    /// stream keeps the "adjacent runs never carry equal values" contract
+    /// by construction, and every run is exactly one wire segment.
     #[inline]
-    fn raw_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, PackError> {
+    pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, PackError> {
         loop {
             let Some(segment) = self.decoder.try_next_segment()? else {
                 return Ok(None);
             };
-            if !T::NULLABLE {
-                if let RleSegment::Null { .. } = segment {
-                    return Err(PackError::InvalidValue(
-                        "null in non-nullable column".to_string(),
-                    ));
+            segment
+                .validate_after(&self.prev, self.prev_lit)
+                .map_err(|e| PackError::InvalidValue(e.to_string()))?;
+            match segment {
+                RleSegment::LitHead { .. } => self.prev_lit = None,
+                RleSegment::Lit { value, .. } => {
+                    self.prev_lit = Some(value);
+                    self.prev = Some(segment);
                 }
+                _ => self.prev = Some(segment),
             }
             let out = self.cut.track::<T>(segment);
             if self.cut.slab.segments == self.target_segments {
@@ -210,46 +219,6 @@ impl<'a, T: RleValue> RleLoadIter<'a, T> {
                 return Ok(Some(run));
             }
         }
-    }
-
-    /// The next canonical run, or `None` at end of input.
-    #[inline]
-    pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, PackError> {
-        if let Some(run) = self.pending.take() {
-            return Ok(Some(run));
-        }
-        let Some(mut run) = (match self.peeked.take() {
-            Some(run) => Some(run),
-            None => self.raw_next_run()?,
-        }) else {
-            return Ok(None);
-        };
-        // merge adjacent equal runs so the output is canonical
-        while let Some(next) = self.raw_next_run()? {
-            if T::eq(next.value, run.value) {
-                run.count += next.count;
-            } else {
-                self.peeked = Some(next);
-                break;
-            }
-        }
-        Ok(Some(run))
-    }
-
-    /// The next single value, stepping through runs.
-    pub fn try_next(&mut self) -> Result<Option<T::Get<'a>>, PackError> {
-        let Some(mut run) = (match self.pending.take() {
-            Some(run) => Some(run),
-            None => self.try_next_run()?,
-        }) else {
-            return Ok(None);
-        };
-        let value = run.value;
-        if run.count > 1 {
-            run.count -= 1;
-            self.pending = Some(run);
-        }
-        Ok(Some(value))
     }
 
     /// Drain and validate whatever the consumer did not pull, flush the
@@ -262,14 +231,20 @@ impl<'a, T: RleValue> RleLoadIter<'a, T> {
         let target_segments = self.target_segments;
         let input = self.input;
         let mut decoder = self.decoder;
+        let mut prev = self.prev;
+        let mut prev_lit = self.prev_lit;
 
         while let Some(segment) = decoder.try_next_segment()? {
-            if !T::NULLABLE {
-                if let RleSegment::Null { .. } = segment {
-                    return Err(PackError::InvalidValue(
-                        "null in non-nullable column".to_string(),
-                    ));
+            segment
+                .validate_after(&prev, prev_lit)
+                .map_err(|e| PackError::InvalidValue(e.to_string()))?;
+            match segment {
+                RleSegment::LitHead { .. } => prev_lit = None,
+                RleSegment::Lit { value, .. } => {
+                    prev_lit = Some(value);
+                    prev = Some(segment);
                 }
+                _ => prev = Some(segment),
             }
             let _ = cut.track::<T>(segment);
             if cut.slab.segments == target_segments {
@@ -291,8 +266,12 @@ where
         RleLoadIter::try_next_run(self)
     }
 
-    fn try_next(&mut self) -> Result<Option<T::Get<'a>>, PackError> {
-        RleLoadIter::try_next(self)
+    fn slabs_completed(&self) -> usize {
+        self.cut.slabs.len()
+    }
+
+    fn completed_slab_len(&self, i: usize) -> usize {
+        self.cut.slabs[i].len
     }
 
     fn finalize(self) -> Result<Vec<Slab>, PackError> {

@@ -1480,7 +1480,7 @@ impl ChangeGraphCols {
         let opts = hexane::LoadOpts::new().with_length(len);
 
         let timestamps =
-            hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(Some(0i64)))?;
+            hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
         let messages =
             hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
         let extra_bytes_meta =
