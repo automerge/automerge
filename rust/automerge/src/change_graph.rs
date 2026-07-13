@@ -2567,6 +2567,36 @@ pub struct ChangeId {
     pub seq: u64,
 }
 
+impl std::fmt::Display for ChangeId {
+    /// `"{seq}@{actor}"`, the same shape as object ids and cursors.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.seq, self.actor)
+    }
+}
+
+impl std::str::FromStr for ChangeId {
+    type Err = ParseChangeIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (seq, actor) = s.split_once('@').ok_or(ParseChangeIdError)?;
+        let seq: u64 = seq.parse().map_err(|_| ParseChangeIdError)?;
+        if seq == 0 {
+            return Err(ParseChangeIdError);
+        }
+        let actor = hex::decode(actor).map_err(|_| ParseChangeIdError)?;
+        Ok(ChangeId {
+            actor: crate::ActorId::from(actor),
+            seq,
+        })
+    }
+}
+
+/// Error parsing a [`ChangeId`] from its `"{seq}@{actor}"` form.
+#[doc(hidden)]
+#[derive(Debug, thiserror::Error)]
+#[error("invalid change id: expected \"{{seq}}@{{actor}}\"")]
+pub struct ParseChangeIdError;
+
 /// How much of the document's change-hash graph is known.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum HashGraphState {

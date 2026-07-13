@@ -35,11 +35,7 @@ describe("the fragments API", () => {
         fragment.head,
       )
       assert.ok(headMeta != null)
-      assert.ok(
-        fragment.members.some(
-          m => m.actor === headMeta.actor && m.seq === headMeta.seq,
-        ),
-      )
+      assert.ok(fragment.members.includes(`${headMeta.seq}@${headMeta.actor}`))
       assert.deepEqual(Automerge.getFragmentMeta(doc, fragment.head), fragment)
     }
 

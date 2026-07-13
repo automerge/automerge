@@ -168,10 +168,8 @@ export type ChangeMetadata = {
   hash: Hash;
 };
 
-export type ChangeId = {
-  actor: Actor;
-  seq: number;
-};
+/** A change identified as "{seq}@{actor}", like object ids and cursors. */
+export type ChangeId = string;
 
 export type FragmentMeta = {
   head: Hash;
@@ -2105,12 +2103,7 @@ fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
     let members: Array = fragment
         .members
         .iter()
-        .map(|m| {
-            let id: JsValue = Object::new().into();
-            js_set(&id, "actor", m.actor.to_string()).unwrap();
-            js_set(&id, "seq", m.seq as f64).unwrap();
-            id
-        })
+        .map(|m| JsValue::from_str(&m.to_string()))
         .collect();
     js_set(&obj, "members", members).unwrap();
     obj
@@ -2123,21 +2116,9 @@ fn js_to_change_ids(value: JS) -> Result<Vec<am::ChangeId>, error::BadJSChangeId
         .map_err(|_| error::BadJSChangeIds::NotArray)?;
     arr.iter()
         .map(|v| {
-            let actor = js_get(&v, "actor")
-                .ok()
-                .and_then(|a| a.0.as_string())
-                .ok_or(error::BadJSChangeIds::BadActor)?;
-            let actor = automerge::ActorId::from(
-                hex::decode(actor)
-                    .map_err(|_| error::BadJSChangeIds::BadActor)?
-                    .to_vec(),
-            );
-            let seq = js_get(&v, "seq")
-                .ok()
-                .and_then(|s| s.0.as_f64())
-                .filter(|s| *s >= 1.0 && s.fract() == 0.0)
-                .ok_or(error::BadJSChangeIds::BadSeq)? as u64;
-            Ok(am::ChangeId { actor, seq })
+            let s = v.as_string().ok_or(error::BadJSChangeIds::NotAString)?;
+            s.parse::<am::ChangeId>()
+                .map_err(|_| error::BadJSChangeIds::BadChangeId(s))
         })
         .collect()
 }
@@ -3016,12 +2997,12 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum BadJSChangeIds {
-        #[error("members must be an array of {{actor, seq}}")]
+        #[error("members must be an array of \"seq@actor\" strings")]
         NotArray,
-        #[error("bad actor in change id")]
-        BadActor,
-        #[error("bad seq in change id")]
-        BadSeq,
+        #[error("change id must be a \"seq@actor\" string")]
+        NotAString,
+        #[error("invalid change id: {0}")]
+        BadChangeId(String),
     }
 
     impl From<BadJSChangeIds> for JsValue {
