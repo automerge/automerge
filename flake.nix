@@ -31,9 +31,7 @@
         pkgs = import nixpkgs {inherit system overlays;};
         unstable = import nixos-unstable {inherit system overlays;};
 
-        rustVersion = "1.89.0";
-
-        rust-toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
+        rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
           extensions = [
             "cargo"
             "clippy"
