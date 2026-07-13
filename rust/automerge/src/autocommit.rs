@@ -668,7 +668,10 @@ impl AutoCommit {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+    pub fn fragments<R: RangeBounds<usize>>(
+        &self,
+        levels: R,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
         self.doc.fragments(levels)
     }
 
@@ -677,7 +680,7 @@ impl AutoCommit {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+    pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
         self.doc.get_fragment(head)
     }
 
@@ -687,7 +690,10 @@ impl AutoCommit {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
+        &self,
+        fragments: I,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
         self.doc.bundle_fragments(fragments)
     }
 

@@ -1441,7 +1441,7 @@ impl Automerge {
         let levels = JsFragmentLevelRange::try_from(levels)?;
         Ok(self
             .doc
-            .fragments(levels)
+            .fragments(levels)?
             .iter()
             .map(fragment_to_js)
             .collect())
@@ -1451,11 +1451,11 @@ impl Automerge {
     pub fn get_fragment_meta(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] head: JsValue,
-    ) -> Result<JsValue, interop::error::BadChangeHash> {
+    ) -> Result<JsValue, error::GetChangeByHash> {
         let head = JS(head).try_into()?;
         Ok(self
             .doc
-            .get_fragment(head)
+            .get_fragment(head)?
             .map(|f| fragment_to_js(&f))
             .unwrap_or(JsValue::null()))
     }
@@ -1468,7 +1468,7 @@ impl Automerge {
         let fragments = Vec::<am::Fragment>::try_from(JS(fragments))?;
         Ok(self
             .doc
-            .bundle_fragments(fragments)
+            .bundle_fragments(fragments)?
             .iter()
             .map(|bytes| Uint8Array::from(bytes.as_slice()))
             .collect())
@@ -2319,6 +2319,8 @@ pub mod error {
     pub enum Fragments {
         #[error(transparent)]
         BadLevelRange(#[from] BadFragmentLevelRange),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
     }
 
     impl From<Fragments> for JsValue {
@@ -2405,6 +2407,8 @@ pub mod error {
         NotArray,
         #[error("bad fragment at index {0}: {1}")]
         BadElem(usize, BadJSFragmentInput),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
     }
 
     impl From<BadJSFragments> for JsValue {

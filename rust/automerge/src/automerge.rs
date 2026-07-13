@@ -1419,8 +1419,17 @@ impl Automerge {
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
+    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
+    /// loaded with [`LoadOptions::skip_hash_graph`] — fragments need the
+    /// whole hash graph.
     #[doc(hidden)]
-    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+    pub fn fragments<R: RangeBounds<usize>>(
+        &self,
+        levels: R,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        if !self.hash_graph_is_checked() {
+            return Err(AutomergeError::UncheckedHashGraph);
+        }
         // these produce fragments newest to oldest
         let mut fragments: Vec<_> = self
             .change_graph
@@ -1428,16 +1437,21 @@ impl Automerge {
             .collect();
         // but we want to return them oldest to newest
         fragments.reverse();
-        fragments
+        Ok(fragments)
     }
 
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
+    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
+    /// loaded with [`LoadOptions::skip_hash_graph`].
     #[doc(hidden)]
-    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        self.change_graph.get_fragment(head)
+    pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
+        if !self.hash_graph_is_checked() {
+            return Err(AutomergeError::UncheckedHashGraph);
+        }
+        Ok(self.change_graph.get_fragment(head))
     }
 
     /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
@@ -1445,9 +1459,17 @@ impl Automerge {
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
+    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
+    /// loaded with [`LoadOptions::skip_hash_graph`].
     #[doc(hidden)]
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
-        fragments
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
+        &self,
+        fragments: I,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        if !self.hash_graph_is_checked() {
+            return Err(AutomergeError::UncheckedHashGraph);
+        }
+        Ok(        fragments
             .into_iter()
             .filter_map(|f| {
                 if f.head.fragment_level() == 0 && f.members.len() == 1 {
@@ -1457,7 +1479,7 @@ impl Automerge {
                     Some(self.bundle(f.members).ok()?.bytes().to_vec())
                 }
             })
-            .collect()
+            .collect())
     }
 
     /// Whether this document's hash graph has been built and validated.
@@ -1510,6 +1532,10 @@ impl Automerge {
         self.change_graph
             .install_checked_hashes(collected.changes.iter().map(|c| c.hash()).collect())
             .map_err(AutomergeError::InvalidHash)?;
+
+        // the fragment index is only maintained on checked graphs — now
+        // that every hash is known, regenerate it
+        self.change_graph.cache_fragments();
         Ok(())
     }
 

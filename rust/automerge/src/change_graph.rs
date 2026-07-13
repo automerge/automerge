@@ -884,6 +884,10 @@ impl ChangeGraph {
     }
 
     pub(crate) fn cache_fragments(&mut self) {
+        // idempotent: rebuild_hash_graph re-runs this after upgrading the
+        // graph, so start from scratch
+        self.fragments.clear();
+        self.fragment_top = SeqClock::new(self.num_actors());
         for n in 0..self.hashes.len() {
             self.cache_fragment(NodeIdx(n as u32))
         }
@@ -2034,9 +2038,9 @@ mod tests {
             tx.commit();
         }
 
-        let fragments = doc.fragments(..);
+        let fragments = doc.fragments(..).unwrap();
 
-        let bundles = doc.bundle_fragments(fragments);
+        let bundles = doc.bundle_fragments(fragments).unwrap();
 
         let joined: Vec<u8> = bundles.into_iter().flatten().collect();
 
