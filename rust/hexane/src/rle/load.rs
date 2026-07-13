@@ -355,22 +355,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn load_and_verify_matches() {
-        let vals: Vec<u64> = (0..1000).map(|i| i % 7).collect();
-        let col = Column::<u64>::from_values(vals);
-        let saved = col.save();
-        let v1 = RleLoadIter::<u64>::new(&saved, 16).finalize().unwrap();
-        let v2 = RleLoadIter::<u64>::new(&saved, 16).finalize().unwrap();
-        assert_eq!(v1.len(), v2.len(), "slab count mismatch");
-        for (i, (s1, s2)) in v1.iter().zip(v2.iter()).enumerate() {
-            assert_eq!(s1.data, s2.data, "slab {i} data mismatch");
-            assert_eq!(s1.len, s2.len, "slab {i} len mismatch");
-            assert_eq!(s1.segments, s2.segments, "slab {i} segments mismatch");
-            assert_eq!(s1.tail, s2.tail, "slab {i} tail mismatch");
-        }
-    }
-
     // ── validate2 error case tests ──────────────────────────────────────
 
     /// Helper: hand-build raw RLE bytes.
@@ -505,7 +489,7 @@ mod tests {
 
     #[test]
     fn validate_load_rejects_null_in_non_nullable() {
-        // Null run in a u64 column via load_and_verify2
+        // Null run in a u64 column
         let data = rle_bytes(&[("null", &[0x00, 0x01])]);
         assert!(RleLoadIter::<u64>::new(&data, 16).finalize().is_err());
     }

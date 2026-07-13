@@ -353,3 +353,122 @@ fn unchecked_diff_works() {
     let patches = doc.diff(&[ChangeHash([7; 32])], &after);
     assert!(!patches.is_empty());
 }
+
+/// The full lifecycle: load unchecked, append changes, verify every
+/// fallible API errors for pre-load interior history but works when
+/// referencing the load heads or hashes created after the load — then
+/// rebuild the hash graph and verify everything works.
+#[test]
+fn unchecked_lifecycle_all_fallible_functions() {
+    use automerge::sync::SyncDoc;
+
+    let (bytes, mut orig) = saved_doc();
+    let early = early_hash(&mut orig);
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    let load_heads = doc.get_heads();
+    assert!(!doc.hash_graph_is_checked());
+
+    // ── add a few changes after the load ──
+    doc.put(ROOT, "k", 100).unwrap();
+    let new1 = doc.commit().unwrap();
+    doc.put(ROOT, "k", 200).unwrap();
+    let new2 = doc.commit().unwrap();
+    assert_eq!(doc.get_heads(), vec![new2]);
+
+    // ── everything that needs pre-load interior hashes errors ──
+    let err = |r: Result<(), AutomergeError>| {
+        assert!(matches!(r, Err(AutomergeError::UncheckedHashGraph)));
+    };
+    err(doc.get_changes(&[]).map(|_| ()));
+    err(doc.get_changes(&[early]).map(|_| ()));
+    err(doc.get_changes_meta(&[]).map(|_| ()));
+    err(doc.get_changes_meta(&[early]).map(|_| ()));
+    err(doc.get_change_by_hash(&early).map(|_| ()));
+    err(doc.get_change_meta_by_hash(&early).map(|_| ()));
+    err(doc.save_after(&[early]).map(|_| ()));
+    let mut state = automerge::sync::State::new();
+    err(doc.sync().generate_sync_message(&mut state).map(|_| ()));
+    let mut other = AutoCommit::new();
+    other.put(ROOT, "x", 1).unwrap();
+    other.commit();
+    err(doc.get_changes_added(&mut other).map(|_| ()));
+    err(doc.merge(&mut other).map(|_| ()));
+
+    // ── referencing the load heads or post-load hashes works ──
+    let since_load = doc.get_changes(&load_heads).unwrap();
+    assert_eq!(
+        since_load.iter().map(|c| c.hash()).collect::<Vec<_>>(),
+        vec![new1, new2]
+    );
+    assert_eq!(doc.get_changes(&[new1]).unwrap().len(), 1);
+    assert_eq!(doc.get_changes(&[new2]).unwrap().len(), 0);
+    assert_eq!(doc.get_changes_meta(&load_heads).unwrap().len(), 2);
+    assert!(doc.get_change_by_hash(&new1).unwrap().is_some());
+    assert!(doc.get_change_meta_by_hash(&new2).unwrap().is_some());
+    assert!(!doc.save_after(&load_heads).unwrap().is_empty());
+    assert!(!doc.save_after(&[new1]).unwrap().is_empty());
+    assert!(doc.get_missing_deps(&load_heads).unwrap().is_empty());
+    assert!(doc.get_missing_deps(&[new2]).unwrap().is_empty());
+    // the new changes are local, so the last local change is reachable
+    assert_eq!(doc.get_last_local_change().unwrap().unwrap().hash(), new2);
+
+    // ── rebuild the graph: every failing call above now succeeds ──
+    doc.rebuild_hash_graph().unwrap();
+    assert!(doc.hash_graph_is_checked());
+
+    assert_eq!(doc.get_changes(&[]).unwrap().len(), 5);
+    assert_eq!(doc.get_changes(&[early]).unwrap().len(), 4);
+    assert_eq!(doc.get_changes_meta(&[]).unwrap().len(), 5);
+    assert!(doc.get_change_by_hash(&early).unwrap().is_some());
+    assert!(doc.get_change_meta_by_hash(&early).unwrap().is_some());
+    assert!(!doc.save_after(&[early]).unwrap().is_empty());
+    assert!(doc
+        .sync()
+        .generate_sync_message(&mut state)
+        .unwrap()
+        .is_some());
+    assert!(!doc.get_changes_added(&mut other).unwrap().is_empty());
+    doc.merge(&mut other).unwrap();
+    let (v, _) = doc.get(ROOT, "x").unwrap().unwrap();
+    assert_eq!(v.to_i64(), Some(1));
+}
+
+/// A saved document whose recorded head hash has a flipped bit (with the
+/// chunk checksum patched to match) loads fine unchecked — the head
+/// hashes are taken on trust — but `rebuild_hash_graph` recomputes the
+/// real hashes and refuses.
+#[test]
+fn bit_flipped_head_loads_unchecked_but_fails_rebuild() {
+    use sha2::{Digest, Sha256};
+
+    let (mut bytes, mut orig) = saved_doc();
+    let head = orig.get_heads()[0];
+
+    // flip one bit in the stored head hash
+    let pos = bytes
+        .windows(32)
+        .position(|w| w == head.as_ref())
+        .expect("head hash bytes present in saved doc");
+    bytes[pos] ^= 0x01;
+
+    // re-derive the chunk checksum: first 4 bytes of
+    // sha256(chunk_type . leb(data_len) . data)
+    // layout: [magic 4][checksum 4][type 1][leb len][data]
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes[8..]);
+    let digest = hasher.finalize();
+    bytes[4..8].copy_from_slice(&digest[..4]);
+
+    // a checked load rejects the forged head outright
+    assert!(AutoCommit::load(&bytes).is_err());
+
+    // an unchecked load takes the recorded heads on trust
+    let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
+    assert!(!doc.hash_graph_is_checked());
+    let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
+    assert_eq!(v.to_i64(), Some(2));
+    assert_ne!(doc.get_heads(), vec![head], "head should be the forged one");
+
+    // ...but rebuilding the graph recomputes the true hashes and refuses
+    assert!(doc.rebuild_hash_graph().is_err());
+}

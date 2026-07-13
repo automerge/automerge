@@ -169,6 +169,25 @@ let col = Column::<u64>::load_with(
 assert_eq!(col.len(), 3);
 ```
 
+Loads can also stream: `load_iter` yields the column's runs *during*
+the decode pass, so a consumer that needs the data anyway reads it while
+the column builds — one pass over the bytes instead of load-then-iterate.
+(This is how automerge builds its op indexes at load time.)
+
+```rust
+use hexane::{Column, LoadOpts};
+
+let bytes = Column::<u64>::from_values(vec![1, 1, 2, 2, 2]).save();
+
+let mut iter = Column::<u64>::load_iter(&bytes, LoadOpts::new());
+let mut total = 0;
+while let Some(run) = iter.try_next_run().unwrap() {
+    total += run.value * run.count as u64;
+}
+let col = iter.finalize().unwrap();      // the fully-validated column
+assert_eq!((col.len(), total), (5, 8));
+```
+
 The failure-mode policy is uniform across the crate:
 
 | Situation | Behavior |
@@ -250,8 +269,8 @@ validate-on-load backing the one `unsafe` block in the crate.
 ## Development
 
 ```bash
-cargo test -p hexane            # ~900 tests incl. fuzzers & golden fixtures
-cargo bench -p hexane           # divan benches: column_ops, remap, ...
+cargo test -p hexane            # ~525 tests incl. fuzzers & golden fixtures
+cargo bench -p hexane           # divan benches: column_ops, load, remap, ...
 ```
 
 Feature flags: `wasm` (console logging via `web-sys`). MSRV 1.80.

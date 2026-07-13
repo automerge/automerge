@@ -212,6 +212,13 @@ export type InitOptions<T> = {
   unchecked?: boolean
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
+  /**
+   * Skip building the change-hash graph for a much faster load. APIs
+   * that need change hashes ({@link getChanges}, {@link merge}, sync,
+   * ...) will throw until {@link rebuildHashGraph} is called on the
+   * document.
+   */
+  skipHashGraph?: boolean
   /** @hidden */
   convertImmutableStringsToText?: boolean
 }
@@ -227,6 +234,16 @@ function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
   } else {
     return { actor: _actor }
   }
+}
+
+/**
+ * Build the hash graph on a document that was loaded with
+ * `skipHashGraph: true`, re-enabling the hash-based APIs. The recomputed
+ * head hashes are verified against the heads recorded in the document.
+ * No-op if the graph is already built.
+ */
+export function rebuildHashGraph<T>(doc: Doc<T>): void {
+  _state(doc).handle.rebuildHashGraph()
 }
 
 export function getChangesSince<T>(state: Doc<T>, heads: Heads): Change[] {
@@ -715,11 +732,13 @@ export function load<T>(
   const allowMissingDeps = opts.allowMissingChanges || false
   const convertImmutableStringsToText =
     opts.convertImmutableStringsToText || false
+  const skipHashGraph = opts.skipHashGraph || false
   const handle = ApiHandler.load(data, {
     actor,
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
+    skipHashGraph,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)

@@ -365,6 +365,9 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  /** Skip building the change-hash graph for a much faster load.
+   * Hash-based APIs throw until `rebuildHashGraph()` is called. */
+  skipHashGraph?: boolean;
 };
 
 // if recursive is false do not diff child objects
@@ -452,7 +455,7 @@ impl Automerge {
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a)
-                .expect("wasm documents always have a checked hash graph");
+                .expect("a fresh document always has a checked hash graph");
         }
         Ok(Automerge {
             doc,
@@ -478,18 +481,16 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
-            automerge
-                .doc
-                .set_actor(actor)
-                .expect("wasm documents always have a checked hash graph");
+            let actor =
+                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -516,10 +517,7 @@ impl Automerge {
         if let Some(s) = actor {
             let actor =
                 automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge
-                .doc
-                .set_actor(actor)
-                .expect("wasm documents always have a checked hash graph");
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -1270,9 +1268,7 @@ impl Automerge {
             return Err(error::Isolate::NoHeads);
         };
 
-        self.doc
-            .isolate(&heads)
-            .expect("wasm documents always have a checked hash graph");
+        self.doc.isolate(&heads)?;
         Ok(())
     }
 
@@ -1316,13 +1312,10 @@ impl Automerge {
     pub fn save_since(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
-    ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
+    ) -> Result<Uint8Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or(Vec::new());
         let ids = heads.clone();
-        let bytes = self
-            .doc
-            .save_after(&ids)
-            .expect("wasm documents always have a checked hash graph");
+        let bytes = self.doc.save_after(&ids)?;
         Ok(Uint8Array::from(bytes.as_slice()))
     }
 
@@ -1366,10 +1359,7 @@ impl Automerge {
     ) -> Result<Array, error::Get> {
         let deps: Vec<am::ChangeHash> = JS(have_deps).try_into()?;
         let ids = deps.clone();
-        let changes = self
-            .doc
-            .get_changes(&ids)
-            .expect("wasm documents always have a checked hash graph");
+        let changes = self.doc.get_changes(&ids)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
@@ -1384,10 +1374,7 @@ impl Automerge {
     ) -> Result<Array, error::Get> {
         let deps: Vec<am::ChangeHash> = JS(have_deps).try_into()?;
         let ids = deps.clone();
-        let changes = self
-            .doc
-            .get_changes_meta(&ids)
-            .expect("wasm documents always have a checked hash graph");
+        let changes = self.doc.get_changes_meta(&ids)?;
         let changes: Array = changes.iter().map(JS::from).collect();
         Ok(changes)
     }
@@ -1396,12 +1383,9 @@ impl Automerge {
     pub fn get_change_by_hash(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, interop::error::BadChangeHash> {
+    ) -> Result<JsValue, error::GetChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change = self
-            .doc
-            .get_change_by_hash(&hash)
-            .expect("wasm documents always have a checked hash graph");
+        let change = self.doc.get_change_by_hash(&hash)?;
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
         } else {
@@ -1413,12 +1397,9 @@ impl Automerge {
     pub fn get_change_meta_by_hash(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, interop::error::BadChangeHash> {
+    ) -> Result<JsValue, error::GetChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change_meta = self
-            .doc
-            .get_change_meta_by_hash(&hash)
-            .expect("wasm documents always have a checked hash graph");
+        let change_meta = self.doc.get_change_meta_by_hash(&hash)?;
         if let Some(c) = change_meta {
             Ok(JS::from(&c).0)
         } else {
@@ -1432,10 +1413,7 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
     ) -> Result<JsValue, error::GetDecodedChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change = self
-            .doc
-            .get_change_by_hash(&hash)
-            .expect("wasm documents always have a checked hash graph");
+        let change = self.doc.get_change_by_hash(&hash)?;
         if let Some(c) = change {
             let change: am::ExpandedChange = c.decode();
             let serializer = serde_wasm_bindgen::Serializer::json_compatible();
@@ -1446,16 +1424,13 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getChangesAdded, unchecked_return_type="Change[]")]
-    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
-        let changes = self
-            .doc
-            .get_changes_added(&mut other.doc)
-            .expect("wasm documents always have a checked hash graph");
+    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
+        let changes = self.doc.get_changes_added(&mut other.doc)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
-        changes
+        Ok(changes)
     }
 
     #[wasm_bindgen(js_name = getFragmentMetadata, unchecked_return_type = "FragmentMeta[]")]
@@ -1536,21 +1511,27 @@ impl Automerge {
         AR::from(heads).into()
     }
 
+    /// Build the hash graph on a document that was loaded with
+    /// `skipHashGraph: true`, re-enabling the hash-based APIs. The
+    /// recomputed head hashes are verified against the heads recorded in
+    /// the document. No-op if the graph is already built.
+    #[wasm_bindgen(js_name = rebuildHashGraph)]
+    pub fn rebuild_hash_graph(&mut self) -> Result<(), error::Merge> {
+        self.doc.rebuild_hash_graph()?;
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
     pub fn get_actor_id(&self) -> String {
         self.doc.get_actor().to_string()
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
-    pub fn get_last_local_change(&mut self) -> JsValue {
-        if let Some(change) = self
-            .doc
-            .get_last_local_change()
-            .expect("wasm documents always have a checked hash graph")
-        {
-            Uint8Array::from(change.raw_bytes()).into()
+    pub fn get_last_local_change(&mut self) -> Result<JsValue, error::Merge> {
+        if let Some(change) = self.doc.get_last_local_change()? {
+            Ok(Uint8Array::from(change.raw_bytes()).into())
         } else {
-            JsValue::null()
+            Ok(JsValue::null())
         }
     }
 
@@ -1563,10 +1544,7 @@ impl Automerge {
     pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or_default();
         let ids = heads.clone();
-        let deps = self
-            .doc
-            .get_missing_deps(&ids)
-            .expect("wasm documents always have a checked hash graph");
+        let deps = self.doc.get_missing_deps(&ids)?;
         let deps: Array = deps
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(h.0)))
@@ -1590,18 +1568,14 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
-    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
-        let message = self
-            .doc
-            .sync()
-            .generate_sync_message(&mut state.0)
-            .expect("wasm documents always have a checked hash graph");
+    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, error::Merge> {
+        let message = self.doc.sync().generate_sync_message(&mut state.0)?;
         if let Some(message) = message {
             let message = message.encode();
             //am::log!("generate sync message: {:?}", message.as_slice());
-            Uint8Array::from(message.as_slice()).into()
+            Ok(Uint8Array::from(message.as_slice()).into())
         } else {
-            JsValue::null()
+            Ok(JsValue::null())
         }
     }
 
@@ -1820,15 +1794,14 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = topoHistoryTraversal, unchecked_return_type="Hash[]")]
-    pub fn topo_history_traversal(&mut self) -> JsValue {
+    pub fn topo_history_traversal(&mut self) -> Result<JsValue, error::Merge> {
         let hashes = self
             .doc
-            .get_changes(&[])
-            .expect("wasm documents always have a checked hash graph")
+            .get_changes(&[])?
             .into_iter()
             .map(|c| c.hash())
             .collect::<Vec<_>>();
-        AR::from(hashes).into()
+        Ok(AR::from(hashes).into())
     }
 
     #[wasm_bindgen(js_name = stats, unchecked_return_type="Stats")]
@@ -1904,19 +1877,23 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
+    let skip_hash_graph = js_get(&options, "skipHashGraph")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let mut doc = am::AutoCommit::load_with_options(
         &data,
         am::LoadOptions::new()
             .on_partial_load(on_partial_load)
             .verification_mode(verification_mode)
+            .skip_hash_graph(skip_hash_graph)
             .migrate_strings(string_migration)
             .text_encoding(TextEncoding::Utf16CodeUnit),
     )?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-        doc.set_actor(actor)
-            .expect("wasm documents always have a checked hash graph");
+        doc.set_actor(actor)?;
     }
     Ok(Automerge {
         doc,
@@ -2765,6 +2742,8 @@ pub mod error {
         Heads(#[from] interop::error::BadChangeHashes),
         #[error("no heads specified")]
         NoHeads,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
     }
 
     impl From<Isolate> for JsValue {
@@ -2975,6 +2954,22 @@ pub mod error {
         BadChangeHash(#[from] super::interop::error::BadChangeHash),
         #[error(transparent)]
         SerdeWasm(#[from] serde_wasm_bindgen::Error),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetChangeByHash {
+        #[error(transparent)]
+        BadChangeHash(#[from] super::interop::error::BadChangeHash),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<GetChangeByHash> for JsValue {
+        fn from(e: GetChangeByHash) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
     }
 
     impl From<GetDecodedChangeByHash> for JsValue {

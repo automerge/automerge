@@ -1478,31 +1478,6 @@ impl Automerge {
     /// hash-based APIs work again.
     ///
     /// This is a no-op on a document whose hash graph is already built.
-    /// Benchmark hook: number of nodes in the change graph.
-    #[doc(hidden)]
-    pub fn num_change_nodes(&self) -> u32 {
-        self.change_graph.len() as u32
-    }
-
-    /// Benchmark hook: compute the clock for change-graph node `idx`,
-    /// returning a checksum so the work cannot be optimized away.
-    #[doc(hidden)]
-    pub fn clock_for_node(&self, idx: u32) -> u64 {
-        self.change_graph
-            .clock_for_node(idx)
-            .iter()
-            .map(|(a, s)| (a as u64) ^ s.map(|s| s.get() as u64).unwrap_or(0))
-            .sum()
-    }
-
-    /// Benchmark hook: rebuild the clock cache with the forward sweep
-    /// (`slow = false`) or the per-node backward walk builder it replaced
-    /// (`slow = true`). Returns the number of cached entries.
-    #[doc(hidden)]
-    pub fn rebuild_clock_cache(&mut self, slow: bool) -> usize {
-        self.change_graph.rebuild_clock_cache(slow)
-    }
-
     pub fn rebuild_hash_graph(&mut self) -> Result<(), AutomergeError> {
         if self.change_graph.is_checked() {
             return Ok(());

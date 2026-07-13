@@ -5,14 +5,6 @@ use crate::index::ColumnIndex;
 use crate::PackError;
 use crate::{AsColumnRef, ColumnValueRef, Run};
 
-/// Fold-style validation function for [`ColumnEncoding::load_and_verify`].
-///
-/// Receives `(accumulator, run_count, value)` for each run during the
-/// decoding pass.  Returns the updated accumulator on success or an
-/// error message.  The accumulator starts at `P::default()`.
-pub type ValidateFn<P, V> =
-    for<'a> fn(P, usize, <V as ColumnValueRef>::Get<'a>) -> Result<P, String>;
-
 /// Trait abstracting the byte-level encoding strategy for a column.
 ///
 /// Implementors provide `get`, bulk encoding/decoding, split/merge, and

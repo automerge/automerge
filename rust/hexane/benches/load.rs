@@ -58,7 +58,7 @@ macro_rules! bench_pair {
             #[divan::bench]
             fn load_with(bencher: Bencher) {
                 let data = $gen();
-                bencher.bench_local(|| black_box(<$col>::load_with(&data, LoadOpts::new().into())));
+                bencher.bench_local(|| black_box(<$col>::load_with(&data, LoadOpts::new())));
             }
         }
     };

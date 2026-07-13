@@ -29,10 +29,10 @@ use crate::{
 #[error("out of memory")]
 pub(crate) struct OutOfMemory;
 
-/// Drives a single pass over the op set, building the op index and
-/// (optionally) collecting the ops of every change so the change graph's
-/// hashes can be computed. Loading with `skip_hash_graph` uses the
-/// index-only form, which does none of the per-change buffering.
+/// Test-only reference: drives a single op-at-a-time pass over the op
+/// set, building the op index the way the pre-fused loader did. The
+/// real index is built during column load ([`IndexBuilder`]'s column
+/// walk); the equality tests compare the two.
 #[cfg(test)]
 pub(crate) struct IndexedChangeCollector<'a> {
     pub(crate) index: &'a mut IndexBuilder,

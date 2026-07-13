@@ -571,17 +571,18 @@ impl ChangeGraph {
     pub(crate) fn get_build_metadata<I>(
         &self,
         hashes: I,
-    ) -> Result<Vec<BuildChangeMetadata<'_>>, MissingDep>
+    ) -> Result<Vec<BuildChangeMetadata<'_>>, crate::AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
         let indexes: Vec<_> = hashes
             .into_iter()
-            .map(|hash| {
-                self.nodes_by_hash
-                    .get(&hash)
-                    .cloned()
-                    .ok_or(MissingDep(hash))
+            .map(|hash| match self.lookup_hash(&hash) {
+                // on an unchecked graph an unknown hash is indistinguishable
+                // from a not-yet-computed one — refuse rather than guess
+                HashLookup::Found(n) => Ok(n),
+                HashLookup::Absent => Err(crate::AutomergeError::from(MissingDep(hash))),
+                HashLookup::Unknown => Err(crate::AutomergeError::UncheckedHashGraph),
             })
             .collect::<Result<_, _>>()?;
 
@@ -1059,26 +1060,6 @@ impl ChangeGraph {
         Some(*self.seq.get(idx.0 as usize)?)
     }
 
-    /// Clock for a single node — benchmark hook for measuring cache-walk
-    /// reconstruction cost.
-    #[doc(hidden)]
-    pub(crate) fn clock_for_node(&self, idx: u32) -> SeqClock {
-        self.calculate_clock(vec![NodeIdx(idx)])
-    }
-
-    /// Benchmark hook: rebuild the clock cache with the chosen builder.
-    /// Returns the number of cached entries.
-    #[doc(hidden)]
-    pub(crate) fn rebuild_clock_cache(&mut self, slow: bool) -> usize {
-        self.clock_cache.clear();
-        if slow {
-            self.cache_clocks_slow();
-        } else {
-            self.cache_clocks();
-        }
-        self.clock_cache.len()
-    }
-
     fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> SeqClock {
         let mut clock = SeqClock::new(self.num_actors());
         let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
@@ -1298,17 +1279,6 @@ impl ChangeGraph {
         }
     }
 
-    /// The builder the forward sweep replaced: compute each cached clock by
-    /// walking backwards from the node, recursively caching every node left
-    /// on the frontier when a walk exceeds its limit (adaptive anchors).
-    /// Kept for A/B benchmarking via `rebuild_clock_cache`.
-    fn cache_clocks_slow(&mut self) {
-        for n in 0..(self.len() as u32) {
-            if (n + 1) % CACHE_STEP == 0 {
-                self.cache_clock(NodeIdx(n));
-            }
-        }
-    }
 
     pub(crate) fn remove_ancestors(
         &self,
@@ -1526,6 +1496,13 @@ impl ChangeGraphCols {
                 let dep = deps_val_iter
                     .next()
                     .ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))?;
+                // hostile bytes: deps must reference earlier changes — the
+                // format stores changes in topological order, `max_ops[dep]`
+                // below indexes by it, and the clock-cache sweep relies on
+                // parents preceding children
+                if dep as usize >= i {
+                    return Err(LoadError::InvalidDepIndex);
+                }
                 let target = NodeIdx(dep);
                 let next = EdgeIdx::new(edges.len() + 1);
                 let next = if e + 1 == d { None } else { Some(next) };

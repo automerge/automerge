@@ -1561,7 +1561,7 @@ where
     /// slab's weight (in column order) *before* any weight enters the
     /// index — so callers can validate aggregates (e.g. delta domain
     /// bounds) before they reach the index's merge arithmetic.
-    pub fn finalize_with(
+    pub(crate) fn finalize_with(
         mut self,
         mut check: impl FnMut(&WF::Weight) -> Result<(), PackError>,
     ) -> Result<Column<T, WF, Idx>, PackError> {
