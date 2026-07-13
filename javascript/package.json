@@ -93,6 +93,6 @@
     "ts-mocha": "^11.1.0",
     "ts-node": "^10.9.1",
     "typedoc": "^0.28.4",
-    "typescript": "^6.0.2"
+    "typescript": "^7.0.2"
   }
 }
