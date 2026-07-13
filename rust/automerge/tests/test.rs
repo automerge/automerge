@@ -103,17 +103,17 @@ fn merge_patches_clear_conflict_after_losing_list_value_is_deleted_from_fuzz_tra
     // list register leaves the winning value unchanged, but must emit a PutSeq
     // patch to clear the materialized conflict flag.
     let mut doc = AutoCommit::new();
-    doc.set_actor(ActorId::from(vec![2]));
+    doc.set_actor(ActorId::from(vec![2])).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, ScalarValue::Null).unwrap();
     doc.commit();
 
     let mut left = doc.fork();
-    left.set_actor(ActorId::from(vec![3]));
+    left.set_actor(ActorId::from(vec![3])).unwrap();
     left.put(&list, 0, 10).unwrap();
     left.commit();
     let mut right = doc.fork();
-    right.set_actor(ActorId::from(vec![2]));
+    right.set_actor(ActorId::from(vec![2])).unwrap();
     right.put(&list, 0, "a").unwrap();
     right.commit();
 
@@ -152,7 +152,11 @@ fn bundle_with_mark_columns_decodes_from_fuzz_trace() {
     .unwrap();
     doc.commit();
 
-    let hashes = doc.get_changes(&[]).into_iter().map(|change| change.hash());
+    let hashes = doc
+        .get_changes(&[])
+        .unwrap()
+        .into_iter()
+        .map(|change| change.hash());
     let bundle = doc.bundle(hashes).unwrap();
     automerge::Bundle::try_from(bundle.bytes()).unwrap();
 }
@@ -164,7 +168,7 @@ fn fork_at_rejects_edit_to_object_outside_isolation_from_fuzz_trace() {
     let mut doc = AutoCommit::new();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.commit();
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
 
     let result = doc.insert(&list, 0, 1);
     let heads = doc.get_heads();
@@ -208,7 +212,7 @@ fn diff_incremental_respects_isolated_heads_from_fuzz_trace() {
     let mut doc = AutoCommit::new();
     doc.put_object(ROOT, "map", ObjType::Map).unwrap();
     doc.commit();
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
 
     let mut actual = doc.hydrate(&ROOT, None).unwrap();
     let expected = actual.clone();
@@ -226,13 +230,13 @@ fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_t
     // Rebuilding that history in fork_at must produce the same top value as rebuilding it during
     // load.
     let mut doc = AutoCommit::new();
-    doc.set_actor(ActorId::from(vec![0]));
+    doc.set_actor(ActorId::from(vec![0])).unwrap();
     let mut counter = AutoCommit::new();
-    counter.set_actor(ActorId::from(vec![1]));
+    counter.set_actor(ActorId::from(vec![1])).unwrap();
     counter.put(ROOT, "key", ScalarValue::counter(34)).unwrap();
     counter.commit();
     let mut scalar = AutoCommit::new();
-    scalar.set_actor(ActorId::from(vec![2]));
+    scalar.set_actor(ActorId::from(vec![2])).unwrap();
     scalar.put(ROOT, "key", ScalarValue::Null).unwrap();
     scalar.commit();
 
@@ -3938,12 +3942,12 @@ fn increment_patch_clears_resolved_map_conflict() {
     let encoding = TextEncoding::UnicodeCodePoint;
 
     let mut doc = AutoCommit::new_with_encoding(encoding);
-    doc.set_actor(ActorId::try_from("01").unwrap());
+    doc.set_actor(ActorId::try_from("01").unwrap()).unwrap();
     doc.put(ROOT, "key", ScalarValue::Null).unwrap();
     doc.commit();
 
     let mut concurrent = AutoCommit::new_with_encoding(encoding);
-    concurrent.set_actor(ActorId::try_from("02").unwrap());
+    concurrent.set_actor(ActorId::try_from("02").unwrap()).unwrap();
     concurrent
         .put(ROOT, "key", ScalarValue::counter(-1000))
         .unwrap();
@@ -3954,7 +3958,7 @@ fn increment_patch_clears_resolved_map_conflict() {
     // well as changing the counter. The patch must therefore replace the
     // conflicted register entry, not merely apply an Increment action to it.
     let mut plain = doc.document().clone();
-    plain.set_actor(ActorId::try_from("03").unwrap());
+    plain.set_actor(ActorId::try_from("03").unwrap()).unwrap();
     let before = plain.hydrate(None);
     let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
     tx.increment(ROOT, "key", 28).unwrap();
@@ -3970,11 +3974,11 @@ fn increment_patch_clears_resolved_map_conflict() {
 fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
-    doc.set_actor(ActorId::try_from("7f").unwrap());
+    doc.set_actor(ActorId::try_from("7f").unwrap()).unwrap();
     doc.put_object(ROOT, "k8", ObjType::Map).unwrap();
     doc.commit();
 
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
     doc.put(ROOT, "k8", ScalarValue::Int(1000)).unwrap();
     doc.commit();
     let isolated_heads = doc.get_heads();
@@ -3993,7 +3997,7 @@ fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
 fn incremental_diff_survives_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
-    doc.set_actor(ActorId::try_from("7f").unwrap());
+    doc.set_actor(ActorId::try_from("7f").unwrap()).unwrap();
     let list = doc.put_object(ROOT, "k6", ObjType::List).unwrap();
     doc.commit();
 
@@ -4008,7 +4012,7 @@ fn incremental_diff_survives_isolate_integrate_roundtrip() {
     .unwrap();
     doc.commit();
 
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
     doc.integrate();
 
     let before = doc.diff_cursor();
@@ -4033,7 +4037,7 @@ fn incremental_text_diff_survives_isolate_integrate_roundtrip() {
     doc.splice_text(&text, 0, 0, "hello").unwrap();
     doc.commit();
 
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
     doc.integrate();
 
     let before = doc.diff_cursor();
@@ -4066,8 +4070,8 @@ fn incremental_diff_discards_edits_inside_deleted_map() {
     // Move behind the object's creation, then forward to the state immediately
     // before its deletion. The second transition exposes the map and text from
     // a view whose clock did not yet cover either object.
-    doc.isolate(&[]);
-    doc.isolate(&before_delete);
+    doc.isolate(&[]).unwrap();
+    doc.isolate(&before_delete).unwrap();
 
     let before = doc.diff_cursor();
     let after = doc.get_heads();
@@ -4091,7 +4095,7 @@ fn incremental_counter_diff_survives_isolate_integrate_roundtrip() {
 
     doc.increment(&map, "count", 1).unwrap();
     doc.commit();
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
     doc.integrate();
 
     let before = doc.diff_cursor();
@@ -4118,7 +4122,7 @@ fn incremental_deep_text_diff_survives_isolate_integrate_roundtrip() {
 
     doc.splice_text(&text, 0, 0, "deep").unwrap();
     doc.commit();
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
     doc.integrate();
 
     let before = doc.diff_cursor();
@@ -4145,7 +4149,7 @@ fn incremental_sibling_text_diffs_survive_isolate_integrate_roundtrip() {
     doc.splice_text(&left, 0, 0, "L").unwrap();
     doc.splice_text(&right, 0, 0, "R").unwrap();
     doc.commit();
-    doc.isolate(&[]);
+    doc.isolate(&[]).unwrap();
     doc.integrate();
 
     let before = doc.diff_cursor();
@@ -4179,7 +4183,7 @@ fn incremental_patches_survive_nested_edit_and_list_shift_across_isolation() {
     doc.update_diff_cursor();
     let mut actual = doc.hydrate(&ROOT, None).unwrap();
 
-    doc.isolate(&beginning);
+    doc.isolate(&beginning).unwrap();
     doc.put(&a, "n", 99).unwrap();
     doc.commit();
     doc.integrate();
@@ -4201,7 +4205,7 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
 
     let expected_heads = doc.get_heads();
     let expected = doc.hydrate(&ROOT, None).unwrap();
-    let mut change = doc.get_last_local_change().unwrap().clone();
+    let mut change = doc.get_last_local_change().unwrap().unwrap().clone();
     let uncompressed_change = change.raw_bytes().to_vec();
     let compressed_change = change.bytes().to_vec();
     assert_ne!(compressed_change, uncompressed_change);
@@ -4240,7 +4244,7 @@ fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
     let _ = doc.diff_incremental();
     let mut actual = doc.hydrate(&ROOT, None).unwrap();
 
-    doc.isolate(&beginning);
+    doc.isolate(&beginning).unwrap();
     let second = doc.put_object(&list, 0, ObjType::Text).unwrap();
     doc.splice_text(&second, 0, 0, "second").unwrap();
     doc.commit();
@@ -4258,31 +4262,34 @@ fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
 fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let actor = ActorId::try_from("7f").unwrap();
-    let mut doc = AutoCommit::new_with_encoding(encoding).with_actor(actor.clone());
+    let mut doc = AutoCommit::new_with_encoding(encoding)
+        .with_actor(actor.clone())
+        .unwrap();
     let mut peer = doc
         .fork()
-        .with_actor(ActorId::try_from("7f00000000000000").unwrap());
-    peer.set_actor(actor);
+        .with_actor(ActorId::try_from("7f00000000000000").unwrap())
+        .unwrap();
+    peer.set_actor(actor).unwrap();
     peer.put_object(ROOT, "k4", ObjType::Text).unwrap();
     peer.commit();
 
     let mut local_sync = State::new();
     let mut peer_sync = State::new();
     for _ in 0..7 {
-        if let Some(message) = doc.sync().generate_sync_message(&mut local_sync) {
+        if let Some(message) = doc.sync().generate_sync_message(&mut local_sync).unwrap() {
             peer.sync()
                 .receive_sync_message(&mut peer_sync, message)
                 .unwrap();
         }
-        if let Some(message) = peer.sync().generate_sync_message(&mut peer_sync) {
+        if let Some(message) = peer.sync().generate_sync_message(&mut peer_sync).unwrap() {
             doc.sync()
                 .receive_sync_message(&mut local_sync, message)
                 .unwrap();
         }
     }
 
-    doc.isolate(&[]);
-    doc.set_actor(ActorId::try_from("ff0000").unwrap());
+    doc.isolate(&[]).unwrap();
+    doc.set_actor(ActorId::try_from("ff0000").unwrap()).unwrap();
     let value = automerge::hydrate::Value::text(encoding, "hello world");
     doc.batch_create_object(ROOT, "k4", &value, false).unwrap();
     doc.commit();
@@ -4301,8 +4308,9 @@ fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace
 #[test]
 fn diff_exposes_list_object_when_conflict_winner_is_removed() {
     let encoding = TextEncoding::UnicodeCodePoint;
-    let mut doc =
-        AutoCommit::new_with_encoding(encoding).with_actor(ActorId::try_from("7f").unwrap());
+    let mut doc = AutoCommit::new_with_encoding(encoding)
+        .with_actor(ActorId::try_from("7f").unwrap())
+        .unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, "base").unwrap();
     doc.commit();
@@ -4310,13 +4318,14 @@ fn diff_exposes_list_object_when_conflict_winner_is_removed() {
 
     let mut peer = doc
         .fork()
-        .with_actor(ActorId::try_from("7f00000000000000").unwrap());
+        .with_actor(ActorId::try_from("7f00000000000000").unwrap())
+        .unwrap();
     peer.put_object(&list, 0, ObjType::Text).unwrap();
     peer.commit();
     doc.merge(&mut peer).unwrap();
 
-    doc.isolate(&base);
-    doc.set_actor(ActorId::try_from("ff0000").unwrap());
+    doc.isolate(&base).unwrap();
+    doc.set_actor(ActorId::try_from("ff0000").unwrap()).unwrap();
     let value = automerge::hydrate::Value::text(encoding, "hello world");
     doc.batch_create_object(&list, 0, &value, false).unwrap();
     doc.commit();
@@ -4336,7 +4345,7 @@ fn diff_exposes_list_object_when_conflict_winner_is_removed() {
 fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
     let encoding = TextEncoding::Utf8CodeUnit;
     let mut doc = AutoCommit::new_with_encoding(encoding);
-    doc.set_actor(ActorId::try_from("fe004faf").unwrap());
+    doc.set_actor(ActorId::try_from("fe004faf").unwrap()).unwrap();
     let text = doc
         .batch_create_object(
             ROOT,
@@ -4410,12 +4419,12 @@ fn transaction_patches_mark_at_normalized_utf8_indexes() {
 #[test]
 fn queued_change_does_not_collide_with_later_local_change() {
     let actor = ActorId::try_from("7f00000000000000").unwrap();
-    let mut local = AutoCommit::new().with_actor(actor.clone());
+    let mut local = AutoCommit::new().with_actor(actor.clone()).unwrap();
     local.put(ROOT, "base", 0).unwrap();
     local.commit();
     let base = local.get_heads();
 
-    let mut remote = local.fork().with_actor(actor.clone());
+    let mut remote = local.fork().with_actor(actor.clone()).unwrap();
 
     // Both branches independently create sequence number 2 for the same actor.
     local.put(ROOT, "local-2", 2).unwrap();
@@ -4424,11 +4433,11 @@ fn queued_change_does_not_collide_with_later_local_change() {
     remote.commit();
     remote.put(ROOT, "remote-3", 3).unwrap();
     remote.commit();
-    remote.set_actor(ActorId::try_from("03").unwrap());
+    remote.set_actor(ActorId::try_from("03").unwrap()).unwrap();
     remote.put(ROOT, "dependent", 4).unwrap();
     remote.commit();
 
-    let remote_changes = remote.get_changes(&base);
+    let remote_changes = remote.get_changes(&base).unwrap();
     let remote_2 = remote_changes[0].clone();
     let remote_3 = remote_changes[1].clone();
     let dependent = remote_changes[2].clone();
@@ -4442,7 +4451,7 @@ fn queued_change_does_not_collide_with_later_local_change() {
         local.apply_changes([remote_2]),
         Err(AutomergeError::DuplicateSeqNumber(2, _))
     ));
-    assert!(local.get_missing_deps(&[]).is_empty());
+    assert!(local.get_missing_deps(&[]).unwrap().is_empty());
 
     // The next local change also receives sequence 3. If the incompatible
     // queued change was retained, saving includes both sequence-3 changes.
@@ -4457,7 +4466,9 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
     let encoding = TextEncoding::UnicodeCodePoint;
     let actor1 = ActorId::try_from("7f0000000000008027").unwrap();
     let actor2 = ActorId::try_from("fe004faf").unwrap();
-    let mut target = AutoCommit::new_with_encoding(encoding).with_actor(actor1);
+    let mut target = AutoCommit::new_with_encoding(encoding)
+        .with_actor(actor1)
+        .unwrap();
     let object = target
         .batch_create_object(
             ROOT,
@@ -4472,7 +4483,7 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
     left.put(&object, 0, "🦊🐻").unwrap();
     left.commit();
 
-    let mut right = target.fork().with_actor(actor2);
+    let mut right = target.fork().with_actor(actor2).unwrap();
     right
         .put(&object, 0, ScalarValue::Bytes(vec![0; 32]))
         .unwrap();

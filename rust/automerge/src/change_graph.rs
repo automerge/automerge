@@ -2063,7 +2063,7 @@ mod tests {
         use crate::ROOT;
 
         let mut doc = Automerge::new();
-        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]));
+        doc.set_actor(crate::ActorId::from(b"alice" as &[u8])).unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "counter", 0i64).unwrap();
         tx.commit();
@@ -2073,7 +2073,12 @@ mod tests {
             tx.commit();
         }
 
-        let hashes: Vec<_> = doc.get_changes(&[]).unwrap().iter().map(|c| c.hash()).collect();
+        let hashes: Vec<_> = doc
+            .get_changes(&[])
+            .unwrap()
+            .iter()
+            .map(|c| c.hash())
+            .collect();
 
         let sorted_bytes = doc.bundle(hashes.iter().copied()).unwrap().bytes().len();
 

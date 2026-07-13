@@ -1627,7 +1627,6 @@ impl Automerge {
         // convert positions >= string.length into `CursorPosition::End`
         // note: negative indices are converted to `CursorPosition::Start` in
         // `impl TryFrom<JS> for CursorPosition`
-        let heads = heads.map(|h| h.clone());
         let len = match heads {
             Some(ref heads) => self.doc.length_at(&obj, heads),
             None => self.doc.length(&obj),
@@ -1667,7 +1666,6 @@ impl Automerge {
         let cursor = cursor.as_string().ok_or(error::Cursor::InvalidCursor)?;
         let cursor = am::Cursor::try_from(cursor)?;
         let heads = get_heads(heads)?;
-        let heads = heads.map(|h| h.clone());
         let position = self
             .doc
             .get_cursor_position(obj, &cursor, heads.as_deref())?;
@@ -1763,7 +1761,6 @@ impl Automerge {
     ) -> Result<Object, JsValue> {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
-        let heads = heads.map(|h| h.clone());
         let marks = self
             .doc
             .get_marks(obj, index as usize, heads.as_deref())
@@ -1782,7 +1779,7 @@ impl Automerge {
         heads: Option<&[am::ChangeHash]>,
     ) -> Result<String, am::AutomergeError> {
         if let Some(heads) = heads {
-            Ok(self.doc.text_at(obj, &heads)?)
+            Ok(self.doc.text_at(obj, heads)?)
         } else {
             Ok(self.doc.text(obj)?)
         }
