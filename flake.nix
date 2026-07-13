@@ -2,7 +2,7 @@
   description = "automerge";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-25.05";
+    nixpkgs.url = "nixpkgs/nixos-26.05";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
     command-utils.url = "github:expede/nix-command-utils";
