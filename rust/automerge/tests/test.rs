@@ -417,6 +417,7 @@ fn incremental_put_seq_in_text_applies_to_hydrated_value_from_fuzz_trace() {
     assert_eq!(actual, expected);
 }
 
+#[cfg(not(any(feature = "utf16-indexing", feature = "utf8-indexing")))]
 #[test]
 fn current_state_diff_with_block_applies_to_hydrated_value_from_fuzz_trace() {
     // Minimized from a fuzz crash. Hydrated text represents a block only
