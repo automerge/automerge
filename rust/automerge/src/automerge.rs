@@ -823,7 +823,7 @@ impl Automerge {
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::Bundle(bundle) => {
                 tracing::trace!("first chunk is change chunk");
@@ -833,7 +833,7 @@ impl Automerge {
                     .to_changes()
                     .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
                 changes.extend(bundle_changes);
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
@@ -844,7 +844,7 @@ impl Automerge {
                     )
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
         };
         tracing::trace!("loading change chunks");
