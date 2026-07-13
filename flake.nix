@@ -238,7 +238,7 @@
           nativeBuildInputs = with pkgs;
             [
               # Rust
-              (pkgs.hiPrio pkgs.rust-bin.nightly.latest.rustfmt)
+              (lib.hiPrio pkgs.rust-bin.nightly.latest.rustfmt)
               cargo-criterion
               cargo-deny
               cargo-edit
@@ -269,10 +269,9 @@
               # External Libraries
               gnuplot
               openssl
-
-              # Commands
-              command_menu
             ]
+            # Commands
+            ++ command_menu
             ++ format-pkgs
             ++ cargo-installs
             ++ lib.optionals stdenv.isDarwin darwin-installs;
