@@ -1,7 +1,7 @@
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
-use crate::{AutomergeError, ChangeHash, PatchLogMismatch};
+use crate::{AutomergeError, ChangeHash, ChangeId, PatchLogMismatch};
 
 use super::{CommitOptions, TransactionInner};
 
@@ -37,7 +37,7 @@ impl OwnedTransaction {
     pub(crate) fn new(
         mut doc: Automerge,
         patch_log: Option<PatchLog>,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<Self, PatchLogMismatch> {
         let args = doc.transaction_args(heads);
         let mut patch_log = patch_log.unwrap_or_else(PatchLog::inactive);
@@ -49,25 +49,57 @@ impl OwnedTransaction {
         })
     }
 
-    /// Get the hash of the change that contains the given opid.
+    /// Get the [`ChangeId`] of the change that contains the given opid.
     ///
-    /// Returns `Ok(None)` if the opid:
+    /// Returns none if the opid:
     /// - is the root object id
     /// - does not exist in this document
     /// - is for an operation in this transaction
-    pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
-        self.doc.hash_for_opid(opid)
+    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
+        self.doc.change_id_for_opid(opid)
+    }
+
+    /// See [`Automerge::get_hash_for_change_id`]
+    pub fn get_hash_for_change_id(
+        &self,
+        id: &ChangeId,
+    ) -> Result<Option<ChangeHash>, AutomergeError> {
+        self.doc.get_hash_for_change_id(id)
+    }
+
+    /// See [`Automerge::get_change_id_for_hash`]
+    pub fn get_change_id_for_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> Result<Option<ChangeId>, AutomergeError> {
+        self.doc.get_change_id_for_hash(hash)
+    }
+
+    /// See [`Automerge::get_change_ids_for_hashes`]
+    pub fn get_change_ids_for_hashes(
+        &self,
+        hashes: &[ChangeHash],
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        self.doc.get_change_ids_for_hashes(hashes)
+    }
+
+    /// See [`Automerge::get_hashes_for_change_ids`]
+    pub fn get_hashes_for_change_ids(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.doc.get_hashes_for_change_ids(ids)
     }
 
     /// Get the heads of the document before this transaction was started.
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    pub fn get_heads(&self) -> Vec<ChangeId> {
         self.doc.get_heads()
     }
 
-    /// Commit the transaction, returning the document, commit hash, and patch log.
+    /// Commit the transaction, returning the document, commit id, and patch log.
     ///
     /// Unlike [`super::Transaction::commit`], no `PatchLog` clone is needed — it is moved out.
-    pub fn commit(mut self) -> (Automerge, Option<ChangeHash>, PatchLog) {
+    pub fn commit(mut self) -> (Automerge, Option<ChangeId>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = super::commit_transaction(
             tx,
@@ -75,17 +107,29 @@ impl OwnedTransaction {
             &mut self.patch_log,
             CommitOptions::default(),
         );
-        (self.doc, hash, self.patch_log)
+        let id = hash.map(|h| {
+            self.doc
+                .get_change_id_for_hash(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
+        (self.doc, id, self.patch_log)
     }
 
     /// Commit with options.
     pub fn commit_with(
         mut self,
         options: CommitOptions,
-    ) -> (Automerge, Option<ChangeHash>, PatchLog) {
+    ) -> (Automerge, Option<ChangeId>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = super::commit_transaction(tx, &mut self.doc, &mut self.patch_log, options);
-        (self.doc, hash, self.patch_log)
+        let id = hash.map(|h| {
+            self.doc
+                .get_change_id_for_hash(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
+        (self.doc, id, self.patch_log)
     }
 
     /// Rollback the transaction, returning the document and number of cancelled ops.
@@ -103,14 +147,18 @@ impl OwnedTransaction {
         f(tx, &mut self.doc, &mut self.patch_log)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
+    fn get_scope(
+        &self,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<Option<crate::types::Clock>, AutomergeError> {
         if let Some(h) = heads {
             // a transaction is in flight: its pending ops are in the op
             // set but not under the graph's heads, so the current-heads
-            // shortcut in `Automerge::clock_at` must not be used here
-            Some(self.doc.change_graph.clock_for_heads_lossy(h))
+            // shortcut in `Automerge::clock_for_ids` must not be used here
+            let nodes = self.doc.nodes_for_change_ids(h)?;
+            Ok(Some(self.doc.change_graph.clock_for_nodes(nodes)))
         } else {
-            self.inner.as_ref().and_then(|i| i.get_scope().clone())
+            Ok(self.inner.as_ref().and_then(|i| i.get_scope().clone()))
         }
     }
 }
@@ -166,7 +214,7 @@ mod tests {
         tx.put(ROOT, "x", 42).unwrap();
         let (doc, id, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
         assert!(id.is_some());
-        let hash = id.unwrap();
+        let hash = doc.get_hash_for_change_id(&id.unwrap()).unwrap().unwrap();
         let change = doc.get_change_by_hash(&hash).unwrap().unwrap();
         assert_eq!(change.message(), Some("test commit"));
     }

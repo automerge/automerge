@@ -1,10 +1,10 @@
 [package]
 name = "automerge-c"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Orion Henry <orion.henry@gmail.com>", "Jason Kankiewicz <jason.kankiewicz@gmail.com>"]
 edition = "2021"
 license = "MIT"
-rust-version = "1.80.0"
+rust-version = "1.73.0"
 
 [lib]
 name = "automerge_core"

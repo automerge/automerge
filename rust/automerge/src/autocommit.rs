@@ -12,6 +12,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
+use crate::ChangeId;
 use crate::Fragment;
 use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
@@ -61,10 +62,13 @@ pub struct AutoCommit {
     pub(crate) doc: Automerge,
     transaction: Option<(PatchLog, TransactionInner)>,
     patch_log: PatchLog,
-    diff_cursor: Vec<ChangeHash>,
+    diff_cursor: Vec<ChangeId>,
     diff_cache: Option<(OpRange, ObjId, bool, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
-    isolation: Option<Vec<ChangeHash>>,
+    /// The heads this document is isolated at, if any. Stored as
+    /// [`ChangeId`]s; the hashes (needed as the deps of any change committed
+    /// in isolation) are validated to be resolvable when isolating.
+    isolation: Option<Vec<ChangeId>>,
 }
 
 /// An autocommit document with an inactive [`PatchLog`]
@@ -157,7 +161,7 @@ impl AutoCommit {
         let save_cursor = if doc.hash_graph_is_checked() {
             Vec::new()
         } else {
-            doc.get_heads()
+            doc.get_head_hashes()
         };
         Ok(Self {
             doc,
@@ -197,7 +201,7 @@ impl AutoCommit {
     }
 
     /// Returns the cursor set by [`Self::update_diff_cursor()`]
-    pub fn diff_cursor(&self) -> Vec<ChangeHash> {
+    pub fn diff_cursor(&self) -> Vec<ChangeId> {
         self.diff_cursor.clone()
     }
 
@@ -236,12 +240,16 @@ impl AutoCommit {
     /// // make some changes - use and update the index
     /// let heads = doc.get_heads();
     /// let diff_cursor = doc.diff_cursor();
-    /// let patches = doc.diff(&diff_cursor, &heads);
+    /// let patches = doc.diff(&diff_cursor, &heads).unwrap();
     /// doc.update_diff_cursor();
     /// ```
     ///
     /// See [`Self::diff_incremental()`] for encapsulating this pattern.
-    pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
+    pub fn diff(
+        &mut self,
+        before: &[ChangeId],
+        after: &[ChangeId],
+    ) -> Result<Vec<Patch>, AutomergeError> {
         self.diff_inner(&ExId::Root, ObjMeta::root(), before, after, true)
     }
 
@@ -249,16 +257,16 @@ impl AutoCommit {
         &mut self,
         exid: &ExId,
         obj: ObjMeta,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: &[ChangeId],
+        after: &[ChangeId],
         recursive: bool,
-    ) -> Vec<Patch> {
+    ) -> Result<Vec<Patch>, AutomergeError> {
         self.ensure_transaction_closed();
         let range = OpRange::new(before, after);
         if let Some((r, id, rec, patches)) = &self.diff_cache {
             if r == &range && id == &obj.id && *rec == recursive {
                 // we could skip this clone and return &[Patch]
-                return patches.clone();
+                return Ok(patches.clone());
             }
         }
         let heads = self.doc.get_heads();
@@ -284,8 +292,12 @@ impl AutoCommit {
             self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
-            let before_clock = self.doc.change_graph.clock_for_heads_lossy(range.before());
-            let after_clock = self.doc.change_graph.clock_for_heads_lossy(range.after());
+            // diffing needs concrete clocks on both sides, so resolve
+            // through the graph rather than the shortcutting reader
+            let before_nodes = self.doc.nodes_for_change_ids(range.before())?;
+            let after_nodes = self.doc.nodes_for_change_ids(range.after())?;
+            let before_clock = self.doc.change_graph.clock_for_nodes(before_nodes);
+            let after_clock = self.doc.change_graph.clock_for_nodes(after_nodes);
             let clock = ClockRange::Diff(before_clock, after_clock.clone());
             let mut patch_log = PatchLog::active();
             patch_log.heads_clock = Some(after_clock);
@@ -293,7 +305,7 @@ impl AutoCommit {
             patch_log.make_patches(&self.doc)
         };
         self.diff_cache = Some((range, obj.id, recursive, patches.clone()));
-        patches
+        Ok(patches)
     }
 
     /// Generates a diff from `before` to `after` for a given `object`
@@ -318,12 +330,12 @@ impl AutoCommit {
     pub fn diff_obj(
         &mut self,
         obj: &ExId,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: &[ChangeId],
+        after: &[ChangeId],
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let meta = self.doc.exid_to_obj(obj)?;
-        Ok(self.diff_inner(obj, meta, before, after, recursive))
+        self.diff_inner(obj, meta, before, after, recursive)
     }
 
     /// This is a convience function that encapsulates the following common pattern
@@ -333,14 +345,16 @@ impl AutoCommit {
     /// // make some changes
     /// let heads = doc.get_heads();
     /// let diff_cursor = doc.diff_cursor();
-    /// let patches = doc.diff(&diff_cursor, &heads);
+    /// let patches = doc.diff(&diff_cursor, &heads).unwrap();
     /// doc.update_diff_cursor();
     /// ```
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
         let diff_cursor = self.diff_cursor();
-        let patches = self.diff(&diff_cursor, &heads);
+        let patches = self
+            .diff(&diff_cursor, &heads)
+            .expect("diff cursor and heads are always known ids");
         self.update_diff_cursor();
         patches
     }
@@ -358,7 +372,7 @@ impl AutoCommit {
         }
     }
 
-    pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+    pub fn fork_at(&mut self, heads: &[ChangeId]) -> Result<Self, AutomergeError> {
         self.ensure_transaction_closed();
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
@@ -400,32 +414,21 @@ impl AutoCommit {
         self.doc.get_actor()
     }
 
-    pub fn isolate(&mut self, heads: &[ChangeHash]) -> Result<(), AutomergeError> {
+    pub fn isolate(&mut self, heads: &[ChangeId]) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        // hashes not in this document are silently skipped, matching the
-        // behaviour of the `*_at` read methods; on an unchecked graph a
-        // missing hash may merely be unknowable, so refuse rather than
-        // guess
-        let heads: Vec<ChangeHash> = heads
-            .iter()
-            .map(|h| {
-                let known = self.doc.change_graph.has_change(h)?;
-                Ok((*h, known))
-            })
-            .filter_map(|r: Result<_, AutomergeError>| match r {
-                Ok((h, true)) => Some(Ok(h)),
-                Ok((_, false)) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .collect::<Result<_, _>>()?;
-        self.patch_to(&heads);
-        self.isolation = Some(heads);
+        // ids not in this document are an error, matching the behaviour of
+        // the `*_at` read methods — and any change committed in isolation
+        // records these heads as its deps, so their hashes must resolve
+        self.doc.resolve_heads(heads)?;
+        self.patch_to(heads);
+        self.isolation = Some(heads.to_vec());
         Ok(())
     }
 
     pub fn integrate(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_to(&self.doc.get_heads());
+        let heads = self.doc.get_heads();
+        self.patch_to(&heads);
         self.isolation = None;
     }
 
@@ -448,8 +451,15 @@ impl AutoCommit {
             self.patch_log.merge(patch_log);
             let hash = tx.commit(&mut self.doc, None, None);
             self.patch_log.finish_transaction(&self.doc.ops().actors);
-            if self.isolation.is_some() && hash.is_some() {
-                self.isolation = hash.map(|h| vec![h])
+            if self.isolation.is_some() {
+                if let Some(h) = hash {
+                    let id = self
+                        .doc
+                        .get_change_id_for_hash(&h)
+                        .expect("just-committed hashes are always known")
+                        .expect("the just-committed change is in the document");
+                    self.isolation = Some(vec![id]);
+                }
             }
         }
     }
@@ -501,7 +511,7 @@ impl AutoCommit {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeId>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         if self.isolation.is_some() {
@@ -523,7 +533,7 @@ impl AutoCommit {
         self.doc.remove_unused_actors(true);
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.get_head_hashes()
         }
         bytes
     }
@@ -578,10 +588,10 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         let bytes = self
             .doc
-            .save_after(&self.save_cursor)
+            .save_after_hashes(&self.save_cursor)
             .expect("changes since the save cursor are always exportable");
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.get_head_hashes()
         }
         bytes
     }
@@ -591,14 +601,14 @@ impl AutoCommit {
     }
 
     /// Save everything which is not a (transitive) dependency of `heads`
-    pub fn save_after(&mut self, heads: &[ChangeHash]) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save_after(&mut self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.save_after(heads)
     }
 
     pub fn get_missing_deps(
         &mut self,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_missing_deps(heads)
@@ -610,14 +620,14 @@ impl AutoCommit {
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Result<Vec<Change>, AutomergeError> {
+    pub fn get_changes(&mut self, have_deps: &[ChangeId]) -> Result<Vec<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }
 
     pub fn get_changes_meta(
         &mut self,
-        have_deps: &[ChangeHash],
+        have_deps: &[ChangeId],
     ) -> Result<Vec<ChangeMetadata<'_>>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes_meta(have_deps)
@@ -716,7 +726,7 @@ impl AutoCommit {
     /// Get the current heads of the document.
     ///
     /// This closes the transaction first, if one is in progress.
-    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
+    pub fn get_heads(&mut self) -> Vec<ChangeId> {
         self.ensure_transaction_closed();
         if let Some(i) = &self.isolation {
             i.clone()
@@ -725,10 +735,26 @@ impl AutoCommit {
         }
     }
 
+    /// The current heads of the document as [`ChangeHash`]es.
+    ///
+    /// This closes the transaction first, if one is in progress. Hashes are
+    /// the currency of the sync protocol and storage; for everything else
+    /// prefer the [`ChangeId`]s from [`Self::get_heads`].
+    pub fn get_head_hashes(&mut self) -> Vec<ChangeHash> {
+        self.ensure_transaction_closed();
+        if let Some(i) = &self.isolation {
+            self.doc
+                .resolve_heads(i)
+                .expect("isolation ids were validated when isolating")
+        } else {
+            self.doc.get_head_hashes()
+        }
+    }
+
     /// Commit any uncommitted changes
     ///
     /// Returns [`None`] if there were no operations to commit
-    pub fn commit(&mut self) -> Option<ChangeHash> {
+    pub fn commit(&mut self) -> Option<ChangeId> {
         self.commit_with(CommitOptions::default())
     }
 
@@ -749,17 +775,30 @@ impl AutoCommit {
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeHash> {
+    pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeId> {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.take().unwrap();
         self.patch_log.merge(patch_log);
         let hash = tx.commit(&mut self.doc, options.message, options.time);
         self.patch_log.finish_transaction(&self.doc.ops().actors);
-        if self.isolation.is_some() && hash.is_some() {
-            self.isolation = hash.map(|h| vec![h])
+        if self.isolation.is_some() {
+            if let Some(h) = hash {
+                let id = self
+                    .doc
+                    .get_change_id_for_hash(&h)
+                    .expect("just-committed hashes are always known")
+                    .expect("the just-committed change is in the document");
+                self.isolation = Some(vec![id]);
+            }
         }
-        hash
+        // the change was just committed, so it always resolves
+        hash.map(|h| {
+            self.doc
+                .get_change_id_for_hash(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        })
     }
 
     /// Remove any changes that have been made in the current transaction from the document
@@ -781,9 +820,9 @@ impl AutoCommit {
     ///
     /// Because this structure is an "autocommit" there may actually be outstanding operations to
     /// submit. If this is the case this function will create two changes, one with the outstanding
-    /// operations and a new one with no operations. The returned hash will always be the
-    /// hash of the empty change.
-    pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
+    /// operations and a new one with no operations. The returned [`ChangeId`] will always be the
+    /// id of the empty change.
+    pub fn empty_change(&mut self, options: CommitOptions) -> ChangeId {
         self.ensure_transaction_closed();
         let args = self.doc.transaction_args(None);
         // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
@@ -793,7 +832,11 @@ impl AutoCommit {
             .expect("AutoCommit's patch log always belongs to its document");
         let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
         self.patch_log.finish_transaction(&self.doc.ops.actors);
-        result
+        // the change was just created, so it always resolves
+        self.doc
+            .get_change_id_for_hash(&result)
+            .expect("hash of a newly created change is always known")
+            .expect("newly created change must be in the document")
     }
 
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
@@ -805,37 +848,82 @@ impl AutoCommit {
         SyncWrapper { inner: self }
     }
 
-    /// See [`Automerge::hash_for_opid`]
+    /// Get the [`ChangeId`] of the change that contains the given `opid`.
     ///
-    /// Note this also returns `Ok(None)` for operations in the current
-    /// uncommitted transaction.
-    pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
-        self.doc.hash_for_opid(opid)
+    /// Returns [`None`] if the `opid`:
+    /// - Is the root object id
+    /// - Does not exist in this document
+    /// - Is for an operation in a transaction
+    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
+        self.doc.change_id_for_opid(opid)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
+    /// Whether this document contains the change identified by `id`.
+    ///
+    /// This never needs hashes so it works on unchecked graphs.
+    pub fn has_change_id(&self, id: &ChangeId) -> bool {
+        self.doc.has_change_id(id)
+    }
+
+    /// See [`Automerge::get_hash_for_change_id`]
+    pub fn get_hash_for_change_id(
+        &self,
+        id: &ChangeId,
+    ) -> Result<Option<ChangeHash>, AutomergeError> {
+        self.doc.get_hash_for_change_id(id)
+    }
+
+    /// See [`Automerge::get_change_id_for_hash`]
+    pub fn get_change_id_for_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> Result<Option<ChangeId>, AutomergeError> {
+        self.doc.get_change_id_for_hash(hash)
+    }
+
+    /// See [`Automerge::get_change_ids_for_hashes`]
+    pub fn get_change_ids_for_hashes(
+        &self,
+        hashes: &[ChangeHash],
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        self.doc.get_change_ids_for_hashes(hashes)
+    }
+
+    /// See [`Automerge::get_hashes_for_change_ids`]
+    pub fn get_hashes_for_change_ids(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.doc.get_hashes_for_change_ids(ids)
+    }
+
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<Option<Clock>, AutomergeError> {
         // heads arg takes priority
         if let Some(h) = heads {
             // the heads == current-heads shortcut (an unscoped read) is only
             // sound with no transaction in flight: pending ops are already in
             // the op set but not yet under the graph's heads
             return if self.transaction.is_none() {
-                self.doc.clock_at(h)
+                self.doc.clock_for_ids(h)
             } else {
-                Some(self.doc.change_graph.clock_for_heads_lossy(h))
+                let nodes = self.doc.nodes_for_change_ids(h)?;
+                Ok(Some(self.doc.change_graph.clock_for_nodes(nodes)))
             };
         }
-        match (&self.isolation, &self.transaction) {
+        Ok(match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
             (Some(_), Some((_, t))) => t.get_scope().clone(),
             // then look at clock for isolation (no transaction is open, so
             // isolation at the current heads can read unscoped)
-            (Some(i), None) => self.doc.clock_at(i),
+            (Some(i), None) => self
+                .doc
+                .clock_for_ids(i)
+                .expect("isolation ids are always known"),
             _ => None,
-        }
+        })
     }
 
-    fn patch_to(&mut self, after: &[ChangeHash]) {
+    fn patch_to(&mut self, after: &[ChangeId]) {
         // we may be isolated so we dont use the document's heads directly
         self.ensure_transaction_closed();
         let before = if let Some(i) = &self.isolation {
@@ -845,11 +933,19 @@ impl AutoCommit {
         };
         if before.as_slice() != after {
             self.patch_log.finish_current_view(&self.doc, &before);
-            // both sides are hashes of changes in this document (current
-            // heads or a previously resolved isolation) so the clocks are
-            // always computable
-            let before = self.doc.change_graph.clock_for_heads_lossy(&before);
-            let after = self.doc.change_graph.clock_for_heads_lossy(after);
+            // both sides are ids of changes in this document (current heads
+            // or a previously validated isolation), and the diff needs
+            // concrete clocks — resolve through the graph
+            let before_nodes = self
+                .doc
+                .nodes_for_change_ids(&before)
+                .expect("known ids always resolve");
+            let after_nodes = self
+                .doc
+                .nodes_for_change_ids(after)
+                .expect("known ids always resolve");
+            let before = self.doc.change_graph.clock_for_nodes(before_nodes);
+            let after = self.doc.change_graph.clock_for_nodes(after_nodes);
             let clock = ClockRange::Diff(before, after);
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
         }
@@ -864,32 +960,49 @@ impl AutoCommit {
 
 impl ReadDoc for AutoCommit {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        self.doc.parents_for(obj.as_ref(), self.get_scope(None))
+        self.doc.parents_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Parents<'_>, AutomergeError> {
         self.doc
-            .parents_for(obj.as_ref(), self.get_scope(Some(heads)))
+            .parents_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.doc.keys_for(obj.as_ref(), self.get_scope(None))
+        self.doc.keys_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
+    fn keys_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Keys<'_>, AutomergeError> {
+        Ok(self
+            .doc
+            .keys_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
-    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
-        self.doc.iter_for(obj.as_ref(), self.get_scope(heads))
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<DocIter<'_>, AutomergeError> {
+        Ok(self.doc.iter_for(obj.as_ref(), self.get_scope(heads)?))
     }
 
     fn iter(&self) -> DocIter<'_> {
-        self.doc.iter_for(&ROOT, self.get_scope(None))
+        self.doc
+            .iter_for(&ROOT, self.get_scope(None).expect("no heads to resolve"))
     }
 
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
@@ -897,51 +1010,75 @@ impl ReadDoc for AutoCommit {
         obj: O,
         range: R,
     ) -> MapRange<'a> {
-        self.doc
-            .map_range_for(obj.as_ref(), range, self.get_scope(None))
+        self.doc.map_range_for(
+            obj.as_ref(),
+            range,
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a> {
-        self.doc
-            .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
+        heads: &[ChangeId],
+    ) -> Result<MapRange<'a>, AutomergeError> {
+        Ok(self
+            .doc
+            .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
-        self.doc
-            .list_range_for(obj.as_ref(), range, self.get_scope(None))
+        self.doc.list_range_for(
+            obj.as_ref(),
+            range,
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
         &self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_> {
-        self.doc
-            .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
+        heads: &[ChangeId],
+    ) -> Result<ListRange<'_>, AutomergeError> {
+        Ok(self
+            .doc
+            .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.doc.values_for(obj.as_ref(), self.get_scope(None))
+        self.doc.values_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        self.doc
-            .values_for(obj.as_ref(), self.get_scope(Some(heads)))
+    fn values_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Values<'_>, AutomergeError> {
+        Ok(self
+            .doc
+            .values_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.doc.length_for(obj.as_ref(), self.get_scope(None))
+        self.doc.length_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        self.doc
-            .length_for(obj.as_ref(), self.get_scope(Some(heads)))
+    fn length_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<usize, AutomergeError> {
+        Ok(self
+            .doc
+            .length_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
@@ -949,63 +1086,73 @@ impl ReadDoc for AutoCommit {
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
-        self.doc.marks_for(obj.as_ref(), self.get_scope(None))
+        self.doc.marks_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc
-            .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
+            .marks_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn get_marks<O: AsRef<ExId>>(
         &self,
         obj: O,
         index: usize,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<MarkSet, AutomergeError> {
         self.doc
-            .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
+            .get_marks_for(obj.as_ref(), index, self.get_scope(heads)?)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.doc.text_for(obj.as_ref(), self.get_scope(None))
+        self.doc.text_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<String, AutomergeError> {
-        self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
+        self.doc
+            .text_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
-        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+        self.doc.spans_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Spans<'_>, AutomergeError> {
         self.doc
-            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<Cursor, AutomergeError> {
         self.doc.get_cursor_for(
             obj.as_ref(),
             position.into(),
-            self.get_scope(at),
+            self.get_scope(at)?,
             MoveCursor::After,
         )
     }
@@ -1014,13 +1161,13 @@ impl ReadDoc for AutoCommit {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
         self.doc.get_cursor_for(
             obj.as_ref(),
             position.into(),
-            self.get_scope(at),
+            self.get_scope(at)?,
             move_cursor,
         )
     }
@@ -1029,16 +1176,16 @@ impl ReadDoc for AutoCommit {
         &self,
         obj: O,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<usize, AutomergeError> {
         self.doc
-            .get_cursor_position_for(obj.as_ref(), cursor, self.get_scope(at))
+            .get_cursor_position_for(obj.as_ref(), cursor, self.get_scope(at)?)
     }
 
     fn hydrate<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         self.doc.hydrate_obj(obj.as_ref(), heads)
     }
@@ -1048,18 +1195,21 @@ impl ReadDoc for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_for(obj.as_ref(), prop.into(), self.get_scope(None))
+        self.doc.get_for(
+            obj.as_ref(),
+            prop.into(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc
-            .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+            .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
     }
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1067,21 +1217,24 @@ impl ReadDoc for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(None))
+        self.doc.get_all_for(
+            obj.as_ref(),
+            prop.into(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
+    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.doc.get_missing_deps(heads)
     }
 
@@ -1255,9 +1408,13 @@ impl Transactable for AutoCommit {
 
     fn base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
-            i.clone()
+            // base heads are the deps of the change this transaction will
+            // commit, which the wire format records as hashes
+            self.doc
+                .resolve_heads(i)
+                .expect("isolation ids were validated when isolating")
         } else {
-            self.doc.get_heads()
+            self.doc.get_head_hashes()
         }
     }
 
@@ -1381,11 +1538,11 @@ impl SyncDoc for SyncWrapper<'_> {
 #[derive(Debug, Clone, PartialEq)]
 struct OpRange {
     before_len: usize,
-    ids: Vec<ChangeHash>,
+    ids: Vec<ChangeId>,
 }
 
 impl OpRange {
-    fn new(before: &[ChangeHash], after: &[ChangeHash]) -> Self {
+    fn new(before: &[ChangeId], after: &[ChangeId]) -> Self {
         let mut ids = Vec::with_capacity(before.len() + after.len());
         ids.extend_from_slice(before);
         ids.extend_from_slice(after);
@@ -1398,11 +1555,11 @@ impl OpRange {
         range
     }
 
-    fn before(&self) -> &[ChangeHash] {
+    fn before(&self) -> &[ChangeId] {
         &self.ids[0..self.before_len]
     }
 
-    fn after(&self) -> &[ChangeHash] {
+    fn after(&self) -> &[ChangeId] {
         &self.ids[self.before_len..]
     }
 }

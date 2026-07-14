@@ -397,7 +397,7 @@ fn insertions_after_noexpand_spans_are_not_marked() {
     doc.splice_text(&text, 11, 0, "a").unwrap();
     let heads_after = doc.get_heads();
 
-    let patches = doc.diff(&heads_before, &heads_after);
+    let patches = doc.diff(&heads_before, &heads_after).unwrap();
     assert_eq!(patches.len(), 1);
 
     let Patch {
@@ -482,7 +482,7 @@ fn marks_which_cross_optree_boundaries_are_not_double_counted_in_splice_patches(
         doc.splice_text(&text, doc.length(&text), 0, "a").unwrap();
         let heads_after = doc.get_heads();
 
-        let patches = doc.diff(&heads_before, &heads_after);
+        let patches = doc.diff(&heads_before, &heads_after).unwrap();
         assert_eq!(patches.len(), 1);
 
         let Patch {
@@ -526,7 +526,7 @@ fn noexpand_marks_at_the_end_of_text_should_not_emit_marked_patches_on_following
     doc.splice_text(&text, doc.length(&text), 0, "a").unwrap();
     let heads_after = doc.get_heads();
 
-    let patches = doc.diff(&heads_before, &heads_after);
+    let patches = doc.diff(&heads_before, &heads_after).unwrap();
     assert_eq!(patches.len(), 1);
 
     let Patch {
@@ -956,7 +956,7 @@ fn splicing_into_multibyte_characters() {
     let actor = doc.get_actor().clone();
     doc.splice_text(&text, 0, 0, "A").unwrap();
     let parent_id = doc.commit().unwrap();
-    let parent_hash = parent_id;
+    let parent_hash = doc.get_hash_for_change_id(&parent_id).unwrap().unwrap();
 
     // We have to construct this change using the legacy API because we intentionally make it
     // impossible to create these kind of changes. The notable thing here is that there is

@@ -1,11 +1,12 @@
 use crate::automerge::Automerge;
+use crate::change_id::ChangeId;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
 use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
-use crate::{ChangeHash, Patch};
+use crate::Patch;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
@@ -286,11 +287,16 @@ impl PatchLog {
     /// indexes may identify different objects after the transition. Finalizing
     /// concrete patches here preserves both their ordering and their paths, and
     /// lets them be safely concatenated with patches from subsequent views.
-    pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
+    pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeId]) {
         if !self.events.is_empty() || !self.expose.is_empty() {
             self.migrate_actors(&doc.ops.actors)
                 .expect("AutoCommit's patch log always belongs to its document");
-            let clock = doc.change_graph.clock_for_heads_lossy(heads);
+            // a pinned patch-log target needs its concrete clock even at
+            // the current heads, so resolve through the graph
+            let nodes = doc
+                .nodes_for_change_ids(heads)
+                .expect("known ids always resolve");
+            let clock = doc.change_graph.clock_for_nodes(nodes);
             let previous_heads = self.heads_clock.replace(clock);
             let patches = self.make_current_patches(doc);
             self.heads_clock = previous_heads;

@@ -211,6 +211,25 @@ impl TryFrom<&AMitems<'_>> for Vec<am::Change> {
     }
 }
 
+impl TryFrom<&AMitems<'_>> for Vec<am::ChangeId> {
+    type Error = am::AutomergeError;
+
+    fn try_from(items: &AMitems<'_>) -> Result<Self, Self::Error> {
+        let mut change_ids = Vec::<am::ChangeId>::with_capacity(items.len());
+        for item in items.as_ref().iter() {
+            match <&am::ChangeId>::try_from(item.as_ref()) {
+                Ok(change_id) => {
+                    change_ids.push(change_id.clone());
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(change_ids)
+    }
+}
+
 impl TryFrom<&AMitems<'_>> for Vec<am::ChangeHash> {
     type Error = am::AutomergeError;
 

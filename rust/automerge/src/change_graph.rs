@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
 
+use crate::change_id::ChangeId;
 use crate::storage::{BundleMetadata, DepRef};
 use crate::{
     clock::{Clock, SeqClock},
@@ -286,15 +287,48 @@ impl ChangeGraph {
         self.heads.iter().cloned()
     }
 
-    /// Whether `heads` is exactly the set of current heads (order and
-    /// duplicates ignored).
-    pub(crate) fn heads_are_current(&self, heads: &[ChangeHash]) -> bool {
+    /// Whether `nodes` is exactly the set of current head nodes (order
+    /// and duplicates ignored). Head hashes are always known — even on an
+    /// unchecked graph — so the membership test never misfires.
+    pub(crate) fn nodes_are_heads(&self, nodes: &[NodeIdx]) -> bool {
         // duplicates can only shrink the set, so fewer entries than heads
         // can never match
-        if heads.len() < self.heads.len() {
+        if nodes.len() < self.heads.len() {
             return false;
         }
-        heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
+        let mut seen: Vec<NodeIdx> = Vec::with_capacity(self.heads.len());
+        for n in nodes {
+            let is_head = self
+                .hashes
+                .get(*n)
+                .map(|h| self.heads.contains(&h))
+                .unwrap_or(false);
+            if !is_head {
+                return false;
+            }
+            if !seen.contains(n) {
+                seen.push(*n);
+            }
+        }
+        seen.len() == self.heads.len()
+    }
+
+    /// The [`ChangeId`]s of the current heads, in canonical (sorted)
+    /// order so that documents with the same heads return the same value.
+    pub(crate) fn head_change_ids(&self, actors: &[crate::ActorId]) -> Vec<ChangeId> {
+        let mut ids: Vec<_> = self
+            .heads
+            .iter()
+            .map(|h| {
+                let n = self
+                    .nodes_by_hash
+                    .get(h)
+                    .expect("every head has a known node");
+                self.change_id(*n, actors)
+            })
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// The node index of each head, in the same order as [`Self::heads`].
@@ -578,10 +612,16 @@ impl ChangeGraph {
     /// The (actor index, seq) of the change containing the given op.
     ///
     /// This never needs hashes so it works on unchecked graphs.
-    pub(crate) fn opid_to_actor_seq(&self, id: OpId) -> Option<(usize, u64)> {
+    /// The [`ChangeId`] of the change containing the op `id`, if any.
+    ///
+    /// This never needs hashes so it works on unchecked graphs.
+    pub(crate) fn opid_to_change_id(
+        &self,
+        id: OpId,
+        actors: &[crate::ActorId],
+    ) -> Option<ChangeId> {
         let node = self.opid_to_node(id)?;
-        let i = node.0 as usize;
-        Some((usize::from(self.actors[i]), self.seq[i] as u64))
+        Some(self.change_id(node, actors))
     }
 
     pub(crate) fn deps_for_hash(
@@ -857,19 +897,52 @@ impl ChangeGraph {
         self.get_build_metadata_for_indexes(change_indexes)
     }
 
-    pub(crate) fn get_hash_for_actor_seq(
-        &self,
-        actor: usize,
-        seq: u64,
-    ) -> Result<ChangeHash, AutomergeError> {
-        let node = self
-            .seq_index
+    /// The hash of the change at `node`.
+    ///
+    /// Errors if the hash graph has not been built and the hash is not one
+    /// of the known ones.
+    pub(crate) fn hash_for_node(&self, node: NodeIdx) -> Result<ChangeHash, AutomergeError> {
+        self.hashes
+            .try_get(node)
+            .map_err(|_| AutomergeError::UncheckedHashGraph)
+    }
+
+    /// The node for the change with the given (actor index, seq), if any.
+    ///
+    /// This is the sole bridge from `(actor, seq)` space — the shape of
+    /// [`ChangeId`]s and of the per-actor sequence index — into node space,
+    /// which is how changes are referenced everywhere else internally. It
+    /// never needs hashes so it works on unchecked graphs.
+    pub(crate) fn node_for_actor_seq(&self, actor: usize, seq: u64) -> Option<NodeIdx> {
+        if seq == 0 {
+            return None;
+        }
+        self.seq_index
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
-            .ok_or(AutomergeError::InvalidSeq(seq))?;
-        self.hashes
-            .try_get(*node)
-            .map_err(|_| AutomergeError::UncheckedHashGraph)
+            .copied()
+    }
+
+    /// The node of the given actor's latest change, if it has made any.
+    pub(crate) fn tip_node_for_actor(&self, actor: usize) -> Option<NodeIdx> {
+        self.node_for_actor_seq(actor, self.seq_for_actor(actor))
+    }
+
+    /// The [`ChangeId`] of the change with the given hash.
+    ///
+    /// Returns `Ok(None)` if the hash is definitely not in this document
+    /// and errors if the graph is unchecked and so we cannot tell.
+    pub(crate) fn change_id_for_hash(
+        &self,
+        hash: &ChangeHash,
+        actors: &[crate::ActorId],
+    ) -> Result<Option<ChangeId>, UncheckedHashes> {
+        let node = match self.lookup_hash(hash) {
+            HashLookup::Found(n) => n,
+            HashLookup::Absent => return Ok(None),
+            HashLookup::Unknown => return Err(UncheckedHashes),
+        };
+        Ok(Some(self.change_id(node, actors)))
     }
 
     fn update_heads(&mut self, change: &Change) {
@@ -964,26 +1037,8 @@ impl ChangeGraph {
     /// graph state notwithstanding.
     fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
         let i = n.0 as usize;
-        ChangeId {
-            actor: actors[usize::from(self.actors[i])].clone(),
-            seq: self.seq[i] as u64,
-        }
-    }
-
-    /// Resolve a [`ChangeId`] back to its node.
-    pub(crate) fn node_for_change_id(
-        &self,
-        id: &ChangeId,
-        actors: &[crate::ActorId],
-    ) -> Option<NodeIdx> {
-        let actor_idx = actors.iter().position(|a| a == &id.actor)?;
-        if id.seq == 0 {
-            return None;
-        }
-        self.seq_index
-            .get(actor_idx)?
-            .get(id.seq as usize - 1)
-            .copied()
+        let actor_idx = usize::from(self.actors[i]);
+        ChangeId::new(self.seq[i] as u64, actors[actor_idx].clone(), actor_idx)
     }
 
     fn loose_commit(&self, n: NodeIdx, actors: &[crate::ActorId]) -> Option<Fragment> {
@@ -1203,36 +1258,13 @@ impl ChangeGraph {
         Ok(self.resolve_hashes(heads.iter())?.nodes)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, UncheckedHashes> {
         let nodes = self.heads_to_nodes(heads)?;
         Ok(self.clock_for_nodes(nodes))
     }
 
-    /// Clock for `heads`, silently skipping hashes not in this document —
-    /// the pre-unchecked-load semantics of every `*_at` read.
-    ///
-    /// Hashes known on an unchecked graph (the load heads and any change
-    /// added since) resolve normally, so historical reads at the load heads
-    /// work without the hash graph.
-    pub(crate) fn clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> Clock {
-        let nodes = heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h).copied())
-            .collect();
-        self.clock_for_nodes(nodes)
-    }
-
-    /// Like [`Self::clock_for_heads_lossy`] but returning the seq clock.
-    pub(crate) fn seq_clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> SeqClock {
-        let nodes = heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h).copied())
-            .collect();
-        self.calculate_clock(nodes)
-    }
-
-    fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
+    /// Compute the clock for the given change nodes. Hash-free.
+    pub(crate) fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
         self.calculate_clock(nodes)
             .iter()
             .map(|(actor, seq)| {
@@ -1251,6 +1283,12 @@ impl ChangeGraph {
     ) -> Result<SeqClock, UncheckedHashes> {
         let nodes = self.heads_to_nodes(heads)?;
         Ok(self.calculate_clock(nodes))
+    }
+
+    /// Like [`Self::seq_clock_for_heads`] but keyed by change nodes.
+    /// Hash-free.
+    pub(crate) fn seq_clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> SeqClock {
+        self.calculate_clock(nodes)
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
@@ -2044,10 +2082,7 @@ mod tests {
         fn all_change_ids(&self) -> Vec<ChangeId> {
             self.changes
                 .iter()
-                .map(|c| ChangeId {
-                    actor: c.actor_id().clone(),
-                    seq: c.seq(),
-                })
+                .map(|c| ChangeId::new(c.seq(), c.actor_id().clone(), 0))
                 .collect()
         }
 
@@ -2061,7 +2096,7 @@ mod tests {
     }
 
     fn member_hash(hash_of: &BTreeMap<(ActorId, u64), ChangeHash>, id: &ChangeId) -> ChangeHash {
-        hash_of[&(id.actor.clone(), id.seq)]
+        hash_of[&(id.actor().clone(), id.seq())]
     }
 
     #[test]
@@ -2079,7 +2114,7 @@ mod tests {
         let all_ids: BTreeSet<_> = builder
             .all_change_ids()
             .into_iter()
-            .map(|id| (id.actor, id.seq))
+            .map(|id| (id.actor().clone(), id.seq()))
             .collect();
         let heads: Vec<_> = graph.heads().collect();
 
@@ -2090,7 +2125,7 @@ mod tests {
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
             for m in &f.members {
-                covered.insert((m.actor.clone(), m.seq));
+                covered.insert((m.actor().clone(), m.seq()));
             }
         }
 
@@ -2190,7 +2225,7 @@ mod tests {
         let all_ids: BTreeSet<_> = builder
             .all_change_ids()
             .into_iter()
-            .map(|id| (id.actor, id.seq))
+            .map(|id| (id.actor().clone(), id.seq()))
             .collect();
         let heads: Vec<_> = graph.heads().collect();
         let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
@@ -2198,7 +2233,7 @@ mod tests {
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
             for m in &f.members {
-                covered.insert((m.actor.clone(), m.seq));
+                covered.insert((m.actor().clone(), m.seq()));
             }
         }
 
@@ -2557,47 +2592,6 @@ pub struct Fragment {
     /// fragment-hashes state, where interior change hashes are unknown.
     pub members: Vec<ChangeId>,
 }
-
-/// Identifies a change by `(actor, seq)` — derivable from the change
-/// graph's structure without knowing the change's hash.
-///
-/// This is an experimental API, it may change or be removed without warning.
-#[doc(hidden)]
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct ChangeId {
-    pub actor: crate::ActorId,
-    pub seq: u64,
-}
-
-impl std::fmt::Display for ChangeId {
-    /// `"{seq}@{actor}"`, the same shape as object ids and cursors.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}", self.seq, self.actor)
-    }
-}
-
-impl std::str::FromStr for ChangeId {
-    type Err = ParseChangeIdError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (seq, actor) = s.split_once('@').ok_or(ParseChangeIdError)?;
-        let seq: u64 = seq.parse().map_err(|_| ParseChangeIdError)?;
-        if seq == 0 {
-            return Err(ParseChangeIdError);
-        }
-        let actor = hex::decode(actor).map_err(|_| ParseChangeIdError)?;
-        Ok(ChangeId {
-            actor: crate::ActorId::from(actor),
-            seq,
-        })
-    }
-}
-
-/// Error parsing a [`ChangeId`] from its `"{seq}@{actor}"` form.
-#[doc(hidden)]
-#[derive(Debug, thiserror::Error)]
-#[error("invalid change id: expected \"{{seq}}@{{actor}}\"")]
-pub struct ParseChangeIdError;
 
 /// How much of the document's change-hash graph is known.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

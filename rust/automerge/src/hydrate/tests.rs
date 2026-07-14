@@ -29,7 +29,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     assert_eq!(doc.text(&text)?, "hello big bad world".to_owned());
     let heads = doc.get_heads();
     let cursor = doc.diff_cursor().to_vec();
-    let patches = doc.diff(&cursor, &heads);
+    let patches = doc.diff(&cursor, &heads).unwrap();
     doc.update_diff_cursor();
     hydrated.apply_patches(TextEncoding::platform_default(), patches)?;
     let hydrate::Value::Text(val) = &hydrated.as_map().unwrap().get("text").unwrap() else {

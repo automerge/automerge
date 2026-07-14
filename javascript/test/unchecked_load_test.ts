@@ -5,12 +5,20 @@ import { createHash } from "crypto"
 type DocType = { k?: number; x?: number }
 
 /** a saved doc with three sequential changes, plus its head list */
-function savedDoc(): { saved: Uint8Array; loadHeads: string[] } {
+function savedDoc(): {
+  saved: Uint8Array
+  loadHeads: string[]
+  loadHeadHashes: string[]
+} {
   let doc = Automerge.init<DocType>()
   doc = Automerge.change(doc, d => (d.k = 0))
   doc = Automerge.change(doc, d => (d.k = 1))
   doc = Automerge.change(doc, d => (d.k = 2))
-  return { saved: Automerge.save(doc), loadHeads: Automerge.getHeads(doc) }
+  return {
+    saved: Automerge.save(doc),
+    loadHeads: Automerge.getHeads(doc),
+    loadHeadHashes: Automerge.getHeadHashes(doc),
+  }
 }
 
 describe("unchecked loads (hashGraphRebuild: none)", () => {
@@ -143,8 +151,8 @@ describe("unchecked loads (hashGraphRebuild: none)", () => {
   })
 
   it("loads a doc with a bit-flipped head unchecked, but rebuildHashGraph rejects it", () => {
-    const { saved, loadHeads } = savedDoc()
-    const head = loadHeads[0]
+    const { saved, loadHeadHashes } = savedDoc()
+    const head = loadHeadHashes[0]
 
     // flip one bit in the stored head hash
     const bytes = Buffer.from(saved)
@@ -164,7 +172,7 @@ describe("unchecked loads (hashGraphRebuild: none)", () => {
     // an unchecked load takes the recorded heads on trust
     const doc = Automerge.load<DocType>(flipped, { hashGraphRebuild: "none" })
     assert.equal(doc.k, 2)
-    assert.notDeepEqual(Automerge.getHeads(doc), [head])
+    assert.notDeepEqual(Automerge.getBackend(doc).getHeadHashes(), [head])
 
     // ...but rebuilding the graph recomputes the true hashes and refuses
     assert.throws(() => Automerge.rebuildHashGraph(doc))

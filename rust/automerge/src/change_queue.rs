@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash};
+use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash, ChangeId};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeBatch {
     changes: Vec<Change>,
     hashes: HashSet<ChangeHash>,
-    incoming_actor_seqs: HashSet<(ActorId, u64)>,
+    ids: HashSet<ChangeId>,
 }
 
 impl ChangeBatch {
@@ -14,7 +14,7 @@ impl ChangeBatch {
         Self {
             changes: Vec::new(),
             hashes: HashSet::new(),
-            incoming_actor_seqs: HashSet::new(),
+            ids: HashSet::new(),
         }
     }
 
@@ -24,8 +24,8 @@ impl ChangeBatch {
             return Ok(());
         }
 
-        let actor_seq = (change.actor_id().clone(), change.seq());
-        if self.incoming_actor_seqs.contains(&actor_seq) {
+        let id = change.id();
+        if self.ids.contains(&id) {
             return Err(AutomergeError::DuplicateSeqNumber(
                 change.seq(),
                 change.actor_id().clone(),
@@ -33,7 +33,7 @@ impl ChangeBatch {
         }
 
         self.hashes.insert(hash);
-        self.incoming_actor_seqs.insert(actor_seq);
+        self.ids.insert(id);
         self.changes.push(change);
         Ok(())
     }
@@ -47,7 +47,9 @@ pub(crate) struct ChangeQueue {
     changes: Vec<Change>,
     /// Set of hashes of all changes in the queue — O(1) contains check.
     hashes: HashSet<ChangeHash>,
-    incoming_actor_seqs: HashSet<(ActorId, u64)>,
+    /// Set of [`ChangeId`]s of all changes in the queue — O(1) duplicate
+    /// `(actor, seq)` detection.
+    ids: HashSet<ChangeId>,
 }
 
 impl ChangeQueue {
@@ -55,7 +57,7 @@ impl ChangeQueue {
         Self {
             changes: Vec::new(),
             hashes: HashSet::new(),
-            incoming_actor_seqs: HashSet::new(),
+            ids: HashSet::new(),
         }
     }
 
@@ -72,9 +74,8 @@ impl ChangeQueue {
         self.changes.iter()
     }
 
-    pub(crate) fn has_actor_seq(&self, c: &Change) -> bool {
-        self.incoming_actor_seqs
-            .contains(&(c.actor_id().clone(), c.seq()))
+    pub(crate) fn has_change_id(&self, c: &Change) -> bool {
+        self.ids.contains(&c.id())
     }
 
     /// Remove queued changes at or after an incompatible actor sequence,
@@ -108,8 +109,7 @@ impl ChangeQueue {
         self.changes.retain(|change| {
             if removed.contains(&change.hash()) {
                 self.hashes.remove(&change.hash());
-                self.incoming_actor_seqs
-                    .remove(&(change.actor_id().clone(), change.seq()));
+                self.ids.remove(&change.id());
                 false
             } else {
                 true
@@ -119,10 +119,10 @@ impl ChangeQueue {
 
     pub(crate) fn extend(&mut self, batch: ChangeBatch) {
         for c in batch.changes {
-            let incoming_actor_seq = (c.actor_id().clone(), c.seq());
-            debug_assert!(!self.incoming_actor_seqs.contains(&incoming_actor_seq));
+            let id = c.id();
+            debug_assert!(!self.ids.contains(&id));
             debug_assert!(!self.hashes.contains(&c.hash()));
-            self.incoming_actor_seqs.insert(incoming_actor_seq);
+            self.ids.insert(id);
             self.hashes.insert(c.hash());
             self.changes.push(c);
         }
@@ -178,8 +178,7 @@ impl ChangeQueue {
                 .take()
                 .expect("topo_order contains invalid index");
             self.hashes.remove(&change.hash());
-            self.incoming_actor_seqs
-                .remove(&(change.actor_id().clone(), change.seq()));
+            self.ids.remove(&change.id());
             topo.push(change);
         }
         self.changes = slots.into_iter().flatten().collect::<Vec<_>>();

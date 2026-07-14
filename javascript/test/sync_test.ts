@@ -9,8 +9,9 @@ import {
   initSyncState,
 } from "../src/index.js"
 
+// sync tests deal in the sync protocol's currency: change hashes
 function getHeads(doc) {
-  return Automerge.getHeads(doc)
+  return Automerge.getHeadHashes(doc)
 }
 
 function getMissingDeps(doc) {
@@ -1137,8 +1138,16 @@ describe("Data sync protocol", () => {
 
   describe("read-only sync", () => {
     it("should not apply incoming changes when read-only", () => {
-      let doc1 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from1 = "hello"))
-      let doc2 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from2 = "world"))
+      let doc1 = Automerge.change<any>(
+        Automerge.init(),
+        { time: 0 },
+        doc => (doc.from1 = "hello"),
+      )
+      let doc2 = Automerge.change<any>(
+        Automerge.init(),
+        { time: 0 },
+        doc => (doc.from2 = "world"),
+      )
 
       // doc1 is read-only: sends changes but ignores doc2's
       let [a, b] = sync(doc1, doc2, initSyncState({ readOnly: true }))
@@ -1170,8 +1179,16 @@ describe("Data sync protocol", () => {
     })
 
     it("should allow switching from read-only to read-write", () => {
-      let doc1 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from1 = "hello"))
-      let doc2 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from2 = "world"))
+      let doc1 = Automerge.change<any>(
+        Automerge.init(),
+        { time: 0 },
+        doc => (doc.from1 = "hello"),
+      )
+      let doc2 = Automerge.change<any>(
+        Automerge.init(),
+        { time: 0 },
+        doc => (doc.from2 = "world"),
+      )
 
       let s1 = initSyncState({ readOnly: true })
       let s2 = initSyncState()
@@ -1186,10 +1203,7 @@ describe("Data sync protocol", () => {
       // Second sync: doc1 should now receive doc2's changes
       ;[doc1, doc2, s1, s2] = sync(doc1, doc2, s1, s2)
       assert.strictEqual((doc1 as any).from2, "world")
-      assert.deepStrictEqual(
-        Automerge.getHeads(doc1),
-        Automerge.getHeads(doc2),
-      )
+      assert.deepStrictEqual(Automerge.getHeads(doc1), Automerge.getHeads(doc2))
     })
   })
 })

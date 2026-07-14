@@ -151,7 +151,8 @@ pub trait Transactable: ReadDoc {
         new_text: I,
     ) -> Result<(), AutomergeError>;
 
-    /// The heads this transaction will be based on
+    /// The heads this transaction will be based on, as [`ChangeHash`]es —
+    /// these become the deps of the change the transaction commits
     fn base_heads(&self) -> Vec<ChangeHash>;
 
     /// Update the value of a string

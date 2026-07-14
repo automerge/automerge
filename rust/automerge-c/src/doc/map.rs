@@ -44,7 +44,7 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key The UTF-8 string view key of an item within the map object
 ///                identified by \p obj_id as an `AMbyteSpan` struct.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
 ///                  items to select a historical item at \p key or `NULL`
 ///                  to select the current item at \p key.
 /// \return A pointer to an `AMresult` struct with an `AMitem` struct.
@@ -71,7 +71,7 @@ pub unsafe extern "C" fn AMmapGet(
     let key = to_str!(key);
     match heads.as_ref() {
         None => to_result((doc.get(obj_id, key), key)),
-        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
             Ok(heads) => to_result((doc.get_at(obj_id, key, &heads), key)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
@@ -86,7 +86,7 @@ pub unsafe extern "C" fn AMmapGet(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key The UTF-8 string view key of an item within the map object
 ///                identified by \p obj_id as an `AMbyteSpan` struct.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
 ///                  items to select a historical last item or `NULL` to
 ///                  select the current last item.
 /// \return A pointer to an `AMresult` struct with an `AMItems` struct.
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn AMmapGetAll(
     let key = to_str!(key);
     match heads.as_ref() {
         None => to_result(doc.get_all(obj_id, key)),
-        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
             Ok(heads) => to_result(doc.get_all_at(obj_id, key, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
@@ -481,7 +481,7 @@ pub unsafe extern "C" fn AMmapPutUint(
 ///                  absolute first key.
 /// \param[in] end The key one past the last key in a subrange or `AMstr(NULL)`
 ///                to indicate one past the absolute last key.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
 ///                  items to select historical items or `NULL` to select
 ///                  current items.
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
@@ -508,7 +508,7 @@ pub unsafe extern "C" fn AMmapRange(
     let obj_id = to_obj_id!(obj_id);
     let heads = match heads.as_ref() {
         None => None,
-        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
             Ok(heads) => Some(heads),
             Err(e) => {
                 return AMresult::error(&e.to_string()).into();
@@ -523,7 +523,10 @@ pub unsafe extern "C" fn AMmapRange(
             };
             let bounds = begin..end;
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                match doc.map_range_at(obj_id, bounds, &heads) {
+                    Ok(v) => to_result(v),
+                    Err(e) => AMresult::error(&e.to_string()).into(),
+                }
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
@@ -531,7 +534,10 @@ pub unsafe extern "C" fn AMmapRange(
         (false, true) => {
             let bounds = to_str!(begin).to_string()..;
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                match doc.map_range_at(obj_id, bounds, &heads) {
+                    Ok(v) => to_result(v),
+                    Err(e) => AMresult::error(&e.to_string()).into(),
+                }
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
@@ -539,7 +545,10 @@ pub unsafe extern "C" fn AMmapRange(
         (true, false) => {
             let bounds = ..to_str!(end).to_string();
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                match doc.map_range_at(obj_id, bounds, &heads) {
+                    Ok(v) => to_result(v),
+                    Err(e) => AMresult::error(&e.to_string()).into(),
+                }
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
@@ -547,7 +556,10 @@ pub unsafe extern "C" fn AMmapRange(
         (true, true) => {
             let bounds = ..;
             if let Some(heads) = heads {
-                to_result(doc.map_range_at(obj_id, bounds, &heads))
+                match doc.map_range_at(obj_id, bounds, &heads) {
+                    Ok(v) => to_result(v),
+                    Err(e) => AMresult::error(&e.to_string()).into(),
+                }
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }

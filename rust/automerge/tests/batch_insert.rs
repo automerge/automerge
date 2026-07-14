@@ -824,7 +824,7 @@ fn batch_init_map_generates_patches() {
     doc.init_root_from_hydrate(&map).unwrap();
 
     let heads = doc.get_heads();
-    let patches = doc.diff(&[], &heads);
+    let patches = doc.diff(&[], &heads).unwrap();
     assert!(
         !patches.is_empty(),
         "expected patches from new_from_hydrate"

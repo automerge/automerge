@@ -45,7 +45,7 @@ static void test_start_and_commit(void** state) {
     AMdoc* doc;
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     /* doc.commit()                                                          */
-    AMstackItems(stack_ptr, AMemptyChange(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItems(stack_ptr, AMemptyChange(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 }
 
 /**
@@ -374,7 +374,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     /* doc.push(sublist, "c");                                               */
     AMstackItem(NULL, AMlistPutStr(doc, sublist, SIZE_MAX, true, AMstr("c")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const heads = doc.getHeads()                                          */
-    AMitems const heads = AMstackItems(stack_ptr, AMgetHeads(doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads = AMstackItems(stack_ptr, AMgetHeads(doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c"] })     */
     doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
                            AMexpect(AM_VAL_TYPE_OBJ_TYPE));
@@ -565,7 +565,7 @@ static void test_should_be_able_to_delete_non_existent_props(void** state) {
     AMstackItem(NULL, AMmapPutStr(doc, AM_ROOT, AMstr("bip"), AMstr("bap")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const hash1 = doc.commit()                                            */
     AMitems const hash1 =
-        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /*                                                                       */
     /* assert.deepEqual(doc.keys("_root"), ["bip", "foo"])                   */
     AMitems keys = AMstackItems(stack_ptr, AMkeys(doc, AM_ROOT, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR));
@@ -583,7 +583,7 @@ static void test_should_be_able_to_delete_non_existent_props(void** state) {
     AMstackItem(NULL, AMmapDelete(doc, AM_ROOT, AMstr("baz")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const hash2 = doc.commit()                                            */
     AMitems const hash2 =
-        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /*                                                                       */
     /* assert.deepEqual(doc.keys("_root"), ["bip"])                          */
     keys = AMstackItems(stack_ptr, AMkeys(doc, AM_ROOT, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR));
@@ -827,12 +827,12 @@ static void test_should_be_able_to_splice_text_2(void** state) {
     AMstackItem(NULL, AMspliceText(doc, text, 0, 0, AMstr("hello world")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const hash1 = doc.commit();                                           */
     AMitems const hash1 =
-        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* doc.splice(text, 6, 0, "big bad ");                                   */
     AMstackItem(NULL, AMspliceText(doc, text, 6, 0, AMstr("big bad ")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const hash2 = doc.commit();                                           */
     AMitems const hash2 =
-        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* assert.strictEqual(doc.text(text), "hello big bad world")             */
     AMbyteSpan str;
     assert_true(
@@ -889,7 +889,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
         AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("cccc")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)), &actor_id));
     AMstackItem(NULL, AMsetActorId(doc3, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* let heads = doc1.getHeads()                                           */
-    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* doc1.put("_root", "cnt", 20)                                          */
     AMstackItem(NULL, AMmapPutInt(doc1, AM_ROOT, AMstr("cnt"), 20), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc2.put("_root", "cnt", 0, "counter")                                */
@@ -1009,7 +1009,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
         AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("cccc")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)), &actor_id));
     AMstackItem(NULL, AMsetActorId(doc3, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* let heads = doc1.getHeads()                                           */
-    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* doc1.put(seq, 0, 20)                                                  */
     AMstackItem(NULL, AMlistPutInt(doc1, seq, 0, false, 20), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc2.put(seq, 0, 0, "counter")                                        */
@@ -1117,10 +1117,10 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
     AMstackItem(NULL, AMmapPutStr(doc1, AM_ROOT, AMstr("a"), AMstr("b")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc2.put("/", "b", "c")                                               */
     AMstackItem(NULL, AMmapPutStr(doc2, AM_ROOT, AMstr("b"), AMstr("c")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    /* const head1 = doc1.getHeads()                                         */
-    AMitems head1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    /* const head2 = doc2.getHeads()                                         */
-    AMitems head2 = AMstackItems(stack_ptr, AMgetHeads(doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    /* const head1 = doc1.getHeadHashes()                                    */
+    AMitems head1 = AMstackItems(stack_ptr, AMgetHeadHashes(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    /* const head2 = doc2.getHeadHashes()                                    */
+    AMitems head2 = AMstackItems(stack_ptr, AMgetHeadHashes(doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* const change1 = doc1.getChangeByHash(head1[0])
        if (change1 === null) { throw new RangeError("change1 should not be
        null")  */
@@ -1495,7 +1495,7 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
     /* A.put("/", "key2", "val2");                                           */
     AMstackItem(NULL, AMmapPutStr(A, AM_ROOT, AMstr("key2"), AMstr("val2")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const heads1 = A.getHeads();                                          */
-    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(A), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(A), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* const B = A.fork("bbbbbb")                                            */
     AMdoc* B;
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMfork(A, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &B));
@@ -1508,9 +1508,9 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
     /* B.put("/", "key4", "val4");                                           */
     AMstackItem(NULL, AMmapPutStr(B, AM_ROOT, AMstr("key4"), AMstr("val4")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* A.merge(B)                                                            */
-    AMstackItem(NULL, AMmerge(A, B), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(A, B), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* const heads2 = A.getHeads();                                          */
-    AMitems const heads2 = AMstackItems(stack_ptr, AMgetHeads(A), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads2 = AMstackItems(stack_ptr, AMgetHeads(A), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* A.put("/", "key5", "val5");                                           */
     AMstackItem(NULL, AMmapPutStr(A, AM_ROOT, AMstr("key5"), AMstr("val5")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/",
@@ -1584,7 +1584,7 @@ static void test_should_handle_merging_text_conflicts_then_saving_and_loading(vo
     AMstackItem(NULL, AMspliceText(B, At, 6, 0, AMstr("world")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /*                                                                       */
     /* A.merge(B)                                                            */
-    AMstackItem(NULL, AMmerge(A, B), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(A, B), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /*                                                                       */
     /* const binary = A.save()                                               */
     AMbyteSpan binary;

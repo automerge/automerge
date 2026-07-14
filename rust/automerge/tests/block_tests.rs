@@ -735,7 +735,7 @@ fn diff_emits_block_updates() {
     let parents = doc.put_object(&block, "parents", ObjType::List).unwrap();
 
     let heads = doc.get_heads();
-    let patches = doc.diff(&[], &heads);
+    let patches = doc.diff(&[], &heads).unwrap();
 
     let expected_patches = vec![
         Patch {
@@ -777,7 +777,7 @@ fn diff_emits_block_updates() {
     // which exercises a different code path
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
 
-    let patches = doc.diff(&[], &heads);
+    let patches = doc.diff(&[], &heads).unwrap();
     assert_eq!(patches, expected_patches);
 }
 
@@ -794,7 +794,7 @@ fn merge_produces_block_insertion_diffs() {
     let heads_before = doc2.get_heads();
     doc2.merge(&mut doc).unwrap();
     let heads_after = doc2.get_heads();
-    let patches = doc2.diff(&heads_before, &heads_after);
+    let patches = doc2.diff(&heads_before, &heads_after).unwrap();
     for patch in &patches {
         println!("{:?}", patch);
     }

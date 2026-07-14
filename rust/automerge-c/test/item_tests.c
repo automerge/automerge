@@ -144,9 +144,21 @@ static void test_AMitemToChangeHash_null_out_arg(void** state) {
     AMstackItem(NULL, AMmapPutBool(doc_state->doc, AM_ROOT, AMstr("bool"), true), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     AMitem* const item =
-        AMstackItem(stack_ptr, AMgetHeads(doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItem(stack_ptr, AMgetHeadHashes(doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_non_null(item);
     assert_false(AMitemToChangeHash(item, NULL));
+}
+
+static void test_AMitemToChangeId_null_out_arg(void** state) {
+    DocState* doc_state = *state;
+    AMstack** stack_ptr = &doc_state->base_state->stack;
+
+    AMstackItem(NULL, AMmapPutBool(doc_state->doc, AM_ROOT, AMstr("bool"), true), cmocka_cb,
+                AMexpect(AM_VAL_TYPE_VOID));
+    AMitem* const item =
+        AMstackItem(stack_ptr, AMgetHeads(doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    assert_non_null(item);
+    assert_false(AMitemToChangeId(item, NULL));
 }
 
 static void test_AMitemToCounter_null_out_arg(void** state) {
@@ -296,6 +308,7 @@ int run_item_tests(void) {
         cmocka_unit_test(test_AMitemToBytes_null_out_arg),
         cmocka_unit_test(test_AMitemToChange_null_out_arg),
         cmocka_unit_test(test_AMitemToChangeHash_null_out_arg),
+        cmocka_unit_test(test_AMitemToChangeId_null_out_arg),
         cmocka_unit_test(test_AMitemToCounter_null_out_arg),
         cmocka_unit_test(test_AMitemToDoc_null_out_arg),
         cmocka_unit_test(test_AMitemToF64_null_out_arg),

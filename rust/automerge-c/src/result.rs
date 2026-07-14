@@ -351,6 +351,38 @@ impl From<Result<Vec<am::Change>, am::LoadChangeError>> for AMresult {
     }
 }
 
+impl From<Option<am::ChangeId>> for AMresult {
+    fn from(maybe: Option<am::ChangeId>) -> Self {
+        match maybe {
+            Some(change_id) => Self::item(change_id.into()),
+            None => Self::item(Default::default()),
+        }
+    }
+}
+
+impl From<Result<am::ChangeId, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::ChangeId, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(change_id) => Self::item(change_id.into()),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<Vec<am::ChangeId>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<am::ChangeId>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(change_ids) => Self::items(
+                change_ids
+                    .into_iter()
+                    .map(|change_id| change_id.into())
+                    .collect(),
+            ),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
 impl From<Result<Vec<am::ChangeHash>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<am::ChangeHash>, am::AutomergeError>) -> Self {
         match maybe {

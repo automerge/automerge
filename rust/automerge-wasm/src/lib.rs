@@ -65,7 +65,8 @@ export type SyncMessage = Uint8Array;
 export type FragmentLevelRange = number | { start?: number; end?: number } | null | undefined;
 export type Prop = string | number;
 export type Hash = string;
-export type Heads = Hash[];
+/** The `"seq@actor"` id of a change — see `ChangeId`. */
+export type Heads = ChangeId[];
 export type ScalarValue = string | number | boolean | null | Date | Uint8Array;
 export type Value = ScalarValue | object;
 export type MaterializeValue =
@@ -135,13 +136,13 @@ export type Datatype =
   | "list";
 
 export type SyncHave = {
-  lastSync: Heads;
+  lastSync: Hash[];
   bloom: Uint8Array;
 };
 
 export type DecodedSyncMessage = {
-  heads: Heads;
-  need: Heads;
+  heads: Hash[];
+  need: Hash[];
   have: SyncHave[];
   changes: Change[];
 };
@@ -152,7 +153,7 @@ export type DecodedChange = {
   startOp: number;
   time: number;
   message: string | null;
-  deps: Heads;
+  deps: Hash[];
   hash: Hash;
   ops: Op[];
 };
@@ -164,7 +165,7 @@ export type ChangeMetadata = {
   maxOp: number;
   time: number;
   message: string | null;
-  deps: Heads;
+  deps: Hash[];
   hash: Hash;
 };
 
@@ -174,8 +175,8 @@ export type ChangeId = string;
 export type FragmentMeta = {
   head: Hash;
   level: number;
-  boundary: Heads;
-  checkpoints: Heads;
+  boundary: Hash[];
+  checkpoints: Hash[];
   members: ChangeId[];
 };
 
@@ -183,7 +184,7 @@ export type HashGraphState = "checked" | "fragmentHashes" | "unchecked";
 
 export type Commit = {
   head: Hash;
-  parents: Heads;
+  parents: Hash[];
   bytes: Uint8Array;
 };
 
@@ -357,7 +358,7 @@ interface Automerge {
 
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
 
-    getMissingDeps(heads?: Heads): Heads;
+    getMissingDeps(heads?: Heads): Hash[];
 
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
 
@@ -392,19 +393,19 @@ export function create(options?: InitOptions): Automerge;
 export function load(data: Uint8Array, options?: LoadOptions): Automerge;
 
 export interface JsSyncState {
-  sharedHeads: Heads;
-  lastSentHeads: Heads;
-  theirHeads: Heads | undefined;
-  theirHeed: Heads | undefined;
+  sharedHeads: Hash[];
+  lastSentHeads: Hash[];
+  theirHeads: Hash[] | undefined;
+  theirHeed: Hash[] | undefined;
   theirHave: SyncHave[] | undefined;
-  sentHashes: Heads;
+  sentHashes: Hash[];
   readOnly: boolean;
   peerReadOnly: boolean;
 }
 
 export interface DecodedBundle {
   changes: DecodedChange[];
-  deps: Heads;
+  deps: Hash[];
 }
 
 export interface API {
@@ -512,8 +513,7 @@ impl Automerge {
         actor: Option<String>,
         heads: JsValue,
     ) -> Result<Automerge, error::Fork> {
-        let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
-        let doc = if let Ok(heads) = heads {
+        let doc = if let Ok(Some(heads)) = get_heads(heads) {
             self.doc.fork_at(&heads)?
         } else {
             self.doc.fork()
@@ -545,19 +545,20 @@ impl Automerge {
         if let Some(time) = time {
             commit_opts.set_time(time as i64);
         }
-        let hash = self.doc.commit_with(commit_opts);
-        match hash {
-            Some(h) => JsValue::from_str(&hex::encode(h.0)),
+        let id = self.doc.commit_with(commit_opts);
+        match id {
+            Some(id) => JsValue::from_str(&id.to_string()),
             None => JsValue::NULL,
         }
     }
 
     #[wasm_bindgen(unchecked_return_type = "Heads")]
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
-        let heads = self.doc.merge(&mut other.doc)?;
+        let mut heads = self.doc.merge(&mut other.doc)?;
+        heads.sort_unstable();
         let heads: Array = heads
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(h.0)))
+            .map(|id| JsValue::from_str(&id.to_string()))
             .collect();
         Ok(heads)
     }
@@ -572,7 +573,7 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads)? {
             self.doc
-                .keys_at(&obj, &heads)
+                .keys_at(&obj, &heads)?
                 .map(|s| JsValue::from_str(&s))
                 .collect()
         } else {
@@ -1234,9 +1235,7 @@ impl Automerge {
             .map_err(error::Diff::InvalidAfterHeads)?
             .ok_or_else(|| error::Diff::MissingAfterHeads)?;
 
-        let before = before.clone();
-        let after = after.clone();
-        let patches = self.doc.diff(&before, &after);
+        let patches = self.doc.diff(&before, &after)?;
 
         Ok(interop::export_patches(&self.external_types, patches)?)
     }
@@ -1262,8 +1261,6 @@ impl Automerge {
             .map_err(error::Diff::InvalidBeforeHeads)?
             .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
 
-        let before = before.clone();
-        let after = after.clone();
         let patches = self.doc.diff_obj(&obj, &before, &after, recursive)?;
 
         Ok(interop::export_patches(&self.external_types, patches)?)
@@ -1290,7 +1287,7 @@ impl Automerge {
     pub fn length(&self, obj: JsValue, heads: JsValue) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
-            Ok(self.doc.length_at(&obj, &heads) as f64)
+            Ok(self.doc.length_at(&obj, &heads)? as f64)
         } else {
             Ok(self.doc.length(&obj) as f64)
         }
@@ -1323,8 +1320,7 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
     ) -> Result<Uint8Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or(Vec::new());
-        let ids = heads.clone();
-        let bytes = self.doc.save_after(&ids)?;
+        let bytes = self.doc.save_after(&heads)?;
         Ok(Uint8Array::from(bytes.as_slice()))
     }
 
@@ -1366,9 +1362,8 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
     ) -> Result<Array, error::Get> {
-        let deps: Vec<am::ChangeHash> = JS(have_deps).try_into()?;
-        let ids = deps.clone();
-        let changes = self.doc.get_changes(&ids)?;
+        let deps = get_heads(have_deps)?.unwrap_or_default();
+        let changes = self.doc.get_changes(&deps)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
@@ -1381,11 +1376,54 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
     ) -> Result<Array, error::Get> {
-        let deps: Vec<am::ChangeHash> = JS(have_deps).try_into()?;
-        let ids = deps.clone();
-        let changes = self.doc.get_changes_meta(&ids)?;
+        let deps = get_heads(have_deps)?.unwrap_or_default();
+        let changes = self.doc.get_changes_meta(&deps)?;
         let changes: Array = changes.iter().map(JS::from).collect();
         Ok(changes)
+    }
+
+    /// Whether the document contains the change with the given
+    /// `"seq@actor"` id. Hash-free: works on unchecked hash graphs.
+    #[wasm_bindgen(js_name = hasChangeId)]
+    pub fn has_change_id(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "ChangeId")] id: String,
+    ) -> bool {
+        id.parse::<am::ChangeId>()
+            .map(|id| self.doc.has_change_id(&id))
+            .unwrap_or(false)
+    }
+
+    /// Convert a change hash to its `"seq@actor"` change id, or null if the
+    /// change is not in this document. Throws if the hash graph is unchecked
+    /// and the hash is not one of the known ones.
+    #[wasm_bindgen(js_name = getChangeIdForHash, unchecked_return_type = "ChangeId | null")]
+    pub fn get_change_id_for_hash(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
+    ) -> Result<JsValue, error::GetChangeByHash> {
+        let hash = JS(hash).try_into()?;
+        match self.doc.get_change_id_for_hash(&hash)? {
+            Some(id) => Ok(JsValue::from_str(&id.to_string())),
+            None => Ok(JsValue::null()),
+        }
+    }
+
+    /// Convert a `"seq@actor"` change id to the change's hash, or null if
+    /// the change is not in this document. Throws if the hash graph is
+    /// unchecked and the change's hash is unknown.
+    #[wasm_bindgen(js_name = getHashForChangeId, unchecked_return_type = "Hash | null")]
+    pub fn get_hash_for_change_id(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "ChangeId")] id: String,
+    ) -> Result<JsValue, error::GetHashForChangeId> {
+        let id = id
+            .parse::<am::ChangeId>()
+            .map_err(error::GetHashForChangeId::BadChangeId)?;
+        match self.doc.get_hash_for_change_id(&id)? {
+            Some(h) => Ok(JsValue::from_str(&hex::encode(h.0))),
+            None => Ok(JsValue::null()),
+        }
     }
 
     #[wasm_bindgen(js_name = getChangeByHash, unchecked_return_type="Change | null")]
@@ -1514,9 +1552,24 @@ impl Automerge {
         Ok(())
     }
 
+    /// The heads of the document as change ids (`"seq@actor"` strings).
     #[wasm_bindgen(js_name = getHeads, unchecked_return_type="Heads")]
     pub fn get_heads(&mut self) -> Array {
-        let heads = self.doc.get_heads();
+        self.doc
+            .get_heads()
+            .iter()
+            .map(|id| JsValue::from_str(&id.to_string()))
+            .collect()
+    }
+
+    /// The heads of the document as change hashes (hex strings), sorted.
+    ///
+    /// Hashes are the currency of the sync protocol and storage; for
+    /// everything else prefer the change ids from `getHeads()`.
+    #[wasm_bindgen(js_name = getHeadHashes, unchecked_return_type="Hash[]")]
+    pub fn get_head_hashes(&mut self) -> Array {
+        let mut heads = self.doc.get_head_hashes();
+        heads.sort_unstable();
         AR::from(heads).into()
     }
 
@@ -1564,8 +1617,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = getMissingDeps, skip_typescript)]
     pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or_default();
-        let ids = heads.clone();
-        let deps = self.doc.get_missing_deps(&ids)?;
+        let deps = self.doc.get_missing_deps(&heads)?;
         let deps: Array = deps
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(h.0)))
@@ -1652,7 +1704,7 @@ impl Automerge {
         // note: negative indices are converted to `CursorPosition::Start` in
         // `impl TryFrom<JS> for CursorPosition`
         let len = match heads {
-            Some(ref heads) => self.doc.length_at(&obj, heads),
+            Some(ref heads) => self.doc.length_at(&obj, heads)?,
             None => self.doc.length(&obj),
         };
 
@@ -1700,8 +1752,8 @@ impl Automerge {
     pub fn empty_change(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let time = time.map(|f| f as i64);
         let options = CommitOptions { message, time };
-        let hash = self.doc.empty_change(options);
-        JsValue::from_str(&hex::encode(hash))
+        let id = self.doc.empty_change(options);
+        JsValue::from_str(&id.to_string())
     }
 
     // skip_typescript because the datatype argument is optional which can only
@@ -1798,7 +1850,7 @@ impl Automerge {
     pub(crate) fn text_at(
         &self,
         obj: &am::ObjId,
-        heads: Option<&[am::ChangeHash]>,
+        heads: Option<&[am::ChangeId]>,
     ) -> Result<String, am::AutomergeError> {
         if let Some(heads) = heads {
             Ok(self.doc.text_at(obj, heads)?)
@@ -2514,7 +2566,7 @@ pub mod error {
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error("bad heads: {0}")]
-        BadHeads(#[from] interop::error::BadChangeHashes),
+        BadHeads(#[from] interop::error::BadChangeIds),
         #[error(transparent)]
         InvalidProp(#[from] interop::error::InvalidProp),
         #[error(transparent)]
@@ -2770,11 +2822,11 @@ pub mod error {
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error("invalid before heads: {0}")]
-        InvalidBeforeHeads(interop::error::BadChangeHashes),
+        InvalidBeforeHeads(interop::error::BadChangeIds),
         #[error("before heads were null or undefined")]
         MissingBeforeHeads,
         #[error("invalid after heads: {0}")]
-        InvalidAfterHeads(interop::error::BadChangeHashes),
+        InvalidAfterHeads(interop::error::BadChangeIds),
         #[error("after heads were null or undefined")]
         MissingAfterHeads,
     }
@@ -2788,7 +2840,7 @@ pub mod error {
     #[derive(Debug, thiserror::Error)]
     pub enum Isolate {
         #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeHashes),
+        Heads(#[from] interop::error::BadChangeIds),
         #[error("no heads specified")]
         NoHeads,
         #[error(transparent)]
@@ -2806,7 +2858,7 @@ pub mod error {
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeHashes),
+        Heads(#[from] interop::error::BadChangeIds),
     }
 
     impl From<Materialize> for JsValue {
@@ -2828,7 +2880,7 @@ pub mod error {
         #[error("cursors only valid on text - obj type: {0}")]
         InvalidObjType(ObjType),
         #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeHashes),
+        Heads(#[from] interop::error::BadChangeIds),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
     }
@@ -2970,7 +3022,7 @@ pub mod error {
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error(transparent)]
-        BadHeads(#[from] interop::error::BadChangeHashes),
+        BadHeads(#[from] interop::error::BadChangeIds),
     }
 
     impl From<GetBlock> for JsValue {
@@ -2984,7 +3036,7 @@ pub mod error {
         #[error("invalid object id: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
         #[error(transparent)]
-        BadHeads(#[from] interop::error::BadChangeHashes),
+        BadHeads(#[from] interop::error::BadChangeIds),
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error(transparent)]
@@ -3021,6 +3073,20 @@ pub mod error {
 
     impl From<BadJSChangeIds> for JsValue {
         fn from(e: BadJSChangeIds) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetHashForChangeId {
+        #[error("invalid change id: {0}")]
+        BadChangeId(automerge::ParseChangeIdError),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<GetHashForChangeId> for JsValue {
+        fn from(e: GetHashForChangeId) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

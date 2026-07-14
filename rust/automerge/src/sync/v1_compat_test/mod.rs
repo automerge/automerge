@@ -25,7 +25,7 @@ const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identif
 
 impl Automerge {
     fn generate_sync_message_v1(&self, sync_state: &mut State) -> Option<Message> {
-        let our_heads = self.get_heads();
+        let our_heads = self.get_head_hashes();
 
         let our_need = self
             .get_missing_deps_hashes(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
@@ -125,7 +125,7 @@ impl Automerge {
     }
 
     fn make_bloom_filter_v1(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self.get_changes(&last_sync).unwrap();
+        let new_changes = self.get_changes_hashes(&last_sync).unwrap();
         let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
@@ -154,7 +154,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes).unwrap();
+            let changes = self.get_changes_hashes(&last_sync_hashes).unwrap();
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -210,7 +210,7 @@ impl Automerge {
         message: Message,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_heads();
+        let before_heads = self.get_head_hashes();
 
         let Message {
             heads: message_heads,
@@ -224,7 +224,7 @@ impl Automerge {
             self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
+                &self.get_head_hashes().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }

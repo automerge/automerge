@@ -1,7 +1,12 @@
 use automerge::{
     transaction::Transactable, ActorId, AutoCommit, Automerge, AutomergeError, ChangeHash,
-    HashGraphRebuild, LoadOptions, ReadDoc, ROOT,
+    ChangeId, HashGraphRebuild, LoadOptions, ReadDoc, ROOT,
 };
+
+/// A change id no real document contains (actor "beefbeef")
+fn foreign_id() -> ChangeId {
+    "1@beefbeef".parse().unwrap()
+}
 
 fn unchecked_opts() -> LoadOptions<'static> {
     LoadOptions::new().hash_graph(HashGraphRebuild::None)
@@ -28,7 +33,7 @@ fn early_hash(orig: &mut AutoCommit) -> ChangeHash {
         .into_iter()
         .map(|c| c.hash())
         .collect();
-    let head = orig.get_heads()[0];
+    let head = orig.get_head_hashes()[0];
     hashes.retain(|h| *h != head);
     hashes[0]
 }
@@ -103,12 +108,12 @@ fn unchecked_load_reads_work() {
     let (v, _) = doc.get_at(ROOT, "k", &heads).unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(2));
 
-    // hashes this document has never seen are silently skipped by the
-    // `*_at` methods, exactly like on a checked document
-    assert!(doc
-        .get_at(ROOT, "k", &[ChangeHash([7; 32])])
-        .unwrap()
-        .is_none());
+    // ids this document has never seen are an error, exactly like on a
+    // checked document
+    assert!(matches!(
+        doc.get_at(ROOT, "k", &[foreign_id()]),
+        Err(AutomergeError::InvalidChangeId(_))
+    ));
 }
 
 #[test]
@@ -178,20 +183,16 @@ fn unchecked_save_after_narrow_failure() {
 
     // everything since the load heads is exportable
     assert!(doc.save_after(&load_heads).is_ok());
-    // exporting pre-load history is not: the early hash is unknown, so the
-    // pre-load changes must be emitted, and their hashes are unavailable
+    // pre-load history is unreachable: the early change's hash cannot be
+    // converted to an id without the hash graph
     assert!(matches!(
-        doc.save_after(std::slice::from_ref(&early)),
+        doc.get_change_id_for_hash(&early),
         Err(AutomergeError::UncheckedHashGraph)
     ));
 
-    // same for get_changes
+    // get_changes works from the load heads
     assert!(doc.get_changes(&load_heads).is_ok());
-    assert!(matches!(
-        doc.get_changes(&[early]),
-        Err(AutomergeError::UncheckedHashGraph)
-    ));
-    // all changes needs all hashes
+    // but all changes needs the pre-load deps' hashes
     assert!(matches!(
         doc.get_changes(&[]),
         Err(AutomergeError::UncheckedHashGraph)
@@ -236,7 +237,7 @@ fn unchecked_set_actor_errors_for_non_head_tip() {
         doc.put(ROOT, "k", i as i64).unwrap();
         doc.commit();
     }
-    let aaaa_tip = doc.get_heads()[0];
+    let aaaa_tip = doc.get_head_hashes()[0];
     doc.set_actor(ActorId::from(&b"bbbb"[..])).unwrap();
     for i in 0..2000 {
         doc.put(ROOT, "k", 10_000 + i as i64).unwrap();
@@ -266,25 +267,35 @@ fn unchecked_set_actor_errors_for_non_head_tip() {
 }
 
 #[test]
-fn unchecked_hash_lookups() {
+fn unchecked_converters() {
     let (bytes, mut orig) = saved_doc();
     let early = early_hash(&mut orig);
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
 
-    // the load heads are known hashes
-    let head = orig.get_heads()[0];
-    assert_eq!(doc.get_heads(), vec![head]);
+    // the load heads convert both ways (paired via the head index suffix)
+    let head_id = orig.get_heads()[0].clone();
+    let head_hash = orig.get_head_hashes()[0];
+    assert_eq!(doc.get_heads(), vec![head_id.clone()]);
+    assert_eq!(doc.get_head_hashes(), vec![head_hash]);
+    assert_eq!(
+        doc.get_hash_for_change_id(&head_id).unwrap(),
+        Some(head_hash)
+    );
+    assert_eq!(
+        doc.get_change_id_for_hash(&head_hash).unwrap(),
+        Some(head_id.clone())
+    );
 
-    // the current op belongs to the head change, whose hash is known
+    // the current op belongs to the head change
     let opid = doc.get(ROOT, "k").unwrap().unwrap().1;
-    assert_eq!(doc.hash_for_opid(&opid).unwrap(), Some(head));
+    assert_eq!(doc.change_id_for_opid(&opid), Some(head_id));
 
     // small docs' interior hashes are all carried by the hash columns
     // now, so lookups of them succeed (the fragment-hashes state)
     assert!(doc.get_change_by_hash(&early).unwrap().is_some());
+    assert!(doc.get_change_id_for_hash(&early).unwrap().is_some());
 
-    // an op from a covered, unstored interior change errors rather than
-    // guessing
+    // an unstored interior hash errors rather than guessing
     let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
     let list = doc
@@ -292,10 +303,16 @@ fn unchecked_hash_lookups() {
         .unwrap();
     doc.commit();
     // the object op made after load is known; interior hashes are not
-    assert!(doc.hash_for_opid(&list).unwrap().is_some());
+    let list_id = doc.change_id_for_opid(&list).unwrap();
+    assert!(doc.get_hash_for_change_id(&list_id).unwrap().is_some());
     assert!(matches!(
-        doc.get_changes(&[unknown]),
+        doc.get_change_id_for_hash(&unknown),
         Err(AutomergeError::UncheckedHashGraph)
+    ));
+    // a foreign id has no hash to look up: a definitive error
+    assert!(matches!(
+        doc.get_hashes_for_change_ids(&[foreign_id()]),
+        Err(AutomergeError::InvalidChangeId(_))
     ));
 }
 
@@ -366,8 +383,8 @@ fn unchecked_multi_head_commit_and_roundtrip() {
         .get_changes(&[])
         .unwrap()
         .iter()
-        .map(|c| c.hash())
-        .filter(|h| orig_heads.contains(h))
+        .map(|c| c.id())
+        .filter(|id| orig_heads.contains(id))
         .collect();
     rebuilt_pre_heads.sort();
     assert_eq!(rebuilt_pre_heads, orig_heads);
@@ -383,13 +400,15 @@ fn unchecked_diff_works() {
     doc.commit();
     let after = doc.get_heads();
 
-    let patches = doc.diff(&before, &after);
+    let patches = doc.diff(&before, &after).unwrap();
     assert!(!patches.is_empty());
 
-    // unknown hashes are silently skipped, so this diffs from the empty
-    // document — same semantics as a checked doc given a foreign hash
-    let patches = doc.diff(&[ChangeHash([7; 32])], &after);
-    assert!(!patches.is_empty());
+    // unknown ids are an error — same semantics as a checked doc given a
+    // foreign id
+    assert!(matches!(
+        doc.diff(&[foreign_id()], &after),
+        Err(AutomergeError::InvalidChangeId(_))
+    ));
 }
 
 /// The full lifecycle: load unchecked (which imports the saved hash
@@ -413,19 +432,17 @@ fn unchecked_lifecycle_all_fallible_functions() {
     let new1 = doc.commit().unwrap();
     doc.put(ROOT, "k", 200_000).unwrap();
     let new2 = doc.commit().unwrap();
-    assert_eq!(doc.get_heads(), vec![new2]);
+    assert_eq!(doc.get_heads(), vec![new2.clone()]);
 
     // ── everything that needs unknown interior hashes errors ──
     let err = |r: Result<(), AutomergeError>| {
         assert!(matches!(r, Err(AutomergeError::UncheckedHashGraph)));
     };
     err(doc.get_changes(&[]).map(|_| ()));
-    err(doc.get_changes(&[unknown]).map(|_| ()));
     err(doc.get_changes_meta(&[]).map(|_| ()));
-    err(doc.get_changes_meta(&[unknown]).map(|_| ()));
     err(doc.get_change_by_hash(&unknown).map(|_| ()));
     err(doc.get_change_meta_by_hash(&unknown).map(|_| ()));
-    err(doc.save_after(&[unknown]).map(|_| ()));
+    err(doc.get_change_id_for_hash(&unknown).map(|_| ()));
     let mut state = automerge::sync::State::new();
     err(doc.sync().generate_sync_message(&mut state).map(|_| ()));
     let mut other = AutoCommit::new();
@@ -437,20 +454,35 @@ fn unchecked_lifecycle_all_fallible_functions() {
     // ── referencing the load heads or post-load hashes works ──
     let since_load = doc.get_changes(&load_heads).unwrap();
     assert_eq!(
-        since_load.iter().map(|c| c.hash()).collect::<Vec<_>>(),
-        vec![new1, new2]
+        since_load.iter().map(|c| c.id()).collect::<Vec<_>>(),
+        vec![new1.clone(), new2.clone()]
     );
-    assert_eq!(doc.get_changes(&[new1]).unwrap().len(), 1);
-    assert_eq!(doc.get_changes(&[new2]).unwrap().len(), 0);
+    assert_eq!(
+        doc.get_changes(std::slice::from_ref(&new1)).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        doc.get_changes(std::slice::from_ref(&new2)).unwrap().len(),
+        0
+    );
     assert_eq!(doc.get_changes_meta(&load_heads).unwrap().len(), 2);
-    assert!(doc.get_change_by_hash(&new1).unwrap().is_some());
-    assert!(doc.get_change_meta_by_hash(&new2).unwrap().is_some());
+    // post-load ids convert to hashes, and those hashes look up changes
+    let new1_hash = doc.get_hash_for_change_id(&new1).unwrap().unwrap();
+    let new2_hash = doc.get_hash_for_change_id(&new2).unwrap().unwrap();
+    assert!(doc.get_change_by_hash(&new1_hash).unwrap().is_some());
+    assert!(doc.get_change_meta_by_hash(&new2_hash).unwrap().is_some());
     assert!(!doc.save_after(&load_heads).unwrap().is_empty());
-    assert!(!doc.save_after(&[new1]).unwrap().is_empty());
+    assert!(!doc
+        .save_after(std::slice::from_ref(&new1))
+        .unwrap()
+        .is_empty());
     assert!(doc.get_missing_deps(&load_heads).unwrap().is_empty());
-    assert!(doc.get_missing_deps(&[new2]).unwrap().is_empty());
+    assert!(doc
+        .get_missing_deps(std::slice::from_ref(&new2))
+        .unwrap()
+        .is_empty());
     // the new changes are local, so the last local change is reachable
-    assert_eq!(doc.get_last_local_change().unwrap().unwrap().hash(), new2);
+    assert_eq!(doc.get_last_local_change().unwrap().unwrap().id(), new2);
 
     // ── fragments work in the fragment-hashes state ──
     let mid_fragments = doc.fragments(..).unwrap();
@@ -466,9 +498,16 @@ fn unchecked_lifecycle_all_fallible_functions() {
     assert_eq!(doc.hash_graph_state(), HashGraphState::Checked);
 
     assert_eq!(doc.get_changes(&[]).unwrap().len(), 4002);
-    assert!(!doc.get_changes(&[unknown]).unwrap().is_empty());
+    let unknown_id = doc.get_change_id_for_hash(&unknown).unwrap().unwrap();
+    assert!(!doc
+        .get_changes(std::slice::from_ref(&unknown_id))
+        .unwrap()
+        .is_empty());
     assert!(doc.get_change_by_hash(&unknown).unwrap().is_some());
-    assert!(!doc.save_after(&[unknown]).unwrap().is_empty());
+    assert!(!doc
+        .save_after(std::slice::from_ref(&unknown_id))
+        .unwrap()
+        .is_empty());
     assert!(doc
         .sync()
         .generate_sync_message(&mut state)
@@ -508,7 +547,7 @@ fn plain_unchecked_state_without_hash_columns() {
         doc.fragments(..),
         Err(AutomergeError::UncheckedHashGraph)
     ));
-    let head = doc.get_heads()[0];
+    let head = doc.get_head_hashes()[0];
     assert!(matches!(
         doc.get_fragment(head),
         Err(AutomergeError::UncheckedHashGraph)
@@ -532,7 +571,7 @@ fn bit_flipped_head_loads_unchecked_but_fails_rebuild() {
     use sha2::{Digest, Sha256};
 
     let (mut bytes, mut orig) = saved_doc();
-    let head = orig.get_heads()[0];
+    let head = orig.get_head_hashes()[0];
 
     // flip one bit in the stored head hash
     let pos = bytes
@@ -557,7 +596,11 @@ fn bit_flipped_head_loads_unchecked_but_fails_rebuild() {
     assert!(!doc.hash_graph_is_checked());
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(2));
-    assert_ne!(doc.get_heads(), vec![head], "head should be the forged one");
+    assert_ne!(
+        doc.get_head_hashes(),
+        vec![head],
+        "head should be the forged one"
+    );
 
     // ...but rebuilding the graph recomputes the true hashes and refuses
     assert!(doc.rebuild_hash_graph().is_err());

@@ -32,31 +32,31 @@ int main(int argc, char** argv) {
     AMstackItem(NULL, AMmapPutStr(doc1, card2, AMstr("title"), AMstr("Rewrite everything in Haskell")), abort_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutBool(doc1, card2, AMstr("done"), false), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc1, AMstr("Add card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc1, AMstr("Add card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     AMdoc* doc2;
     AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2);
-    AMstackItem(NULL, AMmerge(doc2, doc1), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(doc2, doc1), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     AMbyteSpan binary;
     AMitemToBytes(AMstackItem(&stack, AMsave(doc1), abort_cb, AMexpect(AM_VAL_TYPE_BYTES)), &binary);
     AMitemToDoc(AMstackItem(&stack, AMload(binary.src, binary.count), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2);
 
     AMstackItem(NULL, AMmapPutBool(doc1, card1, AMstr("done"), true), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc1, AMstr("Mark card as done"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc1, AMstr("Mark card as done"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     AMstackItem(NULL, AMlistDelete(doc2, cards, 0), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc2, AMstr("Delete card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc2, AMstr("Delete card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
-    AMstackItem(NULL, AMmerge(doc1, doc2), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(doc1, doc2), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     AMitems changes = AMstackItems(&stack, AMgetChanges(doc1, NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     AMitem* item = NULL;
     while ((item = AMitemsNext(&changes, 1)) != NULL) {
         AMchange* change;
         AMitemToChange(item, &change);
-        AMitems const heads = AMstackItems(&stack, AMitemFromChangeHash(AMchangeHash(change)), abort_cb,
-                                           AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMitems const heads = AMstackItems(&stack, AMchangeIdForHash(doc1, AMchangeHash(change)), abort_cb,
+                                           AMexpect(AM_VAL_TYPE_CHANGE_ID));
         char* const c_msg = AMstrdup(AMchangeMessage(change), NULL);
         printf("%s %zu\n", c_msg, AMobjSize(doc1, cards, &heads));
         free(c_msg);

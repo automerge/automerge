@@ -65,7 +65,7 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos The position of an item within the list object identified by
 ///                \p obj_id or `SIZE_MAX` to indicate its last item.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
 ///                  items to select a historical item at \p pos or `NULL`
 ///                  to select the current item at \p pos.
 /// \return A pointer to an `AMresult` struct with an `AMitem` struct.
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn AMlistGet(
     let (pos, _) = adjust!(pos, false, doc.length(obj_id));
     match heads.as_ref() {
         None => to_result((doc.get(obj_id, pos), pos)),
-        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
             Ok(heads) => to_result((doc.get_at(obj_id, pos, &heads), pos)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
@@ -106,7 +106,7 @@ pub unsafe extern "C" fn AMlistGet(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos The position of an item within the list object identified by
 ///                \p obj_id or `SIZE_MAX` to indicate its last item.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
 ///                  items to select a historical last item or `NULL` to select
 ///                  the current last item.
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
@@ -132,7 +132,7 @@ pub unsafe extern "C" fn AMlistGetAll(
     let (pos, _) = adjust!(pos, false, doc.length(obj_id));
     match heads.as_ref() {
         None => to_result(doc.get_all(obj_id, pos)),
-        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
             Ok(heads) => to_result(doc.get_all_at(obj_id, pos, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
@@ -601,7 +601,7 @@ pub unsafe extern "C" fn AMlistPutUint(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] begin The first pos in a range of indices.
 /// \param[in] end At least one past the last pos in a range of indices.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
 ///                  items to select historical items or `NULL` to select
 ///                  current items.
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
@@ -628,8 +628,11 @@ pub unsafe extern "C" fn AMlistRange(
     let range = to_range!(begin, end);
     match heads.as_ref() {
         None => to_result(doc.list_range(obj_id, range)),
-        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.list_range_at(obj_id, range, &heads)),
+        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+            Ok(heads) => match doc.list_range_at(obj_id, range, &heads) {
+                Ok(v) => to_result(v),
+                Err(e) => AMresult::error(&e.to_string()).into(),
+            },
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }

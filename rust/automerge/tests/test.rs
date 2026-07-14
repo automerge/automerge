@@ -124,11 +124,11 @@ fn merge_patches_clear_conflict_after_losing_list_value_is_deleted_from_fuzz_tra
 
     let mut doc = doc.document().clone();
     let mut right = right.document().clone();
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let mut patch_log = PatchLog::active();
     doc.merge_and_log_patches(&mut right, &mut patch_log)
         .unwrap();
-    let expected = doc.hydrate(None);
+    let expected = doc.hydrate(None).unwrap();
     let patches = doc.make_patches(&mut patch_log);
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
@@ -187,7 +187,7 @@ fn historical_owned_transaction_omits_patches_for_unreachable_object_from_fuzz_t
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.commit();
     let doc = source.document().clone();
-    let mut actual = doc.hydrate(Some(&[]));
+    let mut actual = doc.hydrate(Some(&[])).unwrap();
 
     let mut tx = doc
         .into_transaction(Some(PatchLog::active()), Some(&[]))
@@ -196,7 +196,7 @@ fn historical_owned_transaction_omits_patches_for_unreachable_object_from_fuzz_t
     assert!(matches!(result, Err(AutomergeError::InvalidObjId(_))));
     let (doc, hash, mut patch_log) = tx.commit();
     let branch_heads = hash.into_iter().collect::<Vec<_>>();
-    let expected = doc.hydrate(Some(&branch_heads));
+    let expected = doc.hydrate(Some(&branch_heads)).unwrap();
     let patches = doc.make_patches(&mut patch_log);
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
@@ -265,11 +265,11 @@ fn transaction_patches_replace_multi_character_string_in_text_from_fuzz_trace() 
     tx.insert(&text, 0, "ab").unwrap();
     tx.commit();
 
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
     tx.put(&text, 1, f64::MAX).unwrap();
     let (_, mut patch_log) = tx.commit();
-    let expected = doc.hydrate(None);
+    let expected = doc.hydrate(None).unwrap();
     let patches = doc.make_patches(&mut patch_log);
     assert!(matches!(
         patches.as_slice(),
@@ -309,11 +309,11 @@ fn merge_patches_replace_multi_character_string_in_text_from_fuzz_trace() {
 
     let mut doc = doc.document().clone();
     let mut branch = branch.document().clone();
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let mut patch_log = PatchLog::active();
     doc.merge_and_log_patches(&mut branch, &mut patch_log)
         .unwrap();
-    let expected = doc.hydrate(None);
+    let expected = doc.hydrate(None).unwrap();
     let patches = doc.make_patches(&mut patch_log);
     assert!(matches!(
         patches.as_slice(),
@@ -353,11 +353,11 @@ fn merge_patches_include_text_element_update_from_fuzz_trace() {
 
     let mut doc = doc.document().clone();
     let mut branch = branch.document().clone();
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let mut patch_log = PatchLog::active();
     doc.merge_and_log_patches(&mut branch, &mut patch_log)
         .unwrap();
-    let expected = doc.hydrate(None);
+    let expected = doc.hydrate(None).unwrap();
     let patches = doc.make_patches(&mut patch_log);
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
@@ -394,7 +394,7 @@ fn diff_preserves_conflict_after_winning_value_is_deleted_from_fuzz_trace() {
 
     let mut actual = doc.hydrate(&ROOT, Some(&before_heads)).unwrap();
     let expected = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
-    let patches = doc.diff(&before_heads, &current_heads);
+    let patches = doc.diff(&before_heads, &current_heads).unwrap();
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -447,7 +447,7 @@ fn current_state_diff_with_block_applies_to_hydrated_value_from_fuzz_trace() {
 
     let mut actual = doc.hydrate(&ROOT, Some(&[])).unwrap();
     let expected = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
-    let patches = doc.diff(&[], &current_heads);
+    let patches = doc.diff(&[], &current_heads).unwrap();
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -474,7 +474,7 @@ fn reverse_diff_of_replaced_lists_applies_to_hydrated_value_from_fuzz_trace() {
 
     let mut actual = doc.hydrate(&ROOT, Some(&current_heads)).unwrap();
     let expected = doc.hydrate(&ROOT, Some(&historical_heads)).unwrap();
-    let patches = doc.diff(&current_heads, &historical_heads);
+    let patches = doc.diff(&current_heads, &historical_heads).unwrap();
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -631,13 +631,13 @@ fn rollback_after_save_load_of_deep_hydrated_root_map_from_fuzz_trace() {
 
     let mut loaded = AutoCommit::load(&doc.save()).unwrap();
     let mut plain = loaded.document().clone();
-    let before = plain.hydrate(None);
+    let before = plain.hydrate(None).unwrap();
 
     let mut tx = plain.transaction();
     tx.put(ROOT, "k0", "a").unwrap();
     tx.rollback();
 
-    assert_eq!(plain.hydrate(None), before);
+    assert_eq!(plain.hydrate(None).unwrap(), before);
 }
 
 #[test]
@@ -786,7 +786,7 @@ fn diff_spans_preserve_marks_on_inserted_text() {
     .unwrap();
     let after = doc.get_heads();
 
-    let patches = doc.diff(&before, &after);
+    let patches = doc.diff(&before, &after).unwrap();
     let has_marked_splice = patches.iter().any(|patch| {
         matches!(
             &patch.action,
@@ -823,6 +823,7 @@ fn diff_spans_skip_losing_conflicting_text_overwrites() {
 
     let spliced_text = left
         .diff(&before, &after)
+        .unwrap()
         .into_iter()
         .filter_map(|patch| match patch.action {
             PatchAction::SpliceText { value, .. } => Some(value.make_string()),
@@ -2905,7 +2906,7 @@ fn large_patches_in_lists_are_correct() {
         .unwrap()
         .result;
     let heads_after = doc.get_heads();
-    let patches = doc.diff(&heads_before, &heads_after);
+    let patches = doc.diff(&heads_before, &heads_after).unwrap();
     let final_patch = patches.last().unwrap();
     assert_eq!(
         final_patch.path,
@@ -2936,7 +2937,7 @@ fn diff_should_reverse_deletion_of_object_in_list_correctly() {
     let heads_after = doc.get_heads();
 
     doc.update_diff_cursor();
-    let patches = doc.diff(&heads_after, &heads_before);
+    let patches = doc.diff(&heads_after, &heads_before).unwrap();
 
     assert_eq!(patches.len(), 2);
     let patch = patches[0].clone();
@@ -2973,7 +2974,7 @@ fn diff_should_reverse_deletion_of_object_in_map_correctly() {
     let heads_after = doc.get_heads();
 
     doc.update_diff_cursor();
-    let patches = doc.diff(&heads_after, &heads_before);
+    let patches = doc.diff(&heads_after, &heads_before).unwrap();
 
     assert_eq!(patches.len(), 2);
     let patch = patches[0].clone();
@@ -3005,7 +3006,7 @@ fn diff_should_reverse_deletion_of_block_in_text_correctly() {
     let heads_after = doc.get_heads();
 
     doc.update_diff_cursor();
-    let patches = doc.diff(&heads_after, &heads_before);
+    let patches = doc.diff(&heads_after, &heads_before).unwrap();
 
     assert_eq!(patches.len(), 2);
     let patch = patches[0].clone();
@@ -3201,17 +3202,17 @@ fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
 
     doc1.put(&ROOT, "concurrent1", "123").unwrap();
     assert!(doc1.get_heads().len() == 1);
-    let hash_b = doc1.get_heads()[0];
+    let hash_b = doc1.get_heads()[0].clone();
 
     doc3.load_incremental(&doc1.save()).unwrap();
     assert!(doc3.get_heads().len() == 1);
-    let hash_c = doc3.get_heads()[0];
+    let hash_c = doc3.get_heads()[0].clone();
 
     assert_eq!(hash_b, hash_c);
 
     doc2.put(&ROOT, "concurrent2", "abc").unwrap();
     assert!(doc2.get_heads().len() == 1);
-    let hash_d = doc2.get_heads()[0];
+    let hash_d = doc2.get_heads()[0].clone();
 
     doc2.merge(&mut doc1).unwrap();
     let heads = doc2.get_heads();
@@ -3243,7 +3244,7 @@ fn test_get_last_local_change_generation() {
 fn confirm_last_change(doc: &mut AutoCommit) {
     let heads = doc.get_heads();
     let change = doc.get_last_local_change().unwrap().unwrap();
-    assert_eq!(vec![change.hash()], heads);
+    assert_eq!(vec![change.id()], heads);
 }
 
 #[test]
@@ -3722,12 +3723,16 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
         .put(ROOT, "stale_missing", ScalarValue::Uint(1))
         .unwrap();
     stale_branch.commit();
-    let stale_missing = stale_branch.get_heads()[0];
+    let stale_missing_id = stale_branch.get_heads()[0].clone();
+    let stale_missing = stale_branch
+        .get_hash_for_change_id(&stale_missing_id)
+        .unwrap()
+        .unwrap();
     stale_branch
         .put(ROOT, "stale_orphan", ScalarValue::Uint(2))
         .unwrap();
     stale_branch.commit();
-    let stale_orphan = stale_branch.get_changes(&[stale_missing]).unwrap();
+    let stale_orphan = stale_branch.get_changes(&[stale_missing_id]).unwrap();
     assert_eq!(stale_orphan.len(), 1);
 
     receiver.apply_changes_batch(stale_orphan).unwrap();
@@ -3775,14 +3780,22 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         .put(ROOT, "missing", ScalarValue::Uint(1))
         .unwrap();
     orphan_source.commit();
-    let missing = orphan_source.get_heads()[0];
+    let missing_id = orphan_source.get_heads()[0].clone();
+    let missing = orphan_source
+        .get_hash_for_change_id(&missing_id)
+        .unwrap()
+        .unwrap();
 
     orphan_source
         .put(ROOT, "orphan", ScalarValue::Uint(2))
         .unwrap();
     orphan_source.commit();
-    let orphan_head = orphan_source.get_heads()[0];
-    let orphan_change = orphan_source.get_changes(&[missing]).unwrap();
+    let orphan_head_id = orphan_source.get_heads()[0].clone();
+    let orphan_head = orphan_source
+        .get_hash_for_change_id(&orphan_head_id)
+        .unwrap()
+        .unwrap();
+    let orphan_change = orphan_source.get_changes(&[missing_id]).unwrap();
     assert_eq!(orphan_change.len(), 1);
 
     // Queue a change whose dependency is not present in `left`. This is a
@@ -3814,7 +3827,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
 
     let mut right_state = State::new();
     let left_heads = left.get_heads();
-    right_state.their_heads = Some(left_heads.clone());
+    right_state.their_heads = Some(left.get_hashes_for_change_ids(&left_heads).unwrap());
     right_state.their_need = Some(vec![missing]);
     right_state.their_have = Some(vec![]);
 
@@ -3826,7 +3839,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         message.map(|message| message.heads),
         Some({
             let right_heads = right.get_heads();
-            right_heads.clone()
+            right.get_hashes_for_change_ids(&right_heads).unwrap()
         }),
         "right should still advertise its heads even though it cannot satisfy the orphan dep"
     );
@@ -3843,7 +3856,8 @@ fn round_trip_change_with_extra_bytes() {
     doc.put(ROOT, "a", 1).unwrap();
     doc.commit();
     let actor = doc.get_actor().clone();
-    let h1 = doc.get_heads();
+    let h1_ids = doc.get_heads();
+    let h1 = doc.get_hashes_for_change_ids(&h1_ids).unwrap();
 
     let make = |seq: u64, key: &str, deps: Vec<automerge::ChangeHash>, extra: Vec<u8>| {
         automerge::Change::from(automerge::ExpandedChange {
@@ -3961,11 +3975,11 @@ fn increment_patch_clears_resolved_map_conflict() {
     // conflicted register entry, not merely apply an Increment action to it.
     let mut plain = doc.document().clone();
     plain.set_actor(ActorId::try_from("03").unwrap()).unwrap();
-    let before = plain.hydrate(None);
+    let before = plain.hydrate(None).unwrap();
     let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
     tx.increment(ROOT, "key", 28).unwrap();
     let (_, mut patch_log) = tx.commit();
-    let expected = plain.hydrate(None);
+    let expected = plain.hydrate(None).unwrap();
     let patches = plain.make_patches(&mut patch_log);
     let mut actual = before;
     actual.apply_patches(encoding, patches).unwrap();
@@ -3989,7 +4003,7 @@ fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
     let integrated_heads = doc.get_heads();
     let mut actual = doc.hydrate(&ROOT, Some(&integrated_heads)).unwrap();
     let expected = doc.hydrate(&ROOT, Some(&isolated_heads)).unwrap();
-    let patches = doc.diff(&integrated_heads, &isolated_heads);
+    let patches = doc.diff(&integrated_heads, &isolated_heads).unwrap();
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, expected);
@@ -4211,7 +4225,8 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
     let uncompressed_change = change.raw_bytes().to_vec();
     let compressed_change = change.bytes().to_vec();
     assert_ne!(compressed_change, uncompressed_change);
-    let bundle = doc.bundle(expected_heads.clone()).unwrap().bytes().to_vec();
+    let head_hashes = doc.get_head_hashes();
+    let bundle = doc.bundle(head_hashes).unwrap().bytes().to_vec();
 
     for (chunk_type, bytes) in [
         ("change", uncompressed_change),
@@ -4301,7 +4316,7 @@ fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace
     let integrated = doc.get_heads();
     let mut actual = doc.hydrate(&ROOT, Some(&integrated)).unwrap();
     let expected = doc.hydrate(&ROOT, Some(&isolated)).unwrap();
-    let patches = doc.diff(&integrated, &isolated);
+    let patches = doc.diff(&integrated, &isolated).unwrap();
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, expected);
@@ -4337,7 +4352,7 @@ fn diff_exposes_list_object_when_conflict_winner_is_removed() {
     let integrated = doc.get_heads();
     let mut actual = doc.hydrate(&ROOT, Some(&integrated)).unwrap();
     let expected = doc.hydrate(&ROOT, Some(&isolated)).unwrap();
-    let patches = doc.diff(&integrated, &isolated);
+    let patches = doc.diff(&integrated, &isolated).unwrap();
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, expected);
@@ -4360,13 +4375,13 @@ fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
     doc.commit();
 
     let mut plain = doc.document().clone();
-    let mut actual = plain.hydrate(None);
+    let mut actual = plain.hydrate(None).unwrap();
     let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
     let index = 195 % (tx.length(&text) + 1);
     tx.insert(&text, index, ScalarValue::Uint(150)).unwrap();
     let (_, mut patch_log) = tx.commit();
 
-    let expected = plain.hydrate(None);
+    let expected = plain.hydrate(None).unwrap();
     let patches = plain.make_patches(&mut patch_log);
     actual.apply_patches(encoding, patches).unwrap();
 
@@ -4382,11 +4397,11 @@ fn transaction_patches_split_block_at_normalized_utf8_index() {
     source.commit();
     let mut doc = source.document().clone();
 
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
     tx.split_block(&text, 3).unwrap();
     let (_, mut patch_log) = tx.commit();
-    let expected = doc.hydrate(None);
+    let expected = doc.hydrate(None).unwrap();
     actual
         .apply_patches(encoding, doc.make_patches(&mut patch_log))
         .unwrap();
@@ -4499,12 +4514,12 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
 
     let mut logged_target = target.document().clone();
     let mut logged_right = right.document().clone();
-    let mut actual = logged_target.hydrate(None);
+    let mut actual = logged_target.hydrate(None).unwrap();
     let mut patch_log = PatchLog::active();
     logged_target
         .merge_and_log_patches(&mut logged_right, &mut patch_log)
         .unwrap();
-    let expected = logged_target.hydrate(None);
+    let expected = logged_target.hydrate(None).unwrap();
     actual
         .apply_patches(encoding, logged_target.make_patches(&mut patch_log))
         .unwrap();

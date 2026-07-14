@@ -31,7 +31,7 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, Cursor, Fragment, HashGraphState, ObjType, Prop};
+use crate::{AutomergeError, Change, ChangeId, Cursor, Fragment, HashGraphState, ObjType, Prop};
 
 pub(crate) mod current_state;
 
@@ -192,13 +192,12 @@ impl<'a> LoadOptions<'a> {
     /// and hashed, and the head hashes are not verified) at the cost of
     /// leaving the document with an unchecked hash graph: any operation which
     /// needs the hash of a pre-load change (exporting changes, syncing,
-    /// isolating at pre-load heads, ...) will return
+    /// converting pre-load [`ChangeId`]s to hashes, ...) will return
     /// [`AutomergeError::UncheckedHashGraph`] until
     /// [`Automerge::rebuild_hash_graph`] is called.
     ///
-    /// Reading — current state, or historical state at the load heads — as
-    /// well as making new transactions and saving all work on an unchecked
-    /// document.
+    /// Reading (current or historical state via [`ChangeId`]s), making new
+    /// transactions and saving all work on an unchecked document.
     ///
     /// [`HashGraphRebuild::Fragments`] loads like [`HashGraphRebuild::None`] when the
     /// document carries stored fragment hashes (fragment generation works
@@ -365,11 +364,9 @@ impl Automerge {
     /// actor's latest change (to record the sequential dependency). Refuse
     /// actors for which that hash is missing.
     fn check_actor_tip_hash(&self, actor_idx: usize) -> Result<(), AutomergeError> {
-        let seq = self.change_graph.seq_for_actor(actor_idx);
-        if seq == 0 {
-            return Ok(());
+        if let Some(tip) = self.change_graph.tip_node_for_actor(actor_idx) {
+            self.change_graph.hash_for_node(tip)?;
         }
-        self.change_graph.get_hash_for_actor_seq(actor_idx, seq)?;
         Ok(())
     }
 
@@ -457,8 +454,11 @@ impl Automerge {
     pub fn transaction_at(
         &mut self,
         mut patch_log: PatchLog,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Transaction<'_>, AutomergeError> {
+        // fail fast: an isolated transaction commits with these heads as
+        // its deps, which the wire format records as hashes
+        self.resolve_heads(heads)?;
         let args = self.transaction_args(Some(heads));
         patch_log.begin_transaction(self, &args)?;
         Ok(Transaction::new(self, args, patch_log))
@@ -481,19 +481,29 @@ impl Automerge {
     pub fn into_transaction(
         self,
         patch_log: Option<PatchLog>,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<OwnedTransaction, AutomergeError> {
+        if let Some(h) = heads {
+            // fail fast: an isolated transaction commits with these heads
+            // as its deps, which the wire format records as hashes
+            self.resolve_heads(h)?;
+        }
         Ok(OwnedTransaction::new(self, patch_log, heads)?)
     }
 
-    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
+    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeId]>) -> TransactionArgs {
         let actor_index;
         let seq;
         let mut deps;
         let scope;
         match heads {
             Some(heads) => {
-                deps = heads.to_vec();
+                // the isolation heads become the change's deps, which the
+                // wire format records as hashes; callers validated
+                // resolvability when the isolation was created
+                deps = self
+                    .resolve_heads(heads)
+                    .expect("isolation ids were validated when isolating");
                 let isolation = self.isolate_actor(heads);
                 actor_index = isolation.actor_index;
                 seq = isolation.seq;
@@ -502,13 +512,16 @@ impl Automerge {
             None => {
                 actor_index = self.get_or_create_actor_index();
                 seq = self.change_graph.seq_for_actor(actor_index) + 1;
-                deps = self.get_heads();
+                deps = self.get_head_hashes();
                 scope = None;
                 if seq > 1 {
                     // set_actor refuses actors whose latest change hash is
                     // missing, so the hash is always available here
                     let last_hash = self
-                        .get_hash(actor_index, seq - 1)
+                        .change_graph
+                        .tip_node_for_actor(actor_index)
+                        .ok_or(AutomergeError::Fail)
+                        .and_then(|tip| self.change_graph.hash_for_node(tip))
                         .expect("hash of the current actor's last change is always known");
                     if !deps.contains(&last_hash) {
                         deps.push(last_hash);
@@ -568,7 +581,7 @@ impl Automerge {
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let (hash, patch_log) = if let Some(c) = c {
+                let (change_id, patch_log) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -576,7 +589,7 @@ impl Automerge {
                 };
                 Ok(Success {
                     result,
-                    hash,
+                    change_id,
                     patch_log,
                 })
             }
@@ -626,7 +639,7 @@ impl Automerge {
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let (hash, history) = if let Some(c) = c {
+                let (change_id, history) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -634,7 +647,7 @@ impl Automerge {
                 };
                 Ok(Success {
                     result,
-                    hash,
+                    change_id,
                     patch_log: history,
                 })
             }
@@ -649,10 +662,14 @@ impl Automerge {
     ///
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
-    pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
+    pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeId {
         // No patch log is recorded for an empty change, so migrate a throwaway one.
         let args = self.transaction_args(None);
-        Transaction::empty(self, args, opts)
+        let hash = Transaction::empty(self, args, opts);
+        // the change was just added, so it always resolves
+        self.get_change_id_for_hash(&hash)
+            .expect("hash of a newly created change is always known")
+            .expect("newly created change must be in the document")
     }
 
     /// Fork this document at the current point for use by a different actor.
@@ -669,10 +686,11 @@ impl Automerge {
     ///
     /// This will create a new actor ID for the forked document
     ///
-    /// Unlike the `*_at` query methods (which silently skip unknown hashes),
-    /// this returns [`AutomergeError::InvalidHash`] if any of `heads` is not
-    /// a change in this document.
-    pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+    /// Like the `*_at` query methods, this returns
+    /// [`AutomergeError::InvalidChangeId`] if any of `heads` is not a change
+    /// in this document.
+    pub fn fork_at(&self, heads: &[ChangeId]) -> Result<Self, AutomergeError> {
+        let heads = self.resolve_heads(heads)?;
         let mut seen = HashSet::new();
         let mut heads = heads
             .iter()
@@ -866,7 +884,8 @@ impl Automerge {
             Default::default(),
             load::MarkOrderValidation::AllowInvalid,
         )?
-        .hydrate(None))
+        .hydrate(None)
+        .expect("hydrating with no heads cannot fail"))
     }
 
     fn load_with_options_and_mark_validation(
@@ -1049,17 +1068,6 @@ impl Automerge {
         patch_log.path_hint(path_map);
     }
 
-    fn seq_for_actor(&self, actor: &ActorId) -> u64 {
-        self.ops
-            .lookup_actor(actor)
-            .map(|idx| self.change_graph.seq_for_actor(idx))
-            .unwrap_or(0)
-    }
-
-    pub(crate) fn has_actor_seq(&self, change: &Change) -> bool {
-        self.seq_for_actor(change.actor_id()) >= change.seq()
-    }
-
     /// Apply changes to this document.
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
@@ -1082,7 +1090,7 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeId>, AutomergeError> {
         self.merge_and_log_patches(other, &mut PatchLog::inactive())
     }
 
@@ -1092,7 +1100,7 @@ impl Automerge {
         &mut self,
         other: &mut Self,
         patch_log: &mut PatchLog,
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
         // TODO: figure out how to do this transactionally
         let changes = self.get_changes_added(other)?;
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
@@ -1161,8 +1169,20 @@ impl Automerge {
     /// changes. This is useful if you know you have only made a small change since the last
     /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
     /// single character in a text object).
-    pub fn save_after(&self, heads: &[ChangeHash]) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save_after(&self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
         let changes = self.get_changes(heads)?;
+        let mut bytes = vec![];
+        for c in changes {
+            bytes.extend(c.raw_bytes());
+        }
+        Ok(bytes)
+    }
+
+    pub(crate) fn save_after_hashes(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<u8>, AutomergeError> {
+        let changes = ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, heads)?;
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
@@ -1194,35 +1214,70 @@ impl Automerge {
         let Some(actor) = self.get_actor_index() else {
             return Ok(None);
         };
-        let seq = self.change_graph.seq_for_actor(actor);
-        if seq == 0 {
+        let Some(tip) = self.change_graph.tip_node_for_actor(actor) else {
             return Ok(None);
-        }
-        let hash = self.change_graph.get_hash_for_actor_seq(actor, seq)?;
+        };
+        let hash = self.change_graph.hash_for_node(tip)?;
         self.get_change_by_hash(&hash)
     }
 
-    /// Clock for reading the document as at `heads`.
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, AutomergeError> {
+        Ok(self.change_graph.clock_at(heads)?)
+    }
+
+    /// Clock for reading the document as at `heads`, erroring on ids not
+    /// in this document.
     ///
-    /// Returns `None` — an unscoped read of the present document — when
-    /// `heads` is exactly the current heads, so `*_at(doc.get_heads())`
-    /// takes the same indexed fast paths as the un-suffixed methods.
-    /// Otherwise resolves `heads` silently skipping unknown hashes: the
-    /// pre-unchecked-load semantics of every `*_at` read (hashes known on
-    /// an unchecked graph — the load heads and any change added since —
-    /// resolve normally).
+    /// Returns `Ok(None)` — an unscoped read of the present document —
+    /// when `heads` is exactly the current heads, so
+    /// `*_at(doc.get_heads())` takes the same indexed fast paths as the
+    /// un-suffixed methods.
     ///
     /// The shortcut is sound here because pending transaction ops enter
     /// the op set before the graph's heads advance, and an `Automerge`
     /// cannot be read through `&self` while a transaction holds it
     /// mutably. Anything reading *around* an in-flight transaction
     /// (`AutoCommit`, the transaction types) — or needing a concrete
-    /// clock — must use the [`ChangeGraph`] resolvers instead.
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Option<Clock> {
-        if self.change_graph.heads_are_current(heads) {
-            None
+    /// clock — must resolve nodes and use the [`ChangeGraph`] resolvers
+    /// instead.
+    ///
+    /// This never needs hashes so it works on unchecked graphs.
+    pub(crate) fn clock_for_ids(&self, heads: &[ChangeId]) -> Result<Option<Clock>, AutomergeError> {
+        let nodes = self.nodes_for_change_ids(heads)?;
+        if self.change_graph.nodes_are_heads(&nodes) {
+            Ok(None)
         } else {
-            Some(self.change_graph.clock_for_heads_lossy(heads))
+            Ok(Some(self.change_graph.clock_for_nodes(nodes)))
+        }
+    }
+
+    /// Resolve a [`ChangeId`] to its node, verifying the id's actor index
+    /// hint. Hash-free.
+    fn node_for_change_id(&self, id: &ChangeId) -> Option<crate::change_graph::NodeIdx> {
+        let actor_idx = self.change_id_actor_index(id)?;
+        self.change_graph.node_for_actor_seq(actor_idx, id.seq())
+    }
+
+    /// Resolve each id to its node, erroring on ids not in this document.
+    pub(crate) fn nodes_for_change_ids(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<crate::change_graph::NodeIdx>, AutomergeError> {
+        ids.iter()
+            .map(|id| {
+                self.node_for_change_id(id)
+                    .ok_or_else(|| AutomergeError::InvalidChangeId(id.to_string()))
+            })
+            .collect()
+    }
+
+    /// The actor index for a [`ChangeId`]'s actor, verifying the id's hint.
+    fn change_id_actor_index(&self, id: &ChangeId) -> Option<usize> {
+        let hint = id.actor_idx_hint();
+        if self.ops.get_actor_safe(hint) == Some(id.actor()) {
+            Some(hint)
+        } else {
+            self.ops.lookup_actor(id.actor())
         }
     }
 
@@ -1236,11 +1291,14 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
-        // callers resolve heads before isolating, so the clock is always
+    pub(crate) fn isolate_actor(&mut self, heads: &[ChangeId]) -> Isolation {
+        // callers validate heads before isolating, so the clock is always
         // computable
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.change_graph.clock_for_heads_lossy(heads);
+        let mut clock = self
+            .nodes_for_change_ids(heads)
+            .map(|n| self.change_graph.clock_for_nodes(n))
+            .expect("validated ids always have clocks");
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
@@ -1250,7 +1308,10 @@ impl Automerge {
             }
             actor_index = self.get_isolated_actor_index(i);
             // need to recompute the clock b/c the actor indexes may have changed
-            clock = self.change_graph.clock_for_heads_lossy(heads);
+            clock = self
+                .nodes_for_change_ids(heads)
+                .map(|n| self.change_graph.clock_for_nodes(n))
+                .expect("validated ids always have clocks");
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
@@ -1260,10 +1321,6 @@ impl Automerge {
             seq,
             clock,
         }
-    }
-
-    fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
-        self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
     pub(crate) fn update_history(&mut self, change: &Change) {
@@ -1397,14 +1454,24 @@ impl Automerge {
     /// Create patches representing the change in the current state of the document between the
     /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
-    pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
-        let before = self.change_graph.clock_for_heads_lossy(before_heads);
-        let after = self.change_graph.clock_for_heads_lossy(after_heads);
+    pub fn diff(
+        &self,
+        before_heads: &[ChangeId],
+        after_heads: &[ChangeId],
+    ) -> Result<Vec<Patch>, AutomergeError> {
+        // diffing needs concrete clocks on both sides, so resolve through
+        // the graph rather than the shortcutting reader
+        let before = self
+            .change_graph
+            .clock_for_nodes(self.nodes_for_change_ids(before_heads)?);
+        let after = self
+            .change_graph
+            .clock_for_nodes(self.nodes_for_change_ids(after_heads)?);
         let clock = ClockRange::Diff(before, after.clone());
         let mut patch_log = PatchLog::active();
         DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
         patch_log.heads_clock = Some(after);
-        patch_log.make_patches(self)
+        Ok(patch_log.make_patches(self))
     }
 
     /// Create patches representing the change in the current state of an object
@@ -1426,13 +1493,19 @@ impl Automerge {
     pub fn diff_obj(
         &self,
         obj: &ExId,
-        before_heads: &[ChangeHash],
-        after_heads: &[ChangeHash],
+        before_heads: &[ChangeId],
+        after_heads: &[ChangeId],
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let before = self.change_graph.clock_for_heads_lossy(before_heads);
-        let after = self.change_graph.clock_for_heads_lossy(after_heads);
+        // diffing needs concrete clocks on both sides, so resolve through
+        // the graph rather than the shortcutting reader
+        let before = self
+            .change_graph
+            .clock_for_nodes(self.nodes_for_change_ids(before_heads)?);
+        let after = self
+            .change_graph
+            .clock_for_nodes(self.nodes_for_change_ids(after_heads)?);
         let clock = ClockRange::Diff(before, after.clone());
         let mut patch_log = PatchLog::active();
         DiffIter::log(self, obj, clock, &mut patch_log, recursive);
@@ -1465,7 +1538,7 @@ impl Automerge {
         // these produce fragments newest to oldest
         let mut fragments: Vec<_> = self
             .change_graph
-            .fragments(&self.get_heads(), levels, &self.ops.actors)
+            .fragments(&self.get_head_hashes(), levels, &self.ops.actors)
             .collect();
         // but we want to return them oldest to newest
         fragments.reverse();
@@ -1513,7 +1586,7 @@ impl Automerge {
                     let mut nodes = f
                         .members
                         .iter()
-                        .map(|id| self.change_graph.node_for_change_id(id, &self.ops.actors))
+                        .map(|id| self.node_for_change_id(id))
                         .collect::<Option<Vec<_>>>()?;
                     nodes.sort_unstable();
                     let bundle =
@@ -1584,30 +1657,60 @@ impl Automerge {
 
     /// Get the heads of this document.
     ///
-    /// The heads are the hashes of the changes which have no successors in
-    /// this document — collectively they identify the current state. The
-    /// heads are always known, even on a document loaded with
-    /// [`crate::LoadOptions::hash_graph`].
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    /// The heads are the [`ChangeId`]s of the changes which have no successors
+    /// in this document — collectively they identify the current state. Pass
+    /// them to the `*_at` methods of [`ReadDoc`] to read historical values, or
+    /// convert them to hashes with [`Self::get_hashes_for_change_ids`].
+    pub fn get_heads(&self) -> Vec<ChangeId> {
+        self.change_graph.head_change_ids(&self.ops.actors)
+    }
+
+    /// The heads of this document as [`ChangeHash`]es.
+    ///
+    /// The head hashes are always known, even on a document loaded with
+    /// [`crate::LoadOptions::hash_graph`]. Hashes are the currency of the
+    /// sync protocol and storage; for everything else prefer the
+    /// [`ChangeId`]s from [`Self::get_heads`].
+    pub fn get_head_hashes(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<Change>, AutomergeError> {
-        // resolve the exclusion set to a seq clock (silently skipping
-        // unknown hashes, like the old hash traversal did) so that the load
-        // heads work on unchecked graphs; building the emitted changes is
-        // still fallible if their deps are unknown
-        let clock = self.change_graph.seq_clock_for_heads_lossy(have_deps);
+    pub fn get_changes(&self, have_deps: &[ChangeId]) -> Result<Vec<Change>, AutomergeError> {
+        // resolve the exclusion set without hashes so that pre-load heads
+        // work on unchecked graphs; building the changes is still fallible
+        let clock = self.seq_clock_for_ids(have_deps)?;
         ChangeCollector::exclude_seq_clock(&self.ops, &self.change_graph, clock)
+    }
+
+    /// The seq clock for a set of [`ChangeId`]s, erroring on ids not in
+    /// this document. Hash-free.
+    fn seq_clock_for_ids(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<crate::clock::SeqClock, AutomergeError> {
+        Ok(self
+            .change_graph
+            .seq_clock_for_nodes(self.nodes_for_change_ids(ids)?))
+    }
+
+    /// Hash-based version of [`Self::get_changes`], for callers (like the sync
+    /// protocol) which hold hashes for changes this document may not have.
+    #[cfg(test)]
+    pub(crate) fn get_changes_hashes(
+        &self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<Change>, AutomergeError> {
+        ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
     }
 
     pub fn get_changes_meta(
         &self,
-        have_deps: &[ChangeHash],
+        have_deps: &[ChangeId],
     ) -> Result<Vec<ChangeMetadata<'_>>, AutomergeError> {
-        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
+        let have_deps = self.resolve_heads(have_deps)?;
+        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, &have_deps)
     }
 
     pub fn get_change_meta_by_hash(
@@ -1625,7 +1728,7 @@ impl Automerge {
     pub fn get_changes_added(&self, other: &Self) -> Result<Vec<Change>, AutomergeError> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
-        let mut stack: Vec<_> = other.get_heads();
+        let mut stack: Vec<_> = other.get_head_hashes();
         tracing::trace!(their_heads=?stack, "finding changes to merge");
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
@@ -1645,29 +1748,101 @@ impl Automerge {
         other.get_changes_by_hashes(added_change_hashes)
     }
 
-    /// Get the hash of the change that contains the given `opid`.
+    /// Get the [`ChangeId`] of the change that contains the given `opid`.
     ///
-    /// Returns `Ok(None)` if the `opid`:
+    /// Returns [`None`] if the `opid`:
     /// - is the root object id
     /// - does not exist in this document
     ///
-    /// Returns [`AutomergeError::UncheckedHashGraph`] if the change is in
-    /// this document but the hash graph has not been built.
-    pub fn hash_for_opid(&self, exid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
+    /// This never needs hashes so it works on unchecked graphs.
+    pub fn change_id_for_opid(&self, exid: &ExId) -> Option<ChangeId> {
         match exid {
-            ExId::Root => Ok(None),
+            ExId::Root => None,
             ExId::Id(..) => {
-                let Ok(opid) = self.exid_to_opid(exid) else {
-                    return Ok(None);
-                };
-                let Some((actor_idx, seq)) = self.change_graph.opid_to_actor_seq(opid) else {
-                    return Ok(None);
-                };
-                Ok(Some(
-                    self.change_graph.get_hash_for_actor_seq(actor_idx, seq)?,
-                ))
+                let opid = self.exid_to_opid(exid).ok()?;
+                self.change_graph.opid_to_change_id(opid, &self.ops.actors)
             }
         }
+    }
+
+    /// Get the hash of the change identified by `id`.
+    ///
+    /// Returns `Ok(None)` if no change by that (actor, seq) is in this
+    /// document, and [`AutomergeError::UncheckedHashGraph`] if the change is
+    /// in this document but the hash graph has not been built.
+    pub fn get_hash_for_change_id(
+        &self,
+        id: &ChangeId,
+    ) -> Result<Option<ChangeHash>, AutomergeError> {
+        let Some(node) = self.node_for_change_id(id) else {
+            return Ok(None);
+        };
+        self.change_graph.hash_for_node(node).map(Some)
+    }
+
+    /// Get the [`ChangeId`] of the change with the given hash.
+    ///
+    /// Returns `Ok(None)` if the change is not in this document, and
+    /// [`AutomergeError::UncheckedHashGraph`] if the hash graph has not been
+    /// built and so we cannot tell.
+    pub fn get_change_id_for_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> Result<Option<ChangeId>, AutomergeError> {
+        Ok(self
+            .change_graph
+            .change_id_for_hash(hash, &self.ops.actors)?)
+    }
+
+    /// Convert a slice of hashes into [`ChangeId`]s.
+    ///
+    /// Errors with [`AutomergeError::MissingHash`] if a hash is not present
+    /// in this document, and with [`AutomergeError::UncheckedHashGraph`] if
+    /// the hash graph has not been built.
+    pub fn get_change_ids_for_hashes(
+        &self,
+        hashes: &[ChangeHash],
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        hashes
+            .iter()
+            .map(|h| {
+                self.get_change_id_for_hash(h)?
+                    .ok_or(AutomergeError::MissingHash(*h))
+            })
+            .collect()
+    }
+
+    /// Convert a slice of [`ChangeId`]s into hashes.
+    ///
+    /// Errors with [`AutomergeError::InvalidChangeId`] if an id is not
+    /// present in this document, and with
+    /// [`AutomergeError::UncheckedHashGraph`] if the hash of a pre-load
+    /// change is needed but the hash graph has not been built.
+    pub fn get_hashes_for_change_ids(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        ids.iter()
+            .map(|id| {
+                self.get_hash_for_change_id(id)?
+                    .ok_or_else(|| AutomergeError::InvalidChangeId(id.to_string()))
+            })
+            .collect()
+    }
+
+    /// Whether this document contains the change identified by `id`.
+    ///
+    /// This never needs hashes so it works on unchecked graphs.
+    pub fn has_change_id(&self, id: &ChangeId) -> bool {
+        self.node_for_change_id(id).is_some()
+    }
+
+    /// Resolve heads to hashes, erroring on ids not in this document.
+    pub(crate) fn resolve_heads(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.get_hashes_for_change_ids(heads)
     }
 
     fn calculate_marks(
@@ -1734,18 +1909,18 @@ impl Automerge {
         acc.into_iter_no_unmark().collect()
     }
 
-    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        let clock = heads.and_then(|heads| self.clock_at(heads));
-        self.hydrate_map(&ObjId::root(), clock.as_ref())
+    pub fn hydrate(&self, heads: Option<&[ChangeId]>) -> Result<hydrate::Value, AutomergeError> {
+        let clock = heads.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
+        Ok(self.hydrate_map(&ObjId::root(), clock.as_ref()))
     }
 
     pub(crate) fn hydrate_obj(
         &self,
         obj: &crate::ObjId,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let clock = heads.and_then(|heads| self.clock_at(heads));
+        let clock = heads.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         Ok(match obj.typ {
             ObjType::Map | ObjType::Table => self.hydrate_map(&obj.id, clock.as_ref()),
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
@@ -2100,7 +2275,7 @@ impl Automerge {
 
     /// Whether the peer represented by `other` has all the changes we have
     pub fn has_our_changes(&self, other: &crate::sync::State) -> bool {
-        other.shared_heads == self.get_heads()
+        other.shared_heads == self.get_head_hashes()
     }
 
     pub(crate) fn has_change(&self, head: &ChangeHash) -> Result<bool, AutomergeError> {
@@ -2163,9 +2338,9 @@ impl ReadDoc for Automerge {
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Parents<'_>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.parents_for(obj.as_ref(), clock)
     }
 
@@ -2173,15 +2348,22 @@ impl ReadDoc for Automerge {
         self.keys_for(obj.as_ref(), None)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        let clock = self.clock_at(heads);
-        self.keys_for(obj.as_ref(), clock)
+    fn keys_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Keys<'_>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.keys_for(obj.as_ref(), clock))
     }
 
-    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
-        //let obj = self.exid_to_obj(obj.as_ref()).unwrap();
-        let clock = heads.and_then(|heads| self.clock_at(heads));
-        self.iter_for(obj.as_ref(), clock)
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<DocIter<'_>, AutomergeError> {
+        let clock = heads.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
+        Ok(self.iter_for(obj.as_ref(), clock))
     }
 
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
@@ -2196,10 +2378,10 @@ impl ReadDoc for Automerge {
         &'a self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a> {
-        let clock = self.clock_at(heads);
-        self.map_range_for(obj.as_ref(), range, clock)
+        heads: &[ChangeId],
+    ) -> Result<MapRange<'a>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.map_range_for(obj.as_ref(), range, clock))
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
@@ -2210,28 +2392,36 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_> {
-        let clock = self.clock_at(heads);
-        self.list_range_for(obj.as_ref(), range, clock)
+        heads: &[ChangeId],
+    ) -> Result<ListRange<'_>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.list_range_for(obj.as_ref(), range, clock))
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.values_for(obj.as_ref(), None)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        let clock = self.clock_at(heads);
-        self.values_for(obj.as_ref(), clock)
+    fn values_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Values<'_>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.values_for(obj.as_ref(), clock))
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.length_for(obj.as_ref(), None)
     }
 
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        let clock = self.clock_at(heads);
-        self.length_for(obj.as_ref(), clock)
+    fn length_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<usize, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.length_for(obj.as_ref(), clock))
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -2245,9 +2435,9 @@ impl ReadDoc for Automerge {
     fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Spans<'_>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.spans_for(obj.as_ref(), clock)
     }
 
@@ -2255,9 +2445,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.and_then(|heads| self.clock_at(heads));
+        let clock = at.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         self.get_cursor_for(obj.as_ref(), position.into(), clock, MoveCursor::After)
     }
 
@@ -2265,10 +2455,10 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.and_then(|heads| self.clock_at(heads));
+        let clock = at.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         self.get_cursor_for(obj.as_ref(), position.into(), clock, move_cursor)
     }
 
@@ -2276,18 +2466,18 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<usize, AutomergeError> {
-        let clock = at.and_then(|heads| self.clock_at(heads));
+        let clock = at.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         self.get_cursor_position_for(obj.as_ref(), cursor, clock)
     }
 
     fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<String, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.text_for(obj.as_ref(), clock)
     }
 
@@ -2298,19 +2488,19 @@ impl ReadDoc for Automerge {
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<Mark>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.marks_for(obj.as_ref(), clock)
     }
 
     fn hydrate<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = heads.and_then(|h| self.clock_at(h));
+        let clock = heads.map_or(Ok(None), |h| self.clock_for_ids(h))?;
         Ok(match obj.typ {
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
             ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
@@ -2322,9 +2512,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         index: usize,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<MarkSet, AutomergeError> {
-        let clock = heads.and_then(|h| self.clock_at(h));
+        let clock = heads.map_or(Ok(None), |h| self.clock_for_ids(h))?;
         self.get_marks_for(obj.as_ref(), index, clock)
     }
 
@@ -2340,9 +2530,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.get_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -2358,9 +2548,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.get_all_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -2371,8 +2561,8 @@ impl ReadDoc for Automerge {
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.get_missing_deps_hashes(heads)
+    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.get_missing_deps_hashes(&self.resolve_heads(heads)?)
     }
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {

@@ -3,9 +3,7 @@ use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
-use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
-};
+use crate::types::{ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap};
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
 
@@ -23,7 +21,7 @@ type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
-    actor_seq: HashMap<ActorId, HashSet<u64>>,
+    ids: HashSet<crate::ChangeId>,
     hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
@@ -842,29 +840,13 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 
 impl BatchApply {
     fn push(&mut self, c: Change) {
-        assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
+        assert!(!self.ids.contains(&c.id()));
+        self.ids.insert(c.id());
 
         assert!(!self.hashes.contains(&c.hash()));
         self.hashes.insert(c.hash());
 
         self.changes.push(c);
-    }
-
-    fn record_actor_seq(&mut self, c: &Change) {
-        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
-            set.insert(c.seq());
-        } else {
-            self.actor_seq
-                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
-        }
-    }
-
-    fn has_actor_seq(&self, c: &Change) -> bool {
-        self.actor_seq
-            .get(c.actor_id())
-            .map(|set| set.contains(&c.seq()))
-            .unwrap_or(false)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -1079,7 +1061,9 @@ impl Automerge {
             if self.queue.has_hash(&c.hash()) {
                 continue;
             }
-            if self.has_actor_seq(&c) {
+            // the change's (actor, seq) slot is occupied by a different
+            // change (its hash was not found above): a duplicate seq number
+            if self.has_change_id(&c.id()) {
                 self.queue
                     .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
                 return Err(AutomergeError::DuplicateSeqNumber(
@@ -1087,7 +1071,7 @@ impl Automerge {
                     c.actor_id().clone(),
                 ));
             }
-            if self.queue.has_actor_seq(&c) {
+            if self.queue.has_change_id(&c) {
                 return Err(AutomergeError::DuplicateSeqNumber(
                     c.seq(),
                     c.actor_id().clone(),
@@ -1531,7 +1515,7 @@ mod tests {
         assert_eq!(doc_a.save(), doc_b.save());
 
         let pa = doc_a.diff_incremental();
-        let pb = doc_b.diff(&heads, &final_heads);
+        let pb = doc_b.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1622,7 +1606,7 @@ mod tests {
         assert_eq!(doc_a.save(), doc_b.save());
 
         let pa = doc_a.diff_incremental();
-        let pb = doc_b.diff(&heads, &final_heads);
+        let pb = doc_b.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1854,7 +1838,7 @@ mod tests {
         let final_heads = a.get_heads();
 
         a_copy.apply_changes_iter(changes.to_owned()).unwrap();
-        let pb = a_copy.diff(&heads, &final_heads);
+        let pb = a_copy.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1975,6 +1959,9 @@ mod tests {
 
         for _ in 0..CYCLES {
             for d in &mut docs {
+                // ids must name changes d contains: pull the central doc's
+                // changes before isolating at one of its historical heads
+                d.merge(&mut doc).unwrap();
                 let head = rng.random::<u32>() % (heads.len() as u32);
                 d.isolate(&heads[head as usize]).unwrap();
                 for _ in 0..3 {

@@ -9,6 +9,7 @@ use std::rc::Rc;
 use crate::actor_id::AMactorId;
 use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change::AMchange;
+use crate::change_id::AMchangeId;
 use crate::cursor::AMcursor;
 use crate::doc::mark::AMmark;
 use crate::doc::AMdoc;
@@ -34,6 +35,7 @@ pub enum Value {
     ActorId(am::ActorId, UnsafeCell<Option<AMactorId>>),
     Change(Box<am::Change>, UnsafeCell<Option<AMchange>>),
     ChangeHash(am::ChangeHash),
+    ChangeId(am::ChangeId, UnsafeCell<Option<AMchangeId>>),
     Cursor(AMcursor),
     Doc(RefCell<AMdoc>),
     Mark(AMmark),
@@ -162,6 +164,12 @@ impl From<am::ChangeHash> for Value {
     }
 }
 
+impl From<am::ChangeId> for Value {
+    fn from(change_id: am::ChangeId) -> Self {
+        Self::ChangeId(change_id, Default::default())
+    }
+}
+
 impl From<am::Cursor> for Value {
     fn from(cursor: am::Cursor) -> Self {
         Self::Cursor(AMcursor::new(cursor))
@@ -235,6 +243,23 @@ impl<'a> TryFrom<&'a Value> for &'a am::Change {
     }
 }
 
+impl<'a> TryFrom<&'a Value> for &'a am::ChangeId {
+    type Error = am::AutomergeError;
+
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        use self::Value::*;
+        use am::AutomergeError::InvalidValueType;
+
+        match value {
+            ChangeId(change_id, _) => Ok(change_id),
+            _ => Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<self::Value>().to_string(),
+            }),
+        }
+    }
+}
+
 impl<'a> TryFrom<&'a Value> for &'a am::ChangeHash {
     type Error = am::AutomergeError;
 
@@ -284,6 +309,25 @@ impl<'a> TryFrom<&'a Value> for &'a am::ScalarValue {
             expected: type_name::<Self>().to_string(),
             unexpected: type_name::<self::Value>().to_string(),
         })
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a AMchangeId {
+    type Error = am::AutomergeError;
+
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        use self::Value::*;
+        use am::AutomergeError::InvalidValueType;
+
+        match value {
+            ChangeId(change_id, c_change_id) => unsafe {
+                Ok((*c_change_id.get()).get_or_insert(AMchangeId::new(change_id.clone())))
+            },
+            _ => Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<self::Value>().to_string(),
+            }),
+        }
     }
 }
 
@@ -505,6 +549,7 @@ impl PartialEq for Value {
             (ActorId(lhs, _), ActorId(rhs, _)) => *lhs == *rhs,
             (Change(lhs, _), Change(rhs, _)) => lhs == rhs,
             (ChangeHash(lhs), ChangeHash(rhs)) => lhs == rhs,
+            (ChangeId(lhs, _), ChangeId(rhs, _)) => lhs == rhs,
             (Doc(lhs), Doc(rhs)) => lhs.as_ptr() == rhs.as_ptr(),
             (SyncMessage(lhs), SyncMessage(rhs)) => *lhs == *rhs,
             (SyncState(lhs), SyncState(rhs)) => *lhs == *rhs,
@@ -616,6 +661,12 @@ impl From<am::Change> for Item {
     }
 }
 
+impl From<am::ChangeId> for Item {
+    fn from(change_id: am::ChangeId) -> Self {
+        Value::from(change_id).into()
+    }
+}
+
 impl From<am::ChangeHash> for Item {
     fn from(change_hash: am::ChangeHash) -> Self {
         Value::from(change_hash).into()
@@ -697,6 +748,40 @@ impl PartialEq for Item {
 }
 
 impl<'a> TryFrom<&'a Item> for &'a am::Change {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a Item) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidValueType;
+
+        if let Some(value) = &item.value {
+            value.try_into()
+        } else {
+            Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<Option<Value>>().to_string(),
+            })
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Item> for &'a am::ChangeId {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a Item) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidValueType;
+
+        if let Some(value) = &item.value {
+            value.try_into()
+        } else {
+            Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<Option<Value>>().to_string(),
+            })
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Item> for &'a AMchangeId {
     type Error = am::AutomergeError;
 
     fn try_from(item: &'a Item) -> Result<Self, Self::Error> {
@@ -983,6 +1068,10 @@ impl TryFrom<&Item> for (am::Value<'static>, am::ObjId) {
                     expected,
                     unexpected: type_name::<am::ChangeHash>().to_string(),
                 }),
+                ChangeId(_, _) => Err(InvalidValueType {
+                    expected,
+                    unexpected: type_name::<am::ChangeId>().to_string(),
+                }),
                 Change(_, _) => Err(InvalidValueType {
                     expected,
                     unexpected: type_name::<AMchange>().to_string(),
@@ -1075,6 +1164,12 @@ impl From<am::Change> for AMitem {
     }
 }
 
+impl From<am::ChangeId> for AMitem {
+    fn from(change_id: am::ChangeId) -> Self {
+        Value::from(change_id).into()
+    }
+}
+
 impl From<am::ChangeHash> for AMitem {
     fn from(change_hash: am::ChangeHash) -> Self {
         Value::from(change_hash).into()
@@ -1152,6 +1247,22 @@ impl<'a> TryFrom<&'a AMitem> for &'a am::Change {
 
     fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
         item.as_ref().try_into()
+    }
+}
+
+impl<'a> TryFrom<&'a AMitem> for &'a am::ChangeId {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
+        item.0.as_ref().try_into()
+    }
+}
+
+impl<'a> TryFrom<&'a AMitem> for &'a AMchangeId {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
+        item.0.as_ref().try_into()
     }
 }
 
@@ -1304,6 +1415,8 @@ pub enum AMvalType {
     Change = 1 << 4,
     /// A change hash value.
     ChangeHash = 1 << 5,
+    /// A change identifier value.
+    ChangeId = 1 << 21,
     /// A CRDT counter value.
     Counter = 1 << 6,
     /// A cursor value.
@@ -1377,6 +1490,7 @@ impl From<&Value> for AMvalType {
             ActorId(_, _) => Self::ActorId,
             Change(_, _) => Self::Change,
             ChangeHash(_) => Self::ChangeHash,
+            ChangeId(_, _) => Self::ChangeId,
             Cursor(_) => Self::Cursor,
             Doc(_) => Self::Doc,
             Mark(_) => Self::Mark,
@@ -1469,6 +1583,39 @@ pub unsafe extern "C" fn AMitemFromBytes(src: *const u8, count: usize) -> *mut A
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromChangeHash(value: AMbyteSpan) -> *mut AMresult {
     to_result(am::ChangeHash::try_from(&value))
+}
+
+/// \memberof AMitem
+/// \brief Allocates a new item and initializes it from a change identifier's
+///        components.
+///
+/// \param[in] actor_id The bytes of the actor which made the change as an
+///                     `AMbyteSpan` struct.
+/// \param[in] seq The 1-based sequence number of the change in the actor's
+///                history.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_CHANGE_ID` item.
+/// \pre \p actor_id.src `!= NULL`
+/// \pre `0 <` \p actor_id.count
+/// \pre `0 <` \p seq
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
+/// \internal
+///
+/// # Safety
+/// actor_id.src must be a byte array of length >= actor_id.count
+#[no_mangle]
+pub unsafe extern "C" fn AMitemFromChangeId(actor_id: AMbyteSpan, seq: u64) -> *mut AMresult {
+    let Some(seq) = std::num::NonZeroU64::new(seq) else {
+        return AMresult::error("seq must be greater than zero").into();
+    };
+    if actor_id.src.is_null() || actor_id.count == 0 {
+        return AMresult::error("Invalid actor id bytes").into();
+    }
+    let bytes = std::slice::from_raw_parts(actor_id.src, actor_id.count);
+    let actor = am::ActorId::from(bytes);
+    to_result(Ok::<am::ChangeId, am::AutomergeError>(
+        am::ChangeId::from_parts(actor, seq),
+    ))
 }
 
 /// \memberof AMitem
@@ -1816,6 +1963,34 @@ pub unsafe extern "C" fn AMitemToChangeHash(item: *const AMitem, value: *mut AMb
         if let Ok(change_hash) = item.as_ref().try_into_change_hash() {
             if !value.is_null() {
                 *value = change_hash;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// \memberof AMitem
+/// \brief Gets the change identifier value of an item.
+///
+/// \param[in] item A pointer to an `AMitem` struct.
+/// \param[out] value A pointer to an `AMchangeId` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_CHANGE_ID` and
+///         \p *value has been reassigned, `false` otherwise.
+/// \pre \p item `!= NULL`
+/// \internal
+///
+/// # Safety
+/// item must be a valid pointer to an AMitem
+#[no_mangle]
+pub unsafe extern "C" fn AMitemToChangeId(
+    item: *const AMitem,
+    value: *mut *const AMchangeId,
+) -> bool {
+    if let Some(item) = item.as_ref() {
+        if let Ok(change_id) = <&AMchangeId>::try_from(item) {
+            if !value.is_null() {
+                *value = change_id;
                 return true;
             }
         }

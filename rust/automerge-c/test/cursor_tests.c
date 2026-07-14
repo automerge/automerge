@@ -30,21 +30,21 @@ static int setup(void** state) {
                     cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* tx.commit();                                                                                                   */
     AMstackItem(NULL, AMcommit(test_state->doc_state->doc, AMstr(NULL), NULL), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+                AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* let mut tx = doc.transaction();
        tx.splice_text(&text, 0, 0, "hello world")?;                                                                   */
     AMstackItem(NULL, AMspliceText(test_state->doc_state->doc, test_state->text, 0, 0, AMstr("hello world")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     /* tx.commit();                                                                                                   */
     AMstackItem(NULL, AMcommit(test_state->doc_state->doc, AMstr(NULL), NULL), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+                AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* let mut tx = doc.transaction();
        tx.splice_text(&text, 6, 0, "big bad ")?;                                                                      */
     AMstackItem(NULL, AMspliceText(test_state->doc_state->doc, test_state->text, 6, 0, AMstr("big bad ")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     /* tx.commit();                                                                                                   */
     AMstackItem(NULL, AMcommit(test_state->doc_state->doc, AMstr(NULL), NULL), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+                AMexpect(AM_VAL_TYPE_CHANGE_ID));
     *state = test_state;
     return 0;
 }
@@ -135,7 +135,7 @@ static void test_AMgetCursorPosition(void** state) {
     /*
        let heads0 = doc.get_heads();                                                                                  */
     AMitems const heads0 =
-        AMstackItems(stack_ptr, AMgetHeads(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMgetHeads(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /*
        let mut tx = doc.transaction();
        tx.splice_text(&text, 3, 6, " new text ")?;                                                                    */
@@ -143,7 +143,7 @@ static void test_AMgetCursorPosition(void** state) {
                 AMexpect(AM_VAL_TYPE_VOID));
     /* tx.commit();                                                                                                   */
     AMstackItem(NULL, AMcommit(test_state->doc_state->doc, AMstr(NULL), NULL), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+                AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /*
        // confirm the cursor changed position after an edit
        let pos2 = doc.get_cursor_position(&text, &cursor1, None).unwrap();                                            */
@@ -218,11 +218,11 @@ static void test_AMgetCursor_failure(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
     AMitems const heads0 =
-        AMstackItems(stack_ptr, AMgetHeads(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMgetHeads(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     AMstackItem(NULL, AMspliceText(test_state->doc_state->doc, test_state->text, 3, 6, AMstr(" new text ")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMcommit(test_state->doc_state->doc, AMstr(NULL), NULL), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+                AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /* // cursors created after heads are invalid
        let cursor3 = doc.get_cursor(&text, 6, None).unwrap();                                                         */
     AMcursor const* cursor3;
