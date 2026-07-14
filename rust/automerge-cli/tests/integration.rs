@@ -91,3 +91,65 @@ fn import_change_export() {
     assert_eq!(result, expected);
 }
 */
+
+/// Build a document with two sequential changes and return its serialised bytes
+/// together with the change hash created by each change.
+fn two_change_doc() -> (Vec<u8>, automerge::ChangeHash, automerge::ChangeHash) {
+    use automerge::{transaction::Transactable, AutoCommit, ROOT};
+
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    let first = doc.commit().unwrap();
+    doc.put(ROOT, "b", 2).unwrap();
+    let second = doc.commit().unwrap();
+    (doc.save(), first, second)
+}
+
+#[test]
+fn fork_at_earlier_change_drops_later_state() {
+    let bin = env!("CARGO_BIN_EXE_automerge");
+    let (doc, first, _second) = two_change_doc();
+
+    let stdout = cmd!(bin, "fork", first.to_string())
+        .stdin_bytes(doc)
+        .pipe(cmd!(bin, "export"))
+        .read()
+        .unwrap();
+
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    // Forking at the first change should only contain state from that change.
+    assert_eq!(result, serde_json::json!({ "a": 1 }));
+}
+
+#[test]
+fn fork_at_head_preserves_state() {
+    let bin = env!("CARGO_BIN_EXE_automerge");
+    let (doc, _first, second) = two_change_doc();
+
+    let stdout = cmd!(bin, "fork", second.to_string())
+        .stdin_bytes(doc)
+        .pipe(cmd!(bin, "export"))
+        .read()
+        .unwrap();
+
+    let result: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(result, serde_json::json!({ "a": 1, "b": 2 }));
+}
+
+#[test]
+fn fork_with_unknown_hash_fails() {
+    let bin = env!("CARGO_BIN_EXE_automerge");
+    let (doc, _first, _second) = two_change_doc();
+
+    // A syntactically valid hash that is not present in the document.
+    let absent = "0".repeat(64);
+    let output = cmd!(bin, "fork", absent)
+        .stdin_bytes(doc)
+        .stdout_capture()
+        .unchecked()
+        .run()
+        .unwrap();
+
+    // The fork fails and produces no document on stdout.
+    assert!(output.stdout.is_empty());
+}
