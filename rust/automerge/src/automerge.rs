@@ -1121,13 +1121,6 @@ impl Automerge {
     /// Returns `None` — an unscoped read of the present document — when
     /// `heads` is exactly the current heads, so `*_at(doc.get_heads())`
     /// takes the same indexed fast paths as the un-suffixed methods.
-    ///
-    /// The shortcut is sound here because pending transaction ops enter
-    /// the op set before the graph's heads advance, and an `Automerge`
-    /// cannot be read through `&self` while a transaction holds it
-    /// mutably. Anything reading *around* an in-flight transaction
-    /// (`AutoCommit`, the transaction types) — or needing a concrete
-    /// clock — must use [`ChangeGraph::clock_at`] instead.
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Option<Clock> {
         if self.change_graph.heads_are_current(heads) {
             None

@@ -958,11 +958,6 @@ impl OpSet {
         SkipIter::new(iter, top)
     }
 
-    /// Present-time marks for a text object, read straight from the mark
-    /// and text indexes: mark boundaries are the mark index's non-null
-    /// entries and span widths come from the text index's prefix sums, so
-    /// no ops are materialized. O(boundaries x log n) plus a run-level walk
-    /// of the mark index column.
     pub(crate) fn calculate_marks_fast(&self, obj: &ObjId) -> Vec<crate::marks::Mark> {
         use super::op_set::mark_index::MarkIdx;
         use crate::marks::MarkAccumulator;
@@ -973,12 +968,10 @@ impl OpSet {
         }
         let range = self.scope_to_obj(obj);
         let text = &self.cols.index.text;
-        // Sequence positions are exclusive prefix sums of the text index.
-        // Boundaries arrive in ascending position order, so one forward
-        // width iterator serves them all in O(1) amortized per boundary
-        // (`get_prefix` per boundary would be O(log n) each); `pv.prefix()`
-        // is the absolute exclusive prefix at the landed position, and the
-        // iterator's construction already computed the base prefix.
+        // Sequence positions are exclusive prefix sums of the text index (which
+        // tracks text widths). Boundaries arrive in ascending position order,
+        // so one forward width iterator serves them all in O(1) amortized per
+        // boundary.
         let mut widths = text.iter_range(range.clone());
         let base = widths.total();
         let mut widths_at = range.start;
