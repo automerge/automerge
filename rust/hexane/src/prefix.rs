@@ -796,6 +796,15 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         self.inner.pos
     }
 
+    /// The running sum of everything consumed so far — equivalently, the
+    /// **exclusive** prefix of the next item to be yielded. Immediately
+    /// after [`PrefixColumn::iter_range`] this is the prefix at the
+    /// range's start, already paid for by the construction's tree descent.
+    #[inline]
+    pub fn total(&self) -> T::Prefix {
+        self.total.clone()
+    }
+
     #[inline]
     pub fn items_left(&self) -> usize {
         self.inner.items_left
@@ -957,6 +966,19 @@ impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
 #[cfg(test)]
 mod tests {
     use crate::prefix::PrefixColumn;
+
+    #[test]
+    fn iter_total_is_prefix_at_range_start() {
+        let values: Vec<u64> = (0..500).map(|i| i % 7).collect();
+        let col = PrefixColumn::<u64>::from_values(values);
+        for i in 0..=col.len() {
+            assert_eq!(
+                col.iter_range(i..col.len()).total(),
+                col.get_prefix(i),
+                "iter_range({i}..).total() != get_prefix({i})",
+            );
+        }
+    }
 
     fn parity_check(values: Vec<u64>) {
         let col = PrefixColumn::<u64>::from_values(values.clone());

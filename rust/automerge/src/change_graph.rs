@@ -127,6 +127,17 @@ impl ChangeGraph {
         self.heads.iter().cloned()
     }
 
+    /// Whether `heads` is exactly the set of current heads (order and
+    /// duplicates ignored).
+    pub(crate) fn heads_are_current(&self, heads: &[ChangeHash]) -> bool {
+        // duplicates can only shrink the set, so fewer entries than heads
+        // can never match
+        if heads.len() < self.heads.len() {
+            return false;
+        }
+        heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
+    }
+
     pub(crate) fn head_indexes(&self) -> impl Iterator<Item = u64> + '_ {
         self.heads
             .iter()
@@ -767,7 +778,7 @@ impl ChangeGraph {
             .collect()
     }
 
-    pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes)
             .iter()

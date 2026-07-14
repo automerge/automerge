@@ -22,6 +22,7 @@ use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 use hexane::PackError;
 use itertools::Itertools;
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
@@ -50,7 +51,7 @@ pub(crate) use op_iter::{
     OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
-pub(crate) use top_op::{SkipToTopIter, TopOps};
+pub(crate) use top_op::{TopIter, TopOps};
 pub(crate) use visible::{VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
@@ -923,21 +924,6 @@ impl OpSet {
                 .is_some_and(|delta| delta.delta == range.len())
     }
 
-    pub(crate) fn obj_id_iter_range(&self, range: &Range<usize>) -> ObjIdIter<'_> {
-        ObjIdIter::new_range(
-            self.cols.obj_actor.iter_range(range.clone()),
-            self.cols.obj_ctr.iter_range(range.clone()),
-        )
-    }
-
-    pub(crate) fn key_iter_range(&self, range: &Range<usize>) -> KeyIter<'_> {
-        KeyIter::new(
-            self.cols.key_str.iter_range(range.clone()),
-            self.cols.key_actor.iter_range(range.clone()),
-            self.cols.key_ctr.iter_range(range.clone()),
-        )
-    }
-
     pub(crate) fn key_str_iter_range(
         &self,
         range: &Range<usize>,
@@ -957,12 +943,97 @@ impl OpSet {
         SkipIter::new(iter, vis)
     }
 
-    pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        let mut text = String::new();
-        for op in self.top_ops(obj, clock) {
-            text.push_str(op.as_str());
+    /// Like [`Self::action_value_iter`] but yielding only each element's
+    /// top (winning, visible) op — one item per element, so a conflicted
+    /// text position contributes a single character.
+    pub(crate) fn action_value_top_iter(
+        &self,
+        range: Range<usize>,
+        clock: Option<Clock>,
+    ) -> SkipIter<ActionValueIter<'_>, TopIter<'_>> {
+        let value = self.value_iter_range(&range);
+        let action = self.action_iter_range(&range);
+        let top = TopIter::new(self, clock, range);
+        let iter = ActionValueIter::new(action, value);
+        SkipIter::new(iter, top)
+    }
+
+    pub(crate) fn calculate_marks_fast(&self, obj: &ObjId) -> Vec<crate::marks::Mark> {
+        use super::op_set::mark_index::MarkIdx;
+        use crate::marks::MarkAccumulator;
+
+        let mut acc = MarkAccumulator::default();
+        if !self.cols.index.mark.has_any_marks() {
+            return vec![];
         }
-        text
+        let range = self.scope_to_obj(obj);
+        let text = &self.cols.index.text;
+        // Sequence positions are exclusive prefix sums of the text index (which
+        // tracks text widths). Boundaries arrive in ascending position order,
+        // so one forward width iterator serves them all in O(1) amortized per
+        // boundary.
+        let mut widths = text.iter_range(range.clone());
+        let base = widths.total();
+        let mut widths_at = range.start;
+
+        let mut state = RichTextQueryState::default();
+        let mut seg: Option<(usize, std::sync::Arc<MarkSet>)> = None;
+        let mut iter = self.cols.index.mark.iter_range(range.clone());
+        let mut pos = range.start;
+        while let Some(run) = iter.next_run() {
+            let Some(idx) = run.value else {
+                pos += run.count;
+                continue;
+            };
+            // distinct op ids make runs of identical Some values length 1,
+            // but stay honest about the count anyway
+            for _ in 0..run.count {
+                let seek = widths
+                    .delta_nth(pos - widths_at)
+                    .expect("mark boundary lies within the text index");
+                widths_at = pos + 1;
+                let seq = (seek.pv.prefix() - base) as usize;
+                if let Some((start, set)) = seg.take() {
+                    if seq > start {
+                        acc.add(start, seq - start, &set);
+                    }
+                }
+                match idx {
+                    MarkIdx::Start(id) => {
+                        if let Some(data) = self.cols.index.mark.mark_data(&id) {
+                            state.map.insert(id, data.clone());
+                        }
+                    }
+                    MarkIdx::End(id) => {
+                        state.map.remove(&id);
+                    }
+                }
+                if let Some(set) = MarkSet::from_query_state(&state) {
+                    seg = Some((seq, set));
+                }
+                pos += 1;
+            }
+        }
+        if let Some((start, set)) = seg {
+            let end = (text.get_prefix(range.end) - base) as usize;
+            if end > start {
+                acc.add(start, end - start, &set);
+            }
+        }
+        acc.into_iter_no_unmark().collect()
+    }
+
+    pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
+        // only the action and value columns are needed: the `TopIter`
+        // skipper jumps between top ops without materializing full ops
+        let range = self.scope_to_obj(obj);
+        self.action_value_top_iter(range, clock)
+            .map(|(action, value, _)| match (action, value) {
+                (Action::Set, ScalarValue::Str(s)) => s,
+                (Action::Mark, _) => Cow::Borrowed(""),
+                (_, _) => Cow::Borrowed("\u{fffc}"),
+            })
+            .collect()
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {

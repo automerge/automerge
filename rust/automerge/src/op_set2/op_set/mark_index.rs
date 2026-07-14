@@ -234,6 +234,23 @@ impl MarkIndexColumn {
         self.data.values().iter()
     }
 
+    pub(crate) fn iter_range(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> hexane::Iter<'_, Option<MarkIdx>> {
+        self.data.values().iter_range(range)
+    }
+
+    /// Whether any mark exists anywhere in the document: the cache holds
+    /// the [`MarkData`] of every live mark-begin op.
+    pub(crate) fn has_any_marks(&self) -> bool {
+        !self.cache.is_empty()
+    }
+
+    pub(crate) fn mark_data(&self, id: &OpId) -> Option<&MarkData<'static>> {
+        self.cache.get(id)
+    }
+
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         let new_values: Vec<Option<MarkIdx>> = self
             .data
