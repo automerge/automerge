@@ -2308,7 +2308,13 @@ fn bad_change_on_optree_node_boundary() {
         })
         .unwrap();
     }
-    let mut doc2 = Automerge::load(doc.save().as_slice()).unwrap();
+    // apply_changes needs the full hash graph (the default load is
+    // HashGraphRebuild::Fragments, whose state cannot dedup by hash)
+    let mut doc2 = Automerge::load_with_options(
+        doc.save().as_slice(),
+        LoadOptions::new().hash_graph(automerge::HashGraphRebuild::Full),
+    )
+    .unwrap();
     doc.transact::<_, _, AutomergeError>(|d| {
         let i = iterations + 2;
         let s = "a".repeat(i as usize);

@@ -371,13 +371,13 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
-  /** How much of the change-hash graph to rebuild on load. "full" (the
-   * default) rebuilds and verifies it. "none" skips the rebuild for a
-   * much faster load; hash-based APIs throw until `rebuildHashGraph()`
-   * is called. "fragments" uses the fragment hashes stored in the
-   * document if present (fast, and fragment APIs work immediately),
-   * falling back to a full rebuild if not. */
-  hashGraphRebuild?: "full" | "fragments" | "none";
+  /** How much of the change-hash graph to rebuild on load. "fragments"
+   * (the default) uses the fragment hashes stored in the document if
+   * present (fast; hash-based APIs like sync throw until
+   * `rebuildHashGraph()` is called), falling back to a full rebuild if
+   * they are absent. "full" always rebuilds and verifies the whole
+   * graph. "none" skips the rebuild entirely for the fastest load. */
+  hashGraphRebuild?: "fragments" | "full" | "none";
 };
 
 // if recursive is false do not diff child objects
@@ -1952,7 +1952,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .ok()
         .filter(|v| !v.is_undefined() && !v.is_null())
     {
-        None => am::HashGraphRebuild::Full,
+        None => am::HashGraphRebuild::Fragments,
         Some(v) => match v.as_string().as_deref() {
             Some("none") => am::HashGraphRebuild::None,
             Some("fragments") => am::HashGraphRebuild::Fragments,

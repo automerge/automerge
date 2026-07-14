@@ -12,6 +12,12 @@ fn unchecked_opts() -> LoadOptions<'static> {
     LoadOptions::new().hash_graph(HashGraphRebuild::None)
 }
 
+/// A full, verifying load — the default is `HashGraphRebuild::Fragments`,
+/// which trusts stored hash columns instead of recomputing hashes.
+fn checked_opts() -> LoadOptions<'static> {
+    LoadOptions::new().hash_graph(HashGraphRebuild::Full)
+}
+
 /// A doc with 3 sequential changes by one actor
 fn saved_doc() -> (Vec<u8>, AutoCommit) {
     let mut doc = AutoCommit::new()
@@ -166,7 +172,7 @@ fn unchecked_save_incremental_is_infallible() {
     assert!(!incr.is_empty());
 
     // the incremental bytes apply cleanly onto a checked copy
-    let mut checked = AutoCommit::load(&bytes).unwrap();
+    let mut checked = AutoCommit::load_with_options(&bytes, checked_opts()).unwrap();
     checked.load_incremental(&incr).unwrap();
     let (v, _) = checked.get(ROOT, "k").unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(100));
@@ -362,7 +368,7 @@ fn unchecked_multi_head_commit_and_roundtrip() {
     // the incremental bytes (whose deps embed the pre-load head hashes)
     // apply cleanly onto a checked copy: dep hashes must be exactly right
     let incr = doc.save_incremental();
-    let mut checked = AutoCommit::load(&bytes).unwrap();
+    let mut checked = AutoCommit::load_with_options(&bytes, checked_opts()).unwrap();
     checked.load_incremental(&incr).unwrap();
     let mut checked_heads = checked.get_heads();
     let mut heads = doc.get_heads();
@@ -372,7 +378,7 @@ fn unchecked_multi_head_commit_and_roundtrip() {
 
     // full save of the unchecked doc round-trips through a verified load
     let saved = doc.save();
-    let reloaded = AutoCommit::load(&saved).unwrap();
+    let reloaded = AutoCommit::load_with_options(&saved, checked_opts()).unwrap();
     drop(reloaded);
 
     // and rebuilding validates the whole graph: the original heads resolve
@@ -588,8 +594,9 @@ fn bit_flipped_head_loads_unchecked_but_fails_rebuild() {
     let digest = hasher.finalize();
     bytes[4..8].copy_from_slice(&digest[..4]);
 
-    // a checked load rejects the forged head outright
-    assert!(AutoCommit::load(&bytes).is_err());
+    // a full, verifying load rejects the forged head outright (the
+    // default fragments load trusts the recorded heads)
+    assert!(AutoCommit::load_with_options(&bytes, checked_opts()).is_err());
 
     // an unchecked load takes the recorded heads on trust
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();
@@ -651,8 +658,9 @@ fn forged_hash_column_rejected() {
     let digest = hasher.finalize();
     bytes[4..8].copy_from_slice(&digest[..4]);
 
-    // checked load recomputes hashes and rejects the forged column
-    assert!(AutoCommit::load(&bytes).is_err());
+    // a full, verifying load recomputes hashes and rejects the forged
+    // column (the default fragments load trusts it)
+    assert!(AutoCommit::load_with_options(&bytes, checked_opts()).is_err());
 
     // unchecked load trusts it (like the head pairing) ...
     let mut doc = AutoCommit::load_with_options(&bytes, unchecked_opts()).unwrap();

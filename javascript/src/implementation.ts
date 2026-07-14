@@ -215,16 +215,16 @@ export type InitOptions<T> = {
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
   /**
-   * How much of the change-hash graph to rebuild on load. `"full"`
-   * (the default) rebuilds and verifies it. `"none"` skips the rebuild
-   * for a much faster load; APIs that need change hashes
+   * How much of the change-hash graph to rebuild on load.
+   * `"fragments"` (the default) uses the fragment hashes stored in the
+   * document if present — fast, but APIs that need change hashes
    * ({@link getChanges}, {@link merge}, sync, ...) will throw until
-   * {@link rebuildHashGraph} is called on the document. `"fragments"`
-   * uses the fragment hashes stored in the document if present (fast,
-   * and fragment APIs work immediately), falling back to a full
-   * rebuild if not.
+   * {@link rebuildHashGraph} is called on the document — falling back
+   * to a full rebuild if they are absent. `"full"` always rebuilds and
+   * verifies the whole graph. `"none"` skips the rebuild entirely for
+   * the fastest load.
    */
-  hashGraphRebuild?: "full" | "fragments" | "none"
+  hashGraphRebuild?: "fragments" | "full" | "none"
   /** @hidden */
   convertImmutableStringsToText?: boolean
 }

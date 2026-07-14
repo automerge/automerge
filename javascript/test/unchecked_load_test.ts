@@ -166,8 +166,9 @@ describe("unchecked loads (hashGraphRebuild: none)", () => {
     digest.copy(bytes, 4, 0, 4)
     const flipped = new Uint8Array(bytes)
 
-    // a checked load rejects the forged head outright
-    assert.throws(() => Automerge.load(flipped))
+    // a full, verifying load rejects the forged head outright (the
+    // default fragments load trusts the recorded heads)
+    assert.throws(() => Automerge.load(flipped, { hashGraphRebuild: "full" }))
 
     // an unchecked load takes the recorded heads on trust
     const doc = Automerge.load<DocType>(flipped, { hashGraphRebuild: "none" })

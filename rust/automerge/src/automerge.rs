@@ -88,16 +88,18 @@ pub enum HashGraphRebuild {
     None,
     /// Use the fragment hashes stored in the document if they are present,
     /// falling back to a full rebuild (as in [`HashGraphRebuild::Full`]) if they
-    /// are not.
+    /// are not. This is the default.
     ///
     /// When the stored hashes are used the load is as fast as
     /// [`HashGraphRebuild::None`] and the document comes up in the
     /// [`HashGraphState::FragmentHashes`] state, where fragment generation
-    /// works without a rebuild.
+    /// works without a rebuild but APIs which need pre-load interior hashes
+    /// (exporting all changes, syncing) error until
+    /// [`Automerge::rebuild_hash_graph`] is called.
+    #[default]
     Fragments,
     /// Rebuild the full hash graph from the loaded changes, verifying the
-    /// document's recorded heads. This is the default.
-    #[default]
+    /// document's recorded heads.
     Full,
 }
 
@@ -203,7 +205,7 @@ impl<'a> LoadOptions<'a> {
     /// document carries stored fragment hashes (fragment generation works
     /// immediately), and falls back to a full rebuild when it doesn't.
     ///
-    /// The default is [`HashGraphRebuild::Full`].
+    /// The default is [`HashGraphRebuild::Fragments`].
     pub fn hash_graph(self, hash_graph: HashGraphRebuild) -> Self {
         Self { hash_graph, ..self }
     }
@@ -217,7 +219,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
-            hash_graph: HashGraphRebuild::Full,
+            hash_graph: HashGraphRebuild::Fragments,
         }
     }
 }
@@ -1030,7 +1032,10 @@ impl Automerge {
                 LoadOptions::new()
                     .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
-                    .verification_mode(VerificationMode::Check),
+                    .verification_mode(VerificationMode::Check)
+                    // incremental loads feed merging and syncing, which
+                    // need the full hash graph regardless of the default
+                    .hash_graph(HashGraphRebuild::Full),
             )?;
             doc = doc.with_actor(self.actor_id().clone())?;
             if patch_log.is_active() {
@@ -1242,7 +1247,10 @@ impl Automerge {
     /// instead.
     ///
     /// This never needs hashes so it works on unchecked graphs.
-    pub(crate) fn clock_for_ids(&self, heads: &[ChangeId]) -> Result<Option<Clock>, AutomergeError> {
+    pub(crate) fn clock_for_ids(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Option<Clock>, AutomergeError> {
         let nodes = self.nodes_for_change_ids(heads)?;
         if self.change_graph.nodes_are_heads(&nodes) {
             Ok(None)
@@ -1677,6 +1685,8 @@ impl Automerge {
         deps
     }
 
+    // FIXME - get_changes(&[]) should work even with no hash graph and it should in
+    // fact rebuild the hash graph as a side effect
     pub fn get_changes(&self, have_deps: &[ChangeId]) -> Result<Vec<Change>, AutomergeError> {
         // resolve the exclusion set without hashes so that pre-load heads
         // work on unchecked graphs; building the changes is still fallible
