@@ -705,36 +705,32 @@ impl<'a> ValueRef<'a> {
 }
 
 impl hexane::ColumnValue for ActorIdx {
-    type Encoding = hexane::RleEncoding<ActorIdx>;
+    type Encoding<C: hexane::Codec> = hexane::RleEncoding<ActorIdx, C>;
 }
 
 impl hexane::RleValue for ActorIdx {
-    fn try_unpack(data: &[u8]) -> Result<(usize, ActorIdx), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf)?;
-        Ok((start - buf.len(), ActorIdx::from(v)))
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, ActorIdx), PackError> {
+        let (n, v) = C::try_read_unsigned(data)?;
+        Ok((n, ActorIdx::from(v)))
     }
-    fn pack(value: ActorIdx, out: &mut Vec<u8>) -> bool {
-        leb128::write::unsigned(out, u64::from(value)).unwrap();
+    fn pack<C: hexane::Codec>(value: ActorIdx, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(u64::from(value)));
         true
     }
 }
 
 impl hexane::ColumnValue for Action {
-    type Encoding = hexane::RleEncoding<Action>;
+    type Encoding<C: hexane::Codec> = hexane::RleEncoding<Action, C>;
 }
 
 impl hexane::RleValue for Action {
-    fn try_unpack(data: &[u8]) -> Result<(usize, Action), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf)?;
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, Action), PackError> {
+        let (n, v) = C::try_read_unsigned(data)?;
         let action = Action::try_from(v)?;
-        Ok((start - buf.len(), action))
+        Ok((n, action))
     }
-    fn pack(value: Action, out: &mut Vec<u8>) -> bool {
-        leb128::write::unsigned(out, u64::from(value)).unwrap();
+    fn pack<C: hexane::Codec>(value: Action, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(u64::from(value)));
         true
     }
 }

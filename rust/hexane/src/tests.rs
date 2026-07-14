@@ -2329,7 +2329,7 @@ where
             "slab {i}: segments={} exceeds max_segments={max_segments}",
             slab.segments
         );
-        let info = T::Encoding::validate_encoding(&slab.data)
+        let info = T::Encoding::<crate::Leb128>::validate_encoding(&slab.data)
             .unwrap_or_else(|e| panic!("slab {i} encoding invalid: {e}"));
         assert_eq!(slab.len, info.len, "slab {i}: len mismatch");
         assert_eq!(slab.segments, info.segments, "slab {i}: segments mismatch");
@@ -2342,12 +2342,12 @@ where
 
 fn validate_rle_column<T>(col: &Column<T>)
 where
-    T: crate::RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
+    T: crate::RleValue + crate::ColumnValueRef<Encoding<crate::Leb128> = RleEncoding<T>>,
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
     validate_column(col);
     for (i, slab) in col.slabs.iter().enumerate() {
-        let expected = compute_rle_tail::<T>(&slab.data);
+        let expected = compute_rle_tail::<T, crate::Leb128>(&slab.data);
         assert_eq!(
             slab.tail.lit_tail, expected.lit_tail,
             "slab {i}: tail.lit_tail mismatch"
@@ -2910,14 +2910,14 @@ fn merge_slab_string_literal_boundary() {
 /// Validate a single RLE slab (encoding + tail).
 fn validate_rle_column_slab<T>(slab: &Slab<RleTail>)
 where
-    T: crate::RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
+    T: crate::RleValue + crate::ColumnValueRef<Encoding<crate::Leb128> = RleEncoding<T>>,
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
-    let info = rle_validate_encoding::<T>(&slab.data)
+    let info = rle_validate_encoding::<T, crate::Leb128>(&slab.data)
         .unwrap_or_else(|e| panic!("slab encoding invalid: {e}"));
     assert_eq!(slab.len, info.len, "len mismatch");
     assert_eq!(slab.segments, info.segments, "segments mismatch");
-    let expected_tail = compute_rle_tail::<T>(&slab.data);
+    let expected_tail = compute_rle_tail::<T, crate::Leb128>(&slab.data);
     assert_eq!(slab.tail.bytes, expected_tail.bytes, "tail.bytes mismatch");
     assert_eq!(
         slab.tail.lit_tail, expected_tail.lit_tail,
@@ -4124,7 +4124,7 @@ fn index_items_before_parity() {
 
     let vals: Vec<u64> = (0..500u64).collect();
     let btree = Column::<u64>::from_values_with_max_segments(vals.clone(), 4);
-    let bit: Column<u64, LenWeight, BitIndex<usize>> =
+    let bit: Column<u64, crate::Leb128, LenWeight, BitIndex<usize>> =
         Column::from_values_with_max_segments(vals, 4);
     assert!(btree.slab_count() > 1);
 
@@ -4158,7 +4158,7 @@ fn bool_into_slab_tail_multibyte_leb() {
     let mut vals = vec![false; 200];
     vals.extend(vec![true; 200]);
     let slab = Encoder::<bool>::encode_slab(vals);
-    let info = BoolEncoding::validate_encoding(&slab.data).unwrap();
+    let info = BoolEncoding::<crate::Leb128>::validate_encoding(&slab.data).unwrap();
     assert_eq!(slab.tail, info.tail, "into_slab tail vs validated tail");
 }
 
@@ -4474,7 +4474,7 @@ fn next_run_never_yields_adjacent_equal_runs_at_default_config() {
 fn assert_load_roundtrip_bytes<T>(saved: &[u8], expected_len: usize)
 where
     T: crate::RleValue
-        + crate::ColumnValueRef<Encoding = crate::RleEncoding<T>>
+        + crate::ColumnValueRef<Encoding<crate::Leb128> = crate::RleEncoding<T>>
         + for<'a> crate::ColumnValueRef<Get<'a> = T>
         + Clone
         + PartialEq
@@ -4755,5 +4755,333 @@ fn load_accumulates_delta_agg_weights_nullable() {
             .map(|(i, _)| i)
             .collect();
         assert_eq!(got, want, "find_by_value({target})");
+    }
+}
+
+// ── Alternate-codec plumbing ─────────────────────────────────────────────────
+//
+// End-to-end proof that the codec parameter reaches every path: a toy
+// length-prefixed big-endian codec, wire-incompatible with LEB128, driven
+// through column build / splice / save / load / bool / delta / string.
+mod alt_codec {
+    use crate::codec::{Codec, VarBuf};
+    use crate::{Column, DeltaColumn, Leb128, PackError};
+
+    /// Test codec: one length byte (0–8), then that many big-endian bytes
+    /// of the value (minimal — no leading zero bytes).  Signed via zigzag.
+    /// Deliberately nothing like LEB128, so any path that misses the codec
+    /// parameter produces garbage and fails the roundtrip.
+    struct BeLen;
+
+    fn zigzag(n: i64) -> u64 {
+        ((n << 1) ^ (n >> 63)) as u64
+    }
+    fn unzigzag(z: u64) -> i64 {
+        ((z >> 1) as i64) ^ -((z & 1) as i64)
+    }
+
+    impl Codec for BeLen {
+        fn encode_unsigned(n: u64) -> VarBuf {
+            let mut out = VarBuf::new();
+            let len = (8 - n.leading_zeros() as usize / 8).min(8);
+            out.push(len as u8);
+            for i in (0..len).rev() {
+                out.push((n >> (i * 8)) as u8);
+            }
+            out
+        }
+        fn encode_signed(n: i64) -> VarBuf {
+            Self::encode_unsigned(zigzag(n))
+        }
+        fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
+            let len = *data.first()? as usize;
+            if len > 8 || data.len() < 1 + len {
+                return None;
+            }
+            let mut v = 0u64;
+            for &b in &data[1..1 + len] {
+                v = (v << 8) | b as u64;
+            }
+            Some((1 + len, v))
+        }
+        fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
+            let (n, z) = Self::read_unsigned(data)?;
+            Some((n, unzigzag(z)))
+        }
+        fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
+            Self::read_unsigned(data).ok_or(PackError::BadFormat)
+        }
+        fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
+            Self::read_signed(data).ok_or(PackError::BadFormat)
+        }
+        /// Length from the first byte — no decode, like bijou64.
+        fn unsigned_len(data: &[u8]) -> Option<usize> {
+            let len = *data.first()? as usize;
+            (len <= 8 && data.len() >= 1 + len).then_some(1 + len)
+        }
+        fn signed_len(data: &[u8]) -> Option<usize> {
+            Self::unsigned_len(data)
+        }
+    }
+
+    #[test]
+    fn prefix_column() {
+        use crate::PrefixColumn;
+        let values: Vec<u64> = (1..100u64).collect();
+        let mut col: PrefixColumn<u64, BeLen> = PrefixColumn::default();
+        col.splice(0, 0usize, values.clone());
+        assert_eq!(col.values().to_vec(), values);
+        // prefix sums: seek to the position where the running total crosses
+        let leb: PrefixColumn<u64> = {
+            let mut c = PrefixColumn::default();
+            c.splice(0, 0usize, values.clone());
+            c
+        };
+        assert_ne!(col.values().save(), leb.values().save());
+    }
+
+    #[test]
+    fn u64_column_roundtrip_and_wire_divergence() {
+        let values: Vec<u64> = (0..500u64).map(|i| i * 37 % 1000).collect();
+        let leb: Column<u64> = Column::from_values(values.clone());
+        let alt: Column<u64, BeLen> = Column::from_values(values.clone());
+        assert_eq!(alt.to_vec(), values);
+        assert_ne!(leb.save(), alt.save(), "codecs must produce different bytes");
+        // save → load in the same codec
+        let loaded = Column::<u64, BeLen>::load(&alt.save()).unwrap();
+        assert_eq!(loaded.to_vec(), values);
+        // loading alt bytes as LEB128 must not silently succeed with the
+        // same values
+        let cross = Column::<u64>::load(&alt.save());
+        assert!(cross.is_err() || cross.unwrap().to_vec() != values);
+    }
+
+    #[test]
+    fn splice_and_nullable() {
+        let mut col: Column<Option<u64>, BeLen> = Column::new();
+        col.splice(0, 0, vec![Some(1u64), None, None, Some(300), Some(300)]);
+        col.splice(2, 1, vec![Some(70000u64)]);
+        assert_eq!(
+            col.to_vec(),
+            vec![Some(1), None, Some(70000), Some(300), Some(300)]
+        );
+        let loaded = Column::<Option<u64>, BeLen>::load(&col.save()).unwrap();
+        assert_eq!(loaded.to_vec(), col.to_vec());
+    }
+
+    #[test]
+    fn string_and_bool_columns() {
+        let strings = vec!["alpha", "alpha", "beta", "gamma"];
+        let mut scol: Column<String, BeLen> = Column::new();
+        scol.splice(0, 0, strings.clone());
+        let sloaded = Column::<String, BeLen>::load(&scol.save()).unwrap();
+        assert_eq!(sloaded.iter().collect::<Vec<_>>(), strings);
+
+        let bools = vec![true, true, false, true, false, false, false, true];
+        let mut bcol: Column<bool, BeLen> = Column::new();
+        bcol.splice(0, 0, bools.clone());
+        let bloaded = Column::<bool, BeLen>::load(&bcol.save()).unwrap();
+        assert_eq!(bloaded.to_vec(), bools);
+    }
+
+    #[test]
+    fn delta_column() {
+        let values: Vec<u64> = (0..200u64).map(|i| i * 3).collect();
+        let col: DeltaColumn<u64, BeLen> = values.iter().copied().collect();
+        assert_eq!(col.iter().collect::<Vec<_>>(), values);
+        let leb_col: DeltaColumn<u64, Leb128> = values.iter().copied().collect();
+        assert_ne!(col.save(), leb_col.save());
+        let loaded = DeltaColumn::<u64, BeLen>::load(&col.save()).unwrap();
+        assert_eq!(loaded.iter().collect::<Vec<_>>(), values);
+    }
+}
+
+// ── Bijou64 codec (feature-gated) ───────────────────────────────────────────
+#[cfg(feature = "bijou64")]
+mod bijou64_codec {
+    use crate::codec::Codec;
+    use crate::{Bijou64, Column, DeltaColumn, Leb128, PrefixColumn};
+
+    /// Tier boundaries from the bijou64 spec, plus extremes.
+    const UNSIGNED_EDGES: &[u64] = &[
+        0,
+        1,
+        247,
+        248,
+        503,
+        504,
+        66_039,
+        66_040,
+        16_843_255,
+        16_843_256,
+        4_311_810_551,
+        4_311_810_552,
+        u64::MAX - 1,
+        u64::MAX,
+    ];
+
+    const SIGNED_EDGES: &[i64] = &[
+        0,
+        1,
+        -1,
+        123,
+        124,
+        -124,
+        -125,
+        i64::MAX,
+        i64::MIN,
+    ];
+
+    #[test]
+    fn codec_roundtrip_boundaries() {
+        for &v in UNSIGNED_EDGES {
+            let enc = Bijou64::encode_unsigned(v);
+            assert_eq!(enc.len() as u64, Bijou64::unsigned_size(v), "size {v}");
+            assert_eq!(
+                Bijou64::unsigned_len(&enc),
+                Some(enc.len()),
+                "len-from-first-byte {v}"
+            );
+            assert_eq!(Bijou64::read_unsigned(&enc), Some((enc.len(), v)));
+        }
+        for &v in SIGNED_EDGES {
+            let enc = Bijou64::encode_signed(v);
+            assert_eq!(enc.len() as u64, Bijou64::signed_size(v), "size {v}");
+            assert_eq!(Bijou64::read_signed(&enc), Some((enc.len(), v)));
+        }
+        // zigzag keeps small signed values in one byte, wider than LEB128
+        assert_eq!(Bijou64::signed_size(123), 1);
+        assert_eq!(Bijou64::signed_size(-124), 1);
+        assert_eq!(Leb128::signed_size(123), 2);
+    }
+
+    #[test]
+    fn truncated_input_errors() {
+        let enc = Bijou64::encode_unsigned(70_000);
+        assert!(enc.len() > 1);
+        for cut in 0..enc.len() {
+            assert!(Bijou64::read_unsigned(&enc[..cut]).is_none(), "cut {cut}");
+            assert!(Bijou64::try_read_unsigned(&enc[..cut]).is_err(), "cut {cut}");
+        }
+    }
+
+    /// Tier-8 payloads whose offset+payload exceeds u64::MAX are the one
+    /// non-canonical byte pattern the format admits — must be rejected.
+    #[test]
+    fn tier8_overflow_rejected() {
+        let bytes = [0xFFu8; 9]; // offset[8] + (2^64 - 1) overflows
+        assert!(Bijou64::read_unsigned(&bytes).is_none());
+        assert!(Bijou64::try_read_unsigned(&bytes).is_err());
+        // u64::MAX itself decodes fine
+        let enc = Bijou64::encode_unsigned(u64::MAX);
+        assert_eq!(Bijou64::read_unsigned(&enc), Some((9, u64::MAX)));
+    }
+
+    /// Spec wire-format check: exact bytes for the documented tier table,
+    /// matching the reference `bijou64` crate.
+    #[test]
+    fn wire_format_matches_spec() {
+        assert_eq!(&*Bijou64::encode_unsigned(0), &[0x00]);
+        assert_eq!(&*Bijou64::encode_unsigned(247), &[0xF7]);
+        assert_eq!(&*Bijou64::encode_unsigned(248), &[0xF8, 0x00]);
+        assert_eq!(&*Bijou64::encode_unsigned(503), &[0xF8, 0xFF]);
+        assert_eq!(&*Bijou64::encode_unsigned(504), &[0xF9, 0x00, 0x00]);
+        assert_eq!(&*Bijou64::encode_unsigned(66_039), &[0xF9, 0xFF, 0xFF]);
+        assert_eq!(&*Bijou64::encode_unsigned(66_040), &[0xFA, 0x00, 0x00, 0x00]);
+        // big-endian payload: lexicographic byte order == numeric order
+        assert!(Bijou64::encode_unsigned(1000).as_bytes() < Bijou64::encode_unsigned(2000).as_bytes());
+    }
+
+    #[test]
+    fn u64_column_roundtrip_and_wire_divergence() {
+        let values: Vec<u64> = (0..500u64)
+            .map(|i| i * 37 % 1000)
+            .chain(UNSIGNED_EDGES.iter().copied())
+            .collect();
+        let leb: Column<u64> = Column::from_values(values.clone());
+        let alt: Column<u64, Bijou64> = Column::from_values(values.clone());
+        assert_eq!(alt.to_vec(), values);
+        assert_ne!(leb.save(), alt.save(), "codecs must produce different bytes");
+        let loaded = Column::<u64, Bijou64>::load(&alt.save()).unwrap();
+        assert_eq!(loaded.to_vec(), values);
+    }
+
+    #[test]
+    fn splice_and_nullable() {
+        let mut col: Column<Option<u64>, Bijou64> = Column::new();
+        col.splice(0, 0, vec![Some(1u64), None, None, Some(300), Some(300)]);
+        col.splice(2, 1, vec![Some(70000u64)]);
+        assert_eq!(
+            col.to_vec(),
+            vec![Some(1), None, Some(70000), Some(300), Some(300)]
+        );
+        let loaded = Column::<Option<u64>, Bijou64>::load(&col.save()).unwrap();
+        assert_eq!(loaded.to_vec(), col.to_vec());
+    }
+
+    #[test]
+    fn string_bool_delta_prefix_columns() {
+        let strings = vec!["alpha", "alpha", "beta", "gamma"];
+        let mut scol: Column<String, Bijou64> = Column::new();
+        scol.splice(0, 0, strings.clone());
+        let sloaded = Column::<String, Bijou64>::load(&scol.save()).unwrap();
+        assert_eq!(sloaded.iter().collect::<Vec<_>>(), strings);
+
+        let bools = vec![true, true, false, true, false, false, false, true];
+        let mut bcol: Column<bool, Bijou64> = Column::new();
+        bcol.splice(0, 0, bools.clone());
+        let bloaded = Column::<bool, Bijou64>::load(&bcol.save()).unwrap();
+        assert_eq!(bloaded.to_vec(), bools);
+
+        let values: Vec<u64> = (0..200u64).map(|i| i * 3).collect();
+        let dcol: DeltaColumn<u64, Bijou64> = values.iter().copied().collect();
+        assert_eq!(dcol.iter().collect::<Vec<_>>(), values);
+        let dloaded = DeltaColumn::<u64, Bijou64>::load(&dcol.save()).unwrap();
+        assert_eq!(dloaded.iter().collect::<Vec<_>>(), values);
+
+        let mut pcol: PrefixColumn<u64, Bijou64> = PrefixColumn::default();
+        pcol.splice(0, 0usize, values.clone());
+        assert_eq!(pcol.values().to_vec(), values);
+    }
+
+    /// The canonicality argument: bytes that round-trip re-encode to the
+    /// same bytes, for every column save.
+    #[test]
+    fn save_load_save_is_identity() {
+        let values: Vec<u64> = (0..2000u64).map(|i| i.wrapping_mul(0x9E37) % 100_000).collect();
+        let col: Column<u64, Bijou64> = Column::from_values(values);
+        let bytes = col.save();
+        let re = Column::<u64, Bijou64>::load(&bytes).unwrap().save();
+        assert_eq!(bytes, re);
+    }
+}
+
+#[cfg(feature = "bijou64")]
+mod codec_modules {
+    #[test]
+    fn module_aliases_pick_the_codec() {
+        let vals: Vec<u64> = (0..300u64).collect();
+
+        let leb = {
+            use crate::leb128::Column;
+            let mut c = Column::<u64>::new();
+            c.splice(0, 0, vals.clone());
+            c.save()
+        };
+        let bij = {
+            use crate::bijou::Column;
+            let mut c = Column::<u64>::new();
+            c.splice(0, 0, vals.clone());
+            c.save()
+        };
+        assert_ne!(leb, bij);
+        assert_eq!(
+            crate::leb128::decoder::<u64>(&leb).collect::<Vec<_>>(),
+            vals
+        );
+        assert_eq!(crate::bijou::decoder::<u64>(&bij).collect::<Vec<_>>(), vals);
+        // the alias is the same type as the explicit spelling
+        let _: crate::Column<u64, crate::Bijou64> =
+            crate::bijou::Column::<u64>::load(&bij).unwrap();
     }
 }

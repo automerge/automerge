@@ -14,8 +14,11 @@ use crate::{AsColumnRef, ColumnValueRef, Run};
 /// Both [`crate::rle::RleEncoding`] and [`crate::bool::BoolEncoding`]
 /// are zero-sized types — all state lives in the slab bytes.
 pub trait ColumnEncoding: Default {
+    /// The varint codec this encoding reads and writes with.
+    type Codec: crate::Codec;
+
     /// The column value type this encoding operates on.
-    type Value: ColumnValueRef<Encoding = Self>;
+    type Value: ColumnValueRef<Encoding<Self::Codec> = Self>;
 
     /// Per-slab metadata stored alongside data/len/segments.
     type Tail: Copy + Clone + std::fmt::Debug + Default;
@@ -62,12 +65,12 @@ pub trait ColumnEncoding: Default {
     ) -> (Vec<Slab<Self::Tail>>, usize);
 
     fn remap<'a, F, WF, Idx>(
-        mut iter: column::Iter<'a, Self::Value>,
+        mut iter: column::Iter<'a, Self::Value, Self::Codec>,
         max: usize,
         f: F,
-    ) -> Column<Self::Value, WF, Idx>
+    ) -> Column<Self::Value, Self::Codec, WF, Idx>
     where
-        WF: WeightFn<Self::Value>,
+        WF: WeightFn<Self::Value, Self::Codec>,
         WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
@@ -97,13 +100,13 @@ pub trait ColumnEncoding: Default {
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
 
     /// Streaming encoder for building encoded bytes from a sequence of values.
-    type Encoder<'a>: EncoderApi<'a, Self::Value>;
+    type Encoder<'a>: EncoderApi<'a, Self::Value, Self::Codec>;
 
     /// Create a new empty encoder.
     fn encoder<'a>() -> Self::Encoder<'a>;
 
     /// Streaming load iterator: decode + validate saved bytes run by run.
-    type LoadIter<'a>: LoadIterApi<'a, Self::Value>;
+    type LoadIter<'a>: LoadIterApi<'a, Self::Value, Tail = Self::Tail>;
 
     /// Create a load iterator over saved bytes. `max_segments` is the
     /// slab budget for the slabs it builds as the stream is consumed.
@@ -140,10 +143,13 @@ pub trait LoadIterApi<'a, T: ColumnValueRef> {
     /// Item count of completed slab `i`.
     fn completed_slab_len(&self, i: usize) -> usize;
 
+    /// Per-slab tail metadata type of the encoding being loaded.
+    type Tail: Copy + Clone + std::fmt::Debug + Default;
+
     /// Drain and validate whatever the consumer did not pull, and return
     /// the finished slabs (built with the loader's byte-copy mechanics as
     /// the stream was consumed).
-    fn finalize(self) -> Result<Vec<Slab<<T::Encoding as ColumnEncoding>::Tail>>, PackError>
+    fn finalize(self) -> Result<Vec<Slab<Self::Tail>>, PackError>
     where
         Self: Sized;
 }
@@ -166,7 +172,8 @@ impl<'a, T: ColumnValueRef, S: RunSrc<'a, T> + ?Sized> RunSrc<'a, T> for &mut S 
 }
 
 /// Trait for streaming encoders that build encoded bytes from a sequence of values.
-pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
+/// `C` is the varint codec the encoder writes with.
+pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Sized {
     /// Append a single value.
     fn append(&mut self, value: T::Get<'a>);
     fn append_owned(&mut self, value: T);
@@ -216,9 +223,9 @@ pub trait EncoderApi<'a, T: ColumnValueRef>: Sized {
     /// validate pass).  Encoders with slab rollover override this with a
     /// direct slab handoff when [`max_segments`](Self::max_segments) was
     /// set.
-    fn into_column<WF, Idx>(self) -> Column<T, WF, Idx>
+    fn into_column<WF, Idx>(self) -> Column<T, C, WF, Idx>
     where
-        WF: WeightFn<T>,
+        WF: WeightFn<T, C>,
         WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
     {

@@ -1,4 +1,5 @@
-use crate::leb::{encode_signed, encode_unsigned};
+use crate::codec::Codec;
+use crate::Leb128;
 use crate::rle::state::{RleCow, RleState};
 use crate::rle::*;
 use crate::{AsColumnRef, Column, RleValue};
@@ -10,7 +11,7 @@ pub(crate) fn rle_encode_state<T: RleValue>(
 where
     T::Get<'static>: AsColumnRef<T>,
 {
-    let mut state = RleState::<'static, T, T::Get<'static>>::Empty;
+    let mut state = RleState::<'static, T, T::Get<'static>>::empty();
     let mut segments = 0;
     let mut items = 0;
     for v in values {
@@ -40,7 +41,7 @@ mod load_verify_tests {
         assert_eq!(vals, expected);
         for (i, s) in slabs.iter().enumerate() {
             assert!(
-                rle_validate_encoding::<u64>(&s.data).is_ok(),
+                rle_validate_encoding::<u64, Leb128>(&s.data).is_ok(),
                 "slab {i} invalid"
             );
             assert!(s.segments <= 16, "slab {i} exceeds max_segments");
@@ -68,8 +69,8 @@ mod load_verify_tests {
     fn load_verify_rejects_null_in_non_nullable() {
         // Encode a null run (0, count=1) into raw bytes.
         let mut buf = Vec::new();
-        buf.extend(encode_signed(0));
-        buf.extend(encode_unsigned(1));
+        buf.extend(Leb128::encode_signed(0));
+        buf.extend(Leb128::encode_unsigned(1));
 
         // Non-nullable u64 should reject.
         let result = load::RleLoadIter::<u64>::new(&buf, 16).finalize();

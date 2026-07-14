@@ -4,7 +4,7 @@ version = "0.3.0"
 authors = ["Orion Henry <orion.henry@gmail.com>", "Jason Kankiewicz <jason.kankiewicz@gmail.com>"]
 edition = "2021"
 license = "MIT"
-rust-version = "1.73.0"
+rust-version = "1.90.0"
 
 [lib]
 name = "automerge_core"

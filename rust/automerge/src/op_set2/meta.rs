@@ -99,18 +99,16 @@ impl From<&[u8]> for ValueMeta {
 }
 
 impl hexane::ColumnValue for ValueMeta {
-    type Encoding = hexane::RleEncoding<ValueMeta>;
+    type Encoding<C: hexane::Codec> = hexane::RleEncoding<ValueMeta, C>;
 }
 
 impl hexane::RleValue for ValueMeta {
-    fn try_unpack(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf)?;
-        Ok((start - buf.len(), ValueMeta(v)))
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
+        let (n, v) = C::try_read_unsigned(data)?;
+        Ok((n, ValueMeta(v)))
     }
-    fn pack(value: ValueMeta, out: &mut Vec<u8>) -> bool {
-        leb128::write::unsigned(out, value.0).unwrap();
+    fn pack<C: hexane::Codec>(value: ValueMeta, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(value.0));
         true
     }
 }

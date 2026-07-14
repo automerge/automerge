@@ -11,6 +11,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use crate::delta::DeltaValue;
+use crate::{Codec, Leb128};
 
 /// Streaming decoder over delta-encoded column bytes.  See module docs.
 ///
@@ -18,24 +19,24 @@ use crate::delta::DeltaValue;
 /// decoder doesn't have an index to consult — for skipping, build a
 /// [`DeltaColumn`](crate::delta::DeltaColumn) instead.
 #[derive(Clone)]
-pub struct DeltaDecoder<'a, T: DeltaValue> {
-    inner: crate::Decoder<'a, T::Inner>,
+pub struct DeltaDecoder<'a, T: DeltaValue, C: Codec = Leb128> {
+    inner: crate::Decoder<'a, T::Inner, C>,
     running: i64,
     _phantom: PhantomData<fn() -> T>,
 }
 
-impl<'a, T: DeltaValue> DeltaDecoder<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaDecoder<'a, T, C> {
     /// Construct a decoder over delta-encoded column `data`.
     pub fn new(data: &'a [u8]) -> Self {
         Self {
-            inner: crate::decoder::<T::Inner>(data),
+            inner: crate::decoder_in::<T::Inner, C>(data),
             running: 0,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<T: DeltaValue> Iterator for DeltaDecoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Iterator for DeltaDecoder<'_, T, C> {
     type Item = T;
 
     #[inline]
@@ -51,7 +52,7 @@ impl<T: DeltaValue> Iterator for DeltaDecoder<'_, T> {
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaDecoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaDecoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaDecoder")
             .field("running", &self.running)

@@ -3,6 +3,7 @@ pub mod indexed;
 pub use decoder::DeltaDecoder;
 
 use crate::column::{Iter, IterState};
+use crate::{Codec, Leb128};
 use crate::encoder::RleEncoderState;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -24,7 +25,8 @@ pub use indexed::IndexedDeltaWeightFn;
 /// which removes the `Option` widening tax (16-byte values, per-run
 /// discriminant compares) from non-nullable columns.
 pub trait DeltaInner:
-    crate::RleValue<Encoding = crate::RleEncoding<Self>>
+    crate::RleValue
+    + crate::ColumnValueRef<Encoding<Leb128> = crate::RleEncoding<Self, Leb128>>
     + crate::AsColumnRef<Self>
     + crate::sealed::Sealed
     + Copy
@@ -368,8 +370,8 @@ impl DeltaValue for Option<usize> {
 /// `&mut Vec<u8>` so the caller decides where bytes land.  Used by the
 /// fast-path `encode_to_unless` static path to avoid a per-call heap
 /// allocation in the change-encoding loop.
-pub struct DeltaEncoderState<'a, T: DeltaValue> {
-    inner: RleEncoderState<'a, Option<i64>>,
+pub struct DeltaEncoderState<'a, T: DeltaValue, C: Codec = Leb128> {
+    inner: RleEncoderState<'a, Option<i64>, C>,
     abs: i64,
     /// Tracks whether every appended value has been equal so far.
     ///
@@ -385,13 +387,13 @@ pub struct DeltaEncoderState<'a, T: DeltaValue> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaEncoderState<'_, T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaEncoderState<'_, T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
     pub fn new() -> Self {
         Self {
             inner: RleEncoderState::new(),
@@ -477,18 +479,18 @@ impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
 /// enc.append(30);
 /// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
 /// ```
-pub struct DeltaEncoder<'a, T: DeltaValue> {
+pub struct DeltaEncoder<'a, T: DeltaValue, C: Codec = Leb128> {
     data: Vec<u8>,
-    state: DeltaEncoderState<'a, T>,
+    state: DeltaEncoderState<'a, T, C>,
 }
 
-impl<T: DeltaValue> Default for DeltaEncoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaEncoder<'_, T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaEncoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaEncoder")
             .field("len", &self.state.inner.len())
@@ -497,7 +499,7 @@ impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
     }
 }
 
-impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
     /// Create a new empty delta encoder.
     pub fn new() -> Self {
         Self {
@@ -629,7 +631,7 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 
 // ── DeltaColumn ────────────────────────────────────────────────────────────
 //
-// Deltas are stored as `Column<T::Inner, IndexedDeltaWeightFn>` — `i64`
+// Deltas are stored as `Column<T::Inner, C, IndexedDeltaWeightFn>` — `i64`
 // for non-nullable `T`, `Option<i64>` for nullable (see [`DeltaInner`]);
 // the wire bytes are identical either way.  `T` only affects how realized
 // values are materialized on read (and validated on load).  The `SlabAgg` aggregate (len + total +
@@ -642,12 +644,12 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 /// values lie within a 2^63-wide range (for unsigned types, `< 2^63`).
 /// Writes outside the domain panic; [`load`](DeltaColumn::load) rejects
 /// out-of-domain data with an error.
-pub struct DeltaColumn<T: DeltaValue> {
-    pub(crate) col: Column<T::Inner, IndexedDeltaWeightFn>,
+pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
+    pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Clone for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Clone for DeltaColumn<T, C> {
     fn clone(&self) -> Self {
         Self {
             col: self.col.clone(),
@@ -656,7 +658,7 @@ impl<T: DeltaValue> Clone for DeltaColumn<T> {
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaColumn<T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaColumn")
             .field("len", &self.col.len())
@@ -665,13 +667,13 @@ impl<T: DeltaValue> Debug for DeltaColumn<T> {
     }
 }
 
-impl<T: DeltaValue> Default for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaColumn<T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: DeltaValue> DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn new() -> Self {
         Self {
             col: Column::new(),
@@ -702,7 +704,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
     {
         // Non-nullable T stores `Column<i64>`, whose decoder rejects null
         // runs at the segment level — no run-level null scan needed.
-        let iter = InnerColumn::<T>::load_iter(data, opts);
+        let iter = InnerColumn::<T, C>::load_iter(data, opts);
         // Domain validation per slab: the aggregates accumulated during
         // the load (exact — `accumulate_run` errors on any within-slab
         // overflow) hold each slab's realized min/max as offsets from its
@@ -807,7 +809,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         self.iter().nth(index)
     }
 
-    pub fn iter(&self) -> DeltaIter<'_, T> {
+    pub fn iter(&self) -> DeltaIter<'_, T, C> {
         DeltaIter {
             inner: self.col.iter(),
             running: 0,
@@ -816,7 +818,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
-    pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T> {
+    pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T, C> {
         let start = range.start.min(self.col.len());
         let end = range.end.min(self.col.len());
         let mut iter = self.iter();
@@ -942,7 +944,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
 
-type InnerColumn<T> = Column<<T as DeltaValue>::Inner, IndexedDeltaWeightFn>;
+type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
 
 /// Iterator over realized values in a [`DeltaColumn`].
 ///
@@ -950,14 +952,14 @@ type InnerColumn<T> = Column<<T as DeltaValue>::Inner, IndexedDeltaWeightFn>;
 /// accumulates a running `i64` prefix.  `nth(n)` uses the column's
 /// B-tree to jump directly to the target position and reset the
 /// running prefix in O(log n), avoiding an O(n) replay.
-pub struct DeltaIter<'a, T: DeltaValue> {
-    inner: Iter<'a, T::Inner>,
+pub struct DeltaIter<'a, T: DeltaValue, C: Codec = Leb128> {
+    inner: Iter<'a, T::Inner, C>,
     running: i64,
-    col: Option<&'a InnerColumn<T>>,
+    col: Option<&'a InnerColumn<T, C>>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaIter<'_, T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaIter<'_, T, C> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
@@ -968,7 +970,7 @@ impl<T: DeltaValue> Default for DeltaIter<'_, T> {
     }
 }
 
-impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
+impl<T: DeltaValue, C: Codec> Iterator for DeltaIter<'_, T, C> {
     type Item = T;
 
     #[inline]
@@ -1024,7 +1026,7 @@ impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaIter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaIter")
             .field("pos", &self.inner.pos())
@@ -1034,9 +1036,9 @@ impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
     }
 }
 
-impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
+impl<T: DeltaValue, C: Codec> ExactSizeIterator for DeltaIter<'_, T, C> {}
 
-impl<'a, T: DeltaValue> DeltaIter<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     #[inline]
     pub fn pos(&self) -> usize {
         self.inner.pos()
@@ -1098,10 +1100,10 @@ pub struct DeltaIterState {
 }
 
 impl DeltaIterState {
-    pub fn try_resume<'a, T: DeltaValue>(
+    pub fn try_resume<'a, T: DeltaValue, C: Codec>(
         &self,
-        column: &'a DeltaColumn<T>,
-    ) -> Result<DeltaIter<'a, T>, crate::PackError> {
+        column: &'a DeltaColumn<T, C>,
+    ) -> Result<DeltaIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(&column.col)?;
         Ok(DeltaIter {
             inner,
@@ -1112,7 +1114,7 @@ impl DeltaIterState {
     }
 }
 
-impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> Clone for DeltaIter<'a, T, C> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -1220,13 +1222,13 @@ impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> Iterator for SpliceDelta
 
 // ── FromIterator / Extend / IntoIterator ────────────────────────────────────
 
-impl<T: DeltaValue> FromIterator<T> for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> FromIterator<T> for DeltaColumn<T, C> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
     }
 }
 
-impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Extend<T> for DeltaColumn<T, C> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let vals: Vec<T> = iter.into_iter().collect();
         if !vals.is_empty() {
@@ -1236,11 +1238,11 @@ impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
     }
 }
 
-impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
+impl<'a, T: DeltaValue, C: Codec> IntoIterator for &'a DeltaColumn<T, C> {
     type Item = T;
-    type IntoIter = DeltaIter<'a, T>;
+    type IntoIter = DeltaIter<'a, T, C>;
 
-    fn into_iter(self) -> DeltaIter<'a, T> {
+    fn into_iter(self) -> DeltaIter<'a, T, C> {
         self.iter()
     }
 }

@@ -8,10 +8,10 @@ use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
 use crate::PackError;
-use crate::{AsColumnRef, ColumnValueRef, LoadOpts, MaybeFill, Run};
+use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, LoadOpts, MaybeFill, Run};
 
 /// Type alias for the slab tail metadata of a column value type.
-pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
+pub type TailOf<T, C = Leb128> = <<T as ColumnValueRef>::Encoding<C> as ColumnEncoding>::Tail;
 
 /// Default maximum number of RLE/bool segments per slab.
 ///
@@ -77,7 +77,7 @@ impl SlabWeight for usize {
 /// counts.  Prefix-aware columns use a compound weight that also tracks
 /// prefix sums in the same BIT.
 #[doc(hidden)]
-pub trait WeightFn<T: ColumnValueRef>: Sealed {
+pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     /// The per-slab weight type.
     ///
     /// For the Fenwick-BIT-backed [`Column`] and [`BitIndex`](crate::index::BitIndex),
@@ -86,7 +86,7 @@ pub trait WeightFn<T: ColumnValueRef>: Sealed {
     /// [`SlabAggregate`](SlabAggregate), which permits
     /// non-invertible aggregates like min/max.
     type Weight: Clone + Default + std::fmt::Debug;
-    fn compute(slab: &Slab<TailOf<T>>) -> Self::Weight;
+    fn compute(slab: &Slab<TailOf<T, C>>) -> Self::Weight;
 
     /// `true` when `compute` has to re-decode the slab bytes (prefix sums,
     /// delta aggregates).  The streaming loader then builds each slab's
@@ -115,10 +115,10 @@ pub struct LenWeight;
 
 impl Sealed for LenWeight {}
 
-impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
+impl<T: ColumnValueRef, C: Codec> WeightFn<T, C> for LenWeight {
     type Weight = usize;
     #[inline]
-    fn compute(slab: &Slab<TailOf<T>>) -> usize {
+    fn compute(slab: &Slab<TailOf<T, C>>) -> usize {
         slab.len
     }
 
@@ -311,10 +311,11 @@ pub(crate) trait ColumnRef<T: ColumnValueRef> {
     fn slab_start(&self, index: usize) -> usize;
 }
 
-impl<T, WF, Idx> ColumnRef<T> for Column<T, WF, Idx>
+impl<T, C, WF, Idx> ColumnRef<T> for Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn find_slab(&self, index: usize) -> (usize, usize) {
@@ -336,24 +337,24 @@ where
 ///
 /// `nth()` is O(log S + runs_skipped) — uses the column's index structure
 /// to skip directly to the target slab.
-pub struct Iter<'a, T: ColumnValueRef> {
-    pub(crate) slabs: &'a [Slab<TailOf<T>>],
+pub struct Iter<'a, T: ColumnValueRef, C: Codec = Leb128> {
+    pub(crate) slabs: &'a [Slab<TailOf<T, C>>],
     pub(crate) col: Option<&'a dyn ColumnRef<T>>,
     pub(crate) slab_idx: usize,
-    pub(crate) decoder: <T::Encoding as ColumnEncoding>::Decoder<'a>,
+    pub(crate) decoder: <T::Encoding<C> as ColumnEncoding>::Decoder<'a>,
     pub(crate) items_left: usize,
     pub(crate) slab_remaining: usize,
     pub(crate) pos: usize,
     pub(crate) counter: usize,
 }
 
-impl<T: ColumnValueRef> Default for Iter<'_, T> {
+impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
     fn default() -> Self {
         Self {
             slabs: &[],
             col: None,
             slab_idx: 0,
-            decoder: T::Encoding::decoder(&[]),
+            decoder: T::Encoding::<C>::decoder(&[]),
             items_left: 0,
             slab_remaining: 0,
             pos: 0,
@@ -362,7 +363,7 @@ impl<T: ColumnValueRef> Default for Iter<'_, T> {
     }
 }
 
-impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
+impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     type Item = T::Get<'a>;
 
     #[inline]
@@ -383,7 +384,7 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
                 return None;
             }
             self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
+            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
         }
     }
 
@@ -441,7 +442,7 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
                 if self.slab_idx >= self.slabs.len() {
                     break;
                 }
-                self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
+                self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
                 self.slab_remaining = self.slabs[self.slab_idx].len;
             }
         }
@@ -449,15 +450,15 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     }
 }
 
-impl<T: ColumnValueRef> ExactSizeIterator for Iter<'_, T> {}
+impl<T: ColumnValueRef, C: Codec> ExactSizeIterator for Iter<'_, T, C> {}
 
-impl<'a, T: ColumnValueRef> crate::encoding::RunSrc<'a, T> for Iter<'a, T> {
+impl<'a, T: ColumnValueRef, C: Codec> crate::encoding::RunSrc<'a, T> for Iter<'a, T, C> {
     fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
         Ok(self.next_run())
     }
 }
 
-impl<T: ColumnValueRef> std::fmt::Debug for Iter<'_, T> {
+impl<T: ColumnValueRef, C: Codec> std::fmt::Debug for Iter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Iter")
             .field("pos", &self.pos)
@@ -466,7 +467,7 @@ impl<T: ColumnValueRef> std::fmt::Debug for Iter<'_, T> {
     }
 }
 
-impl<T: ColumnValueRef> Clone for Iter<'_, T> {
+impl<T: ColumnValueRef, C: Codec> Clone for Iter<'_, T, C> {
     fn clone(&self) -> Self {
         Self {
             slabs: self.slabs,
@@ -481,7 +482,7 @@ impl<T: ColumnValueRef> Clone for Iter<'_, T> {
     }
 }
 
-impl<'a, T: ColumnValueRef> Iter<'a, T> {
+impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Set the iterator to yield items up to (but not past) `pos`.
     ///
     /// Can both shorten and extend the iterator window. If `pos` is
@@ -551,7 +552,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                 return None;
             }
             self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
+            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
         };
 
         let value = run.value;
@@ -568,7 +569,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                 break;
             }
             self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
+            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
 
             let _max = self.items_left.min(self.slab_remaining).min(max);
             if let Some(next_run) = self.decoder.next_run_max(_max) {
@@ -583,7 +584,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                 } else {
                     // Value doesn't match — reset decoder so the consumed
                     // run can be re-read by subsequent calls.
-                    self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
+                    self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
                 }
             }
             break;
@@ -618,7 +619,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             self.pos = pos;
             self.slab_idx = si;
             self.slab_remaining = self.slabs[si].len;
-            self.decoder = T::Encoding::decoder(&self.slabs[si].data);
+            self.decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
             self.items_left -= skipped;
             true
         }
@@ -645,13 +646,14 @@ impl IterState {
     ///
     /// Returns [`PackError::InvalidResume`] if `column` was mutated since
     /// [`Iter::suspend`].
-    pub fn try_resume<'a, T, WF, Idx>(
+    pub fn try_resume<'a, T, C, WF, Idx>(
         &self,
-        column: &'a Column<T, WF, Idx>,
-    ) -> Result<Iter<'a, T>, PackError>
+        column: &'a Column<T, C, WF, Idx>,
+    ) -> Result<Iter<'a, T, C>, PackError>
     where
         T: ColumnValueRef,
-        WF: WeightFn<T>,
+        C: Codec,
+        WF: WeightFn<T, C>,
         Idx: ColumnIndex<WF::Weight>,
     {
         if self.counter != column.counter {
@@ -666,7 +668,7 @@ impl IterState {
                 slabs,
                 col: Some(column),
                 slab_idx: slabs.len(),
-                decoder: T::Encoding::decoder(&[]),
+                decoder: T::Encoding::<C>::decoder(&[]),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: self.pos,
@@ -674,7 +676,7 @@ impl IterState {
             });
         }
         let slab = &slabs[self.slab_idx];
-        let mut decoder = T::Encoding::decoder(&slab.data);
+        let mut decoder = T::Encoding::<C>::decoder(&slab.data);
         if self.slab_consumed > 0 {
             decoder.nth(self.slab_consumed - 1);
         }
@@ -692,7 +694,7 @@ impl IterState {
     }
 }
 
-impl<'a, T: ColumnValueRef> Iter<'a, T> {
+impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Captures the current iterator position so it can be restored later.
     pub fn suspend(&self) -> IterState {
         let slab_len = if self.slab_idx < self.slabs.len() {
@@ -711,7 +713,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     }
 }
 
-impl<'a, T: ColumnValueRef> Iter<'a, T> {
+impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Narrow the iterator window to the contiguous run of `value` within a
     /// sorted range, returning that range.
     ///
@@ -774,7 +776,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 
                 while lo < hi {
                     let mid = lo + (hi - lo) / 2;
-                    let mut dec = T::Encoding::decoder(col.slab_data(mid));
+                    let mut dec = T::Encoding::<C>::decoder(col.slab_data(mid));
                     let head = dec.next_run().unwrap();
                     match head.value.cmp(&target) {
                         Ordering::Less => {
@@ -830,24 +832,26 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 /// supported ways to get non-default weights.
 pub struct Column<
     T: ColumnValueRef,
-    WF: WeightFn<T> = LenWeight,
-    Idx = SlabBTree<<WF as WeightFn<T>>::Weight>,
+    C: Codec = Leb128,
+    WF: WeightFn<T, C> = LenWeight,
+    Idx = SlabBTree<<WF as WeightFn<T, C>>::Weight>,
 > where
     Idx: ColumnIndex<WF::Weight>,
 {
-    pub(crate) slabs: Vec<Slab<TailOf<T>>>,
+    pub(crate) slabs: Vec<Slab<TailOf<T, C>>>,
     /// Per-slab aggregate index (B-tree by default, Fenwick BIT optional).
     pub(crate) index: Idx,
     pub(crate) total_len: usize,
     pub(crate) max_segments: usize,
     pub(crate) counter: usize,
-    _phantom: PhantomData<fn() -> (T, WF)>,
+    _phantom: PhantomData<fn() -> (T, C, WF)>,
 }
 
-impl<T, WF, Idx> Clone for Column<T, WF, Idx>
+impl<T, C, WF, Idx> Clone for Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight> + Clone,
 {
     fn clone(&self) -> Self {
@@ -862,10 +866,11 @@ where
     }
 }
 
-impl<T, WF, Idx> std::fmt::Debug for Column<T, WF, Idx>
+impl<T, C, WF, Idx> std::fmt::Debug for Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -876,10 +881,11 @@ where
     }
 }
 
-impl<T, WF, Idx> Default for Column<T, WF, Idx>
+impl<T, C, WF, Idx> Default for Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn default() -> Self {
@@ -887,10 +893,11 @@ where
     }
 }
 
-impl<T, WF, Idx> Column<T, WF, Idx>
+impl<T, C, WF, Idx> Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     pub fn new() -> Self {
@@ -949,7 +956,7 @@ where
     /// index builder) can walk the canonical runs during the same decode
     /// pass. A fill option on empty data emits one run and writes one
     /// slab.
-    pub fn load_iter<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> ColumnLoadIter<'a, T, WF, Idx>
+    pub fn load_iter<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> ColumnLoadIter<'a, T, C, WF, Idx>
     where
         F: MaybeFill<T::Get<'a>>,
     {
@@ -959,7 +966,7 @@ where
             _ => None,
         };
         ColumnLoadIter {
-            iter: T::Encoding::load_iter(data, opts.max_segments),
+            iter: T::Encoding::<C>::load_iter(data, opts.max_segments),
             fill,
             fill_emitted: false,
             length: opts.length,
@@ -978,10 +985,10 @@ where
     /// `len` / `segments` / `tail` metadata and `segments <= max_segments`
     /// (debug builds verify).  Used by the streaming encoders'
     /// `into_column` fast path.
-    pub(crate) fn from_slabs(slabs: Vec<Slab<TailOf<T>>>, max_segments: usize) -> Self {
+    pub(crate) fn from_slabs(slabs: Vec<Slab<TailOf<T, C>>>, max_segments: usize) -> Self {
         #[cfg(debug_assertions)]
         for s in &slabs {
-            let info = T::Encoding::validate_encoding(&s.data)
+            let info = T::Encoding::<C>::validate_encoding(&s.data)
                 .unwrap_or_else(|e| panic!("from_slabs: invalid slab encoding: {e}"));
             debug_assert_eq!(s.len, info.len, "from_slabs: slab len mismatch");
             debug_assert_eq!(
@@ -1007,7 +1014,7 @@ where
         if len == 0 {
             return Self::new();
         }
-        let slab = T::Encoding::fill(len, value);
+        let slab = T::Encoding::<C>::fill(len, value);
         let index = Idx::from_weights(std::iter::once(WF::compute(&slab)));
         Self {
             slabs: vec![slab],
@@ -1045,13 +1052,13 @@ where
         F: Fn(T) -> T,
         WF::Weight: SlabAggregate,
     {
-        *self = T::Encoding::remap(self.iter(), self.max_segments, f);
+        *self = T::Encoding::<C>::remap(self.iter(), self.max_segments, f);
     }
 
     /// Validate that the canonical encoding is well-formed.
     pub fn validate_encoding(&self) -> Result<(), PackError> {
         let bytes = self.save();
-        T::Encoding::validate_encoding(&bytes)?;
+        T::Encoding::<C>::validate_encoding(&bytes)?;
         Ok(())
     }
 
@@ -1069,7 +1076,7 @@ where
             let mut segments = first.segments;
             let mut buf = Vec::new();
             for s in &self.slabs[1..] {
-                let (new_seg, new_tail) = T::Encoding::do_merge(out, tail, segments, s, &mut buf);
+                let (new_seg, new_tail) = T::Encoding::<C>::do_merge(out, tail, segments, s, &mut buf);
                 segments = new_seg;
                 tail = new_tail;
                 buf.clear();
@@ -1078,13 +1085,13 @@ where
         start..out.len()
     }
 
-    pub fn iter(&self) -> Iter<'_, T> {
+    pub fn iter(&self) -> Iter<'_, T, C> {
         self.iter_range(0..self.total_len)
     }
 
     /// Iterator over items in `range`, clamped to the column's length.
     /// O(log S) seek via the index, O(1) per item after.
-    pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T> {
+    pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T, C> {
         let start = range.start.min(self.total_len);
         let end = range.end.min(self.total_len);
         if start >= end || self.slabs.is_empty() {
@@ -1092,7 +1099,7 @@ where
                 slabs: &self.slabs,
                 col: Some(self),
                 slab_idx: self.slabs.len(),
-                decoder: T::Encoding::decoder(&[]),
+                decoder: T::Encoding::<C>::decoder(&[]),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: start,
@@ -1100,7 +1107,7 @@ where
             };
         }
         let (si, offset) = self.index.find_slab(start);
-        let mut decoder = T::Encoding::decoder(&self.slabs[si].data);
+        let mut decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
         if offset > 0 {
             decoder.nth(offset - 1);
         }
@@ -1128,7 +1135,7 @@ where
                 if s.len == 0 {
                     return true;
                 }
-                let mut dec = T::Encoding::decoder(&s.data);
+                let mut dec = T::Encoding::<C>::decoder(&s.data);
                 match dec.next_run() {
                     Some(run) => {
                         run.count == s.len && T::eq(run.value, value) && dec.next_run().is_none()
@@ -1159,9 +1166,9 @@ where
     pub fn dump_slabs(&self) {
         let mut offset = 0;
         for (i, s) in self.slabs.iter().enumerate() {
-            let mut dec = T::Encoding::decoder(&s.data);
+            let mut dec = T::Encoding::<C>::decoder(&s.data);
             let first = dec.next_run();
-            let last = T::Encoding::last_run(s);
+            let last = T::Encoding::<C>::last_run(s);
             log!(
                 "  slab[{i}]: offset={offset} len={} segments={} first={:?} last={:?}",
                 s.len,
@@ -1282,7 +1289,7 @@ where
         }
 
         if self.slabs.is_empty() {
-            let empty = T::Encoding::empty_slab();
+            let empty = T::Encoding::<C>::empty_slab();
             self.index.splice(0..0, [WF::compute(&empty)]);
             self.slabs.push(empty);
         }
@@ -1330,7 +1337,7 @@ where
         let mut old_slab_len = self.slabs[si].len;
 
         let (overflow, overflow_del) =
-            T::Encoding::splice_slab(&mut self.slabs[si], offset, del, values, self.max_segments);
+            T::Encoding::<C>::splice_slab(&mut self.slabs[si], offset, del, values, self.max_segments);
 
         let overflow_len = overflow.len();
 
@@ -1349,7 +1356,7 @@ where
                 consume_end += 1;
             } else {
                 old_slab_len += self.slabs[consume_end].len;
-                let (partial_overflow, _) = T::Encoding::splice_slab(
+                let (partial_overflow, _) = T::Encoding::<C>::splice_slab(
                     &mut self.slabs[consume_end],
                     0,
                     remaining,
@@ -1403,7 +1410,7 @@ where
             if let Some(b) = self.slabs.get(index_b).map(|s| s.segments) {
                 if (a < min || b < min) && a + b <= max {
                     let slab_b = self.slabs.remove(index_b);
-                    T::Encoding::merge_slabs(&mut self.slabs[index_a], slab_b);
+                    T::Encoding::<C>::merge_slabs(&mut self.slabs[index_a], slab_b);
                     return true;
                 }
             }
@@ -1418,10 +1425,11 @@ where
 
 // ── Value-range queries (B-tree + SlabAgg weight only) ─────────────────────
 
-impl<T, WF> Column<T, WF, SlabBTree<SlabAgg>>
+impl<T, C, WF> Column<T, C, WF, SlabBTree<SlabAgg>>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T, Weight = SlabAgg>,
+    C: Codec,
+    WF: WeightFn<T, C, Weight = SlabAgg>,
 {
     /// Iterator over `(slab_idx, items_before_slab)` for slabs whose
     /// prefix-sum range covers `target`.  Passes through to
@@ -1446,12 +1454,18 @@ where
 /// count-0 runs, count-1 repeats) is a load error — so consumers get the
 /// "adjacent runs never carry equal values" contract by construction.
 /// All methods return `Result` — the bytes are untrusted.
-pub struct ColumnLoadIter<'a, T, WF = LenWeight, Idx = SlabBTree<<WF as WeightFn<T>>::Weight>>
-where
+pub struct ColumnLoadIter<
+    'a,
+    T,
+    C = Leb128,
+    WF = LenWeight,
+    Idx = SlabBTree<<WF as WeightFn<T, C>>::Weight>,
+> where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
 {
-    iter: <T::Encoding as ColumnEncoding>::LoadIter<'a>,
+    iter: <T::Encoding<C> as ColumnEncoding>::LoadIter<'a>,
     /// engaged when the data was absent and the load options carried a
     /// fill: emit one run, write one slab
     fill: Option<(T::Get<'a>, usize)>,
@@ -1468,10 +1482,11 @@ where
     _phantom: PhantomData<(WF, Idx)>,
 }
 
-impl<'a, T, WF, Idx> ColumnLoadIter<'a, T, WF, Idx>
+impl<'a, T, C, WF, Idx> ColumnLoadIter<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     /// The next canonical run, or `None` at end of input. A fill emits
@@ -1516,7 +1531,7 @@ where
 
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
-    pub fn finalize(mut self) -> Result<Column<T, WF, Idx>, PackError> {
+    pub fn finalize(mut self) -> Result<Column<T, C, WF, Idx>, PackError> {
         use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
             if len == 0 {
@@ -1568,7 +1583,7 @@ where
     pub(crate) fn finalize_with(
         mut self,
         mut check: impl FnMut(&WF::Weight) -> Result<(), PackError>,
-    ) -> Result<Column<T, WF, Idx>, PackError> {
+    ) -> Result<Column<T, C, WF, Idx>, PackError> {
         use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
             if len == 0 {
@@ -1618,10 +1633,11 @@ where
     }
 }
 
-impl<'a, T, WF, Idx> crate::encoding::RunSrc<'a, T> for ColumnLoadIter<'a, T, WF, Idx>
+impl<'a, T, C, WF, Idx> crate::encoding::RunSrc<'a, T> for ColumnLoadIter<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
@@ -1637,11 +1653,12 @@ impl<T: ColumnValueRef> FromIterator<T> for Column<T> {
     }
 }
 
-impl<V, T, WF, Idx> Extend<V> for Column<T, WF, Idx>
+impl<V, T, C, WF, Idx> Extend<V> for Column<T, C, WF, Idx>
 where
     V: AsColumnRef<T>,
     T: ColumnValueRef,
-    WF: WeightFn<T>,
+    C: Codec,
+    WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
@@ -1735,7 +1752,7 @@ mod tests {
     fn parity_with_bit_index() {
         // Column backed by BitIndex — same semantics, different guts.
         let base: Column<u64> = Column::from_values((0u64..100).collect());
-        let v2: Column<u64, LenWeight, BitIndex<usize>> =
+        let v2: Column<u64, Leb128, LenWeight, BitIndex<usize>> =
             Column::from_values((0u64..100).collect());
         assert_eq!(v2.len(), base.len());
         assert_eq!(v2.save(), base.save());

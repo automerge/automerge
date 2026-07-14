@@ -1,34 +1,37 @@
 //! RLE decoder — forward iterator over items in a single RLE-encoded slab.
 
 use crate::encoding::RunDecoder;
-use crate::leb::{read_signed, read_unsigned, try_read_signed, try_read_unsigned};
+
 use crate::PackError;
-use crate::{ColumnValueRef, RleValue, Run};
+use crate::{Codec, ColumnValueRef, Leb128, RleValue, Run};
+use std::marker::PhantomData;
 
 /// Forward iterator over all items in a single RLE-encoded slab.
 ///
 /// Created by the `ColumnEncoding::decoder` method.  Repeat runs yield the cached value
 /// in O(1) per item.  Literal runs decode each value.  Null runs yield
 /// the type's null value.
-pub struct RleDecoder<'a, T: RleValue> {
+pub struct RleDecoder<'a, T: RleValue, C: Codec = Leb128> {
     data: &'a [u8],
     pub(crate) byte_pos: usize,
     pub(crate) remaining: usize,
     state: RleDecoderState<'a, T>,
+    _codec: PhantomData<fn() -> C>,
 }
 
-impl<T: RleValue> Clone for RleDecoder<'_, T> {
+impl<T: RleValue, C: Codec> Clone for RleDecoder<'_, T, C> {
     fn clone(&self) -> Self {
         Self {
             data: self.data,
             byte_pos: self.byte_pos,
             remaining: self.remaining,
             state: self.state.clone(),
+            _codec: PhantomData,
         }
     }
 }
 
-impl<T: RleValue> std::fmt::Debug for RleDecoder<'_, T> {
+impl<T: RleValue, C: Codec> std::fmt::Debug for RleDecoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RleDecoder")
             .field("byte_pos", &self.byte_pos)
@@ -59,13 +62,14 @@ impl<T: RleValue> Clone for RleDecoderState<'_, T> {
     }
 }
 
-impl<'a, T: RleValue> RleDecoder<'a, T> {
+impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         RleDecoder {
             data,
             byte_pos: 0,
             remaining: 0,
             state: RleDecoderState::Idle,
+            _codec: PhantomData,
         }
     }
 
@@ -83,7 +87,7 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
             self.remaining = 0;
             return;
         }
-        let (count_bytes, count_raw) = match read_signed(&self.data[self.byte_pos..]) {
+        let (count_bytes, count_raw) = match C::read_signed(&self.data[self.byte_pos..]) {
             Some(v) => v,
             None => {
                 self.state = RleDecoderState::Idle;
@@ -96,7 +100,7 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
             n if n > 0 => {
                 let count = n as usize;
                 let value_start = self.byte_pos + count_bytes;
-                let (vlen, value) = T::unpack(&self.data[value_start..]);
+                let (vlen, value) = T::unpack::<C>(&self.data[value_start..]);
                 self.byte_pos = value_start + vlen;
                 self.remaining = count;
                 self.state = RleDecoderState::Repeat(value);
@@ -110,7 +114,7 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
             _ => {
                 // Null run (count_raw == 0)
                 let (ncb, null_count) =
-                    read_unsigned(&self.data[self.byte_pos + count_bytes..]).unwrap();
+                    C::read_unsigned(&self.data[self.byte_pos + count_bytes..]).unwrap();
                 self.byte_pos += count_bytes + ncb;
                 self.remaining = null_count as usize;
                 self.state = RleDecoderState::Null;
@@ -124,17 +128,17 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
     pub(crate) fn try_next_segment(&mut self) -> Result<Option<RleSegment<'a, T>>, PackError> {
         if self.remaining > 0 && matches!(self.state, RleDecoderState::Literal) {
             self.remaining -= 1;
-            let (bytes, value) = T::try_unpack(&self.data[self.byte_pos..])?;
+            let (bytes, value) = T::try_unpack::<C>(&self.data[self.byte_pos..])?;
             self.byte_pos += bytes;
             Ok(Some(RleSegment::Lit { value, bytes }))
         } else if self.data[self.byte_pos..].is_empty() {
             Ok(None)
         } else {
-            match try_read_signed(&self.data[self.byte_pos..])? {
+            match C::try_read_signed(&self.data[self.byte_pos..])? {
                 (count_bytes, n) if n > 0 => {
                     let count = n as usize;
                     let value_start = self.byte_pos + count_bytes;
-                    let (vlen, value) = T::try_unpack(&self.data[value_start..])?;
+                    let (vlen, value) = T::try_unpack::<C>(&self.data[value_start..])?;
                     let bytes = count_bytes + vlen;
                     self.byte_pos += bytes;
                     self.state = RleDecoderState::Idle;
@@ -154,7 +158,7 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
                 }
                 (count_bytes, _) => {
                     let (ncb, count) =
-                        try_read_unsigned(&self.data[self.byte_pos + count_bytes..])?;
+                        C::try_read_unsigned(&self.data[self.byte_pos + count_bytes..])?;
                     let count = count as usize;
                     let bytes = count_bytes + ncb;
                     self.byte_pos += bytes;
@@ -167,17 +171,17 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
     }
 }
 
-impl<'a, T: RleValue> RleDecoder<'a, T> {
+impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
     /// Skip `n` literal values by advancing `byte_pos` without decoding.
     fn skip_literals(&mut self, n: usize) {
         for _ in 0..n {
-            let vlen = T::value_len(&self.data[self.byte_pos..]).unwrap();
+            let vlen = T::value_len::<C>(&self.data[self.byte_pos..]).unwrap();
             self.byte_pos += vlen;
         }
     }
 }
 
-impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
+impl<'a, T: RleValue, C: Codec> Iterator for RleDecoder<'a, T, C> {
     type Item = <T as ColumnValueRef>::Get<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -187,7 +191,7 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
                 return match &self.state {
                     RleDecoderState::Repeat(v) => Some(*v),
                     RleDecoderState::Literal => {
-                        let (vlen, value) = T::unpack(&self.data[self.byte_pos..]);
+                        let (vlen, value) = T::unpack::<C>(&self.data[self.byte_pos..]);
                         self.byte_pos += vlen;
                         Some(value)
                     }
@@ -231,14 +235,14 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
                 return None;
             }
             let (count_bytes, count_raw) =
-                read_signed(&self.data[self.byte_pos..]).expect("validated slab");
+                C::read_signed(&self.data[self.byte_pos..]).expect("validated slab");
             match count_raw {
                 c if c > 0 => {
                     let count = c as usize;
                     let value_start = self.byte_pos + count_bytes;
                     if n < count {
                         // Land on this run — full unpack for the value.
-                        let (vlen, value) = T::unpack(&self.data[value_start..]);
+                        let (vlen, value) = T::unpack::<C>(&self.data[value_start..]);
                         self.byte_pos = value_start + vlen;
                         self.remaining = count - n - 1;
                         self.state = RleDecoderState::Repeat(value);
@@ -246,7 +250,7 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
                         //return self.next();
                     }
                     // Skip past — only need byte length of the value.
-                    let vlen = T::value_len(&self.data[value_start..]).expect("validated slab");
+                    let vlen = T::value_len::<C>(&self.data[value_start..]).expect("validated slab");
                     self.byte_pos = value_start + vlen;
                     n -= count;
                 }
@@ -258,7 +262,7 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
                         self.remaining = total - n - 1;
                         self.state = RleDecoderState::Literal;
                         self.skip_literals(n);
-                        let (vlen, value) = T::unpack(&self.data[self.byte_pos..]);
+                        let (vlen, value) = T::unpack::<C>(&self.data[self.byte_pos..]);
                         self.byte_pos += vlen;
                         return Some(value);
                     }
@@ -270,7 +274,7 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
                 _ => {
                     // Null run.
                     let (ncb, null_count) =
-                        read_unsigned(&self.data[self.byte_pos + count_bytes..])
+                        C::read_unsigned(&self.data[self.byte_pos + count_bytes..])
                             .expect("validated slab");
                     let total = null_count as usize;
                     self.byte_pos += count_bytes + ncb;
@@ -380,7 +384,7 @@ impl<'a, T: RleValue> RleSegment<'a, T> {
     }
 }
 
-impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
+impl<'a, T: RleValue, C: Codec> RunDecoder for RleDecoder<'a, T, C> {
     fn next_run(&mut self) -> Option<Run<Self::Item>> {
         self.next_run_max(usize::MAX)
     }
@@ -401,7 +405,7 @@ impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
                     RleDecoderState::Literal => {
                         // Literal: each item is distinct, yield one at a time
                         self.remaining -= 1;
-                        let (vlen, value) = T::unpack(&self.data[self.byte_pos..]);
+                        let (vlen, value) = T::unpack::<C>(&self.data[self.byte_pos..]);
                         self.byte_pos += vlen;
                         Some(Run { count: 1, value })
                     }

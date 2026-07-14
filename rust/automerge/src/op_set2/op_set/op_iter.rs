@@ -291,7 +291,7 @@ pub(crate) struct OpIdIterState {
 }
 
 pub(crate) struct CtrWalker<'a> {
-    ctr: hexane::FindByRange<'a>,
+    ctr: hexane::FindByRange<'a, u32>,
 }
 
 impl<'a> CtrWalker<'a> {
