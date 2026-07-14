@@ -1011,6 +1011,7 @@ impl ChangeGraph {
         Ok(self.resolve_hashes(heads.iter())?.nodes)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, UncheckedHashes> {
         let nodes = self.heads_to_nodes(heads)?;
         Ok(self.clock_for_nodes(nodes))
