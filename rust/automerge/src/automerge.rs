@@ -1111,13 +1111,29 @@ impl Automerge {
     }
 
     pub(crate) fn clock_range(&self, before: &[ChangeHash], after: &[ChangeHash]) -> ClockRange {
-        let before = self.clock_at(before);
-        let after = self.clock_at(after);
+        let before = self.change_graph.clock_at(before);
+        let after = self.change_graph.clock_at(after);
         ClockRange::Diff(before, after)
     }
 
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
-        self.change_graph.clock_for_heads(heads)
+    /// Clock for reading the document as at `heads`.
+    ///
+    /// Returns `None` — an unscoped read of the present document — when
+    /// `heads` is exactly the current heads, so `*_at(doc.get_heads())`
+    /// takes the same indexed fast paths as the un-suffixed methods.
+    ///
+    /// The shortcut is sound here because pending transaction ops enter
+    /// the op set before the graph's heads advance, and an `Automerge`
+    /// cannot be read through `&self` while a transaction holds it
+    /// mutably. Anything reading *around* an in-flight transaction
+    /// (`AutoCommit`, the transaction types) — or needing a concrete
+    /// clock — must use [`ChangeGraph::clock_at`] instead.
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Option<Clock> {
+        if self.change_graph.heads_are_current(heads) {
+            None
+        } else {
+            Some(self.change_graph.clock_at(heads))
+        }
     }
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
@@ -1132,7 +1148,7 @@ impl Automerge {
 
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.clock_at(heads);
+        let mut clock = self.change_graph.clock_at(heads);
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
@@ -1141,7 +1157,8 @@ impl Automerge {
                 break;
             }
             actor_index = self.get_isolated_actor_index(i);
-            clock = self.clock_at(heads); // need to recompute the clock b/c the actor indexes may have changed
+            // need to recompute the clock b/c the actor indexes may have changed
+            clock = self.change_graph.clock_at(heads);
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
@@ -1438,13 +1455,36 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut top_ops = self.ops().top_ops(&obj.id, clock).marks();
 
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             // Really we should return an error here but we don't in order to stay
             // compatibile with older implementations
             return Ok(Vec::new());
         };
+
+        // present-time text marks come straight from the mark and text
+        // indexes — no op materialization (the text index carries text
+        // widths, so lists still take the walk below)
+        if clock.is_none() && seq_type == SequenceType::Text {
+            let fast = self.ops().calculate_marks_fast(&obj.id);
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                let slow = self.calculate_marks_slow(&obj, None, seq_type);
+                assert_eq!(fast, slow, "indexed marks != walked marks");
+            }
+            return Ok(fast);
+        }
+
+        Ok(self.calculate_marks_slow(&obj, clock, seq_type))
+    }
+
+    fn calculate_marks_slow(
+        &self,
+        obj: &crate::types::ObjMeta,
+        clock: Option<Clock>,
+        seq_type: SequenceType,
+    ) -> Vec<Mark> {
+        let mut top_ops = self.ops().top_ops(&obj.id, clock).marks();
 
         let mut index = 0;
         let mut acc = MarkAccumulator::default();
@@ -1470,11 +1510,11 @@ impl Automerge {
             Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
             _ => (),
         }
-        Ok(acc.into_iter_no_unmark().collect())
+        acc.into_iter_no_unmark().collect()
     }
 
     pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        let clock = heads.map(|heads| self.clock_at(heads));
+        let clock = heads.and_then(|heads| self.clock_at(heads));
         self.hydrate_map(&ObjId::root(), clock.as_ref())
     }
 
@@ -1484,7 +1524,7 @@ impl Automerge {
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let clock = heads.map(|heads| self.clock_at(heads));
+        let clock = heads.and_then(|heads| self.clock_at(heads));
         Ok(match obj.typ {
             ObjType::Map | ObjType::Table => self.hydrate_map(&obj.id, clock.as_ref()),
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
@@ -1895,7 +1935,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Parents<'_>, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.parents_for(obj.as_ref(), Some(clock))
+        self.parents_for(obj.as_ref(), clock)
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
@@ -1904,12 +1944,12 @@ impl ReadDoc for Automerge {
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
         let clock = self.clock_at(heads);
-        self.keys_for(obj.as_ref(), Some(clock))
+        self.keys_for(obj.as_ref(), clock)
     }
 
     fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
         //let obj = self.exid_to_obj(obj.as_ref()).unwrap();
-        let clock = heads.map(|heads| self.clock_at(heads));
+        let clock = heads.and_then(|heads| self.clock_at(heads));
         self.iter_for(obj.as_ref(), clock)
     }
 
@@ -1928,7 +1968,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> MapRange<'a> {
         let clock = self.clock_at(heads);
-        self.map_range_for(obj.as_ref(), range, Some(clock))
+        self.map_range_for(obj.as_ref(), range, clock)
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
@@ -1942,7 +1982,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> ListRange<'_> {
         let clock = self.clock_at(heads);
-        self.list_range_for(obj.as_ref(), range, Some(clock))
+        self.list_range_for(obj.as_ref(), range, clock)
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
@@ -1951,7 +1991,7 @@ impl ReadDoc for Automerge {
 
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         let clock = self.clock_at(heads);
-        self.values_for(obj.as_ref(), Some(clock))
+        self.values_for(obj.as_ref(), clock)
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
@@ -1960,7 +2000,7 @@ impl ReadDoc for Automerge {
 
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         let clock = self.clock_at(heads);
-        self.length_for(obj.as_ref(), Some(clock))
+        self.length_for(obj.as_ref(), clock)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -1977,7 +2017,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Spans<'_>, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.spans_for(obj.as_ref(), Some(clock))
+        self.spans_for(obj.as_ref(), clock)
     }
 
     fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
@@ -1986,7 +2026,7 @@ impl ReadDoc for Automerge {
         position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.map(|heads| self.clock_at(heads));
+        let clock = at.and_then(|heads| self.clock_at(heads));
         self.get_cursor_for(obj.as_ref(), position.into(), clock, MoveCursor::After)
     }
 
@@ -1997,7 +2037,7 @@ impl ReadDoc for Automerge {
         at: Option<&[ChangeHash]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.map(|heads| self.clock_at(heads));
+        let clock = at.and_then(|heads| self.clock_at(heads));
         self.get_cursor_for(obj.as_ref(), position.into(), clock, move_cursor)
     }
 
@@ -2007,7 +2047,7 @@ impl ReadDoc for Automerge {
         cursor: &Cursor,
         at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError> {
-        let clock = at.map(|heads| self.clock_at(heads));
+        let clock = at.and_then(|heads| self.clock_at(heads));
         self.get_cursor_position_for(obj.as_ref(), cursor, clock)
     }
 
@@ -2017,7 +2057,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.text_for(obj.as_ref(), Some(clock))
+        self.text_for(obj.as_ref(), clock)
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
@@ -2030,7 +2070,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark>, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.marks_for(obj.as_ref(), Some(clock))
+        self.marks_for(obj.as_ref(), clock)
     }
 
     fn hydrate<O: AsRef<ExId>>(
@@ -2039,7 +2079,7 @@ impl ReadDoc for Automerge {
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = heads.map(|h| self.clock_at(h));
+        let clock = heads.and_then(|h| self.clock_at(h));
         Ok(match obj.typ {
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
             ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
@@ -2053,7 +2093,7 @@ impl ReadDoc for Automerge {
         index: usize,
         heads: Option<&[ChangeHash]>,
     ) -> Result<MarkSet, AutomergeError> {
-        let clock = heads.map(|h| self.clock_at(h));
+        let clock = heads.and_then(|h| self.clock_at(h));
         self.get_marks_for(obj.as_ref(), index, clock)
     }
 
@@ -2071,7 +2111,7 @@ impl ReadDoc for Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = Some(self.clock_at(heads));
+        let clock = self.clock_at(heads);
         self.get_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -2089,7 +2129,7 @@ impl ReadDoc for Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = Some(self.clock_at(heads));
+        let clock = self.clock_at(heads);
         self.get_all_for(obj.as_ref(), prop.into(), clock)
     }
 
