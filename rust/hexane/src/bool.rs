@@ -569,21 +569,6 @@ impl ColumnEncoding for BoolEncoding {
         bool_validate_encoding(slab)
     }
 
-    fn load_and_verify_fold<'a, F, P: Default + Copy>(
-        data: &'a [u8],
-        max_segments: usize,
-        validate: Option<F>,
-    ) -> Result<Vec<Slab>, PackError>
-    where
-        F: Fn(
-            P,
-            usize,
-            <<BoolEncoding as ColumnEncoding>::Value as crate::ColumnValueRef>::Get<'a>,
-        ) -> Result<P, String>,
-    {
-        bool_load_and_verify(data, max_segments, validate.as_ref())
-    }
-
     fn do_merge(
         acc: &mut Vec<u8>,
         a_tail: u8,
@@ -622,6 +607,12 @@ impl ColumnEncoding for BoolEncoding {
 
     fn encoder<'a>() -> Self::Encoder<'a> {
         BoolEncoder::new()
+    }
+
+    type LoadIter<'a> = BoolLoadIter<'a>;
+
+    fn load_iter(data: &[u8], max_segments: usize) -> BoolLoadIter<'_> {
+        BoolLoadIter::new(data, max_segments)
     }
 }
 
@@ -798,87 +789,155 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
 /// or re-encoding is needed: we just validate and byte-copy.
 ///
 /// If `max_segments` is odd it is rounded down to even (17 → 16).
-fn bool_load_and_verify<F, P: Default + Copy>(
-    data: &[u8],
-    max_segments: usize,
-    validate: Option<&F>,
-) -> Result<Vec<Slab>, PackError>
-where
-    F: for<'a> Fn(P, usize, bool) -> Result<P, String>,
-{
-    if data.is_empty() {
-        return Ok(vec![]);
+/// Streaming decode + validate over saved bool-column bytes.
+///
+/// The wire format is a sequence of unsigned counts, alternating values
+/// starting with `false`; only the very first count may be zero (padding
+/// so the data can start with `true`). Yields the non-empty runs.
+pub struct BoolLoadIter<'a> {
+    data: &'a [u8],
+    pos: usize,
+    run_index: usize,
+    // ── slab-cutting state, identical to the block loader ──
+    slabs: Vec<Slab>,
+    slab_start: usize,
+    slab_items: usize,
+    slab_segs: usize,
+    tail: u8,
+    target_segments: usize,
+}
+
+impl<'a> BoolLoadIter<'a> {
+    pub fn new(data: &'a [u8], max_segments: usize) -> Self {
+        Self {
+            data,
+            pos: 0,
+            run_index: 0,
+            slabs: Vec::new(),
+            slab_start: 0,
+            slab_items: 0,
+            slab_segs: 0,
+            tail: 0,
+            // Target half-full slabs, rounded to even so each slab starts
+            // on a false run.
+            target_segments: ((max_segments / 2) & !1).max(2),
+        }
     }
 
-    let mut p = Default::default();
+    fn cut_slab(&mut self) {
+        self.slabs.push(Slab {
+            data: self.data[self.slab_start..self.pos].to_vec(),
+            len: self.slab_items,
+            segments: self.slab_segs,
+            tail: self.tail,
+        });
+        self.slab_start = self.pos;
+        self.slab_items = 0;
+        self.slab_segs = 0;
+    }
 
-    // Target half-full slabs, rounded to even so each slab starts on a false run.
-    let target_segments = ((max_segments / 2) & !1).max(2);
-
-    let mut slabs: Vec<Slab> = Vec::new();
-    let mut pos: usize = 0;
-    let mut slab_start: usize = 0;
-    let mut slab_items: usize = 0;
-    let mut slab_segs: usize = 0;
-    let mut run_index: usize = 0; // global, for validation
-    let mut tail: u8 = 0;
-
-    while pos < data.len() {
-        let (cb, count) = read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
-        tail = cb as u8;
-
-        // Only the very first run may have count 0 (structural padding).
-        if count == 0 && run_index > 0 {
-            return Err(PackError::BadFormat);
+    /// The next run, or `None` at end of input.
+    #[inline]
+    pub fn try_next_run(&mut self) -> Result<Option<Run<bool>>, PackError> {
+        loop {
+            if self.pos >= self.data.len() {
+                return Ok(None);
+            }
+            let (cb, count) = read_count(&self.data[self.pos..]).ok_or(PackError::BadFormat)?;
+            self.tail = cb as u8;
+            // Only the very first run may have count 0 (structural padding).
+            if count == 0 && self.run_index > 0 {
+                return Err(PackError::BadFormat);
+            }
+            let next_pos = self.pos + cb;
+            // A trailing zero-count run is invalid.
+            if next_pos >= self.data.len() && count == 0 {
+                return Err(PackError::BadFormat);
+            }
+            let value = self.run_index % 2 != 0;
+            self.pos = next_pos;
+            self.run_index += 1;
+            self.slab_items += count;
+            self.slab_segs += 1;
+            // Cut after target_segments — always even, so the next slab
+            // starts on a false run and can be memcpy'd as-is.
+            if self.slab_segs >= self.target_segments {
+                self.cut_slab();
+            }
+            if count == 0 {
+                continue;
+            }
+            return Ok(Some(Run { count, value }));
         }
+    }
 
-        // A trailing zero-count run is invalid.
-        let next_pos = pos + cb;
-        if next_pos >= data.len() && count == 0 {
-            return Err(PackError::BadFormat);
-        }
+    /// Drain and validate whatever the consumer did not pull, flush the
+    /// final slab, and return the finished slabs.
+    pub fn finalize(mut self) -> Result<Vec<Slab>, PackError> {
+        let data = self.data;
+        let mut slabs = std::mem::take(&mut self.slabs);
+        let mut pos = self.pos;
+        let mut run_index = self.run_index;
+        let mut slab_start = self.slab_start;
+        let mut slab_items = self.slab_items;
+        let mut slab_segs = self.slab_segs;
+        let mut tail = self.tail;
+        let target_segments = self.target_segments;
 
-        slab_items += count;
-        slab_segs += 1;
-
-        if count > 0 {
-            if let Some(validate) = validate {
-                let value = run_index % 2 != 0;
-                match validate(p, count, value) {
-                    Ok(new_p) => p = new_p,
-                    Err(msg) => return Err(PackError::InvalidValue(msg)),
-                }
+        while pos < data.len() {
+            let (cb, count) = read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
+            tail = cb as u8;
+            if count == 0 && run_index > 0 {
+                return Err(PackError::BadFormat);
+            }
+            let next_pos = pos + cb;
+            if next_pos >= data.len() && count == 0 {
+                return Err(PackError::BadFormat);
+            }
+            pos = next_pos;
+            run_index += 1;
+            slab_items += count;
+            slab_segs += 1;
+            if slab_segs >= target_segments {
+                slabs.push(Slab {
+                    data: data[slab_start..pos].to_vec(),
+                    len: slab_items,
+                    segments: slab_segs,
+                    tail,
+                });
+                slab_start = pos;
+                slab_items = 0;
+                slab_segs = 0;
             }
         }
-
-        pos = next_pos;
-        run_index += 1;
-
-        // Cut after target_segments — always even, so the next slab
-        // starts on a false run and can be memcpy'd as-is.
-        if slab_segs >= target_segments {
+        if slab_segs > 0 {
             slabs.push(Slab {
                 data: data[slab_start..pos].to_vec(),
                 len: slab_items,
                 segments: slab_segs,
                 tail,
             });
-            slab_start = pos;
-            slab_items = 0;
-            slab_segs = 0;
         }
+        Ok(slabs)
+    }
+}
+
+impl<'a> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a> {
+    fn try_next_run(&mut self) -> Result<Option<Run<bool>>, PackError> {
+        BoolLoadIter::try_next_run(self)
     }
 
-    if slab_segs > 0 {
-        slabs.push(Slab {
-            data: data[slab_start..pos].to_vec(),
-            len: slab_items,
-            segments: slab_segs,
-            tail,
-        });
+    fn slabs_completed(&self) -> usize {
+        self.slabs.len()
     }
 
-    Ok(slabs)
+    fn completed_slab_len(&self, i: usize) -> usize {
+        self.slabs[i].len
+    }
+
+    fn finalize(self) -> Result<Vec<Slab>, PackError> {
+        BoolLoadIter::finalize(self)
+    }
 }
 
 #[cfg(test)]

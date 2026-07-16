@@ -47,9 +47,11 @@ pub mod load_opts;
 pub mod prefix;
 pub mod raw;
 pub mod rle;
-pub use column::{Column, Iter, IterState};
+pub mod shift;
+pub use column::{Column, ColumnLoadIter, Iter, IterState};
 pub use delta::indexed::FindByRange;
 pub use delta::{DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
+pub use shift::{Shiftable, Unshift};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.
@@ -73,12 +75,19 @@ pub type Decoder<'a, T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::D
 pub fn decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Decoder<'a, T> {
     <T::Encoding as ColumnEncoding>::decoder(data)
 }
+pub use bool::BoolLoadIter;
+pub use btree::SlabAggregate;
 pub use encoding::ColumnEncoding;
 pub use encoding::EncoderApi;
+pub use encoding::LoadIterApi;
 pub use encoding::RunDecoder;
-pub use load_opts::{LoadOpts, TypedLoadOpts};
-pub use prefix::{PrefixColumn, PrefixIter, PrefixIterState, PrefixValue, PrefixedValue};
+pub use encoding::RunSrc;
+pub use load_opts::{Fill, LoadOpts, MaybeFill, NoFill};
+pub use prefix::{
+    PrefixColumn, PrefixColumnLoadIter, PrefixIter, PrefixIterState, PrefixValue, PrefixedValue,
+};
 pub use raw::{RawColumn, RawColumnIter};
+pub use rle::RleLoadIter;
 
 /// Sealing for the internal plumbing traits (`WeightFn`, `SlabWeight`,
 /// `ColumnIndex`).  They must be `pub` because they appear in `Column`'s
@@ -493,6 +502,7 @@ impl ColumnValue for i64 {
 }
 
 impl RleValue for i64 {
+    #[inline(always)]
     fn try_unpack(data: &[u8]) -> Result<(usize, i64), PackError> {
         let mut buf = data;
         let start = buf.len();

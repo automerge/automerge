@@ -19,7 +19,7 @@ use crate::delta::DeltaValue;
 /// [`DeltaColumn`](crate::delta::DeltaColumn) instead.
 #[derive(Clone)]
 pub struct DeltaDecoder<'a, T: DeltaValue> {
-    inner: crate::Decoder<'a, Option<i64>>,
+    inner: crate::Decoder<'a, T::Inner>,
     running: i64,
     _phantom: PhantomData<fn() -> T>,
 }
@@ -28,7 +28,7 @@ impl<'a, T: DeltaValue> DeltaDecoder<'a, T> {
     /// Construct a decoder over delta-encoded column `data`.
     pub fn new(data: &'a [u8]) -> Self {
         Self {
-            inner: crate::decoder::<Option<i64>>(data),
+            inner: crate::decoder::<T::Inner>(data),
             running: 0,
             _phantom: PhantomData,
         }
@@ -40,7 +40,8 @@ impl<T: DeltaValue> Iterator for DeltaDecoder<'_, T> {
 
     #[inline]
     fn next(&mut self) -> Option<T> {
-        match self.inner.next()? {
+        use crate::delta::DeltaInner;
+        match T::Inner::to_opt(self.inner.next()?) {
             None => Some(T::null_value()),
             Some(d) => {
                 self.running += d;

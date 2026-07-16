@@ -1,5 +1,6 @@
 mod decoder;
 mod load;
+pub use load::RleLoadIter;
 pub(crate) mod splice;
 pub(crate) mod state;
 #[cfg(test)]
@@ -7,7 +8,6 @@ mod tests;
 
 use crate::encoder::RleEncoder;
 pub use decoder::RleDecoder;
-use load::rle_load_and_verify;
 pub(crate) use load::rle_validate_encoding;
 use splice::{do_merge, rle_merge, splice_slab};
 
@@ -167,17 +167,6 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_validate_encoding::<T>(slab)
     }
 
-    fn load_and_verify_fold<'a, F, P: Default + Copy>(
-        data: &'a [u8],
-        max_segments: usize,
-        validate: Option<F>,
-    ) -> Result<Vec<Slab>, PackError>
-    where
-        F: Fn(P, usize, <T as ColumnValueRef>::Get<'a>) -> Result<P, String>,
-    {
-        rle_load_and_verify::<F, P, T>(data, max_segments, validate.as_ref())
-    }
-
     fn do_merge(
         acc: &mut Vec<u8>,
         a_tail: RleTail,
@@ -213,5 +202,11 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
 
     fn encoder<'a>() -> Self::Encoder<'a> {
         RleEncoder::new()
+    }
+
+    type LoadIter<'a> = load::RleLoadIter<'a, T>;
+
+    fn load_iter(data: &[u8], max_segments: usize) -> load::RleLoadIter<'_, T> {
+        load::RleLoadIter::new(data, max_segments)
     }
 }

@@ -10,11 +10,12 @@
 //!     `find_first`) on [`DeltaColumn`].
 
 use crate::sealed::Sealed;
+use crate::PackError;
 use std::ops::Range;
 
 use crate::btree::{FindByValueRange, SlabAgg};
 use crate::column::{Slab, TailOf, WeightFn};
-use crate::delta::{DeltaColumn, DeltaValue};
+use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::ColumnValueRef;
 
@@ -32,11 +33,61 @@ pub struct IndexedDeltaWeightFn;
 
 impl Sealed for IndexedDeltaWeightFn {}
 
-impl WeightFn<Option<i64>> for IndexedDeltaWeightFn {
+impl<I: DeltaInner> WeightFn<I> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
 
-    fn compute(slab: &Slab<TailOf<Option<i64>>>) -> SlabAgg {
-        compute_slab_agg(&slab.data)
+    fn compute(slab: &Slab<TailOf<I>>) -> SlabAgg {
+        compute_slab_agg::<I>(&slab.data)
+    }
+
+    // `compute` re-decodes the slab; let the streaming loader accumulate
+    // weights as the runs go past instead.
+    const ACCUMULATES: bool = true;
+
+    /// Incremental twin of [`compute_slab_agg`] — same endpoint math, with
+    /// `len == 0` standing in for the "no runs yet" min/max sentinels (an
+    /// empty weight stays `SlabAgg::default()`, matching `compute`).
+    ///
+    /// Checked arithmetic: this runs on untrusted bytes during load, and
+    /// a within-slab partial overflowing `i64` is provably invalid — the
+    /// [`DeltaValue`](crate::delta::DeltaValue) domain contract bounds
+    /// all realized values to a 2^63-wide window, so offsets between
+    /// values in one slab always fit. Erroring here (instead of wrapping,
+    /// which hostile bytes can steer back into plausible-looking ranges)
+    /// is what lets [`DeltaColumn`] validate the finished aggregates per
+    /// *slab* rather than per run.
+    #[inline]
+    fn accumulate_run(w: &mut SlabAgg, count: usize, value: I::Get<'_>) -> Result<(), PackError> {
+        let Some(v) = I::to_opt(value) else {
+            // a null run holds the partial where it is
+            if w.len == 0 {
+                w.min_offset = 0;
+                w.max_offset = 0;
+            } else {
+                w.min_offset = w.min_offset.min(w.total);
+                w.max_offset = w.max_offset.max(w.total);
+            }
+            w.len += count;
+            return Ok(());
+        };
+        let overflow = || PackError::InvalidValue("delta running sum overflows i64".into());
+        let step = i64::try_from(count)
+            .ok()
+            .and_then(|c| v.checked_mul(c))
+            .ok_or_else(overflow)?;
+        let first = w.total.checked_add(v).ok_or_else(overflow)?;
+        let last = w.total.checked_add(step).ok_or_else(overflow)?;
+        let (lo, hi) = (first.min(last), first.max(last));
+        if w.len == 0 {
+            w.min_offset = lo;
+            w.max_offset = hi;
+        } else {
+            w.min_offset = w.min_offset.min(lo);
+            w.max_offset = w.max_offset.max(hi);
+        }
+        w.len += count;
+        w.total = last;
+        Ok(())
     }
 }
 
@@ -46,8 +97,8 @@ impl WeightFn<Option<i64>> for IndexedDeltaWeightFn {
 /// progression is monotonic: `partial + v`, `partial + 2v`, …,
 /// `partial + count·v`.  Min/max are at the endpoints — no need to
 /// visit each intermediate item.
-fn compute_slab_agg(data: &[u8]) -> SlabAgg {
-    let mut decoder = <Option<i64> as ColumnValueRef>::Encoding::decoder(data);
+fn compute_slab_agg<I: DeltaInner>(data: &[u8]) -> SlabAgg {
+    let mut decoder = <I as ColumnValueRef>::Encoding::decoder(data);
     let mut partial = 0i64;
     let mut min_off = i64::MAX;
     let mut max_off = i64::MIN;
@@ -55,7 +106,7 @@ fn compute_slab_agg(data: &[u8]) -> SlabAgg {
 
     while let Some(run) = decoder.next_run() {
         len += run.count;
-        match run.value {
+        match I::to_opt(run.value) {
             None => {
                 min_off = min_off.min(partial);
                 max_off = max_off.max(partial);

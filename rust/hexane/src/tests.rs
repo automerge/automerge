@@ -494,6 +494,61 @@ fn iter_range_pos_starts_at_range_start() {
 }
 
 #[test]
+fn scan_to_value_on_rle_columns() {
+    // bool: scan_to_value(true/false) is "scan to next"
+    let mut vals = vec![false; 4];
+    vals.extend([true; 3]);
+    vals.extend([false; 2]);
+    vals.push(true);
+    let col: Column<bool> = Column::from_values(vals);
+
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(true), Some(4));
+    // inside the run: each call takes the next true, no pending state
+    assert_eq!(it.scan_to_value(true), Some(5));
+    assert_eq!(it.scan_to_value(true), Some(6));
+    assert_eq!(it.scan_to_value(true), Some(9));
+    assert_eq!(it.scan_to_value(true), None);
+    assert_eq!(it.next(), None, "miss parks at the window end");
+
+    let mut it = col.iter();
+    it.shift(5..9);
+    assert_eq!(it.scan_to_value(false), Some(7));
+
+    // strings work too
+    let col: Column<Option<String>> = Column::from_values(vec![
+        Some("a".to_owned()),
+        Some("a".to_owned()),
+        None,
+        Some("b".to_owned()),
+    ]);
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(Some("b")), Some(3));
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(None), Some(2));
+    assert_eq!(it.scan_to_value(Some("a")), None);
+}
+
+#[test]
+fn scan_to_pos_consumes_through() {
+    use crate::Shiftable;
+    let col = Column::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(10), Some(10));
+    assert_eq!(it.next(), Some(11));
+    assert_eq!(it.scan_to_pos(50), Some(50));
+
+    let col = DeltaColumn::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(7), Some(7));
+    assert_eq!(it.next(), Some(8));
+
+    let col = PrefixColumn::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(5).map(|pv| pv.value), Some(5));
+}
+
+#[test]
 fn shift_next_matches_v0() {
     // Reproduce exact v0 test case from columndata.rs::shift_next
     let col = Column::<u64>::from_values(vec![
@@ -2067,13 +2122,13 @@ fn load_with_empty_data_and_fill_gives_filled_nullable() {
 
 #[test]
 fn load_with_empty_data_length_without_fill_errors() {
-    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5).into());
+    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5));
     assert!(matches!(err, Err(crate::PackError::InvalidLength(0, 5))));
 }
 
 #[test]
 fn load_with_empty_data_and_zero_length() {
-    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0).into()).unwrap();
+    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0)).unwrap();
     assert_eq!(col.len(), 0);
 }
 
@@ -2081,7 +2136,7 @@ fn load_with_empty_data_and_zero_length() {
 fn load_with_length_mismatch_errors() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2)]);
     let data = col.save();
-    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5).into());
+    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5));
     assert!(matches!(err, Err(crate::PackError::InvalidLength(2, 5))));
 }
 
@@ -2089,27 +2144,11 @@ fn load_with_length_mismatch_errors() {
 fn load_with_length_match_succeeds() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), None, Some(3)]);
     let data = col.save();
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(1)));
     assert_eq!(loaded.get(1), Some(None));
     assert_eq!(loaded.get(2), Some(Some(3)));
-}
-
-#[test]
-fn load_with_validation_rejects_bad_values() {
-    let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(999), None]);
-    let data = col.save();
-    fn reject_large(v: Option<u64>) -> Option<String> {
-        match v {
-            Some(n) if n > 100 => Some(format!("too large: {}", n)),
-            _ => None,
-        }
-    }
-    let err =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_validation(reject_large));
-    assert!(matches!(err, Err(crate::PackError::InvalidValue(_))));
 }
 
 #[test]
@@ -2124,14 +2163,13 @@ fn load_with_no_validation_accepts_all() {
 fn load_with_length() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), Some(3)]);
     let data = col.save();
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.len(), 3);
 }
 
 #[test]
 fn load_with_opts_is_copy() {
-    let opts = LoadOpts::new().with_length(5).with_fill::<bool>(false);
+    let opts = LoadOpts::new().with_length(5).with_fill(false);
     let opts2 = opts; // copy
     let _ = opts; // still usable
     let _ = opts2;
@@ -2149,8 +2187,7 @@ fn prefix_column_load_with_empty_and_fill() {
 fn prefix_column_load_with_roundtrip() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false, true]);
     let data = col.save();
-    let loaded =
-        PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.save(), data);
 }
 
@@ -2158,7 +2195,7 @@ fn prefix_column_load_with_roundtrip() {
 fn prefix_column_load_with_length_mismatch() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false]);
     let data = col.save();
-    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10).into());
+    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10));
     assert!(err.is_err());
 }
 
@@ -2166,7 +2203,7 @@ fn prefix_column_load_with_length_mismatch() {
 fn delta_column_load_with_roundtrip() {
     let col = DeltaColumn::<Option<u64>>::from_values(vec![Some(10), None, Some(30)]);
     let data = col.save();
-    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new().into()).unwrap();
+    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new()).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(10)));
     assert_eq!(loaded.get(1), Some(None));
@@ -4204,7 +4241,7 @@ fn max_segments_one_rejected() {
 #[should_panic(expected = "max_segments must be at least 2")]
 fn max_segments_one_rejected_at_load() {
     let bytes = Column::<u64>::from_values((0..50).collect()).save();
-    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1).into());
+    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1));
 }
 
 #[test]
@@ -4218,7 +4255,7 @@ fn max_segments_two_full_cycle() {
     col.insert(10, 999u64);
     let bytes = col.save();
     let mut loaded =
-        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2).into()).unwrap();
+        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2)).unwrap();
     loaded.remove(0);
     loaded.push(7);
     assert_eq!(loaded.len(), 100);
@@ -4363,4 +4400,543 @@ fn golden_format_delta_opt_i64() {
     );
     let loaded = DeltaColumn::<Option<i64>>::load(fixture).unwrap();
     assert_eq!(loaded.to_vec(), values);
+}
+
+#[test]
+fn next_run_merges_across_slabs_strings_and_prefix() {
+    // Slab cuts land on run boundaries, so adjacent slabs holding equal
+    // values arise from edits: here replacing the value just before a slab
+    // boundary with the value just after it. next_run must merge the two
+    // physical runs — a caller should never observe slab boundaries.
+    let vals: Vec<Option<String>> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|s| Some(s.to_string()))
+        .collect();
+    let mut col = Column::<Option<String>>::from_values_with_max_segments(vals, 2);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+    // replace "b" (end of slab 1) with "c" (start of slab 2)
+    col.splice(1, 1, vec![Some("c".to_string())]);
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+    assert!(
+        !col.slab_lens().contains(&0),
+        "splices must never leave empty slabs behind"
+    );
+    let mut iter = col.iter();
+    let runs: Vec<(usize, Option<String>)> = std::iter::from_fn(|| {
+        iter.next_run()
+            .map(|r| (r.count, r.value.map(|s| s.to_string())))
+    })
+    .collect();
+    assert_eq!(
+        runs,
+        vec![
+            (1, Some("a".to_string())),
+            (2, Some("c".to_string())),
+            (1, Some("d".to_string())),
+        ],
+        "equal-valued runs must merge across slab boundaries"
+    );
+
+    // Same shape for the bool prefix column (the automerge insert column):
+    // deleting the `true` at the start of slab 2 leaves false|false at the
+    // boundary.
+    let mut col = PrefixColumn::<bool>::with_max_segments(2);
+    col.splice(0, 0, vec![true, false, true, false]);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+    col.splice(2, 1, Vec::<bool>::new());
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+    assert!(
+        !col.values().slab_lens().contains(&0),
+        "splices must never leave empty slabs behind"
+    );
+    let mut iter = col.iter();
+    let runs: Vec<(usize, bool)> =
+        std::iter::from_fn(|| iter.next_run().map(|r| (r.count, r.value.value))).collect();
+    assert_eq!(
+        runs,
+        vec![(1, true), (2, false)],
+        "prefix iter runs must merge across slab boundaries"
+    );
+}
+
+#[test]
+fn next_run_never_yields_adjacent_equal_runs_at_default_config() {
+    // ~150 runs at the default max_segments so slabs split naturally, then
+    // an edit makes the values on both sides of the first slab boundary
+    // equal. The contract: next_run coalesces runs regardless of slab
+    // layout, so consecutive runs never carry equal values.
+    let vals: Vec<Option<String>> = (0..300).map(|i| Some(format!("k{}", i / 2))).collect();
+    let mut col = Column::<Option<String>>::from_values(vals);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    let boundary = col.slab_lens()[0];
+    let after: Option<String> = col.get(boundary).flatten().map(|v| v.to_string());
+    col.splice(boundary - 1, 1, vec![after]);
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+
+    let mut iter = col.iter();
+    let mut total = 0;
+    let mut prev: Option<Option<String>> = None;
+    while let Some(run) = iter.next_run() {
+        let value = run.value.map(|s| s.to_string());
+        if let Some(prev) = &prev {
+            assert_ne!(prev, &value, "adjacent runs must never be equal");
+        }
+        total += run.count;
+        prev = Some(value);
+    }
+    assert_eq!(total, 300);
+
+    // same contract for the bool prefix column: delete the `true` at (or
+    // just before) the first slab boundary, leaving false|false across it
+    let vals: Vec<bool> = (0..300).map(|i| i % 2 == 0).collect();
+    let mut col = PrefixColumn::<bool>::new();
+    col.splice(0, 0, vals);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    let boundary = col.values().slab_lens()[0];
+    let at_boundary = col.get(boundary).map(|pv| pv.value).unwrap_or(false);
+    let del = if at_boundary { boundary } else { boundary - 1 };
+    col.splice(del, 1, Vec::<bool>::new());
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+
+    let mut iter = col.iter();
+    let mut total = 0;
+    let mut prev: Option<bool> = None;
+    while let Some(run) = iter.next_run() {
+        let value = run.value.value;
+        if let Some(prev) = prev {
+            assert_ne!(prev, value, "adjacent runs must never be equal");
+        }
+        total += run.count;
+        prev = Some(value);
+    }
+    assert_eq!(total, 299);
+}
+
+// ── streaming load (load_iter-backed load_with) ─────────────────────────────
+
+fn assert_load_roundtrip_bytes<T>(saved: &[u8], expected_len: usize)
+where
+    T: crate::RleValue
+        + crate::ColumnValueRef<Encoding = crate::RleEncoding<T>>
+        + for<'a> crate::ColumnValueRef<Get<'a> = T>
+        + Clone
+        + PartialEq
+        + std::fmt::Debug
+        + 'static,
+{
+    for max_seg in [2usize, 4, 8, 64] {
+        let col =
+            Column::<T>::load_with(saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        assert_eq!(col.len(), expected_len, "len, max_seg={max_seg}");
+        assert_eq!(col.save(), saved, "save roundtrip, max_seg={max_seg}");
+    }
+}
+
+#[test]
+fn load_roundtrips_across_shapes() {
+    // long literal run (forces literal splitting), repeats, mixed
+    for vals in [
+        (0..300).collect::<Vec<u64>>(),
+        (0..300).map(|i| i / 50).collect(),
+        (0..300).map(|i| if i % 7 == 0 { i } else { 9 }).collect(),
+    ] {
+        let saved = Column::<u64>::from_values(vals.clone()).save();
+        assert_load_roundtrip_bytes::<u64>(&saved, vals.len());
+    }
+
+    let nullable: Vec<Option<u64>> = (0..200)
+        .map(|i| if i % 5 == 0 { None } else { Some(i / 3) })
+        .collect();
+    let saved = Column::<Option<u64>>::from_values(nullable.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col =
+            Column::<Option<u64>>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg))
+                .unwrap();
+        assert_eq!(col.to_vec(), nullable);
+        assert_eq!(col.save(), saved);
+    }
+
+    let strings: Vec<String> = (0..100)
+        .map(|i| {
+            if i % 4 == 0 {
+                "repeated".to_string()
+            } else {
+                format!("item_{i}")
+            }
+        })
+        .collect();
+    let saved = Column::<String>::from_values(strings.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col = Column::<String>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg))
+            .unwrap();
+        assert_eq!(col.to_vec(), strings);
+        assert_eq!(col.save(), saved);
+    }
+
+    let bools: Vec<bool> = (0..500).map(|i| (i / 13) % 2 == 0).collect();
+    let saved = Column::<bool>::from_values(bools.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col =
+            Column::<bool>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        assert_eq!(col.to_vec(), bools);
+        assert_eq!(col.save(), saved);
+    }
+
+    // prefix column: weights must come out right for prefix queries
+    let counts: Vec<u32> = (0..400).map(|i| (i % 5) as u32).collect();
+    let saved = PrefixColumn::<u32>::from_values(counts.clone()).save();
+    let col = PrefixColumn::<u32>::load_with(&saved, LoadOpts::new()).unwrap();
+    let mut total = 0u64;
+    for (pos, c) in counts.iter().enumerate() {
+        assert_eq!(col.get_prefix(pos), total, "prefix at {pos}");
+        total += *c as u64;
+    }
+    assert_eq!(col.get_prefix(counts.len()), total);
+}
+
+#[test]
+fn load_empty_and_fill_and_length() {
+    let col =
+        Column::<u64>::load_with(&[], LoadOpts::new().with_length(5).with_fill(7u64)).unwrap();
+    assert_eq!(col.to_vec(), vec![7u64; 5]);
+    assert!(Column::<u64>::load_with(&[], LoadOpts::new().with_length(5)).is_err());
+
+    // length mismatch caught
+    let saved = Column::<u64>::from_values((0..10).collect()).save();
+    assert!(Column::<u64>::load_with(&saved, LoadOpts::new().with_length(11)).is_err());
+}
+
+#[test]
+fn load_rejects_non_canonical_input() {
+    // Non-canonical run structure — anything a canonical encoder would
+    // have merged or never emitted — is a load error, both when draining
+    // (`load_with`) and when pulling the run stream.
+    let cases: &[&[u8]] = &[
+        &[0x01, 0x05],             // repeat with count 1
+        &[0x02, 0x05, 0x02, 0x05], // adjacent equal repeats
+        &[0x02, 0x05, 0x7f, 0x05], // repeat then equal literal
+        &[0x7f, 0x05, 0x7f, 0x05], // adjacent literal runs
+        &[0x7e, 0x05, 0x05],       // literal with consecutive equal values
+        &[0x7f, 0x05, 0x02, 0x05], // literal then equal repeat
+        &[0x00, 0x00],             // null run with count 0 (nullable col below)
+    ];
+    for bytes in cases {
+        assert!(
+            Column::<u64>::load_with(bytes, LoadOpts::new()).is_err(),
+            "load should reject {bytes:?}"
+        );
+        let mut it = crate::RleEncoding::<u64>::load_iter(bytes, 64);
+        let mut errored = false;
+        loop {
+            match crate::LoadIterApi::try_next_run(&mut it) {
+                Err(_) => {
+                    errored = true;
+                    break;
+                }
+                Ok(None) => break,
+                Ok(Some(_)) => {}
+            }
+        }
+        assert!(errored, "run stream should reject {bytes:?}");
+    }
+    // adjacent null runs (needs a nullable column)
+    let adjacent_nulls: &[u8] = &[0x00, 0x01, 0x00, 0x01];
+    assert!(Column::<Option<u64>>::load_with(adjacent_nulls, LoadOpts::new()).is_err());
+    // count-0 null run
+    let zero_null: &[u8] = &[0x00, 0x00];
+    assert!(Column::<Option<u64>>::load_with(zero_null, LoadOpts::new()).is_err());
+}
+
+#[test]
+fn load_rejects_bad_contents() {
+    // null in non-nullable
+    assert!(Column::<u64>::load_with(&[0x00, 0x01], LoadOpts::new()).is_err());
+    // truncated value bytes
+    assert!(Column::<u64>::load_with(&[0x02], LoadOpts::new()).is_err());
+    // invalid utf8 in a string column: repeat count 2, len 1, 0xff
+    assert!(Column::<String>::load_with(&[0x02, 0x01, 0xff], LoadOpts::new()).is_err());
+}
+
+#[test]
+fn load_iter_partial_consume_then_error() {
+    use crate::encoding::LoadIterApi;
+    // one valid run followed by a malformed tail: the error surfaces when
+    // the iterator reaches it, not before
+    let mut bytes = Column::<u64>::from_values(vec![5, 5, 5]).save();
+    bytes.extend_from_slice(&[0x03]); // repeat header with missing value
+    let mut iter = crate::RleEncoding::<u64>::load_iter(&bytes, 64);
+    let first = LoadIterApi::try_next_run(&mut iter);
+    match first {
+        Err(_) => {}
+        Ok(_) => assert!(LoadIterApi::try_next_run(&mut iter).is_err()),
+    }
+
+    // run iteration over valid bytes
+    let good = Column::<u64>::from_values(vec![5, 5, 5]).save();
+    let mut it = crate::RleEncoding::<u64>::load_iter(&good, 64);
+    let run = LoadIterApi::try_next_run(&mut it).unwrap().unwrap();
+    assert_eq!((run.count, run.value), (3, 5));
+    assert!(LoadIterApi::try_next_run(&mut it).unwrap().is_none());
+}
+
+proptest! {
+    #[test]
+    fn load_roundtrip_proptest_streaming(
+        values in prop::collection::vec(prop::option::of(0u64..50), 0..600),
+        max_seg in 2usize..32,
+    ) {
+        let saved = Column::<Option<u64>>::from_values(values.clone()).save();
+        let col = Column::<Option<u64>>::load_with(
+            &saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        prop_assert_eq!(col.to_vec(), values);
+        prop_assert_eq!(col.save(), saved);
+    }
+}
+
+// ── Incremental weight accumulation during load ─────────────────────────────
+//
+// `WF::ACCUMULATES` weights (prefix sums, delta aggregates) are built as
+// runs stream past the loader instead of a `WF::compute` re-decode at
+// `finalize`. Every query below descends the index through the
+// accumulated weights, so a mismatch with `compute` semantics fails.
+
+#[test]
+fn load_accumulates_prefix_weights() {
+    let mut seed = 0x5EEDu64;
+    let vals: Vec<u64> = (0..5_000).map(|_| xorshift(&mut seed) % 7).collect();
+    let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
+    // small max_segments → many slabs → many boundary attributions
+    let col = PrefixColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+
+    let mut running = 0u128;
+    for (i, &v) in vals.iter().enumerate() {
+        let pv = col.get(i).unwrap();
+        assert_eq!(pv.value, v, "value at {i}");
+        assert_eq!(pv.prefix(), running, "prefix at {i}");
+        running += v as u128;
+        assert_eq!(pv.total(), running, "total at {i}");
+    }
+}
+
+#[test]
+fn load_accumulates_prefix_weights_partial_consume() {
+    // consumer pulls some runs before finalize; the weights must come
+    // out the same as an untouched load
+    let mut seed = 0xACC0u64;
+    let vals: Vec<u64> = (0..2_000).map(|_| xorshift(&mut seed) % 5).collect();
+    let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
+
+    let mut iter = PrefixColumn::<u64>::load_iter(&saved, LoadOpts::new().with_max_segments(4));
+    for _ in 0..25 {
+        iter.try_next_run().unwrap().unwrap();
+    }
+    let col = iter.finalize().unwrap();
+
+    let mut running = 0u128;
+    for (i, &v) in vals.iter().enumerate() {
+        let pv = col.get(i).unwrap();
+        assert_eq!((pv.value, pv.total()), (v, running + v as u128), "at {i}");
+        running += v as u128;
+    }
+}
+
+#[test]
+fn prefix_load_rejects_non_canonical_input() {
+    // Adjacent equal repeat runs are a load error for accumulating
+    // (prefix/delta) columns too — the canonicality check runs at the
+    // wire level, beneath the weight machinery.
+    let bytes: Vec<u8> = [0x02, 0x05].repeat(200);
+    assert!(PrefixColumn::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(4)).is_err());
+}
+
+#[test]
+fn load_accumulates_delta_agg_weights() {
+    let mut seed = 0xDE17Au64;
+    let vals: Vec<u64> = (0..3_000).map(|_| xorshift(&mut seed) % 100).collect();
+    let saved = DeltaColumn::<u64>::from_values(vals.clone()).save();
+    let col = DeltaColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+
+    assert_eq!(col.iter().collect::<Vec<_>>(), vals);
+    // find_by_value prunes slabs via the accumulated min/max aggregates
+    // and realizes values from the accumulated totals
+    for target in 0..100 {
+        let got: Vec<usize> = col.find_by_value(target).collect();
+        let want: Vec<usize> = vals
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v == target)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(got, want, "find_by_value({target})");
+    }
+}
+
+#[test]
+fn load_accumulates_delta_agg_weights_nullable() {
+    let mut seed = 0x0511u64;
+    let vals: Vec<Option<i64>> = (0..3_000)
+        .map(|_| {
+            let r = xorshift(&mut seed);
+            if r % 10 == 0 {
+                None
+            } else {
+                Some((r % 200) as i64 - 100)
+            }
+        })
+        .collect();
+    let saved = DeltaColumn::<Option<i64>>::from_values(vals.clone()).save();
+    let col = DeltaColumn::<Option<i64>>::load_with(&saved, LoadOpts::new().with_max_segments(4))
+        .unwrap();
+
+    assert_eq!(col.iter().collect::<Vec<_>>(), vals);
+    for target in -100i64..100 {
+        let got: Vec<usize> = col.find_by_value(Some(target)).collect();
+        let want: Vec<usize> = vals
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v == Some(target))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(got, want, "find_by_value({target})");
+    }
+}
+
+/// An iterator born over an empty range must still be *positioned* at
+/// its start: windows get re-extended (`set_max`/`shift`) and then
+/// advanced, and an unpositioned iterator either yields nothing
+/// (`next`) or trips `advance_to_slab`'s `pos >= self.pos` invariant
+/// (`nth`) when the start sits mid-slab.
+#[test]
+fn empty_born_iter_extends_with_next() {
+    let mut c: Column<u64> = Column::default();
+    for i in 0..40u64 {
+        c.push(i);
+    }
+    let mut it = c.iter_range(5..5);
+    assert_eq!(it.pos(), 5);
+    assert_eq!(it.next(), None);
+    it.set_max(8);
+    assert_eq!(it.next(), Some(5), "extended empty-born iter yields at pos");
+    assert_eq!(it.next(), Some(6));
+    assert_eq!(it.pos(), 7);
+}
+
+#[test]
+fn empty_born_iter_extends_with_shift() {
+    // mirrors automerge's batch apply: a scope narrows to p..p, the
+    // next object switch shifts the same iterator forward
+    let mut c: Column<u64> = Column::default();
+    for i in 0..40u64 {
+        c.push(i);
+    }
+    let mut it = c.iter_range(5..5);
+    it.shift(6..6);
+    assert_eq!(it.pos(), 6);
+    it.set_max(10);
+    assert_eq!(it.next(), Some(6));
+}
+
+#[test]
+fn empty_born_iter_multi_slab_nth() {
+    let mut c: Column<u64> = Column::default();
+    for i in 0..2000u64 {
+        c.push(i);
+    }
+    assert!(c.slab_count() > 1, "need multiple slabs");
+    let mut it = c.iter_range(1000..1000);
+    it.set_max(c.len());
+    // far nth exercises the slab-jump slow path
+    assert_eq!(it.nth(500), Some(1500));
+    assert_eq!(it.pos(), 1501);
+    // empty-born at/past the data end stays a clean end iterator
+    let mut end_it = c.iter_range(2000..2000);
+    end_it.set_max(3000);
+    assert_eq!(end_it.next(), None);
+}
+
+#[test]
+fn delta_scope_to_value_basic() {
+    // same shape as scope_to_value_basic, delta-encoded
+    let data: Vec<u64> = vec![
+        2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 8, 9, 9,
+    ];
+    let col = DeltaColumn::<u64>::from_values(data);
+
+    assert_eq!(col.scope_to_value(4, ..), 7..15);
+    assert_eq!(col.scope_to_value(4, ..11), 7..11);
+    assert_eq!(col.scope_to_value(4, ..8), 7..8);
+    assert_eq!(col.scope_to_value(4, 0..1), 1..1);
+    assert_eq!(col.scope_to_value(4, 8..9), 8..9);
+    assert_eq!(col.scope_to_value(4, 9..), 9..15);
+    assert_eq!(col.scope_to_value(4, 14..16), 14..15);
+
+    assert_eq!(col.scope_to_value(2, ..), 0..3);
+    assert_eq!(col.scope_to_value(7, ..), 22..22);
+    assert_eq!(col.scope_to_value(8, ..), 22..23);
+    assert_eq!(col.scope_to_value(9, ..), 23..25);
+    // insertion points at the extremes
+    assert_eq!(col.scope_to_value(1, ..), 0..0);
+    assert_eq!(col.scope_to_value(10, ..), 25..25);
+}
+
+#[test]
+fn delta_scope_to_value_nullable() {
+    // nulls sort first
+    let data: Vec<Option<i64>> = vec![
+        None,
+        None,
+        Some(-5),
+        Some(-5),
+        Some(0),
+        Some(3),
+        Some(3),
+        Some(3),
+        Some(7),
+    ];
+    let col = DeltaColumn::<Option<i64>>::from_values(data);
+
+    assert_eq!(col.scope_to_value(None, ..), 0..2);
+    assert_eq!(col.scope_to_value(Some(-5), ..), 2..4);
+    assert_eq!(col.scope_to_value(Some(3), ..), 5..8);
+    assert_eq!(col.scope_to_value(Some(1), ..), 5..5);
+    assert_eq!(col.scope_to_value(Some(7), 6..), 8..9);
+}
+
+#[test]
+fn delta_scope_to_value_matches_plain_column() {
+    // multi-slab sorted data: the delta version's tree descent must
+    // agree with the plain column's scan on every target and window
+    use rand::RngExt;
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(31415);
+    for _ in 0..20 {
+        let mut vals: Vec<u64> = (0..2000).map(|_| rng.random_range(0..300u64)).collect();
+        vals.sort();
+        let plain = Column::<u64>::from_values(vals.clone());
+        let delta = DeltaColumn::<u64>::from_values(vals.clone());
+        assert!(delta.slab_count() > 1, "need multiple slabs");
+        for _ in 0..200 {
+            let target = rng.random_range(0..310u64);
+            let a = rng.random_range(0..=vals.len());
+            let b = rng.random_range(0..=vals.len());
+            let (lo, hi) = (a.min(b), a.max(b));
+            assert_eq!(
+                delta.scope_to_value(target, lo..hi),
+                plain.scope_to_value(target, lo..hi),
+                "target {target} window {lo}..{hi}"
+            );
+        }
+    }
 }

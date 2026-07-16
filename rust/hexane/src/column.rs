@@ -8,7 +8,7 @@ use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
 use crate::PackError;
-use crate::{AsColumnRef, ColumnValueRef, TypedLoadOpts};
+use crate::{AsColumnRef, ColumnValueRef, LoadOpts, MaybeFill, Run};
 
 /// Type alias for the slab tail metadata of a column value type.
 pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
@@ -87,6 +87,25 @@ pub trait WeightFn<T: ColumnValueRef>: Sealed {
     /// non-invertible aggregates like min/max.
     type Weight: Clone + Default + std::fmt::Debug;
     fn compute(slab: &Slab<TailOf<T>>) -> Self::Weight;
+
+    /// `true` when `compute` has to re-decode the slab bytes (prefix sums,
+    /// delta aggregates).  The streaming loader then builds each slab's
+    /// weight incrementally via [`accumulate_run`](Self::accumulate_run)
+    /// as runs stream past, instead of a second decode pass at the end.
+    const ACCUMULATES: bool = false;
+
+    /// Fold a run of `count` copies of `value` into an in-progress slab
+    /// weight (starting from `Default`).  Must agree exactly with
+    /// [`compute`](Self::compute); runs may arrive split into pieces.
+    ///
+    /// Only called during load, so it is fallible: weight functions whose
+    /// arithmetic can overflow on hostile bytes (delta aggregates) return
+    /// an error instead of wrapping or panicking.
+    fn accumulate_run(
+        weight: &mut Self::Weight,
+        count: usize,
+        value: T::Get<'_>,
+    ) -> Result<(), PackError>;
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -101,6 +120,18 @@ impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     #[inline]
     fn compute(slab: &Slab<TailOf<T>>) -> usize {
         slab.len
+    }
+
+    // `compute` is O(1) here, so the loader keeps its fast drain path
+    // (`ACCUMULATES = false`); this impl exists for completeness.
+    #[inline]
+    fn accumulate_run(
+        weight: &mut usize,
+        count: usize,
+        _value: T::Get<'_>,
+    ) -> Result<(), PackError> {
+        *weight += count;
+        Ok(())
     }
 }
 
@@ -420,6 +451,12 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
 
 impl<T: ColumnValueRef> ExactSizeIterator for Iter<'_, T> {}
 
+impl<'a, T: ColumnValueRef> crate::encoding::RunSrc<'a, T> for Iter<'a, T> {
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        Ok(self.next_run())
+    }
+}
+
 impl<T: ColumnValueRef> std::fmt::Debug for Iter<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Iter")
@@ -475,6 +512,16 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         if target > self.pos {
             self.nth(target - self.pos - 1);
         }
+    }
+
+    /// Reposition the iterator window to `range`.
+    ///
+    /// After this call the iterator yields the items in `range` and then
+    /// returns `None`. Equivalent to `set_max(range.end)` followed by
+    /// `advance_to(range.start)`.
+    pub fn shift(&mut self, range: Range<usize>) {
+        self.set_max(range.end);
+        self.advance_to(range.start);
     }
 
     pub fn advance_by(&mut self, amount: usize) {
@@ -559,6 +606,9 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         self.nth(range.start - self.pos)
     }
 
+    // Invariant: `pos >= self.pos`. This holds because iterators are
+    // always positioned at construction (see `iter_range` — even empty
+    // ranges seek), and every advance moves forward.
     pub(crate) fn advance_to_slab(&mut self, si: usize, pos: usize) -> bool {
         if si >= self.slabs.len() {
             self.slab_idx = si;
@@ -674,9 +724,38 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// Assumes values within `range` are sorted.  If they aren't, the
     /// result is unspecified — a wrong or empty range may be returned —
     /// but never a panic, memory unsafety, or column corruption.
-    pub fn seek_to_value(
+    /// Scan forward for the next occurrence of `target`.
+    ///
+    /// Unlike [`Self::seek_to_value`] the values need not be sorted —
+    /// this is a find, walked run-at-a-time (for RLE data that is one
+    /// step per run, not per item). On a hit, returns `Some((pos,
+    /// value))` with the value consumed: iteration continues with the
+    /// item after it — so repeated calls walk successive occurrences,
+    /// including consecutive items inside one run, with no caller-side
+    /// run state. On a miss, returns `None` with the iterator at the
+    /// end of its window.
+    pub fn scan_to_value<'t>(&mut self, target: T::Get<'t>) -> Option<usize> {
+        let end = self.end_pos();
+        let mut probe = self.clone();
+        let mut pos = probe.pos();
+        while pos < end {
+            let Some(run) = probe.next_run() else {
+                break;
+            };
+            if T::eq(run.value, T::shorten(&target)) {
+                // consume self through the hit (one indexed jump)
+                self.nth(pos - self.pos())?;
+                return Some(pos);
+            }
+            pos += run.count;
+        }
+        self.advance_to(end);
+        None
+    }
+
+    pub fn seek_to_value<'t>(
         &mut self,
-        target: T::Get<'a>,
+        target: T::Get<'t>,
         range: impl std::ops::RangeBounds<usize>,
     ) -> Range<usize>
     where
@@ -690,14 +769,14 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 
         let mut checkpoint = self.clone();
         checkpoint.set_max(end);
-        let range = checkpoint.scan_to_value(target);
+        let range = checkpoint.sorted_scan_to_value(target);
 
         self.advance_to(range.start);
 
         range
     }
 
-    fn scan_to_value(mut self, target: T::Get<'a>) -> Range<usize>
+    fn sorted_scan_to_value<'t>(mut self, target: T::Get<'t>) -> Range<usize>
     where
         for<'x> T::Get<'x>: Ord,
     {
@@ -711,7 +790,9 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         };
         let si_start = self.get_slab();
 
-        match first_run.value.cmp(&target) {
+        // the column's values and the caller's target have unrelated
+        // borrow lifetimes; shorten both to compare
+        match T::shorten(&first_run.value).cmp(&T::shorten(&target)) {
             Ordering::Equal => {
                 assert!(start + first_run.count <= end);
                 start..start + first_run.count
@@ -729,7 +810,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                     let mid = lo + (hi - lo) / 2;
                     let mut dec = T::Encoding::decoder(col.slab_data(mid));
                     let head = dec.next_run().unwrap();
-                    match head.value.cmp(&target) {
+                    match T::shorten(&head.value).cmp(&T::shorten(&target)) {
                         Ordering::Less => {
                             candidate = Some(mid);
                             lo = mid + 1;
@@ -751,7 +832,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 
                 let mut pos = self.pos();
                 while let Some(run) = self.next_run() {
-                    match run.value.cmp(&target) {
+                    match T::shorten(&run.value).cmp(&T::shorten(&target)) {
                         Ordering::Less => {
                             pos += run.count;
                         }
@@ -877,72 +958,51 @@ where
     }
 
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_verified(data, DEFAULT_MAX_SEG, None)
+        Self::load_iter(data, LoadOpts::new()).finalize()
     }
 
     /// Deserialize with options.  Supports:
     ///   * `with_length(n)` — validate the column has exactly `n` items.
-    ///   * `with_fill(v)` — when data is empty and length is set, fill
-    ///     with `v` instead of returning empty.
-    ///   * `with_validation(f)` — validate each decoded value.
+    ///   * `with_fill(v)` — when data is empty and `length` is set, read
+    ///     as `length` copies of `v` instead of an empty column.
     ///   * `with_max_segments(n)` — override the slab segment budget.
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, PackError> {
-        if data.is_empty() {
-            return match (opts.length, opts.fill) {
-                (Some(0) | None, _) => Ok(Self::new()),
-                (Some(len), Some(value)) => Ok(Self::fill(len, value)),
-                (Some(len), None) => Err(PackError::InvalidLength(0, len)),
-            };
-        }
-        let col = Self::load_verified(data, opts.max_segments, opts.validate)?;
-        if let Some(expected) = opts.length {
-            if col.len() != expected {
-                return Err(PackError::InvalidLength(col.len(), expected));
-            }
-        }
-        Ok(col)
-    }
-
-    pub(crate) fn load_verified(
-        data: &[u8],
-        max_segments: usize,
-        validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
-    ) -> Result<Self, PackError> {
-        assert!(max_segments >= 2, "max_segments must be at least 2");
-        let slabs = T::Encoding::load_and_verify(data, max_segments, validate)?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
-        Ok(Self {
-            slabs,
-            index,
-            total_len,
-            max_segments,
-            counter: 0,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub(crate) fn load_verified_fold<'a, P, F>(
-        data: &'a [u8],
-        max_segments: usize,
-        validate: Option<F>,
-    ) -> Result<Self, PackError>
+    pub fn load_with<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> Result<Self, PackError>
     where
-        P: Default + Copy,
-        F: Fn(P, usize, T::Get<'a>) -> Result<P, String>,
+        F: MaybeFill<T::Get<'a>>,
     {
-        assert!(max_segments >= 2, "max_segments must be at least 2");
-        let slabs = T::Encoding::load_and_verify_fold(data, max_segments, validate)?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
-        Ok(Self {
-            slabs,
-            index,
-            total_len,
-            max_segments,
-            counter: 0,
+        Self::load_iter(data, opts).finalize()
+    }
+
+    /// Streaming load: decode + validate the saved bytes run by run while
+    /// the column's slabs build underneath (the loader's byte-copy
+    /// mechanics), then [`finalize`](ColumnLoadIter::finalize) into the
+    /// column.
+    ///
+    /// Pulling runs is optional — `load_iter(data, opts).finalize()` is a
+    /// plain load — but consumers that need the data anyway (like an
+    /// index builder) can walk the canonical runs during the same decode
+    /// pass. A fill option on empty data emits one run and writes one
+    /// slab.
+    pub fn load_iter<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> ColumnLoadIter<'a, T, WF, Idx>
+    where
+        F: MaybeFill<T::Get<'a>>,
+    {
+        assert!(opts.max_segments >= 2, "max_segments must be at least 2");
+        let fill = match (data.is_empty(), opts.length) {
+            (true, Some(len)) => opts.fill.fill_value().map(|value| (value, len)),
+            _ => None,
+        };
+        ColumnLoadIter {
+            iter: T::Encoding::load_iter(data, opts.max_segments),
+            fill,
+            fill_emitted: false,
+            length: opts.length,
+            max_segments: opts.max_segments,
+            weights: Vec::new(),
+            cur_weight: WF::Weight::default(),
+            cur_emitted: 0,
             _phantom: PhantomData,
-        })
+        }
     }
 
     /// Build a column directly from pre-encoded slabs, skipping the
@@ -1060,8 +1120,15 @@ where
     /// O(log S) seek via the index, O(1) per item after.
     pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T> {
         let start = range.start.min(self.total_len);
-        let end = range.end.min(self.total_len);
-        if start >= end || self.slabs.is_empty() {
+        let end = range.end.min(self.total_len).max(start);
+        // Even an empty range must leave the iterator *positioned* at
+        // `start` (decoder and slab state valid): windows are routinely
+        // re-extended later via `set_max`/`shift`, and an unpositioned
+        // iterator would yield nothing from `next` and violate
+        // `advance_to_slab`'s forward invariant from `nth`. Only a
+        // start at/past the end of the data — where there is nothing
+        // to sit on — takes the unpositioned shortcut.
+        if start >= self.total_len || self.slabs.is_empty() {
             return Iter {
                 slabs: &self.slabs,
                 col: Some(self),
@@ -1172,7 +1239,7 @@ where
     {
         let (start, end) = normalize_range_max(range, self.total_len);
         let target = value.as_column_ref();
-        self.iter_range(start..end).scan_to_value(target)
+        self.iter_range(start..end).sorted_scan_to_value(target)
     }
 
     // ── Mutations ───────────────────────────────────────────────────────
@@ -1225,6 +1292,16 @@ where
         I: IntoIterator<Item = V>,
     {
         let _ = self.splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
+    }
+
+    /// Splice `(value, count)` runs in — the run-aware fast path for bulk
+    /// uniform data.
+    pub fn splice_runs<V, I>(&mut self, index: usize, del: usize, runs: I)
+    where
+        V: AsColumnRef<T>,
+        I: IntoIterator<Item = (V, usize)>,
+    {
+        let _ = self.splice_inner(index, del, runs);
     }
 
     /// Returns the affected slab range (post-merge), mirroring
@@ -1360,7 +1437,9 @@ where
 
     fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
         let max = self.max_segments;
-        let min = self.max_segments / 4;
+        // clamped so that even at tiny max_segments a slab emptied by a
+        // deletion (0 segments) always merges away
+        let min = (self.max_segments / 4).max(1);
         if let Some(a) = self.slabs.get(index_a).map(|s| s.segments) {
             if let Some(b) = self.slabs.get(index_b).map(|s| s.segments) {
                 if (a < min || b < min) && a + b <= max {
@@ -1396,6 +1475,198 @@ where
     /// prefix-sum range overlaps `[lo, hi]`.
     pub fn find_by_value_range(&self, lo: i64, hi: i64) -> FindByValueRange<'_> {
         self.index.find_by_value_range(lo, hi)
+    }
+}
+
+// ── ColumnLoadIter ──────────────────────────────────────────────────────────
+
+/// Streaming column load — see [`Column::load_iter`].
+///
+/// Yields the input's runs while the slabs build underneath. The input
+/// must be canonical — non-canonical structure (adjacent mergeable runs,
+/// count-0 runs, count-1 repeats) is a load error — so consumers get the
+/// "adjacent runs never carry equal values" contract by construction.
+/// All methods return `Result` — the bytes are untrusted.
+pub struct ColumnLoadIter<'a, T, WF = LenWeight, Idx = SlabBTree<<WF as WeightFn<T>>::Weight>>
+where
+    T: ColumnValueRef,
+    WF: WeightFn<T>,
+{
+    iter: <T::Encoding as ColumnEncoding>::LoadIter<'a>,
+    /// engaged when the data was absent and the load options carried a
+    /// fill: emit one run, write one slab
+    fill: Option<(T::Get<'a>, usize)>,
+    fill_emitted: bool,
+    length: Option<usize>,
+    max_segments: usize,
+    /// per-slab weights accumulated as runs stream past — only when
+    /// `WF::ACCUMULATES`, sparing `finalize` the `WF::compute` re-decode
+    weights: Vec<WF::Weight>,
+    /// weight of the slab currently being cut
+    cur_weight: WF::Weight,
+    /// items already attributed to the slab currently being cut
+    cur_emitted: usize,
+    _phantom: PhantomData<(WF, Idx)>,
+}
+
+impl<'a, T, WF, Idx> ColumnLoadIter<'a, T, WF, Idx>
+where
+    T: ColumnValueRef,
+    WF: WeightFn<T>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    /// The next canonical run, or `None` at end of input. A fill emits
+    /// its entire contents as one run.
+    pub fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        use crate::encoding::LoadIterApi;
+        if let Some((value, len)) = self.fill {
+            if self.fill_emitted || len == 0 {
+                return Ok(None);
+            }
+            self.fill_emitted = true;
+            return Ok(Some(Run { count: len, value }));
+        }
+        let run = self.iter.try_next_run()?;
+        if WF::ACCUMULATES {
+            if let Some(run) = &run {
+                self.attribute(run.count, run.value)?;
+            }
+        }
+        Ok(run)
+    }
+
+    /// Attribute a pulled run's items to the current slab's weight.
+    /// Every run is exactly one wire segment (canonical input is
+    /// enforced by the loader), so a run never spans a slab boundary —
+    /// if this run's segment completed a slab, the cut landed at the
+    /// run's end and the weight closes with it.
+    fn attribute(&mut self, count: usize, value: T::Get<'a>) -> Result<(), PackError> {
+        use crate::encoding::LoadIterApi;
+        WF::accumulate_run(&mut self.cur_weight, count, value)?;
+        self.cur_emitted += count;
+        if self.weights.len() < self.iter.slabs_completed() {
+            debug_assert_eq!(
+                self.cur_emitted,
+                self.iter.completed_slab_len(self.weights.len())
+            );
+            self.weights.push(std::mem::take(&mut self.cur_weight));
+            self.cur_emitted = 0;
+        }
+        Ok(())
+    }
+
+    /// Drain and validate whatever was not pulled, apply the length check
+    /// from the load options, and return the finished column.
+    pub fn finalize(mut self) -> Result<Column<T, WF, Idx>, PackError> {
+        use crate::encoding::LoadIterApi;
+        if let Some((value, len)) = self.fill {
+            if len == 0 {
+                return Ok(Column::with_max_segments(self.max_segments));
+            }
+            return Ok(Column::fill(len, value));
+        }
+        if WF::ACCUMULATES {
+            // `iter.finalize()` below drains and validates whatever is
+            // left, but its fast discard loop never materializes runs —
+            // accumulating weights need every run to pass through
+            // `attribute`, so eat the tail here first (the finalize
+            // below then only flushes the last slab)
+            while self.try_next_run()?.is_some() {}
+        }
+        let slabs = self.iter.finalize()?;
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        if let Some(expected) = self.length {
+            if total_len != expected {
+                return Err(PackError::InvalidLength(total_len, expected));
+            }
+        }
+        let index = if WF::ACCUMULATES {
+            let mut weights = self.weights;
+            // the final slab is only cut by `finalize` itself; whatever is
+            // not yet attributed to a closed slab belongs to it
+            if weights.len() < slabs.len() {
+                weights.push(self.cur_weight);
+            }
+            debug_assert_eq!(weights.len(), slabs.len());
+            Idx::from_weights(weights)
+        } else {
+            Idx::from_weights(slabs.iter().map(WF::compute))
+        };
+        Ok(Column {
+            slabs,
+            index,
+            total_len,
+            max_segments: self.max_segments,
+            counter: 0,
+            _phantom: PhantomData,
+        })
+    }
+
+    /// Like [`finalize`](Self::finalize), but runs `check` over every
+    /// slab's weight (in column order) *before* any weight enters the
+    /// index — so callers can validate aggregates (e.g. delta domain
+    /// bounds) before they reach the index's merge arithmetic.
+    pub(crate) fn finalize_with(
+        mut self,
+        mut check: impl FnMut(&WF::Weight) -> Result<(), PackError>,
+    ) -> Result<Column<T, WF, Idx>, PackError> {
+        use crate::encoding::LoadIterApi;
+        if let Some((value, len)) = self.fill {
+            if len == 0 {
+                return Ok(Column::with_max_segments(self.max_segments));
+            }
+            return Ok(Column::fill(len, value));
+        }
+        if WF::ACCUMULATES {
+            // `iter.finalize()` below drains and validates whatever is
+            // left, but its fast discard loop never materializes runs —
+            // accumulating weights need every run to pass through
+            // `attribute`, so eat the tail here first (the finalize
+            // below then only flushes the last slab)
+            while self.try_next_run()?.is_some() {}
+        }
+        let slabs = self.iter.finalize()?;
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        if let Some(expected) = self.length {
+            if total_len != expected {
+                return Err(PackError::InvalidLength(total_len, expected));
+            }
+        }
+        let weights: Vec<WF::Weight> = if WF::ACCUMULATES {
+            let mut weights = self.weights;
+            // the final slab is only cut by `finalize` itself; whatever is
+            // not yet attributed to a closed slab belongs to it
+            if weights.len() < slabs.len() {
+                weights.push(self.cur_weight);
+            }
+            debug_assert_eq!(weights.len(), slabs.len());
+            weights
+        } else {
+            slabs.iter().map(WF::compute).collect()
+        };
+        for w in &weights {
+            check(w)?;
+        }
+        let index = Idx::from_weights(weights);
+        Ok(Column {
+            slabs,
+            index,
+            total_len,
+            max_segments: self.max_segments,
+            counter: 0,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<'a, T, WF, Idx> crate::encoding::RunSrc<'a, T> for ColumnLoadIter<'a, T, WF, Idx>
+where
+    T: ColumnValueRef,
+    WF: WeightFn<T>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        ColumnLoadIter::try_next_run(self)
     }
 }
 
