@@ -3,6 +3,7 @@ members = [
     "automerge",
     "automerge-c",
     "automerge-cli",
+    "automerge-node-api",
     "automerge-test",
     "automerge-wasm",
     "edit-trace",
