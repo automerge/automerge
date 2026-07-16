@@ -4,8 +4,9 @@ use crate::PackError;
 
 type Slab = crate::column::Slab<u8>;
 use crate::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
-use crate::leb::{encode_count, read_count};
-use crate::{AsColumnRef, Run};
+
+use crate::{AsColumnRef, Codec, Leb128, Run};
+use std::marker::PhantomData;
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
@@ -24,8 +25,8 @@ use crate::{AsColumnRef, Run};
 
 /// Validate a bool slab's len, segments, and tail. Panics on mismatch.
 #[cfg(debug_assertions)]
-fn validate_slab(slab: &Slab) {
-    let info = bool_validate_encoding(&slab.data).expect("invalid bool encoding");
+fn validate_slab<C: Codec>(slab: &Slab) {
+    let info = bool_validate_encoding::<C>(&slab.data).expect("invalid bool encoding");
     assert_eq!(slab.len, info.len, "bool slab len mismatch");
     assert_eq!(slab.segments, info.segments, "bool slab segments mismatch");
     assert_eq!(slab.tail, info.tail, "bool slab tail mismatch");
@@ -66,7 +67,7 @@ impl BoolPartition {
 /// suffix holds no items.
 ///
 /// Shared by the two overflow paths in [`splice_slab`].
-fn make_suffix_slab(
+fn make_suffix_slab<C: Codec>(
     suffix: &BoolPartition,
     raw_suffix: &[u8],
     raw_suffix_item_count: usize,
@@ -78,11 +79,11 @@ fn make_suffix_slab(
     let mut tail = 0u8;
     // Bool slabs must start on a false run.
     if suffix.value && suffix.count > 0 {
-        buf.extend(encode_count(0));
+        buf.extend(C::encode_count(0));
         segments += 1;
     }
     if suffix.count > 0 {
-        let c = encode_count(suffix.count);
+        let c = C::encode_count(suffix.count);
         tail = c.len() as u8;
         buf.extend(c);
         len += suffix.count;
@@ -116,7 +117,7 @@ fn make_suffix_slab(
 /// ```
 ///
 /// Runs with `count == 0` are omitted during reconstruction.
-pub(crate) fn find_partition(
+pub(crate) fn find_partition<C: Codec>(
     slab: &Slab,
     start_index: usize,
     end_index: usize,
@@ -132,7 +133,7 @@ pub(crate) fn find_partition(
     let mut suffix = None;
 
     while byte_pos < data.len() {
-        let (cb, count) = read_count(&data[byte_pos..]).unwrap();
+        let (cb, count) = C::read_count(&data[byte_pos..]).unwrap();
         let run_end_item = item_pos + count;
         let run_end_byte = byte_pos + cb;
 
@@ -153,7 +154,7 @@ pub(crate) fn find_partition(
             // end_index falls strictly within this run.
             // Suffix segments = total segments from run_end_byte onward.
             let suffix_segs = slab.segments - segments;
-            debug_assert_eq!(suffix_segs, bool_count_segments(&data[run_end_byte..]));
+            debug_assert_eq!(suffix_segs, bool_count_segments::<C>(&data[run_end_byte..]));
             // This run contributes 1 segment to the suffix (the partial run).
             suffix = Some(BoolPartition {
                 value,
@@ -190,7 +191,7 @@ pub(crate) fn find_partition(
 /// it directly into `slab_data`, avoiding a full slab copy.
 ///
 /// Returns overflow slabs `Vec<Slab>` on success.
-pub(crate) fn splice_slab(
+pub(crate) fn splice_slab<C: Codec>(
     slab: &mut Slab,
     index: usize,
     del: usize,
@@ -203,7 +204,7 @@ pub(crate) fn splice_slab(
     let (prefix, suffix) = if slab.data.is_empty() {
         (BoolPartition::default(), BoolPartition::default())
     } else {
-        find_partition(slab, index, end_index).expect("find_partition failed")
+        find_partition::<C>(slab, index, end_index).expect("find_partition failed")
     };
 
     let slab_data = &mut slab.data;
@@ -236,7 +237,7 @@ pub(crate) fn splice_slab(
             cur_count += count;
         } else {
             // Flush current run.
-            let c = encode_count(cur_count);
+            let c = C::encode_count(cur_count);
             tail = c.len() as u8;
             buf.extend(c);
             len += cur_count;
@@ -271,7 +272,7 @@ pub(crate) fn splice_slab(
                 tail = 0;
                 if cur_value {
                     // Zero-count false padding — counts as a segment.
-                    buf.extend(encode_count(0));
+                    buf.extend(C::encode_count(0));
                     segments = 1;
                     tail = 1;
                 }
@@ -286,7 +287,7 @@ pub(crate) fn splice_slab(
     if !overflowed && segments + suffix_extra > max_segments {
         // Flush cur_count, commit buf to main slab, put suffix in overflow.
         if cur_count > 0 {
-            let c = encode_count(cur_count);
+            let c = C::encode_count(cur_count);
             tail = c.len() as u8;
             buf.extend(c);
             len += cur_count;
@@ -300,7 +301,7 @@ pub(crate) fn splice_slab(
         slab.segments = segments;
         slab.tail = tail;
 
-        overflow.extend(make_suffix_slab(
+        overflow.extend(make_suffix_slab::<C>(
             &suffix,
             &raw_suffix,
             raw_suffix_item_count,
@@ -308,10 +309,10 @@ pub(crate) fn splice_slab(
         ));
 
         #[cfg(debug_assertions)]
-        validate_slab(slab);
+        validate_slab::<C>(slab);
         #[cfg(debug_assertions)]
         for s in &overflow {
-            validate_slab(s);
+            validate_slab::<C>(s);
         }
         return overflow;
     }
@@ -322,7 +323,7 @@ pub(crate) fn splice_slab(
             cur_count += suffix.count;
         } else {
             // Flush, then start the suffix run.
-            let c = encode_count(cur_count);
+            let c = C::encode_count(cur_count);
             tail = c.len() as u8;
             buf.extend(c);
             len += cur_count;
@@ -333,7 +334,7 @@ pub(crate) fn splice_slab(
 
     // Flush final run.
     if cur_count > 0 {
-        let c = encode_count(cur_count);
+        let c = C::encode_count(cur_count);
         tail = c.len() as u8;
         buf.extend(c);
         len += cur_count;
@@ -349,7 +350,7 @@ pub(crate) fn splice_slab(
         slab.len = slab.len - del + items_inserted;
         slab.segments = segments + suffix.segments;
         #[cfg(debug_assertions)]
-        validate_slab(slab);
+        validate_slab::<C>(slab);
     } else {
         // Overflowed — attach suffix to the last overflow slab.
         let suffix_total_segs = segments + suffix.segments;
@@ -380,7 +381,7 @@ pub(crate) fn splice_slab(
                 });
             }
 
-            overflow.extend(make_suffix_slab(
+            overflow.extend(make_suffix_slab::<C>(
                 &suffix,
                 &raw_suffix,
                 raw_suffix_item_count,
@@ -389,10 +390,10 @@ pub(crate) fn splice_slab(
         }
 
         #[cfg(debug_assertions)]
-        validate_slab(slab);
+        validate_slab::<C>(slab);
         #[cfg(debug_assertions)]
         for s in &overflow {
-            validate_slab(s);
+            validate_slab::<C>(s);
         }
     }
 
@@ -405,24 +406,31 @@ pub(crate) fn splice_slab(
 ///
 /// Created by [`BoolEncoding::decoder`].  Each run yields the same value
 /// in O(1) per item; advancing between runs reads one LEB128 count.
-#[derive(Clone)]
-pub struct BoolDecoder<'a> {
+pub struct BoolDecoder<'a, C: Codec = Leb128> {
     data: &'a [u8],
     byte_pos: usize,
     remaining: usize,
+    _codec: PhantomData<fn() -> C>,
     /// Current run's boolean value.  Initialized to `true` so the first
     /// `advance_run` flip produces `false` (matching the wire format's
     /// "first run is always false" invariant).
     value: bool,
 }
 
-impl<'a> BoolDecoder<'a> {
+impl<C: Codec> Clone for BoolDecoder<'_, C> {
+    fn clone(&self) -> Self {
+        Self { ..*self }
+    }
+}
+
+impl<'a, C: Codec> BoolDecoder<'a, C> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         BoolDecoder {
             data,
             byte_pos: 0,
             remaining: 0,
             value: true,
+            _codec: PhantomData,
         }
     }
 
@@ -431,7 +439,7 @@ impl<'a> BoolDecoder<'a> {
             self.remaining = 0;
             return;
         }
-        if let Some((cb, count)) = read_count(&self.data[self.byte_pos..]) {
+        if let Some((cb, count)) = C::read_count(&self.data[self.byte_pos..]) {
             self.byte_pos += cb;
             self.value = !self.value;
             self.remaining = count;
@@ -441,7 +449,7 @@ impl<'a> BoolDecoder<'a> {
     }
 }
 
-impl<'a> Iterator for BoolDecoder<'a> {
+impl<'a, C: Codec> Iterator for BoolDecoder<'a, C> {
     type Item = bool;
 
     #[inline]
@@ -477,7 +485,7 @@ impl<'a> Iterator for BoolDecoder<'a> {
     }
 }
 
-impl<'a> RunDecoder for BoolDecoder<'a> {
+impl<'a, C: Codec> RunDecoder for BoolDecoder<'a, C> {
     fn next_run(&mut self) -> Option<Run<bool>> {
         self.next_run_max(usize::MAX)
     }
@@ -503,28 +511,30 @@ impl<'a> RunDecoder for BoolDecoder<'a> {
 /// Boolean encoding strategy — alternating run-length encoding.
 ///
 /// Zero-sized type; all state lives in the slab bytes.
-pub struct BoolEncoding;
+/// `C` is the varint codec used for run counts.
+pub struct BoolEncoding<C: Codec = Leb128>(PhantomData<fn() -> C>);
 
-impl Default for BoolEncoding {
+impl<C: Codec> Default for BoolEncoding<C> {
     fn default() -> Self {
-        Self
+        Self(PhantomData)
     }
 }
 
-impl ColumnEncoding for BoolEncoding {
+impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
+    type Codec = C;
     type Value = bool;
     type Tail = u8;
 
     fn fill(len: usize, value: bool) -> Slab {
         let mut data = Vec::new();
         let segments = if value {
-            leb128::write::unsigned(&mut data, 0).unwrap();
+            data.extend(C::encode_count(0));
             2 // zero-count false + true
         } else {
             1
         };
         let t = data.len();
-        leb128::write::unsigned(&mut data, len as u64).unwrap();
+        data.extend(C::encode_count(len));
         let tail = (data.len() - t) as u8;
         Slab {
             data,
@@ -538,13 +548,13 @@ impl ColumnEncoding for BoolEncoding {
         if a.len == 0 {
             *a = b;
         } else if b.len > 0 {
-            let (new_segs, new_tail) = bool_merge_slabs(&mut a.data, a.tail, a.segments, &b);
+            let (new_segs, new_tail) = bool_merge_slabs::<C>(&mut a.data, a.tail, a.segments, &b);
             a.len += b.len;
             a.segments = new_segs;
             a.tail = new_tail;
         }
         #[cfg(debug_assertions)]
-        validate_slab(a);
+        validate_slab::<C>(a);
     }
 
     fn last_run(slab: &Slab) -> Option<Run<bool>> {
@@ -566,7 +576,7 @@ impl ColumnEncoding for BoolEncoding {
     }
 
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
-        bool_validate_encoding(slab)
+        bool_validate_encoding::<C>(slab)
     }
 
     fn do_merge(
@@ -579,7 +589,7 @@ impl ColumnEncoding for BoolEncoding {
         if b.len == 0 || b.data.is_empty() {
             (a_segments, a_tail)
         } else {
-            bool_merge_slabs(acc, a_tail, a_segments, b)
+            bool_merge_slabs::<C>(acc, a_tail, a_segments, b)
         }
     }
 
@@ -593,37 +603,37 @@ impl ColumnEncoding for BoolEncoding {
         let slab_del = del.min(slab.len - index);
         let overflow_del = del - slab_del;
         let bools = values.map(|(v, count)| (v.as_column_ref(), count));
-        let overflow_slabs = splice_slab(slab, index, slab_del, bools, max_segments);
+        let overflow_slabs = splice_slab::<C>(slab, index, slab_del, bools, max_segments);
         (overflow_slabs, overflow_del)
     }
 
-    type Decoder<'a> = BoolDecoder<'a>;
+    type Decoder<'a> = BoolDecoder<'a, C>;
 
-    fn decoder(slab: &[u8]) -> BoolDecoder<'_> {
+    fn decoder(slab: &[u8]) -> BoolDecoder<'_, C> {
         BoolDecoder::new(slab)
     }
 
-    type Encoder<'a> = BoolEncoder;
+    type Encoder<'a> = BoolEncoder<C>;
 
     fn encoder<'a>() -> Self::Encoder<'a> {
         BoolEncoder::new()
     }
 
-    type LoadIter<'a> = BoolLoadIter<'a>;
+    type LoadIter<'a> = BoolLoadIter<'a, C>;
 
-    fn load_iter(data: &[u8], max_segments: usize) -> BoolLoadIter<'_> {
+    fn load_iter(data: &[u8], max_segments: usize) -> BoolLoadIter<'_, C> {
         BoolLoadIter::new(data, max_segments)
     }
 }
 
 // ── count_segments ───────────────────────────────────────────────────────────
 
-fn bool_count_segments(slab: &[u8]) -> usize {
+fn bool_count_segments<C: Codec>(slab: &[u8]) -> usize {
     let mut byte_pos = 0;
     let mut segments = 0;
 
     while byte_pos < slab.len() {
-        let (cb, _count) = match read_count(&slab[byte_pos..]) {
+        let (cb, _count) = match C::read_count(&slab[byte_pos..]) {
             Some(v) => v,
             None => break,
         };
@@ -644,7 +654,7 @@ fn bool_count_segments(slab: &[u8]) -> usize {
 /// 3. No trailing zero-count run
 /// 4. No two adjacent runs can be merged (implied by alternating, but
 ///    a zero-count interior run would effectively merge its neighbors)
-fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
+fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
     if slab.is_empty() {
         return Ok(SlabInfo {
             segments: 0,
@@ -661,7 +671,7 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
     let mut last_cb: u8 = 0;
 
     while byte_pos < slab.len() {
-        let (cb, count) = read_count(&slab[byte_pos..]).ok_or(PackError::BadFormat)?;
+        let (cb, count) = C::read_count(&slab[byte_pos..]).ok_or(PackError::BadFormat)?;
 
         if count == 0 && run_index > 0 {
             return Err(PackError::InvalidValue(format!(
@@ -698,14 +708,19 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
 /// interiors.
 /// In-place merge of bool slab `b` into `a`. No extra allocation beyond
 /// extending `a`'s buffer. Both slabs must be non-empty.
-fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Slab) -> (usize, u8) {
+fn bool_merge_slabs<C: Codec>(
+    a_data: &mut Vec<u8>,
+    a_tail: u8,
+    a_segments: usize,
+    b: &Slab,
+) -> (usize, u8) {
     // a's last run — derived from tail (no scan).
     if b.len == 0 {
         return (a_segments, a_tail);
     }
 
     let a_last_start = a_data.len() - a_tail as usize;
-    let (a_last_cb, a_last_count) = read_count(&a_data[a_last_start..]).unwrap();
+    let (a_last_cb, a_last_count) = C::read_count(&a_data[a_last_start..]).unwrap();
     debug_assert_eq!(a_last_cb, a_tail as usize);
     // Runs alternate false/true: seg 1=false, 2=true, 3=false...
     // Even segments → last is true, odd → last is false.
@@ -713,7 +728,7 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
 
     // b's first run (always starts with false).
     let b_data: &[u8] = &b.data;
-    let (b_first_cb, b_first_count) = read_count(b_data).unwrap();
+    let (b_first_cb, b_first_count) = C::read_count(b_data).unwrap();
     let b_rest = &b_data[b_first_cb..];
 
     let b_segments = b.segments;
@@ -729,7 +744,7 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
         if b_first_count > 0 {
             // Same value — merge counts. Removes 1 segment (the two false runs become one).
             a_data.truncate(a_last_start);
-            let count = encode_count(a_last_count + b_first_count);
+            let count = C::encode_count(a_last_count + b_first_count);
             merge_bytes = count.len() as u8;
             a_data.extend(count);
             a_data.extend_from_slice(b_rest);
@@ -751,9 +766,9 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
             // b's second run is true — merge with a's last true run.
             // Removes 2 segments: b's zero-count false + b's first true merged into a's last true.
             if !b_rest.is_empty() {
-                let (cb2, count2) = read_count(b_rest).unwrap();
+                let (cb2, count2) = C::read_count(b_rest).unwrap();
                 a_data.truncate(a_last_start);
-                let count = encode_count(a_last_count + count2);
+                let count = C::encode_count(a_last_count + count2);
                 merge_bytes = count.len() as u8;
                 a_data.extend(count);
                 a_data.extend_from_slice(&b_rest[cb2..]);
@@ -794,10 +809,11 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
 /// The wire format is a sequence of unsigned counts, alternating values
 /// starting with `false`; only the very first count may be zero (padding
 /// so the data can start with `true`). Yields the non-empty runs.
-pub struct BoolLoadIter<'a> {
+pub struct BoolLoadIter<'a, C: Codec = Leb128> {
     data: &'a [u8],
     pos: usize,
     run_index: usize,
+    _codec: PhantomData<fn() -> C>,
     // ── slab-cutting state, identical to the block loader ──
     slabs: Vec<Slab>,
     slab_start: usize,
@@ -807,12 +823,13 @@ pub struct BoolLoadIter<'a> {
     target_segments: usize,
 }
 
-impl<'a> BoolLoadIter<'a> {
+impl<'a, C: Codec> BoolLoadIter<'a, C> {
     pub fn new(data: &'a [u8], max_segments: usize) -> Self {
         Self {
             data,
             pos: 0,
             run_index: 0,
+            _codec: PhantomData,
             slabs: Vec::new(),
             slab_start: 0,
             slab_items: 0,
@@ -843,7 +860,7 @@ impl<'a> BoolLoadIter<'a> {
             if self.pos >= self.data.len() {
                 return Ok(None);
             }
-            let (cb, count) = read_count(&self.data[self.pos..]).ok_or(PackError::BadFormat)?;
+            let (cb, count) = C::read_count(&self.data[self.pos..]).ok_or(PackError::BadFormat)?;
             self.tail = cb as u8;
             // Only the very first run may have count 0 (structural padding).
             if count == 0 && self.run_index > 0 {
@@ -885,7 +902,7 @@ impl<'a> BoolLoadIter<'a> {
         let target_segments = self.target_segments;
 
         while pos < data.len() {
-            let (cb, count) = read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
+            let (cb, count) = C::read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
             tail = cb as u8;
             if count == 0 && run_index > 0 {
                 return Err(PackError::BadFormat);
@@ -922,7 +939,9 @@ impl<'a> BoolLoadIter<'a> {
     }
 }
 
-impl<'a> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a> {
+impl<'a, C: Codec> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a, C> {
+    type Tail = u8;
+
     fn try_next_run(&mut self) -> Result<Option<Run<bool>>, PackError> {
         BoolLoadIter::try_next_run(self)
     }
@@ -944,7 +963,8 @@ impl<'a> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a> {
 mod tests {
     use super::Slab;
     use super::{bool_count_segments, find_partition, BoolPartition};
-    use crate::leb::{encode_count, read_count};
+    use crate::codec::{Codec as _, Leb128};
+
     use crate::Column;
 
     fn build_bool(values: &[bool]) -> Column<bool> {
@@ -1094,7 +1114,7 @@ mod tests {
         let mut byte_pos = 0;
         let mut value = false;
         while byte_pos < data.len() {
-            let (cb, count) = read_count(&data[byte_pos..]).unwrap();
+            let (cb, count) = Leb128::read_count(&data[byte_pos..]).unwrap();
             for _ in 0..count {
                 result.push(value);
             }
@@ -1108,19 +1128,19 @@ mod tests {
     fn encode_runs(counts: &[usize]) -> Vec<u8> {
         let mut out = Vec::new();
         for &c in counts {
-            out.extend(encode_count(c));
+            out.extend(Leb128::encode_count(c));
         }
         out
     }
 
     fn make_slab(data: Vec<u8>) -> Slab {
-        let _segments = bool_count_segments(&data);
+        let _segments = bool_count_segments::<Leb128>(&data);
         let mut tail = 0;
         let mut len = 0;
         let mut pos = 0;
         let mut segments = 0;
         while pos < data.len() {
-            let (cb, count) = read_count(&data[pos..]).unwrap();
+            let (cb, count) = Leb128::read_count(&data[pos..]).unwrap();
             if count > 0 {
                 segments += 1
             }
@@ -1141,7 +1161,7 @@ mod tests {
     fn partition_mid_run() {
         // [100f, 100t, 100f]
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 150, 160).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 150, 160).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1166,7 +1186,7 @@ mod tests {
     fn partition_on_boundary() {
         // [100f, 100t, 100f]
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 200, 200).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 200, 200).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1191,7 +1211,7 @@ mod tests {
     fn partition_at_start() {
         // [100f, 100t, 100f]
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 0, 10).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 0, 10).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1216,7 +1236,7 @@ mod tests {
     fn partition_at_end() {
         // [100f, 100t, 100f]
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 290, 300).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 290, 300).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1235,7 +1255,7 @@ mod tests {
     fn partition_entire_slab() {
         // [100f, 100t, 100f]
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 0, 300).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 0, 300).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1253,7 +1273,7 @@ mod tests {
     fn partition_span_runs() {
         // [100f, 100t, 100f]  — delete items 50..250 (spans all three runs)
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 50, 250).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 50, 250).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1278,7 +1298,7 @@ mod tests {
     fn partition_single_insert_point() {
         // [100f, 100t, 100f] — insert at position 150 (no delete)
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 150, 150).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 150, 150).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1303,7 +1323,7 @@ mod tests {
     fn partition_at_run_start() {
         // [100f, 100t, 100f] — insert at position 100 (start of true run)
         let data = encode_runs(&[100, 100, 100]);
-        let (p, s) = find_partition(&make_slab(data.clone()), 100, 100).unwrap();
+        let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), 100, 100).unwrap();
         assert_eq!(
             p,
             BoolPartition {
@@ -1332,7 +1352,7 @@ mod tests {
         let mut byte_pos = 0;
         let mut value = start_value;
         while byte_pos < data.len() {
-            let (cb, count) = read_count(&data[byte_pos..]).unwrap();
+            let (cb, count) = Leb128::read_count(&data[byte_pos..]).unwrap();
             for _ in 0..count {
                 result.push(value);
             }
@@ -1367,7 +1387,7 @@ mod tests {
         let data = encode_runs(&[100, 100, 100]);
         let orig = decode_bool_slab(&data);
         for idx in [0, 50, 100, 150, 200, 250, 300] {
-            let (p, s) = find_partition(&make_slab(data.clone()), idx, idx).unwrap();
+            let (p, s) = find_partition::<Leb128>(&make_slab(data.clone()), idx, idx).unwrap();
             let recon = reconstruct(&data, &p, &s);
             assert_eq!(orig, recon, "identity failed at idx={idx}");
         }

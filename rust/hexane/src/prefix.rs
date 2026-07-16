@@ -6,6 +6,7 @@ use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 use crate::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::PackError;
+use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
@@ -81,8 +82,8 @@ pub trait PrefixValue: ColumnValueRef {
 
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
-    fn slab_sum(slab: &Slab<TailOf<Self>>) -> Self::Prefix {
-        let mut decoder = Self::Encoding::decoder(&slab.data);
+    fn slab_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>) -> Self::Prefix {
+        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         while let Some(run) = decoder.next_run() {
             Self::accumulate_run(&mut acc, &run);
@@ -91,8 +92,8 @@ pub trait PrefixValue: ColumnValueRef {
     }
 
     /// Compute the partial prefix sum of the first `count` items in a slab.
-    fn partial_sum(slab: &Slab<TailOf<Self>>, count: usize) -> Self::Prefix {
-        let mut decoder = Self::Encoding::decoder(&slab.data);
+    fn partial_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>, count: usize) -> Self::Prefix {
+        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         let mut items = 0;
         while let Some(mut run) = decoder.next_run() {
@@ -112,13 +113,16 @@ pub trait PrefixValue: ColumnValueRef {
 ///
 /// Only correct for unsigned prefix types where sums are monotonically
 /// increasing.  Callers are gated by `T::Prefix: UnsignedPrefix`.
-fn find_prefix_in_slab<T: PrefixValue>(slab: &Slab<TailOf<T>>, target: T::Prefix) -> usize
+fn find_prefix_in_slab<T: PrefixValue, C: Codec>(
+    slab: &Slab<TailOf<T, C>>,
+    target: T::Prefix,
+) -> usize
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
     let zero = T::Prefix::default();
     let one_p = T::Prefix::try_from(1).unwrap_or_default();
-    let mut decoder = T::Encoding::decoder(&slab.data);
+    let mut decoder = T::Encoding::<C>::decoder(&slab.data);
     let mut acc = zero;
     let mut items = 0;
     while let Some(run) = decoder.next_run() {
@@ -203,14 +207,14 @@ pub struct PrefixWeightFn<T>(PhantomData<fn() -> T>);
 
 impl<T> Sealed for PrefixWeightFn<T> {}
 
-impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
+impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
 
     #[inline]
-    fn compute(slab: &Slab<TailOf<T>>) -> PrefixSlabWeight<T::Prefix> {
+    fn compute(slab: &Slab<TailOf<T, C>>) -> PrefixSlabWeight<T::Prefix> {
         PrefixSlabWeight {
             len: slab.len,
-            prefix: T::slab_sum(slab),
+            prefix: T::slab_sum::<C>(slab),
         }
     }
 
@@ -322,7 +326,7 @@ impl PrefixValue for bool {
 
 // ── Load / save with options ────────────────────────────────────────────────
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// Deserialize with options. See [`LoadOpts`](crate::LoadOpts).
     /// Streaming load — the [`Column::load_iter`] of prefix columns:
     /// pull the canonical runs during the decode pass, then
@@ -342,7 +346,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
     where
         F: crate::MaybeFill<T::Get<'a>>,
     {
-        let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
+        let col = Column::<T, C, PrefixWeightFn<T>>::load_with(data, opts)?;
         Ok(Self { col })
     }
 
@@ -403,15 +407,15 @@ where
 }
 // ── PrefixColumn (B-tree backed — one aggregate for len+prefix queries) ────
 //
-// Wraps a `Column<T, PrefixWeightFn<T>>`; the inner B-tree carries
+// Wraps a `Column<T, C, PrefixWeightFn<T>>`; the inner B-tree carries
 // `PrefixSlabWeight<T::Prefix>` per slab, answering both positional and
 // prefix-sum queries without a sidecar.
 
-pub struct PrefixColumn<T: PrefixValue> {
-    col: Column<T, PrefixWeightFn<T>>,
+pub struct PrefixColumn<T: PrefixValue, C: Codec = Leb128> {
+    col: Column<T, C, PrefixWeightFn<T>>,
 }
 
-impl<T: PrefixValue> Clone for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> Clone for PrefixColumn<T, C> {
     fn clone(&self) -> Self {
         Self {
             col: self.col.clone(),
@@ -419,7 +423,7 @@ impl<T: PrefixValue> Clone for PrefixColumn<T> {
     }
 }
 
-impl<T: PrefixValue> std::fmt::Debug for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> std::fmt::Debug for PrefixColumn<T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrefixColumn")
             .field("len", &self.col.len())
@@ -428,13 +432,13 @@ impl<T: PrefixValue> std::fmt::Debug for PrefixColumn<T> {
     }
 }
 
-impl<T: PrefixValue> Default for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> Default for PrefixColumn<T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     pub fn new() -> Self {
         Self { col: Column::new() }
     }
@@ -569,7 +573,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
 // ── Unsigned-prefix-only methods ────────────────────────────────────────────
 
-impl<T: PrefixValue> PrefixColumn<T>
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C>
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
@@ -602,14 +606,14 @@ where
 
         let remaining = target - prefix_before;
         let slab = &self.col.slabs[si];
-        let idx_in_slab = find_prefix_in_slab::<T>(slab, remaining);
+        let idx_in_slab = find_prefix_in_slab::<T, C>(slab, remaining);
         items_before + idx_in_slab
     }
 }
 
 // ── More PrefixColumn methods (port from old BIT-backed variant) ───────────
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     pub fn save_to(&self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
         self.col.save_to(out)
     }
@@ -625,12 +629,12 @@ impl<T: PrefixValue> PrefixColumn<T> {
     /// * `col.values().iter()` / `.iter_range(a..b)` — plain value iteration
     ///
     /// (`PrefixColumn::get` / `iter` return [`PrefixedValue`]s.)
-    pub fn values(&self) -> &Column<T, PrefixWeightFn<T>> {
+    pub fn values(&self) -> &Column<T, C, PrefixWeightFn<T>> {
         &self.col
     }
 
     /// Wrap an existing [`Column`] that already tracks `PrefixWeightFn<T>`.
-    pub fn from_column(col: Column<T, PrefixWeightFn<T>>) -> Self {
+    pub fn from_column(col: Column<T, C, PrefixWeightFn<T>>) -> Self {
         Self { col }
     }
 
@@ -640,7 +644,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 
     /// Iterator yielding a [`PrefixedValue`] per item.
-    pub fn iter(&self) -> PrefixIter<'_, T> {
+    pub fn iter(&self) -> PrefixIter<'_, T, C> {
         PrefixIter {
             col: Some(self),
             inner: self.col.iter(),
@@ -650,7 +654,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 
     /// Iterator over `range` yielding `(inclusive_prefix, value)`.
-    pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T> {
+    pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T, C> {
         let start = range.start.min(self.col.len());
         let end = range.end.min(self.col.len());
         let mut iter = self.iter();
@@ -737,9 +741,9 @@ where
 ///
 /// `next()` is O(1) — it accumulates the running total from each value.
 /// `nth(n)` is O(log S) via the B-tree.
-pub struct PrefixIter<'a, T: PrefixValue> {
-    col: Option<&'a PrefixColumn<T>>,
-    inner: Iter<'a, T>,
+pub struct PrefixIter<'a, T: PrefixValue, C: Codec = Leb128> {
+    col: Option<&'a PrefixColumn<T, C>>,
+    inner: Iter<'a, T, C>,
     total: T::Prefix,
     /// Offset subtracted from the column's absolute prefixes; see
     /// [`reset_prefix`](Self::reset_prefix). Invariant:
@@ -747,7 +751,7 @@ pub struct PrefixIter<'a, T: PrefixValue> {
     base: T::Prefix,
 }
 
-impl<T: PrefixValue> Default for PrefixIter<'_, T> {
+impl<T: PrefixValue, C: Codec> Default for PrefixIter<'_, T, C> {
     fn default() -> Self {
         Self {
             col: None,
@@ -758,7 +762,7 @@ impl<T: PrefixValue> Default for PrefixIter<'_, T> {
     }
 }
 
-impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
+impl<T: PrefixValue, C: Codec> Clone for PrefixIter<'_, T, C> {
     fn clone(&self) -> Self {
         Self {
             col: self.col,
@@ -769,7 +773,7 @@ impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
     }
 }
 
-impl<T: PrefixValue> std::fmt::Debug for PrefixIter<'_, T> {
+impl<T: PrefixValue, C: Codec> std::fmt::Debug for PrefixIter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrefixIter")
             .field("total", &self.total)
@@ -778,7 +782,7 @@ impl<T: PrefixValue> std::fmt::Debug for PrefixIter<'_, T> {
     }
 }
 
-impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
+impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
     type Item = PrefixedValue<'a, T>;
 
     #[inline]
@@ -825,9 +829,9 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
     }
 }
 
-impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
+impl<T: PrefixValue, C: Codec> ExactSizeIterator for PrefixIter<'_, T, C> {}
 
-impl<'a, T: PrefixValue> PrefixIter<'a, T> {
+impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     fn same_slab_nth(&mut self, mut n: usize) -> PrefixedValue<'a, T> {
         while let Some(run) = self.inner.next_run_max(n + 1) {
             T::accumulate_run(&mut self.total, &run);
@@ -960,7 +964,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     }
 }
 
-impl<'a, T: PrefixValue> PrefixIter<'a, T>
+impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C>
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
@@ -1006,10 +1010,10 @@ pub struct PrefixIterState<T: PrefixValue> {
 }
 
 impl<T: PrefixValue> PrefixIterState<T> {
-    pub fn try_resume<'a>(
+    pub fn try_resume<'a, C: Codec>(
         &self,
-        column: &'a PrefixColumn<T>,
-    ) -> Result<PrefixIter<'a, T>, crate::PackError> {
+        column: &'a PrefixColumn<T, C>,
+    ) -> Result<PrefixIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(column.values())?;
         Ok(PrefixIter {
             col: Some(column),
@@ -1022,13 +1026,13 @@ impl<T: PrefixValue> PrefixIterState<T> {
 
 // ── Trait impls ─────────────────────────────────────────────────────────────
 
-impl<T: PrefixValue> FromIterator<T> for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> FromIterator<T> for PrefixColumn<T, C> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
     }
 }
 
-impl<V, T: PrefixValue> Extend<V> for PrefixColumn<T>
+impl<V, T: PrefixValue, C: Codec> Extend<V> for PrefixColumn<T, C>
 where
     V: crate::AsColumnRef<T>,
 {
@@ -1038,11 +1042,11 @@ where
     }
 }
 
-impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
+impl<'a, T: PrefixValue, C: Codec> IntoIterator for &'a PrefixColumn<T, C> {
     type Item = PrefixedValue<'a, T>;
-    type IntoIter = PrefixIter<'a, T>;
+    type IntoIter = PrefixIter<'a, T, C>;
 
-    fn into_iter(self) -> PrefixIter<'a, T> {
+    fn into_iter(self) -> PrefixIter<'a, T, C> {
         self.iter()
     }
 }
@@ -1050,11 +1054,11 @@ impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 /// Streaming prefix-column load — see [`PrefixColumn::load_iter`].
-pub struct PrefixColumnLoadIter<'a, T: PrefixValue>(
-    crate::column::ColumnLoadIter<'a, T, PrefixWeightFn<T>>,
+pub struct PrefixColumnLoadIter<'a, T: PrefixValue, C: Codec = Leb128>(
+    crate::column::ColumnLoadIter<'a, T, C, PrefixWeightFn<T>>,
 );
 
-impl<'a, T: PrefixValue> PrefixColumnLoadIter<'a, T> {
+impl<'a, T: PrefixValue, C: Codec> PrefixColumnLoadIter<'a, T, C> {
     /// The next canonical run, or `None` at end of input.
     pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
         self.0.try_next_run()
@@ -1062,12 +1066,14 @@ impl<'a, T: PrefixValue> PrefixColumnLoadIter<'a, T> {
 
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
-    pub fn finalize(self) -> Result<PrefixColumn<T>, crate::PackError> {
+    pub fn finalize(self) -> Result<PrefixColumn<T, C>, crate::PackError> {
         Ok(PrefixColumn::from_column(self.0.finalize()?))
     }
 }
 
-impl<'a, T: PrefixValue> crate::encoding::RunSrc<'a, T> for PrefixColumnLoadIter<'a, T> {
+impl<'a, T: PrefixValue, C: Codec> crate::encoding::RunSrc<'a, T>
+    for PrefixColumnLoadIter<'a, T, C>
+{
     fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
         PrefixColumnLoadIter::try_next_run(self)
     }

@@ -4,6 +4,7 @@ pub use decoder::DeltaDecoder;
 
 use crate::column::{normalize_range_max, Iter, IterState};
 use crate::encoder::RleEncoderState;
+use crate::{Codec, Leb128};
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -24,7 +25,8 @@ pub use indexed::IndexedDeltaWeightFn;
 /// which removes the `Option` widening tax (16-byte values, per-run
 /// discriminant compares) from non-nullable columns.
 pub trait DeltaInner:
-    crate::RleValue<Encoding = crate::RleEncoding<Self>>
+    crate::RleValue
+    + crate::ColumnValueRef<Encoding<Leb128> = crate::RleEncoding<Self, Leb128>>
     + crate::AsColumnRef<Self>
     + crate::sealed::Sealed
     + Copy
@@ -368,8 +370,8 @@ impl DeltaValue for Option<usize> {
 /// `&mut Vec<u8>` so the caller decides where bytes land.  Used by the
 /// fast-path `encode_to_unless` static path to avoid a per-call heap
 /// allocation in the change-encoding loop.
-pub struct DeltaEncoderState<'a, T: DeltaValue> {
-    inner: RleEncoderState<'a, Option<i64>>,
+pub struct DeltaEncoderState<'a, T: DeltaValue, C: Codec = Leb128> {
+    inner: RleEncoderState<'a, Option<i64>, C>,
     abs: i64,
     /// Tracks whether every appended value has been equal so far.
     ///
@@ -385,13 +387,13 @@ pub struct DeltaEncoderState<'a, T: DeltaValue> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaEncoderState<'_, T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaEncoderState<'_, T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
     pub fn new() -> Self {
         Self {
             inner: RleEncoderState::new(),
@@ -477,18 +479,18 @@ impl<'a, T: DeltaValue> DeltaEncoderState<'a, T> {
 /// enc.append(30);
 /// let bytes = enc.save(); // [10, 10, 10] deltas, RLE-encoded
 /// ```
-pub struct DeltaEncoder<'a, T: DeltaValue> {
+pub struct DeltaEncoder<'a, T: DeltaValue, C: Codec = Leb128> {
     data: Vec<u8>,
-    state: DeltaEncoderState<'a, T>,
+    state: DeltaEncoderState<'a, T, C>,
 }
 
-impl<T: DeltaValue> Default for DeltaEncoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaEncoder<'_, T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaEncoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaEncoder")
             .field("len", &self.state.inner.len())
@@ -497,7 +499,7 @@ impl<T: DeltaValue> Debug for DeltaEncoder<'_, T> {
     }
 }
 
-impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
     /// Create a new empty delta encoder.
     pub fn new() -> Self {
         Self {
@@ -629,7 +631,7 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 
 // ── DeltaColumn ────────────────────────────────────────────────────────────
 //
-// Deltas are stored as `Column<T::Inner, IndexedDeltaWeightFn>` — `i64`
+// Deltas are stored as `Column<T::Inner, C, IndexedDeltaWeightFn>` — `i64`
 // for non-nullable `T`, `Option<i64>` for nullable (see [`DeltaInner`]);
 // the wire bytes are identical either way.  `T` only affects how realized
 // values are materialized on read (and validated on load).  The `SlabAgg` aggregate (len + total +
@@ -642,12 +644,12 @@ impl<'a, T: DeltaValue> DeltaEncoder<'a, T> {
 /// values lie within a 2^63-wide range (for unsigned types, `< 2^63`).
 /// Writes outside the domain panic; [`load`](DeltaColumn::load) rejects
 /// out-of-domain data with an error.
-pub struct DeltaColumn<T: DeltaValue> {
-    pub(crate) col: Column<T::Inner, IndexedDeltaWeightFn>,
+pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
+    pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Clone for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Clone for DeltaColumn<T, C> {
     fn clone(&self) -> Self {
         Self {
             col: self.col.clone(),
@@ -656,7 +658,7 @@ impl<T: DeltaValue> Clone for DeltaColumn<T> {
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaColumn<T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaColumn")
             .field("len", &self.col.len())
@@ -665,13 +667,13 @@ impl<T: DeltaValue> Debug for DeltaColumn<T> {
     }
 }
 
-impl<T: DeltaValue> Default for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaColumn<T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: DeltaValue> DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn new() -> Self {
         Self {
             col: Column::new(),
@@ -702,7 +704,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
     {
         // Non-nullable T stores `Column<i64>`, whose decoder rejects null
         // runs at the segment level — no run-level null scan needed.
-        let iter = InnerColumn::<T>::load_iter(data, opts);
+        let iter = InnerColumn::<T, C>::load_iter(data, opts);
         // Domain validation per slab: the aggregates accumulated during
         // the load (exact — `accumulate_run` errors on any within-slab
         // overflow) hold each slab's realized min/max as offsets from its
@@ -807,7 +809,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         self.iter().nth(index)
     }
 
-    pub fn iter(&self) -> DeltaIter<'_, T> {
+    pub fn iter(&self) -> DeltaIter<'_, T, C> {
         DeltaIter {
             inner: self.col.iter(),
             running: 0,
@@ -816,7 +818,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
-    pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T> {
+    pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T, C> {
         let start = range.start.min(self.col.len());
         let end = range.end.min(self.col.len());
         let mut iter = self.iter();
@@ -963,7 +965,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
 
-type InnerColumn<T> = Column<<T as DeltaValue>::Inner, IndexedDeltaWeightFn>;
+type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
 
 /// Iterator over realized values in a [`DeltaColumn`].
 ///
@@ -971,14 +973,14 @@ type InnerColumn<T> = Column<<T as DeltaValue>::Inner, IndexedDeltaWeightFn>;
 /// accumulates a running `i64` prefix.  `nth(n)` uses the column's
 /// B-tree to jump directly to the target position and reset the
 /// running prefix in O(log n), avoiding an O(n) replay.
-pub struct DeltaIter<'a, T: DeltaValue> {
-    inner: Iter<'a, T::Inner>,
+pub struct DeltaIter<'a, T: DeltaValue, C: Codec = Leb128> {
+    inner: Iter<'a, T::Inner, C>,
     running: i64,
-    col: Option<&'a InnerColumn<T>>,
+    col: Option<&'a InnerColumn<T, C>>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: DeltaValue> Default for DeltaIter<'_, T> {
+impl<T: DeltaValue, C: Codec> Default for DeltaIter<'_, T, C> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
@@ -989,7 +991,7 @@ impl<T: DeltaValue> Default for DeltaIter<'_, T> {
     }
 }
 
-impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
+impl<T: DeltaValue, C: Codec> Iterator for DeltaIter<'_, T, C> {
     type Item = T;
 
     #[inline]
@@ -1045,7 +1047,7 @@ impl<T: DeltaValue> Iterator for DeltaIter<'_, T> {
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaIter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaIter")
             .field("pos", &self.inner.pos())
@@ -1055,9 +1057,9 @@ impl<T: DeltaValue> Debug for DeltaIter<'_, T> {
     }
 }
 
-impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
+impl<T: DeltaValue, C: Codec> ExactSizeIterator for DeltaIter<'_, T, C> {}
 
-impl<'a, T: DeltaValue> DeltaIter<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     #[inline]
     pub fn pos(&self) -> usize {
         self.inner.pos()
@@ -1419,10 +1421,10 @@ pub struct DeltaIterState {
 }
 
 impl DeltaIterState {
-    pub fn try_resume<'a, T: DeltaValue>(
+    pub fn try_resume<'a, T: DeltaValue, C: Codec>(
         &self,
-        column: &'a DeltaColumn<T>,
-    ) -> Result<DeltaIter<'a, T>, crate::PackError> {
+        column: &'a DeltaColumn<T, C>,
+    ) -> Result<DeltaIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(&column.col)?;
         Ok(DeltaIter {
             inner,
@@ -1433,7 +1435,7 @@ impl DeltaIterState {
     }
 }
 
-impl<'a, T: DeltaValue> Clone for DeltaIter<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> Clone for DeltaIter<'a, T, C> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -1541,13 +1543,13 @@ impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> Iterator for SpliceDelta
 
 // ── FromIterator / Extend / IntoIterator ────────────────────────────────────
 
-impl<T: DeltaValue> FromIterator<T> for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> FromIterator<T> for DeltaColumn<T, C> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
     }
 }
 
-impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> Extend<T> for DeltaColumn<T, C> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let vals: Vec<T> = iter.into_iter().collect();
         if !vals.is_empty() {
@@ -1557,11 +1559,11 @@ impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
     }
 }
 
-impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
+impl<'a, T: DeltaValue, C: Codec> IntoIterator for &'a DeltaColumn<T, C> {
     type Item = T;
-    type IntoIter = DeltaIter<'a, T>;
+    type IntoIter = DeltaIter<'a, T, C>;
 
-    fn into_iter(self) -> DeltaIter<'a, T> {
+    fn into_iter(self) -> DeltaIter<'a, T, C> {
         self.iter()
     }
 }
@@ -1713,8 +1715,7 @@ mod overflow_tests {
         // the slab aggregate read as a plausible {min: 0, max: 2^62}.
         // Checked accumulation must reject it instead.
         use crate::encoding::EncoderApi;
-        let bytes =
-            crate::Encoder::<Option<i64>>::encode(std::iter::repeat(Some(1i64 << 62)).take(8));
+        let bytes = crate::Encoder::<Option<i64>>::encode(std::iter::repeat_n(Some(1i64 << 62), 8));
         assert!(
             DeltaColumn::<u64>::load(&bytes).is_err(),
             "wrapped within-slab overflow must be a load error"
@@ -1803,7 +1804,7 @@ mod tests {
     #[test]
     fn seek_to_value_basic() {
         let values = vec![1u64, 3, 3, 3, 7, 9];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
 
         let mut iter = col.iter();
         assert_eq!(iter.seek_to_value(3, ..), 1..4);
@@ -1823,7 +1824,7 @@ mod tests {
     #[test]
     fn seek_to_value_windowed() {
         let values = vec![1u64, 3, 3, 3, 7, 9];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
 
         // the run is clipped to the window
         assert_eq!(col.iter().seek_to_value(3, 2..5), 2..4);
@@ -1851,7 +1852,7 @@ mod tests {
     fn scan_to_value_basic() {
         // unsorted: scan finds occurrences in order, consuming each hit
         let values = vec![5u64, 100, 3, 42, 7, 42];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
 
         let mut iter = col.iter();
         assert_eq!(iter.scan_to_value(42), Some(3));
@@ -1894,7 +1895,7 @@ mod tests {
         // hop straight to the one candidate slab
         let mut values = vec![1u64; 20_000];
         values[17_777] = 42;
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
         let mut iter = col.iter();
         assert_eq!(iter.scan_to_value(42), Some(17_777));
         assert_eq!(iter.next(), Some(1));
@@ -1909,7 +1910,7 @@ mod tests {
         for _ in 0..32 {
             let len = rng.random_range(1..4000usize);
             let values: Vec<u64> = (0..len).map(|_| rng.random_range(0..200u64)).collect();
-            let col = DeltaColumn::from_values(values.clone());
+            let col = DeltaColumn::<u64>::from_values(values.clone());
 
             for _ in 0..16 {
                 let target = rng.random_range(0..210u64);
@@ -1933,7 +1934,7 @@ mod tests {
     #[test]
     fn scan_to_range_basic() {
         let values = vec![50u64, 3, 90, 12, 7, 60, 11];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
 
         // first value inside [10, 20)
         let mut iter = col.iter();
@@ -1961,7 +1962,7 @@ mod tests {
         for _ in 0..32 {
             let len = rng.random_range(1..3000usize);
             let values: Vec<u64> = (0..len).map(|_| rng.random_range(0..300u64)).collect();
-            let col = DeltaColumn::from_values(values.clone());
+            let col = DeltaColumn::<u64>::from_values(values.clone());
 
             for _ in 0..16 {
                 let a = rng.random_range(0..310u64);
@@ -1988,7 +1989,7 @@ mod tests {
         // a miss returns the empty range exactly between the two
         // values the target would be inserted between
         let values = vec![10u64, 20, 30, 40];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
         for (target, at) in [(5, 0), (15, 1), (25, 2), (35, 3), (45, 4)] {
             let mut iter = col.iter();
             let got = iter.seek_to_value(target, ..);
@@ -2006,9 +2007,9 @@ mod tests {
         // returned range must clip at the window, and the iterator
         // must yield nothing past it
         let mut values = vec![1u64, 2];
-        values.extend(std::iter::repeat(5u64).take(50));
+        values.extend(std::iter::repeat_n(5u64, 50));
         values.push(9);
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<u64>::from_values(values.clone());
 
         let mut iter = col.iter();
         let got = iter.seek_to_value(5, 0..10);
@@ -2041,7 +2042,7 @@ mod tests {
         // slab-prefix descent may land early (pre-window prefixes cross
         // the target) but never late, so clamped results stay exact.
         let values = vec![500i64, 400, 1, 2, 2, 3, 7, 9, 600, 0];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<i64>::from_values(values.clone());
         let window = 2..8;
 
         for target in [0i64, 1, 2, 3, 5, 7, 9, 10] {
@@ -2064,7 +2065,7 @@ mod tests {
             let len = rng.random_range(1..4000usize);
             let mut values: Vec<u64> = (0..len).map(|_| rng.random_range(0..500u64)).collect();
             values.sort_unstable();
-            let col = DeltaColumn::from_values(values.clone());
+            let col = DeltaColumn::<u64>::from_values(values.clone());
 
             for _ in 0..32 {
                 let a = rng.random_range(0..=len);
@@ -2096,7 +2097,7 @@ mod tests {
             let offset = noisy.len();
             noisy.extend(values.iter().copied());
             noisy.extend((0..rng.random_range(1..50usize)).map(|_| rng.random_range(0..1000u64)));
-            let noisy_col = DeltaColumn::from_values(noisy.clone());
+            let noisy_col = DeltaColumn::<u64>::from_values(noisy.clone());
             for _ in 0..8 {
                 let a = offset + rng.random_range(0..=len);
                 let b = offset + rng.random_range(0..=len);

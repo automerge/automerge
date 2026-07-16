@@ -105,7 +105,7 @@ fn opt_u64_actors_100k(bencher: Bencher) {
         } else {
             Some(rng.random_range(0..6u64))
         };
-        vals.extend(std::iter::repeat(v).take(run));
+        vals.extend(std::iter::repeat_n(v, run));
     }
     let col = Column::<Option<u64>>::from_values(vals);
     bencher

@@ -18,11 +18,11 @@ use crate::column::{Slab, TailOf, WeightFn};
 use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::ColumnValueRef;
+use crate::{Codec, Leb128};
 
 // Type aliases to keep the decoder / slab types readable in struct fields.
-type OptI64Encoding = <Option<i64> as ColumnValueRef>::Encoding;
-type OptI64Decoder<'a> = <OptI64Encoding as ColumnEncoding>::Decoder<'a>;
-type OptI64Slab = Slab<TailOf<Option<i64>>>;
+type OptI64Encoding<C> = <Option<i64> as ColumnValueRef>::Encoding<C>;
+type OptI64Decoder<'a, C> = <OptI64Encoding<C> as ColumnEncoding>::Decoder<'a>;
 
 // ── Weight function ─────────────────────────────────────────────────────────
 
@@ -33,11 +33,11 @@ pub struct IndexedDeltaWeightFn;
 
 impl Sealed for IndexedDeltaWeightFn {}
 
-impl<I: DeltaInner> WeightFn<I> for IndexedDeltaWeightFn {
+impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
 
-    fn compute(slab: &Slab<TailOf<I>>) -> SlabAgg {
-        compute_slab_agg::<I>(&slab.data)
+    fn compute(slab: &Slab<TailOf<I, C>>) -> SlabAgg {
+        compute_slab_agg::<I, C>(&slab.data)
     }
 
     // `compute` re-decodes the slab; let the streaming loader accumulate
@@ -97,8 +97,8 @@ impl<I: DeltaInner> WeightFn<I> for IndexedDeltaWeightFn {
 /// progression is monotonic: `partial + v`, `partial + 2v`, …,
 /// `partial + count·v`.  Min/max are at the endpoints — no need to
 /// visit each intermediate item.
-fn compute_slab_agg<I: DeltaInner>(data: &[u8]) -> SlabAgg {
-    let mut decoder = <I as ColumnValueRef>::Encoding::decoder(data);
+fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
+    let mut decoder = <I as ColumnValueRef>::Encoding::<C>::decoder(data);
     let mut partial = 0i64;
     let mut min_off = i64::MAX;
     let mut max_off = i64::MIN;
@@ -135,14 +135,14 @@ fn compute_slab_agg<I: DeltaInner>(data: &[u8]) -> SlabAgg {
 
 // ── Value-query methods ────────────────────────────────────────────────────
 
-impl<T: DeltaValue> DeltaColumn<T> {
+impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     /// Iterator over all indices whose realized value equals `target`.
     ///
     /// A `target` outside the [`DeltaValue`] domain (e.g. unsigned
     /// `> i64::MAX`) can never be stored, so the iterator is simply
     /// empty — matching [`find_by_range`](Self::find_by_range)'s
     /// behaviour for unrepresentable bounds.
-    pub fn find_by_value(&self, target: T) -> FindByRange<'_> {
+    pub fn find_by_value(&self, target: T) -> FindByRange<'_, T, C> {
         match target.try_to_i64() {
             Some(v) => self.find_by_range(v..v + 1),
             None => self.find_by_range(0i64..0i64),
@@ -158,7 +158,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
     /// and v0's `find_by_range` semantics.  Generic over any `X` that
     /// can be converted to `i64` so callers can pass `u32`, `i64`, or the
     /// delta's native `T` interchangeably.
-    pub fn find_by_range<X>(&self, range: Range<X>) -> FindByRange<'_>
+    pub fn find_by_range<X>(&self, range: Range<X>) -> FindByRange<'_, T, C>
     where
         X: TryInto<i64>,
     {
@@ -173,19 +173,30 @@ impl<T: DeltaValue> DeltaColumn<T> {
 /// [`DeltaColumn::find_by_value`].  Walks the B-tree's pruned slab
 /// iterator and, for each candidate slab, runs a slab scan over its
 /// RLE-encoded data.
-#[derive(Default)]
-pub struct FindByRange<'a> {
+pub struct FindByRange<'a, T: DeltaValue, C: Codec = Leb128> {
     lo: i64,
     hi: i64,
-    slabs: &'a [OptI64Slab],
+    slabs: &'a [Slab<TailOf<T::Inner, C>>],
     outer: Option<FindByValueRange<'a>>,
-    current: Option<SlabScan<'a>>,
+    current: Option<SlabScan<'a, C>>,
 }
 
-impl<'a> FindByRange<'a> {
+impl<T: DeltaValue, C: Codec> Default for FindByRange<'_, T, C> {
+    fn default() -> Self {
+        Self {
+            lo: 0,
+            hi: 0,
+            slabs: &[],
+            outer: None,
+            current: None,
+        }
+    }
+}
+
+impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
     /// Build a `FindByRange` over `col` for the half-open range `[lo, hi)`.
     /// If `hi <= lo` the returned iterator is empty.
-    pub fn new<T: DeltaValue>(lo: i64, hi: i64, col: &'a DeltaColumn<T>) -> Self {
+    pub fn new(lo: i64, hi: i64, col: &'a DeltaColumn<T, C>) -> Self {
         if hi > lo {
             Self {
                 lo,
@@ -200,7 +211,7 @@ impl<'a> FindByRange<'a> {
     }
 }
 
-impl Iterator for FindByRange<'_> {
+impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
         loop {
@@ -225,8 +236,8 @@ impl Iterator for FindByRange<'_> {
 /// Scan of a single slab's RLE-encoded data for items whose realized
 /// value lies in `[lo, hi)`.  Uses the encoding's run decoder + O(1)
 /// arithmetic per repeat run (no per-item iteration).
-struct SlabScan<'a> {
-    decoder: OptI64Decoder<'a>,
+struct SlabScan<'a, C: Codec> {
+    decoder: OptI64Decoder<'a, C>,
     lo: i64,
     hi: i64,
     items_before: usize,
@@ -238,10 +249,10 @@ struct SlabScan<'a> {
     pending: Range<usize>,
 }
 
-impl<'a> SlabScan<'a> {
+impl<'a, C: Codec> SlabScan<'a, C> {
     fn new(data: &'a [u8], lo: i64, hi: i64, items_before: usize, prefix_before: i64) -> Self {
         Self {
-            decoder: OptI64Encoding::decoder(data),
+            decoder: OptI64Encoding::<C>::decoder(data),
             lo,
             hi,
             items_before,
@@ -253,7 +264,7 @@ impl<'a> SlabScan<'a> {
     }
 }
 
-impl Iterator for SlabScan<'_> {
+impl<C: Codec> Iterator for SlabScan<'_, C> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
         loop {
