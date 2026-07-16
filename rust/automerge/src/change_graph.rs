@@ -1041,10 +1041,7 @@ pub struct MissingDep(ChangeHash);
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::BTreeMap;
 
     use crate::{
         make_rng,
@@ -1107,6 +1104,7 @@ mod tests {
         changes: Vec<Change>,
         graph: ChangeGraph,
         seqs_by_actor: BTreeMap<ActorId, u64>,
+        rng: rand::rngs::SmallRng,
     }
 
     impl TestGraphBuilder {
@@ -1116,11 +1114,13 @@ mod tests {
                 changes: Vec::new(),
                 graph: ChangeGraph::new(0),
                 seqs_by_actor: BTreeMap::new(),
+                rng: crate::make_rng(),
             }
         }
 
         fn actor(&mut self) -> ActorId {
-            let actor = ActorId::random();
+            use rand::RngExt;
+            let actor = ActorId::from(self.rng.random::<[u8; 16]>().to_vec());
             self.graph.insert_actor(self.actors.len());
             self.actors.push(actor.clone());
             actor
@@ -1169,10 +1169,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64;
+            let timestamp = 0;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
             let meta = BuildChangeMetadata {
                 actor: actor_idx,
@@ -1403,11 +1400,18 @@ mod tests {
 
         // loose + cached partition the full range
         assert_eq!(loose.len() + cached.len(), all.len());
-        assert!(!loose.is_empty());
         assert!(
             !cached.is_empty(),
             "expected at least one cached fragment from 5000 changes",
         );
+        // ~1 run in 256 the head hash itself has a leading zero byte:
+        // the head is then a cached fragment head, every change is
+        // covered, and an empty loose set is the correct answer
+        if heads.iter().all(|h| h.fragment_level() > 0) {
+            assert!(loose.is_empty(), "cached head must cover everything");
+        } else {
+            assert!(!loose.is_empty());
+        }
 
         for f in &loose {
             assert_eq!(f.level, 0, "0..=0 returned a non-zero level fragment");
@@ -1418,6 +1422,41 @@ mod tests {
 
         // empty range yields nothing
         assert_eq!(graph.fragments(&heads, 0..0).count(), 0);
+    }
+
+    #[test]
+    fn fragments_with_cached_head() {
+        // force the rare branch the two tests above only hit by luck:
+        // rebuild small graphs until the head hash has a leading zero
+        // byte (expected ~256 tries), then loose must be empty and the
+        // cached fragments must cover every change
+        for _ in 0..10_000 {
+            let mut builder = TestGraphBuilder::new();
+            let actor = builder.actor();
+            let mut prev = vec![];
+            for _ in 0..8 {
+                let h = builder.change(&actor, 1, &prev);
+                prev = vec![h];
+            }
+            if prev[0].fragment_level() == 0 {
+                continue;
+            }
+            let graph = builder.build();
+            let heads: Vec<_> = graph.heads().collect();
+
+            let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
+            assert!(loose.is_empty(), "cached head must cover everything");
+
+            let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+            let covered: BTreeSet<ChangeHash> = cached
+                .iter()
+                .flat_map(|f| f.members.iter().copied())
+                .collect();
+            let all: BTreeSet<ChangeHash> = builder.all_hashes().into_iter().collect();
+            assert_eq!(covered, all, "cached fragments must cover all changes");
+            return;
+        }
+        panic!("no level>=1 head hash in 10k tries (p ~ 1e-17)");
     }
 
     #[test]
@@ -1434,13 +1473,17 @@ mod tests {
 
         let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
         let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
-        assert!(!loose.is_empty());
         assert!(!cached.is_empty(), "expected at least one cached fragment");
 
-        // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
-        let l = &loose[0];
-        let got = graph.get_fragment(l.head).expect("loose fragment exists");
-        assert_eq!(got, *l);
+        // get_fragment on a loose (level 0) commit hash returns an
+        // equivalent Fragment. Loose can be legitimately empty (~1 run
+        // in 256) when the head hash itself is a fragment head
+        if let Some(l) = loose.first() {
+            let got = graph.get_fragment(l.head).expect("loose fragment exists");
+            assert_eq!(got, *l);
+        } else {
+            assert!(heads.iter().all(|h| h.fragment_level() > 0));
+        }
 
         // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
         let c = &cached[0];
