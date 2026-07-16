@@ -9,59 +9,9 @@ use std::fmt::Debug;
 use std::iter::Peekable;
 use std::ops::Range;
 
-#[derive(Clone, Debug)]
-pub(crate) struct Unshift<T: Iterator> {
-    inner: T,
-    next: Option<T::Item>,
-}
-
-impl<T: Iterator + Default> Default for Unshift<T> {
-    fn default() -> Self {
-        Self {
-            inner: T::default(),
-            next: None,
-        }
-    }
-}
-
-impl<T: Iterator> Unshift<T> {
-    pub(crate) fn new(mut inner: T) -> Self {
-        let next = inner.next();
-        Self { inner, next }
-    }
-
-    pub(crate) fn peek(&self) -> Option<&T::Item> {
-        self.next.as_ref()
-    }
-}
-
-impl<T: Shiftable + Iterator> Unshift<T> {
-    pub(crate) fn shift(&mut self, range: Range<usize>) {
-        self.next = self.inner.shift_next(range);
-    }
-}
-
-impl<T: Iterator> Iterator for Unshift<T> {
-    type Item = T::Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut next = self.inner.next();
-        std::mem::swap(&mut next, &mut self.next);
-        next
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let mut next = self.inner.nth(n);
-        std::mem::swap(&mut next, &mut self.next);
-        next
-    }
-}
+pub(crate) use hexane::{Shiftable, Unshift};
 
 pub(crate) trait Skipper: Iterator<Item = usize> {}
-
-pub(crate) trait Shiftable: Iterator + Debug {
-    fn shift_next(&mut self, _range: Range<usize>) -> Option<<Self as Iterator>::Item>;
-}
 
 /// A peekable iterator that also supports repositioning.
 ///
@@ -102,6 +52,11 @@ impl<I: Iterator + Shiftable> PeekShift<I> {
     pub(crate) fn shift(&mut self, range: Range<usize>) {
         self.peeked = self.iter.shift_next(range);
     }
+
+    /// Truncate the inner window; an already-drawn lookahead survives.
+    pub(crate) fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
 }
 
 impl<I: Iterator> Iterator for PeekShift<I> {
@@ -109,12 +64,6 @@ impl<I: Iterator> Iterator for PeekShift<I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.peeked.take().or_else(|| self.iter.next())
-    }
-}
-
-impl<T: hexane::PrefixValue> Shiftable for hexane::PrefixIter<'_, T> {
-    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        hexane::PrefixIter::shift_next(self, range)
     }
 }
 
@@ -169,6 +118,27 @@ impl<I: Iterator + Debug + Clone, S: Skipper> SkipIter<I, S> {
 }
 
 impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable for SkipIter<I, S> {
+    fn get_pos(&self) -> usize {
+        self.skip.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.skip.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.skip.set_max(pos);
+        self.iter.set_max(pos);
+    }
+
+    // the skipper's first item decides how far `iter` jumps, so a
+    // position-only shift moves both to the range start and lets the
+    // next `next()` consume the first skip
+    fn shift(&mut self, range: Range<usize>) {
+        self.skip.shift(range.clone());
+        self.iter.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let skip = self.skip.shift_next(range.clone());
         let start = range.start + skip.unwrap_or(0);
@@ -313,48 +283,67 @@ where
 /// represnting ranges of `false` values in a boolean column. This can then
 /// be used by other iterators to skip past elements for which the boolean
 /// column is false
+///
+/// Only `pending` (trues still owed from a consumed run) and the
+/// exhaustion flag are real state — the cursor is derived as
+/// `iter.pos() - pending`, and the window end is the iter's own max.
 #[derive(Clone, Default, Debug)]
 pub(crate) struct BoolColumnSkipper<'a> {
     iter: hexane::Iter<'a, bool>,
-    range: Range<usize>,
-    cursor: usize,
     pending: usize,
     exhausted: bool,
 }
 
 impl<'a> BoolColumnSkipper<'a> {
-    pub(crate) fn new(iter: hexane::Iter<'a, bool>, range: Range<usize>) -> Self {
-        let cursor = range.start;
+    pub(crate) fn new(iter: hexane::Iter<'a, bool>) -> Self {
         Self {
             iter,
-            range,
-            cursor,
             pending: 0,
             exhausted: false,
         }
+    }
+
+    /// The position of the next item this skipper will account for.
+    fn cursor(&self) -> usize {
+        self.iter.pos() - self.pending
     }
 }
 
 impl Skipper for BoolColumnSkipper<'_> {}
 
 impl Shiftable for BoolColumnSkipper<'_> {
-    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.range = range.clone();
-        self.cursor = range.start;
-        self.pending = 0;
+    fn get_pos(&self) -> usize {
+        self.cursor()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
+    // yields skip counts — reposition the state, don't consume.
+    // Entering a true-run consumes it whole from the inner iter, owing
+    // the tail as `pending`; a shift landing inside the owed span trims
+    // it and leaves the iter alone (it is already past). Only when
+    // nothing is owed does the iter really move.
+    fn shift(&mut self, range: Range<usize>) {
+        self.pending = self
+            .pending
+            .saturating_sub(range.start.saturating_sub(self.cursor()));
         self.exhausted = false;
-
-        let Some(value) = self.iter.shift_next(range.clone()) else {
-            self.exhausted = true;
-            return Some(range.end.saturating_sub(range.start));
-        };
-
-        self.cursor = range.start + 1;
-        if value {
-            Some(0)
+        if self.pending > 0 {
+            self.iter.set_max(range.end);
         } else {
-            Some(1 + self.next().unwrap_or(0))
+            self.iter.shift(range);
         }
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.shift(range);
+        self.next()
     }
 }
 
@@ -367,24 +356,19 @@ impl Iterator for BoolColumnSkipper<'_> {
         }
         if self.pending > 0 {
             self.pending -= 1;
-            self.cursor += 1;
-            Some(0)
-        } else {
-            let mut skipped = 0;
-            while let Some(run) = self.iter.next_run() {
-                if run.value && run.count > 0 {
-                    self.pending = run.count - 1;
-                    let pos = self.cursor + skipped;
-                    self.cursor = pos + 1;
-                    return Some(skipped);
-                }
-                skipped += run.count;
-            }
-            self.exhausted = true;
-            let skip = self.range.end.saturating_sub(self.cursor);
-            self.cursor = self.range.end.saturating_add(1);
-            Some(skip)
+            return Some(0);
         }
+        let mut skipped = 0;
+        while let Some(run) = self.iter.next_run() {
+            if run.value && run.count > 0 {
+                self.pending = run.count - 1;
+                return Some(skipped);
+            }
+            skipped += run.count;
+        }
+        // no more trues: one final skip covering the remaining falses
+        self.exhausted = true;
+        Some(skipped)
     }
 }
 
@@ -511,6 +495,34 @@ impl<S> Shiftable for DiffSkipper<S>
 where
     S: Skipper + Shiftable + Debug,
 {
+    fn get_pos(&self) -> usize {
+        match self {
+            Self::Current(iter) => iter.get_pos(),
+            Self::Diff(iter) => iter.get_pos(),
+        }
+    }
+
+    fn get_max(&self) -> usize {
+        match self {
+            Self::Current(iter) => iter.get_max(),
+            Self::Diff(iter) => iter.get_max(),
+        }
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        match self {
+            Self::Current(iter) => iter.set_max(pos),
+            Self::Diff(iter) => iter.set_max(pos),
+        }
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        match self {
+            Self::Current(iter) => iter.shift(range),
+            Self::Diff(iter) => iter.shift(range),
+        }
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<(Diff, usize)> {
         match self {
             Self::Current(iter) => Some((Diff::Add, iter.shift_next(range)?)),
@@ -523,6 +535,28 @@ impl<S> Shiftable for PastSkipper<S>
 where
     S: Skipper + Shiftable + Debug,
 {
+    // the two streams sit at different positions while a run of
+    // adds/deletes is pending; the `after` stream is the document
+    // position
+    fn get_pos(&self) -> usize {
+        self.after.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.after.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.before.set_max(pos);
+        self.after.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.before.shift(range.clone());
+        self.after.shift(range);
+        self.state = Default::default();
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<(Diff, usize)> {
         let skip_before = self.before.shift_next(range.clone());
         let skip_after = self.after.shift_next(range.clone());
@@ -586,6 +620,24 @@ where
     I: Iterator + Debug + Clone + Shiftable,
     S: Skipper + Shiftable + Debug,
 {
+    fn get_pos(&self) -> usize {
+        self.skipper.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.skipper.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.skipper.set_max(pos);
+        self.iter.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.skipper.shift(range.clone());
+        self.iter.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let (diff, skip) = self.skipper.shift_next(range.clone())?;
         let start = range.start + skip;
@@ -628,5 +680,54 @@ impl Diff {
 
     pub(crate) fn is_visible(&self) -> bool {
         !self.is_del()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bool_skipper_shift_into_consumed_run() {
+        // 5 trues, 3 falses, 4 trues
+        let mut vals = vec![true; 5];
+        vals.extend([false; 3]);
+        vals.extend([true; 4]);
+        let col: hexane::Column<bool> = hexane::Column::from_values(vals);
+
+        // reference: a fresh skipper built directly over 2..8
+        let fresh: Vec<usize> = BoolColumnSkipper::new(col.iter_range(2..8)).collect();
+
+        // entering the first true-run consumes it whole from the inner
+        // iter (pending = 4 after one next)...
+        let mut skipper = BoolColumnSkipper::new(col.iter_range(0..12));
+        assert_eq!(skipper.next(), Some(0));
+
+        // ...so a shift landing inside the consumed run must trim the
+        // owed trues, not discard them
+        skipper.shift(2..8);
+        let shifted: Vec<usize> = skipper.collect();
+
+        assert_eq!(shifted, fresh, "shift into a consumed true-run");
+    }
+
+    #[test]
+    fn bool_skipper_shift_next_into_consumed_run() {
+        let mut vals = vec![true; 5];
+        vals.extend([false; 3]);
+        vals.extend([true; 4]);
+        let col: hexane::Column<bool> = hexane::Column::from_values(vals);
+
+        let mut fresh = BoolColumnSkipper::new(col.iter_range(2..12));
+        let mut skipper = BoolColumnSkipper::new(col.iter_range(0..12));
+        assert_eq!(skipper.next(), Some(0)); // pending = 4
+
+        // previously panicked: the inner iter is already past 2
+        assert_eq!(skipper.shift_next(2..12), fresh.next());
+        assert_eq!(
+            skipper.collect::<Vec<_>>(),
+            fresh.collect::<Vec<_>>(),
+            "shift_next into a consumed true-run"
+        );
     }
 }

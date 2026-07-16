@@ -6,7 +6,7 @@ use crate::{
     op_set2::{
         op::SuccCursors,
         types::{Action, ActorIdx, KeyRef, ScalarValue},
-        OpSet,
+        OpSet, SuccInsert,
     },
     types::{ElemId, ObjId, OpId},
 };
@@ -386,7 +386,63 @@ impl<'a> OpIdIter<'a> {
     }
 }
 
+impl OpIdIter<'_> {
+    // FIXME this needs test
+    // this is only valid on a range of sorted op ids
+    pub(crate) fn seek_to_value(&mut self, target: &OpId) -> Range<usize> {
+        let range = self.ctr.seek_to_value(target.counter() as u32, ..);
+        let range = self.actor.seek_to_value(target.actoridx(), range);
+        self.ctr.advance_to(range.start);
+        range
+    }
+
+    // this will work on unsorted ids
+    pub(crate) fn scan_to_value(&mut self, target: &OpId) -> Option<usize> {
+        loop {
+            let pos = self.ctr.scan_to_value(target.counter() as u32)?;
+            let actor = self.actor.scan_to_pos(pos)?;
+            if actor == target.actoridx() {
+                return Some(pos);
+            }
+        }
+    }
+
+    /// Scan forward for the first op id *less than* `target` — the
+    /// insert-slot rule: a new element belongs immediately before the
+    /// first insert with a smaller id.
+    ///
+    /// Works on unsorted ids: any counter at or below the target's can
+    /// host a lesser id, so the counter column does an aggregate-pruned
+    /// interval scan and the actor column breaks equal-counter ties.
+    /// Returns the position and the id found there; on a hit both
+    /// columns have consumed through it.
+    pub(crate) fn scan_to_lesser(&mut self, target: OpId) -> Option<(usize, OpId)> {
+        loop {
+            let (pos, ctr) = self.ctr.scan_to_range(..=target.counter() as u32)?;
+            let actor = self.actor.scan_to_pos(pos)?;
+            let found = OpId::new(ctr as u64, u64::from(actor) as usize);
+            if found < target {
+                return Some((pos, found));
+            }
+            // equal counter, actor at or above the target's — not lesser
+        }
+    }
+}
+
 impl Shiftable for OpIdIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.actor.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.actor.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.actor.set_max(pos);
+        self.ctr.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<OpId> {
         let actor_idx = self.actor.shift_next(range.clone())?;
         let counter = self.ctr.shift_next(range)?;
@@ -440,6 +496,18 @@ impl<'a> InsertIter<'a> {
 }
 
 impl Shiftable for InsertIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.iter.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
         self.iter.shift_next(range)
     }
@@ -447,6 +515,78 @@ impl Shiftable for InsertIter<'_> {
 
 impl Iterator for InsertIter<'_> {
     type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ElemIter<'a> {
+    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+}
+
+impl<'a> ElemIter<'a> {
+    pub(crate) fn new(
+        key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+    ) -> Self {
+        Self { key_actor, key_ctr }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Result<Option<ElemId>, ReadOpError> {
+        let key_actor = self
+            .key_actor
+            .next()
+            .ok_or(ReadOpError::MissingValue("key_actor"))?;
+        let key_ctr = self
+            .key_ctr
+            .next()
+            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
+        ElemId::try_load(key_actor, key_ctr.map(i64::from))
+    }
+
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<Option<ElemId>, ReadOpError> {
+        let key_actor = self
+            .key_actor
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("key_actor"))?;
+        let key_ctr = self
+            .key_ctr
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
+        ElemId::try_load(key_actor, key_ctr.map(i64::from))
+    }
+}
+
+impl<'a> Shiftable for ElemIter<'a> {
+    fn get_pos(&self) -> usize {
+        self.key_actor.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.key_actor.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.key_actor.set_max(pos);
+        self.key_ctr.set_max(pos);
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
+        let key_actor = self.key_actor.shift_next(range.clone())?;
+        let key_ctr = self.key_ctr.shift_next(range)?;
+        ElemId::try_load(key_actor, key_ctr.map(i64::from)).ok()
+    }
+}
+
+impl<'a> Iterator for ElemIter<'a> {
+    type Item = Option<ElemId>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().ok()
@@ -535,6 +675,20 @@ impl<'a> KeyIter<'a> {
 }
 
 impl<'a> Shiftable for KeyIter<'a> {
+    fn get_pos(&self) -> usize {
+        self.key_str.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.key_str.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.key_str.set_max(pos);
+        self.key_actor.set_max(pos);
+        self.key_ctr.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
         let key_str = self.key_str.shift_next(range.clone())?;
         let key_actor = self.key_actor.shift_next(range.clone())?;
@@ -637,6 +791,19 @@ impl<'a> ObjIdIter<'a> {
 }
 
 impl Shiftable for ObjIdIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.obj_actor.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.obj_actor.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.obj_actor.set_max(pos);
+        self.obj_ctr.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
         let actor = self.obj_actor.shift_next(range.clone())?;
         let ctr = self.obj_ctr.shift_next(range)?;
@@ -677,6 +844,19 @@ impl MarkInfoIterState {
 }
 
 impl Shiftable for MarkInfoIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.name.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.name.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.name.set_max(pos);
+        self.expand.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let mark_name = self.name.shift_next(range.clone());
         let expand = self.expand.shift_next(range).unwrap_or(false);
@@ -772,6 +952,19 @@ impl<'a> Iterator for ActionValueIter<'a> {
 }
 
 impl Shiftable for ActionValueIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.action.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.action.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.action.set_max(pos);
+        self.value.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let action = self.action.shift_next(range.clone());
         let value = self.value.shift_next(range);
@@ -798,6 +991,18 @@ impl ActionIterState {
 }
 
 impl Shiftable for ActionIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.iter.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.iter.shift_next(range)
     }
@@ -856,6 +1061,20 @@ impl ValueIterState {
 }
 
 impl Shiftable for ValueIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.meta.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.meta.end_pos()
+    }
+
+    // `raw` is byte-addressed and repositions itself from the meta
+    // prefix on every jump, so only the meta window needs truncating
+    fn set_max(&mut self, pos: usize) {
+        self.meta.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let pv = self.meta.shift_next(range)?;
         let meta = pv.value;
@@ -946,8 +1165,31 @@ impl SuccIterIterState {
     }
 }
 
-impl<'a> SuccIterIter<'a> {
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+impl Shiftable for SuccIterIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.count.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.count.end_pos()
+    }
+
+    // the sub-columns are succ-entry addressed and follow the count
+    // column's prefix, so only the count window needs truncating
+    fn set_max(&mut self, pos: usize) {
+        self.count.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.count.shift(range);
+        // the count prefix at the new position locates the sub-columns
+        let sub_start = self.count.total() as usize;
+        self.actor.advance_to(sub_start);
+        self.ctr.advance_to(sub_start);
+        self.incs.advance_to(sub_start);
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let pv = self.count.shift_next(range)?;
         let num_succ = pv.value as usize;
         let sub_start = pv.prefix() as usize;
@@ -969,7 +1211,9 @@ impl<'a> SuccIterIter<'a> {
 
         Some(iter)
     }
+}
 
+impl<'a> SuccIterIter<'a> {
     pub(crate) fn new(
         count: hexane::PrefixIter<'a, u32>,
         actor: hexane::Iter<'a, ActorIdx>,
@@ -1046,6 +1290,18 @@ impl<'a> SuccIterIter<'a> {
             incs: self.incs.suspend(),
         }
     }
+
+    pub(crate) fn add_succ_at(
+        &mut self,
+        pos: usize,
+        id: OpId,
+        inc: Option<i64>,
+    ) -> Option<SuccInsert> {
+        if pos > self.count.pos() {
+            let _ = self.nth(pos - self.count.pos() - 1);
+        }
+        Some(self.clone().next()?.add_succ(pos, id, inc))
+    }
 }
 
 impl<'a> Iterator for SuccIterIter<'a> {
@@ -1067,6 +1323,56 @@ mod tests {
     use crate::transaction::Transactable;
     use crate::types::{ActorId, OpId};
     use crate::{Automerge, ROOT};
+
+    #[test]
+    fn scan_to_lesser_finds_first_smaller_id() {
+        // three actors' concurrent list inserts give unsorted ids in
+        // document order
+        let a1 = ActorId::try_from("aaaaaaaa").unwrap();
+        let a2 = ActorId::try_from("bbbbbbbb").unwrap();
+        let a3 = ActorId::try_from("cccccccc").unwrap();
+
+        let mut doc = crate::AutoCommit::new().with_actor(a1).unwrap();
+        let list = doc.put_object(&ROOT, "list", crate::ObjType::List).unwrap();
+        for i in 0..8 {
+            doc.insert(&list, i, i as i64).unwrap();
+        }
+        let mut d2 = doc.fork().with_actor(a2).unwrap();
+        let mut d3 = doc.fork().with_actor(a3).unwrap();
+        for i in 0..5 {
+            d2.insert(&list, 2 + i, 100 + i as i64).unwrap();
+            d3.insert(&list, 6, 200 + i as i64).unwrap();
+        }
+        doc.merge(&mut d2).unwrap();
+        doc.merge(&mut d3).unwrap();
+
+        let op_set = doc.doc.ops();
+        let range = 0..op_set.len();
+        let ids: Vec<OpId> = op_set.id_iter_range(&range).collect();
+
+        // reference: first id after `from` that is less than `target`
+        let reference = |from: usize, target: OpId| {
+            ids[from..]
+                .iter()
+                .position(|id| *id < target)
+                .map(|i| from + i)
+        };
+
+        for from in [0usize, 3, 7, ids.len() / 2] {
+            for target in &ids {
+                let mut iter = op_set.id_iter_range(&range);
+                iter.shift(from..range.end);
+                let got = iter.scan_to_lesser(*target);
+                let want = reference(from, *target);
+                assert_eq!(got.map(|(p, _)| p), want, "from {from} target {target:?}");
+                if let Some((pos, id)) = got {
+                    assert_eq!(id, ids[pos], "the id found at the hit");
+                    // both columns consumed through the hit
+                    assert_eq!(iter.get_pos(), pos + 1);
+                }
+            }
+        }
+    }
 
     #[test]
     fn skip_op_ids() {

@@ -606,6 +606,15 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         self.nth(range.start - self.pos)
     }
 
+    // BUG(claude): an Iter *created* over an empty range (iter_range(p..p))
+    // has slab_remaining = 0 and a decoder that was never positioned at p.
+    // If its max is later extended (set_max/shift) and it is advanced,
+    // nth's slow path calls this with pos = the *slab start* containing p,
+    // which is < self.pos whenever p sits mid-slab: the debug_assert fires,
+    // and in release `items_left -= skipped` underflows. Either forbid
+    // extending empty-born iters, or make this path recompute
+    // items_left/decoder absolutely (decoder re-inits anyway; skipping
+    // `offset` items from slab start would land correctly).
     pub(crate) fn advance_to_slab(&mut self, si: usize, pos: usize) -> bool {
         if si >= self.slabs.len() {
             self.slab_idx = si;
@@ -721,9 +730,38 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// Assumes values within `range` are sorted.  If they aren't, the
     /// result is unspecified — a wrong or empty range may be returned —
     /// but never a panic, memory unsafety, or column corruption.
-    pub fn seek_to_value(
+    /// Scan forward for the next occurrence of `target`.
+    ///
+    /// Unlike [`Self::seek_to_value`] the values need not be sorted —
+    /// this is a find, walked run-at-a-time (for RLE data that is one
+    /// step per run, not per item). On a hit, returns `Some((pos,
+    /// value))` with the value consumed: iteration continues with the
+    /// item after it — so repeated calls walk successive occurrences,
+    /// including consecutive items inside one run, with no caller-side
+    /// run state. On a miss, returns `None` with the iterator at the
+    /// end of its window.
+    pub fn scan_to_value<'t>(&mut self, target: T::Get<'t>) -> Option<usize> {
+        let end = self.end_pos();
+        let mut probe = self.clone();
+        let mut pos = probe.pos();
+        while pos < end {
+            let Some(run) = probe.next_run() else {
+                break;
+            };
+            if T::eq(run.value, T::shorten(&target)) {
+                // consume self through the hit (one indexed jump)
+                self.nth(pos - self.pos())?;
+                return Some(pos);
+            }
+            pos += run.count;
+        }
+        self.advance_to(end);
+        None
+    }
+
+    pub fn seek_to_value<'t>(
         &mut self,
-        target: T::Get<'a>,
+        target: T::Get<'t>,
         range: impl std::ops::RangeBounds<usize>,
     ) -> Range<usize>
     where
@@ -737,14 +775,14 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 
         let mut checkpoint = self.clone();
         checkpoint.set_max(end);
-        let range = checkpoint.scan_to_value(target);
+        let range = checkpoint.sorted_scan_to_value(target);
 
         self.advance_to(range.start);
 
         range
     }
 
-    fn scan_to_value(mut self, target: T::Get<'a>) -> Range<usize>
+    fn sorted_scan_to_value<'t>(mut self, target: T::Get<'t>) -> Range<usize>
     where
         for<'x> T::Get<'x>: Ord,
     {
@@ -758,7 +796,9 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         };
         let si_start = self.get_slab();
 
-        match first_run.value.cmp(&target) {
+        // the column's values and the caller's target have unrelated
+        // borrow lifetimes; shorten both to compare
+        match T::shorten(&first_run.value).cmp(&T::shorten(&target)) {
             Ordering::Equal => {
                 assert!(start + first_run.count <= end);
                 start..start + first_run.count
@@ -776,7 +816,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                     let mid = lo + (hi - lo) / 2;
                     let mut dec = T::Encoding::decoder(col.slab_data(mid));
                     let head = dec.next_run().unwrap();
-                    match head.value.cmp(&target) {
+                    match T::shorten(&head.value).cmp(&T::shorten(&target)) {
                         Ordering::Less => {
                             candidate = Some(mid);
                             lo = mid + 1;
@@ -798,7 +838,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 
                 let mut pos = self.pos();
                 while let Some(run) = self.next_run() {
-                    match run.value.cmp(&target) {
+                    match T::shorten(&run.value).cmp(&T::shorten(&target)) {
                         Ordering::Less => {
                             pos += run.count;
                         }
@@ -1198,7 +1238,7 @@ where
     {
         let (start, end) = normalize_range_max(range, self.total_len);
         let target = value.as_column_ref();
-        self.iter_range(start..end).scan_to_value(target)
+        self.iter_range(start..end).sorted_scan_to_value(target)
     }
 
     // ── Mutations ───────────────────────────────────────────────────────

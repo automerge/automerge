@@ -14,6 +14,7 @@ use std::ops::Range;
 
 pub(crate) mod batch;
 pub(crate) mod collector;
+pub(crate) mod fragment;
 
 #[cfg(test)]
 pub(crate) use collector::IndexedChangeCollector;

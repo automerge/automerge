@@ -494,6 +494,61 @@ fn iter_range_pos_starts_at_range_start() {
 }
 
 #[test]
+fn scan_to_value_on_rle_columns() {
+    // bool: scan_to_value(true/false) is "scan to next"
+    let mut vals = vec![false; 4];
+    vals.extend([true; 3]);
+    vals.extend([false; 2]);
+    vals.push(true);
+    let col: Column<bool> = Column::from_values(vals);
+
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(true), Some(4));
+    // inside the run: each call takes the next true, no pending state
+    assert_eq!(it.scan_to_value(true), Some(5));
+    assert_eq!(it.scan_to_value(true), Some(6));
+    assert_eq!(it.scan_to_value(true), Some(9));
+    assert_eq!(it.scan_to_value(true), None);
+    assert_eq!(it.next(), None, "miss parks at the window end");
+
+    let mut it = col.iter();
+    it.shift(5..9);
+    assert_eq!(it.scan_to_value(false), Some(7));
+
+    // strings work too
+    let col: Column<Option<String>> = Column::from_values(vec![
+        Some("a".to_owned()),
+        Some("a".to_owned()),
+        None,
+        Some("b".to_owned()),
+    ]);
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(Some("b")), Some(3));
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(None), Some(2));
+    assert_eq!(it.scan_to_value(Some("a")), None);
+}
+
+#[test]
+fn scan_to_pos_consumes_through() {
+    use crate::Shiftable;
+    let col = Column::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(10), Some(10));
+    assert_eq!(it.next(), Some(11));
+    assert_eq!(it.scan_to_pos(50), Some(50));
+
+    let col = DeltaColumn::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(7), Some(7));
+    assert_eq!(it.next(), Some(8));
+
+    let col = PrefixColumn::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(5).map(|pv| pv.value), Some(5));
+}
+
+#[test]
 fn shift_next_matches_v0() {
     // Reproduce exact v0 test case from columndata.rs::shift_next
     let col = Column::<u64>::from_values(vec![

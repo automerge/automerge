@@ -645,6 +645,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
             col: Some(self),
             inner: self.col.iter(),
             total: T::Prefix::default(),
+            base: T::Prefix::default(),
         }
     }
 
@@ -740,6 +741,10 @@ pub struct PrefixIter<'a, T: PrefixValue> {
     col: Option<&'a PrefixColumn<T>>,
     inner: Iter<'a, T>,
     total: T::Prefix,
+    /// Offset subtracted from the column's absolute prefixes; see
+    /// [`reset_prefix`](Self::reset_prefix). Invariant:
+    /// `total == absolute_prefix_at_pos - base`.
+    base: T::Prefix,
 }
 
 impl<T: PrefixValue> Default for PrefixIter<'_, T> {
@@ -748,6 +753,7 @@ impl<T: PrefixValue> Default for PrefixIter<'_, T> {
             col: None,
             inner: Iter::default(),
             total: T::Prefix::default(),
+            base: T::Prefix::default(),
         }
     }
 }
@@ -758,6 +764,7 @@ impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
             col: self.col,
             inner: self.inner.clone(),
             total: self.total.clone(),
+            base: self.base.clone(),
         }
     }
 }
@@ -805,7 +812,9 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
             return None;
         }
 
-        self.total = found.prefix;
+        // the tree hands back the absolute prefix at the slab start;
+        // carry any reset_prefix offset across the jump
+        self.total = found.prefix - self.base.clone();
 
         Some(self.same_slab_nth(target_pos - found.pos))
     }
@@ -847,6 +856,20 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         self.total.clone()
     }
 
+    /// Zero the running total at the current position without moving
+    /// the iterator: subsequent [`total()`](Self::total)s and yielded
+    /// [`PrefixedValue`]s are relative to here. Useful when the iterator
+    /// tracks running totals over a sub-portion of the column.
+    ///
+    /// Only the accumulator is affected — position, window and seek
+    /// behaviour are unchanged ([`advance_prefix`](Self::advance_prefix)
+    /// still interprets its argument as units past the current
+    /// position, and slab jumps in `nth` carry the offset).
+    pub fn reset_prefix(&mut self) {
+        self.base += &self.total;
+        self.total = T::Prefix::default();
+    }
+
     #[inline]
     pub fn items_left(&self) -> usize {
         self.inner.items_left
@@ -871,6 +894,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         PrefixIterState {
             inner: self.inner.suspend(),
             total: self.total.clone(),
+            base: self.base.clone(),
         }
     }
 
@@ -955,7 +979,9 @@ where
         // unless we had an Iterator<Item=(slab,prefix)> instead of doing a slab_index +=1
         // currently this isnt a bottleneck anywhere so not a big deal
         let col = self.col.expect("advance_prefix on default PrefixIter");
-        let target = self.total + n;
+        // get_index_for_total works in absolute prefixes: undo any
+        // reset_prefix offset before seeking the tree
+        let target = self.total + self.base + n;
         let one = T::Prefix::try_from(1).unwrap_or_default();
         let seek_target = target + one;
         let target_pos = col.get_index_for_total(seek_target);
@@ -976,6 +1002,7 @@ where
 pub struct PrefixIterState<T: PrefixValue> {
     inner: IterState,
     total: T::Prefix,
+    base: T::Prefix,
 }
 
 impl<T: PrefixValue> PrefixIterState<T> {
@@ -988,6 +1015,7 @@ impl<T: PrefixValue> PrefixIterState<T> {
             col: Some(column),
             inner,
             total: self.total.clone(),
+            base: self.base.clone(),
         })
     }
 }
@@ -1048,6 +1076,88 @@ impl<'a, T: PrefixValue> crate::encoding::RunSrc<'a, T> for PrefixColumnLoadIter
 #[cfg(test)]
 mod tests {
     use crate::prefix::PrefixColumn;
+
+    #[test]
+    fn reset_prefix_tracks_subportion_totals() {
+        // enough values for several slabs so nth's slab jumps are hit
+        let values: Vec<u64> = (0..2000).map(|i| (i % 13) + 1).collect();
+        let col = PrefixColumn::<u64>::from_values(values.clone());
+
+        // reset mid-column: totals become relative to the reset point
+        let mut it = col.iter();
+        it.advance_by(100);
+        assert_eq!(it.total(), col.get_prefix(100));
+        it.reset_prefix();
+        assert_eq!(it.total(), 0);
+        assert_eq!(it.pos(), 100, "reset must not move the iterator");
+
+        // sequential next(): running totals of values[100..]
+        let mut expect = 0u128;
+        for (i, pv) in (&mut it).take(50).enumerate() {
+            expect += values[100 + i] as u128;
+            assert_eq!(pv.total(), expect, "at offset {i}");
+        }
+
+        // a far nth crosses slab boundaries: the tree's absolute prefix
+        // must be re-based, not clobber the relative total
+        let hop = 1500;
+        let pv = it.nth(hop - 1).unwrap();
+        let expect: u128 = values[100..100 + 50 + hop].iter().map(|v| *v as u128).sum();
+        assert_eq!(pv.total(), expect, "relative total lost across slab jump");
+        assert_eq!(it.total(), expect);
+
+        // double reset composes
+        it.reset_prefix();
+        assert_eq!(it.total(), 0);
+        let pv = it.next().unwrap();
+        assert_eq!(pv.total(), values[it.pos() - 1] as u128);
+    }
+
+    #[test]
+    fn reset_prefix_advance_prefix_still_absolute_safe() {
+        let values: Vec<u64> = vec![1; 1000];
+        let col = PrefixColumn::<u64>::from_values(values);
+
+        // reference: no reset
+        let mut a = col.iter();
+        a.advance_by(200);
+        let ra = a.advance_prefix(300).unwrap();
+
+        // with reset: advance_prefix must land on the same item
+        let mut b = col.iter();
+        b.advance_by(200);
+        b.reset_prefix();
+        let rb = b.advance_prefix(300).unwrap();
+
+        assert_eq!(ra.pos, rb.pos);
+        assert_eq!(ra.delta, rb.delta, "delta is relative either way");
+        assert_eq!(a.pos(), b.pos());
+        // totals differ by exactly the prefix at the reset point
+        assert_eq!(
+            ra.pv.total() - rb.pv.total(),
+            col.get_prefix(200),
+            "reset offset"
+        );
+    }
+
+    #[test]
+    fn reset_prefix_survives_suspend_resume() {
+        let values: Vec<u64> = (0..600).map(|i| i + 1).collect();
+        let col = PrefixColumn::<u64>::from_values(values.clone());
+
+        let mut it = col.iter();
+        it.advance_by(50);
+        it.reset_prefix();
+        it.advance_by(10);
+        let expect = it.total();
+
+        let mut resumed = it.suspend().try_resume(&col).unwrap();
+        assert_eq!(resumed.total(), expect);
+        // and the offset still applies across a post-resume slab jump
+        let pv = resumed.nth(400).unwrap();
+        let want: u128 = values[50..50 + 10 + 401].iter().map(|v| *v as u128).sum();
+        assert_eq!(pv.total(), want);
+    }
 
     #[test]
     fn iter_total_is_prefix_at_range_start() {

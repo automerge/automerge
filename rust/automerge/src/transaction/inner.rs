@@ -464,7 +464,9 @@ impl TransactionInner {
         let succ: Vec<_> = query
             .ops
             .iter()
-            .map(|op| op.add_succ(id, inc_value))
+            // increments act as ordinary overwrites on non-counter
+            // targets (e.g. a conflicted non-counter loser)
+            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter())))
             .collect();
 
         self.insert_local_op(
@@ -536,7 +538,9 @@ impl TransactionInner {
         let succ = query
             .ops
             .iter()
-            .map(|op| op.add_succ(id, inc_value))
+            // increments act as ordinary overwrites on non-counter
+            // targets (e.g. a conflicted non-counter loser)
+            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter())))
             .collect::<Vec<_>>();
 
         self.insert_local_op(doc, patch_log, op, &succ, query.range, replaced);

@@ -234,6 +234,10 @@ impl<'a> From<ValueRef<'a>> for types::Value<'static> {
 }
 
 impl<'a> ScalarValue<'a> {
+    pub fn is_counter(&self) -> bool {
+        matches!(&self, ScalarValue::Counter(_))
+    }
+
     pub fn as_i64(&self) -> i64 {
         match self {
             Self::Int(i) | Self::Timestamp(i) => *i,

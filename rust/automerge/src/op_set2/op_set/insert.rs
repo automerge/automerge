@@ -97,6 +97,12 @@ impl<'a> InsertQuery<'a> {
         while let Some(mut op) = self.iter.next() {
             let op_pos = op.pos;
             if op.is_inc() {
+                // increments carry no visibility/width but they DO
+                // occupy a row: the end-of-object fallback below
+                // returns `pos + 1`, and skipping without recording
+                // `pos` would place a trailing insert BEFORE the
+                // increment row, splitting its element's group
+                pos = op_pos;
                 continue;
             }
             let visible = op.scope_to_clock(self.clock.as_ref());

@@ -2,7 +2,7 @@ mod decoder;
 pub mod indexed;
 pub use decoder::DeltaDecoder;
 
-use crate::column::{Iter, IterState};
+use crate::column::{normalize_range_max, Iter, IterState};
 use crate::encoder::RleEncoderState;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -1090,6 +1090,306 @@ impl<'a, T: DeltaValue> DeltaIter<'a, T> {
             running: self.running,
         }
     }
+
+    /// Narrow the iterator window to the contiguous run of `target`
+    /// within a sorted range, returning that range.
+    ///
+    /// If the value is not found, returns an empty range at the
+    /// insertion point and the iterator is positioned there.
+    ///
+    /// Assumes values within `range` are sorted by `T`'s `Ord` (for
+    /// nullable columns that puts null rows first). If they aren't,
+    /// the result is unspecified — a wrong or empty range may be
+    /// returned — but never a panic, memory unsafety, or column
+    /// corruption.
+    ///
+    /// The encoding stores deltas, so unlike
+    /// [`Iter::seek_to_value`](crate::Iter::seek_to_value) there are no
+    /// slab-head values to compare against. But the B-tree knows the
+    /// running prefix at the start of every slab, and for sorted data
+    /// the prefix *is* the realized value — so one descent
+    /// ([`find_slab_at_prefix`](crate::btree::SlabBTree)) lands on the
+    /// slab where the running sum first reaches the target, without
+    /// decoding anything. Only that slab is decoded: a run walk finds
+    /// the exact position (repeats of a value are runs of zero deltas,
+    /// which is also how the run of the target is extended).
+    pub fn seek_to_value(
+        &mut self,
+        target: T,
+        range: impl std::ops::RangeBounds<usize>,
+    ) -> Range<usize>
+    where
+        T: Ord,
+    {
+        let (start, end) = normalize_range_max(range, self.end_pos());
+        self.set_max(end);
+        if start > self.pos() {
+            self.advance_to(start);
+        }
+        let start = self.pos();
+        if start >= end {
+            return start..start;
+        }
+
+        // null targets sort first: the run, if any, is the window's
+        // leading null rows
+        if T::NULLABLE && target == T::null_value() {
+            let mut probe = self.clone();
+            let mut run_end = start;
+            while run_end < end {
+                let Some(run) = probe.inner.next_run() else {
+                    break;
+                };
+                if T::Inner::to_opt(run.value).is_some() {
+                    break;
+                }
+                run_end += run.count;
+            }
+            return start..run_end.min(end);
+        }
+
+        let Some(t) = target.try_to_i64() else {
+            // outside the storable domain: greater than anything here
+            self.advance_to(end);
+            return end..end;
+        };
+
+        // jump the probe to the slab where the running prefix first
+        // reaches the target. With garbage outside the (sorted) window
+        // the descent can only land early, never late, so clamping to
+        // the window start keeps this correct — just slower.
+        let mut probe = self.clone();
+        if let Some(col) = probe.col {
+            let (si, prefix, pos) = col.index.find_slab_at_prefix(t);
+            if pos > probe.pos() && pos < end {
+                probe.running = prefix;
+                if !probe.inner.advance_to_slab(si, pos) {
+                    probe = self.clone();
+                }
+            }
+        }
+
+        // decode from the slab start: find the first value >= target
+        let mut pos = probe.pos();
+        let mut running = probe.running;
+        let mut run_start = end;
+        let mut run_end = end;
+        while pos < end {
+            let Some(run) = probe.inner.next_run() else {
+                break;
+            };
+            let count = run.count.min(end - pos);
+            match T::Inner::to_opt(run.value) {
+                // null rows sort before every value
+                None => pos += count,
+                Some(d) => {
+                    let run_final = running + d * count as i64;
+                    if run_final < t {
+                        running = run_final;
+                        pos += count;
+                        continue;
+                    }
+                    // the crossing is inside this run: the j-th item
+                    // (1-based) realizes running + j*d
+                    // d <= 0 happens at the window boundary (the run
+                    // bridges pre-window data) or on all-equal runs: the
+                    // first item is the only candidate either way
+                    let steps = if d <= 0 {
+                        1
+                    } else {
+                        ((t - running + d - 1).div_euclid(d)).max(1)
+                    } as usize;
+                    run_start = pos + steps - 1;
+                    let found = running + d * steps as i64 == t;
+                    run_end = run_start;
+                    if found {
+                        run_end += 1;
+                        if d == 0 {
+                            // the rest of this run repeats the target
+                            run_end = pos + count;
+                        }
+                        if run_end == pos + count {
+                            // ended at a run boundary: adjacent runs of
+                            // zero deltas keep repeating the target
+                            while run_end < end {
+                                let Some(run) = probe.inner.next_run() else {
+                                    break;
+                                };
+                                if T::Inner::to_opt(run.value) != Some(0) {
+                                    break;
+                                }
+                                run_end += run.count;
+                            }
+                            run_end = run_end.min(end);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        if run_start == end {
+            run_end = end;
+        }
+
+        self.advance_to(run_start);
+        run_start..run_end
+    }
+
+    /// Scan forward for the next occurrence of `target`, letting the
+    /// column's value aggregates skip slabs that cannot contain it.
+    ///
+    /// Unlike [`Self::seek_to_value`] the values need not be sorted —
+    /// this is a find. On a hit, returns the position with the value
+    /// consumed: iteration continues with the item after it. On a
+    /// miss, returns `None` with the iterator at the end of its
+    /// window.
+    pub fn scan_to_value(&mut self, target: T) -> Option<usize> {
+        if target.try_to_i64().is_none() && T::NULLABLE && target == T::null_value() {
+            // nulls are invisible to the value aggregates — plain run scan
+            let end = self.end_pos();
+            return self.scan_to_null(end);
+        }
+        self.scan_to_range(target..=target).map(|(pos, _)| pos)
+    }
+
+    /// Scan forward for the next value inside `range`, letting the
+    /// column's value aggregates skip slabs whose value span cannot
+    /// overlap it.
+    ///
+    /// The values need not be sorted. Within a slab the scan is
+    /// run-by-run (a run's values form an arithmetic progression, so
+    /// interval membership is O(1)); when a slab is exhausted the
+    /// index supplies the next candidate slab and everything in
+    /// between is skipped without decoding. Null rows never match.
+    ///
+    /// On a hit, returns `Some((pos, value))` with the value consumed:
+    /// iteration continues with the item after it. On a miss, returns
+    /// `None` with the iterator at the end of its window.
+    pub fn scan_to_range(&mut self, range: impl std::ops::RangeBounds<T>) -> Option<(usize, T)> {
+        use std::ops::Bound;
+        let end = self.end_pos();
+        if self.pos() >= end {
+            return None;
+        }
+
+        // resolve the bounds to an inclusive i64 interval, clamped to
+        // the storable domain
+        let lo = match range.start_bound() {
+            Bound::Unbounded => T::MIN_I64,
+            Bound::Included(v) => v.try_to_i64()?,
+            Bound::Excluded(v) => v.try_to_i64()?.checked_add(1)?,
+        };
+        let hi = match range.end_bound() {
+            Bound::Unbounded => T::MAX_I64,
+            Bound::Included(v) => v.try_to_i64()?,
+            Bound::Excluded(v) => v.try_to_i64()?.checked_sub(1)?,
+        };
+        if lo > hi {
+            return None;
+        }
+
+        // the first item of a delta run hitting `[lo, hi]`, if any:
+        // values are `running + d*j` for `j` in `1..=count`
+        fn run_hit(running: i64, d: i64, count: usize, lo: i64, hi: i64) -> Option<usize> {
+            let j = if d == 0 {
+                1
+            } else if d > 0 {
+                // increasing: first j at or above lo
+                ((lo - running) + d - 1).div_euclid(d).max(1)
+            } else {
+                // decreasing: first j at or below hi
+                let d = -d;
+                ((running - hi) + d - 1).div_euclid(d).max(1)
+            };
+            if j as usize > count {
+                return None;
+            }
+            let v = running + d * j;
+            (lo <= v && v <= hi).then_some(j as usize)
+        }
+
+        let mut candidates = self.col.map(|c| c.find_by_value_range(lo, hi));
+        loop {
+            // scan the rest of the current slab; on a hit, rewind to
+            // the mark and step precisely onto it
+            let mark = self.clone();
+            let mut pos = self.pos();
+            let mut running = self.running;
+            let mut hit = None;
+            while self.inner.slab_remaining > 0 && pos < end {
+                let Some(run) = self.inner.next_run() else {
+                    break;
+                };
+                let count = run.count.min(end - pos);
+                match T::Inner::to_opt(run.value) {
+                    None => pos += count,
+                    Some(d) => {
+                        if let Some(j) = run_hit(running, d, count, lo, hi) {
+                            hit = Some(pos + j - 1);
+                            break;
+                        }
+                        running += d * count as i64;
+                        pos += count;
+                    }
+                }
+            }
+            if let Some(h) = hit {
+                *self = mark;
+                let v = self.nth(h - self.pos())?;
+                return Some((h, v));
+            }
+
+            // no hit in this slab — jump to the next candidate
+            let cands = candidates.as_mut()?;
+            loop {
+                let Some((si, items_before, prefix)) = cands.next() else {
+                    self.advance_to(end);
+                    return None;
+                };
+                if items_before >= end {
+                    self.advance_to(end);
+                    return None;
+                }
+                // candidates arrive in slab order; skip the ones behind us
+                if items_before < self.pos() {
+                    continue;
+                }
+                self.running = prefix;
+                if !self.inner.advance_to_slab(si, items_before) {
+                    self.advance_to(end);
+                    return None;
+                }
+                break;
+            }
+        }
+    }
+
+    fn scan_to_null(&mut self, end: usize) -> Option<usize> {
+        let mark = self.clone();
+        let mut pos = self.pos();
+        let mut hit = None;
+        while pos < end {
+            let Some(run) = self.inner.next_run() else {
+                break;
+            };
+            if T::Inner::to_opt(run.value).is_none() {
+                hit = Some(pos);
+                break;
+            }
+            pos += run.count;
+        }
+        match hit {
+            Some(h) if h < end => {
+                *self = mark;
+                self.nth(h - self.pos())?;
+                Some(h)
+            }
+            _ => {
+                self.advance_to(end);
+                None
+            }
+        }
+    }
 }
 
 pub struct DeltaIterState {
@@ -1460,6 +1760,330 @@ mod overflow_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── seek_to_value ───────────────────────────────────────────────────────
+
+    /// linear reference: the run of `target` within `window`, or the
+    /// empty range at the insertion point
+    fn seek_reference<T: DeltaValue + Ord>(
+        values: &[T],
+        target: T,
+        window: Range<usize>,
+    ) -> Range<usize> {
+        let vals = &values[window.clone()];
+        let start = window.start + vals.iter().take_while(|v| **v < target).count();
+        let count = values[start..window.end]
+            .iter()
+            .take_while(|v| **v == target)
+            .count();
+        start..start + count
+    }
+
+    #[test]
+    fn seek_to_value_basic() {
+        let values = vec![1u64, 3, 3, 3, 7, 9];
+        let col = DeltaColumn::from_values(values.clone());
+
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(3, ..), 1..4);
+        // positioned at the run start
+        assert_eq!(iter.next(), Some(3));
+
+        // miss: empty range at the insertion point
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(5, ..), 4..4);
+        assert_eq!(iter.next(), Some(7));
+
+        // before everything / after everything
+        assert_eq!(col.iter().seek_to_value(0, ..), 0..0);
+        assert_eq!(col.iter().seek_to_value(10, ..), 6..6);
+    }
+
+    #[test]
+    fn seek_to_value_windowed() {
+        let values = vec![1u64, 3, 3, 3, 7, 9];
+        let col = DeltaColumn::from_values(values.clone());
+
+        // the run is clipped to the window
+        assert_eq!(col.iter().seek_to_value(3, 2..5), 2..4);
+        // target exists in the column but not in the window
+        assert_eq!(col.iter().seek_to_value(3, 4..6), 4..4);
+        // sequential seeks over one iterator
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(1, ..), 0..1);
+        assert_eq!(iter.seek_to_value(7, ..), 4..5);
+    }
+
+    #[test]
+    fn seek_to_value_nullable() {
+        // nulls sort first for Option's Ord
+        let values = vec![None, None, Some(2u32), Some(2), Some(5)];
+        let col = DeltaColumn::<Option<u32>>::from_values(values.clone());
+
+        assert_eq!(col.iter().seek_to_value(None, ..), 0..2);
+        assert_eq!(col.iter().seek_to_value(Some(2), ..), 2..4);
+        assert_eq!(col.iter().seek_to_value(Some(3), ..), 4..4);
+        assert_eq!(col.iter().seek_to_value(Some(9), ..), 5..5);
+    }
+
+    #[test]
+    fn scan_to_value_basic() {
+        // unsorted: scan finds occurrences in order, consuming each hit
+        let values = vec![5u64, 100, 3, 42, 7, 42];
+        let col = DeltaColumn::from_values(values.clone());
+
+        let mut iter = col.iter();
+        assert_eq!(iter.scan_to_value(42), Some(3));
+        // the hit is consumed: iteration continues after it
+        assert_eq!(iter.pos(), 4);
+        assert_eq!(iter.next(), Some(7));
+        assert_eq!(iter.scan_to_value(42), Some(5));
+        // miss: iterator parks at the end of the window
+        assert_eq!(iter.scan_to_value(42), None);
+        assert_eq!(iter.next(), None);
+
+        // window-scoped
+        let mut iter = col.iter();
+        iter.shift(1..4);
+        assert_eq!(iter.scan_to_value(42), Some(3));
+        let mut iter = col.iter();
+        iter.shift(1..3);
+        assert_eq!(iter.scan_to_value(42), None);
+        assert_eq!(iter.pos(), 3);
+    }
+
+    #[test]
+    fn scan_to_value_nullable() {
+        let values = vec![Some(9u32), None, Some(2), None, Some(9)];
+        let col = DeltaColumn::<Option<u32>>::from_values(values.clone());
+
+        let mut iter = col.iter();
+        assert_eq!(iter.scan_to_value(None), Some(1));
+        assert_eq!(iter.scan_to_value(None), Some(3));
+        assert_eq!(iter.scan_to_value(None), None);
+
+        let mut iter = col.iter();
+        assert_eq!(iter.scan_to_value(Some(9)), Some(0));
+        assert_eq!(iter.scan_to_value(Some(9)), Some(4));
+    }
+
+    #[test]
+    fn scan_to_value_prunes_to_deep_slab() {
+        // a single 42 buried in a large constant column: the scan must
+        // hop straight to the one candidate slab
+        let mut values = vec![1u64; 20_000];
+        values[17_777] = 42;
+        let col = DeltaColumn::from_values(values.clone());
+        let mut iter = col.iter();
+        assert_eq!(iter.scan_to_value(42), Some(17_777));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.scan_to_value(42), None);
+    }
+
+    #[test]
+    fn scan_to_value_fuzz() {
+        use rand::RngExt;
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(2718);
+        for _ in 0..32 {
+            let len = rng.random_range(1..4000usize);
+            let values: Vec<u64> = (0..len).map(|_| rng.random_range(0..200u64)).collect();
+            let col = DeltaColumn::from_values(values.clone());
+
+            for _ in 0..16 {
+                let target = rng.random_range(0..210u64);
+                let want: Vec<usize> = values
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| **v == target)
+                    .map(|(i, _)| i)
+                    .collect();
+                let mut got = vec![];
+                let mut iter = col.iter();
+                while let Some(pos) = iter.scan_to_value(target) {
+                    got.push(pos);
+                }
+                assert_eq!(got, want, "target {target} len {len}");
+                assert_eq!(iter.next(), None, "iterator parks at the end");
+            }
+        }
+    }
+
+    #[test]
+    fn scan_to_range_basic() {
+        let values = vec![50u64, 3, 90, 12, 7, 60, 11];
+        let col = DeltaColumn::from_values(values.clone());
+
+        // first value inside [10, 20)
+        let mut iter = col.iter();
+        assert_eq!(iter.scan_to_range(10..20), Some((3, 12)));
+        assert_eq!(iter.scan_to_range(10..20), Some((6, 11)));
+        assert_eq!(iter.scan_to_range(10..20), None);
+        assert_eq!(iter.next(), None);
+
+        // inclusive / unbounded flavors
+        assert_eq!(col.iter().scan_to_range(..=3u64), Some((1, 3)));
+        assert_eq!(col.iter().scan_to_range(60u64..), Some((2, 90)));
+        assert_eq!(col.iter().scan_to_range(..), Some((0, 50)));
+        // empty interval
+        assert_eq!(col.iter().scan_to_range(20u64..10), None);
+    }
+
+    #[test]
+    fn scan_to_range_fuzz() {
+        use rand::RngExt;
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(1618);
+        for _ in 0..32 {
+            let len = rng.random_range(1..3000usize);
+            let values: Vec<u64> = (0..len).map(|_| rng.random_range(0..300u64)).collect();
+            let col = DeltaColumn::from_values(values.clone());
+
+            for _ in 0..16 {
+                let a = rng.random_range(0..310u64);
+                let b = rng.random_range(0..310u64);
+                let (lo, hi) = (a.min(b), a.max(b));
+                let want: Vec<(usize, u64)> = values
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| (lo..hi).contains(*v))
+                    .map(|(i, v)| (i, *v))
+                    .collect();
+                let mut got = vec![];
+                let mut iter = col.iter();
+                while let Some(hit) = iter.scan_to_range(lo..hi) {
+                    got.push(hit);
+                }
+                assert_eq!(got, want, "range {lo}..{hi} len {len}");
+            }
+        }
+    }
+
+    #[test]
+    fn seek_to_value_insertion_point() {
+        // a miss returns the empty range exactly between the two
+        // values the target would be inserted between
+        let values = vec![10u64, 20, 30, 40];
+        let col = DeltaColumn::from_values(values.clone());
+        for (target, at) in [(5, 0), (15, 1), (25, 2), (35, 3), (45, 4)] {
+            let mut iter = col.iter();
+            let got = iter.seek_to_value(target, ..);
+            assert_eq!(got, at..at, "insertion point for {target}");
+            // positioned between the neighbors: next() is the first
+            // value greater than the target
+            assert_eq!(iter.pos(), at);
+            assert_eq!(iter.next(), values.get(at).copied(), "value after {target}");
+        }
+    }
+
+    #[test]
+    fn seek_to_value_respects_max() {
+        // a long run of the target straddles the window end: the
+        // returned range must clip at the window, and the iterator
+        // must yield nothing past it
+        let mut values = vec![1u64, 2];
+        values.extend(std::iter::repeat(5u64).take(50));
+        values.push(9);
+        let col = DeltaColumn::from_values(values.clone());
+
+        let mut iter = col.iter();
+        let got = iter.seek_to_value(5, 0..10);
+        assert_eq!(got, 2..10, "run clipped at the window end");
+        // positioned at the run start...
+        assert_eq!(iter.pos(), 2);
+        // ...and iteration stops at the window end, not the run end
+        assert_eq!(iter.by_ref().take(20).count(), 8);
+        assert_eq!(iter.next(), None);
+
+        // a miss positions the iterator at the insertion point and
+        // next() yields the first value greater than the target
+        let mut iter = col.iter();
+        let got = iter.seek_to_value(3, 0..10);
+        assert_eq!(got, 2..2);
+        assert_eq!(iter.pos(), 2);
+        assert_eq!(iter.next(), Some(5));
+
+        // a miss past everything in the window yields None
+        let mut iter = col.iter();
+        let got = iter.seek_to_value(9, 0..10);
+        assert_eq!(got, 10..10);
+        assert_eq!(iter.pos(), 10);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn seek_to_value_window_sorted_only() {
+        // the column is not globally sorted — only the window is. The
+        // slab-prefix descent may land early (pre-window prefixes cross
+        // the target) but never late, so clamped results stay exact.
+        let values = vec![500i64, 400, 1, 2, 2, 3, 7, 9, 600, 0];
+        let col = DeltaColumn::from_values(values.clone());
+        let window = 2..8;
+
+        for target in [0i64, 1, 2, 3, 5, 7, 9, 10] {
+            let want = seek_reference(&values, target, window.clone());
+            let mut iter = col.iter();
+            let got = iter.seek_to_value(target, window.clone());
+            assert_eq!(got, want, "target {target}");
+            assert_eq!(iter.pos(), want.start);
+        }
+    }
+
+    #[test]
+    fn seek_to_value_fuzz() {
+        use rand::RngExt;
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(31415);
+        for _ in 0..64 {
+            // sorted values with heavy duplication, big enough for
+            // several slabs
+            let len = rng.random_range(1..4000usize);
+            let mut values: Vec<u64> = (0..len).map(|_| rng.random_range(0..500u64)).collect();
+            values.sort_unstable();
+            let col = DeltaColumn::from_values(values.clone());
+
+            for _ in 0..32 {
+                let a = rng.random_range(0..=len);
+                let b = rng.random_range(0..=len);
+                let window = a.min(b)..a.max(b);
+                let target = rng.random_range(0..510u64);
+
+                let want = seek_reference(&values, target, window.clone());
+                let mut iter = col.iter();
+                let got = iter.seek_to_value(target, window.clone());
+                assert_eq!(got, want, "target {target} in {window:?} of len {len}");
+                assert!(
+                    got.start >= window.start && got.end <= window.end,
+                    "range escapes the window"
+                );
+                assert_eq!(iter.pos(), want.start, "iterator position");
+                if !want.is_empty() {
+                    assert_eq!(iter.next(), Some(target), "value at run start");
+                }
+                // iteration after the seek never leaves the window
+                assert!(iter.count() <= window.end.saturating_sub(want.start));
+            }
+
+            // same column with unsorted noise around it: only query the
+            // still-sorted middle
+            let mut noisy: Vec<u64> = (0..rng.random_range(1..50usize))
+                .map(|_| rng.random_range(0..1000u64))
+                .collect();
+            let offset = noisy.len();
+            noisy.extend(values.iter().copied());
+            noisy.extend((0..rng.random_range(1..50usize)).map(|_| rng.random_range(0..1000u64)));
+            let noisy_col = DeltaColumn::from_values(noisy.clone());
+            for _ in 0..8 {
+                let a = offset + rng.random_range(0..=len);
+                let b = offset + rng.random_range(0..=len);
+                let window = a.min(b)..a.max(b);
+                let target = rng.random_range(0..510u64);
+                let want = seek_reference(&noisy, target, window.clone());
+                let got = noisy_col.iter().seek_to_value(target, window.clone());
+                assert_eq!(got, want, "noisy: target {target} in {window:?}");
+            }
+        }
+    }
 
     fn assert_col<T: DeltaValue + PartialEq + Debug>(col: &DeltaColumn<T>, expected: &[T]) {
         assert_eq!(col.len(), expected.len(), "length mismatch");

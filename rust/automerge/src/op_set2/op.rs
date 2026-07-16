@@ -858,6 +858,24 @@ impl<'a> SuccCursors<'a> {
     pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
         SuccIncCursors(self)
     }
+
+    pub(crate) fn add_succ(mut self, pos: usize, id: OpId, inc: Option<i64>) -> SuccInsert {
+        let len = self.len() as u64;
+        let mut sub_pos = self.pos();
+        while let Some(i) = self.next() {
+            if i > id {
+                break;
+            }
+            sub_pos = self.pos();
+        }
+        SuccInsert {
+            id,
+            pos,
+            inc,
+            len,
+            sub_pos,
+        }
+    }
 }
 
 impl std::fmt::Debug for SuccCursors<'_> {
@@ -953,27 +971,11 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
-        let pos = self.pos;
-        let mut succ = self.succ_cursors.clone();
-        if inc.is_some() && !self.is_counter() {
-            inc = None;
-        }
-        let len = succ.len() as u64;
-        let mut sub_pos = succ.pos();
-        while let Some(i) = succ.next() {
-            if i > id {
-                break;
-            }
-            sub_pos = succ.pos();
-        }
-        SuccInsert {
-            id,
-            pos,
-            inc,
-            len,
-            sub_pos,
-        }
+    /// `inc` is trusted as given: callers own increment/counter
+    /// normalization (an increment acts as an ordinary overwrite —
+    /// `inc = None` — on a non-counter target).
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
+        self.succ_cursors.clone().add_succ(self.pos, id, inc)
     }
 
     pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
@@ -1125,7 +1127,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn is_counter(&self) -> bool {
-        matches!(&self.value, ScalarValue::Counter(_))
+        self.value.is_counter()
     }
 
     pub(crate) fn is_mark(&self) -> bool {

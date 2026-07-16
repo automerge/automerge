@@ -1,5 +1,7 @@
 use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
+use crate::iter::tools::BoolColumnSkipper;
+use crate::iter::tools::SkipIter;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
@@ -17,19 +19,19 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
+pub(crate) type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 
 #[derive(Debug, Clone, Default)]
-struct BatchApply {
-    ops: Vec<ChangeOp>,
-    changes: Vec<Change>,
+pub(crate) struct BatchApply {
+    pub(crate) ops: Vec<ChangeOp>,
+    pub(crate) changes: Vec<Change>,
     actor_seq: HashMap<ActorId, HashSet<u64>>,
     hashes: HashSet<ChangeHash>,
-    pred: PredCache,
-    obj_spans: Vec<ObjSpan>,
+    pub(crate) pred: PredCache,
+    pub(crate) obj_spans: Vec<ObjSpan>,
 }
 
-struct Untangler<'a> {
+pub(crate) struct Untangler<'a> {
     // the tangle of change ops we need to navigate
     change_ops: &'a mut [ChangeOp],
     // these are entry points into the change_op tangle
@@ -251,7 +253,7 @@ impl<'a> Untangler<'a> {
         Some(())
     }
 
-    fn new(
+    pub(crate) fn new(
         obj: ObjId,
         encoding: SequenceType,
         text_encoding: TextEncoding,
@@ -314,7 +316,7 @@ impl<'a> Untangler<'a> {
     }
 }
 
-fn walk_list<'a>(
+pub(crate) fn walk_list<'a>(
     mut ut: Untangler<'a>,
     doc_ops: OpIter<'a>,
     succ: &mut Vec<SuccInsert>,
@@ -333,7 +335,7 @@ fn walk_list<'a>(
     ut.finish(log);
 }
 
-struct MapWalker<'a, 'b> {
+pub(crate) struct MapWalker<'a, 'b> {
     ops: OpIter<'a>,
     log: &'b mut PatchLog,
     pred: &'b mut PredCache,
@@ -346,13 +348,13 @@ struct MapWalker<'a, 'b> {
 }
 
 #[derive(Debug, Clone)]
-enum Adjust {
+pub(crate) enum Adjust {
     Conflict(usize),
     Expose(usize),
 }
 
 #[derive(PartialEq, Debug)]
-enum Top {
+pub(super) enum Top {
     Nothing,
     ChangeIndex(usize),
     Doc(usize),
@@ -360,14 +362,14 @@ enum Top {
 }
 
 impl Top {
-    fn reset(&mut self, conflicts: &mut Vec<Adjust>) {
+    pub(super) fn reset(&mut self, conflicts: &mut Vec<Adjust>) {
         if let Top::Expose(i) = self {
             conflicts.push(Adjust::Expose(*i));
         }
         *self = Top::Nothing;
     }
 
-    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool) {
+    pub(super) fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool) {
         if d.visible() {
             if deleted {
                 if let Top::Doc(i) = self {
@@ -382,7 +384,12 @@ impl Top {
         }
     }
 
-    fn process_change_op(&mut self, conflicts: &mut Vec<Adjust>, ops: &mut [ChangeOp], pos: usize) {
+    pub(super) fn process_change_op(
+        &mut self,
+        conflicts: &mut Vec<Adjust>,
+        ops: &mut [ChangeOp],
+        pos: usize,
+    ) {
         if ops[pos].visible() {
             match self {
                 Top::ChangeIndex(i) => ops[*i].conflicted = true,
@@ -395,7 +402,7 @@ impl Top {
 }
 
 impl<'a, 'b> MapWalker<'a, 'b> {
-    fn new(
+    pub(crate) fn new(
         obj: ObjId,
         mut ops: OpIter<'a>,
         text_encoding: TextEncoding,
@@ -484,7 +491,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 }
 
-fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
+pub(crate) fn normalize_increment_successors(
+    is_counter: bool,
+    successors: &mut [(OpId, Option<i64>)],
+) {
     if !is_counter {
         for (_, increment) in successors {
             // Increment operations preserve and update counter predecessors,
@@ -513,11 +523,11 @@ fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<Su
 }
 
 #[derive(Debug, Clone)]
-struct ValueState<'a> {
+pub(super) struct ValueState<'a> {
     obj: ObjId,
     seq_type: SequenceType,
     text_encoding: TextEncoding,
-    key: Option<PropRef<'a>>,
+    pub(super) key: Option<PropRef<'a>>,
     doc: OpValueOption,
     change: OpValueOption,
     marks: RichTextDiff<'a>,
@@ -599,7 +609,7 @@ impl OpValueOption {
 }
 
 impl<'a> ValueState<'a> {
-    fn new(obj: ObjId, encoding: SequenceType, text_encoding: TextEncoding) -> Self {
+    pub(super) fn new(obj: ObjId, encoding: SequenceType, text_encoding: TextEncoding) -> Self {
         Self {
             obj,
             seq_type: encoding,
@@ -611,7 +621,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool) {
+    pub(super) fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool) {
         match doc_op.action {
             Action::Increment => {}
             Action::Mark => {
@@ -650,7 +660,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn process_change_op(&mut self, op: &ChangeOp) {
+    pub(super) fn process_change_op(&mut self, op: &ChangeOp) {
         match op.action() {
             Action::Delete => {}
             Action::Increment => self.do_increment(op),
@@ -673,7 +683,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
+    pub(super) fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
         if self.key.take().is_none() {
             return;
         }
@@ -833,7 +843,7 @@ impl<'a> ValueState<'a> {
     }
 }
 
-fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
+pub(crate) fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
     for pos in 0..change_ops.len() {
         mw.change_op(change_ops, pos);
     }
@@ -841,7 +851,7 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 }
 
 impl BatchApply {
-    fn push(&mut self, c: Change) {
+    pub(crate) fn push(&mut self, c: Change) {
         assert!(!self.has_actor_seq(&c));
         self.record_actor_seq(&c);
 
@@ -867,7 +877,7 @@ impl BatchApply {
             .unwrap_or(false)
     }
 
-    fn insert_new_actors(&mut self, doc: &mut Automerge) {
+    pub(crate) fn insert_new_actors(&mut self, doc: &mut Automerge) {
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
             doc.put_actor_ref(c.actor_id());
         }
@@ -963,36 +973,10 @@ impl BatchApply {
 
         doc.ops.add_succ(&succ);
 
-        self.insert_runs_of_ops(doc);
+        insert_runs_of_ops(&self.ops, doc);
 
         debug_assert!(doc.ops.validate_op_order());
         Ok(())
-    }
-
-    fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
-        let mut last_pos = None;
-        let mut start = 0;
-        let mut shift = 0;
-        for (i, op) in self.ops.iter().enumerate() {
-            if op.pos != last_pos {
-                if let Some(pos) = last_pos {
-                    let end = i;
-                    shift += self.insert_ops(doc, pos + shift, start..end);
-                    start = end;
-                }
-                last_pos = op.pos;
-            }
-        }
-        if let Some(pos) = last_pos {
-            self.insert_ops(doc, pos + shift, start..self.ops.len());
-        }
-    }
-
-    pub(crate) fn insert_ops(&self, doc: &mut Automerge, pos: usize, range: Range<usize>) -> usize {
-        let batch = &self.ops[range];
-        let start = doc.ops().len();
-        doc.ops_mut().splice(pos, batch);
-        doc.ops().len() - start
     }
 
     pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
@@ -1035,25 +1019,54 @@ impl BatchApply {
 }
 
 #[derive(Debug, Clone)]
-struct ObjWalker<'a> {
+pub(crate) struct ObjWalker<'a> {
     iter: ObjIdIter<'a>,
 }
 
 impl<'a> ObjWalker<'a> {
-    fn new(ops: &'a OpSet) -> Self {
+    pub(crate) fn new(ops: &'a OpSet) -> Self {
         let iter = ops.obj_id_iter();
         Self { iter }
     }
 
-    fn seek_to_obj(&mut self, obj: ObjId) -> Range<usize> {
+    pub(crate) fn seek_to_obj(&mut self, obj: ObjId) -> Range<usize> {
         self.iter.seek_to_value(obj)
     }
 }
 
 #[derive(Debug, Clone, Default)]
-struct ObjSpan {
-    obj: ObjId,
-    span: Range<usize>,
+pub(crate) struct ObjSpan {
+    pub(crate) obj: ObjId,
+    pub(crate) span: Range<usize>,
+}
+
+/// Splice runs of positioned ops into the document's columns. The ops
+/// must be sorted by `(pos, subsort)`; each run of equal `pos` values is
+/// inserted with a single splice.
+pub(super) fn insert_runs_of_ops(ops: &[ChangeOp], doc: &mut Automerge) {
+    let mut last_pos = None;
+    let mut start = 0;
+    let mut shift = 0;
+    for (i, op) in ops.iter().enumerate() {
+        if op.pos != last_pos {
+            if let Some(pos) = last_pos {
+                let end = i;
+                shift += insert_ops(ops, doc, pos + shift, start..end);
+                start = end;
+            }
+            last_pos = op.pos;
+        }
+    }
+    if let Some(pos) = last_pos {
+        insert_ops(ops, doc, pos + shift, start..ops.len());
+    }
+}
+
+fn insert_ops(ops: &[ChangeOp], doc: &mut Automerge, pos: usize, range: Range<usize>) -> usize {
+    let batch = &ops[range];
+    let start = doc.ops().len();
+    doc.ops_mut().splice(pos, batch);
+    doc.ops().len() - start
 }
 
 impl Automerge {
@@ -1110,7 +1123,7 @@ impl Automerge {
         Ok(chap.apply(self, log)?)
     }
 
-    fn import_ops_to(
+    pub(crate) fn import_ops_to(
         &mut self,
         change: &Change,
         ops: &mut Vec<ChangeOp>,
@@ -1184,6 +1197,27 @@ mod tests {
             self.validate_top_index();
             Ok(())
         }
+    }
+
+    #[test]
+    fn v1_increment_plus_child_insert_layout() {
+        // v1 batch apply must keep an element's updates ahead of its
+        // child inserts; a same-batch increment + insert-after on the
+        // same element must not interleave
+        let mut doc = AutoCommit::new()
+            .with_actor("aa".try_into().unwrap())
+            .unwrap();
+        let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, ScalarValue::counter(5)).unwrap();
+        let heads = doc.get_heads();
+
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
+        f.increment(&list, 0, 1).unwrap();
+        f.insert(&list, 1, "x").unwrap();
+
+        doc.merge(&mut f).unwrap();
+        // walking the merged doc's changes re-encounters the layout
+        let _ = doc.doc.get_changes(&heads).unwrap();
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use super::parents::Parents;
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
+use crate::iter::tools::BoolColumnSkipper;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
@@ -31,6 +32,7 @@ use std::sync::Arc;
 mod found_op;
 pub(crate) mod index;
 mod insert;
+mod manifold;
 mod mark_index;
 mod marks;
 mod op_iter;
@@ -47,8 +49,8 @@ pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
-    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    ActionIter, ActionValueIter, CtrWalker, ElemIter, InsertIter, KeyIter, MarkInfoIter, ObjIdIter,
+    OpIdIter, OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
 pub(crate) use top_op::{TopIter, TopOps};
@@ -900,6 +902,10 @@ impl OpSet {
         self.cols.insert.iter_range(range.clone())
     }
 
+    pub(crate) fn insert(&self) -> &hexane::PrefixColumn<bool> {
+        &self.cols.insert
+    }
+
     pub(crate) fn insert_iter_range(&self, range: &Range<usize>) -> InsertIter<'_> {
         InsertIter::new(self.cols.insert.values().iter_range(range.clone()))
     }
@@ -919,6 +925,14 @@ impl OpSet {
                 .top
                 .delta(range.start, range.end)
                 .is_some_and(|delta| delta.delta == range.len())
+    }
+
+    pub(crate) fn elem_iter(&self) -> ElemIter<'_> {
+        ElemIter::new(self.cols.key_actor.iter(), self.cols.key_ctr.iter())
+    }
+
+    pub(crate) fn key_str_iter(&self) -> hexane::Iter<'_, Option<String>> {
+        self.cols.key_str.iter()
     }
 
     pub(crate) fn key_str_iter_range(
@@ -1406,11 +1420,21 @@ impl OpSet {
         self.iter_range(&range)
     }
 
+    pub(crate) fn value_iter(&self) -> ValueIter<'_> {
+        let meta = self.cols.value_meta.iter();
+        let value_raw = self.cols.value.iter();
+        ValueIter::new(meta, value_raw)
+    }
+
     pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
         let meta = self.cols.value_meta.iter_range(range.clone());
         let value_advance = self.cols.value_meta.get_prefix(range.start) as usize;
         let value_raw = self.cols.value.iter_at(value_advance);
         ValueIter::new(meta, value_raw)
+    }
+
+    pub(crate) fn id_iter(&self) -> OpIdIter<'_> {
+        OpIdIter::new(self.cols.id_actor.iter(), self.cols.id_ctr.iter())
     }
 
     pub(crate) fn id_iter_range(&self, range: &Range<usize>) -> OpIdIter<'_> {
@@ -1425,6 +1449,14 @@ impl OpSet {
             self.cols.mark_name.iter_range(range.clone()),
             self.cols.expand.iter_range(range.clone()),
         )
+    }
+
+    pub(crate) fn succ_iter(&self) -> SuccIterIter<'_> {
+        let succ_count = self.cols.succ_count.iter();
+        let succ_actor = self.cols.succ_actor.iter();
+        let succ_counter = self.cols.succ_ctr.iter();
+        let inc_values = self.cols.index.inc.iter();
+        SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values)
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {

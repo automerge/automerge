@@ -76,6 +76,8 @@ pub enum AutomergeError {
     EncodingError(#[from] PackError),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("invalid fragment: {0}")]
+    InvalidFragment(&'static str),
 }
 
 impl PartialEq for AutomergeError {

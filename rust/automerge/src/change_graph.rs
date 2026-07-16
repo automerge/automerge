@@ -164,6 +164,47 @@ impl Hashes {
             Self::Unchecked { tail, .. } => tail.push(hash),
         }
     }
+
+    /// Record that `n` nodes with unknown hashes are being appended.
+    ///
+    /// A checked graph downgrades to the fragment-hashes state — every
+    /// hash known so far moves to `pre`, so anything a fragment needs
+    /// is still available. An unchecked graph folds its (always-known)
+    /// tail into `pre`. Either way the watermark moves past the new
+    /// nodes, preserving the invariant that nodes at or beyond it have
+    /// known hashes.
+    fn extend_unknown(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let new_watermark = (self.len() + n) as u32;
+        match self {
+            Self::Checked(v) => {
+                let pre = v
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| (NodeIdx(i as u32), *h))
+                    .collect();
+                *self = Self::Unchecked {
+                    watermark: new_watermark,
+                    tail: Vec::new(),
+                    pre,
+                    fragment_hashes: true,
+                };
+            }
+            Self::Unchecked {
+                watermark,
+                tail,
+                pre,
+                ..
+            } => {
+                for (i, h) in tail.drain(..).enumerate() {
+                    pre.insert(NodeIdx(*watermark + i as u32), h);
+                }
+                *watermark = new_watermark;
+            }
+        }
+    }
 }
 
 /// The result of looking a hash up in a [`ChangeGraph`]
@@ -238,6 +279,30 @@ struct Edge {
     // as you get the edge from the child
     target: NodeIdx,
     next: Option<EdgeIdx>,
+}
+
+/// A member change of a bundle being applied without conversion into
+/// [`Change`]s — everything the graph needs except the change's hash.
+#[derive(Debug, Clone)]
+pub(crate) struct FragmentMember<'a> {
+    /// The member's actor as a document actor index
+    pub(crate) actor: usize,
+    pub(crate) seq: u64,
+    pub(crate) max_op: u64,
+    pub(crate) num_ops: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) message: Option<String>,
+    pub(crate) extra: Cow<'a, [u8]>,
+    pub(crate) deps: Vec<FragmentDep>,
+}
+
+/// A [`FragmentMember`]'s dependency: another member of the same bundle
+/// (by its position in the member list, which is topological order) or
+/// a node already in the graph.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FragmentDep {
+    Member(usize),
+    Node(NodeIdx),
 }
 
 impl ChangeGraph {
@@ -384,7 +449,7 @@ impl ChangeGraph {
         self.max_op as u64
     }
 
-    pub(crate) fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
+    pub(crate) fn max_op_for_actor(&self, actor_index: usize) -> u64 {
         self.seq_index
             .get(actor_index)
             .and_then(|s| s.last())
@@ -397,6 +462,26 @@ impl ChangeGraph {
             .get(actor)
             .map(|v| v.len() as u64)
             .unwrap_or(0)
+    }
+
+    /// The clock covering the whole document: every actor's current op
+    /// counter.
+    pub(crate) fn current_clock(&self) -> Clock {
+        Clock(
+            (0..self.seq_index.len())
+                .map(|a| self.max_op_for_actor(a) as u32)
+                .collect(),
+        )
+    }
+
+    /// The seq clock covering the whole document: every actor's current
+    /// seq.
+    pub(crate) fn current_seq_clock(&self) -> SeqClock {
+        let mut clock = SeqClock::new(self.num_actors());
+        for (a, seqs) in self.seq_index.iter().enumerate() {
+            clock.include(a, u32::try_from(seqs.len()).ok().filter(|n| *n > 0));
+        }
+        clock
     }
 
     fn deps_iter(&self) -> impl Iterator<Item = NodeIdx> + '_ {
@@ -962,7 +1047,7 @@ impl ChangeGraph {
 
     /// The `(actor, seq)` identity of a node — always derivable, hash
     /// graph state notwithstanding.
-    fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
+    pub(crate) fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
         let i = n.0 as usize;
         ChangeId {
             actor: actors[usize::from(self.actors[i])].clone(),
@@ -1076,6 +1161,78 @@ impl ChangeGraph {
         })
     }
 
+    /// Order fragments so every fragment's external member deps land in
+    /// earlier fragments — the order `apply_fragment` needs.
+    ///
+    /// Sorting by head node index is not enough: a loose commit on a
+    /// concurrent branch can predate (by node index) the head of the
+    /// fragment covering its parents. So this is a proper topological
+    /// sort of the fragment DAG, using head node index to break ties
+    /// deterministically.
+    pub(crate) fn sort_fragments_for_apply(
+        &self,
+        fragments: &mut Vec<Fragment>,
+        actors: &[crate::ActorId],
+    ) {
+        let n = fragments.len();
+
+        // which fragment owns each member node
+        let mut owner: HashMap<NodeIdx, usize> = HashMap::new();
+        for (i, f) in fragments.iter().enumerate() {
+            for m in &f.members {
+                if let Some(node) = self.node_for_change_id(m, actors) {
+                    owner.insert(node, i);
+                }
+            }
+        }
+
+        // fragment-level dependency edges from the members' parents
+        let mut indegree = vec![0usize; n];
+        let mut children: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        for (&node, &i) in &owner {
+            for p in self.parents(node) {
+                if let Some(&j) = owner.get(&p) {
+                    if j != i && seen.insert((j, i)) {
+                        children[j].push(i);
+                        indegree[i] += 1;
+                    }
+                }
+            }
+        }
+
+        // Kahn's algorithm, popping the ready fragment with the
+        // smallest head node index
+        let head_node = |f: &Fragment| self.node_by_hash(&f.head);
+        let mut ready: BTreeSet<(Option<NodeIdx>, usize)> = indegree
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| **d == 0)
+            .map(|(i, _)| (head_node(&fragments[i]), i))
+            .collect();
+        let mut order = Vec::with_capacity(n);
+        while let Some(&(key, i)) = ready.iter().next() {
+            ready.remove(&(key, i));
+            order.push(i);
+            for &c in &children[i] {
+                indegree[c] -= 1;
+                if indegree[c] == 0 {
+                    ready.insert((head_node(&fragments[c]), c));
+                }
+            }
+        }
+        debug_assert_eq!(order.len(), n, "fragment dependencies form a cycle");
+
+        let mut pos = vec![0usize; n];
+        for (rank, i) in order.iter().enumerate() {
+            pos[*i] = rank;
+        }
+        let mut indexed: Vec<(usize, Fragment)> =
+            std::mem::take(fragments).into_iter().enumerate().collect();
+        indexed.sort_by_key(|(i, _)| pos[*i]);
+        *fragments = indexed.into_iter().map(|(_, f)| f).collect();
+    }
+
     pub(crate) fn cache_fragments(&mut self) {
         // idempotent: rebuild_hash_graph re-runs this after upgrading the
         // graph, so start from scratch
@@ -1119,6 +1276,108 @@ impl ChangeGraph {
         }
         SeqClock::merge(&mut self.fragment_top, &clock);
         self.fragments.push(FragmentNode { head, deps, clock });
+    }
+
+    pub(crate) fn node_by_hash(&self, hash: &ChangeHash) -> Option<NodeIdx> {
+        self.nodes_by_hash.get(hash).copied()
+    }
+
+    pub(crate) fn node_for_actor_seq(&self, actor: usize, seq: u64) -> Option<NodeIdx> {
+        if seq == 0 {
+            return None;
+        }
+        self.seq_index.get(actor)?.get(seq as usize - 1).copied()
+    }
+
+    pub(crate) fn hash_for_node(&self, node: NodeIdx) -> Option<ChangeHash> {
+        self.hashes.get(node)
+    }
+
+    /// Append the member changes of a bundle without knowing their
+    /// hashes.
+    ///
+    /// The members must be in topological order and each member's seq
+    /// must extend its actor's chain — callers validate both. A checked
+    /// graph downgrades to the fragment-hashes state (see
+    /// [`Hashes::extend_unknown`]); the new nodes have no hash until
+    /// `rebuild_hash_graph` recomputes them, so they cannot appear in
+    /// `nodes_by_hash`, `heads` or the fragment index yet.
+    pub(crate) fn add_fragment_members(&mut self, members: Vec<FragmentMember<'_>>) {
+        let base = NodeIdx(self.len() as u32);
+
+        self.hashes.extend_unknown(members.len());
+
+        self.actors
+            .extend(members.iter().map(|m| ActorIdx::from(m.actor)));
+        self.seq.extend(members.iter().map(|m| m.seq as u32));
+        self.max_ops.extend(members.iter().map(|m| m.max_op as u32));
+        self.num_ops.extend(members.iter().map(|m| m.num_ops));
+        self.timestamps.extend(members.iter().map(|m| m.timestamp));
+        self.messages
+            .extend(members.iter().map(|m| m.message.clone()));
+        self.extra_bytes_meta
+            .extend(members.iter().map(|m| ValueMeta::from(m.extra.as_ref())));
+        self.parents
+            .extend(std::iter::repeat_n(None, members.len()));
+        for m in &members {
+            self.extra_bytes_raw.extend_from_slice(&m.extra);
+        }
+
+        for (i, m) in members.iter().enumerate() {
+            let node_idx = base + i;
+            self.max_op = std::cmp::max(self.max_op, m.max_op as u32);
+
+            assert!(m.actor < self.seq_index.len());
+            assert_eq!(self.seq_index[m.actor].len() + 1, m.seq as usize);
+            self.seq_index[m.actor].push(node_idx);
+
+            for d in &m.deps {
+                let parent = match d {
+                    FragmentDep::Member(j) => {
+                        debug_assert!(*j < i);
+                        base + *j
+                    }
+                    FragmentDep::Node(n) => *n,
+                };
+                self.add_parent(node_idx, parent);
+                // a parent that was a head is now covered
+                if let Some(h) = self.hashes.get(parent) {
+                    self.heads.remove(&h);
+                }
+            }
+
+            if (node_idx + 1).0 % CACHE_STEP == 0 {
+                self.cache_clock(node_idx);
+            }
+        }
+    }
+
+    /// Record the (unverified, until `rebuild_hash_graph`) hash of a
+    /// node whose hash was unknown — a fragment head, checkpoint or
+    /// boundary/dep pairing learned from an applied bundle. Makes the
+    /// hash resolvable; maintains the fragment index for fragment-level
+    /// hashes. No-op on a checked graph or for post-load nodes, whose
+    /// hashes are already known.
+    pub(crate) fn record_node_hash(&mut self, node: NodeIdx, hash: ChangeHash) {
+        match &mut self.hashes {
+            Hashes::Checked(_) => return,
+            Hashes::Unchecked { watermark, pre, .. } => {
+                if node.0 >= *watermark {
+                    // tail nodes always have known hashes
+                    return;
+                }
+                pre.insert(node, hash);
+            }
+        }
+        self.nodes_by_hash.insert(hash, node);
+        self.cache_fragment(node);
+    }
+
+    /// [`Self::record_node_hash`] for a fragment's head — the unique
+    /// childless member — whose hash also joins the heads.
+    pub(crate) fn record_fragment_head(&mut self, node: NodeIdx, hash: ChangeHash) {
+        self.record_node_hash(node, hash);
+        self.heads.insert(hash);
     }
 
     pub(crate) fn add_change(

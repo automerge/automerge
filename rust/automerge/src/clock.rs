@@ -1,4 +1,4 @@
-use crate::types::OpId;
+use crate::types::{ElemId, OpId};
 
 use std::num::NonZeroU32;
 
@@ -117,6 +117,14 @@ impl Clock {
 
     pub(crate) fn covers(&self, id: &OpId) -> bool {
         self.0[id.actor()] as u64 >= id.counter()
+    }
+
+    pub(crate) fn covers_elem(&self, e: &ElemId) -> bool {
+        if e.is_head() {
+            true
+        } else {
+            self.covers(&e.0)
+        }
     }
 }
 

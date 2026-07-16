@@ -57,6 +57,10 @@ harness = false
 name = "remap"
 harness = false
 
+[[bench]]
+name = "seek_to_value"
+harness = false
+
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]
