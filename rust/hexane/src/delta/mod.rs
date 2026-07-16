@@ -1131,7 +1131,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     /// slab-head values to compare against. But the B-tree knows the
     /// running prefix at the start of every slab, and for sorted data
     /// the prefix *is* the realized value — so one descent
-    /// ([`find_slab_at_prefix`](crate::btree::SlabBTree)) lands on the
+    /// (`find_slab_at_prefix`) lands on the
     /// slab where the running sum first reaches the target, without
     /// decoding anything. Only that slab is decoded: a run walk finds
     /// the exact position (repeats of a value are runs of zero deltas,

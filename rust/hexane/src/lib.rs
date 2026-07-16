@@ -41,7 +41,8 @@ pub use codec::Bijou64;
 ///
 /// `use hexane::leb128::Column` reads the same as `use hexane::Column`
 /// (LEB128 is the crate-wide default) but states the wire format at the
-/// import, mirroring [`bijou`].  Code that mixes codecs can import both
+/// import, mirroring the `bijou` module (behind the `bijou64`
+/// feature).  Code that mixes codecs can import both
 /// modules and qualify at the use site.
 pub mod leb128 {
     use crate::Leb128;
