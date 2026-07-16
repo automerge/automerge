@@ -3652,7 +3652,7 @@ fn fuzz_delta_column() {
         for i in 0..300 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 4 != 0 {
+            if len == 0 || !r.is_multiple_of(4) {
                 let pos = if len == 0 {
                     0
                 } else {
@@ -3741,7 +3741,7 @@ fn fuzz_delta_column_nullable() {
             } else {
                 (xorshift(&mut rng) as usize) % (len + 1)
             };
-            let val = if xorshift(&mut rng) % 5 == 0 {
+            let val = if xorshift(&mut rng).is_multiple_of(5) {
                 None
             } else {
                 Some((xorshift(&mut rng) % 500) as u32)
@@ -3768,7 +3768,7 @@ fn fuzz_prefix_column() {
         for i in 0..300 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 4 != 0 {
+            if len == 0 || !r.is_multiple_of(4) {
                 let pos = if len == 0 {
                     0
                 } else {
@@ -3911,13 +3911,13 @@ fn fuzz_prefix_column_bool() {
         for i in 0..300 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 3 != 0 {
+            if len == 0 || !r.is_multiple_of(3) {
                 let pos = if len == 0 {
                     0
                 } else {
                     (xorshift(&mut rng) as usize) % (len + 1)
                 };
-                let val = xorshift(&mut rng) % 2 == 0;
+                let val = xorshift(&mut rng).is_multiple_of(2);
                 col.insert(pos, val);
                 mirror.insert(pos, val);
             } else {
@@ -4048,13 +4048,13 @@ fn fuzz_column_save_load_after_mutations() {
         for _ in 0..200 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 3 != 0 {
+            if len == 0 || !r.is_multiple_of(3) {
                 let pos = if len == 0 {
                     0
                 } else {
                     (xorshift(&mut rng) as usize) % (len + 1)
                 };
-                let val = if xorshift(&mut rng) % 5 == 0 {
+                let val = if xorshift(&mut rng).is_multiple_of(5) {
                     None
                 } else {
                     Some(xorshift(&mut rng) % 100)
@@ -4787,7 +4787,7 @@ fn load_accumulates_delta_agg_weights_nullable() {
     let vals: Vec<Option<i64>> = (0..3_000)
         .map(|_| {
             let r = xorshift(&mut seed);
-            if r % 10 == 0 {
+            if r.is_multiple_of(10) {
                 None
             } else {
                 Some((r % 200) as i64 - 100)

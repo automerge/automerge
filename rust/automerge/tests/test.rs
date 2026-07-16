@@ -573,7 +573,7 @@ fn rollback_after_save_load_of_deep_hydrated_root_map_from_fuzz_trace() {
             "multi\nline",
             "abcdefghijklmnopqrstuvwxyz",
         ];
-        if slot % 8 == 0 {
+        if slot.is_multiple_of(8) {
             "the quick brown fox jumps over the lazy dog".to_string()
         } else {
             STRINGS[usize::from(slot) % STRINGS.len()].to_string()

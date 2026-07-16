@@ -724,7 +724,7 @@ fn bool_merge_slabs<C: Codec>(
     debug_assert_eq!(a_last_cb, a_tail as usize);
     // Runs alternate false/true: seg 1=false, 2=true, 3=false...
     // Even segments → last is true, odd → last is false.
-    let a_last_value = a_segments % 2 == 0;
+    let a_last_value = a_segments.is_multiple_of(2);
 
     // b's first run (always starts with false).
     let b_data: &[u8] = &b.data;
@@ -871,7 +871,7 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             if next_pos >= self.data.len() && count == 0 {
                 return Err(PackError::BadFormat);
             }
-            let value = self.run_index % 2 != 0;
+            let value = !self.run_index.is_multiple_of(2);
             self.pos = next_pos;
             self.run_index += 1;
             self.slab_items += count;

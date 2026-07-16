@@ -567,7 +567,7 @@ impl ChangeGraph {
                 self.add_parent(node_idx, parent_hash);
             }
 
-            if (node_idx + 1).0 % CACHE_STEP == 0 {
+            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
                 self.cache_clock(node_idx);
             }
 
