@@ -16,3 +16,11 @@ codegen-units = 1
 
 [profile.bench]
 debug = true
+
+# getrandom 0.4.2 (latest crates.io release as of 2026-05) does not support
+# wasm64-unknown-unknown in its wasm_js backend. Upstream PR rust-random/getrandom#848
+# adds that support but is unreleased. Pin to the git rev that includes it so the
+# memory64 build target works. wasm32 builds are unaffected — the patched code
+# extends the existing wasm_js arm from target_arch=wasm32 to target_family=wasm.
+[patch.crates-io]
+getrandom = { git = "https://github.com/rust-random/getrandom", branch = "master" }
