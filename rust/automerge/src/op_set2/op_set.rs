@@ -1,7 +1,6 @@
 use super::parents::Parents;
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
-use crate::iter::tools::BoolColumnSkipper;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
@@ -32,6 +31,9 @@ use std::sync::Arc;
 mod found_op;
 pub(crate) mod index;
 mod insert;
+// dead_code: the manifold is only consumed by its tests until the
+// batch apply switches over to it
+#[allow(dead_code)]
 mod manifold;
 mod mark_index;
 mod marks;
@@ -927,6 +929,8 @@ impl OpSet {
                 .is_some_and(|delta| delta.delta == range.len())
     }
 
+    // dead_code: seek-mode surface awaiting the batch-apply wiring
+    #[allow(dead_code)]
     pub(crate) fn elem_iter(&self) -> ElemIter<'_> {
         ElemIter::new(self.cols.key_actor.iter(), self.cols.key_ctr.iter())
     }

@@ -1,7 +1,5 @@
 use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
-use crate::iter::tools::BoolColumnSkipper;
-use crate::iter::tools::SkipIter;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;

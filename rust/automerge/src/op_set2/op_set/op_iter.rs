@@ -525,12 +525,15 @@ impl Iterator for InsertIter<'_> {
     }
 }
 
+// dead_code: seek-mode surface awaiting the batch-apply wiring
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct ElemIter<'a> {
     key_actor: hexane::Iter<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaIter<'a, Option<u32>>,
 }
 
+#[allow(dead_code)]
 impl<'a> ElemIter<'a> {
     pub(crate) fn new(
         key_actor: hexane::Iter<'a, Option<ActorIdx>>,
