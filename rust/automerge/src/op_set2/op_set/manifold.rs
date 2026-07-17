@@ -153,13 +153,13 @@ impl<'a> ApplyManifold<'a> {
             elem: None,
             last_insert: None,
             elem_scope: 0..0,
-            top: TopCalc::default(),
+            top: TopCalc::new(),
             vis_iter,
         }
     }
 
     /// Feed the manifold all of `ops` and resolve.
-    pub(crate) fn apply<I: Iterator<Item = ChangeOp>>(mut self, ops: I) -> ManifoldResult {
+    pub(crate) fn apply<'i, I: Iterator<Item = &'i ChangeOp>>(mut self, ops: I) -> ManifoldResult {
         for op in ops {
             self.apply_op(op);
         }
@@ -183,7 +183,17 @@ impl<'a> ApplyManifold<'a> {
 
     /// Process one change op. Ops must arrive in document order (see
     /// the type-level contract).
-    pub(crate) fn apply_op(&mut self, op: ChangeOp) {
+    pub(crate) fn apply_op(&mut self, op: &ChangeOp) {
+        if std::env::var("BATCH_DEBUG").is_ok() {
+            eprintln!(
+                "mop {:?} key {:?} ins {} del {} obj {:?}",
+                op.id(),
+                op.key(),
+                op.insert(),
+                op.bld.is_delete(),
+                op.bld.obj
+            );
+        }
         if let Some(info) = op.obj_info() {
             self.obj_info.insert(op.id(), info);
         }
@@ -224,10 +234,17 @@ impl<'a> ApplyManifold<'a> {
                 }
             }
             if !op.bld.is_delete() {
+                if std::env::var("BATCH_DEBUG").is_ok() {
+                    eprintln!(
+                        "  map-seek {:?} id_iter pos {}",
+                        op.id(),
+                        self.id_iter.pos()
+                    );
+                }
                 let r = self.id_iter.seek_to_value(&op.id());
                 assert!(r.is_empty());
                 self.insert_pos.push(r.start);
-                self.top.candidate(&op, r.start);
+                self.top.candidate(op, r.start);
             }
         } else if op.insert() {
             let e = op.key().elemid().unwrap();
@@ -238,7 +255,7 @@ impl<'a> ApplyManifold<'a> {
             // document order) and open one with no doc rows
             self.flush();
             // slot is irrelevant: an insert's scope never has doc rows
-            self.top.candidate(&op, 0);
+            self.top.candidate(op, 0);
             self.elem = None;
 
             if !e.is_head() && self.clock.covers(&e.0) {
@@ -318,7 +335,13 @@ impl<'a> ApplyManifold<'a> {
                         Some((row_id, s)) if row_id == e.0 => s,
                         _ => {
                             self.id_iter.set_max(self.obj_scope.end);
-                            self.id_iter.scan_to_value(&e.0).unwrap()
+                            match self.id_iter.scan_to_value(&e.0) {
+                                Some(p) => p,
+                                None => panic!(
+                                    "update target {:?} not found: op {:?} action {:?} pred {:?} id_iter pos {} obj_scope {:?} elem_scope {:?} lesser {:?} last_insert {:?}",
+                                    e, op.id(), op.bld.action, op.bld.pred, self.id_iter.pos(), self.obj_scope, self.elem_scope, self.lesser, self.last_insert
+                                ),
+                            }
                         }
                     };
                     // this group's element row is an insert row between
@@ -353,12 +376,12 @@ impl<'a> ApplyManifold<'a> {
                 if self.elem_scope.is_empty() {
                     // pending target: rides along at its insert's slot
                     self.insert_pos.push(self.elem_scope.start);
-                    self.top.candidate(&op, self.elem_scope.start);
+                    self.top.candidate(op, self.elem_scope.start);
                 } else {
                     let r = self.id_iter.seek_to_value(&op.id());
                     assert!(r.is_empty());
                     self.insert_pos.push(r.start);
-                    self.top.candidate(&op, r.start);
+                    self.top.candidate(op, r.start);
                 }
             }
         }
@@ -401,8 +424,8 @@ impl<'a> ApplyManifold<'a> {
 /// Text needs no separate pass: `conflict()`/`expose()` maintain the
 /// text index alongside the top bit, and `Columns::splice` derives new
 /// rows' entries from `OpLike::top`.
-#[derive(Default)]
 struct TopCalc {
+    enabled: bool,
     // current scope: doc row range (empty for insert/pending scopes)
     doc_scope: Range<usize>,
     // visible batch ops in arrival (= ascending id) order
@@ -427,6 +450,17 @@ struct BatchTop {
 }
 
 impl TopCalc {
+    fn new() -> Self {
+        TopCalc {
+            enabled: std::env::var("MANIFOLD_NO_TOP").is_err(),
+            doc_scope: 0..0,
+            batch: vec![],
+            deleted: vec![],
+            adjusts: vec![],
+            conflicted: vec![],
+        }
+    }
+
     fn open(&mut self, doc_scope: Range<usize>) {
         debug_assert!(self.batch.is_empty() && self.deleted.is_empty());
         self.doc_scope = doc_scope;
@@ -437,6 +471,10 @@ impl TopCalc {
     /// row and can never be in the batch list, so the common case
     /// never walks it.
     fn kill(&mut self, pred: &OpId, inc: Option<i64>) {
+        if !self.enabled {
+            return;
+        }
+
         if let Some(b) = self.batch.iter_mut().find(|b| b.id == *pred) {
             // same normalization flush applies to doc targets: an
             // increment only preserves a counter
@@ -450,6 +488,10 @@ impl TopCalc {
     /// that can hold top (matches v1's `Top` visibility test). `slot`
     /// is its already-computed insertion point within the scope.
     fn candidate(&mut self, op: &ChangeOp, slot: usize) {
+        if !self.enabled {
+            return;
+        }
+
         if !op.bld.is_inc() {
             self.batch.push(BatchTop {
                 id: op.id(),
@@ -463,11 +505,19 @@ impl TopCalc {
     /// Called by the succ flush for every covered pred resolved with
     /// `inc = None` — the rows `add_succ` will clear.
     fn note_deleted(&mut self, pos: usize) {
+        if !self.enabled {
+            return;
+        }
+
         self.deleted.push(pos);
     }
 
     /// Close the scope: decide the group winner and emit adjustments.
     fn finalize(&mut self, vis_iter: &mut hexane::Iter<'_, bool>) {
+        if !self.enabled {
+            return;
+        }
+
         let cmax = self.batch.iter().rev().find(|b| b.alive);
         if cmax.is_none() && self.deleted.is_empty() {
             // increments-only, deletes-of-nothing, or empty — the hot
@@ -583,6 +633,9 @@ impl SuccCache {
         let mut counter_memo: Option<(OpId, bool)> = None;
         for (pred, succ, mut inc) in self.preds.drain(..) {
             if self.clock.covers(&pred) {
+                if std::env::var("BATCH_DEBUG").is_ok() {
+                    eprintln!("  flush-seek {:?} pred_iter pos {}", pred, pred_iter.pos());
+                }
                 let r = pred_iter.seek_to_value(&pred);
                 assert!(r.len() == 1, "covered pred must be present");
                 if inc.is_some() {
@@ -694,7 +747,7 @@ mod tests {
         let r = doc
             .ops()
             .apply_manifold(doc.change_graph.current_clock())
-            .apply(ordered.iter().cloned());
+            .apply(ordered.iter());
         let (v2_succ, v2_change_succ, v2_pos) = (r.doc_succ, r.change_succ, r.insert_pos);
 
         // insert positions, paired by op id
@@ -1259,7 +1312,7 @@ mod tests {
                 let out = doc
                     .ops()
                     .apply_manifold(doc.change_graph.current_clock())
-                    .apply(ops.into_iter());
+                    .apply(ops.iter());
                 v2_times.push(t.elapsed());
                 std::hint::black_box(&out);
             }

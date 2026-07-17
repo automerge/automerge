@@ -1024,6 +1024,7 @@ impl Automerge {
             *self = doc;
             return Ok(self.ops.len());
         }
+        let parse_t = std::time::Instant::now();
         let changes = match load::load_changes(
             storage::parse::Input::new(data),
             self.text_encoding(),
@@ -1036,6 +1037,13 @@ impl Automerge {
                 loaded
             }
         };
+        if std::env::var("BATCH_TIMING").is_ok() {
+            eprintln!(
+                "BATCH {:<22} {:>9.3}ms",
+                "parse+load_changes",
+                parse_t.elapsed().as_secs_f64() * 1e3
+            );
+        }
         let start = self.ops.len();
         self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;

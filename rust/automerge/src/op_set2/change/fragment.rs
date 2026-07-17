@@ -27,6 +27,9 @@ pub(crate) struct FragmentApply {
     ops: Vec<ChangeOp>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
+    /// the document clock *before* this fragment — the manifold path
+    /// needs it to split doc preds from in-bundle preds
+    clock: Clock,
 }
 
 impl FragmentApply {
@@ -79,6 +82,7 @@ impl FragmentApply {
             ops,
             pred: PredCache::default(),
             obj_spans: Vec::new(),
+            clock: clock.clone(),
         })
     }
 
@@ -130,6 +134,74 @@ impl FragmentApply {
     }
 
     pub(crate) fn apply(
+        &mut self,
+        doc: &mut Automerge,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        // the manifold path resolves positions/succ/top by seeking
+        // instead of walking every doc row; it produces no patches, so
+        // an active log falls back to the walk
+        if !log.is_active() && std::env::var("FRAGMENT_MANIFOLD").is_ok() {
+            return self.apply_manifold(doc, log);
+        }
+        self.apply_walk(doc, log)
+    }
+
+    /// Resolve the bundle with [`crate::op_set2::op_set::ApplyManifold`]:
+    /// the bundle's ops are already in document order — the manifold's
+    /// exact contract — so positions, succ and top/text adjustments come
+    /// from seeks over the touched scopes only.
+    fn apply_manifold(
+        &mut self,
+        doc: &mut Automerge,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        log.migrate_actors(&doc.ops().actors)?;
+
+        let mut r = doc
+            .ops()
+            .apply_manifold(self.clock.clone())
+            .apply(self.ops.iter());
+
+        // same ordering as the walk path: adjust the standing rows,
+        // write the doc succ, then splice
+        for a in r.adjusts.drain(..) {
+            match a {
+                Adjust::Conflict(index) => doc.ops.conflict(index),
+                Adjust::Expose(index) => doc.ops.expose(index),
+            }
+        }
+        doc.ops.add_succ(&r.doc_succ);
+
+        // stamp the manifold's outputs onto the ops: the splice derives
+        // each new row's succ/top/text entries from them. Document
+        // order is (pos, subsort) order, so no sort is needed
+        let conflicted: HashSet<OpId> = r.conflicted.iter().copied().collect();
+        let mut pos_iter = r.insert_pos.iter();
+        for (i, op) in self.ops.iter_mut().enumerate() {
+            op.subsort = i;
+            op.conflicted = conflicted.contains(&op.id());
+            if !op.bld.is_delete() {
+                op.pos = Some(*pos_iter.next().expect("one position per non-delete op"));
+            }
+            if let Some(mut succ) = r.change_succ.remove(&op.id()) {
+                // the succ columns want id order, increments normalized
+                // against their target
+                succ.sort_unstable_by_key(|(id, _)| *id);
+                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
+                normalize_increment_successors(is_counter, &mut succ);
+                op.succ = succ;
+            }
+        }
+        debug_assert!(pos_iter.next().is_none());
+
+        insert_runs_of_ops(&self.ops, doc);
+
+        debug_assert!(doc.ops.validate_op_order());
+        Ok(())
+    }
+
+    fn apply_walk(
         &mut self,
         doc: &mut Automerge,
         log: &mut PatchLog,

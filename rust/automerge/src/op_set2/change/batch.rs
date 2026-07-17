@@ -333,6 +333,157 @@ pub(crate) fn walk_list<'a>(
     ut.finish(log);
 }
 
+/// The ordering half of [`Untangler`]: sub-sorts a sequence object's
+/// change ops into strict document order and nothing else — no succ,
+/// top, value or patch work. Same battle-tested mechanics (entry /
+/// stack / gosub / updates driven by a walk of the object's rows), but
+/// the walk reads only the id and insert columns, and the only output
+/// is the order itself. Feeds the manifold, which requires strict
+/// document order and computes everything the full walk used to.
+struct UntangleLite<'a> {
+    change_ops: &'a mut [ChangeOp],
+    order: Vec<u32>,
+    count: u32,
+    entry: SmallHashMap<OpId, Vec<usize>>,
+    stack: Vec<usize>,
+    gosub: SmallHashMap<usize, Vec<usize>>,
+    updates: SmallHashMap<ElemId, Vec<usize>>,
+    updates_stack: Vec<usize>,
+}
+
+impl<'a> UntangleLite<'a> {
+    fn new(change_ops: &'a mut [ChangeOp]) -> Self {
+        // same population pass as Untangler::new, minus the pred/succ
+        // bookkeeping (the manifold resolves succ)
+        let mut e_to_i = SmallHashMap::default();
+        let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
+        let mut entry: SmallHashMap<OpId, Vec<usize>> = HashMap::default();
+        let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
+        let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
+        let mut last_e = None;
+        for (i, op) in change_ops.iter().enumerate() {
+            if let KeyRef::Seq(e) = op.key() {
+                if op.insert() {
+                    if let Some(j) = e_to_i.get(e) {
+                        gosub.entry(*j).or_default().push(i);
+                    } else if e.is_head() {
+                        stack.push(i);
+                    } else {
+                        entry.entry(e.0).or_default().push(i);
+                    }
+                    let this_e = ElemId(op.id());
+                    e_to_i.insert(this_e, i);
+                    last_e = Some(this_e);
+                } else if last_e != Some(*e) {
+                    updates.entry(*e).or_default().push(i);
+                }
+            }
+        }
+        let order = vec![u32::MAX; change_ops.len()];
+        Self {
+            change_ops,
+            order,
+            count: 0,
+            entry,
+            stack,
+            gosub,
+            updates,
+            updates_stack: vec![],
+        }
+    }
+
+    fn emit(&mut self, i: usize) {
+        debug_assert_eq!(self.order[i], u32::MAX);
+        self.order[i] = self.count;
+        self.count += 1;
+    }
+
+    fn element_update(&mut self, doc_insert: bool, doc_id: OpId) {
+        while let Some(last) = self.updates_stack.last().copied() {
+            if doc_insert || doc_id > self.change_ops[last].id() {
+                self.updates_stack.pop();
+                self.emit(last);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn untangle_inserts(&mut self, id: OpId) {
+        if let Err(n) = self
+            .stack
+            .binary_search_by(|n| self.change_ops[*n].id().cmp(&id))
+        {
+            while self.stack.len() > n {
+                self.untangle_inner();
+            }
+        }
+        if let Some(v) = self.entry.remove(&id) {
+            self.stack.extend(v);
+        }
+        if let Some(u) = self.updates.get(&ElemId(id)) {
+            self.updates_stack.extend(u.iter().rev());
+        }
+    }
+
+    fn untangle_inner(&mut self) -> Option<()> {
+        let pos = self.stack.pop()?;
+        let key = KeyRef::Seq(ElemId(self.change_ops[pos].id()));
+        self.emit(pos);
+        if let Some(v) = self.gosub.remove(&pos) {
+            self.stack.extend(v);
+        }
+        // the op's own updates follow it contiguously in
+        // order_ops_for_doc order
+        for i in (pos + 1)..self.change_ops.len() {
+            if self.change_ops[i].insert() || self.change_ops[i].key() != &key {
+                break;
+            }
+            self.emit(i);
+        }
+        Some(())
+    }
+
+    fn finish(mut self) {
+        for i in std::mem::take(&mut self.updates_stack).into_iter().rev() {
+            self.emit(i);
+        }
+        while !self.stack.is_empty() {
+            self.untangle_inner();
+        }
+        debug_assert!(self.order.iter().all(|&o| o != u32::MAX));
+        // apply the permutation in place by cycles: order[i] is the
+        // destination slot of the op at i
+        let mut order = std::mem::take(&mut self.order);
+        for i in 0..order.len() {
+            while order[i] as usize != i {
+                let j = order[i] as usize;
+                self.change_ops.swap(i, j);
+                order.swap(i, j);
+            }
+        }
+    }
+}
+
+/// Reorder one sequence object's change ops into strict document
+/// order, driving [`UntangleLite`] with the object's id and insert
+/// columns only.
+pub(super) fn untangle_order(
+    change_ops: &mut [ChangeOp],
+    mut ids: crate::op_set2::op_set::OpIdIter<'_>,
+    mut inserts: hexane::Iter<'_, bool>,
+) {
+    let mut ut = UntangleLite::new(change_ops);
+    for id in ids.by_ref() {
+        let insert = inserts.next().expect("insert column length matches ids");
+        ut.element_update(insert, id);
+        if insert {
+            ut.untangle_inserts(id);
+        }
+    }
+    ut.finish();
+}
+
 pub(crate) struct MapWalker<'a, 'b> {
     ops: OpIter<'a>,
     log: &'b mut PatchLog,
@@ -894,15 +1045,31 @@ impl BatchApply {
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), PatchLogMismatch> {
+        // manifold pipeline: order_ops_for_doc -> untangle (order only)
+        // -> manifold (positions/succ/top) -> write ops. Produces no
+        // patches, so an active log uses the walk
+        if !log.is_active() && std::env::var("BATCH_MANIFOLD").is_ok() {
+            return self.apply_manifold(doc, log);
+        }
+        let timing = std::env::var("BATCH_TIMING").is_ok();
+        let mut t = std::time::Instant::now();
+        let mut lap = |label: &str| {
+            if timing {
+                eprintln!("WALK {:<22} {:>9.3}ms", label, t.elapsed().as_secs_f64() * 1e3);
+                t = std::time::Instant::now();
+            }
+        };
         self.insert_new_actors(doc);
 
         log.migrate_actors(&doc.ops().actors)?;
 
         self.import_ops(doc);
+        lap("import_ops");
 
         let mut obj_info = doc.ops().obj_info.clone();
 
         self.order_ops_for_doc(&mut obj_info);
+        lap("order_ops_for_doc");
 
         let mut succ = vec![];
 
@@ -948,6 +1115,7 @@ impl BatchApply {
             }
         }
 
+        lap("walk_and_untangle");
         #[cfg(feature = "slow_path_assertions")]
         {
             // should always be ordered correctly - just double checking
@@ -970,8 +1138,107 @@ impl BatchApply {
         }
 
         doc.ops.add_succ(&succ);
+        lap("adjusts+add_succ");
 
         insert_runs_of_ops(&self.ops, doc);
+        lap("splice");
+
+        debug_assert!(doc.ops.validate_op_order());
+        Ok(())
+    }
+
+    fn apply_manifold(
+        &mut self,
+        doc: &mut Automerge,
+        log: &mut PatchLog,
+    ) -> Result<(), PatchLogMismatch> {
+        let timing = std::env::var("BATCH_TIMING").is_ok();
+        let mut t = std::time::Instant::now();
+        let mut lap = |label: &str| {
+            if timing {
+                eprintln!("BATCH {:<22} {:>9.3}ms", label, t.elapsed().as_secs_f64() * 1e3);
+                t = std::time::Instant::now();
+            }
+        };
+        self.insert_new_actors(doc);
+        log.migrate_actors(&doc.ops().actors)?;
+
+        // import the ops first so actor indexes are settled, then
+        // capture the clock BEFORE update_history records the batch —
+        // the manifold splits doc rows from batch ops by what the
+        // document knew before these changes
+        for c in &self.changes {
+            doc.import_ops_to(c, &mut self.ops).unwrap();
+        }
+        lap("import_ops");
+        let clock = doc.change_graph.current_clock();
+        for c in &self.changes {
+            doc.update_history(c);
+        }
+        doc.remove_unused_actors(true);
+        lap("update_history");
+
+        let mut obj_info = doc.ops().obj_info.clone();
+        self.order_ops_for_doc(&mut obj_info);
+        lap("order_ops_for_doc");
+
+        // strict document order per sequence object (maps already are)
+        let mut walker = ObjWalker::new(doc.ops());
+        for os in &self.obj_spans {
+            if matches!(obj_info.object_type(&os.obj), Some(t) if t.is_sequence()) {
+                let obj_range = walker.seek_to_obj(os.obj);
+                untangle_order(
+                    &mut self.ops[os.span.clone()],
+                    doc.ops().id_iter_range(&obj_range),
+                    doc.ops().insert().values().iter_range(obj_range.clone()),
+                );
+            }
+        }
+
+        lap("untangle_lite");
+        let mut r = doc.ops().apply_manifold(clock).apply(self.ops.iter());
+        lap("manifold");
+
+        for a in r.adjusts.drain(..) {
+            match a {
+                Adjust::Conflict(index) => doc.ops.conflict(index),
+                Adjust::Expose(index) => doc.ops.expose(index),
+            }
+        }
+        doc.ops.add_succ(&r.doc_succ);
+        lap("adjusts+add_succ");
+
+        let conflicted: HashSet<OpId> = r.conflicted.iter().copied().collect();
+        let mut pos_iter = r.insert_pos.iter();
+        for (i, op) in self.ops.iter_mut().enumerate() {
+            op.subsort = i;
+            op.conflicted = conflicted.contains(&op.id());
+            if !op.bld.is_delete() {
+                op.pos = Some(*pos_iter.next().expect("one position per non-delete op"));
+            }
+            if let Some(mut succ) = r.change_succ.remove(&op.id()) {
+                succ.sort_unstable_by_key(|(id, _)| *id);
+                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
+                normalize_increment_successors(is_counter, &mut succ);
+                op.succ = succ;
+            }
+        }
+        debug_assert!(pos_iter.next().is_none());
+
+        // deletes never splice, but pos=None would break the run
+        // grouping in insert_runs_of_ops (one splice call per run):
+        // give each delete the following op's position
+        let mut next_pos = None;
+        for op in self.ops.iter_mut().rev() {
+            if op.pos.is_some() {
+                next_pos = op.pos;
+            } else {
+                op.pos = next_pos;
+            }
+        }
+        lap("stamp");
+        insert_runs_of_ops(&self.ops, doc);
+        lap("splice");
 
         debug_assert!(doc.ops.validate_op_order());
         Ok(())
@@ -1216,6 +1483,169 @@ mod tests {
         doc.merge(&mut f).unwrap();
         // walking the merged doc's changes re-encounters the layout
         let _ = doc.doc.get_changes(&heads).unwrap();
+    }
+
+    #[test]
+    fn untangle_lite_matches_full_untangler() {
+        let mut rng = make_rng();
+        for _ in 0..30 {
+            let mut base = AutoCommit::new().with_actor(rng.random()).unwrap();
+            let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
+            for i in 0..5 {
+                base.insert(&list, i, i as i64).unwrap();
+            }
+            base.put(&list, 1, "u1").unwrap();
+            let heads = base.get_heads();
+            let mut src = base.fork().with_actor(rng.random()).unwrap();
+            for _ in 0..6 {
+                let mut f = base.fork().with_actor(rng.random()).unwrap();
+                for _ in 0..rng.random_range(1..8u32) {
+                    let len = f.length(&list);
+                    match rng.random_range(0..5u32) {
+                        0 if len > 0 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.put(&list, at, "x").unwrap();
+                        }
+                        1 if len > 1 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.delete(&list, at).unwrap();
+                        }
+                        2 => {
+                            f.commit();
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, 7i64).unwrap();
+                        }
+                        _ => {
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
+                        }
+                    }
+                }
+                src.merge(&mut f).unwrap();
+            }
+            let changes = changes_since(&mut src, &heads);
+
+            let doc = &mut base.doc;
+            let mut chap = BatchApply::default();
+            for c in changes {
+                chap.push(c);
+            }
+            chap.insert_new_actors(doc);
+            for c in &chap.changes {
+                doc.import_ops_to(c, &mut chap.ops).unwrap();
+            }
+            let mut obj_info = doc.ops().obj_info.clone();
+            chap.order_ops_for_doc(&mut obj_info);
+
+            let mut walker = ObjWalker::new(doc.ops());
+            for os in &chap.obj_spans {
+                if !matches!(obj_info.object_type(&os.obj), Some(t) if t.is_sequence()) {
+                    continue;
+                }
+                let obj_range = walker.seek_to_obj(os.obj);
+
+                // lite order
+                let mut lite_ops = chap.ops[os.span.clone()].to_vec();
+                untangle_order(
+                    &mut lite_ops,
+                    doc.ops().id_iter_range(&obj_range),
+                    doc.ops().insert().values().iter_range(obj_range.clone()),
+                );
+                let lite: Vec<OpId> = lite_ops.iter().map(|o| o.id()).collect();
+
+                // full untangler order (walk assigns pos/subsort + sorts)
+                let mut log = PatchLog::inactive();
+                let mut succ = vec![];
+                let mut conflicts = vec![];
+                let doc_ops = doc.ops().iter_range(&obj_range);
+                let ut = Untangler::new(
+                    os.obj,
+                    SequenceType::List,
+                    doc.text_encoding(),
+                    &mut conflicts,
+                    &mut chap.ops[os.span.clone()],
+                    &mut chap.pred,
+                    doc_ops.end_pos(),
+                );
+                walk_list(ut, doc_ops, &mut succ, &mut log);
+                let full: Vec<OpId> = chap.ops[os.span.clone()].iter().map(|o| o.id()).collect();
+
+                assert_eq!(lite, full, "untangle orders diverge");
+            }
+        }
+    }
+
+    #[test]
+    fn batch_apply_manifold_matches_walk() {
+        // same changes through the walk pipeline and the untangle ->
+        // manifold pipeline must produce byte-identical documents
+        let mut rng = make_rng();
+        for _ in 0..20 {
+            let mut base = AutoCommit::new().with_actor(rng.random()).unwrap();
+            let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
+            let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
+            base.put(&map, "c", ScalarValue::counter(0)).unwrap();
+            for i in 0..5 {
+                base.insert(&list, i, i as i64).unwrap();
+            }
+            base.put(&list, 1, "u1").unwrap();
+            let heads = base.get_heads();
+
+            let mut src = base.fork().with_actor(rng.random()).unwrap();
+            for _ in 0..6 {
+                let mut f = base.fork().with_actor(rng.random()).unwrap();
+                for _ in 0..rng.random_range(1..8u32) {
+                    let len = f.length(&list);
+                    match rng.random_range(0..7u32) {
+                        0 => {
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
+                        }
+                        1 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            f.put(&map, k, rng.random_range(0..100i64)).unwrap();
+                        }
+                        2 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            let _ = f.delete(&map, k);
+                        }
+                        3 => {
+                            f.increment(&map, "c", rng.random_range(1..10i64)).unwrap();
+                        }
+                        4 if len > 0 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.put(&list, at, "x").unwrap();
+                        }
+                        5 if len > 1 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.delete(&list, at).unwrap();
+                        }
+                        _ => {
+                            f.commit();
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
+                        }
+                    }
+                }
+                src.merge(&mut f).unwrap();
+            }
+            let changes = changes_since(&mut src, &heads);
+
+            std::env::remove_var("BATCH_MANIFOLD");
+            let mut walk_doc = base.fork();
+            walk_doc.doc.apply_changes_batch(changes.clone()).unwrap();
+            std::env::set_var("BATCH_MANIFOLD", "1");
+            let mut mani_doc = base.fork();
+            mani_doc.doc.apply_changes_batch(changes).unwrap();
+            std::env::remove_var("BATCH_MANIFOLD");
+
+            assert_eq!(walk_doc.get_heads(), mani_doc.get_heads());
+            assert_eq!(walk_doc.doc.save(), mani_doc.doc.save(), "docs diverge");
+        }
+    }
+
+    fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeHash]) -> Vec<Change> {
+        src.get_changes(heads).unwrap()
     }
 
     #[test]

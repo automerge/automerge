@@ -1126,8 +1126,14 @@ where
     /// O(log S) seek via the index, O(1) per item after.
     pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T> {
         let start = range.start.min(self.total_len);
-        let end = range.end.min(self.total_len);
-        if start >= end || self.slabs.is_empty() {
+        let end = range.end.min(self.total_len).max(start);
+        // Even an empty range must leave the iterator *positioned* at
+        // `start` (decoder and slab state valid): windows are routinely
+        // re-extended later via `set_max`/`shift`, and an unpositioned
+        // iterator would yield nothing from `next` and violate
+        // `advance_to_slab`'s forward invariant from `nth`. Only a
+        // start at/past the end of the data takes the shortcut.
+        if start >= self.total_len || self.slabs.is_empty() {
             return Iter {
                 slabs: &self.slabs,
                 col: Some(self),

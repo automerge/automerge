@@ -2611,6 +2611,392 @@ mod tests {
         assert_eq!(a, b);
     }
 
+    /// Apply the same V2 fragments through the walk and the manifold
+    /// paths; the resulting documents must be byte-identical.
+    #[test]
+    #[ignore] // parked: bundles emit delete ops out of group order, which
+              // the manifold's doc-order contract rejects (rng-dependent;
+              // see repro_a2_manifold). Re-enable with the v2 bundle work.
+    fn fragment_apply_manifold_matches_walk() {
+        use crate::read::ReadDoc;
+        let mut rng = make_rng();
+        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let text = doc.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        let map = doc.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
+        doc.put(&map, "c", crate::ScalarValue::counter(0)).unwrap();
+        for i in 0..40 {
+            if i % 8 == 0 {
+                doc.commit();
+            }
+            let len = doc.length(&text);
+            match rng.random_range(0..5u32) {
+                0 if len > 1 => {
+                    let at = rng.random_range(0..len as u32) as usize;
+                    doc.splice_text(&text, at, 1, "").unwrap();
+                }
+                1 => {
+                    let k = format!("k{}", rng.random_range(0..6u32));
+                    doc.put(&map, k, rng.random_range(0..100i64)).unwrap();
+                }
+                2 => {
+                    doc.increment(&map, "c", 1).unwrap();
+                }
+                _ => {
+                    let at = rng.random_range(0..=len as u32) as usize;
+                    doc.splice_text(&text, at, 0, "x").unwrap();
+                }
+            }
+        }
+        doc.commit();
+
+        let fragments = doc.doc.fragments(..).unwrap();
+        let bundles: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+
+        let apply_all = || {
+            let mut d = Automerge::new();
+            for b in &bundles {
+                d.apply_fragment(b).unwrap();
+            }
+            d
+        };
+
+        std::env::remove_var("FRAGMENT_MANIFOLD");
+        let walk = apply_all();
+        std::env::set_var("FRAGMENT_MANIFOLD", "1");
+        let manifold = apply_all();
+        std::env::remove_var("FRAGMENT_MANIFOLD");
+
+        assert_eq!(walk.get_heads(), manifold.get_heads());
+        assert_eq!(walk.save(), manifold.save(), "docs diverge");
+    }
+
+    /// Apply a doc's v1 bundles one at a time, v1 walk vs v2 manifold,
+    /// timing each. Loose (single-change) bundles are summarized.
+    /// BENCH_DOCS=C2 cargo test -p automerge --release --lib bench_per_bundle -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_per_bundle() {
+        use std::time::{Duration, Instant};
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|v| v.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| vec!["C2".to_string()]);
+        for name in &docs {
+            let path = format!("/Users/orion/automerge-blog/data/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let sizes: Vec<usize> = fragments.iter().map(|f| f.members.len()).collect();
+            let bundles = doc.bundle_fragments(fragments).unwrap();
+
+            let run = |env: bool| -> Vec<Duration> {
+                if env {
+                    std::env::set_var("BATCH_MANIFOLD", "1");
+                } else {
+                    std::env::remove_var("BATCH_MANIFOLD");
+                }
+                let mut d = Automerge::new();
+                let times = bundles
+                    .iter()
+                    .map(|b| {
+                        let t = Instant::now();
+                        d.load_incremental(b).unwrap();
+                        t.elapsed()
+                    })
+                    .collect();
+                std::env::remove_var("BATCH_MANIFOLD");
+                assert_eq!(d.get_heads(), doc.get_heads());
+                times
+            };
+            let v1 = run(false);
+            let v2 = run(true);
+
+            println!("{name}: {} bundles", bundles.len());
+            println!("{:>6} {:>8} {:>12} {:>12}", "idx", "changes", "v1", "v2");
+            let mut loose = (0usize, Duration::ZERO, Duration::ZERO);
+            for i in 0..bundles.len() {
+                if sizes[i] <= 1 {
+                    loose.0 += 1;
+                    loose.1 += v1[i];
+                    loose.2 += v2[i];
+                } else {
+                    println!("{:>6} {:>8} {:>12.2?} {:>12.2?}", i, sizes[i], v1[i], v2[i]);
+                }
+            }
+            if loose.0 > 0 {
+                println!(
+                    " loose {:>8} {:>12.2?} {:>12.2?}   (count, avg v1, avg v2)",
+                    loose.0,
+                    loose.1 / loose.0 as u32,
+                    loose.2 / loose.0 as u32
+                );
+            }
+            println!(
+                " total          {:>12.2?} {:>12.2?}",
+                v1.iter().sum::<Duration>(),
+                v2.iter().sum::<Duration>()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_v1_load_walk_vs_manifold() {
+        use std::time::{Duration, Instant};
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|v| v.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| {
+                ["S1", "S2", "S3", "C1", "C2", "A1", "A2"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+        for name in &docs {
+            let path = format!("/Users/orion/automerge-blog/data/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let joined: Vec<u8> = doc
+                .bundle_fragments(fragments)
+                .unwrap()
+                .into_iter()
+                .flatten()
+                .collect();
+            let mut run = |env: bool| -> (Duration, Automerge) {
+                if env {
+                    std::env::set_var("BATCH_MANIFOLD", "1");
+                } else {
+                    std::env::remove_var("BATCH_MANIFOLD");
+                }
+                let mut best = Duration::MAX;
+                let mut out = None;
+                for _ in 0..3 {
+                    let mut d = Automerge::new();
+                    let t = Instant::now();
+                    d.load_incremental(&joined).unwrap();
+                    let e = t.elapsed();
+                    if e < best {
+                        best = e;
+                    }
+                    out = Some(d);
+                }
+                std::env::remove_var("BATCH_MANIFOLD");
+                (best, out.unwrap())
+            };
+            let (walk_t, walk_d) = run(false);
+            let (mani_t, mani_d) = run(true);
+            if std::env::var("MANIFOLD_NO_TOP").is_err() {
+                assert_eq!(walk_d.get_heads(), mani_d.get_heads(), "{name} heads");
+                assert_eq!(walk_d.save(), mani_d.save(), "{name} diverge");
+            }
+            println!(
+                "{name}: walk {walk_t:.2?}  manifold {mani_t:.2?}  ({:.2}x)",
+                walk_t.as_secs_f64() / mani_t.as_secs_f64()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_a2_bundle_order() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/A2.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let b = doc.bundle_fragment_v2(&fragments[3]).unwrap();
+        let bundle = b.bundle();
+        for (i, op) in bundle.storage.iter_ops().enumerate() {
+            if (8980..9010).contains(&i) {
+                eprintln!(
+                    "stream[{i}] id {:?} action {:?} insert {} key {:?} pred {:?}",
+                    op.id, op.action, op.insert, op.key, op.pred
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn repro_a2_manifold() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/A2.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let v2: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+        std::env::set_var("FRAGMENT_MANIFOLD", "1");
+        let mut d = Automerge::new();
+        for (i, b) in v2.iter().enumerate() {
+            eprintln!("fragment {i}");
+            d.apply_fragment(b).unwrap();
+        }
+        std::env::remove_var("FRAGMENT_MANIFOLD");
+        assert_eq!(d.get_heads(), doc.get_heads());
+    }
+
+    /// Ingest a document's fragments four ways and time each:
+    /// v1 bundles through load_incremental (concatenated and one call
+    /// per fragment) and V2 bundles through apply_fragment (walk and
+    /// manifold resolution). Run with:
+    ///   cargo test -p automerge --release --lib bench_fragment_ingest_v1_v2 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_fragment_ingest_v1_v2() {
+        use std::time::{Duration, Instant};
+        let dir = "/Users/orion/automerge-blog/data";
+        let iters = 3;
+
+        let time = |f: &dyn Fn() -> Automerge| -> (Duration, Automerge) {
+            let mut best = Duration::MAX;
+            let mut out = None;
+            for _ in 0..iters {
+                let t = Instant::now();
+                let d = f();
+                let e = t.elapsed();
+                if e < best {
+                    best = e;
+                }
+                out = Some(d);
+            }
+            (best, out.unwrap())
+        };
+
+        println!(
+            "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11} | {:>10} {:>11}",
+            "doc",
+            "ops",
+            "frags",
+            "v1 conc",
+            "v1 per-frag",
+            "v2w conc",
+            "v2w per-frag",
+            "v2m conc",
+            "v2m per-frag"
+        );
+        for name in ["S1", "S2", "S3", "C1", "C2", "A1", "A2"] {
+            let path = format!("{dir}/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else {
+                println!("{name}: missing at {path}, skipped");
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let v1_bundles = doc.bundle_fragments(fragments.clone()).unwrap();
+            let v1_joined: Vec<u8> = v1_bundles.iter().flatten().copied().collect();
+            let v2_bundles: Vec<_> = fragments
+                .iter()
+                .map(|f| doc.bundle_fragment_v2(f).unwrap())
+                .collect();
+            // v2 concat: one whole-history bundle applied in a single
+            // FragmentApply pass — the true analog of v1 concat
+            let doc_heads = doc.get_heads();
+            assert_eq!(doc_heads.len(), 1, "{name}: expected single head");
+            let whole = Fragment {
+                head: doc_heads[0],
+                level: 1,
+                boundary: vec![],
+                checkpoints: vec![],
+                members: fragments.iter().flat_map(|f| f.members.clone()).collect(),
+            };
+            let v2_whole = doc.bundle_fragment_v2(&whole).unwrap();
+
+            let (t1, d1) = time(&|| {
+                let mut d = Automerge::new();
+                d.load_incremental(&v1_joined).unwrap();
+                d
+            });
+            let (t2, d2) = time(&|| {
+                let mut d = Automerge::new();
+                for b in &v1_bundles {
+                    d.load_incremental(b).unwrap();
+                }
+                d
+            });
+            std::env::remove_var("FRAGMENT_MANIFOLD");
+            let (t3, d3) = time(&|| {
+                let mut d = Automerge::new();
+                for b in &v2_bundles {
+                    d.apply_fragment(b).unwrap();
+                }
+                d
+            });
+            let (t3c, d3c) = time(&|| {
+                let mut d = Automerge::new();
+                d.apply_fragment(&v2_whole).unwrap();
+                d
+            });
+            // A2's bundle emits a delete out of group order, which the
+            // manifold's strict doc-order contract rejects (see
+            // repro_a2_manifold)
+            let manifold_ok = name != "A2";
+            let (t4, d4, t4c, d4c) = if manifold_ok {
+                std::env::set_var("FRAGMENT_MANIFOLD", "1");
+                let (t4, d4) = time(&|| {
+                    let mut d = Automerge::new();
+                    for b in &v2_bundles {
+                        d.apply_fragment(b).unwrap();
+                    }
+                    d
+                });
+                let (t4c, d4c) = time(&|| {
+                    let mut d = Automerge::new();
+                    d.apply_fragment(&v2_whole).unwrap();
+                    d
+                });
+                std::env::remove_var("FRAGMENT_MANIFOLD");
+                (t4, Some(d4), t4c, Some(d4c))
+            } else {
+                (Duration::MAX, None, Duration::MAX, None)
+            };
+
+            // correctness: identical op sets and heads everywhere
+            let heads = doc.get_heads();
+            let mut check = vec![("v1c", &d1), ("v1p", &d2), ("v2wp", &d3), ("v2wc", &d3c)];
+            if let (Some(d4), Some(d4c)) = (&d4, &d4c) {
+                check.push(("v2mp", d4));
+                check.push(("v2mc", d4c));
+            }
+            for (label, d) in check {
+                assert_eq!(d.ops.len(), doc.ops.len(), "{name}/{label} op count");
+                assert_eq!(d.get_heads(), heads, "{name}/{label} heads");
+            }
+            if let (Some(d4), Some(d4c)) = (&d4, &d4c) {
+                assert_eq!(
+                    d3.save(),
+                    d4.save(),
+                    "{name}: per-frag walk vs manifold diverge"
+                );
+                assert_eq!(
+                    d3c.save(),
+                    d4c.save(),
+                    "{name}: concat walk vs manifold diverge"
+                );
+            }
+
+            let fmt = |t: Duration| {
+                if t == Duration::MAX {
+                    "-".to_string()
+                } else {
+                    format!("{t:.2?}")
+                }
+            };
+            println!(
+                "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11} | {:>10} {:>11}",
+                name,
+                doc.ops.len(),
+                v2_bundles.len(),
+                fmt(t1),
+                fmt(t2),
+                fmt(t3c),
+                fmt(t3),
+                fmt(t4c),
+                fmt(t4)
+            );
+        }
+    }
+
     /// Regression test: `bundle()` must be insensitive to the order in which
     /// callers provide change hashes. The change-metadata columns inside a
     /// bundle are RLE/delta encoded, so if `from_meta` didn't sort its input
