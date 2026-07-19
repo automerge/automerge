@@ -79,8 +79,8 @@ impl Bundle {
 
         for op in op_set.iter_ctr_range(min..max) {
             let op_id = op.id;
-            let op_succ = op.succ();
-            collector.process_op(op);
+            let op_succ: Vec<_> = op.succ().collect();
+            collector.process_op(op, &op_succ);
 
             for id in op_succ {
                 collector.process_succ(op_id, id);

@@ -34,7 +34,7 @@ mod insert;
 // dead_code: the manifold is only consumed by its tests until the
 // batch apply switches over to it
 #[allow(dead_code)]
-mod manifold;
+pub(crate) mod manifold;
 mod mark_index;
 mod marks;
 mod op_iter;

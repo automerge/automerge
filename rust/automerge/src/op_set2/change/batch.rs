@@ -1035,8 +1035,8 @@ impl BatchApply {
     fn import_ops(&mut self, doc: &mut Automerge) {
         for c in &self.changes {
             doc.import_ops_to(c, &mut self.ops).unwrap();
-            doc.update_history(c);
         }
+        doc.update_history_batch(&self.changes);
         doc.remove_unused_actors(true);
     }
 
@@ -1048,6 +1048,13 @@ impl BatchApply {
         // manifold pipeline: order_ops_for_doc -> untangle (order only)
         // -> manifold (positions/succ/top) -> write ops. Produces no
         // patches, so an active log uses the walk
+        if std::env::var("BATCH_TIMING").is_ok() {
+            eprintln!(
+                "GATE log_active={} env={}",
+                log.is_active(),
+                std::env::var("BATCH_MANIFOLD").is_ok()
+            );
+        }
         if !log.is_active() && std::env::var("BATCH_MANIFOLD").is_ok() {
             return self.apply_manifold(doc, log);
         }
@@ -1055,7 +1062,11 @@ impl BatchApply {
         let mut t = std::time::Instant::now();
         let mut lap = |label: &str| {
             if timing {
-                eprintln!("WALK {:<22} {:>9.3}ms", label, t.elapsed().as_secs_f64() * 1e3);
+                eprintln!(
+                    "WALK {:<22} {:>9.3}ms",
+                    label,
+                    t.elapsed().as_secs_f64() * 1e3
+                );
                 t = std::time::Instant::now();
             }
         };
@@ -1156,7 +1167,11 @@ impl BatchApply {
         let mut t = std::time::Instant::now();
         let mut lap = |label: &str| {
             if timing {
-                eprintln!("BATCH {:<22} {:>9.3}ms", label, t.elapsed().as_secs_f64() * 1e3);
+                eprintln!(
+                    "MANIFOLD {:<22} {:>9.3}ms",
+                    label,
+                    t.elapsed().as_secs_f64() * 1e3
+                );
                 t = std::time::Instant::now();
             }
         };
@@ -1172,11 +1187,39 @@ impl BatchApply {
         }
         lap("import_ops");
         let clock = doc.change_graph.current_clock();
-        for c in &self.changes {
-            doc.update_history(c);
-        }
-        doc.remove_unused_actors(true);
+        doc.update_history_batch(&self.changes);
         lap("update_history");
+
+        // normalize to the succ-carrying shape fragment bundles arrive
+        // in: preds targeting ops in this batch become succ entries on
+        // their targets (sorted, increments normalized), ops keep only
+        // doc-row preds, and deletes left with no preds contribute
+        // nothing further — they leave the stream entirely
+        let mut succ_map = PredCache::default();
+        for op in self.ops.iter_mut() {
+            let id = op.id();
+            let inc = op.get_increment_value();
+            op.bld.pred.retain(|p| {
+                if clock.covers(p) {
+                    true
+                } else {
+                    succ_map.entry(*p).or_default().push((id, inc));
+                    false
+                }
+            });
+        }
+        self.ops
+            .retain(|op| !(op.bld.is_delete() && op.bld.pred.is_empty()));
+        for op in self.ops.iter_mut() {
+            if let Some(mut succ) = succ_map.remove(&op.id()) {
+                succ.sort_unstable_by_key(|(id, _)| *id);
+                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
+                normalize_increment_successors(is_counter, &mut succ);
+                op.succ = succ;
+            }
+        }
+        debug_assert!(succ_map.is_empty(), "succ target missing from batch");
+        lap("normalize succ");
 
         let mut obj_info = doc.ops().obj_info.clone();
         self.order_ops_for_doc(&mut obj_info);
@@ -1196,7 +1239,11 @@ impl BatchApply {
         }
 
         lap("untangle_lite");
-        let mut r = doc.ops().apply_manifold(clock).apply(self.ops.iter());
+        let mut r = if doc.ops().len() == 0 {
+            crate::op_set2::op_set::manifold::apply_blank(self.ops.iter())
+        } else {
+            doc.ops().apply_manifold(clock).apply(self.ops.iter())
+        };
         lap("manifold");
 
         for a in r.adjusts.drain(..) {
@@ -1209,13 +1256,8 @@ impl BatchApply {
         lap("adjusts+add_succ");
 
         let conflicted: HashSet<OpId> = r.conflicted.iter().copied().collect();
-        let mut pos_iter = r.insert_pos.iter();
-        for (i, op) in self.ops.iter_mut().enumerate() {
-            op.subsort = i;
+        for op in self.ops.iter_mut() {
             op.conflicted = conflicted.contains(&op.id());
-            if !op.bld.is_delete() {
-                op.pos = Some(*pos_iter.next().expect("one position per non-delete op"));
-            }
             if let Some(mut succ) = r.change_succ.remove(&op.id()) {
                 succ.sort_unstable_by_key(|(id, _)| *id);
                 let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
@@ -1223,21 +1265,13 @@ impl BatchApply {
                 op.succ = succ;
             }
         }
-        debug_assert!(pos_iter.next().is_none());
-
-        // deletes never splice, but pos=None would break the run
-        // grouping in insert_runs_of_ops (one splice call per run):
-        // give each delete the following op's position
-        let mut next_pos = None;
-        for op in self.ops.iter_mut().rev() {
-            if op.pos.is_some() {
-                next_pos = op.pos;
-            } else {
-                op.pos = next_pos;
-            }
-        }
+        // the runs cover exactly the non-delete ops
+        debug_assert_eq!(
+            r.insert_runs.iter().map(|(_, r)| r.len()).sum::<usize>(),
+            self.ops.iter().filter(|o| !o.bld.is_delete()).count()
+        );
         lap("stamp");
-        insert_runs_of_ops(&self.ops, doc);
+        splice_insert_runs(&self.ops, &r.insert_runs, doc);
         lap("splice");
 
         debug_assert!(doc.ops.validate_op_order());
@@ -1324,6 +1358,44 @@ pub(super) fn insert_runs_of_ops(ops: &[ChangeOp], doc: &mut Automerge) {
     }
     if let Some(pos) = last_pos {
         insert_ops(ops, doc, pos + shift, start..ops.len());
+    }
+}
+
+/// Splice the manifold's insert runs into the document's columns: each
+/// run is `(pos, start..end)` — the batch ops at indexes `start..end`
+/// land at document position `pos`. Adjacent runs share a position only
+/// when delete ops (which never splice, and are filtered by the column
+/// splice) split the index range, so such runs merge into one call.
+pub(super) fn splice_insert_runs(
+    ops: &[ChangeOp],
+    runs: &[(usize, Range<usize>)],
+    doc: &mut Automerge,
+) {
+    let mut shift = 0;
+    let mut i = 0;
+    let mut calls = 0;
+    while i < runs.len() {
+        let (pos, range) = &runs[i];
+        let mut end = range.end;
+        // merging [(4, 0..1), (4, 100..101)] into one splice of
+        // ops[0..101] at pos 4 is safe because indexes 1..100 can only
+        // be DELETE ops: every non-delete op pushes a position, so if
+        // any op in the gap were a non-delete its run would sit
+        // between these two in the vec and they would not be adjacent.
+        // The column splice filters `Action::Delete` from the slice,
+        // so the merged call inserts exactly ops 0 and 100 — the same
+        // rows two separate calls at pos 4 (with the shift in between)
+        // would have produced, in the same order
+        while matches!(runs.get(i + 1), Some((p, _)) if p == pos) {
+            i += 1;
+            end = runs[i].1.end;
+        }
+        shift += insert_ops(ops, doc, pos + shift, range.start..end);
+        calls += 1;
+        i += 1;
+    }
+    if std::env::var("FRAG_TIMING").is_ok() || std::env::var("BATCH_TIMING").is_ok() {
+        eprintln!("SPLICE   {} runs -> {} splice calls", runs.len(), calls);
     }
 }
 
@@ -1531,6 +1603,7 @@ mod tests {
                 chap.push(c);
             }
             chap.insert_new_actors(doc);
+
             for c in &chap.changes {
                 doc.import_ops_to(c, &mut chap.ops).unwrap();
             }

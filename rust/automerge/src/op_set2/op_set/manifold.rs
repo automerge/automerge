@@ -33,8 +33,12 @@ pub(crate) struct ManifoldResult {
     /// succ for targets pending in the batch itself, deferred to the
     /// consumer's change ops (unnormalized)
     pub(crate) change_succ: HashMap<OpId, Vec<(OpId, Option<i64>)>>,
-    /// one insert position per non-delete op, in arrival order
-    pub(crate) insert_pos: Vec<usize>,
+    /// insert runs, in arrival order: `(pos, start..end)` means the
+    /// batch ops at indexes `start..end` all land at document position
+    /// `pos`. Delete ops never land, so their indexes fall in the gaps
+    /// between runs — a delete-free batch applied to an empty doc is
+    /// the single run `(0, 0..ops.len())`
+    pub(crate) insert_runs: Vec<(usize, Range<usize>)>,
     /// top/text index adjustments for existing rows — apply BEFORE
     /// add_succ/splice, exactly like v1's conflict/expose pass
     pub(crate) adjusts: Vec<Adjust>,
@@ -88,7 +92,10 @@ pub(crate) struct ApplyManifold<'a> {
     obj_scope: Range<usize>,
     key: Option<String>,
 
-    insert_pos: Vec<usize>,
+    insert_runs: Vec<(usize, Range<usize>)>,
+    // index of the op the current `apply_op` call is processing —
+    // the run ranges are in these units
+    op_index: usize,
     succ_cache: SuccCache,
     // the last row a slot scan stopped on: (row id, slot). Reusable by
     // any op that beats the row — except one anchored at the row
@@ -147,7 +154,8 @@ impl<'a> ApplyManifold<'a> {
             obj_type: ObjType::Map,
             obj_scope,
             key: None,
-            insert_pos: vec![],
+            insert_runs: vec![],
+            op_index: 0,
             succ_cache,
             lesser: None,
             elem: None,
@@ -166,6 +174,17 @@ impl<'a> ApplyManifold<'a> {
         self.finish()
     }
 
+    /// Record that the current op lands at document position `pos`:
+    /// extend the last run when it is contiguous (same position, no
+    /// delete gap), otherwise open a new one.
+    fn push_pos(&mut self, pos: usize) {
+        let i = self.op_index;
+        match self.insert_runs.last_mut() {
+            Some((p, r)) if *p == pos && r.end == i => r.end = i + 1,
+            _ => self.insert_runs.push((pos, i..i + 1)),
+        }
+    }
+
     /// Close the scope that is ending: resolve its cached preds while
     /// the iterators still cover it, then decide its top winner and
     /// emit any adjustments. The two always travel together — the
@@ -181,6 +200,20 @@ impl<'a> ApplyManifold<'a> {
         self.top.finalize(&mut self.vis_iter);
     }
 
+    /// Whether MANIFOLD_TRACE=<start>-<end> covers the current op index.
+    fn traced(&self) -> bool {
+        match std::env::var("MANIFOLD_TRACE") {
+            Ok(v) => {
+                let mut it = v.split('-').filter_map(|s| s.parse::<usize>().ok());
+                match (it.next(), it.next()) {
+                    (Some(a), Some(b)) => (a..=b).contains(&self.op_index),
+                    _ => true,
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Process one change op. Ops must arrive in document order (see
     /// the type-level contract).
     pub(crate) fn apply_op(&mut self, op: &ChangeOp) {
@@ -192,6 +225,21 @@ impl<'a> ApplyManifold<'a> {
                 op.insert(),
                 op.bld.is_delete(),
                 op.bld.obj
+            );
+        }
+        if self.traced() {
+            eprintln!(
+                "TRACE[{}] IN  op {:?} key {:?} ins {} del {} | pos {} lesser {:?} elem {:?} elem_scope {:?} last_insert {:?}",
+                self.op_index,
+                op.id(),
+                op.key(),
+                op.insert(),
+                op.bld.is_delete(),
+                self.id_iter.pos(),
+                self.lesser,
+                self.elem,
+                self.elem_scope,
+                self.last_insert,
             );
         }
         if let Some(info) = op.obj_info() {
@@ -243,7 +291,7 @@ impl<'a> ApplyManifold<'a> {
                 }
                 let r = self.id_iter.seek_to_value(&op.id());
                 assert!(r.is_empty());
-                self.insert_pos.push(r.start);
+                self.push_pos(r.start);
                 self.top.candidate(op, r.start);
             }
         } else if op.insert() {
@@ -278,23 +326,30 @@ impl<'a> ApplyManifold<'a> {
                 // a hop here would drag id_iter/ins past rows the next
                 // update group or sibling still needs
                 let (_, found) = self.lesser.unwrap();
-                self.insert_pos.push(found);
+                self.push_pos(found);
             } else {
                 // an insert only ever lands immediately before another
                 // insert row (or the object end): hop past any update
                 // rows before the slot scan. Bounded to the object: an
                 // unbounded miss parks `ins` at the column end and a hit
                 // can land in (and consume) the next object's first
-                // insert row
+                // insert row.
+                // A previous update group may have narrowed the window
+                // (the covered-anchor branch re-widens, but head- and
+                // pending-anchored inserts arrive here directly): the
+                // slot scan must see the whole object, or an empty
+                // window yields a bogus end-of-object slot while the
+                // hop below drags `ins` ahead of the pinned cursor
+                self.id_iter.set_max(self.obj_scope.end);
                 let cur = self.id_iter.pos();
                 self.ins.shift(cur..self.obj_scope.end);
                 let epos = self.ins.scan_to_value(true).unwrap_or(self.obj_scope.end);
                 self.id_iter.advance_to(epos);
                 if let Some((found, row_id)) = self.id_iter.scan_to_lesser(op.id()) {
-                    self.insert_pos.push(found);
+                    self.push_pos(found);
                     self.lesser = Some((row_id, found));
                 } else {
-                    self.insert_pos.push(self.obj_scope.end);
+                    self.push_pos(self.obj_scope.end);
                     self.lesser = None;
                 }
             }
@@ -323,7 +378,7 @@ impl<'a> ApplyManifold<'a> {
                     // nothing to seek and no covered preds. The memo is
                     // deliberately left alone — this element's children
                     // will collapse onto the same slot through it
-                    let p = *self.insert_pos.last().unwrap();
+                    let p = self.insert_runs.last().unwrap().0;
                     self.elem_scope = p..p;
                 } else {
                     // the element row may already be consumed: when an
@@ -375,28 +430,39 @@ impl<'a> ApplyManifold<'a> {
             if !op.bld.is_delete() {
                 if self.elem_scope.is_empty() {
                     // pending target: rides along at its insert's slot
-                    self.insert_pos.push(self.elem_scope.start);
+                    self.push_pos(self.elem_scope.start);
                     self.top.candidate(op, self.elem_scope.start);
                 } else {
                     let r = self.id_iter.seek_to_value(&op.id());
                     assert!(r.is_empty());
-                    self.insert_pos.push(r.start);
+                    self.push_pos(r.start);
                     self.top.candidate(op, r.start);
                 }
             }
         }
+        if self.traced() {
+            eprintln!(
+                "TRACE[{}] OUT slot {:?} | pos {} lesser {:?} elem_scope {:?}",
+                self.op_index,
+                self.insert_runs.last(),
+                self.id_iter.pos(),
+                self.lesser,
+                self.elem_scope,
+            );
+        }
+        self.op_index += 1;
     }
 
     /// Flush the trailing scope and hand back the batch resolution:
-    /// document succ inserts, deferred change-op succ, and one insert
-    /// position per non-delete op (in arrival order).
+    /// document succ inserts, deferred change-op succ, and the insert
+    /// runs (in arrival order).
     pub(crate) fn finish(mut self) -> ManifoldResult {
         self.flush();
 
         ManifoldResult {
             doc_succ: self.succ_cache.doc_succ,
             change_succ: self.succ_cache.change_succ,
-            insert_pos: self.insert_pos,
+            insert_runs: self.insert_runs,
             adjusts: self.top.adjusts,
             conflicted: self.top.conflicted,
         }
@@ -487,6 +553,11 @@ impl TopCalc {
     /// Register a batch op as a top candidate if it is the kind of op
     /// that can hold top (matches v1's `Top` visibility test). `slot`
     /// is its already-computed insertion point within the scope.
+    ///
+    /// Aliveness starts from the op's own (normalized) succ: succ-format
+    /// bundles pre-stamp in-batch deletions there and emit no delete ops
+    /// to `kill` through. v1 sources stamp succ after the manifold runs,
+    /// so their candidates start alive and die by `kill` as before.
     fn candidate(&mut self, op: &ChangeOp, slot: usize) {
         if !self.enabled {
             return;
@@ -497,7 +568,7 @@ impl TopCalc {
                 id: op.id(),
                 slot,
                 is_counter: matches!(op.bld.value, OpScalarValue::Counter(_)),
-                alive: true,
+                alive: !op.succ.iter().any(|(_, inc)| inc.is_none()),
             });
         }
     }
@@ -510,6 +581,23 @@ impl TopCalc {
         }
 
         self.deleted.push(pos);
+    }
+
+    /// [`finalize`](Self::finalize) for scopes with no doc rows at all
+    /// (the blank-document path): no visible scan, no candidates but
+    /// the batch's own — straight to the batch winner.
+    fn finalize_blank(&mut self) {
+        if !self.enabled {
+            return;
+        }
+        if let Some(winner) = self.batch.iter().rev().find(|b| b.alive).map(|b| b.id) {
+            for b in self.batch.iter().filter(|b| b.alive) {
+                if b.id != winner {
+                    self.conflicted.push(b.id);
+                }
+            }
+        }
+        self.batch.clear();
     }
 
     /// Close the scope: decide the group winner and emit adjustments.
@@ -591,6 +679,83 @@ impl TopCalc {
         self.batch.clear();
         self.deleted.clear();
         self.doc_scope = 0..0;
+    }
+}
+
+/// The blank-document fast path: applying doc-ordered ops to an empty
+/// document. No column exists to consult — every pred is in-batch,
+/// every slot is 0 (one splice run), and top tracking needs only the
+/// batch-side winner logic. The whole apply is one allocation-light
+/// pass converting preds into succs.
+pub(crate) fn apply_blank<'i, I: Iterator<Item = &'i ChangeOp>>(ops: I) -> ManifoldResult {
+    let mut insert_runs: Vec<(usize, Range<usize>)> = vec![];
+    let mut change_succ: HashMap<OpId, Vec<(OpId, Option<i64>)>> = HashMap::default();
+    let mut top = TopCalc::new();
+
+    let mut obj = ObjId::root();
+    let mut key: Option<String> = None;
+    let mut elem: Option<ElemId> = None;
+    let mut last_insert: Option<OpId> = None;
+
+    for (i, op) in ops.enumerate() {
+        // scope boundaries from op fields alone: obj change, map key
+        // change, or element-group change (an insert starts its own
+        // group; updates follow their pending element contiguously)
+        let boundary = if op.bld.obj != obj {
+            obj = op.bld.obj;
+            key = None;
+            elem = None;
+            true
+        } else if let Some(k) = op.bld.key.key_str() {
+            if key.as_deref() != Some(&*k) {
+                key = Some(k.into_owned());
+                true
+            } else {
+                false
+            }
+        } else if op.insert() {
+            elem = None;
+            true
+        } else {
+            let e = op.key().elemid().unwrap();
+            if elem != Some(e) && last_insert != Some(e.0) {
+                elem = Some(e);
+                true
+            } else {
+                elem = Some(e);
+                false
+            }
+        };
+        if boundary {
+            top.finalize_blank();
+        }
+        if op.insert() {
+            last_insert = Some(op.id());
+        }
+
+        let inc = op.get_increment_value();
+        for pred in op.pred() {
+            top.kill(pred, inc);
+            change_succ.entry(*pred).or_default().push((op.id(), inc));
+        }
+        if !op.bld.is_delete() {
+            // every op lands at position 0; runs still break where a
+            // delete leaves a gap in the index range
+            match insert_runs.last_mut() {
+                Some((_, r)) if r.end == i => r.end = i + 1,
+                _ => insert_runs.push((0, i..i + 1)),
+            }
+            top.candidate(op, 0);
+        }
+    }
+    top.finalize_blank();
+
+    ManifoldResult {
+        doc_succ: vec![],
+        change_succ,
+        insert_runs,
+        adjusts: top.adjusts,
+        conflicted: top.conflicted,
     }
 }
 
@@ -748,33 +913,49 @@ mod tests {
             .ops()
             .apply_manifold(doc.change_graph.current_clock())
             .apply(ordered.iter());
-        let (v2_succ, v2_change_succ, v2_pos) = (r.doc_succ, r.change_succ, r.insert_pos);
+        let (v2_succ, v2_change_succ, v2_runs) = (r.doc_succ, r.change_succ, r.insert_runs);
+
+        // expand the (pos, index range) runs: every non-delete op index
+        // must be covered exactly once, every delete must fall in a gap
+        let mut v2_pos: HashMap<usize, usize> = HashMap::default();
+        for (p, run) in &v2_runs {
+            for i in run.clone() {
+                assert!(v2_pos.insert(i, *p).is_none(), "index {i} in two runs");
+            }
+        }
 
         // insert positions, paired by op id
         let v1_pos: HashMap<OpId, usize> =
             chap.ops.iter().map(|o| (o.id(), o.pos.unwrap())).collect();
         if std::env::var("MANIFOLD_DEBUG").is_ok() {
-            let mut k = 0;
-            for o in &ordered {
-                let qualifies = !o.bld.is_delete();
-                if qualifies {
+            for (i, o) in ordered.iter().enumerate() {
+                if !o.bld.is_delete() {
                     eprintln!(
-                        "op {:?} key {:?} insert {} v1 {} v2 {}",
+                        "op {:?} key {:?} insert {} v1 {} v2 {:?}",
                         o.id(),
                         o.key(),
                         o.insert(),
                         v1_pos[&o.id()],
-                        v2_pos[k]
+                        v2_pos.get(&i)
                     );
-                    k += 1;
                 }
             }
         }
         let mut k = 0;
-        for o in &ordered {
-            let qualifies = !o.bld.is_delete();
-            if qualifies {
-                assert_eq!(v2_pos[k], v1_pos[&o.id()], "pos of {:?}", o.id());
+        for (i, o) in ordered.iter().enumerate() {
+            if o.bld.is_delete() {
+                assert!(
+                    !v2_pos.contains_key(&i),
+                    "delete {:?} covered by a run",
+                    o.id()
+                );
+            } else {
+                assert_eq!(
+                    v2_pos.get(&i),
+                    Some(&v1_pos[&o.id()]),
+                    "pos of {:?}",
+                    o.id()
+                );
                 k += 1;
             }
         }
@@ -923,6 +1104,49 @@ mod tests {
         src.merge(&mut f1).unwrap();
         src.merge(&mut f2).unwrap();
 
+        let changes = changes_since(&mut src, &heads);
+        assert_manifold_matches_v1(&mut doc, changes);
+    }
+
+    /// Regression for the A2 shape: update groups narrow `id_iter` to
+    /// their elem scope, then a head-anchored insert chain arrives —
+    /// head (and pending) anchors skip the covered branch that
+    /// re-widens the window, so the miss path must re-widen itself or
+    /// the slot scan sees an empty window, emits a bogus end-of-object
+    /// slot, and every degenerate hop drags the shared `ins` cursor
+    /// ahead of the pinned `id_iter` — corrupting the next
+    /// covered-anchor insert's slot and stranding the delete after it.
+    #[test]
+    fn manifold_head_insert_after_update_groups() {
+        let actor = |b: u8| crate::ActorId::from(vec![b]);
+        let mut doc = AutoCommit::new().with_actor(actor(1)).unwrap();
+        let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "ab").unwrap();
+
+        // concurrent head typing by the LARGER actor: its subtree
+        // leads the list once merged
+        let mut f_c = doc.fork().with_actor(actor(3)).unwrap();
+        f_c.splice_text(&text, 0, 0, "cd").unwrap();
+
+        // concurrent head typing by the SMALLER actor (lands after
+        // actor 3's subtree), plus an insert after 'a' and a delete of
+        // 'b' — the covered-anchor ops downstream of the head chain
+        let mut f_b = doc.fork().with_actor(actor(2)).unwrap();
+        f_b.splice_text(&text, 0, 0, "hij").unwrap();
+        f_b.splice_text(&text, 4, 0, "k").unwrap();
+        f_b.splice_text(&text, 5, 1, "").unwrap();
+
+        // deletes of c,d are causally after f_c: in the batch they are
+        // update groups on doc rows, resolved first in document order
+        let mut src = doc.fork().with_actor(actor(4)).unwrap();
+        src.merge(&mut f_c).unwrap();
+        src.splice_text(&text, 0, 2, "").unwrap();
+        src.merge(&mut f_b).unwrap();
+
+        // the receiver already has f_c — the batch is the deletes plus
+        // f_b's concurrent changes
+        doc.merge(&mut f_c).unwrap();
+        let heads = doc.get_heads();
         let changes = changes_since(&mut src, &heads);
         assert_manifold_matches_v1(&mut doc, changes);
     }
@@ -1150,6 +1374,66 @@ mod tests {
         f.increment(&ROOT, "c", 3).unwrap();
         let changes = changes_since(&mut f, &heads);
         assert_manifold_matches_v1(&mut doc, changes);
+    }
+
+    #[test]
+    fn manifold_concurrent_counters_incremented() {
+        // two forks each put a counter at the same key, increment
+        // several times, then everything merges: increments seeing
+        // both counters carry multiple preds, exercising the flush
+        // memo's (pred, succ) ordering
+        let mut rng = make_rng();
+        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.put(&ROOT, "k", "seed").unwrap();
+        let heads = doc.get_heads();
+
+        let mut fa = doc.fork().with_actor(rng.random()).unwrap();
+        fa.put(&ROOT, "k", ScalarValue::counter(0)).unwrap();
+        fa.commit();
+        for i in 0..4 {
+            fa.increment(&ROOT, "k", i + 1).unwrap();
+            fa.commit();
+        }
+        let mut fb = doc.fork().with_actor(rng.random()).unwrap();
+        fb.put(&ROOT, "k", ScalarValue::counter(10)).unwrap();
+        fb.commit();
+        for i in 0..3 {
+            fb.increment(&ROOT, "k", 10 * (i + 1)).unwrap();
+            fb.commit();
+        }
+        // fc sees BOTH counters: its increments list both as preds
+        let mut fc = fa.fork().with_actor(rng.random()).unwrap();
+        fc.merge(&mut fb).unwrap();
+        for i in 0..3 {
+            fc.increment(&ROOT, "k", 100 * (i + 1)).unwrap();
+            fc.commit();
+        }
+
+        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        src.merge(&mut fa).unwrap();
+        src.merge(&mut fb).unwrap();
+        src.merge(&mut fc).unwrap();
+        let changes = changes_since(&mut src, &heads);
+        assert_manifold_matches_v1(&mut doc, changes);
+
+        // same shape but the counters are already IN the doc when the
+        // multi-pred increments arrive (covered preds -> flush memo)
+        let mut doc2 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc2.put(&ROOT, "k", "seed").unwrap();
+        let mut ga = doc2.fork().with_actor(rng.random()).unwrap();
+        ga.put(&ROOT, "k", ScalarValue::counter(0)).unwrap();
+        let mut gb = doc2.fork().with_actor(rng.random()).unwrap();
+        gb.put(&ROOT, "k", ScalarValue::counter(10)).unwrap();
+        doc2.merge(&mut ga).unwrap();
+        doc2.merge(&mut gb).unwrap(); // doc2: conflicted counter pair
+        let heads2 = doc2.get_heads();
+        let mut gc = doc2.fork().with_actor(rng.random()).unwrap();
+        for i in 0..4 {
+            gc.increment(&ROOT, "k", i + 1).unwrap();
+            gc.commit();
+        }
+        let changes2 = changes_since(&mut gc, &heads2);
+        assert_manifold_matches_v1(&mut doc2, changes2);
     }
 
     #[test]

@@ -1278,6 +1278,17 @@ impl Automerge {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
+    pub(crate) fn update_history_batch(&mut self, changes: &[Change]) {
+        self.change_graph
+            .add_changes(
+                changes
+                    .iter()
+                    .map(|c| (c, self.ops.actors.binary_search(c.actor_id()).unwrap())),
+            )
+            .unwrap();
+        self.deps = self.change_graph.heads().collect();
+    }
+
     pub(crate) fn update_history(&mut self, change: &Change) {
         self.update_deps(change);
 
@@ -1548,6 +1559,9 @@ impl Automerge {
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
         nodes.sort_unstable();
+        // fragments can share members (a loose commit covered by more
+        // than one fragment clock) — a member must appear once
+        nodes.dedup();
         let bundle = storage::Bundle::for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
 
         // member indexes are positions in the bundle's (topologically
@@ -1705,7 +1719,15 @@ impl Automerge {
             let next = next_seq[m.actor].unwrap_or(have + 1);
             match m.seq.cmp(&next) {
                 Ordering::Less => continue, // already have this change
-                Ordering::Greater => return Err(AutomergeError::MissingDeps),
+                Ordering::Greater => {
+                    if std::env::var("FRAG_DEBUG").is_ok() {
+                        eprintln!(
+                            "member {} of {}: actor {} seq {} but expected {}",
+                            i, num_members, m.actor, m.seq, next
+                        );
+                    }
+                    return Err(AutomergeError::MissingDeps);
+                }
                 Ordering::Equal => {}
             }
             next_seq[m.actor] = Some(next + 1);

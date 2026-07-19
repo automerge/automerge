@@ -95,18 +95,18 @@ impl<'a> BundleBuilder<'a> {
         }
     }
 
-    pub(crate) fn process_op(&mut self, op: Op<'a>) {
+    pub(crate) fn process_op(&mut self, op: Op<'a>, succ: &[OpId]) {
         let next = Some((op.obj, op.elemid_or_key()));
         let flush = self.last != next;
 
-        self.process_op_internal(op, flush);
+        self.process_op_internal(op, succ, flush);
 
         if flush {
             self.last = next;
         }
     }
 
-    fn process_op_internal(&mut self, op: Op<'a>, flush: bool) {
+    fn process_op_internal(&mut self, op: Op<'a>, succ: &[OpId], flush: bool) {
         self.max_op = std::cmp::max(self.max_op, op.id.counter());
 
         if flush {
@@ -115,25 +115,42 @@ impl<'a> BundleBuilder<'a> {
 
         let pred = self.preds.remove(&op.id).unwrap_or_default();
 
-        let op = op.build(pred);
-
         if let Some(index) = self.builders_index(op.id) {
-            self.op_writer.add(op, index, &mut self.mapper);
+            // a member row carries its in-bundle successors in the succ
+            // column; relationships to later, non-member ops are not the
+            // bundle's business and are dropped
+            let internal_succ: Vec<OpId> = succ
+                .iter()
+                .copied()
+                .filter(|s| self.builders_index(*s).is_some())
+                .collect();
+            let op = op.build(pred);
+            self.op_writer
+                .add(op, &internal_succ, index, &mut self.mapper);
         }
     }
 
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
-        self.preds.entry(succ_id).or_default().push(op_id);
+        // only relationships that cross INTO the bundle ride the pred
+        // column: an in-bundle target carries the relationship in its
+        // succ column instead
+        if self.builders_index(op_id).is_none() && self.builders_index(succ_id).is_some() {
+            self.preds.entry(succ_id).or_default().push(op_id);
+        }
     }
 
+    /// Write the delete ops whose preds crossed into the bundle from
+    /// outside. Deletes whose targets are all in-bundle never reach
+    /// `preds` — they have no row; their ids live in the targets' succ
+    /// column.
     pub(crate) fn flush_deletes(&mut self) {
         if let Some((obj, key)) = self.last.take() {
             for (id, pred) in &self.preds {
                 let op = Op::del(*id, obj, key.clone());
                 let op = op.build(pred.to_vec());
                 if let Some(index) = self.builders_index(op.id) {
-                    self.op_writer.add(op, index, &mut self.mapper);
+                    self.op_writer.add(op, &[], index, &mut self.mapper);
                 }
             }
             self.preds.clear();
@@ -167,7 +184,14 @@ impl<'a> BundleBuilder<'a> {
         let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
         let changes_meta = change_cols.raw_columns();
         let mut ops_data_buf = Vec::new();
-        let (ops_cols, id_ctr) = self.op_writer.finish(&mapper, &mut ops_data_buf);
+        // builders are sorted by (actor, seq) — the canonical member
+        // order the inverse column is keyed by
+        let members: Vec<(usize, u64, u64)> = self
+            .builders
+            .iter()
+            .map(|b| (b.actor, b.start_op, b.max_op))
+            .collect();
+        let (ops_cols, id_ctr) = self.op_writer.finish(&mapper, &mut ops_data_buf, &members);
         let ops_meta = ops_cols.raw_columns();
 
         // ---- Uncompressed assembly (used in-memory for iteration) ----
@@ -348,6 +372,9 @@ pub(crate) struct BundleOpWriter<'a> {
     pred_count: hexane::Encoder<'a, u32>,
     pred_actor: hexane::Encoder<'a, ActorIdx>,
     pred_ctr: hexane::DeltaEncoder<'a, i64>,
+    succ_count: hexane::Encoder<'a, u32>,
+    succ_actor: hexane::Encoder<'a, ActorIdx>,
+    succ_ctr: hexane::DeltaEncoder<'a, i64>,
     expand: hexane::Encoder<'a, bool>,
     mark_name: hexane::Encoder<'a, Option<String>>,
     /// `(actor, counter, doc_pos)` for each op as we process it. At
@@ -357,9 +384,20 @@ pub(crate) struct BundleOpWriter<'a> {
 }
 
 impl<'a> BundleOpWriter<'a> {
-    fn add(&mut self, op: OpBuilder<'a>, _index: usize, mapper: &mut ActorMapper<'a>) {
+    fn add(
+        &mut self,
+        op: OpBuilder<'a>,
+        succ: &[OpId],
+        _index: usize,
+        mapper: &mut ActorMapper<'a>,
+    ) {
         mapper.process_op(&op);
         let doc_pos = self.id_actor.len() as u32;
+        self.succ_count.append(succ.len() as u32);
+        for s in succ {
+            self.succ_actor.append(s.actoridx());
+            self.succ_ctr.append(s.icounter());
+        }
         self.id_actor.append(op.id.actoridx());
         self.obj_actor.append(op.obj.actor());
         self.obj_ctr.append(op.obj.icounter());
@@ -385,10 +423,14 @@ impl<'a> BundleOpWriter<'a> {
             .push((op.id.actor(), op.id.counter(), doc_pos));
     }
 
+    /// `members` is the canonical (actor, start_op, max_op) list sorted
+    /// by (actor, seq) — the inverse column carries one entry per op in
+    /// these ranges, null for ops with no row.
     fn finish(
         mut self,
         mapper: &ActorMapper<'a>,
         data: &mut Vec<u8>,
+        members: &[(usize, u64, u64)],
     ) -> (BundleOpsColumns, Vec<i64>) {
         let obj_actor = save_opt_actor_unless_empty(self.obj_actor, &mapper.mapping, data);
         let obj_ctr = self.obj_ctr.save_to_unless(data, None);
@@ -405,6 +447,9 @@ impl<'a> BundleOpWriter<'a> {
         let pred_count = self.pred_count.save_to(data);
         let pred_actor = save_actor(self.pred_actor, &mapper.mapping, data);
         let pred_ctr = self.pred_ctr.save_to(data);
+        let succ_count = self.succ_count.save_to(data);
+        let succ_actor = save_actor(self.succ_actor, &mapper.mapping, data);
+        let succ_ctr = self.succ_ctr.save_to(data);
         let expand = self.expand.save_to_unless(data, false);
         let mark_name = self.mark_name.save_to_unless(data, None);
 
@@ -417,20 +462,32 @@ impl<'a> BundleOpWriter<'a> {
             .map(|(_, counter, _)| *counter as i64)
             .collect();
 
-        // Sort by canonical (actor, counter) order and emit each op's
-        // doc_pos as a delta-int — the inverse permutation. Readers walk
-        // the change metadata in (actor, seq) order to materialise the
-        // canonical (actor, counter) for each `k`, then look up
-        // `doc_pos = inverse[k]` to place that op's id in the doc-order
-        // column. For editing-style workloads where each new op lands
-        // close to its predecessor, the deltas are almost all `+1`s —
-        // far more compressible than the doc-order counter sequence.
+        // Emit one inverse entry per member op in canonical
+        // (actor, counter) order: the op's doc position, or null for
+        // ops with no row (deletes whose targets are all in-bundle —
+        // they live in the succ column). Readers walk the change
+        // metadata in (actor, seq) order to materialise the canonical
+        // (actor, counter) for each `k`, then place non-null entries'
+        // counters at their doc position. For editing-style workloads
+        // where each new op lands close to its predecessor, the deltas
+        // are almost all `+1`s — far more compressible than the
+        // doc-order counter sequence.
         self.inverse_positions
             .sort_unstable_by_key(|(a, c, _)| (*a, *c));
-        let mut id_ctr_inverse_enc = hexane::DeltaEncoder::<i64>::default();
-        for (_, _, doc_pos) in &self.inverse_positions {
-            id_ctr_inverse_enc.append(*doc_pos as i64);
+        let mut id_ctr_inverse_enc = hexane::DeltaEncoder::<Option<i64>>::default();
+        let mut row = self.inverse_positions.iter().peekable();
+        for (actor, start_op, max_op) in members {
+            for ctr in *start_op..=*max_op {
+                match row.peek() {
+                    Some((a, c, doc_pos)) if a == actor && *c == ctr => {
+                        id_ctr_inverse_enc.append(Some(*doc_pos as i64));
+                        row.next();
+                    }
+                    _ => id_ctr_inverse_enc.append(None),
+                }
+            }
         }
+        debug_assert!(row.next().is_none(), "row op outside member op ranges");
         let id_ctr_inverse = id_ctr_inverse_enc.save_to(data);
 
         (
@@ -449,6 +506,9 @@ impl<'a> BundleOpWriter<'a> {
                 pred_count,
                 pred_actor,
                 pred_ctr,
+                succ_count,
+                succ_actor,
+                succ_ctr,
                 expand,
                 mark_name,
             },
@@ -473,6 +533,9 @@ pub(crate) struct BundleOpsColumns {
     pub(crate) pred_count: Range<usize>,
     pub(crate) pred_actor: Range<usize>,
     pub(crate) pred_ctr: Range<usize>,
+    pub(crate) succ_count: Range<usize>,
+    pub(crate) succ_actor: Range<usize>,
+    pub(crate) succ_ctr: Range<usize>,
     pub(crate) expand: Range<usize>,
     pub(crate) mark_name: Range<usize>,
 }
@@ -528,6 +591,9 @@ impl BundleOpsColumns {
             (ops::PRED_COUNT, &self.pred_count),
             (ops::PRED_ACTOR, &self.pred_actor),
             (ops::PRED_CTR, &self.pred_ctr),
+            (ops::SUCC_COUNT, &self.succ_count),
+            (ops::SUCC_ACTOR, &self.succ_actor),
+            (ops::SUCC_CTR, &self.succ_ctr),
             (ops::EXPAND, &self.expand),
             (ops::MARK_NAME, &self.mark_name),
             (ops::ID_CTR_INVERSE, &self.id_ctr_inverse),
@@ -757,9 +823,22 @@ struct OpIterInner<'a> {
     pred_count: hexane::Decoder<'a, Option<u64>>,
     pred_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     pred_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    succ_count: hexane::Decoder<'a, Option<u64>>,
+    succ_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     expand: hexane::Decoder<'a, bool>,
     mark_name: hexane::Decoder<'a, Option<String>>,
     value: &'a [u8],
+}
+
+/// One bundle op row: the op itself (pred = references to ops before
+/// the bundle) plus its in-bundle successors from the succ column.
+/// `succ` is empty for bundles predating the succ column — those carry
+/// every relationship (and every delete) in pred/rows instead.
+#[derive(Debug, Clone)]
+pub(crate) struct BundleOp<'a> {
+    pub(crate) op: OpBuilder<'a>,
+    pub(crate) succ: Vec<OpId>,
 }
 
 pub(crate) struct OpIter<'a> {
@@ -779,17 +858,17 @@ impl<'a> OpIter<'a> {
 }
 
 impl<'a> Iterator for OpIter<'a> {
-    type Item = OpBuilder<'a>;
+    type Item = BundleOp<'a>;
 
-    fn next(&mut self) -> Option<OpBuilder<'a>> {
+    fn next(&mut self) -> Option<BundleOp<'a>> {
         self.iter.next().map(|v| v.unwrap())
     }
 }
 
 impl<'a> Iterator for OpIterUnverified<'a> {
-    type Item = Result<OpBuilder<'a>, ParseError>;
+    type Item = Result<BundleOp<'a>, ParseError>;
 
-    fn next(&mut self) -> Option<Result<OpBuilder<'a>, ParseError>> {
+    fn next(&mut self) -> Option<Result<BundleOp<'a>, ParseError>> {
         self.inner
             .as_mut()?
             .try_next()
@@ -799,7 +878,7 @@ impl<'a> Iterator for OpIterUnverified<'a> {
 }
 
 impl<'a> OpIterInner<'a> {
-    fn try_next(&mut self) -> Result<Option<OpBuilder<'a>>, ParseError> {
+    fn try_next(&mut self) -> Result<Option<BundleOp<'a>>, ParseError> {
         let id_actor = self.id_actor.next().flatten();
         let id_ctr = self.id_ctr.next().copied();
         let id = match OpId::try_load(id_actor, id_ctr) {
@@ -843,16 +922,27 @@ impl<'a> OpIterInner<'a> {
             pred.push(OpId::try_load(pred_actor, pred_ctr)?);
         }
 
-        Ok(Some(OpBuilder {
-            id,
-            obj,
-            action,
-            key,
-            value,
-            insert,
-            expand,
-            mark_name,
-            pred,
+        let succ_count = self.succ_count.next().flatten().unwrap_or(0) as usize;
+        let mut succ = Vec::with_capacity(succ_count);
+        for _ in 0..succ_count {
+            let succ_actor = self.succ_actor.next().flatten();
+            let succ_ctr = self.succ_ctr.next().flatten();
+            succ.push(OpId::try_load(succ_actor, succ_ctr)?);
+        }
+
+        Ok(Some(BundleOp {
+            op: OpBuilder {
+                id,
+                obj,
+                action,
+                key,
+                value,
+                insert,
+                expand,
+                mark_name,
+                pred,
+            },
+            succ,
         }))
     }
 
@@ -874,6 +964,9 @@ impl<'a> OpIterInner<'a> {
         let mut pred_count = hexane::decoder::<Option<u64>>(&[]);
         let mut pred_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
         let mut pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut succ_count = hexane::decoder::<Option<u64>>(&[]);
+        let mut succ_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut succ_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
         let mut expand = hexane::decoder::<bool>(&[]);
         let mut mark_name = hexane::decoder::<Option<String>>(&[]);
         let mut value: &[u8] = &[];
@@ -906,6 +999,11 @@ impl<'a> OpIterInner<'a> {
                 (ops::PRED_COL_ID, C::DeltaInteger) => {
                     pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
+                (ops::SUCC_COL_ID, C::Group) => succ_count = hexane::decoder::<Option<u64>>(d),
+                (ops::SUCC_COL_ID, C::Actor) => succ_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::SUCC_COL_ID, C::DeltaInteger) => {
+                    succ_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
                 (ops::EXPAND_COL_ID, C::Boolean) => expand = hexane::decoder::<bool>(d),
                 (ops::MARK_NAME_COL_ID, C::String) => {
                     mark_name = hexane::decoder::<Option<String>>(d)
@@ -928,6 +1026,9 @@ impl<'a> OpIterInner<'a> {
             pred_count,
             pred_actor,
             pred_ctr,
+            succ_count,
+            succ_actor,
+            succ_ctr,
             expand,
             mark_name,
         })
@@ -945,6 +1046,11 @@ pub(crate) mod ops {
     pub(super) const ACTION_COL_ID:         ColumnId = ColumnId::new(4);
     pub(super) const VAL_COL_ID:            ColumnId = ColumnId::new(5);
     pub(super) const PRED_COL_ID:           ColumnId = ColumnId::new(7);
+    /// In-bundle successors of each op, mirroring the document format's
+    /// succ group. Only relationships between two bundle members are
+    /// stored here; the pred column holds only references to ops from
+    /// before the bundle.
+    pub(super) const SUCC_COL_ID:           ColumnId = ColumnId::new(8);
     pub(super) const EXPAND_COL_ID:         ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID:      ColumnId = ColumnId::new(10);
     /// Inverse permutation of doc positions. For each op in canonical
@@ -964,6 +1070,9 @@ pub(crate) mod ops {
     pub(super) const PRED_COUNT: ColumnSpec = ColumnSpec::new_group(PRED_COL_ID);
     pub(super) const PRED_ACTOR: ColumnSpec = ColumnSpec::new_actor(PRED_COL_ID);
     pub(super) const PRED_CTR:   ColumnSpec = ColumnSpec::new_delta(PRED_COL_ID);
+    pub(super) const SUCC_COUNT: ColumnSpec = ColumnSpec::new_group(SUCC_COL_ID);
+    pub(super) const SUCC_ACTOR: ColumnSpec = ColumnSpec::new_actor(SUCC_COL_ID);
+    pub(super) const SUCC_CTR:   ColumnSpec = ColumnSpec::new_delta(SUCC_COL_ID);
     pub(super) const INSERT:     ColumnSpec = ColumnSpec::new_boolean(INSERT_COL_ID);
     pub(super) const ACTION:     ColumnSpec = ColumnSpec::new_integer(ACTION_COL_ID);
     pub(super) const VALUE_META: ColumnSpec = ColumnSpec::new_value_metadata(VAL_COL_ID);

@@ -101,9 +101,11 @@ fn extract_id_ctr_values(
     }
 
     // New format: reconstruct doc-order counters from the inverse
-    // permutation column.
+    // permutation column. One entry per member op; nulls are ops with
+    // no row (deletes elided into the succ column).
     if let Some(inverse_bytes) = inverse_bytes {
-        let inverse: Vec<i64> = decode_delta_int(inverse_bytes)?;
+        let inverse: Vec<Option<i64>> = decode_delta_int_opt(inverse_bytes)?;
+        let num_rows = inverse.iter().filter(|v| v.is_some()).count();
 
         let mut change_meta: Vec<(usize, u64, u64, u64)> =
             BundleChangeIterUnverified::try_new(changes_meta, changes_data)?
@@ -111,18 +113,20 @@ fn extract_id_ctr_values(
                 .collect::<Result<_, _>>()?;
         change_meta.sort_unstable_by_key(|(actor, seq, _, _)| (*actor, *seq));
 
-        let mut counters = vec![0i64; inverse.len()];
+        let mut counters = vec![0i64; num_rows];
         let mut k = 0usize;
         for (_actor, _seq, start_op, max_op) in &change_meta {
             for ctr in *start_op..=*max_op {
                 if k >= inverse.len() {
                     return Err(ParseError::InverseLengthMismatch);
                 }
-                let doc_pos = inverse[k] as usize;
-                if doc_pos >= counters.len() {
-                    return Err(ParseError::InverseDecode);
+                if let Some(doc_pos) = inverse[k] {
+                    let doc_pos = doc_pos as usize;
+                    if doc_pos >= counters.len() {
+                        return Err(ParseError::InverseDecode);
+                    }
+                    counters[doc_pos] = ctr as i64;
                 }
-                counters[doc_pos] = ctr as i64;
                 k += 1;
             }
         }
@@ -145,6 +149,10 @@ fn decode_delta_int(bytes: &[u8]) -> Result<Vec<i64>, ParseError> {
     hexane::DeltaDecoder::<Option<i64>>::new(bytes)
         .map(|item| item.ok_or(ParseError::InverseDecode))
         .collect()
+}
+
+fn decode_delta_int_opt(bytes: &[u8]) -> Result<Vec<Option<i64>>, ParseError> {
+    Ok(hexane::DeltaDecoder::<Option<i64>>::new(bytes).collect())
 }
 
 impl<'a> BundleStorage<'a, Unverified> {
@@ -306,12 +314,77 @@ impl<'a> BundleStorage<'a, Unverified> {
 }
 
 impl BundleStorage<'_, Verified> {
+    /// Rebuild the member [`Change`]s. The bundle stores in-bundle
+    /// relationships in the succ column (and elides delete ops whose
+    /// targets are all in-bundle), so this inverts them back into pred
+    /// lists: a succ entry `(target -> s)` becomes a pred `target` on
+    /// op `s`, and a successor with no row of its own is an elided
+    /// delete, resurrected with its group's obj/key. Preds are merged
+    /// with the (external-only) pred column in ascending id order —
+    /// the order the document visits a group's rows in.
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
+        use crate::op_set2::op::Op;
+        use crate::op_set2::types::KeyRef;
+        use crate::types::{ElemId, OpId};
+        use std::collections::{HashMap, HashSet};
+
         let change_meta = self.iter_change_meta().collect();
         let mut collector = ChangeCollector::from_bundle_changes(change_meta, &self.actors);
-        for op in self.iter_ops() {
+
+        // pass 1: row ids + the succ inversion (successor -> targets,
+        // accumulated in doc order = ascending id within a group)
+        let mut rows: HashSet<OpId> = HashSet::new();
+        let mut inverted: HashMap<OpId, Vec<OpId>> = HashMap::new();
+        for bop in self.iter_ops() {
+            rows.insert(bop.op.id);
+            for s in &bop.succ {
+                inverted.entry(*s).or_default().push(bop.op.id);
+            }
+        }
+
+        // pass 2: feed the rows with merged preds; emit each group's
+        // elided deletes when the group ends (their position within a
+        // change is fixed by their op counter, so only the group's
+        // obj/key needs to be current)
+        let mut last: Option<(crate::types::ObjId, KeyRef<'_>)> = None;
+        let mut group_dels: Vec<OpId> = Vec::new();
+        for bop in self.iter_ops() {
+            let key = if bop.op.insert {
+                KeyRef::Seq(ElemId(bop.op.id))
+            } else {
+                bop.op.key.clone()
+            };
+            let next = Some((bop.op.obj, key));
+            if last != next {
+                if let Some((obj, key)) = last.take() {
+                    for d in group_dels.drain(..) {
+                        let mut pred = inverted.remove(&d).unwrap_or_default();
+                        pred.sort_unstable();
+                        collector.add(Op::del(d, obj, key.clone()).build(pred));
+                    }
+                }
+                last = next;
+            }
+            for s in &bop.succ {
+                if !rows.contains(s) && !group_dels.contains(s) {
+                    group_dels.push(*s);
+                }
+            }
+            let mut op = bop.op;
+            if let Some(internal) = inverted.remove(&op.id) {
+                op.pred.extend(internal);
+                op.pred.sort_unstable();
+            }
             collector.add(op);
         }
+        if let Some((obj, key)) = last.take() {
+            for d in group_dels.drain(..) {
+                let mut pred = inverted.remove(&d).unwrap_or_default();
+                pred.sort_unstable();
+                collector.add(Op::del(d, obj, key.clone()).build(pred));
+            }
+        }
+
         let bundle = collector
             .unbundle(&self.actors, &self.deps)
             .map_err(|e| ParseError::Unbundle(Box::new(e)))?;

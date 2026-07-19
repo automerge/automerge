@@ -8,8 +8,8 @@ use crate::{Automerge, AutomergeError, PatchLog, TextEncoding};
 use super::super::op::{ChangeOp, Op, OpBuilder};
 use super::super::op_set::{ObjIndex, OpIter};
 use super::batch::{
-    insert_runs_of_ops, normalize_increment_successors, walk_map, Adjust, MapWalker, ObjSpan,
-    ObjWalker, PredCache, Top, ValueState,
+    insert_runs_of_ops, normalize_increment_successors, splice_insert_runs, walk_map, Adjust,
+    MapWalker, ObjSpan, ObjWalker, PredCache, Top, ValueState,
 };
 
 use std::borrow::Cow;
@@ -30,6 +30,10 @@ pub(crate) struct FragmentApply {
     /// the document clock *before* this fragment — the manifold path
     /// needs it to split doc preds from in-bundle preds
     clock: Clock,
+    /// overlap produced succ entries on *skipped* rows that name kept
+    /// ops — they were seeded straight into `pred` (which only the walk
+    /// consumes), so the manifold path must not run
+    harvested: bool,
 }
 
 impl FragmentApply {
@@ -38,15 +42,43 @@ impl FragmentApply {
     /// in the document). `clock` is the document's current clock — ops
     /// it covers belong to member changes the document already has and
     /// are dropped.
+    ///
+    /// The bundle's succ column carries each op's in-bundle successors
+    /// (already in id order, increments pre-resolved), so the ops come
+    /// out with `succ` stamped; the pred column holds only references
+    /// to rows from before the bundle.
     pub(crate) fn new(
         bundle: &Bundle,
         actor_map: &[usize],
         clock: &Clock,
     ) -> Result<Self, AutomergeError> {
+        // increment successors need their value; increments are rows
+        let mut inc_values: std::collections::HashMap<OpId, i64> = Default::default();
+        for bop in bundle.storage.iter_ops() {
+            if let Some(v) = bop.op.get_increment_value() {
+                inc_values.insert(bop.op.id, v);
+            }
+        }
+
         let mut ops = Vec::new();
-        for op in bundle.storage.iter_ops() {
+        let mut pred = PredCache::default();
+        let mut harvested = false;
+        for bop in bundle.storage.iter_ops() {
+            let op = bop.op;
             let id = op.id.map(actor_map)?;
             if clock.covers(&id) {
+                // the row is already in the document, but its succ
+                // entries naming *kept* ops still have to land as doc
+                // succ — seed them into the pred cache the walk reads
+                for s in &bop.succ {
+                    let sm = s.map(actor_map)?;
+                    if !clock.covers(&sm) {
+                        harvested = true;
+                        pred.entry(id)
+                            .or_default()
+                            .push((sm, inc_values.get(s).copied()));
+                    }
+                }
                 continue;
             }
             let obj = op.obj.map(actor_map)?;
@@ -54,11 +86,18 @@ impl FragmentApply {
                 KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.into_owned())),
                 KeyRef::Seq(e) => KeyRef::Seq(e.map(actor_map)?),
             };
-            let pred = op
+            let op_pred = op
                 .pred
                 .iter()
                 .map(|p| p.map(actor_map))
                 .collect::<Result<Vec<_>, _>>()?;
+            let mut succ = bop
+                .succ
+                .iter()
+                .map(|s| Ok((s.map(actor_map)?, inc_values.get(s).copied())))
+                .collect::<Result<Vec<_>, AutomergeError>>()?;
+            let is_counter = matches!(op.value, OpScalarValue::Counter(_));
+            normalize_increment_successors(is_counter, &mut succ);
             let bld = OpBuilder {
                 id,
                 obj,
@@ -68,21 +107,22 @@ impl FragmentApply {
                 mark_name: op.mark_name.map(|s| Cow::Owned(s.into_owned())),
                 expand: op.expand,
                 insert: op.insert,
-                pred,
+                pred: op_pred,
             };
             ops.push(ChangeOp {
                 pos: None,
                 subsort: 0,
                 conflicted: false,
-                succ: vec![],
+                succ,
                 bld,
             });
         }
         Ok(Self {
             ops,
-            pred: PredCache::default(),
+            pred,
             obj_spans: Vec::new(),
             clock: clock.clone(),
+            harvested,
         })
     }
 
@@ -140,8 +180,9 @@ impl FragmentApply {
     ) -> Result<(), AutomergeError> {
         // the manifold path resolves positions/succ/top by seeking
         // instead of walking every doc row; it produces no patches, so
-        // an active log falls back to the walk
-        if !log.is_active() && std::env::var("FRAGMENT_MANIFOLD").is_ok() {
+        // an active log falls back to the walk. Harvested overlap succ
+        // rides the pred cache, which only the walk consumes
+        if !log.is_active() && !self.harvested && std::env::var("FRAGMENT_MANIFOLD").is_ok() {
             return self.apply_manifold(doc, log);
         }
         self.apply_walk(doc, log)
@@ -156,12 +197,28 @@ impl FragmentApply {
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        let timing = std::env::var("FRAG_TIMING").is_ok();
+        let mut t = std::time::Instant::now();
+        let lap = |label: &str, t: &mut std::time::Instant| {
+            if timing {
+                eprintln!(
+                    "TIMING   {:<26} {:>10.3}ms",
+                    label,
+                    t.elapsed().as_secs_f64() * 1e3
+                );
+                *t = std::time::Instant::now();
+            }
+        };
         log.migrate_actors(&doc.ops().actors)?;
 
-        let mut r = doc
-            .ops()
-            .apply_manifold(self.clock.clone())
-            .apply(self.ops.iter());
+        let mut r = if doc.ops().len() == 0 {
+            crate::op_set2::op_set::manifold::apply_blank(self.ops.iter())
+        } else {
+            doc.ops()
+                .apply_manifold(self.clock.clone())
+                .apply(self.ops.iter())
+        };
+        lap("manifold", &mut t);
 
         // same ordering as the walk path: adjust the standing rows,
         // write the doc succ, then splice
@@ -172,18 +229,13 @@ impl FragmentApply {
             }
         }
         doc.ops.add_succ(&r.doc_succ);
+        lap("adjusts + add_succ", &mut t);
 
         // stamp the manifold's outputs onto the ops: the splice derives
-        // each new row's succ/top/text entries from them. Document
-        // order is (pos, subsort) order, so no sort is needed
+        // each new row's succ/top/text entries from them
         let conflicted: HashSet<OpId> = r.conflicted.iter().copied().collect();
-        let mut pos_iter = r.insert_pos.iter();
-        for (i, op) in self.ops.iter_mut().enumerate() {
-            op.subsort = i;
+        for op in self.ops.iter_mut() {
             op.conflicted = conflicted.contains(&op.id());
-            if !op.bld.is_delete() {
-                op.pos = Some(*pos_iter.next().expect("one position per non-delete op"));
-            }
             if let Some(mut succ) = r.change_succ.remove(&op.id()) {
                 // the succ columns want id order, increments normalized
                 // against their target
@@ -193,9 +245,15 @@ impl FragmentApply {
                 op.succ = succ;
             }
         }
-        debug_assert!(pos_iter.next().is_none());
+        // the runs cover exactly the non-delete ops
+        debug_assert_eq!(
+            r.insert_runs.iter().map(|(_, r)| r.len()).sum::<usize>(),
+            self.ops.iter().filter(|o| !o.bld.is_delete()).count()
+        );
+        lap("stamp", &mut t);
 
-        insert_runs_of_ops(&self.ops, doc);
+        splice_insert_runs(&self.ops, &r.insert_runs, doc);
+        lap("splice (insert_runs)", &mut t);
 
         debug_assert!(doc.ops.validate_op_order());
         Ok(())
