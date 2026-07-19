@@ -1339,23 +1339,37 @@ impl<'a, T: DeltaValue> DeltaIter<'a, T> {
                 return Some((h, v));
             }
 
-            // no hit in this slab — jump to the next candidate
-            let cands = candidates.as_mut()?;
+            // No hit in this slab: park or jump. The probe above
+            // consumed runs from `self.inner` while tracking pos and
+            // running in locals, so any exit that does not fully
+            // reposition (the candidate jump resets both) must first
+            // rewind to `mark` — otherwise `running` is stale and
+            // every value realized after a later window extension is
+            // wrong by the unfolded deltas.
+            let Some(cands) = candidates.as_mut() else {
+                *self = mark;
+                self.advance_to(end);
+                return None;
+            };
             loop {
                 let Some((si, items_before, prefix)) = cands.next() else {
+                    *self = mark;
                     self.advance_to(end);
                     return None;
                 };
                 if items_before >= end {
+                    *self = mark;
                     self.advance_to(end);
                     return None;
                 }
-                // candidates arrive in slab order; skip the ones behind us
+                // candidates arrive in slab order; skip any starting
+                // inside the region the probe already cleared
                 if items_before < self.pos() {
                     continue;
                 }
                 self.running = prefix;
                 if !self.inner.advance_to_slab(si, items_before) {
+                    *self = mark;
                     self.advance_to(end);
                     return None;
                 }
@@ -1385,6 +1399,10 @@ impl<'a, T: DeltaValue> DeltaIter<'a, T> {
                 Some(h)
             }
             _ => {
+                // the probe consumed runs without folding them into the
+                // iterator state — rewind before parking (see
+                // `scan_to_range`)
+                *self = mark;
                 self.advance_to(end);
                 None
             }
@@ -1907,6 +1925,43 @@ mod tests {
                 assert_eq!(iter.next(), None, "iterator parks at the end");
             }
         }
+    }
+
+    /// A windowed scan that misses must leave the iterator able to
+    /// realize later values correctly once the window is extended: the
+    /// probe consumes runs whose deltas must be folded back (or the
+    /// iterator rewound) before parking. Regression for the manifold's
+    /// seek-mode pattern: narrow scan miss, widen, seek.
+    #[test]
+    fn scan_miss_preserves_running() {
+        let values = vec![10u64, 13, 3, 12, 12, 10];
+        let col = DeltaColumn::from_values(values.clone());
+        let mut iter = col.iter();
+        iter.set_max(2);
+        assert_eq!(iter.scan_to_range(..=5u64), None);
+        assert_eq!(iter.pos(), 2);
+        iter.set_max(6);
+        assert_eq!(iter.next(), Some(3), "running went stale after the miss");
+        assert_eq!(iter.seek_to_value(12, ..), 3..5);
+    }
+
+    /// Same shape for the null scan: the non-null runs the probe
+    /// consumed must not corrupt later realized values.
+    #[test]
+    fn scan_null_miss_preserves_running() {
+        let values = vec![Some(5u64), Some(9), None, Some(7)];
+        let col = DeltaColumn::<Option<u64>>::from_values(values.clone());
+        let mut iter = col.iter();
+        iter.set_max(2);
+        assert_eq!(iter.scan_to_value(None), None);
+        assert_eq!(iter.pos(), 2);
+        iter.set_max(4);
+        assert_eq!(iter.next(), Some(None));
+        assert_eq!(
+            iter.next(),
+            Some(Some(7)),
+            "running went stale after the miss"
+        );
     }
 
     #[test]
