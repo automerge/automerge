@@ -266,6 +266,15 @@ impl<'a> ApplyManifold<'a> {
             if self.key.as_deref() != op.bld.key.key_str().as_deref() {
                 self.key = op.bld.key.key_str().map(Cow::into_owned);
                 let key_scope = self.key_iter.seek_to_value(self.key.as_deref(), ..);
+                if self.traced() {
+                    eprintln!(
+                        "TRACE[{}]   key {:?} scope {:?} id_iter (a_pos, a_max, c_pos, c_max) {:?}",
+                        self.op_index,
+                        self.key,
+                        key_scope,
+                        self.id_iter.debug_state()
+                    );
+                }
 
                 self.flush();
                 self.top.open(key_scope.clone());
@@ -833,189 +842,19 @@ impl SuccCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::op_set2::change::batch::{
-        normalize_increment_successors, walk_list, walk_map, BatchApply, MapWalker, ObjWalker,
-        Untangler,
-    };
-    use crate::op_set2::types::ScalarValue as OpScalarValue;
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
-    use crate::types::SequenceType;
-    use crate::{make_rng, AutoCommit, Change, ObjType, PatchLog, ScalarValue, ROOT};
+    use crate::{make_rng, AutoCommit, Change, ObjType, ScalarValue, ROOT};
     use rand::prelude::*;
 
-    /// Run the manifold and the v1 walk over the same batch against the
-    /// same document (neither mutates it) and compare insert
-    /// positions, doc succ and change-op succ.
-    fn assert_manifold_matches_v1(doc: &mut AutoCommit, changes: Vec<Change>) {
-        let doc = &mut doc.doc;
-
-        let mut chap = BatchApply::default();
-        for c in changes {
-            chap.push(c);
-        }
-        chap.insert_new_actors(doc);
-        for c in &chap.changes {
-            doc.import_ops_to(c, &mut chap.ops).unwrap();
-        }
-
-        let mut obj_info = doc.ops().obj_info.clone();
-        chap.order_ops_for_doc(&mut obj_info);
-
-        // v1 reference first: the walkers assign pos/subsort and
-        // re-sort each span into final *document* order — exactly the
-        // order the manifold's contract requires as input
-        let mut log = PatchLog::inactive();
-        let mut succ = vec![];
-        let mut conflicts = vec![];
-        let mut walker = ObjWalker::new(doc.ops());
-        for os in &chap.obj_spans {
-            let obj_range = walker.seek_to_obj(os.obj);
-            let doc_ops = doc.ops().iter_range(&obj_range);
-            match obj_info.object_type(&os.obj) {
-                Some(ObjType::Map) => {
-                    let mut mw = MapWalker::new(
-                        os.obj,
-                        doc_ops,
-                        doc.text_encoding(),
-                        &mut chap.pred,
-                        &mut succ,
-                        &mut log,
-                        &mut conflicts,
-                    );
-                    walk_map(&mut mw, &mut chap.ops[os.span.clone()]);
-                }
-                Some(otype) if otype.is_sequence() => {
-                    let sequence_type = match otype {
-                        ObjType::Text => SequenceType::Text,
-                        ObjType::List => SequenceType::List,
-                        _ => unreachable!(),
-                    };
-                    let ut = Untangler::new(
-                        os.obj,
-                        sequence_type,
-                        doc.text_encoding(),
-                        &mut conflicts,
-                        &mut chap.ops[os.span.clone()],
-                        &mut chap.pred,
-                        doc_ops.end_pos(),
-                    );
-                    walk_list(ut, doc_ops, &mut succ, &mut log);
-                }
-                _ => panic!("obj missing from index"),
-            }
-        }
-
-        // manifold: read-only pass over the untangled (document-ordered) ops
-        let ordered: Vec<ChangeOp> = chap.ops.clone();
-        let r = doc
-            .ops()
-            .apply_manifold(doc.change_graph.current_clock())
-            .apply(ordered.iter());
-        let (v2_succ, v2_change_succ, v2_runs) = (r.doc_succ, r.change_succ, r.insert_runs);
-
-        // expand the (pos, index range) runs: every non-delete op index
-        // must be covered exactly once, every delete must fall in a gap
-        let mut v2_pos: HashMap<usize, usize> = HashMap::default();
-        for (p, run) in &v2_runs {
-            for i in run.clone() {
-                assert!(v2_pos.insert(i, *p).is_none(), "index {i} in two runs");
-            }
-        }
-
-        // insert positions, paired by op id
-        let v1_pos: HashMap<OpId, usize> =
-            chap.ops.iter().map(|o| (o.id(), o.pos.unwrap())).collect();
-        if std::env::var("MANIFOLD_DEBUG").is_ok() {
-            for (i, o) in ordered.iter().enumerate() {
-                if !o.bld.is_delete() {
-                    eprintln!(
-                        "op {:?} key {:?} insert {} v1 {} v2 {:?}",
-                        o.id(),
-                        o.key(),
-                        o.insert(),
-                        v1_pos[&o.id()],
-                        v2_pos.get(&i)
-                    );
-                }
-            }
-        }
-        let mut k = 0;
-        for (i, o) in ordered.iter().enumerate() {
-            if o.bld.is_delete() {
-                assert!(
-                    !v2_pos.contains_key(&i),
-                    "delete {:?} covered by a run",
-                    o.id()
-                );
-            } else {
-                assert_eq!(
-                    v2_pos.get(&i),
-                    Some(&v1_pos[&o.id()]),
-                    "pos of {:?}",
-                    o.id()
-                );
-                k += 1;
-            }
-        }
-        assert_eq!(k, v2_pos.len(), "v2 produced extra positions");
-
-        // doc succ: same set under the canonical order
-        let key = |s: &SuccInsert| (s.pos, s.sub_pos, s.id);
-        let mut a = v2_succ;
-        a.sort_by_key(key);
-        let mut b = succ;
-        b.sort_by_key(key);
-        assert_eq!(a, b, "doc succ");
-
-        // change-op succ: v1 stores them on the target op, normalized;
-        // v2 defers normalization of batch targets to the consumer
-        for o in &chap.ops {
-            let mut v1 = o.succ.clone();
-            v1.sort_unstable();
-            let mut v2 = v2_change_succ.get(&o.id()).cloned().unwrap_or_default();
-            let is_counter = matches!(o.bld.value, OpScalarValue::Counter(_));
-            normalize_increment_successors(is_counter, &mut v2);
-            v2.sort_unstable();
-            assert_eq!(v1, v2, "change succ of {:?}", o.id());
-        }
-
-        // top/text adjustments: compare by net effect. v1 can emit
-        // redundant entries (Conflict on an already-shadowed row), so
-        // replay each list into pos -> bit and drop no-ops against the
-        // pre-batch top column
-        let canon = |list: &[Adjust]| -> HashMap<usize, bool> {
-            let mut m = HashMap::default();
-            for a in list {
-                match a {
-                    Adjust::Conflict(p) => m.insert(*p, false),
-                    Adjust::Expose(p) => m.insert(*p, true),
-                };
-            }
-            m.retain(|p, v| doc.ops().cols.index.top.get(*p).map(|pv| pv.value) != Some(*v));
-            m
-        };
-        if std::env::var("MANIFOLD_DEBUG").is_ok() {
-            eprintln!(
-                "adjusts: v1 {} v2 {} (canon {}) conflicted {}",
-                conflicts.len(),
-                r.adjusts.len(),
-                canon(&r.adjusts).len(),
-                r.conflicted.len()
-            );
-        }
-        assert_eq!(canon(&conflicts), canon(&r.adjusts), "top adjustments");
-
-        // conflicted flags: v1 marks the op in place, v2 returns ids
-        for o in &chap.ops {
-            assert_eq!(
-                o.conflicted,
-                r.conflicted.contains(&o.id()),
-                "conflicted flag of {:?}",
-                o.id()
-            );
-        }
+    /// Apply the changes through the (single) batch pipeline on a fork
+    /// and deep-validate the result: the incrementally-maintained
+    /// indexes must match a from-scratch rebuild, and the op columns
+    /// must reproduce the history hash-for-hash.
+    fn assert_batch_validates(doc: &mut AutoCommit, changes: Vec<Change>) {
+        let mut d = doc.fork();
+        d.doc.apply_changes_batch(changes).unwrap();
+        d.doc.validate_document();
     }
 
     fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeHash]) -> Vec<Change> {
@@ -1038,7 +877,7 @@ mod tests {
         src.merge(&mut f2).unwrap();
 
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1064,7 +903,7 @@ mod tests {
         src.merge(&mut f2).unwrap();
 
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1084,7 +923,7 @@ mod tests {
         src.merge(&mut f).unwrap();
 
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1105,7 +944,7 @@ mod tests {
         src.merge(&mut f2).unwrap();
 
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     /// Regression for the A2 shape: update groups narrow `id_iter` to
@@ -1148,7 +987,7 @@ mod tests {
         doc.merge(&mut f_c).unwrap();
         let heads = doc.get_heads();
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1213,7 +1052,7 @@ mod tests {
             }
 
             let changes = changes_since(&mut src, &heads);
-            assert_manifold_matches_v1(&mut doc, changes);
+            assert_batch_validates(&mut doc, changes);
         }
     }
 
@@ -1242,7 +1081,7 @@ mod tests {
         f.insert(&l2, 4, 98i64).unwrap();
 
         let changes = changes_since(&mut f, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1269,7 +1108,7 @@ mod tests {
         src.merge(&mut f2).unwrap();
 
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1289,7 +1128,7 @@ mod tests {
         f.put(&ROOT, "k", "fork2").unwrap(); // ctr 4: beats the local put
         doc.put(&ROOT, "k", "local").unwrap(); // ctr 3, concurrent, stays visible
         let changes = changes_since(&mut f, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1308,7 +1147,7 @@ mod tests {
         doc.commit();
         doc.put(&ROOT, "k", "l2").unwrap(); // ctr 4: local wins
         let changes = changes_since(&mut f, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1332,7 +1171,7 @@ mod tests {
             doc.merge(&mut fa).unwrap(); // doc: "a" and "b" both visible
             fa.delete(&ROOT, "k").unwrap(); // fa only sees "a": deletes one side
             let changes = changes_since(&mut fa, &pre);
-            assert_manifold_matches_v1(&mut doc, changes);
+            assert_batch_validates(&mut doc, changes);
         }
     }
 
@@ -1356,7 +1195,7 @@ mod tests {
         f1.merge(&mut f2).unwrap();
         f1.merge(&mut f3).unwrap();
         let changes = changes_since(&mut f1, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1373,7 +1212,7 @@ mod tests {
         f.commit();
         f.increment(&ROOT, "c", 3).unwrap();
         let changes = changes_since(&mut f, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
     }
 
     #[test]
@@ -1414,7 +1253,7 @@ mod tests {
         src.merge(&mut fb).unwrap();
         src.merge(&mut fc).unwrap();
         let changes = changes_since(&mut src, &heads);
-        assert_manifold_matches_v1(&mut doc, changes);
+        assert_batch_validates(&mut doc, changes);
 
         // same shape but the counters are already IN the doc when the
         // multi-pred increments arrive (covered preds -> flush memo)
@@ -1433,7 +1272,7 @@ mod tests {
             gc.commit();
         }
         let changes2 = changes_since(&mut gc, &heads2);
-        assert_manifold_matches_v1(&mut doc2, changes2);
+        assert_batch_validates(&mut doc2, changes2);
     }
 
     #[test]
@@ -1491,167 +1330,7 @@ mod tests {
                 src.merge(&mut f1).unwrap();
             }
             let changes = changes_since(&mut src, &heads);
-            assert_manifold_matches_v1(&mut doc, changes);
+            assert_batch_validates(&mut doc, changes);
         }
-    }
-
-    /// Time the position/succ-resolution phase only: the v1 walkers
-    /// (order_ops_for_doc ordering assumed done, walk assigns
-    /// pos/subsort + succ) vs the manifold (same inputs, doc-ordered).
-    /// Per-iteration state clones happen outside the timed sections.
-    /// Run with:
-    ///   cargo test -p automerge --release --lib bench_manifold_vs_v1 -- --ignored --nocapture
-    #[test]
-    #[ignore]
-    fn bench_manifold_vs_v1() {
-        use std::time::{Duration, Instant};
-
-        fn report(label: &str, mut v1: Vec<Duration>, mut v2: Vec<Duration>) {
-            v1.sort();
-            v2.sort();
-            let med1 = v1[v1.len() / 2];
-            let med2 = v2[v2.len() / 2];
-            println!(
-                "{label:40} v1 min {:>10.2?} med {:>10.2?} | v2 min {:>10.2?} med {:>10.2?} | med speedup {:>6.1}x",
-                v1[0],
-                med1,
-                v2[0],
-                med2,
-                med1.as_nanos() as f64 / med2.as_nanos().max(1) as f64,
-            );
-        }
-
-        fn run(label: &str, doc: &mut AutoCommit, changes: Vec<Change>, iters: usize) {
-            let doc = &mut doc.doc;
-
-            let mut chap = BatchApply::default();
-            for c in changes {
-                chap.push(c);
-            }
-            chap.insert_new_actors(doc);
-            for c in &chap.changes {
-                doc.import_ops_to(c, &mut chap.ops).unwrap();
-            }
-            let mut obj_info = doc.ops().obj_info.clone();
-            chap.order_ops_for_doc(&mut obj_info);
-
-            let base_ops = chap.ops.clone();
-            let base_pred = chap.pred.clone();
-
-            let mut v1_times = Vec::with_capacity(iters);
-            for _ in 0..iters {
-                chap.ops = base_ops.clone();
-                chap.pred = base_pred.clone();
-                let mut log = PatchLog::inactive();
-                let mut succ = vec![];
-                let mut conflicts = vec![];
-                let t = Instant::now();
-                let mut walker = ObjWalker::new(doc.ops());
-                for os in &chap.obj_spans {
-                    let obj_range = walker.seek_to_obj(os.obj);
-                    let doc_ops = doc.ops().iter_range(&obj_range);
-                    match obj_info.object_type(&os.obj) {
-                        Some(ObjType::Map) => {
-                            let mut mw = MapWalker::new(
-                                os.obj,
-                                doc_ops,
-                                doc.text_encoding(),
-                                &mut chap.pred,
-                                &mut succ,
-                                &mut log,
-                                &mut conflicts,
-                            );
-                            walk_map(&mut mw, &mut chap.ops[os.span.clone()]);
-                        }
-                        Some(otype) if otype.is_sequence() => {
-                            let sequence_type = match otype {
-                                ObjType::Text => SequenceType::Text,
-                                ObjType::List => SequenceType::List,
-                                _ => unreachable!(),
-                            };
-                            let ut = Untangler::new(
-                                os.obj,
-                                sequence_type,
-                                doc.text_encoding(),
-                                &mut conflicts,
-                                &mut chap.ops[os.span.clone()],
-                                &mut chap.pred,
-                                doc_ops.end_pos(),
-                            );
-                            walk_list(ut, doc_ops, &mut succ, &mut log);
-                        }
-                        _ => panic!("obj missing from index"),
-                    }
-                }
-                v1_times.push(t.elapsed());
-                std::hint::black_box(&succ);
-            }
-
-            // chap.ops is now in final document order — v2's input
-            let ordered: Vec<ChangeOp> = chap.ops.clone();
-            let mut v2_times = Vec::with_capacity(iters);
-            for _ in 0..iters {
-                let ops = ordered.clone();
-                let t = Instant::now();
-                let out = doc
-                    .ops()
-                    .apply_manifold(doc.change_graph.current_clock())
-                    .apply(ops.iter());
-                v2_times.push(t.elapsed());
-                std::hint::black_box(&out);
-            }
-
-            report(label, v1_times, v2_times);
-        }
-
-        let mut rng = make_rng();
-
-        // ── scenario 1: large batch into a large text document ──────
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
-        let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
-        let body: String = (0..20_000)
-            .map(|i| (b'a' + (i % 26) as u8) as char)
-            .collect();
-        doc.splice_text(&text, 0, 0, &body).unwrap();
-        let heads = doc.get_heads();
-        let mut f = doc.fork().with_actor(rng.random()).unwrap();
-        for _ in 0..4 {
-            for _ in 0..500 {
-                let len = f.length(&text);
-                if rng.random_range(0..4u32) == 0 && len > 1 {
-                    let at = rng.random_range(0..len as u32) as usize;
-                    f.splice_text(&text, at, 1, "").unwrap();
-                } else {
-                    let at = rng.random_range(0..=len as u32) as usize;
-                    f.splice_text(&text, at, 0, "x").unwrap();
-                }
-            }
-            f.commit();
-        }
-        let changes = changes_since(&mut f, &heads);
-        run("2000 ops -> 20k-char text doc", &mut doc, changes, 15);
-
-        // ── scenario 2: single insert into a large text document ────
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
-        let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
-        let body: String = (0..100_000)
-            .map(|i| (b'a' + (i % 26) as u8) as char)
-            .collect();
-        doc.splice_text(&text, 0, 0, &body).unwrap();
-        let heads = doc.get_heads();
-        let mut f = doc.fork().with_actor(rng.random()).unwrap();
-        f.splice_text(&text, 50_000, 0, "x").unwrap();
-        let changes = changes_since(&mut f, &heads);
-        run("1 insert -> 100k-char text doc", &mut doc, changes, 400);
-
-        // ── scenario 2b: single insert near the END of a large doc ──
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
-        let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
-        doc.splice_text(&text, 0, 0, &body).unwrap();
-        let heads = doc.get_heads();
-        let mut f = doc.fork().with_actor(rng.random()).unwrap();
-        f.splice_text(&text, 99_999, 0, "x").unwrap();
-        let changes = changes_since(&mut f, &heads);
-        run("1 insert -> end of 100k-char text", &mut doc, changes, 400);
     }
 }

@@ -2674,11 +2674,8 @@ mod tests {
             d
         };
 
-        std::env::remove_var("FRAGMENT_MANIFOLD");
         let walk = apply_all();
-        std::env::set_var("FRAGMENT_MANIFOLD", "1");
         let manifold = apply_all();
-        std::env::remove_var("FRAGMENT_MANIFOLD");
 
         assert_eq!(walk.get_heads(), manifold.get_heads());
         assert_eq!(walk.save(), manifold.save(), "docs diverge");
@@ -2711,7 +2708,6 @@ mod tests {
         eprintln!("bundle_fragment_v2 encode: {:.2?}", t.elapsed());
 
         for _ in 0..3 {
-            std::env::set_var("FRAGMENT_MANIFOLD", "1");
             let mut d = Automerge::new();
             let t = Instant::now();
             d.apply_fragment(&v2).unwrap();
@@ -2720,7 +2716,6 @@ mod tests {
                 t.elapsed(),
                 d.ops.len()
             );
-            std::env::remove_var("FRAGMENT_MANIFOLD");
             assert_eq!(d.get_heads(), heads);
             assert_eq!(d.ops.len(), doc.ops.len());
         }
@@ -2839,7 +2834,6 @@ mod tests {
 
         // the big fragment: the one bringing in the most ops (found on
         // a throwaway pass so later rounds can report against it)
-        std::env::set_var("FRAGMENT_MANIFOLD", "1");
         let mut sizes = vec![0usize; v2s.len()];
         {
             let mut d = Automerge::new();
@@ -2863,7 +2857,6 @@ mod tests {
         let heads = light.get_heads();
         let saved = light.save();
 
-        std::env::set_var("FRAGMENT_MANIFOLD", "1");
         for round in 0..3 {
             let mut d = Automerge::new();
             for (i, v2) in v2s.iter().enumerate() {
@@ -2886,7 +2879,6 @@ mod tests {
             assert_eq!(d.get_heads(), heads);
             assert_eq!(d.ops.len(), light.ops.len());
         }
-        std::env::remove_var("FRAGMENT_MANIFOLD");
 
         for _ in 0..3 {
             let t = Instant::now();
@@ -2935,41 +2927,21 @@ mod tests {
             );
             let base = {
                 let mut d = Automerge::new();
-                std::env::remove_var("BATCH_MANIFOLD");
                 for b in bundles.iter().take(big) {
                     d.load_incremental(b).unwrap();
                 }
                 d
             };
 
-            for env in [false, true] {
-                if env {
-                    std::env::set_var("BATCH_MANIFOLD", "1");
-                } else {
-                    std::env::remove_var("BATCH_MANIFOLD");
-                }
-                eprintln!("--- {} ---", if env { "v2 manifold" } else { "v1 walk" });
-                let mut d = base.fork();
-                let t = Instant::now();
-                d.load_incremental(&bundles[big]).unwrap();
-                eprintln!(
-                    "TOTAL {:>9.3}ms  ops {}",
-                    t.elapsed().as_secs_f64() * 1e3,
-                    d.ops.len()
-                );
-            }
-            std::env::remove_var("BATCH_MANIFOLD");
-
-            // equivalence of the two paths
-            std::env::remove_var("BATCH_MANIFOLD");
-            let mut d1 = base.fork();
-            d1.load_incremental(&bundles[big]).unwrap();
-            std::env::set_var("BATCH_MANIFOLD", "1");
-            let mut d2 = base.fork();
-            d2.load_incremental(&bundles[big]).unwrap();
-            std::env::remove_var("BATCH_MANIFOLD");
-            assert_eq!(d1.get_heads(), d2.get_heads(), "{name} heads");
-            assert_eq!(d1.save(), d2.save(), "{name} diverge");
+            let mut d = base.fork();
+            let t = Instant::now();
+            d.load_incremental(&bundles[big]).unwrap();
+            eprintln!(
+                "TOTAL {:>9.3}ms  ops {}",
+                t.elapsed().as_secs_f64() * 1e3,
+                d.ops.len()
+            );
+            d.validate_document();
         }
     }
 
@@ -2990,61 +2962,36 @@ mod tests {
             let fragments = doc.fragments(..).unwrap();
             let sizes: Vec<usize> = fragments.iter().map(|f| f.members.len()).collect();
             let bundles = doc.bundle_fragments(fragments).unwrap();
-            /*
-                        let mut doc2 = Automerge::load(&bundles[0]);
-                        let doc = doc2;
-                        let bundles = &bundles[0..1].to_vec();
-            */
-
-            let run = |env: bool| -> Vec<Duration> {
-                if env {
-                    std::env::set_var("BATCH_MANIFOLD", "1");
-                } else {
-                    std::env::remove_var("BATCH_MANIFOLD");
-                }
-                let mut d = Automerge::new();
-                let times = bundles
-                    .iter()
-                    .map(|b| {
-                        let t = Instant::now();
-                        d.load_incremental(b).unwrap();
-                        t.elapsed()
-                    })
-                    .collect();
-                std::env::remove_var("BATCH_MANIFOLD");
-                //assert_eq!(d.get_heads(), doc.get_heads());
-                times
-            };
-            println!("run v1");
-            let v1 = run(false);
-            println!("run v2");
-            let v2 = run(true);
+            let mut d = Automerge::new();
+            let times: Vec<Duration> = bundles
+                .iter()
+                .map(|b| {
+                    let t = Instant::now();
+                    d.load_incremental(b).unwrap();
+                    t.elapsed()
+                })
+                .collect();
+            assert_eq!(d.get_heads(), doc.get_heads());
 
             println!("{name}: {} bundles", bundles.len());
-            println!("{:>6} {:>8} {:>12} {:>12}", "idx", "changes", "v1", "v2");
-            let mut loose = (0usize, Duration::ZERO, Duration::ZERO);
+            println!("{:>6} {:>8} {:>12}", "idx", "changes", "time");
+            let mut loose = (0usize, Duration::ZERO);
             for i in 0..bundles.len() {
                 if sizes[i] <= 1 {
                     loose.0 += 1;
-                    loose.1 += v1[i];
-                    loose.2 += v2[i];
+                    loose.1 += times[i];
                 } else {
-                    println!("{:>6} {:>8} {:>12.2?} {:>12.2?}", i, sizes[i], v1[i], v2[i]);
+                    println!("{:>6} {:>8} {:>12.2?}", i, sizes[i], times[i]);
                 }
             }
             if loose.0 > 0 {
                 println!(
-                    " loose {:>8} {:>12.2?} {:>12.2?}   (count, avg v1, avg v2)",
+                    " loose {:>8} {:>12.2?}   (count, avg)",
                     loose.0,
                     loose.1 / loose.0 as u32,
-                    loose.2 / loose.0 as u32
                 );
             }
-            println!(
-                " total          {:>12.2?} {:>12.2?}",
-                v1.iter().sum::<Duration>(),
-                v2.iter().sum::<Duration>()
-            );
+            println!(" total          {:>12.2?}", times.iter().sum::<Duration>());
         }
     }
 
@@ -3073,37 +3020,21 @@ mod tests {
                 .into_iter()
                 .flatten()
                 .collect();
-            let run = |env: bool| -> (Duration, Automerge) {
-                if env {
-                    std::env::set_var("BATCH_MANIFOLD", "1");
-                } else {
-                    std::env::remove_var("BATCH_MANIFOLD");
+            let mut best = Duration::MAX;
+            let mut out = None;
+            for _ in 0..3 {
+                let mut d = Automerge::new();
+                let t = Instant::now();
+                d.load_incremental(&joined).unwrap();
+                let e = t.elapsed();
+                if e < best {
+                    best = e;
                 }
-                let mut best = Duration::MAX;
-                let mut out = None;
-                for _ in 0..3 {
-                    let mut d = Automerge::new();
-                    let t = Instant::now();
-                    d.load_incremental(&joined).unwrap();
-                    let e = t.elapsed();
-                    if e < best {
-                        best = e;
-                    }
-                    out = Some(d);
-                }
-                std::env::remove_var("BATCH_MANIFOLD");
-                (best, out.unwrap())
-            };
-            let (walk_t, walk_d) = run(false);
-            let (mani_t, mani_d) = run(true);
-            if std::env::var("MANIFOLD_NO_TOP").is_err() {
-                assert_eq!(walk_d.get_heads(), mani_d.get_heads(), "{name} heads");
-                assert_eq!(walk_d.save(), mani_d.save(), "{name} diverge");
+                out = Some(d);
             }
-            println!(
-                "{name}: walk {walk_t:.2?}  manifold {mani_t:.2?}  ({:.2}x)",
-                walk_t.as_secs_f64() / mani_t.as_secs_f64()
-            );
+            let d = out.unwrap();
+            assert_eq!(d.get_heads(), doc.get_heads(), "{name} heads");
+            println!("{name}: {best:.2?}");
         }
     }
 
@@ -3122,7 +3053,6 @@ mod tests {
             .iter()
             .map(|f| doc.bundle_fragment_v2(f).unwrap())
             .collect();
-        std::env::set_var("FRAGMENT_MANIFOLD", "1");
         let mut d = Automerge::new();
         let sample = [100usize, 300, 500, 700, 900];
         let mut window = std::time::Duration::ZERO;
@@ -3146,7 +3076,6 @@ mod tests {
             window += t.elapsed();
             std::env::remove_var("FRAG_TIMING");
         }
-        std::env::remove_var("FRAGMENT_MANIFOLD");
         eprintln!("final: {} ops", d.ops.len());
         assert_eq!(d.get_heads(), doc.get_heads());
     }
@@ -3239,22 +3168,19 @@ mod tests {
             eprintln!("--- doc rows {range:?} ---");
             for op in d.ops().iter_range(&range) {
                 eprintln!(
-                    "  pos {:>5} id {:?} ins {} key {:?} visible {}",
+                    "  pos {:>5} id {:?} ins {} key {:?}",
                     op.pos,
                     op.id,
                     op.insert,
                     op.elemid_or_key(),
-                    op.visible(),
                 );
             }
         }
-        std::env::set_var("FRAGMENT_MANIFOLD", "1");
         std::env::set_var("MANIFOLD_TRACE", "5855-5916");
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             d.apply_fragment(&v2[3]).unwrap();
         }));
         std::env::remove_var("MANIFOLD_TRACE");
-        std::env::remove_var("FRAGMENT_MANIFOLD");
         eprintln!("frag 3 apply result: {:?}", r.is_ok());
     }
 
@@ -3305,9 +3231,7 @@ mod tests {
         let mut w = Automerge::new();
         let mut d = Automerge::new();
         for (i, b) in v2.iter().enumerate() {
-            std::env::remove_var("FRAGMENT_MANIFOLD");
             w.apply_fragment(b).unwrap();
-            std::env::set_var("FRAGMENT_MANIFOLD", "1");
             d.apply_fragment(b).unwrap();
             if d.save() != w.save() {
                 eprintln!("first divergence after fragment {i}");
@@ -3315,7 +3239,6 @@ mod tests {
                 panic!("diverged after fragment {i}");
             }
         }
-        std::env::remove_var("FRAGMENT_MANIFOLD");
         assert_eq!(d.get_heads(), doc.get_heads());
         // the fragments cover the whole history: after verifying every
         // member hash the docs must serialize identically
@@ -3371,16 +3294,8 @@ mod tests {
         };
 
         println!(
-            "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11} | {:>10} {:>11}",
-            "doc",
-            "ops",
-            "frags",
-            "v1 conc",
-            "v1 per-frag",
-            "v2w conc",
-            "v2w per-frag",
-            "v2m conc",
-            "v2m per-frag"
+            "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11}",
+            "doc", "ops", "frags", "v1 conc", "v1 per-frag", "v2 conc", "v2 per-frag",
         );
         let docs: Vec<String> = std::env::var("BENCH_DOCS")
             .map(|v| v.split(',').map(str::to_string).collect())
@@ -3428,7 +3343,6 @@ mod tests {
                 }
                 d
             });
-            std::env::remove_var("FRAGMENT_MANIFOLD");
             let (t3, d3) = time(&|| {
                 let mut d = Automerge::new();
                 for b in &v2_bundles {
@@ -3441,66 +3355,23 @@ mod tests {
                 d.apply_fragment(&v2_whole).unwrap();
                 d
             });
-            let (t4, d4, t4c, d4c) = {
-                std::env::set_var("FRAGMENT_MANIFOLD", "1");
-                let (t4, d4) = time(&|| {
-                    let mut d = Automerge::new();
-                    for b in &v2_bundles {
-                        d.apply_fragment(b).unwrap();
-                    }
-                    d
-                });
-                let (t4c, d4c) = time(&|| {
-                    let mut d = Automerge::new();
-                    d.apply_fragment(&v2_whole).unwrap();
-                    d
-                });
-                std::env::remove_var("FRAGMENT_MANIFOLD");
-                (t4, Some(d4), t4c, Some(d4c))
-            };
 
             // correctness: identical op sets and heads everywhere
             let heads = doc.get_heads();
-            let mut check = vec![("v1c", &d1), ("v1p", &d2), ("v2wp", &d3), ("v2wc", &d3c)];
-            if let (Some(d4), Some(d4c)) = (&d4, &d4c) {
-                check.push(("v2mp", d4));
-                check.push(("v2mc", d4c));
-            }
-            for (label, d) in check {
+            for (label, d) in [("v1c", &d1), ("v1p", &d2), ("v2p", &d3), ("v2c", &d3c)] {
                 assert_eq!(d.ops.len(), doc.ops.len(), "{name}/{label} op count");
                 assert_eq!(d.get_heads(), heads, "{name}/{label} heads");
             }
-            if let (Some(d4), Some(d4c)) = (&d4, &d4c) {
-                assert_eq!(
-                    d3.save(),
-                    d4.save(),
-                    "{name}: per-frag walk vs manifold diverge"
-                );
-                assert_eq!(
-                    d3c.save(),
-                    d4c.save(),
-                    "{name}: concat walk vs manifold diverge"
-                );
-            }
 
-            let fmt = |t: Duration| {
-                if t == Duration::MAX {
-                    "-".to_string()
-                } else {
-                    format!("{t:.2?}")
-                }
-            };
             println!(
-                "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11} | {:>10} {:>11}",
+                "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11}",
                 name,
                 doc.ops.len(),
                 v2_bundles.len(),
-                fmt(t1),
-                fmt(t2),
-                fmt(t3c),
-                fmt(t3),
-                fmt(t4c),
-                fmt(t4)
+                format!("{t1:.2?}"),
+                format!("{t2:.2?}"),
+                format!("{t3c:.2?}"),
+                format!("{t3:.2?}"),
             );
         }
     }

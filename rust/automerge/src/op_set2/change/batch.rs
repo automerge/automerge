@@ -1,16 +1,11 @@
 use crate::change_queue::ChangeBatch;
-use crate::hydrate::Value;
-use crate::iter::RichTextDiff;
-use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
-use crate::op_set2::SuccInsert;
-use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
-};
+use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
+use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
+use crate::AutomergeError;
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
-use crate::{AutomergeError, TextEncoding};
 
-use super::super::op::{ChangeOp, Op, OpBuilder};
-use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
+use super::super::op::{ChangeOp, OpBuilder};
+use super::super::op_set::{ObjIdIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -25,323 +20,45 @@ pub(crate) struct BatchApply {
     pub(crate) changes: Vec<Change>,
     actor_seq: HashMap<ActorId, HashSet<u64>>,
     hashes: HashSet<ChangeHash>,
-    pub(crate) pred: PredCache,
-    pub(crate) obj_spans: Vec<ObjSpan>,
 }
 
-pub(crate) struct Untangler<'a> {
-    // the tangle of change ops we need to navigate
-    change_ops: &'a mut [ChangeOp],
-    // these are entry points into the change_op tangle
-    // when we see a doc_op.id equal to key, put this vec onto the stack
-    // ops inserted after HEAD are put onto the stack immidately
-    entry: SmallHashMap<OpId, Vec<usize>>,
-    // same concept as entry but internal to the change_ops array
-    gosub: SmallHashMap<usize, Vec<usize>>,
-    // stack of change ops ready to be processed
-    stack: Vec<usize>,
-    // these are change ops updating a pre-existing doc op elemid's
-    // and are handled differently than inserts
-    updates: SmallHashMap<ElemId, Vec<usize>>,
-    updates_stack: Vec<usize>,
-    pred: &'a mut PredCache,
-    // Top and Conflicts keep track of changes that need to
-    // be made to the index.top and index.visible columns
-    top: Top,
-    conflicts: &'a mut Vec<Adjust>,
-    value: ValueState<'a>,
-    seq_type: SequenceType,
-    text_encoding: TextEncoding,
-    count: usize,
-    index: usize,
-    max: usize,
-    width: usize,
+/// The batch sort order: objects ascending, keys/elemids within an
+/// object, ids within a group — document order for maps; sequences
+/// still need untangling afterward.
+pub(super) fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
+    a.bld.obj.cmp(&b.bld.obj).then_with(|| {
+        match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
+            Some(Ordering::Equal) | None => a.bld.id.cmp(&b.bld.id),
+            Some(order) => order,
+        }
+    })
 }
 
-impl<'a> Untangler<'a> {
-    fn flush(&mut self, log: &mut PatchLog) {
-        self.value.list_flush(self.index, log);
-        self.top.reset(self.conflicts);
-        self.index += self.width;
-        self.width = 0;
-    }
-
-    fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
-        let mut deleted = false;
-        if let Some(mut successors) = self.pred.remove(&doc_op.id) {
-            normalize_increment_successors(doc_op.is_counter(), &mut successors);
-            for (id, inc) in successors {
-                deleted |= inc.is_none();
-                succ.push(doc_op.add_succ(id, inc));
-            }
-        }
-
-        if doc_op.insert {
-            self.flush(log);
-            self.value.key = Some(PropRef::Seq(self.index));
-        }
-
-        if doc_op.visible() && !deleted {
-            self.width = doc_op.width(self.seq_type, self.text_encoding);
-        }
-        self.value.process_doc_op(doc_op, deleted);
-        self.top.process_doc_op(self.change_ops, doc_op, deleted);
-    }
-
-    fn element_update(&mut self, doc_op: &Op<'_>) {
-        while let Some(last) = self.updates_stack.last().copied() {
-            if doc_op.insert || doc_op.id > self.change_ops[last].id() {
-                self.updates_stack.pop();
-                self.change_ops[last].pos = Some(doc_op.pos);
-                self.change_ops[last].subsort = self.count;
-                if self.change_ops[last].visible() {
-                    self.width = self.change_ops[last].width(self.seq_type, self.text_encoding);
-                }
-                self.value.process_change_op(&self.change_ops[last]);
-                self.count += 1;
-                self.top
-                    .process_change_op(self.conflicts, self.change_ops, last);
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn finish_updates(&mut self) {
-        for i in self.updates_stack.iter().rev() {
-            self.change_ops[*i].pos = Some(self.max);
-            self.change_ops[*i].subsort = self.count;
-            self.width = 0;
-            if self.change_ops[*i].visible() {
-                self.width = self.change_ops[*i].width(self.seq_type, self.text_encoding);
-            }
-            self.value.process_change_op(&self.change_ops[*i]);
-
-            self.top
-                .process_change_op(self.conflicts, self.change_ops, *i);
-
-            self.count += 1;
-        }
-    }
-
-    fn finish_inserts(&mut self, log: &mut PatchLog) {
-        while !self.stack.is_empty() {
-            self.untangle_inner(self.max, log);
-        }
-    }
-
-    fn finish(mut self, log: &mut PatchLog) {
-        self.finish_updates();
-
-        self.flush(log);
-
-        assert!(self.entry.is_empty());
-
-        self.finish_inserts(log);
-
-        self.flush(log);
-
-        assert_eq!(self.top, Top::Nothing);
-
-        self.change_ops.sort_by(|a, b| {
-            a.pos
-                .unwrap()
-                .cmp(&b.pos.unwrap())
-                .then_with(|| a.subsort.cmp(&b.subsort))
-        });
-    }
-
-    fn untangle_inserts(&mut self, id: OpId, insert_pos: usize, log: &mut PatchLog) {
-        self.flush(log);
-
-        if let Err(n) = self
-            .stack
-            .binary_search_by(|n| self.change_ops[*n].id().cmp(&id))
-        {
-            while self.stack.len() > n {
-                self.untangle_inner(insert_pos, log);
-            }
-        }
-        if let Some(v) = self.entry.remove(&id) {
-            self.stack.extend(v);
-        }
-        if let Some(u) = self.updates.get(&ElemId(id)) {
-            self.updates_stack.extend(u.iter().rev());
-        }
-    }
-
-    fn untangle_inner(&mut self, insert_pos: usize, log: &mut PatchLog) -> Option<()> {
-        let mut pos = self.stack.pop()?;
-        let op = self.change_ops.get_mut(pos)?;
-
-        let mut conflict = false;
-        let mut vis = None;
-
-        let key = KeyRef::Seq(ElemId(op.id()));
-
-        assert!(op.pos.is_none());
-        op.pos = Some(insert_pos);
-        op.subsort = self.count;
-        self.count += 1;
-
-        if op.is_set_or_make() && !op.has_succ() {
-            vis = Some(pos);
-        } else if op.action() == Action::Mark {
-            self.value.process_mark(op.id(), op.mark_data());
-        }
-
-        if let Some(v) = self.gosub.get(&pos) {
-            self.stack.extend(v);
-        }
-
-        for i in (pos + 1)..self.change_ops.len() {
-            let next_vis = {
-                let next_op = &mut self.change_ops[i];
-
-                pos += 1;
-
-                if next_op.insert() || next_op.key() != &key {
-                    break;
-                }
-
-                next_op.pos = Some(insert_pos);
-                next_op.subsort = self.count;
-                self.count += 1;
-
-                next_op.is_set_or_make() && !next_op.has_succ()
-            };
-
-            if next_vis {
-                // borrow checker stuff
-                if let Some(conflict_pos) = vis {
-                    self.change_ops[conflict_pos].conflicted = true;
-                    conflict = true;
-                }
-                vis = Some(pos);
-            }
-        }
-
-        if let Some(p) = vis {
-            let op = &mut self.change_ops[p];
-            if self.seq_type == SequenceType::List {
-                let value = op.hydrate_value_and_fix_counters(self.text_encoding);
-                log.insert(op.bld.obj, self.index, value, op.id(), conflict);
-                self.index += 1;
-            } else {
-                let marks = self.value.marks.after.current().cloned();
-                match op.bld.action {
-                    Action::MakeMap => {
-                        // Block markers
-                        log.insert(
-                            op.bld.obj,
-                            self.index,
-                            Value::map(),
-                            op.bld.id,
-                            op.conflicted,
-                        );
-                    }
-                    _ => {
-                        log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
-                    }
-                }
-                self.index += op.width(self.seq_type, self.text_encoding);
-            }
-        }
-
-        Some(())
-    }
-
-    pub(crate) fn new(
-        obj: ObjId,
-        encoding: SequenceType,
-        text_encoding: TextEncoding,
-        conflicts: &'a mut Vec<Adjust>,
-        change_ops: &'a mut [ChangeOp],
-        pred: &'a mut PredCache,
-        max: usize,
-    ) -> Self {
-        let mut e_to_i = SmallHashMap::default();
-        let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
-        let mut entry: SmallHashMap<OpId, Vec<usize>> = HashMap::default();
-        let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
-        let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
-        let mut last_e = None;
-        let value = ValueState::new(obj, encoding, text_encoding);
-        for (i, op) in change_ops.iter_mut().enumerate() {
-            if let Some(mut successors) = pred.remove(&op.id()) {
-                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
-                normalize_increment_successors(is_counter, &mut successors);
-                op.succ = successors;
-            }
-            if let KeyRef::Seq(e) = op.key() {
-                if op.insert() {
-                    if let Some(j) = e_to_i.get(e) {
-                        gosub.entry(*j).or_default().push(i);
-                    } else if e.is_head() {
-                        stack.push(i);
-                    } else {
-                        entry.entry(e.0).or_default().push(i);
-                    }
-                } else if last_e != Some(*e) {
-                    updates.entry(*e).or_default().push(i);
-                }
-                if op.insert() {
-                    let this_e = ElemId(op.id());
-                    e_to_i.insert(this_e, i);
-                    last_e = Some(this_e);
-                }
-            }
-        }
-        let updates_stack = Vec::with_capacity(change_ops.len());
-        Self {
-            gosub,
-            entry,
-            stack,
-            pred,
-            change_ops,
-            updates,
-            seq_type: encoding,
-            text_encoding,
-            conflicts,
-            updates_stack,
-            top: Top::Nothing,
-            count: 0,
-            index: 0,
-            width: 0,
-            value,
-            max,
-        }
-    }
-}
-
-pub(crate) fn walk_list<'a>(
-    mut ut: Untangler<'a>,
-    doc_ops: OpIter<'a>,
-    succ: &mut Vec<SuccInsert>,
-    log: &mut PatchLog,
+/// [`untangle_order`] over a slice of indexes into `ops`: the ops stay
+/// put and the `u32` indexes are permuted instead.
+pub(super) fn untangle_order_idx(
+    ops: &[ChangeOp],
+    idxs: &mut [u32],
+    mut ids: crate::op_set2::op_set::OpIdIter<'_>,
+    mut inserts: hexane::Iter<'_, bool>,
 ) {
-    for op in doc_ops {
-        ut.element_update(&op);
-
-        if op.insert {
-            ut.untangle_inserts(op.id, op.pos, log);
+    let mut ut = UntangleLiteIdx::new(ops, idxs);
+    for id in ids.by_ref() {
+        let insert = inserts.next().expect("insert column length matches ids");
+        ut.element_update(insert, id);
+        if insert {
+            ut.untangle_inserts(id);
         }
-
-        ut.handle_doc_op(&op, succ, log);
     }
-
-    ut.finish(log);
+    ut.finish();
 }
 
-/// The ordering half of [`Untangler`]: sub-sorts a sequence object's
-/// change ops into strict document order and nothing else — no succ,
-/// top, value or patch work. Same battle-tested mechanics (entry /
-/// stack / gosub / updates driven by a walk of the object's rows), but
-/// the walk reads only the id and insert columns, and the only output
-/// is the order itself. Feeds the manifold, which requires strict
-/// document order and computes everything the full walk used to.
-struct UntangleLite<'a> {
-    change_ops: &'a mut [ChangeOp],
+/// [`UntangleLite`] operating on span positions of an index slice: all
+/// op lookups indirect through `idxs`, and `finish` permutes the
+/// indexes rather than the ops.
+struct UntangleLiteIdx<'a> {
+    ops: &'a [ChangeOp],
+    idxs: &'a mut [u32],
     order: Vec<u32>,
     count: u32,
     entry: SmallHashMap<OpId, Vec<usize>>,
@@ -351,17 +68,20 @@ struct UntangleLite<'a> {
     updates_stack: Vec<usize>,
 }
 
-impl<'a> UntangleLite<'a> {
-    fn new(change_ops: &'a mut [ChangeOp]) -> Self {
-        // same population pass as Untangler::new, minus the pred/succ
-        // bookkeeping (the manifold resolves succ)
+impl<'a> UntangleLiteIdx<'a> {
+    fn op(&self, pos: usize) -> &ChangeOp {
+        &self.ops[self.idxs[pos] as usize]
+    }
+
+    fn new(ops: &'a [ChangeOp], idxs: &'a mut [u32]) -> Self {
         let mut e_to_i = SmallHashMap::default();
         let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
         let mut entry: SmallHashMap<OpId, Vec<usize>> = HashMap::default();
-        let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
+        let mut stack: Vec<usize> = Vec::with_capacity(idxs.len());
         let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
         let mut last_e = None;
-        for (i, op) in change_ops.iter().enumerate() {
+        for (i, &ix) in idxs.iter().enumerate() {
+            let op = &ops[ix as usize];
             if let KeyRef::Seq(e) = op.key() {
                 if op.insert() {
                     if let Some(j) = e_to_i.get(e) {
@@ -379,9 +99,10 @@ impl<'a> UntangleLite<'a> {
                 }
             }
         }
-        let order = vec![u32::MAX; change_ops.len()];
+        let order = vec![u32::MAX; idxs.len()];
         Self {
-            change_ops,
+            ops,
+            idxs,
             order,
             count: 0,
             entry,
@@ -400,7 +121,7 @@ impl<'a> UntangleLite<'a> {
 
     fn element_update(&mut self, doc_insert: bool, doc_id: OpId) {
         while let Some(last) = self.updates_stack.last().copied() {
-            if doc_insert || doc_id > self.change_ops[last].id() {
+            if doc_insert || doc_id > self.op(last).id() {
                 self.updates_stack.pop();
                 self.emit(last);
             } else {
@@ -410,10 +131,7 @@ impl<'a> UntangleLite<'a> {
     }
 
     fn untangle_inserts(&mut self, id: OpId) {
-        if let Err(n) = self
-            .stack
-            .binary_search_by(|n| self.change_ops[*n].id().cmp(&id))
-        {
+        if let Err(n) = self.stack.binary_search_by(|n| self.op(*n).id().cmp(&id)) {
             while self.stack.len() > n {
                 self.untangle_inner();
             }
@@ -428,15 +146,14 @@ impl<'a> UntangleLite<'a> {
 
     fn untangle_inner(&mut self) -> Option<()> {
         let pos = self.stack.pop()?;
-        let key = KeyRef::Seq(ElemId(self.change_ops[pos].id()));
+        let key = KeyRef::Seq(ElemId(self.op(pos).id()));
         self.emit(pos);
         if let Some(v) = self.gosub.remove(&pos) {
             self.stack.extend(v);
         }
-        // the op's own updates follow it contiguously in
-        // order_ops_for_doc order
-        for i in (pos + 1)..self.change_ops.len() {
-            if self.change_ops[i].insert() || self.change_ops[i].key() != &key {
+        // the op's own updates follow it contiguously in sorted order
+        for i in (pos + 1)..self.idxs.len() {
+            if self.op(i).insert() || self.op(i).key() != &key {
                 break;
             }
             self.emit(i);
@@ -452,48 +169,16 @@ impl<'a> UntangleLite<'a> {
             self.untangle_inner();
         }
         debug_assert!(self.order.iter().all(|&o| o != u32::MAX));
-        // apply the permutation in place by cycles: order[i] is the
-        // destination slot of the op at i
+        // apply the permutation to the index slice by cycles
         let mut order = std::mem::take(&mut self.order);
         for i in 0..order.len() {
             while order[i] as usize != i {
                 let j = order[i] as usize;
-                self.change_ops.swap(i, j);
+                self.idxs.swap(i, j);
                 order.swap(i, j);
             }
         }
     }
-}
-
-/// Reorder one sequence object's change ops into strict document
-/// order, driving [`UntangleLite`] with the object's id and insert
-/// columns only.
-pub(super) fn untangle_order(
-    change_ops: &mut [ChangeOp],
-    mut ids: crate::op_set2::op_set::OpIdIter<'_>,
-    mut inserts: hexane::Iter<'_, bool>,
-) {
-    let mut ut = UntangleLite::new(change_ops);
-    for id in ids.by_ref() {
-        let insert = inserts.next().expect("insert column length matches ids");
-        ut.element_update(insert, id);
-        if insert {
-            ut.untangle_inserts(id);
-        }
-    }
-    ut.finish();
-}
-
-pub(crate) struct MapWalker<'a, 'b> {
-    ops: OpIter<'a>,
-    log: &'b mut PatchLog,
-    pred: &'b mut PredCache,
-    succ: &'b mut Vec<SuccInsert>,
-    value: ValueState<'a>,
-    pos: usize,
-    doc_op: Option<Op<'a>>,
-    conflicts: &'b mut Vec<Adjust>,
-    top: Top,
 }
 
 #[derive(Debug, Clone)]
@@ -502,501 +187,19 @@ pub(crate) enum Adjust {
     Expose(usize),
 }
 
-#[derive(PartialEq, Debug)]
-pub(super) enum Top {
-    Nothing,
-    ChangeIndex(usize),
-    Doc(usize),
-    Expose(usize),
-}
-
-impl Top {
-    pub(super) fn reset(&mut self, conflicts: &mut Vec<Adjust>) {
-        if let Top::Expose(i) = self {
-            conflicts.push(Adjust::Expose(*i));
-        }
-        *self = Top::Nothing;
-    }
-
-    pub(super) fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool) {
-        if d.visible() {
-            if deleted {
-                if let Top::Doc(i) = self {
-                    *self = Top::Expose(*i)
-                }
-            } else {
-                if let Top::ChangeIndex(i) = self {
-                    ops[*i].conflicted = true
-                }
-                *self = Top::Doc(d.pos);
-            }
-        }
-    }
-
-    pub(super) fn process_change_op(
-        &mut self,
-        conflicts: &mut Vec<Adjust>,
-        ops: &mut [ChangeOp],
-        pos: usize,
-    ) {
-        if ops[pos].visible() {
-            match self {
-                Top::ChangeIndex(i) => ops[*i].conflicted = true,
-                Top::Doc(i) => conflicts.push(Adjust::Conflict(*i)),
-                _ => {}
-            }
-            *self = Top::ChangeIndex(pos);
-        }
-    }
-}
-
-impl<'a, 'b> MapWalker<'a, 'b> {
-    pub(crate) fn new(
-        obj: ObjId,
-        mut ops: OpIter<'a>,
-        text_encoding: TextEncoding,
-        pred: &'b mut PredCache,
-        succ: &'b mut Vec<SuccInsert>,
-        log: &'b mut PatchLog,
-        conflicts: &'b mut Vec<Adjust>,
-    ) -> Self {
-        let pos = ops.pos();
-        let doc_op = ops.next();
-        let value = ValueState::new(obj, SequenceType::List, text_encoding);
-        let top = Top::Nothing;
-        MapWalker {
-            ops,
-            log,
-            pos,
-            doc_op,
-            pred,
-            succ,
-            value,
-            conflicts,
-            top,
-        }
-    }
-
-    fn next_doc_op(&mut self) {
-        self.pos = self.ops.pos();
-        self.doc_op = self.ops.next();
-    }
-
-    fn change_op(&mut self, ops: &mut [ChangeOp], pos: usize) {
-        if let Some(mut successors) = self.pred.remove(&ops[pos].id()) {
-            let is_counter = matches!(ops[pos].bld.value, OpScalarValue::Counter(_));
-            normalize_increment_successors(is_counter, &mut successors);
-            ops[pos].succ = successors
-        }
-
-        self.advance_doc_op(pos, ops);
-
-        if ops[pos].prop() != self.value.key {
-            self.value.map_flush(self.log);
-            self.value.key = ops[pos].prop_static();
-            self.top.reset(self.conflicts);
-        }
-        self.value.process_change_op(&ops[pos]);
-
-        ops[pos].pos = Some(self.pos);
-
-        self.top.process_change_op(self.conflicts, ops, pos);
-    }
-
-    fn advance_doc_op(&mut self, pos: usize, ops: &mut [ChangeOp]) {
-        while let Some(d) = self.doc_op.as_ref() {
-            // TODO - sometimes we can fast forward to the next property
-            match d.key.partial_cmp(ops[pos].key()) {
-                Some(Ordering::Greater) => break,
-                Some(Ordering::Equal) if d.id > ops[pos].id() => break,
-                _ => {
-                    let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
-                    if d.prop() != self.value.key {
-                        self.value.map_flush(self.log);
-                        self.value.key = d.prop();
-                        self.top.reset(self.conflicts);
-                    }
-                    self.value.process_doc_op(d, deleted);
-                    self.top.process_doc_op(ops, d, deleted);
-                }
-            }
-            self.next_doc_op();
-        }
-    }
-
-    fn finish(&mut self, ops: &mut [ChangeOp]) {
-        while let Some(d) = self.doc_op.as_ref() {
-            let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
-            if d.prop() == self.value.key {
-                self.top.process_doc_op(ops, d, deleted);
-                self.value.process_doc_op(d, deleted);
-                self.next_doc_op();
-            } else {
-                break;
-            }
-        }
-        self.value.map_flush(self.log);
-        self.top.reset(self.conflicts);
-    }
-}
-
+/// Increment operations preserve and update counter predecessors, but
+/// act as ordinary overwrites for non-counter predecessors.
 pub(crate) fn normalize_increment_successors(
     is_counter: bool,
     successors: &mut [(OpId, Option<i64>)],
 ) {
     if !is_counter {
         for (_, increment) in successors {
-            // Increment operations preserve and update counter predecessors,
-            // but act as ordinary overwrites for non-counter predecessors.
             if increment.is_some() {
                 *increment = None;
             }
         }
     }
-}
-
-fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
-    if let Some(d) = doc_op {
-        let mut deleted = false;
-        if let Some(mut successors) = pred.remove(&d.id) {
-            normalize_increment_successors(d.is_counter(), &mut successors);
-            for (id, inc) in successors {
-                deleted |= inc.is_none();
-                succ.push(d.add_succ(id, inc));
-            }
-        }
-        deleted
-    } else {
-        false
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ValueState<'a> {
-    obj: ObjId,
-    seq_type: SequenceType,
-    text_encoding: TextEncoding,
-    pub(super) key: Option<PropRef<'a>>,
-    doc: OpValueOption,
-    change: OpValueOption,
-    marks: RichTextDiff<'a>,
-}
-
-#[derive(Debug, Clone)]
-struct OpValue {
-    id: OpId,
-    value: Value,
-    deleted: bool,
-    conflict: bool,
-    expose: bool,
-    replaced: Option<Value>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct OpValueOption(Option<OpValue>);
-
-impl OpValueOption {
-    fn id(&self) -> Option<OpId> {
-        self.value().map(|o| o.id)
-    }
-
-    fn increment(&mut self, n: i64) {
-        if let Self(Some(ov)) = self {
-            if let Value::Scalar(ScalarValue::Counter(c)) = &mut ov.value {
-                c.increment(n);
-            }
-        }
-    }
-
-    fn expose(&mut self, replaced: Value) {
-        if let Self(Some(ov)) = self {
-            ov.expose = true;
-            ov.replaced = Some(replaced);
-        }
-    }
-
-    fn set(&mut self, value: Value, id: OpId, deleted: bool) {
-        if deleted && self.is_visible() {
-            self.expose(value);
-        } else {
-            let conflict = self.is_visible();
-            let expose = !deleted && self.is_deleted();
-            *self = Self(Some(OpValue {
-                value,
-                id,
-                conflict,
-                deleted,
-                expose,
-                replaced: None,
-            }));
-        }
-    }
-
-    fn is_none(&self) -> bool {
-        self.value().is_none()
-    }
-
-    fn value(&self) -> Option<&OpValue> {
-        self.0.as_ref()
-    }
-
-    fn is_visible(&self) -> bool {
-        self.value().map(|o| !o.deleted).unwrap_or(false)
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.value().map(|o| o.deleted).unwrap_or(false)
-    }
-
-    fn take(&mut self) -> Self {
-        Self(self.0.take())
-    }
-
-    fn into_value(self) -> Option<OpValue> {
-        self.0
-    }
-}
-
-impl<'a> ValueState<'a> {
-    pub(super) fn new(obj: ObjId, encoding: SequenceType, text_encoding: TextEncoding) -> Self {
-        Self {
-            obj,
-            seq_type: encoding,
-            text_encoding,
-            key: None,
-            doc: OpValueOption(None),
-            change: OpValueOption(None),
-            marks: RichTextDiff::default(),
-        }
-    }
-
-    pub(super) fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool) {
-        match doc_op.action {
-            Action::Increment => {}
-            Action::Mark => {
-                self.marks.before.process(doc_op.id, doc_op.action());
-                self.marks.after.process(doc_op.id, doc_op.action());
-            }
-            _ => {
-                if doc_op.visible() {
-                    self.doc
-                        .set(doc_op.hydrate_value(self.text_encoding), doc_op.id, deleted);
-                }
-            }
-        }
-    }
-
-    fn do_increment(&mut self, op: &ChangeOp) {
-        if self.change.is_none() {
-            if let Some(id) = self.doc.id() {
-                if op.pred().contains(&id) && !self.doc.is_deleted() {
-                    self.change = self.doc.clone();
-                }
-            }
-        }
-        if let Some(id) = self.change.id() {
-            if op.pred().contains(&id) {
-                self.change.increment(op.value().as_i64());
-            }
-        }
-    }
-
-    fn process_mark(&mut self, id: OpId, data: Option<MarkData<'static>>) {
-        if let Some(data) = data {
-            self.marks.after.mark_begin(id, data);
-        } else {
-            self.marks.after.mark_end(id);
-        }
-    }
-
-    pub(super) fn process_change_op(&mut self, op: &ChangeOp) {
-        match op.action() {
-            Action::Delete => {}
-            Action::Increment => self.do_increment(op),
-            Action::Mark => self.process_mark(op.id(), op.mark_data()),
-            _ => {
-                if op.visible() {
-                    self.change
-                        .set(op.hydrate_value(self.text_encoding), op.id(), false);
-                }
-            }
-        }
-    }
-
-    fn map_flush(&mut self, log: &mut PatchLog) {
-        let obj = self.obj;
-        let change = self.change.take();
-        let doc = self.doc.take();
-        if let Some(PropRef::Map(key)) = self.key.take() {
-            Self::map_process(obj, &key, doc, change, log);
-        }
-    }
-
-    pub(super) fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
-        if self.key.take().is_none() {
-            return;
-        }
-        let obj = self.obj;
-        let encoding = self.seq_type;
-        if encoding == SequenceType::List {
-            match (self.doc.0.take(), self.change.0.take()) {
-                (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
-                (Some(d), Some(c)) if d.id == c.id => {
-                    let n = c.value.as_i64() - d.value.as_i64();
-                    if n != 0 {
-                        log.increment_seq(obj, index, n, c.id);
-                    }
-                }
-                (Some(d), Some(c)) if c.id < d.id => {
-                    log.flag_conflict(obj, &Prop::from(index));
-                }
-                (Some(d), Some(c)) => {
-                    let conflict = !d.deleted || c.conflict;
-                    log.put_seq(obj, index, c.value, c.id, conflict, false)
-                }
-                (Some(d), None) => {
-                    if d.expose {
-                        log.put_seq(obj, index, d.value, d.id, d.conflict, true);
-                    } else if d.deleted {
-                        log.delete_seq(obj, index, 1);
-                    }
-                }
-                _ => {}
-            }
-        } else {
-            match (self.doc.0.take(), self.change.0.take()) {
-                (None, Some(c)) => {
-                    match c.value {
-                        Value::Scalar(_) => {
-                            // I don't think this branch can ever actually happen in practice. If we
-                            // reach here it's because there is a non-inserting operation (i.e. an
-                            // update) to the operation at `index`, but we only allow insertions
-                            // into text objects. Regardless, we handle this is a splice just in
-                            // case
-                            log.splice(obj, index, c.value.as_str(), self.marks.current().export());
-                        }
-                        _ => log.insert(obj, index, c.value, c.id, c.conflict),
-                    }
-                }
-                (Some(d), Some(c)) if d.deleted => {
-                    // A text update replaces one Automerge sequence element, but that element can
-                    // render as more than one unit in the configured text encoding. Express the
-                    // update as a deletion and insertion so materialized text removes the full
-                    // width of the old value.
-                    log.replace_seq(
-                        obj,
-                        index,
-                        &d.value,
-                        c.value,
-                        c.id,
-                        c.conflict,
-                        false,
-                        self.seq_type,
-                        self.text_encoding,
-                        self.marks.current().export(),
-                    );
-                }
-                (Some(d), Some(c)) if d.id == c.id => {
-                    // Counter increments do not change the rendered text.
-                }
-                (Some(d), Some(c)) if c.id > d.id => {
-                    let conflict = !d.deleted || c.conflict;
-                    log.replace_seq(
-                        obj,
-                        index,
-                        &d.value,
-                        c.value,
-                        c.id,
-                        conflict,
-                        false,
-                        self.seq_type,
-                        self.text_encoding,
-                        self.marks.current().export(),
-                    );
-                }
-                (Some(d), Some(_)) if !d.conflict => {
-                    log.flag_conflict(obj, &Prop::from(index));
-                }
-                (Some(d), None) if d.expose => {
-                    let replaced = d
-                        .replaced
-                        .clone()
-                        .expect("exposed value must record the value it replaces");
-                    log.replace_seq(
-                        obj,
-                        index,
-                        &replaced,
-                        d.value,
-                        d.id,
-                        d.conflict,
-                        true,
-                        self.seq_type,
-                        self.text_encoding,
-                        self.marks.current().export(),
-                    );
-                }
-                (Some(d), None) if d.deleted => {
-                    let w = d.value.width(self.seq_type, self.text_encoding);
-                    log.delete_seq(obj, index, w);
-                }
-                (Some(d), None) => {
-                    if let Some(m) = self.marks.current().export() {
-                        log.mark(
-                            obj,
-                            index,
-                            d.value.width(self.seq_type, self.text_encoding),
-                            &m,
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn map_process(
-        obj: ObjId,
-        key: &str,
-        doc: OpValueOption,
-        change: OpValueOption,
-        log: &mut PatchLog,
-    ) {
-        match (doc.into_value(), change.into_value()) {
-            (None, Some(c)) => {
-                log.put_map(obj, key, c.value, c.id, c.conflict, false);
-            }
-            (Some(d), None) => {
-                if d.expose {
-                    log.put_map(obj, key, d.value, d.id, d.conflict, true);
-                } else if d.deleted {
-                    log.delete_map(obj, key);
-                }
-            }
-            (Some(d), Some(c)) if c.id > d.id => {
-                let conflict = (c.conflict && !d.conflict) || !d.deleted;
-                log.put_map(obj, key, c.value, c.id, conflict, false);
-            }
-            (Some(d), Some(c)) if c.id < d.id => {
-                if !d.conflict {
-                    log.flag_conflict(obj, &Prop::from(key));
-                }
-            }
-            (Some(d), Some(c)) if d.id == c.id => {
-                let n = c.value.as_i64() - d.value.as_i64();
-                if n != 0 {
-                    log.increment_map(obj, key, n, c.id);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-pub(crate) fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
-    for pos in 0..change_ops.len() {
-        mw.change_op(change_ops, pos);
-    }
-    mw.finish(change_ops);
 }
 
 impl BatchApply {
@@ -1032,169 +235,28 @@ impl BatchApply {
         }
     }
 
-    fn import_ops(&mut self, doc: &mut Automerge) {
-        for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops).unwrap();
-        }
-        doc.update_history_batch(&self.changes);
-        doc.remove_unused_actors(true);
-    }
-
+    /// Apply the batch: convert the v1 changes into the v2 succ-format
+    /// columns and run the v2 pipeline. Patches for an active log are
+    /// produced by diffing the document across the apply.
     pub(crate) fn apply(
         &mut self,
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), PatchLogMismatch> {
-        // manifold pipeline: order_ops_for_doc -> untangle (order only)
-        // -> manifold (positions/succ/top) -> write ops. Produces no
-        // patches, so an active log uses the walk
-        if std::env::var("BATCH_TIMING").is_ok() {
-            eprintln!(
-                "GATE log_active={} env={}",
-                log.is_active(),
-                std::env::var("BATCH_MANIFOLD").is_ok()
-            );
+        let before = log.is_active().then(|| doc.get_heads());
+        self.apply_v2(doc, log)?;
+        if let Some(before) = before {
+            doc.log_diff(&before, log);
         }
-        if !log.is_active() && std::env::var("BATCH_MANIFOLD").is_ok() {
-            return self.apply_manifold(doc, log);
-        }
-        let timing = std::env::var("BATCH_TIMING").is_ok();
-        let mut t = std::time::Instant::now();
-        let mut lap = |label: &str| {
-            if timing {
-                eprintln!(
-                    "WALK {:<22} {:>9.3}ms",
-                    label,
-                    t.elapsed().as_secs_f64() * 1e3
-                );
-                t = std::time::Instant::now();
-            }
-        };
-        self.insert_new_actors(doc);
-
-        log.migrate_actors(&doc.ops().actors)?;
-
-        self.import_ops(doc);
-        lap("import_ops");
-
-        let mut obj_info = doc.ops().obj_info.clone();
-
-        self.order_ops_for_doc(&mut obj_info);
-        lap("order_ops_for_doc");
-
-        let mut succ = vec![];
-
-        let mut walker = ObjWalker::new(doc.ops());
-
-        let mut conflicts = vec![];
-
-        for os in &self.obj_spans {
-            let obj_range = walker.seek_to_obj(os.obj);
-            let doc_ops = doc.ops().iter_range(&obj_range);
-            match obj_info.object_type(&os.obj) {
-                Some(ObjType::Map) => {
-                    let mut walker = MapWalker::new(
-                        os.obj,
-                        doc_ops,
-                        doc.text_encoding(),
-                        &mut self.pred,
-                        &mut succ,
-                        log,
-                        &mut conflicts,
-                    );
-                    let change_ops = &mut self.ops[os.span.clone()];
-                    walk_map(&mut walker, change_ops);
-                }
-                Some(otype) if otype.is_sequence() => {
-                    let sequence_type = match otype {
-                        ObjType::Text => SequenceType::Text,
-                        ObjType::List => SequenceType::List,
-                        _ => unreachable!(),
-                    };
-                    let ut = Untangler::new(
-                        os.obj,
-                        sequence_type,
-                        doc.text_encoding(),
-                        &mut conflicts,
-                        &mut self.ops[os.span.clone()],
-                        &mut self.pred,
-                        doc_ops.end_pos(),
-                    );
-                    walk_list(ut, doc_ops, &mut succ, log);
-                }
-                _ => panic!("Obj {:?} Missing from Index", os.obj),
-            }
-        }
-
-        lap("walk_and_untangle");
-        #[cfg(feature = "slow_path_assertions")]
-        {
-            // should always be ordered correctly - just double checking
-            let mut tmp_succ = succ.clone();
-            tmp_succ.sort_by(|a, b| {
-                a.pos
-                    .cmp(&b.pos)
-                    .then_with(|| a.sub_pos.cmp(&b.sub_pos))
-                    .then_with(|| a.id.counter().cmp(&b.id.counter()))
-                    .then_with(|| a.id.actor().cmp(&b.id.actor()))
-            });
-            debug_assert_eq!(succ, tmp_succ);
-        }
-
-        for a in conflicts {
-            match a {
-                Adjust::Conflict(index) => doc.ops.conflict(index),
-                Adjust::Expose(index) => doc.ops.expose(index),
-            }
-        }
-
-        doc.ops.add_succ(&succ);
-        lap("adjusts+add_succ");
-
-        insert_runs_of_ops(&self.ops, doc);
-        lap("splice");
-
-        debug_assert!(doc.ops.validate_op_order());
         Ok(())
     }
 
-    fn apply_manifold(
-        &mut self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
-        let timing = std::env::var("BATCH_TIMING").is_ok();
-        let mut t = std::time::Instant::now();
-        let mut lap = |label: &str| {
-            if timing {
-                eprintln!(
-                    "MANIFOLD {:<22} {:>9.3}ms",
-                    label,
-                    t.elapsed().as_secs_f64() * 1e3
-                );
-                t = std::time::Instant::now();
-            }
-        };
-        self.insert_new_actors(doc);
-        log.migrate_actors(&doc.ops().actors)?;
-
-        // import the ops first so actor indexes are settled, then
-        // capture the clock BEFORE update_history records the batch —
-        // the manifold splits doc rows from batch ops by what the
-        // document knew before these changes
-        for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops).unwrap();
-        }
-        lap("import_ops");
-        let clock = doc.change_graph.current_clock();
-        doc.update_history_batch(&self.changes);
-        lap("update_history");
-
-        // normalize to the succ-carrying shape fragment bundles arrive
-        // in: preds targeting ops in this batch become succ entries on
-        // their targets (sorted, increments normalized), ops keep only
-        // doc-row preds, and deletes left with no preds contribute
-        // nothing further — they leave the stream entirely
+    /// Normalize to the succ-carrying shape fragment bundles arrive in:
+    /// preds targeting ops in this batch become succ entries on their
+    /// targets (sorted, increments normalized) and ops keep only
+    /// doc-row preds. Deletes left with no preds carry nothing beyond
+    /// the succ already stamped — callers drop them from the stream.
+    fn stamp_succ(&mut self, clock: &Clock) {
         let mut succ_map = PredCache::default();
         for op in self.ops.iter_mut() {
             let id = op.id();
@@ -1208,8 +270,6 @@ impl BatchApply {
                 }
             });
         }
-        self.ops
-            .retain(|op| !(op.bld.is_delete() && op.bld.pred.is_empty()));
         for op in self.ops.iter_mut() {
             if let Some(mut succ) = succ_map.remove(&op.id()) {
                 succ.sort_unstable_by_key(|(id, _)| *id);
@@ -1219,101 +279,130 @@ impl BatchApply {
             }
         }
         debug_assert!(succ_map.is_empty(), "succ target missing from batch");
+    }
+
+    /// EXPERIMENT (`BATCH_V2=1`): convert the v1 batch into the v2
+    /// succ-format columns as early as possible and continue on the v2
+    /// code path. The ops vec is never sorted or compacted — a `u32`
+    /// index vec is filtered, sorted and untangled instead, then the
+    /// ops are encoded into bundle columns in index order and handed to
+    /// [`FragmentApply`], which decodes and applies them exactly like a
+    /// received fragment. Measures the conversion tax of making the
+    /// compressed columns canonical.
+    fn apply_v2(
+        &mut self,
+        doc: &mut Automerge,
+        log: &mut PatchLog,
+    ) -> Result<(), PatchLogMismatch> {
+        let timing = std::env::var("BATCH_TIMING").is_ok();
+        let mut t = std::time::Instant::now();
+        let mut lap = |label: &str| {
+            if timing {
+                eprintln!(
+                    "V2CONV {:<22} {:>9.3}ms",
+                    label,
+                    t.elapsed().as_secs_f64() * 1e3
+                );
+                t = std::time::Instant::now();
+            }
+        };
+        self.insert_new_actors(doc);
+        log.migrate_actors(&doc.ops().actors)?;
+        for c in &self.changes {
+            doc.import_ops_to(c, &mut self.ops).unwrap();
+        }
+        lap("import_ops");
+        let clock = doc.change_graph.current_clock();
+        doc.update_history_batch(&self.changes);
+        lap("update_history");
+
+        self.stamp_succ(&clock);
         lap("normalize succ");
 
-        let mut obj_info = doc.ops().obj_info.clone();
-        self.order_ops_for_doc(&mut obj_info);
-        lap("order_ops_for_doc");
+        // sort and filter u32 indexes, not 200-byte ChangeOps
+        let mut idxs: Vec<u32> = (0..self.ops.len() as u32)
+            .filter(|&i| {
+                let op = &self.ops[i as usize];
+                !(op.bld.is_delete() && op.bld.pred.is_empty())
+            })
+            .collect();
+        idxs.sort_unstable_by(|&a, &b| doc_order_cmp(&self.ops[a as usize], &self.ops[b as usize]));
+        lap("index sort");
 
-        // strict document order per sequence object (maps already are)
+        let mut obj_info = doc.ops().obj_info.clone();
+        for &i in &idxs {
+            let op = &self.ops[i as usize];
+            if let Some(info) = op.obj_info() {
+                obj_info.insert(op.id(), info);
+            }
+        }
+        // untangle each sequence object's span of the index vec
         let mut walker = ObjWalker::new(doc.ops());
-        for os in &self.obj_spans {
-            if matches!(obj_info.object_type(&os.obj), Some(t) if t.is_sequence()) {
-                let obj_range = walker.seek_to_obj(os.obj);
-                untangle_order(
-                    &mut self.ops[os.span.clone()],
+        let mut start = 0;
+        while start < idxs.len() {
+            let obj = self.ops[idxs[start] as usize].bld.obj;
+            let mut end = start + 1;
+            while end < idxs.len() && self.ops[idxs[end] as usize].bld.obj == obj {
+                end += 1;
+            }
+            if matches!(obj_info.object_type(&obj), Some(t) if t.is_sequence()) {
+                let obj_range = walker.seek_to_obj(obj);
+                untangle_order_idx(
+                    &self.ops,
+                    &mut idxs[start..end],
                     doc.ops().id_iter_range(&obj_range),
                     doc.ops().insert().values().iter_range(obj_range.clone()),
                 );
             }
+            start = end;
         }
+        lap("untangle idx");
 
-        lap("untangle_lite");
-        let mut r = if doc.ops().len() == 0 {
-            crate::op_set2::op_set::manifold::apply_blank(self.ops.iter())
-        } else {
-            doc.ops().apply_manifold(clock).apply(self.ops.iter())
-        };
-        lap("manifold");
-
-        for a in r.adjusts.drain(..) {
-            match a {
-                Adjust::Conflict(index) => doc.ops.conflict(index),
-                Adjust::Expose(index) => doc.ops.expose(index),
-            }
-        }
-        doc.ops.add_succ(&r.doc_succ);
-        lap("adjusts+add_succ");
-
-        let conflicted: HashSet<OpId> = r.conflicted.iter().copied().collect();
-        for op in self.ops.iter_mut() {
-            op.conflicted = conflicted.contains(&op.id());
-            if let Some(mut succ) = r.change_succ.remove(&op.id()) {
-                succ.sort_unstable_by_key(|(id, _)| *id);
-                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
-                normalize_increment_successors(is_counter, &mut succ);
-                op.succ = succ;
-            }
-        }
-        // the runs cover exactly the non-delete ops
-        debug_assert_eq!(
-            r.insert_runs.iter().map(|(_, r)| r.len()).sum::<usize>(),
-            self.ops.iter().filter(|o| !o.bld.is_delete()).count()
-        );
-        lap("stamp");
-        splice_insert_runs(&self.ops, &r.insert_runs, doc);
-        lap("splice");
-
-        debug_assert!(doc.ops.validate_op_order());
-        Ok(())
-    }
-
-    pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
-        self.ops.sort_by(|a, b| {
-            a.bld.obj.cmp(&b.bld.obj).then_with(|| {
-                match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
-                    Some(Ordering::Equal) | None => a.bld.id.cmp(&b.bld.id),
-                    Some(order) => order,
-                }
+        // encode the v2 op columns in index (= document) order. This is
+        // an in-process handoff: actor indexes stay the document's, so
+        // the mapping is identity
+        let actors_len = doc.ops().actors.len();
+        let mut members: Vec<(usize, u64, u64, u64)> = self
+            .changes
+            .iter()
+            .map(|c| {
+                let actor = doc.ops().actors.binary_search(c.actor_id()).unwrap();
+                (actor, c.seq(), c.start_op().get(), c.max_op())
             })
-        });
-        let mut start = 0;
-        let mut last_obj = None;
-        for (i, o) in self.ops.iter().enumerate() {
-            for p in o.pred().iter() {
-                self.pred
-                    .entry(*p)
-                    .or_default()
-                    .push((o.id(), o.get_increment_value()));
+            .collect();
+        members.sort_unstable_by_key(|(a, s, _, _)| (*a, *s));
+        let members: Vec<(usize, u64, u64)> =
+            members.into_iter().map(|(a, _, s, m)| (a, s, m)).collect();
+
+        let mut data = Vec::new();
+        let (raw, id_ctr) = {
+            let mut mapper = crate::op_set2::change::ActorMapper::new(&doc.ops().actors);
+            let mut writer = crate::storage::bundle::BundleOpWriter::default();
+            for &i in &idxs {
+                let op = &self.ops[i as usize];
+                let succ_ids: Vec<OpId> = op.succ.iter().map(|s| s.0).collect();
+                writer.add(&op.bld, &succ_ids, 0, &mut mapper);
             }
-            if let Some(info) = o.obj_info() {
-                obj_info.insert(o.id(), info)
-            }
-            if Some(o.bld.obj) != last_obj {
-                if let Some(obj) = last_obj {
-                    self.obj_spans.push(ObjSpan {
-                        obj,
-                        span: start..i,
-                    });
-                }
-                start = i;
-                last_obj = Some(o.bld.obj);
-            }
-        }
-        if let Some(obj) = last_obj {
-            let span = start..self.ops.len();
-            self.obj_spans.push(ObjSpan { obj, span });
-        }
+            mapper.mapping = (0..actors_len)
+                .map(|i| Some(crate::op_set2::types::ActorIdx::from(i)))
+                .collect();
+            let (cols, id_ctr) = writer.finish(&mapper, &mut data, &members);
+            (cols.raw_columns(), id_ctr)
+        };
+        lap("encode v2");
+
+        // from here on this IS the v2 path: decode + manifold + splice
+        let actor_map: Vec<usize> = (0..actors_len).collect();
+        let mut frag = super::fragment::FragmentApply::from_ops(
+            || crate::storage::bundle::OpIter::new(&raw, &data, &id_ctr),
+            &actor_map,
+            &clock,
+        )
+        .unwrap();
+        lap("decode v2");
+        frag.apply_manifold(doc, log).unwrap();
+        lap("fragment apply");
+        Ok(())
     }
 }
 
@@ -1330,34 +419,6 @@ impl<'a> ObjWalker<'a> {
 
     pub(crate) fn seek_to_obj(&mut self, obj: ObjId) -> Range<usize> {
         self.iter.seek_to_value(obj)
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ObjSpan {
-    pub(crate) obj: ObjId,
-    pub(crate) span: Range<usize>,
-}
-
-/// Splice runs of positioned ops into the document's columns. The ops
-/// must be sorted by `(pos, subsort)`; each run of equal `pos` values is
-/// inserted with a single splice.
-pub(super) fn insert_runs_of_ops(ops: &[ChangeOp], doc: &mut Automerge) {
-    let mut last_pos = None;
-    let mut start = 0;
-    let mut shift = 0;
-    for (i, op) in ops.iter().enumerate() {
-        if op.pos != last_pos {
-            if let Some(pos) = last_pos {
-                let end = i;
-                shift += insert_ops(ops, doc, pos + shift, start..end);
-                start = end;
-            }
-            last_pos = op.pos;
-        }
-    }
-    if let Some(pos) = last_pos {
-        insert_ops(ops, doc, pos + shift, start..ops.len());
     }
 }
 
@@ -1500,8 +561,6 @@ impl Automerge {
                     pred,
                 };
                 let change = ChangeOp {
-                    pos: None,
-                    subsort: 0,
                     conflicted: false,
                     succ: vec![],
                     bld,
@@ -1519,6 +578,7 @@ mod tests {
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
     use crate::types;
+    use crate::types::{ObjType, ScalarValue};
     use crate::{make_rng, ActorId, AutoCommit, ROOT};
     use rand::prelude::*;
 
@@ -1558,100 +618,67 @@ mod tests {
     }
 
     #[test]
-    fn untangle_lite_matches_full_untangler() {
+    fn batch_apply_per_merge_validates() {
         let mut rng = make_rng();
-        for _ in 0..30 {
+        for _ in 0..10 {
             let mut base = AutoCommit::new().with_actor(rng.random()).unwrap();
             let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
+            let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
+            base.put(&map, "c", ScalarValue::counter(0)).unwrap();
             for i in 0..5 {
                 base.insert(&list, i, i as i64).unwrap();
             }
             base.put(&list, 1, "u1").unwrap();
+
             let heads = base.get_heads();
             let mut src = base.fork().with_actor(rng.random()).unwrap();
             for _ in 0..6 {
+                // concurrent: every fork branches from base, so its
+                // changes land on a src that has moved on
                 let mut f = base.fork().with_actor(rng.random()).unwrap();
                 for _ in 0..rng.random_range(1..8u32) {
                     let len = f.length(&list);
-                    match rng.random_range(0..5u32) {
-                        0 if len > 0 => {
-                            let at = rng.random_range(0..len as u32) as usize;
-                            f.put(&list, at, "x").unwrap();
-                        }
-                        1 if len > 1 => {
-                            let at = rng.random_range(0..len as u32) as usize;
-                            f.delete(&list, at).unwrap();
-                        }
-                        2 => {
-                            f.commit();
-                            let at = rng.random_range(0..=len as u32) as usize;
-                            f.insert(&list, at, 7i64).unwrap();
-                        }
-                        _ => {
+                    match rng.random_range(0..7u32) {
+                        0 => {
                             let at = rng.random_range(0..=len as u32) as usize;
                             f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
                         }
+                        1 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            f.put(&map, k, rng.random_range(0..100i64)).unwrap();
+                        }
+                        2 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            let _ = f.delete(&map, k);
+                        }
+                        3 => {
+                            f.increment(&map, "c", rng.random_range(1..10i64)).unwrap();
+                        }
+                        4 if len > 0 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.put(&list, at, "x").unwrap();
+                        }
+                        5 if len > 1 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.delete(&list, at).unwrap();
+                        }
+                        _ => {
+                            f.commit();
+                        }
                     }
                 }
-                src.merge(&mut f).unwrap();
-            }
-            let changes = changes_since(&mut src, &heads);
+                let changes = changes_since(&mut f, &heads);
 
-            let doc = &mut base.doc;
-            let mut chap = BatchApply::default();
-            for c in changes {
-                chap.push(c);
-            }
-            chap.insert_new_actors(doc);
-
-            for c in &chap.changes {
-                doc.import_ops_to(c, &mut chap.ops).unwrap();
-            }
-            let mut obj_info = doc.ops().obj_info.clone();
-            chap.order_ops_for_doc(&mut obj_info);
-
-            let mut walker = ObjWalker::new(doc.ops());
-            for os in &chap.obj_spans {
-                if !matches!(obj_info.object_type(&os.obj), Some(t) if t.is_sequence()) {
-                    continue;
-                }
-                let obj_range = walker.seek_to_obj(os.obj);
-
-                // lite order
-                let mut lite_ops = chap.ops[os.span.clone()].to_vec();
-                untangle_order(
-                    &mut lite_ops,
-                    doc.ops().id_iter_range(&obj_range),
-                    doc.ops().insert().values().iter_range(obj_range.clone()),
-                );
-                let lite: Vec<OpId> = lite_ops.iter().map(|o| o.id()).collect();
-
-                // full untangler order (walk assigns pos/subsort + sorts)
-                let mut log = PatchLog::inactive();
-                let mut succ = vec![];
-                let mut conflicts = vec![];
-                let doc_ops = doc.ops().iter_range(&obj_range);
-                let ut = Untangler::new(
-                    os.obj,
-                    SequenceType::List,
-                    doc.text_encoding(),
-                    &mut conflicts,
-                    &mut chap.ops[os.span.clone()],
-                    &mut chap.pred,
-                    doc_ops.end_pos(),
-                );
-                walk_list(ut, doc_ops, &mut succ, &mut log);
-                let full: Vec<OpId> = chap.ops[os.span.clone()].iter().map(|o| o.id()).collect();
-
-                assert_eq!(lite, full, "untangle orders diverge");
+                src.doc.apply_changes_batch(changes).unwrap();
+                src.doc.validate_document();
             }
         }
     }
 
     #[test]
-    fn batch_apply_manifold_matches_walk() {
-        // same changes through the walk pipeline and the untangle ->
-        // manifold pipeline must produce byte-identical documents
+    fn batch_apply_fuzz_validates() {
+        // random concurrent batches through the one pipeline; the doc
+        // must deep-validate (index rebuild + hash round-trip) after
         let mut rng = make_rng();
         for _ in 0..20 {
             let mut base = AutoCommit::new().with_actor(rng.random()).unwrap();
@@ -1704,16 +731,9 @@ mod tests {
             }
             let changes = changes_since(&mut src, &heads);
 
-            std::env::remove_var("BATCH_MANIFOLD");
-            let mut walk_doc = base.fork();
-            walk_doc.doc.apply_changes_batch(changes.clone()).unwrap();
-            std::env::set_var("BATCH_MANIFOLD", "1");
-            let mut mani_doc = base.fork();
-            mani_doc.doc.apply_changes_batch(changes).unwrap();
-            std::env::remove_var("BATCH_MANIFOLD");
-
-            assert_eq!(walk_doc.get_heads(), mani_doc.get_heads());
-            assert_eq!(walk_doc.doc.save(), mani_doc.doc.save(), "docs diverge");
+            let mut doc = base.fork();
+            doc.doc.apply_changes_batch(changes).unwrap();
+            doc.doc.validate_document();
         }
     }
 

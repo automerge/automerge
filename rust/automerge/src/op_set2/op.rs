@@ -50,58 +50,11 @@ impl AsBuilder for &TxOp {
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
     pub(crate) succ: Vec<(OpId, Option<i64>)>,
-    pub(crate) pos: Option<usize>,
-    pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
 impl ChangeOp {
-    pub(crate) fn prop_static(&self) -> Option<PropRef<'static>> {
-        match &self.bld.key {
-            KeyRef::Map(s) => Some(PropRef::Map(Cow::Owned(String::from(s.as_ref())))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn prop(&self) -> Option<PropRef<'_>> {
-        match &self.bld.key {
-            KeyRef::Map(Cow::Owned(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
-            KeyRef::Map(Cow::Borrowed(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn mark_data(&self) -> Option<MarkData<'static>> {
-        let name = self.bld.mark_name.as_ref()?.clone();
-        let value = self.bld.value.clone();
-        Some(MarkData { name, value })
-    }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        self.bld.hydrate_value(text_encoding)
-    }
-
-    pub(crate) fn hydrate_value_and_fix_counters(
-        &self,
-        text_encoding: TextEncoding,
-    ) -> hydrate::Value {
-        if self.bld.action == Action::Set {
-            if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self.succ.iter().filter_map(|(_, inc)| *inc).sum();
-                hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
-            } else {
-                hydrate::Value::Scalar(self.bld.value.to_owned())
-            }
-        } else {
-            self.bld.hydrate_value(text_encoding)
-        }
-    }
-
-    pub(crate) fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
-        self.bld.width(seq_type, text_encoding)
-    }
-
     pub(crate) fn visible(&self) -> bool {
         !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
@@ -112,20 +65,6 @@ impl ChangeOp {
 
     pub(crate) fn insert(&self) -> bool {
         self.bld.insert
-    }
-
-    pub(crate) fn is_set_or_make(&self) -> bool {
-        matches!(
-            self.bld.action,
-            Action::Set | Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
-        )
-    }
-
-    pub(crate) fn action(&self) -> Action {
-        self.bld.action
-    }
-    pub(crate) fn value(&self) -> &ScalarValue<'static> {
-        &self.bld.value
     }
 
     pub(crate) fn key(&self) -> &KeyRef<'static> {
@@ -1148,16 +1087,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() {
-            false
-        } else if self.is_counter() {
-            !self.succ_inc().any(|(_, inc)| inc.is_none())
-        } else {
-            self.succ_cursors.len() == 0
-        }
-    }
-
     pub(crate) fn del(id: OpId, obj: ObjId, key: KeyRef<'a>) -> Self {
         Op {
             pos: 0,
@@ -1172,11 +1101,6 @@ impl<'a> Op<'a> {
             mark_name: None,
             succ_cursors: SuccCursors::default(),
         }
-    }
-
-    pub(crate) fn prop(&self) -> Option<PropRef<'a>> {
-        let key_str = self.key.key_str()?;
-        Some(PropRef::Map(key_str))
     }
 }
 

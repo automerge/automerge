@@ -387,6 +387,16 @@ impl<'a> OpIdIter<'a> {
 }
 
 impl OpIdIter<'_> {
+    /// Debug: (actor pos, actor max, ctr pos, ctr max).
+    pub(crate) fn debug_state(&self) -> (usize, usize, usize, usize) {
+        (
+            self.actor.pos(),
+            self.actor.end_pos(),
+            self.ctr.pos(),
+            self.ctr.end_pos(),
+        )
+    }
+
     // FIXME this needs test
     // this is only valid on a range of sorted op ids
     pub(crate) fn seek_to_value(&mut self, target: &OpId) -> Range<usize> {
@@ -399,12 +409,22 @@ impl OpIdIter<'_> {
     // this will work on unsorted ids
     pub(crate) fn scan_to_value(&mut self, target: &OpId) -> Option<usize> {
         loop {
-            let pos = self.ctr.scan_to_value(target.counter() as u32)?;
-            let actor = self.actor.scan_to_pos(pos)?;
+            let Some(pos) = self.ctr.scan_to_value(target.counter() as u32) else {
+                break;
+            };
+            let Some(actor) = self.actor.scan_to_pos(pos) else {
+                break;
+            };
             if actor == target.actoridx() {
                 return Some(pos);
             }
         }
+        let max = self.actor.end_pos();
+        self.actor.advance_to(max);
+        self.ctr.advance_to(max);
+        debug_assert_equal!(self.ctr.pos(), self.actor.pos());
+        debug_assert_equal!(self.ctr.end_pos(), self.actor.end_pos());
+        None
     }
 
     /// Scan forward for the first op id *less than* `target` — the
@@ -418,8 +438,14 @@ impl OpIdIter<'_> {
     /// columns have consumed through it.
     pub(crate) fn scan_to_lesser(&mut self, target: OpId) -> Option<(usize, OpId)> {
         loop {
-            let (pos, ctr) = self.ctr.scan_to_range(..=target.counter() as u32)?;
-            let actor = self.actor.scan_to_pos(pos)?;
+            let Some((pos, ctr)) = self.ctr.scan_to_range(..=target.counter() as u32) else {
+                self.park_miss();
+                return None;
+            };
+            let Some(actor) = self.actor.scan_to_pos(pos) else {
+                self.park_miss();
+                return None;
+            };
             let found = OpId::new(ctr as u64, u64::from(actor) as usize);
             if found < target {
                 return Some((pos, found));

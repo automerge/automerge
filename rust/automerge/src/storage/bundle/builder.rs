@@ -126,7 +126,7 @@ impl<'a> BundleBuilder<'a> {
                 .collect();
             let op = op.build(pred);
             self.op_writer
-                .add(op, &internal_succ, index, &mut self.mapper);
+                .add(&op, &internal_succ, index, &mut self.mapper);
         }
     }
 
@@ -150,7 +150,7 @@ impl<'a> BundleBuilder<'a> {
                 let op = Op::del(*id, obj, key.clone());
                 let op = op.build(pred.to_vec());
                 if let Some(index) = self.builders_index(op.id) {
-                    self.op_writer.add(op, &[], index, &mut self.mapper);
+                    self.op_writer.add(&op, &[], index, &mut self.mapper);
                 }
             }
             self.preds.clear();
@@ -384,14 +384,14 @@ pub(crate) struct BundleOpWriter<'a> {
 }
 
 impl<'a> BundleOpWriter<'a> {
-    fn add(
+    pub(crate) fn add(
         &mut self,
-        op: OpBuilder<'a>,
+        op: &OpBuilder<'_>,
         succ: &[OpId],
         _index: usize,
         mapper: &mut ActorMapper<'a>,
     ) {
-        mapper.process_op(&op);
+        mapper.process_op(op);
         let doc_pos = self.id_actor.len() as u32;
         self.succ_count.append(succ.len() as u32);
         for s in succ {
@@ -418,7 +418,7 @@ impl<'a> BundleOpWriter<'a> {
         }
         self.expand.append(op.expand);
         self.mark_name
-            .append_owned(op.mark_name.map(|s| s.into_owned()));
+            .append_owned(op.mark_name.as_deref().map(str::to_owned));
         self.inverse_positions
             .push((op.id.actor(), op.id.counter(), doc_pos));
     }
@@ -426,7 +426,7 @@ impl<'a> BundleOpWriter<'a> {
     /// `members` is the canonical (actor, start_op, max_op) list sorted
     /// by (actor, seq) — the inverse column carries one entry per op in
     /// these ranges, null for ops with no row.
-    fn finish(
+    pub(crate) fn finish(
         mut self,
         mapper: &ActorMapper<'a>,
         data: &mut Vec<u8>,
@@ -576,7 +576,7 @@ impl BundleChangeColumns {
 }
 
 impl BundleOpsColumns {
-    fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
+    pub(crate) fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (ops::OBJ_ACTOR, &self.obj_actor),
             (ops::OBJ_CTR, &self.obj_ctr),

@@ -1417,6 +1417,24 @@ impl Automerge {
         */
     }
 
+    /// Fill `log` with patches for everything that changed between
+    /// `before` and the document's current heads. The apply pipeline
+    /// produces no patches itself — an active log is served by diffing
+    /// the document across the apply.
+    pub(crate) fn log_diff(&self, before: &[ChangeHash], log: &mut PatchLog) {
+        let after = self.get_heads();
+        let b = self.change_graph.clock_for_heads_lossy(before);
+        let a = self.change_graph.clock_for_heads_lossy(&after);
+        DiffIter::log(
+            self,
+            ObjMeta::root(),
+            ClockRange::Diff(b, a.clone()),
+            log,
+            true,
+        );
+        log.heads_clock = Some(a);
+    }
+
     /// Create patches representing the change in the current state of the document between the
     /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
@@ -1863,6 +1881,34 @@ impl Automerge {
         let r = ops.apply(self, log);
         lap("ops.apply total", &mut t);
         r
+    }
+
+    /// Test-support deep validation of the document.
+    ///
+    /// 1. Op columns must be in document order.
+    /// 2. The incrementally-maintained indexes (top/visible/text/inc/
+    ///    mark/obj-info) must match a from-scratch rebuild by the load
+    ///    path's index builder.
+    /// 3. The op columns must reproduce the document's history: every
+    ///    change is re-encoded from the columns and its hash
+    ///    recomputed — replaying those changes into a fresh document
+    ///    can only reach the same heads if every column value is
+    ///    exactly right, because any miswritten value changes a
+    ///    reconstructed change's bytes and breaks the hash chain.
+    #[doc(hidden)]
+    pub fn validate_document(&self) {
+        assert!(self.ops.validate_op_order(), "op columns out of order");
+        self.ops.validate_indexes();
+
+        let mut redoc = Automerge::new();
+        redoc
+            .apply_changes(self.get_changes(&[]).expect("change reconstruction"))
+            .expect("replaying reconstructed changes");
+        assert_eq!(
+            self.get_heads(),
+            redoc.get_heads(),
+            "hash round-trip diverges"
+        );
     }
 
     /// Whether this document's hash graph has been built and validated.

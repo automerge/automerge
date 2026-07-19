@@ -332,13 +332,6 @@ impl PatchLog {
         self.push_event(obj, Event::IncrementSeq { index, n, id })
     }
 
-    pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.flag_conflict_map(obj, key),
-            Prop::Seq(index) => self.flag_conflict_seq(obj, *index),
-        }
-    }
-
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
         self.push_event(obj, Event::FlagConflictMap { key: key.into() })
     }

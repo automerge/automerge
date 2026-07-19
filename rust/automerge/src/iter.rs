@@ -19,7 +19,7 @@ pub(crate) use list_range::{ListDiff, ListDiffItem};
 pub(crate) use map_range::{MapDiff, MapDiffItem};
 pub(crate) use tools::Diff;
 
-pub(crate) use spans::{RichTextDiff, SpanDiff, SpanInternal, SpansDiff, SpansInternal};
+pub(crate) use spans::{SpanDiff, SpanInternal, SpansDiff, SpansInternal};
 
 #[cfg(test)]
 pub(crate) use keys::KeyOpIter;

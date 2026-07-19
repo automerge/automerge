@@ -109,6 +109,50 @@ impl OpSet {
         IndexBuilder::new(self.text_encoding)
     }
 
+    /// Test-support validation: the incrementally-maintained index
+    /// columns must match a from-scratch rebuild by the load path's
+    /// [`IndexBuilder`]. Panics with the diverging index's name.
+    #[doc(hidden)]
+    pub(crate) fn validate_indexes(&self) {
+        let mut builder = IndexBuilder::new(self.text_encoding);
+        builder.process_op_set(self).unwrap();
+        let (fresh, _) = builder.finish();
+        assert!(
+            self.cols
+                .index
+                .text
+                .values()
+                .iter()
+                .eq(fresh.text.values().iter()),
+            "text index diverges from rebuild"
+        );
+        assert!(
+            self.cols
+                .index
+                .top
+                .values()
+                .iter()
+                .eq(fresh.top.values().iter()),
+            "top index diverges from rebuild"
+        );
+        assert!(
+            self.cols.index.visible.iter().eq(fresh.visible.iter()),
+            "visible index diverges from rebuild"
+        );
+        assert!(
+            self.cols.index.inc.iter().eq(fresh.inc.iter()),
+            "inc index diverges from rebuild"
+        );
+        assert!(
+            self.cols.index.mark.iter().eq(fresh.mark.iter()),
+            "mark index diverges from rebuild"
+        );
+        assert_eq!(
+            self.obj_info, fresh.obj_info,
+            "obj info diverges from rebuild"
+        );
+    }
+
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
         let top = self.cols.index.top.values().iter_range(range.clone());
         let vis = self.cols.index.visible.iter_range(range.clone());

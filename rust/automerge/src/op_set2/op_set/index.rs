@@ -4,7 +4,6 @@ use crate::op_set2::op_set::OpIdIter;
 use crate::op_set2::op_set::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::MarkData;
-#[cfg(test)]
 use crate::op_set2::OpSet;
 use crate::op_set2::ValueMeta;
 use crate::op_set2::{ChangeOp, Op, OpBuilder, ReadOpError};
@@ -112,7 +111,7 @@ impl MarkOrderValidator {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct ObjIndex(pub(crate) HashMap<OpId, ObjInfo>);
 
 impl ObjIndex {
@@ -481,7 +480,6 @@ impl IndexBuilder {
     /// test's way of running [`Self::process_columns`] over in-memory
     /// iterators to compare against the op-at-a-time reference builder.
     /// Production always builds indexes during column load.
-    #[cfg(test)]
     pub(crate) fn process_op_set(&mut self, op_set: &OpSet) -> Result<(), ReadOpError> {
         let rare = RareOps::new(
             OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
