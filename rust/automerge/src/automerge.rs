@@ -1764,7 +1764,7 @@ impl Automerge {
         // load the ops before touching the graph, so a malformed bundle
         // fails without altering history. Ops the clock covers belong to
         // skipped members and are dropped.
-        let mut ops = match FragmentApply::new(bundle, &actor_map, &clock) {
+        let mut ops = match FragmentApply::new(bundle, actor_map.clone(), &clock) {
             Ok(f) => f,
             Err(e) => {
                 self.remove_unused_actors(false);

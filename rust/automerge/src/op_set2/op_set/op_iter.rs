@@ -406,6 +406,18 @@ impl OpIdIter<'_> {
         range
     }
 
+    /// A scan miss parks whichever sub-cursor ran ahead at its window
+    /// end; the pair must leave in step or every later advance (which
+    /// moves both by the same count, keyed off the actor position)
+    /// carries the skew forward and later windows resolve garbage.
+    fn park_miss(&mut self) {
+        let max = self.actor.end_pos();
+        self.actor.advance_to(max);
+        self.ctr.advance_to(max);
+        debug_assert_eq!(self.ctr.pos(), self.actor.pos());
+        debug_assert_eq!(self.ctr.end_pos(), self.actor.end_pos());
+    }
+
     // this will work on unsorted ids
     pub(crate) fn scan_to_value(&mut self, target: &OpId) -> Option<usize> {
         loop {
@@ -419,11 +431,7 @@ impl OpIdIter<'_> {
                 return Some(pos);
             }
         }
-        let max = self.actor.end_pos();
-        self.actor.advance_to(max);
-        self.ctr.advance_to(max);
-        debug_assert_equal!(self.ctr.pos(), self.actor.pos());
-        debug_assert_equal!(self.ctr.end_pos(), self.actor.end_pos());
+        self.park_miss();
         None
     }
 
@@ -439,12 +447,10 @@ impl OpIdIter<'_> {
     pub(crate) fn scan_to_lesser(&mut self, target: OpId) -> Option<(usize, OpId)> {
         loop {
             let Some((pos, ctr)) = self.ctr.scan_to_range(..=target.counter() as u32) else {
-                self.park_miss();
-                return None;
+                break;
             };
             let Some(actor) = self.actor.scan_to_pos(pos) else {
-                self.park_miss();
-                return None;
+                break;
             };
             let found = OpId::new(ctr as u64, u64::from(actor) as usize);
             if found < target {
@@ -452,6 +458,8 @@ impl OpIdIter<'_> {
             }
             // equal counter, actor at or above the target's — not lesser
         }
+        self.park_miss();
+        None
     }
 }
 

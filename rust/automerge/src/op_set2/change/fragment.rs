@@ -17,15 +17,71 @@ use std::collections::HashSet;
 /// document's op set, but exploiting the bundle's invariants — its ops
 /// are already in document order and never causally precede anything in
 /// the receiving document — so no sorting or untangling is needed.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct FragmentApply {
+/// Where the streaming manifold reads the fragment's op columns from.
+#[derive(Debug)]
+pub(crate) enum FragSrc<'a> {
+    /// a received bundle's columns, borrowed
+    Bundle(&'a Bundle),
+    /// columns encoded in-process (the batch path, and re-encoded
+    /// overlap fragments)
+    Owned {
+        raw: crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
+        data: Vec<u8>,
+        id_ctr: Vec<i64>,
+    },
+}
+
+impl FragSrc<'_> {
+    fn parts(
+        &self,
+    ) -> (
+        &crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
+        &[u8],
+        &[i64],
+    ) {
+        match self {
+            FragSrc::Bundle(b) => (
+                &b.storage.ops_meta,
+                &b.storage.bytes[b.storage.ops_data.clone()],
+                &b.storage.id_ctr,
+            ),
+            FragSrc::Owned { raw, data, id_ctr } => (raw, data, id_ctr),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct FragmentApply<'a> {
+    /// decoded ops in stream order — the splice input (succ stamped)
     ops: Vec<ChangeOp>,
     /// the document clock *before* this fragment — the manifold needs
     /// it to split doc preds from in-bundle preds
     clock: Clock,
+    /// bundle-actor -> doc-actor translation for the column stream
+    actor_map: Vec<usize>,
+    src: FragSrc<'a>,
+    /// clock-covered rows were skipped: the stored columns no longer
+    /// match `ops`, so the stream must be re-encoded before use
+    overlap: bool,
 }
 
-impl FragmentApply {
+impl<'a> FragmentApply<'a> {
+    /// Wrap already doc-ordered, succ-stamped ops plus their encoded
+    /// columns (the batch path).
+    pub(crate) fn from_parts(
+        ops: Vec<ChangeOp>,
+        clock: Clock,
+        actor_map: Vec<usize>,
+        src: FragSrc<'a>,
+    ) -> Self {
+        Self {
+            ops,
+            clock,
+            actor_map,
+            src,
+            overlap: false,
+        }
+    }
     /// Load the bundle's ops, remapping its actor indexes to the
     /// document's via `actor_map` (every bundle actor must already be
     /// in the document). `clock` is the document's current clock — ops
@@ -37,96 +93,106 @@ impl FragmentApply {
     /// out with `succ` stamped; the pred column holds only references
     /// to rows from before the bundle.
     pub(crate) fn new(
-        bundle: &Bundle,
-        actor_map: &[usize],
+        bundle: &'a Bundle,
+        actor_map: Vec<usize>,
         clock: &Clock,
     ) -> Result<Self, AutomergeError> {
-        Self::from_ops(|| bundle.storage.iter_ops(), actor_map, clock)
-    }
-
-    /// Build from any doc-ordered succ-format op stream. `iter` is
-    /// called twice: an increment-value prepass, then the main pass.
-    pub(crate) fn from_ops<'a, F, I>(
-        iter: F,
-        actor_map: &[usize],
-        clock: &Clock,
-    ) -> Result<Self, AutomergeError>
-    where
-        F: Fn() -> I,
-        I: Iterator<Item = crate::storage::bundle::BundleOp<'a>>,
-    {
-        // increment successors need their value; increments are rows
-        let mut inc_values: std::collections::HashMap<OpId, i64> = Default::default();
-        for bop in iter() {
-            if let Some(v) = bop.op.get_increment_value() {
-                inc_values.insert(bop.op.id, v);
-            }
-        }
-
-        let mut ops = Vec::new();
-        // overlap: a skipped (already-present) row's succ entries that
-        // name *kept* ops must still land as doc succ. The kept
-        // successor is in the same group with a larger id, so document
-        // order puts it after the skipped row — record the pairing and
-        // hand it to the successor as an extra (external) pred, which
-        // the manifold resolves like any other doc-row pred
-        let mut pending: std::collections::HashMap<OpId, Vec<OpId>> = Default::default();
-        for bop in iter() {
-            let op = bop.op;
-            let id = op.id.map(actor_map)?;
-            if clock.covers(&id) {
-                for s in &bop.succ {
-                    let sm = s.map(actor_map)?;
-                    if !clock.covers(&sm) {
-                        pending.entry(sm).or_default().push(id);
-                    }
-                }
-                continue;
-            }
-            let obj = op.obj.map(actor_map)?;
-            let key = match op.key {
-                KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.into_owned())),
-                KeyRef::Seq(e) => KeyRef::Seq(e.map(actor_map)?),
-            };
-            let mut op_pred = op
-                .pred
-                .iter()
-                .map(|p| p.map(actor_map))
-                .collect::<Result<Vec<_>, _>>()?;
-            if let Some(extra) = pending.remove(&id) {
-                op_pred.extend(extra);
-            }
-            let mut succ = bop
-                .succ
-                .iter()
-                .map(|s| Ok((s.map(actor_map)?, inc_values.get(s).copied())))
-                .collect::<Result<Vec<_>, AutomergeError>>()?;
-            let is_counter = matches!(op.value, OpScalarValue::Counter(_));
-            normalize_increment_successors(is_counter, &mut succ);
-            let bld = OpBuilder {
-                id,
-                obj,
-                key,
-                action: op.action,
-                value: op.value.into_owned(),
-                mark_name: op.mark_name.map(|s| Cow::Owned(s.into_owned())),
-                expand: op.expand,
-                insert: op.insert,
-                pred: op_pred,
-            };
-            ops.push(ChangeOp {
-                conflicted: false,
-                succ,
-                bld,
-            });
-        }
-        debug_assert!(pending.is_empty(), "skipped-row successor never arrived");
+        let (ops, overlap) = decode_ops(|| bundle.storage.iter_ops(), &actor_map, clock)?;
         Ok(Self {
             ops,
             clock: clock.clone(),
+            actor_map,
+            src: FragSrc::Bundle(bundle),
+            overlap,
         })
     }
+}
 
+/// Decode a doc-ordered succ-format op stream into splice-ready
+/// [`ChangeOp`]s. `iter` is called twice: an increment-value prepass,
+/// then the main pass. Returns the ops and whether any clock-covered
+/// rows were skipped (overlap).
+fn decode_ops<'a, F, I>(
+    iter: F,
+    actor_map: &[usize],
+    clock: &Clock,
+) -> Result<(Vec<ChangeOp>, bool), AutomergeError>
+where
+    F: Fn() -> I,
+    I: Iterator<Item = crate::storage::bundle::BundleOp<'a>>,
+{
+    // increment successors need their value; increments are rows
+    let mut inc_values: std::collections::HashMap<OpId, i64> = Default::default();
+    for bop in iter() {
+        if let Some(v) = bop.op.get_increment_value() {
+            inc_values.insert(bop.op.id, v);
+        }
+    }
+
+    let mut ops = Vec::new();
+    // overlap: a skipped (already-present) row's succ entries that
+    // name *kept* ops must still land as doc succ. The kept
+    // successor is in the same group with a larger id, so document
+    // order puts it after the skipped row — record the pairing and
+    // hand it to the successor as an extra (external) pred, which
+    // the manifold resolves like any other doc-row pred
+    let mut pending: std::collections::HashMap<OpId, Vec<OpId>> = Default::default();
+    let mut overlap = false;
+    for bop in iter() {
+        let op = bop.op;
+        let id = op.id.map(actor_map)?;
+        if clock.covers(&id) {
+            overlap = true;
+            for s in &bop.succ {
+                let sm = s.map(actor_map)?;
+                if !clock.covers(&sm) {
+                    pending.entry(sm).or_default().push(id);
+                }
+            }
+            continue;
+        }
+        let obj = op.obj.map(actor_map)?;
+        let key = match op.key {
+            KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.into_owned())),
+            KeyRef::Seq(e) => KeyRef::Seq(e.map(actor_map)?),
+        };
+        let mut op_pred = op
+            .pred
+            .iter()
+            .map(|p| p.map(actor_map))
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(extra) = pending.remove(&id) {
+            op_pred.extend(extra);
+        }
+        let mut succ = bop
+            .succ
+            .iter()
+            .map(|s| Ok((s.map(actor_map)?, inc_values.get(s).copied())))
+            .collect::<Result<Vec<_>, AutomergeError>>()?;
+        let is_counter = matches!(op.value, OpScalarValue::Counter(_));
+        normalize_increment_successors(is_counter, &mut succ);
+        let bld = OpBuilder {
+            id,
+            obj,
+            key,
+            action: op.action,
+            value: op.value.into_owned(),
+            mark_name: op.mark_name.map(|s| Cow::Owned(s.into_owned())),
+            expand: op.expand,
+            insert: op.insert,
+            pred: op_pred,
+        };
+        ops.push(ChangeOp {
+            conflicted: false,
+            succ,
+            bld,
+        });
+    }
+    debug_assert!(pending.is_empty(), "skipped-row successor never arrived");
+    Ok((ops, overlap))
+}
+
+impl<'a> FragmentApply<'a> {
     /// Apply the bundle's ops. Patches for an active log are produced
     /// by diffing the document across the apply.
     pub(crate) fn apply(
@@ -168,12 +234,24 @@ impl FragmentApply {
         };
         log.migrate_actors(&doc.ops().actors)?;
 
-        let mut r = if doc.ops().len() == 0 {
-            crate::op_set2::op_set::manifold::apply_blank(self.ops.iter())
-        } else {
+        if self.overlap {
+            // rare: clock-covered rows were dropped from `ops`, so the
+            // stored columns no longer describe the stream — re-encode
+            // the kept ops (doc actor indexes, identity map)
+            let (raw, data, id_ctr) = super::batch::encode_frag_ops(self.ops.iter(), doc.ops());
+            self.actor_map = (0..doc.ops().actors.len()).collect();
+            self.src = FragSrc::Owned { raw, data, id_ctr };
+            self.overlap = false;
+        }
+        lap("overlap re-encode", &mut t);
+
+        let mut r = {
+            let (raw, data, id_ctr) = self.src.parts();
+            let meta = crate::storage::bundle::frag_prepass(raw, data, id_ctr, &self.actor_map);
+            let mut fs = crate::storage::bundle::FragOps::new(raw, data, id_ctr, &self.actor_map);
             doc.ops()
                 .apply_manifold(self.clock.clone())
-                .apply(self.ops.iter())
+                .apply_frag(&mut fs, &meta)
         };
         lap("manifold", &mut t);
 
@@ -212,7 +290,35 @@ impl FragmentApply {
         splice_insert_runs(&self.ops, &r.insert_runs, doc);
         lap("splice (insert_runs)", &mut t);
 
-        debug_assert!(doc.ops.validate_op_order());
+        #[cfg(debug_assertions)]
+        if !doc.ops.validate_op_order() {
+            eprintln!("== stream ops ==");
+            for (k, op) in self.ops.iter().enumerate() {
+                eprintln!(
+                    "  in[{k}] id {:?} obj {:?} key {:?} ins {} del {} pred {:?} succ {:?}",
+                    op.id(),
+                    op.bld.obj,
+                    op.key(),
+                    op.insert(),
+                    op.bld.is_delete(),
+                    op.bld.pred,
+                    op.succ
+                );
+            }
+            eprintln!("== insert runs {:?} ==", r.insert_runs);
+            eprintln!("== doc rows ==");
+            for op in doc.ops().iter() {
+                eprintln!(
+                    "  row {:>3} id {:?} obj {:?} key {:?} ins {}",
+                    op.pos,
+                    op.id,
+                    op.obj,
+                    op.elemid_or_key(),
+                    op.insert
+                );
+            }
+            panic!("op order violated");
+        }
         Ok(())
     }
 }

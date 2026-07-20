@@ -12,7 +12,7 @@ use crate::op_set2::{ReadOpError, ScalarValue};
 use crate::storage::change::DEFLATE_MIN_SIZE;
 use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{ChunkType, Header, RawColumn, RawColumns};
-use crate::types::{ChangeHash, ObjId, OpId};
+use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
 use super::{Bundle, BundleChange, BundleMetadata, BundleStorage, ParseError};
 
@@ -1032,6 +1032,445 @@ impl<'a> OpIterInner<'a> {
             expand,
             mark_name,
         })
+    }
+}
+
+/// Prepass facts the streaming manifold needs about *rare* rows,
+/// gathered from the action/value columns so the main pass never
+/// touches values at all: each increment's value (its succ entry on
+/// the target carries `Some(v)`), and which rows are counter-valued
+/// puts (only a counter is kept alive by increment successors). Ids
+/// come out doc-mapped.
+#[derive(Debug, Default)]
+pub(crate) struct FragMeta {
+    pub(crate) increments: HashMap<OpId, i64>,
+    pub(crate) counters: std::collections::HashSet<OpId>,
+}
+
+pub(crate) fn frag_prepass(
+    columns: &RawColumns<compression::Uncompressed>,
+    data: &[u8],
+    id_ctr: &[i64],
+    actor_map: &[usize],
+) -> FragMeta {
+    let mut action = hexane::decoder::<Option<Action>>(&[]);
+    let mut meta = hexane::decoder::<Option<ValueMeta>>(&[]);
+    let mut id_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+    let mut value: &[u8] = &[];
+    for col in columns.iter() {
+        let d = &data[col.data()];
+        match (col.spec().id(), col.spec().col_type()) {
+            (ops::ACTION_COL_ID, ColumnType::Integer) => {
+                action = hexane::decoder::<Option<Action>>(d)
+            }
+            (ops::VAL_COL_ID, ColumnType::ValueMetadata) => {
+                meta = hexane::decoder::<Option<ValueMeta>>(d)
+            }
+            (ops::VAL_COL_ID, ColumnType::Value) => value = d,
+            (ops::ID_COL_ID, ColumnType::Actor) => {
+                id_actor = hexane::decoder::<Option<ActorIdx>>(d)
+            }
+            _ => {}
+        }
+    }
+
+    let mut out = FragMeta::default();
+    let mut offset = 0usize;
+    for ctr in id_ctr.iter() {
+        let a = action.next().flatten().expect("validated action");
+        let m = meta.next().flatten().expect("validated value meta");
+        let actor = id_actor.next().flatten().expect("validated id actor");
+        if a == Action::Increment {
+            let id = OpId::new(*ctr as u64, actor_map[usize::from(actor)]);
+            let raw = &value[offset..offset + m.length()];
+            let v = ScalarValue::from_raw(m, raw).expect("validated value");
+            let inc = match v {
+                ScalarValue::Int(i) => i,
+                ScalarValue::Uint(u) => u as i64,
+                _ => 0,
+            };
+            out.increments.insert(id, inc);
+        } else if m.type_code() == crate::op_set2::meta::ValueType::Counter {
+            let id = OpId::new(*ctr as u64, actor_map[usize::from(actor)]);
+            out.counters.insert(id);
+        }
+        offset += m.length();
+    }
+    out
+}
+
+/// A minimally-decoded fragment op for the streaming manifold: no
+/// value, no marks, actor indexes already doc-mapped.
+#[derive(Debug)]
+pub(crate) struct FragOp<'a> {
+    pub(crate) id: OpId,
+    pub(crate) obj: ObjId,
+    pub(crate) key: FragKey<'a>,
+    pub(crate) insert: bool,
+    pub(crate) action: Action,
+    /// external (doc-row) predecessors
+    pub(crate) preds: Vec<OpId>,
+    /// no in-fragment successor deletes this op (normalized: only an
+    /// increment succ on a counter keeps it alive)
+    pub(crate) alive: bool,
+    /// increments only: the value carried by the succ entry on the
+    /// target
+    pub(crate) inc: Option<i64>,
+    pub(crate) is_counter: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FragKey<'a> {
+    Map(&'a str),
+    Seq(ElemId),
+}
+
+impl FragKey<'_> {
+    pub(crate) fn key_str(&self) -> Option<&str> {
+        match self {
+            FragKey::Map(s) => Some(s),
+            FragKey::Seq(_) => None,
+        }
+    }
+
+    pub(crate) fn elemid(&self) -> Option<ElemId> {
+        match self {
+            FragKey::Map(_) => None,
+            FragKey::Seq(e) => Some(*e),
+        }
+    }
+}
+
+fn skip_rle<D: hexane::RunDecoder>(d: &mut D, mut n: usize) {
+    // CLAUDE - isnt this just advance_by(n)
+    while n > 0 {
+        // an elided column decodes as empty: nothing to advance
+        let Some(run) = d.next_run_max(n) else { break };
+        n -= run.count;
+    }
+}
+
+fn skip_delta(d: &mut hexane::DeltaDecoder<'_, Option<i64>>, mut n: usize) {
+    // CLAUDE - isnt this just advance_by(n)
+    while n > 0 {
+        let Some(run) = d.next_delta_run_max(n) else {
+            break;
+        };
+        n -= run.count;
+    }
+}
+
+fn run_len_zero_count(mut d: hexane::Decoder<'_, Option<u64>>, max: usize) -> usize {
+    use hexane::RunDecoder;
+    let mut n = 0;
+    while n < max {
+        match d.next_run_max(max - n) {
+            Some(run) if run.value.unwrap_or(0) == 0 => n += run.count,
+            _ => break,
+        }
+    }
+    n
+}
+
+fn run_len_set(mut d: hexane::Decoder<'_, Option<Action>>, max: usize) -> usize {
+    use hexane::RunDecoder;
+    let mut n = 0;
+    while n < max {
+        match d.next_run_max(max - n) {
+            Some(run) if run.value == Some(Action::Set) => n += run.count,
+            _ => break,
+        }
+    }
+    n
+}
+
+fn run_len_true(mut d: hexane::Decoder<'_, bool>, max: usize) -> usize {
+    use hexane::RunDecoder;
+    let mut n = 0;
+    while n < max {
+        match d.next_run_max(max - n) {
+            Some(run) if run.value => n += run.count,
+            _ => break,
+        }
+    }
+    n
+}
+
+/// Long-lived forward-only streaming reader over a fragment's op
+/// columns — the fragment-side counterpart of the manifold's document
+/// iterators. Only the columns the manifold consults are decoded (no
+/// values, no marks) and run-level peeks power the tail fast path.
+#[derive(Clone)]
+pub(crate) struct FragOps<'a> {
+    pub(crate) pos: usize,
+    pub(crate) len: usize,
+    actor_map: &'a [usize],
+    id_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    id_ctr: &'a [i64],
+    obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    key_str: hexane::Decoder<'a, Option<String>>,
+    insert: hexane::Decoder<'a, bool>,
+    action: hexane::Decoder<'a, Option<Action>>,
+    pred_count: hexane::Decoder<'a, Option<u64>>,
+    pred_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    pred_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    succ_count: hexane::Decoder<'a, Option<u64>>,
+    succ_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    /// raw (unmapped) obj actor of the last-read op, for same-obj run
+    /// peeks against the raw column
+    cur_obj_raw: (Option<ActorIdx>, Option<i64>),
+    /// elided columns decode as empty but mean "all default": the run
+    /// peeks must treat them as unbounded default runs
+    pred_absent: bool,
+    succ_absent: bool,
+    obj_absent: bool,
+}
+
+impl<'a> FragOps<'a> {
+    pub(crate) fn new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+        id_ctr: &'a [i64],
+        actor_map: &'a [usize],
+    ) -> Self {
+        let mut s = FragOps {
+            pos: 0,
+            len: id_ctr.len(),
+            actor_map,
+            id_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
+            id_ctr,
+            obj_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
+            obj_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
+            key_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
+            key_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
+            key_str: hexane::decoder::<Option<String>>(&[]),
+            insert: hexane::decoder::<bool>(&[]),
+            action: hexane::decoder::<Option<Action>>(&[]),
+            pred_count: hexane::decoder::<Option<u64>>(&[]),
+            pred_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
+            pred_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
+            succ_count: hexane::decoder::<Option<u64>>(&[]),
+            succ_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
+            succ_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
+            cur_obj_raw: (None, None),
+            pred_absent: true,
+            succ_absent: true,
+            obj_absent: true,
+        };
+        for col in columns.iter() {
+            let d = &data[col.data()];
+            type C = ColumnType;
+            match (col.spec().id(), col.spec().col_type()) {
+                (ops::OBJ_COL_ID, C::Actor) => {
+                    s.obj_actor = hexane::decoder::<Option<ActorIdx>>(d);
+                    s.obj_absent = d.is_empty();
+                }
+                (ops::OBJ_COL_ID, C::DeltaInteger) => {
+                    s.obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::KEY_COL_ID, C::Actor) => s.key_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::KEY_COL_ID, C::DeltaInteger) => {
+                    s.key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::KEY_COL_ID, C::String) => s.key_str = hexane::decoder::<Option<String>>(d),
+                (ops::ID_COL_ID, C::Actor) => s.id_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::INSERT_COL_ID, C::Boolean) => s.insert = hexane::decoder::<bool>(d),
+                (ops::ACTION_COL_ID, C::Integer) => s.action = hexane::decoder::<Option<Action>>(d),
+                (ops::PRED_COL_ID, C::Group) => {
+                    s.pred_count = hexane::decoder::<Option<u64>>(d);
+                    s.pred_absent = d.is_empty();
+                }
+                (ops::PRED_COL_ID, C::Actor) => {
+                    s.pred_actor = hexane::decoder::<Option<ActorIdx>>(d)
+                }
+                (ops::PRED_COL_ID, C::DeltaInteger) => {
+                    s.pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::SUCC_COL_ID, C::Group) => {
+                    s.succ_count = hexane::decoder::<Option<u64>>(d);
+                    s.succ_absent = d.is_empty();
+                }
+                (ops::SUCC_COL_ID, C::Actor) => {
+                    s.succ_actor = hexane::decoder::<Option<ActorIdx>>(d)
+                }
+                (ops::SUCC_COL_ID, C::DeltaInteger) => {
+                    s.succ_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                _ => {}
+            }
+        }
+        s
+    }
+
+    /// Decode the next op (minimal fields), doc-mapping every actor.
+    pub(crate) fn next_op(&mut self, meta: &FragMeta) -> FragOp<'a> {
+        debug_assert!(self.pos < self.len);
+        let r = self.pos;
+        self.pos += 1;
+
+        let actor = self.id_actor.next().flatten().expect("id actor");
+        let id = OpId::new(self.id_ctr[r] as u64, self.actor_map[usize::from(actor)]);
+
+        let oa = self.obj_actor.next().flatten();
+        let oc = self.obj_ctr.next().flatten();
+        self.cur_obj_raw = (oa, oc);
+        let obj = match (oa, oc) {
+            (Some(a), Some(c)) if c > 0 => {
+                ObjId(OpId::new(c as u64, self.actor_map[usize::from(a)]))
+            }
+            _ => ObjId::root(),
+        };
+
+        let ks = self.key_str.next().flatten();
+        let ka = self.key_actor.next().flatten();
+        let kc = self.key_ctr.next().flatten();
+        let key = match ks {
+            Some(sv) => FragKey::Map(sv),
+            None => {
+                let e = match (ka, kc) {
+                    (None, Some(0)) | (None, None) => ElemId(OpId::new(0, 0)),
+                    (Some(a), Some(c)) => {
+                        ElemId(OpId::new(c as u64, self.actor_map[usize::from(a)]))
+                    }
+                    _ => panic!("invalid elem key"),
+                };
+                FragKey::Seq(e)
+            }
+        };
+
+        let insert = self.insert.next().unwrap_or_default();
+        let action = self.action.next().flatten().expect("action");
+
+        let n_pred = self.pred_count.next().flatten().unwrap_or(0) as usize;
+        let mut preds = Vec::with_capacity(n_pred);
+        for _ in 0..n_pred {
+            let pa = self.pred_actor.next().flatten().expect("pred actor");
+            let pc = self.pred_ctr.next().flatten().expect("pred ctr");
+            preds.push(OpId::new(pc as u64, self.actor_map[usize::from(pa)]));
+        }
+
+        let is_counter = meta.counters.contains(&id);
+        let n_succ = self.succ_count.next().flatten().unwrap_or(0) as usize;
+        let mut alive = true;
+        for _ in 0..n_succ {
+            let sa = self.succ_actor.next().flatten().expect("succ actor");
+            let sc = self.succ_ctr.next().flatten().expect("succ ctr");
+            let sm = OpId::new(sc as u64, self.actor_map[usize::from(sa)]);
+            if !(is_counter && meta.increments.contains_key(&sm)) {
+                alive = false;
+            }
+        }
+
+        let inc = meta.increments.get(&id).copied();
+
+        FragOp {
+            id,
+            obj,
+            key,
+            insert,
+            action,
+            preds,
+            alive,
+            inc,
+            is_counter,
+        }
+    }
+
+    /// How many upcoming ops are a *clean run*: same object, insert
+    /// rows, no preds and no succ. The manifold takes such a run
+    /// wholesale — one position push, no per-op scope work.
+    pub(crate) fn clean_insert_run(&self) -> usize {
+        let mut n = self.len - self.pos;
+        if n == 0 {
+            return 0;
+        }
+        n = n.min(run_len_true(self.insert.clone(), n));
+        if n == 0 {
+            return 0;
+        }
+        // only plain Set inserts: Make ops must register obj_info and
+        // Mark/Increment rows carry semantics the skip would drop
+        n = n.min(run_len_set(self.action.clone(), n));
+        if n == 0 {
+            return 0;
+        }
+        if !self.pred_absent {
+            n = n.min(run_len_zero_count(self.pred_count.clone(), n));
+        }
+        if n == 0 {
+            return 0;
+        }
+        if !self.succ_absent {
+            n = n.min(run_len_zero_count(self.succ_count.clone(), n));
+        }
+        if n == 0 {
+            return 0;
+        }
+        n.min(self.same_obj_run(n))
+    }
+
+    /// How many upcoming ops carry no external preds (bounded).
+    pub(crate) fn pred_free_run(&self) -> usize {
+        if self.pred_absent {
+            return self.len - self.pos;
+        }
+        run_len_zero_count(self.pred_count.clone(), self.len - self.pos)
+    }
+
+    /// How many upcoming ops still belong to the last-read op's object
+    /// (bounded by `max`).
+    pub(crate) fn same_obj_run(&self, max: usize) -> usize {
+        use hexane::RunDecoder;
+        if self.obj_absent {
+            // every op is in the root object
+            return max.min(self.len - self.pos);
+        }
+        // same object ⇔ zero obj-ctr delta and repeating obj actor
+        let mut n = 0;
+        let mut ctr = self.obj_ctr.clone();
+        while n < max {
+            match ctr.next_delta_run_max(max - n) {
+                Some(run) if run.value == Some(0) => n += run.count,
+                _ => break,
+            }
+        }
+        let mut m = 0;
+        let mut act = self.obj_actor.clone();
+        while m < n {
+            match act.next_run_max(n - m) {
+                Some(run) if run.value == self.cur_obj_raw.0 => m += run.count,
+                _ => break,
+            }
+        }
+        m
+    }
+
+    /// Skip `n` ops known to have zero preds and zero succ (a clean
+    /// run), advancing every column in step. Returns the id of the
+    /// last skipped op.
+    pub(crate) fn skip_clean(&mut self, n: usize) -> OpId {
+        debug_assert!(n > 0 && self.pos + n <= self.len);
+        let last_actor = self.id_actor.nth(n - 1).flatten().expect("id actor");
+        skip_rle(&mut self.obj_actor, n);
+        skip_delta(&mut self.obj_ctr, n);
+        skip_rle(&mut self.key_actor, n);
+        skip_delta(&mut self.key_ctr, n);
+        skip_rle(&mut self.key_str, n);
+        skip_rle(&mut self.insert, n);
+        skip_rle(&mut self.action, n);
+        // pred/succ counts are all zero in a clean run: the group
+        // sub-columns do not advance
+        skip_rle(&mut self.pred_count, n);
+        skip_rle(&mut self.succ_count, n);
+        self.pos += n;
+        OpId::new(
+            self.id_ctr[self.pos - 1] as u64,
+            self.actor_map[usize::from(last_actor)],
+        )
     }
 }
 

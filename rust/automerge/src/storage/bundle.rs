@@ -16,7 +16,8 @@ mod storage;
 pub use builder::BundleChangeIter;
 
 pub(crate) use builder::{
-    BundleBuilder, BundleChangeIterUnverified, BundleOp, BundleOpWriter, OpIter, OpIterUnverified,
+    frag_prepass, BundleBuilder, BundleChangeIterUnverified, BundleOp, BundleOpWriter, FragMeta,
+    FragOp, FragOps, OpIter, OpIterUnverified,
 };
 pub(crate) use error::ParseError;
 pub(crate) use meta::{BundleMetadata, DepRef};

@@ -71,10 +71,6 @@ impl ChangeOp {
         &self.bld.key
     }
 
-    pub(crate) fn pred(&self) -> &[OpId] {
-        &self.bld.pred
-    }
-
     pub(crate) fn id(&self) -> OpId {
         self.bld.id
     }

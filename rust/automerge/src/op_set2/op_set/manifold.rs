@@ -11,9 +11,9 @@
 //! [`finish`]: ApplyManifold::finish
 
 use crate::op_set2::change::batch::Adjust;
-use crate::op_set2::op::ChangeOp;
-use crate::op_set2::types::ScalarValue as OpScalarValue;
+use crate::op_set2::types::Action;
 use crate::op_set2::SuccInsert;
+use crate::storage::bundle::{FragMeta, FragOp, FragOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
 
 use super::index::ObjIndex;
@@ -22,7 +22,6 @@ use super::{OpSet, ValueIter};
 
 use hexane::Shiftable;
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -102,6 +101,9 @@ pub(crate) struct ApplyManifold<'a> {
     // itself, which belongs after it (document order guarantees no
     // other anchor can sit between a memo slot and its row)
     lesser: Option<(OpId, usize)>,
+    // the last resolved slot was the object end with no memo — every
+    // later same-object op appends there too (tail fast path trigger)
+    appending: bool,
     // the current update scope: an element and its group in the doc
     elem: Option<ElemId>,
     last_insert: Option<OpId>,
@@ -158,20 +160,13 @@ impl<'a> ApplyManifold<'a> {
             op_index: 0,
             succ_cache,
             lesser: None,
+            appending: false,
             elem: None,
             last_insert: None,
             elem_scope: 0..0,
             top: TopCalc::new(),
             vis_iter,
         }
-    }
-
-    /// Feed the manifold all of `ops` and resolve.
-    pub(crate) fn apply<'i, I: Iterator<Item = &'i ChangeOp>>(mut self, ops: I) -> ManifoldResult {
-        for op in ops {
-            self.apply_op(op);
-        }
-        self.finish()
     }
 
     /// Record that the current op lands at document position `pos`:
@@ -214,27 +209,172 @@ impl<'a> ApplyManifold<'a> {
         }
     }
 
-    /// Process one change op. Ops must arrive in document order (see
+    /// Drive the manifold from a fragment's columns: ops stream out of
+    /// [`FragOps`] minimally decoded and in document order. When every
+    /// remaining op of the current object is fragment-internal (no doc
+    /// preds — visible as a zero run on the pred-count column) and the
+    /// doc cursor has passed the object's last row, the tail fast path
+    /// takes over: clean insert runs are consumed wholesale and the
+    /// rest run in blank mode with no doc iterator work.
+    pub(crate) fn apply_frag(mut self, src: &mut FragOps<'_>, meta: &FragMeta) -> ManifoldResult {
+        while src.pos < src.len {
+            if self.tail_ready(src) {
+                self.consume_tail(src, meta);
+                continue;
+            }
+            let op = src.next_op(meta);
+            self.apply_frag_op(&op);
+        }
+        self.finish()
+    }
+
+    /// Push a resolved slot and note whether appends have begun: once
+    /// an op lands at the object end with no memo, every later
+    /// same-object op lands there too (document order), which is what
+    /// arms the tail fast path.
+    fn push_slot(&mut self, pos: usize) {
+        self.push_pos(pos);
+        self.appending = pos == self.obj_scope.end && self.lesser.is_none();
+    }
+
+    /// The tail fast path is ready when appends have begun in the
+    /// current object and the remaining same-object ops carry no doc
+    /// preds (document order guarantees the latter once appends begin —
+    /// the pred-run peek is the cheap proof).
+    fn tail_ready(&self, src: &FragOps<'_>) -> bool {
+        if !self.appending || src.pos >= src.len {
+            return false;
+        }
+        let rem = src.same_obj_run(src.len - src.pos);
+        rem > 0 && src.pred_free_run() >= rem
+    }
+
+    /// Consume the rest of the current object in blank mode: every op
+    /// lands at the object end, in-fragment relationships ride the succ
+    /// column, and scope logic needs only the op fields. Clean insert
+    /// runs (set/insert, no preds, no succ) skip per-op work entirely.
+    ///
+    /// The scope open at the transition may straddle into the tail:
+    /// its ops keep joining it and its close is a full doc-mode flush.
+    /// Every scope after that is fragment-only (blank finalize), and
+    /// the trailing scope is closed here so the next object's flush
+    /// starts clean.
+    fn consume_tail(&mut self, src: &mut FragOps<'_>, meta: &FragMeta) {
+        let end = self.obj_scope.end;
+        let mut rem = src.same_obj_run(src.len - src.pos);
+        let mut straddling = true;
+        while rem > 0 {
+            let n = src.clean_insert_run().min(rem);
+            if n > 0 {
+                if straddling {
+                    straddling = false;
+                    self.flush();
+                } else {
+                    self.top.finalize_blank();
+                }
+                // each insert is its own single-candidate scope —
+                // alive and unconflicted — so only the positions
+                // matter. If an update on the run's last insert
+                // follows, its candidate is reconstructed there.
+                let i = self.op_index;
+                match self.insert_runs.last_mut() {
+                    Some((p, r)) if *p == end && r.end == i => r.end = i + n,
+                    _ => self.insert_runs.push((end, i..i + n)),
+                }
+                self.op_index += n;
+                self.last_insert = Some(src.skip_clean(n));
+                self.elem = None;
+                rem -= n;
+                continue;
+            }
+
+            let op = src.next_op(meta);
+            debug_assert!(op.preds.is_empty(), "tail op carries doc preds");
+            debug_assert!(op.action != Action::Delete, "tail delete has no row");
+            if let Ok(obj_type) = ObjType::try_from(op.action) {
+                self.obj_info.insert(
+                    op.id,
+                    super::index::ObjInfo {
+                        parent: op.obj,
+                        obj_type,
+                    },
+                );
+            }
+            let mut pending_after_run = false;
+            let boundary = if let Some(k) = op.key.key_str() {
+                if self.key.as_deref() != Some(k) {
+                    self.key = Some(k.to_owned());
+                    true
+                } else {
+                    false
+                }
+            } else if op.insert {
+                self.elem = None;
+                true
+            } else {
+                let e = op.key.elemid().unwrap();
+                let fresh = self.elem != Some(e) && self.last_insert != Some(e.0);
+                // an update following a clean run targets the run's
+                // last insert (updates follow their element directly
+                // in document order) — its scope skipped candidate
+                // registration, so reconstruct the insert's entry
+                pending_after_run = self.elem.is_none() && self.last_insert == Some(e.0);
+                self.elem = Some(e);
+                fresh
+            };
+            if boundary {
+                if straddling {
+                    straddling = false;
+                    self.flush();
+                } else {
+                    self.top.finalize_blank();
+                }
+            }
+            if pending_after_run {
+                let id = self.last_insert.unwrap();
+                self.top
+                    .candidate_raw(id, meta.counters.contains(&id), true, end);
+            }
+            if op.insert {
+                self.last_insert = Some(op.id);
+            }
+            self.push_pos(end);
+            self.top.candidate(&op, end);
+            self.op_index += 1;
+            rem -= 1;
+        }
+        // close the trailing scope and leave the top scope empty so
+        // the next doc-mode flush is a no-op
+        if straddling {
+            self.flush();
+        } else {
+            self.top.finalize_blank();
+        }
+        self.top.open(end..end);
+        self.elem = None;
+    }
+
+    /// Process one fragment op. Ops must arrive in document order (see
     /// the type-level contract).
-    pub(crate) fn apply_op(&mut self, op: &ChangeOp) {
+    fn apply_frag_op(&mut self, op: &FragOp<'_>) {
         if std::env::var("BATCH_DEBUG").is_ok() {
             eprintln!(
                 "mop {:?} key {:?} ins {} del {} obj {:?}",
-                op.id(),
-                op.key(),
-                op.insert(),
-                op.bld.is_delete(),
-                op.bld.obj
+                op.id,
+                op.key,
+                op.insert,
+                (op.action == Action::Delete),
+                op.obj
             );
         }
         if self.traced() {
             eprintln!(
                 "TRACE[{}] IN  op {:?} key {:?} ins {} del {} | pos {} lesser {:?} elem {:?} elem_scope {:?} last_insert {:?}",
                 self.op_index,
-                op.id(),
-                op.key(),
-                op.insert(),
-                op.bld.is_delete(),
+                op.id,
+                op.key,
+                op.insert,
+                (op.action == Action::Delete),
                 self.id_iter.pos(),
                 self.lesser,
                 self.elem,
@@ -242,13 +382,19 @@ impl<'a> ApplyManifold<'a> {
                 self.last_insert,
             );
         }
-        if let Some(info) = op.obj_info() {
-            self.obj_info.insert(op.id(), info);
+        if let Ok(obj_type) = ObjType::try_from(op.action) {
+            self.obj_info.insert(
+                op.id,
+                super::index::ObjInfo {
+                    parent: op.obj,
+                    obj_type,
+                },
+            );
         }
-        if op.bld.obj != self.obj {
+        if op.obj != self.obj {
             self.flush();
 
-            self.obj = op.bld.obj;
+            self.obj = op.obj;
             self.obj_scope = self.obj_id_iter.seek_to_value(self.obj);
             self.obj_type = self.obj_info.object_type(&self.obj).unwrap();
 
@@ -256,6 +402,7 @@ impl<'a> ApplyManifold<'a> {
             self.pred_iter.shift(self.obj_scope.clone());
             self.elem = None;
             self.lesser = None;
+            self.appending = false;
 
             if self.obj_type == ObjType::Map {
                 self.key_iter.shift(self.obj_scope.clone());
@@ -263,8 +410,8 @@ impl<'a> ApplyManifold<'a> {
             }
         }
         if self.obj_type == ObjType::Map {
-            if self.key.as_deref() != op.bld.key.key_str().as_deref() {
-                self.key = op.bld.key.key_str().map(Cow::into_owned);
+            if self.key.as_deref() != op.key.key_str() {
+                self.key = op.key.key_str().map(str::to_owned);
                 let key_scope = self.key_iter.seek_to_value(self.key.as_deref(), ..);
                 if self.traced() {
                     eprintln!(
@@ -283,29 +430,25 @@ impl<'a> ApplyManifold<'a> {
                 self.pred_iter.shift(key_scope.clone());
                 self.succ_iter.shift(key_scope);
             }
-            let inc = op.get_increment_value();
-            for pred_id in op.pred() {
-                self.succ_cache.push(*pred_id, op.id(), inc);
+            let inc = op.inc;
+            for pred_id in &op.preds {
+                self.succ_cache.push(*pred_id, op.id, inc);
                 if !self.clock.covers(pred_id) {
                     self.top.kill(pred_id, inc);
                 }
             }
-            if !op.bld.is_delete() {
+            if !(op.action == Action::Delete) {
                 if std::env::var("BATCH_DEBUG").is_ok() {
-                    eprintln!(
-                        "  map-seek {:?} id_iter pos {}",
-                        op.id(),
-                        self.id_iter.pos()
-                    );
+                    eprintln!("  map-seek {:?} id_iter pos {}", op.id, self.id_iter.pos());
                 }
-                let r = self.id_iter.seek_to_value(&op.id());
+                let r = self.id_iter.seek_to_value(&op.id);
                 assert!(r.is_empty());
-                self.push_pos(r.start);
+                self.push_slot(r.start);
                 self.top.candidate(op, r.start);
             }
-        } else if op.insert() {
-            let e = op.key().elemid().unwrap();
-            self.last_insert = Some(op.id());
+        } else if op.insert {
+            let e = op.key.elemid().unwrap();
+            self.last_insert = Some(op.id);
 
             // every insert starts a new element group: close the
             // previous scope (its updates all precede this op in
@@ -330,12 +473,12 @@ impl<'a> ApplyManifold<'a> {
                     self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
                 }
             }
-            if matches!(self.lesser, Some((row_id, _)) if row_id < op.id() && row_id != e.0) {
+            if matches!(self.lesser, Some((row_id, _)) if row_id < op.id && row_id != e.0) {
                 // memo hit: same slot, and crucially no iterator moves —
                 // a hop here would drag id_iter/ins past rows the next
                 // update group or sibling still needs
                 let (_, found) = self.lesser.unwrap();
-                self.push_pos(found);
+                self.push_slot(found);
             } else {
                 // an insert only ever lands immediately before another
                 // insert row (or the object end): hop past any update
@@ -354,11 +497,11 @@ impl<'a> ApplyManifold<'a> {
                 self.ins.shift(cur..self.obj_scope.end);
                 let epos = self.ins.scan_to_value(true).unwrap_or(self.obj_scope.end);
                 self.id_iter.advance_to(epos);
-                if let Some((found, row_id)) = self.id_iter.scan_to_lesser(op.id()) {
-                    self.push_pos(found);
+                if let Some((found, row_id)) = self.id_iter.scan_to_lesser(op.id) {
+                    self.push_slot(found);
                     self.lesser = Some((row_id, found));
                 } else {
-                    self.push_pos(self.obj_scope.end);
+                    self.push_slot(self.obj_scope.end);
                     self.lesser = None;
                 }
             }
@@ -366,7 +509,7 @@ impl<'a> ApplyManifold<'a> {
             // non-insert seq ops (set/delete/increment): the group
             // analog of the map path — scope to the element's run of
             // updates, sized via the insert column
-            let e = op.key().elemid().unwrap();
+            let e = op.key.elemid().unwrap();
             if self.elem != Some(e) {
                 if self.last_insert == Some(e.0) {
                     // a pending element's updates belong to the scope
@@ -403,7 +546,7 @@ impl<'a> ApplyManifold<'a> {
                                 Some(p) => p,
                                 None => panic!(
                                     "update target {:?} not found: op {:?} action {:?} pred {:?} id_iter pos {} obj_scope {:?} elem_scope {:?} lesser {:?} last_insert {:?}",
-                                    e, op.id(), op.bld.action, op.bld.pred, self.id_iter.pos(), self.obj_scope, self.elem_scope, self.lesser, self.last_insert
+                                    e, op.id, op.action, op.preds, self.id_iter.pos(), self.obj_scope, self.elem_scope, self.lesser, self.last_insert
                                 ),
                             }
                         }
@@ -429,22 +572,22 @@ impl<'a> ApplyManifold<'a> {
                     self.succ_iter.shift(self.elem_scope.clone());
                 }
             }
-            let inc = op.get_increment_value();
-            for pred_id in op.pred() {
-                self.succ_cache.push(*pred_id, op.id(), inc);
+            let inc = op.inc;
+            for pred_id in &op.preds {
+                self.succ_cache.push(*pred_id, op.id, inc);
                 if !self.clock.covers(pred_id) {
                     self.top.kill(pred_id, inc);
                 }
             }
-            if !op.bld.is_delete() {
+            if !(op.action == Action::Delete) {
                 if self.elem_scope.is_empty() {
                     // pending target: rides along at its insert's slot
-                    self.push_pos(self.elem_scope.start);
+                    self.push_slot(self.elem_scope.start);
                     self.top.candidate(op, self.elem_scope.start);
                 } else {
-                    let r = self.id_iter.seek_to_value(&op.id());
+                    let r = self.id_iter.seek_to_value(&op.id);
                     assert!(r.is_empty());
-                    self.push_pos(r.start);
+                    self.push_slot(r.start);
                     self.top.candidate(op, r.start);
                 }
             }
@@ -559,25 +702,35 @@ impl TopCalc {
         }
     }
 
+    /// [`Self::candidate`] from explicit fields, for candidates whose
+    /// op was consumed by a run skip.
+    fn candidate_raw(&mut self, id: OpId, is_counter: bool, alive: bool, slot: usize) {
+        if !self.enabled {
+            return;
+        }
+        self.batch.push(BatchTop {
+            id,
+            slot,
+            is_counter,
+            alive,
+        });
+    }
+
     /// Register a batch op as a top candidate if it is the kind of op
-    /// that can hold top (matches v1's `Top` visibility test). `slot`
-    /// is its already-computed insertion point within the scope.
-    ///
-    /// Aliveness starts from the op's own (normalized) succ: succ-format
-    /// bundles pre-stamp in-batch deletions there and emit no delete ops
-    /// to `kill` through. v1 sources stamp succ after the manifold runs,
-    /// so their candidates start alive and die by `kill` as before.
-    fn candidate(&mut self, op: &ChangeOp, slot: usize) {
+    /// that can hold top. `slot` is its already-computed insertion
+    /// point within the scope; aliveness comes from the op's own
+    /// (normalized) in-fragment succ.
+    fn candidate(&mut self, op: &FragOp<'_>, slot: usize) {
         if !self.enabled {
             return;
         }
 
-        if !op.bld.is_inc() {
+        if op.action != Action::Increment {
             self.batch.push(BatchTop {
-                id: op.id(),
+                id: op.id,
                 slot,
-                is_counter: matches!(op.bld.value, OpScalarValue::Counter(_)),
-                alive: !op.succ.iter().any(|(_, inc)| inc.is_none()),
+                is_counter: op.is_counter,
+                alive: op.alive,
             });
         }
     }
@@ -688,83 +841,6 @@ impl TopCalc {
         self.batch.clear();
         self.deleted.clear();
         self.doc_scope = 0..0;
-    }
-}
-
-/// The blank-document fast path: applying doc-ordered ops to an empty
-/// document. No column exists to consult — every pred is in-batch,
-/// every slot is 0 (one splice run), and top tracking needs only the
-/// batch-side winner logic. The whole apply is one allocation-light
-/// pass converting preds into succs.
-pub(crate) fn apply_blank<'i, I: Iterator<Item = &'i ChangeOp>>(ops: I) -> ManifoldResult {
-    let mut insert_runs: Vec<(usize, Range<usize>)> = vec![];
-    let mut change_succ: HashMap<OpId, Vec<(OpId, Option<i64>)>> = HashMap::default();
-    let mut top = TopCalc::new();
-
-    let mut obj = ObjId::root();
-    let mut key: Option<String> = None;
-    let mut elem: Option<ElemId> = None;
-    let mut last_insert: Option<OpId> = None;
-
-    for (i, op) in ops.enumerate() {
-        // scope boundaries from op fields alone: obj change, map key
-        // change, or element-group change (an insert starts its own
-        // group; updates follow their pending element contiguously)
-        let boundary = if op.bld.obj != obj {
-            obj = op.bld.obj;
-            key = None;
-            elem = None;
-            true
-        } else if let Some(k) = op.bld.key.key_str() {
-            if key.as_deref() != Some(&*k) {
-                key = Some(k.into_owned());
-                true
-            } else {
-                false
-            }
-        } else if op.insert() {
-            elem = None;
-            true
-        } else {
-            let e = op.key().elemid().unwrap();
-            if elem != Some(e) && last_insert != Some(e.0) {
-                elem = Some(e);
-                true
-            } else {
-                elem = Some(e);
-                false
-            }
-        };
-        if boundary {
-            top.finalize_blank();
-        }
-        if op.insert() {
-            last_insert = Some(op.id());
-        }
-
-        let inc = op.get_increment_value();
-        for pred in op.pred() {
-            top.kill(pred, inc);
-            change_succ.entry(*pred).or_default().push((op.id(), inc));
-        }
-        if !op.bld.is_delete() {
-            // every op lands at position 0; runs still break where a
-            // delete leaves a gap in the index range
-            match insert_runs.last_mut() {
-                Some((_, r)) if r.end == i => r.end = i + 1,
-                _ => insert_runs.push((0, i..i + 1)),
-            }
-            top.candidate(op, 0);
-        }
-    }
-    top.finalize_blank();
-
-    ManifoldResult {
-        doc_succ: vec![],
-        change_succ,
-        insert_runs,
-        adjusts: top.adjusts,
-        conflicted: top.conflicted,
     }
 }
 
