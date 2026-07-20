@@ -76,6 +76,49 @@ pub trait Shiftable: Iterator + Debug {
     {
         Unshift::new(self)
     }
+
+    /// Chain multiple windows: yield the items of each range in turn.
+    /// Whatever remains of the current window is discarded; ranges
+    /// must be ascending and non-overlapping (touching is fine).
+    fn ranges<R>(self, ranges: R) -> Ranges<Self, R::IntoIter>
+    where
+        Self: Sized,
+        R: IntoIterator<Item = Range<usize>>,
+    {
+        let mut iter = self;
+        // empty the window so the first next() pulls the first range
+        iter.set_max(iter.get_pos());
+        Ranges {
+            iter,
+            ranges: ranges.into_iter(),
+        }
+    }
+}
+
+/// Iterator adapter chaining several positional windows of a
+/// [`Shiftable`] iterator; created by [`Shiftable::ranges`].
+#[derive(Clone, Debug)]
+pub struct Ranges<I, R> {
+    iter: I,
+    ranges: R,
+}
+
+impl<I: Shiftable, R: Iterator<Item = Range<usize>>> Iterator for Ranges<I, R> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(v) = self.iter.next() {
+                return Some(v);
+            }
+            let r = self.ranges.next()?;
+            assert!(
+                r.start >= self.iter.get_pos(),
+                "ranges must be ascending and non-overlapping"
+            );
+            self.iter.shift(r);
+        }
+    }
 }
 
 impl<T: ColumnValueRef> Shiftable for Iter<'_, T> {
@@ -117,6 +160,74 @@ impl<T: DeltaValue> Shiftable for DeltaIter<'_, T> {
 
     fn set_max(&mut self, pos: usize) {
         DeltaIter::set_max(self, pos)
+    }
+}
+
+// The run adapters position by *item*, not by run — the trait's
+// `nth`-based defaults would skip a run per step — so everything
+// positional delegates to the inner iterator.
+
+impl<'a, T: ColumnValueRef, C: crate::Codec + Debug> Shiftable for crate::column::Runs<'a, T, C> {
+    fn get_pos(&self) -> usize {
+        self.0.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.0.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.0.set_max(pos)
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        self.0.advance_to(target)
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        self.0.advance_by(amount)
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<crate::Run<T::Get<'a>>> {
+        self.0.shift(range);
+        self.next()
+    }
+
+    fn scan_to_pos(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
+        self.0.advance_to(pos);
+        self.next()
+    }
+}
+
+impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRuns<'_, T, C> {
+    fn get_pos(&self) -> usize {
+        self.0.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.0.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.0.set_max(pos)
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        self.0.advance_to(target)
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        self.0.advance_by(amount)
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<crate::delta::DeltaRun> {
+        self.0.shift(range);
+        self.next()
+    }
+
+    fn scan_to_pos(&mut self, pos: usize) -> Option<crate::delta::DeltaRun> {
+        self.0.advance_to(pos);
+        self.next()
     }
 }
 

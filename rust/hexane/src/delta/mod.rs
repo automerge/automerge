@@ -914,11 +914,157 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         del: usize,
         values: impl IntoIterator<Item = T>,
     ) -> std::ops::Range<usize> {
+        self.splice_items_inner(
+            index,
+            del,
+            values.into_iter().map(|t| SpliceItem::Value(t.to_i64())),
+        )
+    }
+
+    /// Splice [`DeltaRun`]s in — the run-aware fast path for bulk data.
+    /// A run whose `prefix` matches the running value copies through as
+    /// one inner run; a mismatch costs one peeled fix-up delta.
+    ///
+    /// Each run's realized values must lie in `T`'s value domain (a
+    /// writer-side contract, like [`DeltaValue::to_i64`]); null runs
+    /// panic on non-nullable columns.
+    pub fn splice_runs(
+        &mut self,
+        index: usize,
+        del: usize,
+        runs: impl IntoIterator<Item = DeltaRun>,
+    ) {
+        let _ = self.splice_items_inner(
+            index,
+            del,
+            runs.into_iter()
+                .filter(|r| r.count > 0)
+                .map(SpliceItem::Run),
+        );
+    }
+
+    /// Delta-column version of
+    /// [`Column::copy_ranges`](crate::Column::copy_ranges); seam deltas
+    /// re-anchor through the same fix-up machinery as `splice_runs`.
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
+    where
+        I: IntoIterator<Item = crate::Splice>,
+    {
+        let splices = crate::column::normalize_splices(splices, src.len(), self.len());
+        if splices.is_empty() {
+            return;
+        }
+        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
+        let strategy = self.col.copy_strategy(&src.col, &ranges, splices.len());
+        self.copy_splices_with(src, &splices, strategy);
+    }
+
+    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
+    /// `splices` must already be normalized.
+    pub(crate) fn copy_splices_with(
+        &mut self,
+        mut src: Self,
+        splices: &[crate::Splice],
+        strategy: crate::column::CopyStrategy,
+    ) {
+        use crate::column::CopyStrategy;
+        use crate::Shiftable;
+        match strategy {
+            CopyStrategy::Direct => {
+                let mut shift = 0isize;
+                for sp in splices {
+                    let at = (sp.pos as isize + shift) as usize;
+                    self.splice_runs(at, sp.delete, src.iter().runs().ranges([sp.range.clone()]));
+                    shift += sp.range.len() as isize - sp.delete as isize;
+                }
+            }
+            CopyStrategy::Invert => {
+                let old_len = self.len();
+                self.col.swap_contents(&mut src.col);
+                let ranges: Vec<std::ops::Range<usize>> =
+                    splices.iter().map(|sp| sp.range.clone()).collect();
+                self.retain_ranges(&ranges);
+                let mut out_pos = 0usize;
+                let mut prev_end = 0usize;
+                for sp in splices {
+                    if sp.pos > prev_end {
+                        self.splice_runs(out_pos, 0, src.iter_range(prev_end..sp.pos).runs());
+                        out_pos += sp.pos - prev_end;
+                    }
+                    prev_end = sp.pos + sp.delete;
+                    out_pos += sp.range.len();
+                }
+                if old_len > prev_end {
+                    self.splice_runs(out_pos, 0, src.iter_range(prev_end..old_len).runs());
+                }
+            }
+        }
+    }
+
+    /// Single-point [`copy_ranges`](Self::copy_ranges) with a deletion
+    /// count and the strategy pinned — kept for the strategy-agreement
+    /// tests, which exercise `del`.
+    #[cfg(test)]
+    pub(crate) fn copy_ranges_with(
+        &mut self,
+        index: usize,
+        del: usize,
+        mut src: Self,
+        ranges: Vec<Range<usize>>,
+        strategy: crate::column::CopyStrategy,
+    ) {
+        use crate::column::CopyStrategy;
+        assert!(index + del <= self.len(), "splice range out of bounds");
+        match strategy {
+            CopyStrategy::Direct => {
+                use crate::Shiftable;
+                self.splice_runs(index, del, src.iter().runs().ranges(ranges));
+            }
+            CopyStrategy::Invert => {
+                let old_len = self.len();
+                self.col.swap_contents(&mut src.col);
+                self.retain_ranges(&ranges);
+                let retained = self.len();
+                if index > 0 {
+                    self.splice_runs(0, 0, src.iter_range(0..index).runs());
+                }
+                if index + del < old_len {
+                    self.splice_runs(
+                        index + retained,
+                        0,
+                        src.iter_range(index + del..old_len).runs(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Keep only the rows in `ranges` (normalized), deleting the gaps
+    /// back-to-front.
+    fn retain_ranges(&mut self, ranges: &[Range<usize>]) {
+        let mut end = self.len();
+        for r in ranges.iter().rev() {
+            if r.end < end {
+                self.remove_n(r.end, end - r.end);
+            }
+            end = r.start;
+        }
+        if end > 0 {
+            self.remove_n(0, end);
+        }
+    }
+
+    fn splice_items_inner(
+        &mut self,
+        index: usize,
+        del: usize,
+        items: impl Iterator<Item = SpliceItem>,
+    ) -> std::ops::Range<usize> {
         let len = self.col.len();
         assert!(index + del <= len, "splice range out of bounds");
 
-        let mut values = values.into_iter().map(|t| t.to_i64()).peekable();
-        if del == 0 && values.peek().is_none() {
+        let mut items = items.peekable();
+        if del == 0 && items.peek().is_none() {
             return 0..0;
         }
 
@@ -928,7 +1074,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // null run + a recomputed boundary delta to keep the realized value
         // of `next_val` intact.
         let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
-        let iter = SpliceDeltaIter::<_, T::Inner>::new(values, prev, skip, next_val);
+        let iter = SpliceDeltaIter::<_, T::Inner>::new(items, prev, skip, next_val);
         self.col.splice_inner(index, total_del, iter)
     }
 
@@ -961,6 +1107,25 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             ),
         }
     }
+}
+
+// ── DeltaRun ────────────────────────────────────────────────────────────────
+
+/// A run from a [`DeltaColumn`] iterator: one run of identical deltas,
+/// realizing the values `[prefix + delta, prefix + 2*delta, …,
+/// prefix + count*delta]`.  A null run (`delta: None`) is `count` nulls
+/// and leaves the running value at `prefix`.
+///
+/// Carrying `prefix` makes each run self-describing, so
+/// [`DeltaColumn::splice_runs`] can copy aligned runs verbatim and fix
+/// up misaligned ones by peeling the first item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeltaRun {
+    /// Realized running value immediately before the run.
+    pub prefix: i64,
+    /// The per-item delta; `None` is a run of nulls.
+    pub delta: Option<i64>,
+    pub count: usize,
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
@@ -1112,6 +1277,29 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
             inner: self.inner.suspend(),
             running: self.running,
         }
+    }
+
+    /// Returns the next [`DeltaRun`], anchored at the current running
+    /// value.  Respects the iterator window; a clipped run's remainder
+    /// is still a valid self-describing `DeltaRun`.
+    pub fn next_run(&mut self) -> Option<DeltaRun> {
+        let run = self.inner.next_run()?;
+        let prefix = self.running;
+        let delta = T::Inner::to_opt(run.value);
+        if let Some(d) = delta {
+            self.running += d * run.count as i64;
+        }
+        Some(DeltaRun {
+            prefix,
+            delta,
+            count: run.count,
+        })
+    }
+
+    /// Adapt into an iterator of [`DeltaRun`]s — the item shape
+    /// [`DeltaColumn::splice_runs`] accepts.
+    pub fn runs(self) -> DeltaRuns<'a, T, C> {
+        DeltaRuns(self)
     }
 
     /// Narrow the iterator window to the contiguous run of `target`
@@ -1433,6 +1621,20 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     }
 }
 
+/// Iterator adapter yielding [`DeltaRun`]s instead of realized values;
+/// created by [`DeltaIter::runs`].
+#[derive(Debug)]
+pub struct DeltaRuns<'a, T: DeltaValue, C: Codec = Leb128>(pub(crate) DeltaIter<'a, T, C>);
+
+impl<T: DeltaValue, C: Codec> Iterator for DeltaRuns<'_, T, C> {
+    type Item = DeltaRun;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next_run()
+    }
+}
+
 pub struct DeltaIterState {
     inner: IterState,
     running: i64,
@@ -1483,16 +1685,24 @@ pub(crate) fn deltas_from<'a, I: DeltaInner>(
     })
 }
 
-/// Streaming iterator that turns realized `Option<i64>` values + the result
-/// of `find_boundaries` into the `(delta, count)` pairs that
-/// `Column::splice_inner` consumes.  Avoids allocating the values into a
-/// `Vec`: emits each delta in lockstep with the input iterator, then —
-/// when a boundary non-null follows the splice — emits a bulk
-/// `(None, skip)` and a recomputed boundary delta against the post-splice
-/// running.
+/// One inserted element of a delta splice: a lone realized value
+/// (from `splice`) or a whole [`DeltaRun`] (from `splice_runs`).
+enum SpliceItem {
+    Value(Option<i64>),
+    Run(DeltaRun),
+}
+
+/// Streaming iterator turning [`SpliceItem`]s + the result of
+/// `find_boundaries` into the `(delta, count)` pairs
+/// `Column::splice_inner` consumes.  Aligned runs pass through as one
+/// pair; a mismatched prefix peels the run's first item into a fix-up
+/// delta.  After the input, emits the preserved null run and a
+/// recomputed boundary delta.
 struct SpliceDeltaIter<It, Out> {
     iter: It,
     running: i64,
+    /// Remainder of a peeled run: `(delta, count)` still to emit.
+    pending: Option<(i64, usize)>,
     skip: usize,
     next_val: Option<i64>,
     phase: SplicePhase,
@@ -1506,11 +1716,12 @@ enum SplicePhase {
     Done,
 }
 
-impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> SpliceDeltaIter<It, Out> {
+impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> SpliceDeltaIter<It, Out> {
     fn new(iter: It, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
         Self {
             iter,
             running: prev,
+            pending: None,
             skip,
             next_val,
             phase: SplicePhase::Values,
@@ -1519,27 +1730,53 @@ impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> SpliceDeltaIter<It, Out>
     }
 }
 
-impl<It: Iterator<Item = Option<i64>>, Out: DeltaInner> Iterator for SpliceDeltaIter<It, Out> {
+impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaIter<It, Out> {
     type Item = (Out, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.phase {
-                SplicePhase::Values => match self.iter.next() {
-                    Some(None) => return Some((Out::from_opt(None), 1)),
-                    Some(Some(r)) => {
-                        let d = r - self.running;
-                        self.running = r;
-                        return Some((Out::from_opt(Some(d)), 1));
+                SplicePhase::Values => {
+                    if let Some((d, count)) = self.pending.take() {
+                        return Some((Out::from_opt(Some(d)), count));
                     }
-                    None => {
-                        self.phase = if self.next_val.is_some() {
-                            SplicePhase::NullRun
-                        } else {
-                            SplicePhase::Done
-                        };
+                    match self.iter.next() {
+                        Some(SpliceItem::Value(None)) => return Some((Out::from_opt(None), 1)),
+                        Some(SpliceItem::Value(Some(r))) => {
+                            let d = r - self.running;
+                            self.running = r;
+                            return Some((Out::from_opt(Some(d)), 1));
+                        }
+                        Some(SpliceItem::Run(DeltaRun {
+                            delta: None, count, ..
+                        })) => return Some((Out::from_opt(None), count)),
+                        Some(SpliceItem::Run(DeltaRun {
+                            prefix,
+                            delta: Some(d),
+                            count,
+                        })) => {
+                            let aligned = prefix == self.running;
+                            let first = prefix + d - self.running;
+                            self.running = prefix + d * count as i64;
+                            if aligned {
+                                return Some((Out::from_opt(Some(d)), count));
+                            }
+                            // Peel: fix-up delta for the first item, then
+                            // the rest of the run verbatim.
+                            if count > 1 {
+                                self.pending = Some((d, count - 1));
+                            }
+                            return Some((Out::from_opt(Some(first)), 1));
+                        }
+                        None => {
+                            self.phase = if self.next_val.is_some() {
+                                SplicePhase::NullRun
+                            } else {
+                                SplicePhase::Done
+                            };
+                        }
                     }
-                },
+                }
                 SplicePhase::NullRun => {
                     self.phase = SplicePhase::Boundary;
                     // don't construct a null for a zero-length run — the
@@ -1798,8 +2035,259 @@ mod overflow_tests {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
+
+    // ── next_run / runs / splice_runs ──────────────────────────────────────
+
+    #[test]
+    fn next_run_shapes() {
+        // deltas: [10, 10, 10, 10, -35] → one run of 4, one of 1
+        let col = DeltaColumn::<_>::from_values(vec![10i64, 20, 30, 40, 5]);
+        let mut it = col.iter();
+        assert_eq!(
+            it.next_run(),
+            Some(DeltaRun {
+                prefix: 0,
+                delta: Some(10),
+                count: 4
+            })
+        );
+        assert_eq!(
+            it.next_run(),
+            Some(DeltaRun {
+                prefix: 40,
+                delta: Some(-35),
+                count: 1
+            })
+        );
+        assert_eq!(it.next_run(), None);
+    }
+
+    #[test]
+    fn next_run_partial_after_advance() {
+        let col = DeltaColumn::<_>::from_values(vec![10u64, 20, 30, 40]);
+        let mut it = col.iter();
+        it.advance_by(2);
+        // remainder of the run, re-anchored at the current running value
+        assert_eq!(
+            it.next_run(),
+            Some(DeltaRun {
+                prefix: 20,
+                delta: Some(10),
+                count: 2
+            })
+        );
+    }
+
+    #[test]
+    fn next_run_nulls() {
+        let col =
+            DeltaColumn::<Option<u32>>::from_values(vec![Some(1), None, None, Some(2), Some(3)]);
+        let mut it = col.iter();
+        assert_eq!(
+            it.next_run(),
+            Some(DeltaRun {
+                prefix: 0,
+                delta: Some(1),
+                count: 1
+            })
+        );
+        // nulls don't advance the running value
+        assert_eq!(
+            it.next_run(),
+            Some(DeltaRun {
+                prefix: 1,
+                delta: None,
+                count: 2
+            })
+        );
+        assert_eq!(
+            it.next_run(),
+            Some(DeltaRun {
+                prefix: 1,
+                delta: Some(1),
+                count: 2
+            })
+        );
+        assert_eq!(it.next_run(), None);
+    }
+
+    #[test]
+    fn splice_runs_hand_built() {
+        let mut col = DeltaColumn::<u64>::new();
+        col.splice_runs(
+            0,
+            0,
+            [DeltaRun {
+                prefix: 0,
+                delta: Some(1),
+                count: 5,
+            }],
+        );
+        assert_eq!(col.to_vec(), vec![1, 2, 3, 4, 5]);
+
+        // zero-count runs are a no-op
+        col.splice_runs(
+            0,
+            0,
+            [DeltaRun {
+                prefix: 0,
+                delta: Some(7),
+                count: 0,
+            }],
+        );
+        assert_eq!(col.to_vec(), vec![1, 2, 3, 4, 5]);
+    }
+
+    /// runs()-based splice must produce the same realized values as
+    /// per-item splice, across aligned, misaligned, deleting, and
+    /// null-bearing cases.
+    #[test]
+    fn splice_runs_matches_per_item_splice() {
+        let base: Vec<Option<i64>> = vec![Some(100), Some(200), None, Some(300)];
+        let src: Vec<Option<i64>> = vec![
+            Some(5),
+            Some(6),
+            Some(7),
+            Some(8),
+            None,
+            None,
+            Some(8),
+            Some(1000),
+        ];
+        let src_col = DeltaColumn::<_>::from_values(src.clone());
+        let ranges = [0..8, 1..4, 2..7, 3..3, 5..8];
+        for range in ranges {
+            for (at, del) in [(0, 0), (1, 0), (2, 2), (4, 0), (0, 4)] {
+                let mut a = DeltaColumn::<_>::from_values(base.clone());
+                let mut b = DeltaColumn::<_>::from_values(base.clone());
+                a.splice_runs(at, del, src_col.iter_range(range.clone()).runs());
+                b.splice(at, del, src_col.iter_range(range.clone()));
+                assert_eq!(a.to_vec(), b.to_vec(), "range={range:?} at={at} del={del}");
+            }
+        }
+    }
+
+    /// Splicing a mid-column range of one delta column into another:
+    /// the first non-null run misaligns (one peel), everything after
+    /// lines up and copies run-for-run.
+    #[test]
+    fn splice_runs_cross_column() {
+        let src = DeltaColumn::<_>::from_values(vec![5u64, 6, 7, 8, 9, 50, 51, 52]);
+        let mut dst = DeltaColumn::<_>::from_values(vec![1000u64, 2000, 3000]);
+        dst.splice_runs(1, 0, src.iter_range(1..7).runs());
+        assert_eq!(dst.to_vec(), vec![1000, 6, 7, 8, 9, 50, 51, 2000, 3000]);
+    }
+
+    /// runs().ranges() on a delta column: scattered ranges splice like
+    /// the per-item equivalent, each range re-anchored mid-run; touching
+    /// ranges behave like their union.
+    #[test]
+    fn splice_runs_with_ranges() {
+        use crate::Shiftable;
+        let values: Vec<u64> = (0..40).map(|i| i * 3).collect();
+        let src = DeltaColumn::<_>::from_values(values.clone());
+
+        let mut a = DeltaColumn::<_>::from_values(vec![7u64, 8]);
+        let mut b = a.clone();
+        a.splice_runs(1, 0, src.iter().runs().ranges([0..4, 10..13, 20..33]));
+        b.splice(
+            1,
+            0,
+            [0..4, 10..13, 20..33]
+                .into_iter()
+                .flat_map(|r| values[r].to_vec()),
+        );
+        assert_eq!(a.to_vec(), b.to_vec());
+
+        // touching ranges == their union, and the clipped run re-merges
+        // into canonical form
+        let mut a = DeltaColumn::<_>::from_values(vec![7u64, 8]);
+        let mut b = a.clone();
+        a.splice_runs(1, 0, src.iter().runs().ranges([10..15, 15..20]));
+        b.splice_runs(1, 0, src.iter().runs().ranges([10..20]));
+        assert_eq!(a.to_vec(), b.to_vec());
+        assert_eq!(a.save(), b.save());
+    }
+
+    /// copy_ranges: direct and inverted agree with the per-item
+    /// reference — misaligned seams, null runs, deletes — and produce
+    /// identical canonical bytes.
+    #[test]
+    fn copy_ranges_strategies_agree() {
+        use crate::column::{normalize_ranges, CopyStrategy};
+
+        let src_vals: Vec<Option<i64>> = (0..2000)
+            .map(|i| match i % 11 {
+                0 => None,
+                _ => Some((i as i64) * 3),
+            })
+            .collect();
+        let dest_vals: Vec<Option<i64>> = vec![Some(7), None, Some(9)];
+        let src = DeltaColumn::<_>::from_values(src_vals.clone());
+
+        let cases: Vec<(usize, usize, Vec<Range<usize>>)> = vec![
+            (0, 0, vec![0..2000]),
+            (1, 0, vec![0..1000, 1000..2000]), // touching
+            (2, 1, vec![3..700, 800..1999]),
+            (1, 0, vec![22..1500]), // range starts on a null run
+            (3, 0, vec![]),
+            (0, 3, vec![10..11]),
+        ];
+
+        for (index, del, ranges) in cases {
+            let norm = normalize_ranges(ranges.iter().cloned(), src.len());
+            let mut direct = DeltaColumn::<_>::from_values(dest_vals.clone());
+            let mut invert = direct.clone();
+            direct.copy_ranges_with(index, del, src.clone(), norm.clone(), CopyStrategy::Direct);
+            invert.copy_ranges_with(index, del, src.clone(), norm.clone(), CopyStrategy::Invert);
+
+            let mut want = dest_vals[..index].to_vec();
+            for r in &norm {
+                want.extend_from_slice(&src_vals[r.clone()]);
+            }
+            want.extend_from_slice(&dest_vals[index + del..]);
+
+            assert_eq!(direct.to_vec(), want, "direct idx={index} del={del}");
+            assert_eq!(invert.to_vec(), want, "invert idx={index} del={del}");
+            assert_eq!(direct.save(), invert.save(), "bytes idx={index} del={del}");
+        }
+    }
+
+    /// The public delta copy_ranges picks inversion for a bulk copy and
+    /// produces correct realized values end to end.
+    #[test]
+    fn copy_ranges_bulk() {
+        use crate::column::CopyStrategy;
+        // delta pattern [1,1,1,8] — enough segments that the source
+        // spans many slabs (uniform deltas would collapse to one run)
+        let v = |i: u64| (i / 4) * 7 + i;
+        let src = DeltaColumn::<_>::from_values((0..100_000).map(v).collect::<Vec<_>>());
+        let dest = DeltaColumn::<_>::from_values(vec![1u64, 5]);
+        let norm = crate::column::normalize_ranges([0..100_000], src.len());
+        assert_eq!(
+            dest.col.copy_strategy(&src.col, &norm, 1),
+            CopyStrategy::Invert
+        );
+
+        let mut dest2 = dest.clone();
+        dest2.copy_ranges(
+            src,
+            [crate::Splice {
+                pos: 1,
+                delete: 0,
+                range: 0..100_000,
+            }],
+        );
+        assert_eq!(dest2.len(), 100_002);
+        assert_eq!(dest2.get(0), Some(1));
+        assert_eq!(dest2.get(1), Some(v(0)));
+        assert_eq!(dest2.get(2), Some(v(1)));
+        assert_eq!(dest2.get(100_000), Some(v(99_999)));
+        assert_eq!(dest2.get(100_001), Some(5));
+    }
 
     // ── seek_to_value ───────────────────────────────────────────────────────
 
@@ -1957,7 +2445,7 @@ mod tests {
     #[test]
     fn scan_miss_preserves_running() {
         let values = vec![10u64, 13, 3, 12, 12, 10];
-        let col = DeltaColumn::from_values(values.clone());
+        let col = DeltaColumn::<_>::from_values(values.clone());
         let mut iter = col.iter();
         iter.set_max(2);
         assert_eq!(iter.scan_to_range(..=5u64), None);
@@ -1987,6 +2475,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::reversed_empty_ranges)]
     fn scan_to_range_basic() {
         let values = vec![50u64, 3, 90, 12, 7, 60, 11];
         let col = DeltaColumn::<u64>::from_values(values.clone());

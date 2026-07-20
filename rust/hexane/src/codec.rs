@@ -136,7 +136,7 @@ impl IntoIterator for VarBuf {
 /// fallible reads; everything else has defaults derived from those.
 /// Override the defaults where the format admits something faster
 /// (e.g. length-from-first-byte instead of a full decode).
-pub trait Codec: 'static {
+pub trait Codec: std::fmt::Debug + 'static {
     /// Encode an unsigned integer into a stack buffer.
     fn encode_unsigned(n: u64) -> VarBuf;
 

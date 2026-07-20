@@ -34,6 +34,34 @@ impl<'a, T: DeltaValue, C: Codec> DeltaDecoder<'a, T, C> {
             _phantom: PhantomData,
         }
     }
+
+    /// Consume the next run of *raw deltas* (at most `max` items),
+    /// folding them into the running sum. `value` is the shared delta:
+    /// `Some(0)` means the realized value repeats for the whole run,
+    /// `None` is a null run, and literal (varying) deltas come out one
+    /// item at a time.
+    pub fn next_delta_run_max(&mut self, max: usize) -> Option<crate::Run<Option<i64>>> {
+        use crate::delta::DeltaInner;
+        use crate::encoding::RunDecoder;
+        let run = self.inner.next_run_max(max)?;
+        let value = T::Inner::to_opt(run.value);
+        if let Some(d) = value {
+            self.running += d * run.count as i64;
+        }
+        Some(crate::Run {
+            count: run.count,
+            value,
+        })
+    }
+
+    /// Advance past `n` items in O(runs), keeping the running sum
+    /// correct. Panics if fewer than `n` items remain.
+    pub fn advance_by(&mut self, mut n: usize) {
+        while n > 0 {
+            let run = self.next_delta_run_max(n).expect("advance past column end");
+            n -= run.count;
+        }
+    }
 }
 
 impl<T: DeltaValue, C: Codec> Iterator for DeltaDecoder<'_, T, C> {

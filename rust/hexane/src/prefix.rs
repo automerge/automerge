@@ -516,14 +516,24 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         self.col.splice(index, del, values);
     }
 
-    /// Splice `(value, count)` runs in — the run-aware fast path for bulk
-    /// uniform data.
+    /// Splice [`crate::Run`]s in — the run-aware fast path for bulk uniform
+    /// data.  Accepts `Run<T::Get<'_>>` straight from a column iterator, or
+    /// runs of any other insertable form.
     pub fn splice_runs<V, I>(&mut self, index: usize, del: usize, runs: I)
     where
         V: crate::AsColumnRef<T>,
-        I: IntoIterator<Item = (V, usize)>,
+        I: IntoIterator<Item = crate::Run<V>>,
     {
         self.col.splice_runs(index, del, runs);
+    }
+
+    /// See [`Column::copy_ranges`](crate::Column::copy_ranges).
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
+    where
+        I: IntoIterator<Item = crate::Splice>,
+        for<'b> T::Get<'b>: crate::AsColumnRef<T>,
+    {
+        self.col.copy_ranges(src.col, splices);
     }
 
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────
@@ -912,6 +922,12 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
         assert!(range.start >= self.pos());
         self.set_max(range.end);
         self.nth(range.start - self.pos())
+    }
+
+    /// Adapt into an iterator of plain value [`Run`]s, discarding the
+    /// running prefix; use [`next_run`](Self::next_run) for prefixed runs.
+    pub fn runs(self) -> crate::column::Runs<'a, T, C> {
+        crate::column::Runs(self.inner)
     }
 
     /// Next run of identical values as a [`PrefixedValue`] describing the
