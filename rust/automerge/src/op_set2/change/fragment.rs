@@ -271,11 +271,12 @@ impl<'a> FragmentApply<'a> {
             let (raw, data, id_ctr) = self.src.parts();
             let meta = crate::storage::bundle::frag_prepass(raw, data, id_ctr, &self.actor_map);
             let mut fs = crate::storage::bundle::FragOps::new(raw, data, id_ctr, &self.actor_map);
-            doc.ops()
-                .apply_manifold(self.clock.clone())
-                .apply_frag(&mut fs, &meta)
+            lap("manifold: prepass", &mut t);
+            let m = doc.ops().apply_manifold(self.clock.clone());
+            lap("manifold: setup", &mut t);
+            m.apply_frag(&mut fs, &meta)
         };
-        lap("manifold", &mut t);
+        lap("manifold: stream", &mut t);
 
         // in the succ format every pred names a doc row — nothing can
         // defer to the batch side

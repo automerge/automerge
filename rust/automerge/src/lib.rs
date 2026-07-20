@@ -331,3 +331,6 @@ fn make_rng() -> rand::rngs::SmallRng {
     log!("SEED: {}", seed);
     rand::rngs::SmallRng::seed_from_u64(seed)
 }
+
+#[doc(hidden)]
+pub use crate::op_set2::op_set::manifold::dump_manifold_stats;

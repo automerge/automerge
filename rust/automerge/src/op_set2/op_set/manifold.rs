@@ -23,6 +23,28 @@ use hexane::Shiftable;
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+/// MANIFOLD_STATS diagnostics: (calls, rows scanned) per scan site.
+pub(crate) static STAT_UPD_SCAN: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_SLOT_WALK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_SLOT_EDGE: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_INS_LESSER: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_MAP_SEEK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+pub fn dump_manifold_stats() {
+    let d = |s: &[AtomicU64; 2]| (s[0].swap(0, Relaxed), s[1].swap(0, Relaxed));
+    let (c1, r1) = d(&STAT_UPD_SCAN);
+    let (c2, r2) = d(&STAT_SLOT_WALK);
+    let (c3, r3) = d(&STAT_SLOT_EDGE);
+    let (c4, r4) = d(&STAT_INS_LESSER);
+    let (c5, r5) = d(&STAT_MAP_SEEK);
+    eprintln!("MSTATS upd-elem-scan   calls {:>9} rows {:>12}", c1, r1);
+    eprintln!("MSTATS ins-anchor-scan calls {:>9} rows {:>12}", c2, r2);
+    eprintln!("MSTATS ins-anchor-MISS calls {:>9} rows {:>12}", c3, r3);
+    eprintln!("MSTATS ins-lesser-scan calls {:>9} rows {:>12}", c4, r4);
+    eprintln!("MSTATS map-key-seek    calls {:>9} rows {:>12}", c5, r5);
+}
 
 /// What a batch resolves to.
 pub(crate) struct ManifoldResult {
@@ -121,6 +143,12 @@ pub(crate) struct ApplyManifold<'a> {
     // the current update scope: an element and its group in the doc
     elem: Option<ElemId>,
     last_insert: Option<OpId>,
+    // every doc elem row the cursor stopped at in this object
+    // (update-group targets, covered insert anchors, lesser-scan
+    // hits). A later covered anchor can only be *behind* the cursor
+    // if it is one of these — every other row the cursor passed lies
+    // in a region document order forbids later ops from targeting
+    consumed: rustc_hash::FxHashSet<OpId>,
     // batch row index of `last_insert` — the head of any standalone
     // register a following headless run fused with
     last_ins_row: Option<usize>,
@@ -176,6 +204,7 @@ impl<'a> ApplyManifold<'a> {
             appending: false,
             elem: None,
             last_insert: None,
+            consumed: rustc_hash::FxHashSet::default(),
             last_ins_row: None,
             elem_scope: 0..0,
             top: TopCalc::new(),
@@ -424,6 +453,7 @@ impl<'a> ApplyManifold<'a> {
             self.pred_iter.shift(self.obj_scope.clone());
             self.elem = None;
             self.lesser = None;
+            self.consumed.clear();
             self.last_ins_row = None;
             self.appending = false;
 
@@ -464,7 +494,10 @@ impl<'a> ApplyManifold<'a> {
                 if std::env::var("BATCH_DEBUG").is_ok() {
                     eprintln!("  map-seek {:?} id_iter pos {}", op.id, self.id_iter.pos());
                 }
+                let before = self.id_iter.pos();
                 let r = self.id_iter.seek_to_value(&op.id);
+                STAT_MAP_SEEK[0].fetch_add(1, Relaxed);
+                STAT_MAP_SEEK[1].fetch_add((r.start.saturating_sub(before)) as u64, Relaxed);
                 assert!(r.is_empty());
                 self.push_slot(r.start);
                 self.top.candidate(op, self.op_index, self.last_ins_row);
@@ -488,15 +521,36 @@ impl<'a> ApplyManifold<'a> {
                 // an update group may have narrowed the window; the
                 // anchor can live anywhere ahead in the object
                 self.id_iter.set_max(self.obj_scope.end);
-                let start = self.id_iter.pos();
-                // optimisticly scan forward - most of the time itll be ahead of us
-                if self.id_iter.scan_to_value(&e.0).is_some() {
-                    // the anchor sits past the memo slot, so the memo
-                    // cannot apply any more
-                    self.lesser = None;
-                } else {
-                    // whoops - anchor was behind us
-                    self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
+                // BEHIND CHECK: the anchor row is behind the cursor
+                // exactly when the cursor already consumed it, and
+                // every row the cursor stopped at is in `consumed`.
+                // For those, the slot search continues from the
+                // cursor (doc order: slots never go backward) — no
+                // scan. Claiming "behind" from anything but a known
+                // consumed row would corrupt the slot, so anything
+                // else scans forward — cheap when the anchor is ahead
+                // (slab min/max pruning jumps the scan), a full-window
+                // walk only for an anchor consumed by a scan that
+                // never stopped on it
+                if !self.consumed.contains(&e.0) {
+                    let start = self.id_iter.pos();
+                    // most of the time the anchor is ahead of us
+                    if self.id_iter.scan_to_value(&e.0).is_some() {
+                        STAT_SLOT_WALK[0].fetch_add(1, Relaxed);
+                        STAT_SLOT_WALK[1].fetch_add((self.id_iter.pos() - start) as u64, Relaxed);
+                        self.consumed.insert(e.0);
+                        // the anchor sits past the memo slot, so the
+                        // memo cannot apply any more
+                        self.lesser = None;
+                    } else {
+                        // a consumed anchor the set never saw (its row
+                        // streamed past mid-scan): the memo/hop below
+                        // still resolves the slot, this was just the
+                        // expensive way to learn "behind"
+                        STAT_SLOT_EDGE[0].fetch_add(1, Relaxed);
+                        STAT_SLOT_EDGE[1].fetch_add((self.obj_scope.end - start) as u64, Relaxed);
+                        self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
+                    }
                 }
             }
             if matches!(self.lesser, Some((row_id, _)) if row_id < op.id && row_id != e.0) {
@@ -523,9 +577,19 @@ impl<'a> ApplyManifold<'a> {
                 self.ins.shift(cur..self.obj_scope.end);
                 let epos = self.ins.scan_to_value(true).unwrap_or(self.obj_scope.end);
                 self.id_iter.advance_to(epos);
-                if let Some((found, row_id)) = self.id_iter.scan_to_lesser(op.id) {
+                STAT_INS_LESSER[0].fetch_add(1, Relaxed);
+                let lesser_from = self.id_iter.pos();
+                let hit = self.id_iter.scan_to_lesser(op.id);
+                STAT_INS_LESSER[1].fetch_add(
+                    (self.id_iter.pos().saturating_sub(lesser_from)) as u64,
+                    Relaxed,
+                );
+                if let Some((found, row_id)) = hit {
                     self.push_slot(found);
                     self.lesser = Some((row_id, found));
+                    // the scan stopped on (and consumed) this row — a
+                    // later op may anchor at it
+                    self.consumed.insert(row_id);
                 } else {
                     self.push_slot(self.obj_scope.end);
                     self.lesser = None;
@@ -568,7 +632,14 @@ impl<'a> ApplyManifold<'a> {
                         Some((row_id, s)) if row_id == e.0 => s,
                         _ => {
                             self.id_iter.set_max(self.obj_scope.end);
-                            match self.id_iter.scan_to_value(&e.0) {
+                            let start = self.id_iter.pos();
+                            let found = self.id_iter.scan_to_value(&e.0);
+                            STAT_UPD_SCAN[0].fetch_add(1, Relaxed);
+                            STAT_UPD_SCAN[1].fetch_add(
+                                (self.id_iter.pos().saturating_sub(start)) as u64,
+                                Relaxed,
+                            );
+                            match found {
                                 Some(p) => p,
                                 None => panic!(
                                     "update target {:?} not found: op {:?} action {:?} pred {:?} id_iter pos {} obj_scope {:?} elem_scope {:?} lesser {:?} last_insert {:?}",
@@ -581,6 +652,7 @@ impl<'a> ApplyManifold<'a> {
                     // any older memo slot and the cursor: the memo's
                     // reuse invariant is gone
                     self.lesser = None;
+                    self.consumed.insert(e.0);
                     // group-end scan on its own cursor (`ins_upd`),
                     // bounded to the object so a miss parks at the
                     // object end, not the column end
