@@ -48,10 +48,13 @@ pub mod prefix;
 pub mod raw;
 pub mod rle;
 pub mod shift;
-pub use column::{Column, ColumnLoadIter, Iter, IterState};
+pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs};
 pub use delta::indexed::FindByRange;
-pub use delta::{DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaValue};
-pub use shift::{Shiftable, Unshift};
+pub use delta::{
+    DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaRun, DeltaRuns,
+    DeltaValue,
+};
+pub use shift::{Ranges, Shiftable, Unshift};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.

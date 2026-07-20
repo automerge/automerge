@@ -1070,10 +1070,10 @@ impl<A, M, S> IndexIter<A, M, S> {
     }
 }
 
-/// Compress an iterator into `(value, count)` runs.
+/// Compress an iterator into [`hexane::Run`]s.
 pub(crate) fn runs<T: PartialEq>(
     iter: impl Iterator<Item = T>,
-) -> impl Iterator<Item = (T, usize)> {
+) -> impl Iterator<Item = hexane::Run<T>> {
     let mut iter = iter.peekable();
     std::iter::from_fn(move || {
         let value = iter.next()?;
@@ -1081,7 +1081,7 @@ pub(crate) fn runs<T: PartialEq>(
         while iter.next_if(|v| *v == value).is_some() {
             count += 1;
         }
-        Some((value, count))
+        Some(hexane::Run { count, value })
     })
 }
 

@@ -536,6 +536,12 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         self.next_run_max(self.items_left)
     }
 
+    /// Adapt into an iterator of [`Run`]s — the item shape
+    /// [`Column::splice_runs`] accepts.
+    pub fn runs(self) -> Runs<'a, T> {
+        Runs(self)
+    }
+
     pub(crate) fn next_run_max(&mut self, mut max: usize) -> Option<crate::Run<T::Get<'a>>> {
         if max == 0 {
             return None;
@@ -631,6 +637,62 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             self.items_left -= skipped;
             true
         }
+    }
+}
+
+// ── copy_ranges support ─────────────────────────────────────────────────────
+
+/// Execution strategy for `copy_ranges`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CopyStrategy {
+    Direct,
+    Invert,
+}
+
+/// Safety factor favouring Direct in [`Column::copy_strategy`].  The
+/// seam term is already a gross upper bound, so 1 is not aggressive;
+/// see `copy_ranges_bench`.
+pub(crate) const COPY_INVERT_FACTOR: usize = 1;
+
+/// Clamp `ranges` to `len`, drop empties, merge touching neighbours,
+/// and assert ascending/non-overlapping.
+pub(crate) fn normalize_ranges(
+    ranges: impl IntoIterator<Item = Range<usize>>,
+    len: usize,
+) -> Vec<Range<usize>> {
+    let mut out: Vec<Range<usize>> = Vec::new();
+    let mut pos = 0usize;
+    for r in ranges {
+        assert!(
+            r.start >= pos,
+            "ranges must be ascending and non-overlapping"
+        );
+        pos = pos.max(r.end);
+        let start = r.start.min(len);
+        let end = r.end.min(len);
+        if end > start {
+            match out.last_mut() {
+                Some(last) if last.end == start => last.end = end,
+                _ => out.push(start..end),
+            }
+        }
+    }
+    out
+}
+
+// ── Runs ────────────────────────────────────────────────────────────────────
+
+/// Iterator adapter yielding [`Run`]s instead of individual items;
+/// created by [`Iter::runs`].
+#[derive(Debug)]
+pub struct Runs<'a, T: ColumnValueRef>(pub(crate) Iter<'a, T>);
+
+impl<'a, T: ColumnValueRef> Iterator for Runs<'a, T> {
+    type Item = Run<T::Get<'a>>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next_run()
     }
 }
 
@@ -1299,14 +1361,145 @@ where
         let _ = self.splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
-    /// Splice `(value, count)` runs in — the run-aware fast path for bulk
-    /// uniform data.
+    /// Splice [`Run`]s in — the run-aware fast path for bulk uniform data.
+    /// Accepts `Run<T::Get<'_>>` straight from a column iterator, or runs of
+    /// any other insertable form.
     pub fn splice_runs<V, I>(&mut self, index: usize, del: usize, runs: I)
     where
         V: AsColumnRef<T>,
-        I: IntoIterator<Item = (V, usize)>,
+        I: IntoIterator<Item = Run<V>>,
     {
-        let _ = self.splice_inner(index, del, runs);
+        let _ = self.splice_inner(index, del, runs.into_iter().map(|r| (r.value, r.count)));
+    }
+
+    /// Splice `ranges` of `src` into `self` at `index`, deleting `del`
+    /// rows — equivalent to
+    /// `splice_runs(index, del, src.iter().runs().ranges(ranges))`.
+    /// Takes `src` by value so the implementation may invert: swap the
+    /// columns, delete the gaps (reusing `src`'s slabs without
+    /// decoding), and splice the old `self` back around them.  The
+    /// choice is unobservable — both paths yield identical values and
+    /// `save()` bytes.
+    ///
+    /// Ranges must be ascending and non-overlapping (touching is fine)
+    /// and are clamped to `src`'s length.
+    pub fn copy_ranges<R>(&mut self, index: usize, del: usize, src: Self, ranges: R)
+    where
+        R: IntoIterator<Item = Range<usize>>,
+        for<'b> T::Get<'b>: AsColumnRef<T>,
+    {
+        let ranges = normalize_ranges(ranges, src.len());
+        let strategy = self.copy_strategy(&src, &ranges);
+        self.copy_ranges_with(index, del, src, ranges, strategy);
+    }
+
+    /// Decide direct vs inverted for [`copy_ranges`](Self::copy_ranges)
+    /// from stored per-slab item/segment counts — O(slabs), no data
+    /// decoded.
+    pub(crate) fn copy_strategy(&self, src: &Self, ranges: &[Range<usize>]) -> CopyStrategy {
+        // Inverting keeps src's slabs, built under src's segment
+        // budget — only sound when the budgets match.
+        if self.max_segments != src.max_segments || src.slabs.len() < 8 {
+            return CopyStrategy::Direct;
+        }
+
+        let mut item_prefix = Vec::with_capacity(src.slabs.len() + 1);
+        let mut seg_prefix = Vec::with_capacity(src.slabs.len() + 1);
+        item_prefix.push(0usize);
+        seg_prefix.push(0usize);
+        for s in &src.slabs {
+            item_prefix.push(item_prefix.last().unwrap() + s.len);
+            seg_prefix.push(seg_prefix.last().unwrap() + s.segments);
+        }
+        let slab_of = |row: usize| item_prefix.partition_point(|&p| p <= row) - 1;
+
+        // Segments the direct path would decode + re-encode.
+        let mut retained_segs = 0usize;
+        for r in ranges {
+            let sa = slab_of(r.start);
+            let sb = slab_of(r.end - 1);
+            if sa == sb {
+                retained_segs += src.slabs[sa].segments;
+            } else {
+                retained_segs += src.slabs[sa].segments
+                    + src.slabs[sb].segments
+                    + (seg_prefix[sb] - seg_prefix[sa + 1]);
+            }
+        }
+
+        // Inverted-path work: re-encode all of self, boundary segments
+        // per gap seam, O(slabs) bookkeeping.
+        let dest_segs: usize = self.slabs.iter().map(|s| s.segments).sum();
+        let seam_segs = (ranges.len() + 1) * 2 * self.max_segments;
+        let invert_cost = dest_segs + seam_segs + src.slabs.len();
+
+        if retained_segs > COPY_INVERT_FACTOR * invert_cost {
+            CopyStrategy::Invert
+        } else {
+            CopyStrategy::Direct
+        }
+    }
+
+    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
+    /// `ranges` must already be normalized.
+    pub(crate) fn copy_ranges_with(
+        &mut self,
+        index: usize,
+        del: usize,
+        mut src: Self,
+        ranges: Vec<Range<usize>>,
+        strategy: CopyStrategy,
+    ) where
+        for<'b> T::Get<'b>: AsColumnRef<T>,
+    {
+        assert!(index + del <= self.len(), "splice range out of bounds");
+        match strategy {
+            CopyStrategy::Direct => {
+                use crate::shift::Shiftable;
+                self.splice_runs(index, del, src.iter().runs().ranges(ranges));
+            }
+            CopyStrategy::Invert => {
+                let old_len = self.len();
+                self.swap_contents(&mut src);
+                self.retain_ranges(&ranges);
+                let retained = self.len();
+                if index > 0 {
+                    self.splice_runs(0, 0, src.iter_range(0..index).runs());
+                }
+                if index + del < old_len {
+                    self.splice_runs(
+                        index + retained,
+                        0,
+                        src.iter_range(index + del..old_len).runs(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Keep only the rows in `ranges` (normalized), deleting the gaps
+    /// back-to-front; interior slabs of a gap drop without decoding.
+    pub(crate) fn retain_ranges(&mut self, ranges: &[Range<usize>]) {
+        let mut end = self.len();
+        for r in ranges.iter().rev() {
+            if r.end < end {
+                self.remove_n(r.end, end - r.end);
+            }
+            end = r.start;
+        }
+        if end > 0 {
+            self.remove_n(0, end);
+        }
+    }
+
+    /// Swap contents with `other`, keeping this column's segment budget
+    /// and bumping the counter past both so suspended iterators of
+    /// either column can't resume against the swapped data.
+    pub(crate) fn swap_contents(&mut self, other: &mut Self) {
+        let counter = self.counter.max(other.counter) + 1;
+        std::mem::swap(self, other);
+        std::mem::swap(&mut self.max_segments, &mut other.max_segments);
+        self.counter = counter;
     }
 
     /// Returns the affected slab range (post-merge), mirroring
