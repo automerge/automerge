@@ -10,8 +10,8 @@
 //! [`apply_op`]: ApplyManifold::apply_op
 //! [`finish`]: ApplyManifold::finish
 
+use crate::op_set2::op::DocSucc;
 use crate::op_set2::types::Action;
-use crate::op_set2::SuccInsert;
 use crate::storage::bundle::{FragMeta, FragOp, FragOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
 
@@ -31,6 +31,8 @@ pub(crate) static STAT_SLOT_WALK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64
 pub(crate) static STAT_SLOT_EDGE: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 pub(crate) static STAT_INS_LESSER: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 pub(crate) static STAT_MAP_SEEK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_ADD_SUCC: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_RESET: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
 pub fn dump_manifold_stats() {
     let d = |s: &[AtomicU64; 2]| (s[0].swap(0, Relaxed), s[1].swap(0, Relaxed));
@@ -39,17 +41,21 @@ pub fn dump_manifold_stats() {
     let (c3, r3) = d(&STAT_SLOT_EDGE);
     let (c4, r4) = d(&STAT_INS_LESSER);
     let (c5, r5) = d(&STAT_MAP_SEEK);
+    let (c6, r6) = d(&STAT_ADD_SUCC);
+    let (c7, r7) = d(&STAT_RESET);
     eprintln!("MSTATS upd-elem-scan   calls {:>9} rows {:>12}", c1, r1);
     eprintln!("MSTATS ins-anchor-scan calls {:>9} rows {:>12}", c2, r2);
     eprintln!("MSTATS ins-anchor-MISS calls {:>9} rows {:>12}", c3, r3);
     eprintln!("MSTATS ins-lesser-scan calls {:>9} rows {:>12}", c4, r4);
     eprintln!("MSTATS map-key-seek    calls {:>9} rows {:>12}", c5, r5);
+    eprintln!("MSTATS add-succ      applies {:>9} entries {:>9}", c6, r6);
+    eprintln!("MSTATS reset-mixed    groups {:>9} rows {:>12}", c7, r7);
 }
 
 /// What a batch resolves to.
 pub(crate) struct ManifoldResult {
-    /// succ entries to write into existing document rows
-    pub(crate) doc_succ: Vec<SuccInsert>,
+    /// succ entries to write into existing document rows, batched
+    pub(crate) doc_succ: DocSucc,
     /// succ for targets pending in the batch itself, deferred to the
     /// consumer's change ops (unnormalized)
     pub(crate) change_succ: HashMap<OpId, Vec<(OpId, Option<i64>)>>,
@@ -58,7 +64,7 @@ pub(crate) struct ManifoldResult {
     /// `pos`. Delete ops never land, so their indexes fall in the gaps
     /// between runs — a delete-free batch applied to an empty doc is
     /// the single run `(0, 0..ops.len())`
-    pub(crate) insert_runs: Vec<(usize, Range<usize>)>,
+    pub(crate) insert_runs: Vec<CopyRange>,
     /// groups whose top/text election may have changed: they contain
     /// visible rows (or fresh deletions) from BOTH the document and the
     /// batch. Each entry is the group's doc row range (pre-merge) plus
@@ -81,6 +87,19 @@ pub(crate) struct MixedGroup {
     /// first row (deletes included): the head of the standalone
     /// register the group's rows fused with, needing re-election
     pub(crate) head_hint: Option<usize>,
+}
+
+/// One insert run with everything the column merge needs: the doc row
+/// position (pre-merge), the fragment row range, and the fragment's
+/// succ-entry and value-byte ranges for those rows — stamped while the
+/// manifold streams, so the merge never queries the fragment's
+/// prefix columns.
+#[derive(Debug, Clone)]
+pub(crate) struct CopyRange {
+    pub(crate) pos: usize,
+    pub(crate) range: Range<usize>,
+    pub(crate) sub_range: Range<usize>,
+    pub(crate) val_range: Range<usize>,
 }
 
 impl OpSet {
@@ -127,10 +146,14 @@ pub(crate) struct ApplyManifold<'a> {
     obj_scope: Range<usize>,
     key: Option<String>,
 
-    insert_runs: Vec<(usize, Range<usize>)>,
+    insert_runs: Vec<CopyRange>,
     // index of the op the current `apply_op` call is processing —
     // the run ranges are in these units
     op_index: usize,
+    // fragment succ entries / value bytes consumed through the pushed
+    // ops so far — the source of each CopyRange's sub/val ranges
+    frag_sub: usize,
+    frag_val: usize,
     succ_cache: SuccCache,
     // the last row a slot scan stopped on: (row id, slot). Reusable by
     // any op that beats the row — except one anchored at the row
@@ -199,6 +222,8 @@ impl<'a> ApplyManifold<'a> {
             key: None,
             insert_runs: vec![],
             op_index: 0,
+            frag_sub: 0,
+            frag_val: 0,
             succ_cache,
             lesser: None,
             appending: false,
@@ -211,14 +236,28 @@ impl<'a> ApplyManifold<'a> {
         }
     }
 
-    /// Record that the current op lands at document position `pos`:
-    /// extend the last run when it is contiguous (same position, no
-    /// delete gap), otherwise open a new one.
-    fn push_pos(&mut self, pos: usize) {
+    /// Record that the current op lands at document position `pos`,
+    /// carrying `sub` succ entries and `val` value bytes: extend the
+    /// last run when it is contiguous (same position, no delete gap),
+    /// otherwise open a new one. Delete ops never push and carry
+    /// neither, so consecutive runs' sub/val ranges stay contiguous.
+    fn push_pos(&mut self, pos: usize, sub: usize, val: usize) {
         let i = self.op_index;
+        let (sub0, val0) = (self.frag_sub, self.frag_val);
+        self.frag_sub += sub;
+        self.frag_val += val;
         match self.insert_runs.last_mut() {
-            Some((p, r)) if *p == pos && r.end == i => r.end = i + 1,
-            _ => self.insert_runs.push((pos, i..i + 1)),
+            Some(cr) if cr.pos == pos && cr.range.end == i => {
+                cr.range.end = i + 1;
+                cr.sub_range.end = self.frag_sub;
+                cr.val_range.end = self.frag_val;
+            }
+            _ => self.insert_runs.push(CopyRange {
+                pos,
+                range: i..i + 1,
+                sub_range: sub0..self.frag_sub,
+                val_range: val0..self.frag_val,
+            }),
         }
     }
 
@@ -274,8 +313,8 @@ impl<'a> ApplyManifold<'a> {
     /// an op lands at the object end with no memo, every later
     /// same-object op lands there too (document order), which is what
     /// arms the tail fast path.
-    fn push_slot(&mut self, pos: usize) {
-        self.push_pos(pos);
+    fn push_slot(&mut self, pos: usize, sub: usize, val: usize) {
+        self.push_pos(pos, sub, val);
         self.appending = pos == self.obj_scope.end && self.lesser.is_none();
     }
 
@@ -319,12 +358,24 @@ impl<'a> ApplyManifold<'a> {
                 // matter. If an update on the run's last insert
                 // follows, its candidate is reconstructed there.
                 let i = self.op_index;
+                let (last_id, vbytes) = src.skip_clean(n);
+                let (sub0, val0) = (self.frag_sub, self.frag_val);
+                self.frag_val += vbytes;
                 match self.insert_runs.last_mut() {
-                    Some((p, r)) if *p == end && r.end == i => r.end = i + n,
-                    _ => self.insert_runs.push((end, i..i + n)),
+                    Some(cr) if cr.pos == end && cr.range.end == i => {
+                        cr.range.end = i + n;
+                        cr.sub_range.end = self.frag_sub;
+                        cr.val_range.end = self.frag_val;
+                    }
+                    _ => self.insert_runs.push(CopyRange {
+                        pos: end,
+                        range: i..i + n,
+                        sub_range: sub0..self.frag_sub,
+                        val_range: val0..self.frag_val,
+                    }),
                 }
                 self.op_index += n;
-                self.last_insert = Some(src.skip_clean(n));
+                self.last_insert = Some(last_id);
                 self.last_ins_row = Some(self.op_index - 1);
                 self.elem = None;
                 rem -= n;
@@ -389,7 +440,7 @@ impl<'a> ApplyManifold<'a> {
                 self.last_insert = Some(op.id);
                 self.last_ins_row = Some(self.op_index);
             }
-            self.push_pos(end);
+            self.push_pos(end, op.sub_len, op.val_len);
             self.top.candidate(&op, self.op_index, self.last_ins_row);
             self.op_index += 1;
             rem -= 1;
@@ -499,7 +550,7 @@ impl<'a> ApplyManifold<'a> {
                 STAT_MAP_SEEK[0].fetch_add(1, Relaxed);
                 STAT_MAP_SEEK[1].fetch_add((r.start.saturating_sub(before)) as u64, Relaxed);
                 assert!(r.is_empty());
-                self.push_slot(r.start);
+                self.push_slot(r.start, op.sub_len, op.val_len);
                 self.top.candidate(op, self.op_index, self.last_ins_row);
             } else {
                 self.top.note_del(self.op_index, self.last_ins_row);
@@ -558,7 +609,7 @@ impl<'a> ApplyManifold<'a> {
                 // a hop here would drag id_iter/ins past rows the next
                 // update group or sibling still needs
                 let (_, found) = self.lesser.unwrap();
-                self.push_slot(found);
+                self.push_slot(found, op.sub_len, op.val_len);
             } else {
                 // an insert only ever lands immediately before another
                 // insert row (or the object end): hop past any update
@@ -585,13 +636,13 @@ impl<'a> ApplyManifold<'a> {
                     Relaxed,
                 );
                 if let Some((found, row_id)) = hit {
-                    self.push_slot(found);
+                    self.push_slot(found, op.sub_len, op.val_len);
                     self.lesser = Some((row_id, found));
                     // the scan stopped on (and consumed) this row — a
                     // later op may anchor at it
                     self.consumed.insert(row_id);
                 } else {
-                    self.push_slot(self.obj_scope.end);
+                    self.push_slot(self.obj_scope.end, op.sub_len, op.val_len);
                     self.lesser = None;
                 }
             }
@@ -620,7 +671,7 @@ impl<'a> ApplyManifold<'a> {
                     // nothing to seek and no covered preds. The memo is
                     // deliberately left alone — this element's children
                     // will collapse onto the same slot through it
-                    let p = self.insert_runs.last().unwrap().0;
+                    let p = self.insert_runs.last().unwrap().pos;
                     self.elem_scope = p..p;
                 } else {
                     // the element row may already be consumed: when an
@@ -680,12 +731,12 @@ impl<'a> ApplyManifold<'a> {
             if !(op.action == Action::Delete) {
                 if self.elem_scope.is_empty() {
                     // pending target: rides along at its insert's slot
-                    self.push_slot(self.elem_scope.start);
+                    self.push_slot(self.elem_scope.start, op.sub_len, op.val_len);
                     self.top.candidate(op, self.op_index, self.last_ins_row);
                 } else {
                     let r = self.id_iter.seek_to_value(&op.id);
                     assert!(r.is_empty());
-                    self.push_slot(r.start);
+                    self.push_slot(r.start, op.sub_len, op.val_len);
                     self.top.candidate(op, self.op_index, self.last_ins_row);
                 }
             } else {
@@ -924,7 +975,7 @@ struct SuccCache {
     clock: Clock,
     preds: Vec<(OpId, OpId, Option<i64>)>,
     change_succ: HashMap<OpId, Vec<(OpId, Option<i64>)>>,
-    doc_succ: Vec<SuccInsert>,
+    doc_succ: DocSucc,
 }
 
 impl SuccCache {
@@ -932,7 +983,7 @@ impl SuccCache {
         SuccCache {
             clock,
             preds: vec![],
-            doc_succ: vec![],
+            doc_succ: DocSucc::default(),
             change_succ: HashMap::default(),
         }
     }

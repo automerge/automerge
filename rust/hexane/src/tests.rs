@@ -1320,6 +1320,77 @@ fn copy_ranges_strategies_agree() {
     }
 }
 
+/// Multi-point copy_ranges: several splice points — inserts, replaces
+/// (delete + insert), pure deletes, and contiguous neighbours that
+/// normalize into one — agree across strategies, match a per-item
+/// reference interleave, and produce identical save() bytes.
+#[test]
+fn copy_ranges_multi_point_strategies_agree() {
+    use crate::column::{normalize_splices, CopyStrategy};
+    use crate::Splice;
+
+    let sp =
+        |pos: usize, delete: usize, range: std::ops::Range<usize>| Splice { pos, delete, range };
+    let src_vals: Vec<u64> = (0..3000).map(|i| (i * 7) / 40).collect();
+    let dest_vals: Vec<u64> = (0..200).map(|i| 9000 + i / 3).collect();
+    let src: Column<u64> = src_vals.iter().copied().collect();
+
+    let cases: Vec<Vec<Splice>> = vec![
+        vec![sp(0, 0, 0..100), sp(50, 0, 200..300), sp(199, 0, 400..500)],
+        // repeated insertion point with a gap between src ranges
+        vec![sp(10, 0, 0..40), sp(10, 0, 100..140), sp(90, 0, 200..2900)],
+        // append-heavy: everything lands at the end
+        vec![sp(200, 0, 0..1500), sp(200, 0, 1500..3000)],
+        // single mid-point bulk (the invert sweet spot)
+        vec![sp(1, 0, 5..2995)],
+        // replaces and pure deletes
+        vec![sp(0, 3, 0..3), sp(10, 5, 100..102), sp(60, 20, 300..300)],
+        // contiguous replaces that normalize into one splice
+        vec![
+            sp(5, 1, 0..1),
+            sp(6, 1, 1..2),
+            sp(7, 1, 2..3),
+            sp(30, 2, 50..60),
+        ],
+        // empty and clamped ranges drop out
+        vec![sp(0, 0, 3..3), sp(7, 0, 2990..3100)],
+    ];
+
+    for splices in cases {
+        let norm = normalize_splices(splices.iter().cloned(), src.len(), dest_vals.len());
+        let mut direct: Column<u64> = dest_vals.iter().copied().collect();
+        let mut invert: Column<u64> = dest_vals.iter().copied().collect();
+        direct.copy_splices_with(src.clone(), &norm, CopyStrategy::Direct);
+        invert.copy_splices_with(src.clone(), &norm, CopyStrategy::Invert);
+
+        let mut want = Vec::new();
+        let mut prev = 0usize;
+        for sp in &norm {
+            want.extend_from_slice(&dest_vals[prev..sp.pos]);
+            want.extend_from_slice(&src_vals[sp.range.clone()]);
+            prev = sp.pos + sp.delete;
+        }
+        want.extend_from_slice(&dest_vals[prev..]);
+
+        assert_eq!(
+            direct.iter().collect::<Vec<_>>(),
+            want,
+            "direct {splices:?}"
+        );
+        assert_eq!(
+            invert.iter().collect::<Vec<_>>(),
+            want,
+            "invert {splices:?}"
+        );
+        assert_eq!(direct.save(), invert.save(), "bytes {splices:?}");
+
+        // the public API (heuristic strategy) matches too
+        let mut auto: Column<u64> = dest_vals.iter().copied().collect();
+        auto.copy_ranges(src.clone(), splices.iter().cloned());
+        assert_eq!(auto.iter().collect::<Vec<_>>(), want, "auto {splices:?}");
+    }
+}
+
 /// copy_ranges strategy equivalence with null runs in the source.
 #[test]
 fn copy_ranges_strategies_agree_nullable() {
@@ -1356,18 +1427,31 @@ fn copy_ranges_heuristic() {
     let dest: Column<u64> = [1u64, 2].iter().copied().collect();
 
     let all = normalize_ranges([0..100_000], src.len());
-    assert_eq!(dest.copy_strategy(&src, &all), CopyStrategy::Invert);
+    assert_eq!(dest.copy_strategy(&src, &all, 1), CopyStrategy::Invert);
 
     let scattered = normalize_ranges([50..60, 1000..1010], src.len());
-    assert_eq!(dest.copy_strategy(&src, &scattered), CopyStrategy::Direct);
+    assert_eq!(
+        dest.copy_strategy(&src, &scattered, 1),
+        CopyStrategy::Direct
+    );
 
     // mismatched segment budgets force direct
     let small_budget: Column<u64> = Column::with_max_segments(8);
-    assert_eq!(small_budget.copy_strategy(&src, &all), CopyStrategy::Direct);
+    assert_eq!(
+        small_budget.copy_strategy(&src, &all, 1),
+        CopyStrategy::Direct
+    );
 
     // end-to-end through the public API (this picks Invert internally)
     let mut dest2 = dest.clone();
-    dest2.copy_ranges(1, 0, src.clone(), [0..100_000]);
+    dest2.copy_ranges(
+        src.clone(),
+        [crate::Splice {
+            pos: 1,
+            delete: 0,
+            range: 0..100_000,
+        }],
+    );
     assert_eq!(dest2.len(), 100_002);
     assert_eq!(dest2.get(0), Some(1));
     assert_eq!(dest2.get(1), Some(0));
@@ -1397,7 +1481,21 @@ fn copy_ranges_into_empty_column() {
 fn copy_ranges_rejects_overlap() {
     let src: Column<u64> = (0..100u64).collect();
     let mut dest = Column::<u64>::new();
-    dest.copy_ranges(0, 0, src, [10..30, 20..40]);
+    dest.copy_ranges(
+        src,
+        [
+            crate::Splice {
+                pos: 0,
+                delete: 0,
+                range: 10..30,
+            },
+            crate::Splice {
+                pos: 0,
+                delete: 0,
+                range: 20..40,
+            },
+        ],
+    );
 }
 
 /// PrefixIter::ranges() keeps absolute prefix totals across window jumps.
@@ -1424,7 +1522,14 @@ fn copy_ranges_prefix_column() {
     let src: PrefixColumn<u64> = (0..50_000u64).map(|i| 1 + i % 3).collect();
     let expected_total: u64 = src.iter().map(|pv| pv.value).sum();
     let mut dest: PrefixColumn<u64> = [7u64, 7].iter().copied().collect();
-    dest.copy_ranges(1, 0, src, [0..50_000]);
+    dest.copy_ranges(
+        src,
+        [crate::Splice {
+            pos: 1,
+            delete: 0,
+            range: 0..50_000,
+        }],
+    );
     assert_eq!(dest.len(), 50_002);
     assert_eq!(dest.get_prefix(50_002), u128::from(14 + expected_total));
 }

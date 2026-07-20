@@ -48,7 +48,7 @@ pub mod prefix;
 pub mod raw;
 pub mod rle;
 pub mod shift;
-pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs};
+pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs, Splice};
 pub use delta::indexed::FindByRange;
 pub use delta::{
     DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaRun, DeltaRuns,

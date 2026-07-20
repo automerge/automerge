@@ -524,12 +524,12 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 
     /// See [`Column::copy_ranges`](crate::Column::copy_ranges).
-    pub fn copy_ranges<R>(&mut self, index: usize, del: usize, src: Self, ranges: R)
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
-        R: IntoIterator<Item = std::ops::Range<usize>>,
+        I: IntoIterator<Item = crate::Splice>,
         for<'b> T::Get<'b>: crate::AsColumnRef<T>,
     {
-        self.col.copy_ranges(index, del, src.col, ranges);
+        self.col.copy_ranges(src.col, splices);
     }
 
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────

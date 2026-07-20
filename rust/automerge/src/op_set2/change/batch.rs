@@ -361,7 +361,7 @@ impl BatchApply {
         // as an indexed op set, the streaming manifold resolves them,
         // and the merge copies columns and indexes in wholesale
         let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
-        let mut frag = super::fragment::FragmentApply::from_parts(
+        let frag = super::fragment::FragmentApply::from_parts(
             clock.clone(),
             actor_map,
             super::fragment::FragSrc::Owned { raw, data, id_ctr },

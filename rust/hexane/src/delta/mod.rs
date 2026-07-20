@@ -923,17 +923,65 @@ impl<T: DeltaValue> DeltaColumn<T> {
     /// Delta-column version of
     /// [`Column::copy_ranges`](crate::Column::copy_ranges); seam deltas
     /// re-anchor through the same fix-up machinery as `splice_runs`.
-    pub fn copy_ranges<R>(&mut self, index: usize, del: usize, src: Self, ranges: R)
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
-        R: IntoIterator<Item = Range<usize>>,
+        I: IntoIterator<Item = crate::Splice>,
     {
-        let ranges = crate::column::normalize_ranges(ranges, src.len());
-        let strategy = self.col.copy_strategy(&src.col, &ranges);
-        self.copy_ranges_with(index, del, src, ranges, strategy);
+        let splices = crate::column::normalize_splices(splices, src.len(), self.len());
+        if splices.is_empty() {
+            return;
+        }
+        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
+        let strategy = self.col.copy_strategy(&src.col, &ranges, splices.len());
+        self.copy_splices_with(src, &splices, strategy);
     }
 
     /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
-    /// `ranges` must already be normalized.
+    /// `splices` must already be normalized.
+    pub(crate) fn copy_splices_with(
+        &mut self,
+        mut src: Self,
+        splices: &[crate::Splice],
+        strategy: crate::column::CopyStrategy,
+    ) {
+        use crate::column::CopyStrategy;
+        use crate::Shiftable;
+        match strategy {
+            CopyStrategy::Direct => {
+                let mut shift = 0isize;
+                for sp in splices {
+                    let at = (sp.pos as isize + shift) as usize;
+                    self.splice_runs(at, sp.delete, src.iter().runs().ranges([sp.range.clone()]));
+                    shift += sp.range.len() as isize - sp.delete as isize;
+                }
+            }
+            CopyStrategy::Invert => {
+                let old_len = self.len();
+                self.col.swap_contents(&mut src.col);
+                let ranges: Vec<std::ops::Range<usize>> =
+                    splices.iter().map(|sp| sp.range.clone()).collect();
+                self.retain_ranges(&ranges);
+                let mut out_pos = 0usize;
+                let mut prev_end = 0usize;
+                for sp in splices {
+                    if sp.pos > prev_end {
+                        self.splice_runs(out_pos, 0, src.iter_range(prev_end..sp.pos).runs());
+                        out_pos += sp.pos - prev_end;
+                    }
+                    prev_end = sp.pos + sp.delete;
+                    out_pos += sp.range.len();
+                }
+                if old_len > prev_end {
+                    self.splice_runs(out_pos, 0, src.iter_range(prev_end..old_len).runs());
+                }
+            }
+        }
+    }
+
+    /// Single-point [`copy_ranges`](Self::copy_ranges) with a deletion
+    /// count and the strategy pinned — kept for the strategy-agreement
+    /// tests, which exercise `del`.
+    #[cfg(test)]
     pub(crate) fn copy_ranges_with(
         &mut self,
         index: usize,
@@ -2198,12 +2246,19 @@ mod tests {
         let dest = DeltaColumn::from_values(vec![1u64, 5]);
         let norm = crate::column::normalize_ranges([0..100_000], src.len());
         assert_eq!(
-            dest.col.copy_strategy(&src.col, &norm),
+            dest.col.copy_strategy(&src.col, &norm, 1),
             CopyStrategy::Invert
         );
 
         let mut dest2 = dest.clone();
-        dest2.copy_ranges(1, 0, src, [0..100_000]);
+        dest2.copy_ranges(
+            src,
+            [crate::Splice {
+                pos: 1,
+                delete: 0,
+                range: 0..100_000,
+            }],
+        );
         assert_eq!(dest2.len(), 100_002);
         assert_eq!(dest2.get(0), Some(1));
         assert_eq!(dest2.get(1), Some(v(0)));
@@ -2398,7 +2453,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::reversed_empty_ranges)] 
+    #[allow(clippy::reversed_empty_ranges)]
     fn scan_to_range_basic() {
         let values = vec![50u64, 3, 90, 12, 7, 60, 11];
         let col = DeltaColumn::from_values(values.clone());

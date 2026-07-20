@@ -1115,6 +1115,10 @@ pub(crate) struct FragOp<'a> {
     /// target
     pub(crate) inc: Option<i64>,
     pub(crate) is_counter: bool,
+    /// in-fragment succ entries this row carries (sub-column width)
+    pub(crate) sub_len: usize,
+    /// value bytes this row carries
+    pub(crate) val_len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1218,6 +1222,7 @@ pub(crate) struct FragOps<'a> {
     succ_count: hexane::Decoder<'a, Option<u64>>,
     succ_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    value_meta: hexane::Decoder<'a, Option<ValueMeta>>,
     /// raw (unmapped) obj actor of the last-read op, for same-obj run
     /// peeks against the raw column
     cur_obj_raw: (Option<ActorIdx>, Option<u64>),
@@ -1254,6 +1259,7 @@ impl<'a> FragOps<'a> {
             succ_count: hexane::decoder::<Option<u64>>(&[]),
             succ_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
             succ_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
+            value_meta: hexane::decoder::<Option<ValueMeta>>(&[]),
             cur_obj_raw: (None, None),
             pred_absent: true,
             succ_absent: true,
@@ -1295,6 +1301,9 @@ impl<'a> FragOps<'a> {
                 }
                 (ops::SUCC_COL_ID, C::DeltaInteger) => {
                     s.succ_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::VAL_COL_ID, C::ValueMetadata) => {
+                    s.value_meta = hexane::decoder::<Option<ValueMeta>>(d)
                 }
                 _ => {}
             }
@@ -1360,6 +1369,7 @@ impl<'a> FragOps<'a> {
         }
 
         let inc = meta.increments.get(&id).copied();
+        let val_len = self.value_meta.next().flatten().map_or(0, |m| m.length());
 
         FragOp {
             id,
@@ -1371,6 +1381,8 @@ impl<'a> FragOps<'a> {
             alive,
             inc,
             is_counter,
+            sub_len: n_succ,
+            val_len,
         }
     }
 
@@ -1446,7 +1458,8 @@ impl<'a> FragOps<'a> {
     /// Skip `n` ops known to have zero preds and zero succ (a clean
     /// run), advancing every column in step. Returns the id of the
     /// last skipped op.
-    pub(crate) fn skip_clean(&mut self, n: usize) -> OpId {
+    pub(crate) fn skip_clean(&mut self, n: usize) -> (OpId, usize) {
+        use hexane::RunDecoder;
         debug_assert!(n > 0 && self.pos + n <= self.len);
         let last_actor = self.id_actor.nth(n - 1).flatten().expect("id actor");
         skip_rle(&mut self.obj_actor, n);
@@ -1460,10 +1473,26 @@ impl<'a> FragOps<'a> {
         // sub-columns do not advance
         skip_rle(&mut self.pred_count, n);
         skip_rle(&mut self.succ_count, n);
+        // value bytes ride along in the copy ranges: sum the skipped
+        // rows' meta lengths run by run
+        let mut vbytes = 0usize;
+        let mut m = 0usize;
+        while m < n {
+            match self.value_meta.next_run_max(n - m) {
+                Some(run) => {
+                    vbytes += run.value.map_or(0, |v| v.length()) * run.count;
+                    m += run.count;
+                }
+                None => break, // elided column: no bytes
+            }
+        }
         self.pos += n;
-        OpId::new(
-            self.id_ctr[self.pos - 1] as u64,
-            self.actor_map[usize::from(last_actor)],
+        (
+            OpId::new(
+                self.id_ctr[self.pos - 1] as u64,
+                self.actor_map[usize::from(last_actor)],
+            ),
+            vbytes,
         )
     }
 }

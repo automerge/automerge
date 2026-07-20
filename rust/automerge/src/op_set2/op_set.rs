@@ -13,7 +13,7 @@ use crate::types::{
 };
 use crate::AutomergeError;
 
-use super::op::{Op, OpLike, SuccCursors, SuccInsert, TxOp};
+use super::op::{DocSucc, Op, OpLike, SuccCursors, SuccInsert, TxOp};
 
 use super::columns::Columns;
 
@@ -188,6 +188,29 @@ impl OpSet {
         if n == 0 {
             return;
         }
+        if n == 1 {
+            // single-row register: top must equal visible, and usually
+            // already does (add_succ cleared both on a kill) — two
+            // point reads instead of the full election
+            let vis = self
+                .cols
+                .index
+                .visible
+                .iter_range(range.clone())
+                .next()
+                .unwrap_or(false);
+            let top = self
+                .cols
+                .index
+                .top
+                .values()
+                .iter_range(range.clone())
+                .next()
+                .unwrap_or(false);
+            if top == vis {
+                return;
+            }
+        }
         let mut new_top = vec![false; n];
         {
             let ins = self.cols.insert.values().iter_range(range.clone());
@@ -210,10 +233,12 @@ impl OpSet {
         }
         let mut new_text: Vec<Option<u32>> = Vec::with_capacity(n);
         let mut widths_needed = vec![];
+        let mut changed = false;
         {
             let top_old = self.cols.index.top.values().iter_range(range.clone());
             let text_old = self.cols.index.text.values().iter_range(range.clone());
             for (i, (t_old, w_old)) in top_old.zip(text_old).enumerate() {
+                changed |= new_top[i] != t_old;
                 new_text.push(match (new_top[i], t_old) {
                     (true, true) => w_old,
                     (true, false) => {
@@ -223,6 +248,11 @@ impl OpSet {
                     (false, _) => None,
                 });
             }
+        }
+        if !changed {
+            // the election stands: kept tops keep their text, losers
+            // already read None — nothing to write
+            return;
         }
         for i in widths_needed {
             let w = self
@@ -481,29 +511,63 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
-        let mut succ_inc = 0;
-        let mut last_pos = None;
-        for i in op_pos.iter().rev() {
-            if last_pos == Some(i.pos) {
-                succ_inc += 1;
-            } else {
-                last_pos = Some(i.pos);
-                succ_inc = 1;
-            }
+    /// Write a batch of succ additions in one pass per column. The
+    /// three sub columns take their new entries via multi-point
+    /// [`hexane::Splice`]s from small encoded source columns; the
+    /// row-level count updates and visibility clears are replace
+    /// splices through the same machinery — contiguous rows (a delete
+    /// sweep) normalize into single splices.
+    pub(crate) fn add_succ(&mut self, s: DocSucc) {
+        if s.is_empty() {
+            return;
+        }
+        let splices = || s.splices.iter().cloned();
+        self.cols
+            .succ_actor
+            .copy_ranges(hexane::Column::from_values(s.actors), splices());
+        self.cols
+            .succ_ctr
+            .copy_ranges(hexane::DeltaColumn::from_values(s.ctrs), splices());
+        self.cols
+            .index
+            .inc
+            .copy_ranges(hexane::Column::from_values(s.incs), splices());
+
+        let counts = hexane::Column::from_values(s.counts.iter().map(|(_, c)| *c).collect());
+        let count_splices = s
+            .counts
+            .iter()
+            .enumerate()
+            .map(|(k, (pos, _))| hexane::Splice {
+                pos: *pos,
+                delete: 1,
+                range: k..k + 1,
+            });
+        self.cols
+            .succ_count
+            .copy_ranges(hexane::PrefixColumn::from_column(counts), count_splices);
+
+        if !s.clears.is_empty() {
+            let n = s.clears.len();
+            let clear_splices = || {
+                s.clears.iter().enumerate().map(|(k, pos)| hexane::Splice {
+                    pos: *pos,
+                    delete: 1,
+                    range: k..k + 1,
+                })
+            };
             self.cols
-                .succ_count
-                .splice(i.pos, 1, [(i.len + succ_inc) as u32]);
-            self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
-            self.cols
-                .succ_ctr
-                .splice(i.sub_pos, 0, [i.id.counter() as u32]);
-            self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
-                self.cols.index.visible.splice(i.pos, 1, [false]);
-                self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
-                self.cols.index.top.splice(i.pos, 1, [false]);
-            }
+                .index
+                .visible
+                .copy_ranges(hexane::Column::from_values(vec![false; n]), clear_splices());
+            self.cols.index.top.copy_ranges(
+                hexane::PrefixColumn::from_values(vec![false; n]),
+                clear_splices(),
+            );
+            self.cols.index.text.copy_ranges(
+                hexane::PrefixColumn::from_values(vec![None::<u32>; n]),
+                clear_splices(),
+            );
         }
     }
 
@@ -641,6 +705,11 @@ impl OpSet {
         };
 
         MapRange::new(self, start..end, clock)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cols_sub_len(&self) -> usize {
+        self.cols.sub_len()
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -1613,11 +1682,9 @@ impl OpSet {
     /// Splice a loaded fragment op set into this one at the manifold's
     /// insert runs: a straight copy of op columns and index columns
     /// (see [`Columns::merge`]), plus the fragment's obj_info entries.
-    pub(crate) fn merge(&mut self, frag: &OpSet, runs: &[(usize, Range<usize>)]) {
-        self.cols.merge(&frag.cols, runs);
-        self.obj_info
-            .0
-            .extend(frag.obj_info.0.iter().map(|(k, v)| (*k, *v)));
+    pub(crate) fn merge(&mut self, frag: OpSet, runs: &[manifold::CopyRange]) {
+        self.obj_info.0.extend(frag.obj_info.0);
+        self.cols.merge(frag.cols, runs);
     }
 
     /// Rebuild every index column (and obj_info) from scratch with the
@@ -1854,6 +1921,36 @@ impl OpSet {
             self.rewrite_with_new_actor(idx)
         }
         self.actors.insert(idx, actor)
+    }
+
+    /// Map every actor index through `map` in one pass — the batched
+    /// form of [`Self::rewrite_with_new_actor`] for inserting several
+    /// actors at once.
+    pub(crate) fn remap_actor_indexes(&mut self, map: &[u32]) {
+        self.cols
+            .remap_actors(&|a: ActorIdx| ActorIdx::from(map[u64::from(a) as usize] as usize));
+        self.cols.index.mark.remap_actor_indexes(map);
+        let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
+        self.obj_info = ObjIndex(
+            self.obj_info
+                .0
+                .iter()
+                .map(|(id, info)| {
+                    let parent = if info.parent.is_root() {
+                        info.parent
+                    } else {
+                        ObjId(remap_id(&info.parent.0))
+                    };
+                    (
+                        remap_id(id),
+                        ObjInfo {
+                            parent,
+                            obj_type: info.obj_type,
+                        },
+                    )
+                })
+                .collect(),
+        );
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {

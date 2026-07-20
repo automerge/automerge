@@ -229,7 +229,7 @@ impl<'a> FragmentApply<'a> {
     /// Apply the bundle's ops. Patches for an active log are produced
     /// by diffing the document across the apply.
     pub(crate) fn apply(
-        &mut self,
+        self,
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
@@ -249,7 +249,7 @@ impl<'a> FragmentApply<'a> {
     /// `pub(super)` so the batch path can join this pipeline after
     /// converting a v1 batch into the succ-format columns.
     pub(super) fn apply_manifold(
-        &mut self,
+        self,
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
@@ -267,7 +267,7 @@ impl<'a> FragmentApply<'a> {
         };
         log.migrate_actors(&doc.ops().actors)?;
 
-        let r = {
+        let mut r = {
             let (raw, data, id_ctr) = self.src.parts();
             let meta = crate::storage::bundle::frag_prepass(raw, data, id_ctr, &self.actor_map);
             let mut fs = crate::storage::bundle::FragOps::new(raw, data, id_ctr, &self.actor_map);
@@ -292,12 +292,18 @@ impl<'a> FragmentApply<'a> {
         // write the doc succ while positions are still pre-merge —
         // add_succ also clears vis/top/text on rows it deletes, so the
         // visible column is final before the elections below read it
-        doc.ops.add_succ(&r.doc_succ);
+        crate::op_set2::op_set::manifold::STAT_ADD_SUCC[0]
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::op_set2::op_set::manifold::STAT_ADD_SUCC[1].fetch_add(
+            r.doc_succ.len() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        doc.ops.add_succ(std::mem::take(&mut r.doc_succ));
         lap("add_succ", &mut t);
 
         // the merge: copy the fragment's columns and indexes in at the
         // insert runs
-        doc.ops.merge(&self.frag, &r.insert_runs);
+        doc.ops.merge(self.frag, &r.insert_runs);
         lap("merge columns", &mut t);
 
         // top/text are the only index bits that aren't a straight copy,
@@ -319,17 +325,17 @@ impl<'a> FragmentApply<'a> {
                     let runs = &r.insert_runs;
                     let mut shifts = Vec::with_capacity(runs.len());
                     let mut acc = 0usize;
-                    for (_, rg) in runs.iter() {
+                    for cr in runs.iter() {
                         shifts.push(acc);
-                        acc += rg.len();
+                        acc += cr.range.len();
                     }
                     for (col, pos) in &diffs {
                         // provenance: which frag run (or doc row) owns pos
                         let mut src = "past all runs".to_string();
-                        for (k, (p, rg)) in runs.iter().enumerate() {
-                            let base = p + shifts[k];
-                            if *pos >= base && *pos < base + rg.len() {
-                                src = format!("frag row {}", rg.start + (pos - base));
+                        for (k, cr) in runs.iter().enumerate() {
+                            let base = cr.pos + shifts[k];
+                            if *pos >= base && *pos < base + cr.range.len() {
+                                src = format!("frag row {}", cr.range.start + (pos - base));
                                 break;
                             } else if *pos < base {
                                 src = format!("doc row {}", pos - shifts[k]);
@@ -379,24 +385,24 @@ fn reset_mixed_groups(doc: &mut Automerge, r: &crate::op_set2::op_set::manifold:
     // prefix sums: shifts[i] = rows merged before run i
     let mut shifts = Vec::with_capacity(runs.len());
     let mut acc = 0usize;
-    for (_, rg) in runs.iter() {
+    for cr in runs.iter() {
         shifts.push(acc);
-        acc += rg.len();
+        acc += cr.range.len();
     }
     let total = acc;
     // fragment row -> merged position (rows in mixed groups always merge)
     let row_pos = |row: usize| -> usize {
-        let i = runs.partition_point(|(_, rg)| rg.start <= row) - 1;
-        let (p, rg) = &runs[i];
-        debug_assert!(rg.contains(&row), "mixed-group row not merged");
-        p + shifts[i] + (row - rg.start)
+        let i = runs.partition_point(|cr| cr.range.start <= row) - 1;
+        let cr = &runs[i];
+        debug_assert!(cr.range.contains(&row), "mixed-group row not merged");
+        cr.pos + shifts[i] + (row - cr.range.start)
     };
     // pre-merge doc position -> merged position: displaced by every
     // fragment row inserted at or before it
     let doc_pos = |p: usize| -> usize {
         // runs 0..i sit at positions <= p, so exactly their rows
         // displace this doc row
-        let i = runs.partition_point(|(pos, _)| *pos <= p);
+        let i = runs.partition_point(|cr| cr.pos <= p);
         p + if i == runs.len() { total } else { shifts[i] }
     };
     // consecutive headless runs share one fused register: re-elect each
@@ -421,6 +427,10 @@ fn reset_mixed_groups(doc: &mut Automerge, r: &crate::op_set2::op_set::manifold:
             start = start.min(row_pos(lo));
             end = end.max(row_pos(hi) + 1);
         }
+        crate::op_set2::op_set::manifold::STAT_RESET[0]
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::op_set2::op_set::manifold::STAT_RESET[1]
+            .fetch_add((end - start) as u64, std::sync::atomic::Ordering::Relaxed);
         doc.ops.reset_top_range(start..end);
     }
 }

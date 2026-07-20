@@ -27,6 +27,9 @@ fn main() {
             continue;
         };
         let doc = Automerge::load(&bytes).unwrap();
+        // measured FIRST (best of 3): a clean-heap baseline, before
+        // the ingest paths churn the allocator
+        let full = best_of(|| Automerge::load(&bytes).unwrap(), &doc);
 
         let mut changes = Vec::new();
         for c in doc.get_changes(&[]).unwrap() {
@@ -67,11 +70,6 @@ fn main() {
             },
             &doc,
         );
-
-        let t = Instant::now();
-        let d2 = Automerge::load(&bytes).unwrap();
-        let full = t.elapsed().as_secs_f64();
-        drop(d2);
 
         println!(
             "{name}: changes {:>9}B bundles {:>9}B | changes {:>7.3}s | bundles {:>7.3}s | fragments {:>7.3}s | full load {:>6.3}s",

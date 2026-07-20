@@ -267,21 +267,43 @@ impl MarkIndexColumn {
         self.cache = new_cache;
     }
 
+    /// Map every actor index through `map` — the batched-actor-insert
+    /// analog of [`Self::rewrite_with_new_actor`].
+    pub(crate) fn remap_actor_indexes(&mut self, map: &[u32]) {
+        let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
+        let remap_idx = |m: MarkIdx| match m {
+            MarkIdx::Start(id) => MarkIdx::Start(remap_id(&id)),
+            MarkIdx::End(id) => MarkIdx::End(remap_id(&id)),
+        };
+        let new_values: Vec<Option<MarkIdx>> = self
+            .data
+            .values()
+            .iter()
+            .map(|v| v.map(remap_idx))
+            .collect();
+        let new_cache = self
+            .cache
+            .iter()
+            .map(|(key, val)| (remap_id(key), val.clone()))
+            .collect();
+        self.data = PrefixColumn::from_values(new_values);
+        self.cache = new_cache;
+    }
+
     /// Splice a range of another mark column's rows in at `at` — the
     /// mark half of a fragment merge. The cache travels separately (see
     /// [`Self::absorb_cache`]) since one union covers every run.
-    pub(crate) fn splice_from(&mut self, at: usize, other: &Self, range: std::ops::Range<usize>) {
-        self.data
-            .splice(at, 0, other.data.values().iter_range(range));
-    }
-
-    /// Union another column's mark cache into this one. Mark ids are
-    /// globally unique ops, so collisions can only be identical entries.
-    pub(crate) fn absorb_cache(&mut self, other: &Self) {
-        if !other.cache.is_empty() {
-            self.cache
-                .extend(other.cache.iter().map(|(k, v)| (*k, v.clone())));
-        }
+    /// Splice ranges of another mark column's rows in at the given
+    /// insertion points — the mark half of a fragment merge. Consumes
+    /// `other`: the data column moves into the copy and the cache
+    /// entries move across (mark ids are globally unique ops, so
+    /// collisions can only be identical entries).
+    pub(crate) fn merge_from<R>(&mut self, other: Self, splices: R)
+    where
+        R: IntoIterator<Item = hexane::Splice>,
+    {
+        self.data.copy_ranges(other.data, splices);
+        self.cache.extend(other.cache);
     }
 
     /// Assemble from a pre-built column and cache (the streaming index

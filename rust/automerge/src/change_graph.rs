@@ -2684,6 +2684,52 @@ mod tests {
     /// Apply a doc's v1 bundles one at a time, v1 walk vs v2 manifold,
     /// timing each. Loose (single-change) bundles are summarized.
     /// BENCH_DOCS=C2 cargo test -p automerge --release --lib bench_per_bundle -- --ignored --nocapture
+    /// Shape stats for the egwalker docs — what each workload is made
+    /// of. BENCH_DOCS=A1 cargo test -p automerge --release --lib doc_shape -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn doc_shape() {
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|s| s.split(',').map(|d| d.to_string()).collect())
+            .unwrap_or_else(|_| {
+                ["S1", "S3", "C1", "C2", "A1", "A2"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+        for name in docs {
+            let bytes =
+                std::fs::read(format!("/Users/orion/automerge-blog/data/{name}.am")).unwrap();
+            let doc = Automerge::load(&bytes).unwrap();
+            let ops = doc.ops();
+            let rows = ops.len();
+            let subs = ops.cols_sub_len();
+            let actors = ops.actors.len();
+            let changes = doc.get_changes(&[]).unwrap();
+            let frags = doc.fragments(..).unwrap();
+            // insert rows vs update rows, and object count
+            let mut inserts = 0usize;
+            let mut objects = std::collections::HashSet::new();
+            for op in ops.iter() {
+                if op.insert {
+                    inserts += 1;
+                }
+                objects.insert(op.obj);
+            }
+            // total ops incl deletes = per-change op counts
+            let total_ops: usize = changes.iter().map(|c| c.len()).sum();
+            eprintln!(
+                "{name}: rows {rows} | succ entries {subs} | deletes {} | inserts {} | updates {} | objects {} | actors {actors} | changes {} | fragments {}",
+                total_ops - rows,
+                inserts,
+                rows - inserts,
+                objects.len(),
+                changes.len(),
+                frags.len(),
+            );
+        }
+    }
+
     /// S3 as ONE v2 fragment applied to a blank doc (manifold + blank
     /// path) vs the "speed of light": loading the saved doc without
     /// rebuilding the hash graph.

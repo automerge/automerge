@@ -656,6 +656,7 @@ pub(crate) const COPY_INVERT_FACTOR: usize = 1;
 
 /// Clamp `ranges` to `len`, drop empties, merge touching neighbours,
 /// and assert ascending/non-overlapping.
+#[cfg(test)]
 pub(crate) fn normalize_ranges(
     ranges: impl IntoIterator<Item = Range<usize>>,
     len: usize,
@@ -675,6 +676,61 @@ pub(crate) fn normalize_ranges(
                 Some(last) if last.end == start => last.end = end,
                 _ => out.push(start..end),
             }
+        }
+    }
+    out
+}
+
+/// One point of a multi-point [`Column::copy_ranges`]: at destination
+/// position `pos` (pre-splice coordinates), delete `delete` rows and
+/// insert the source rows `range`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Splice {
+    pub pos: usize,
+    pub delete: usize,
+    pub range: Range<usize>,
+}
+
+/// Normalize a multi-point splice list: clamp src ranges to `src_len`,
+/// drop no-ops, and merge contiguous neighbours (next edit starting
+/// where the previous one ended, with touching src ranges). Asserts
+/// destination regions are ascending/non-overlapping and in bounds,
+/// and src ranges globally ascending/non-overlapping.
+pub(crate) fn normalize_splices(
+    splices: impl IntoIterator<Item = Splice>,
+    src_len: usize,
+    dst_len: usize,
+) -> Vec<Splice> {
+    let mut out: Vec<Splice> = Vec::new();
+    let mut src_pos = 0usize;
+    let mut dst_pos = 0usize;
+    for sp in splices {
+        assert!(
+            sp.pos >= dst_pos,
+            "destination regions must be ascending and non-overlapping"
+        );
+        assert!(sp.pos + sp.delete <= dst_len, "splice out of bounds");
+        assert!(
+            sp.range.start >= src_pos,
+            "src ranges must be ascending and non-overlapping"
+        );
+        dst_pos = sp.pos + sp.delete;
+        src_pos = src_pos.max(sp.range.end);
+        let start = sp.range.start.min(src_len);
+        let end = sp.range.end.min(src_len);
+        if end == start && sp.delete == 0 {
+            continue;
+        }
+        match out.last_mut() {
+            Some(last) if last.pos + last.delete == sp.pos && last.range.end == start => {
+                last.delete += sp.delete;
+                last.range.end = end;
+            }
+            _ => out.push(Splice {
+                pos: sp.pos,
+                delete: sp.delete,
+                range: start..end,
+            }),
         }
     }
     out
@@ -1383,20 +1439,75 @@ where
     ///
     /// Ranges must be ascending and non-overlapping (touching is fine)
     /// and are clamped to `src`'s length.
-    pub fn copy_ranges<R>(&mut self, index: usize, del: usize, src: Self, ranges: R)
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
-        R: IntoIterator<Item = Range<usize>>,
+        I: IntoIterator<Item = Splice>,
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        let ranges = normalize_ranges(ranges, src.len());
-        let strategy = self.copy_strategy(&src, &ranges);
-        self.copy_ranges_with(index, del, src, ranges, strategy);
+        let splices = normalize_splices(splices, src.len(), self.len());
+        if splices.is_empty() {
+            return;
+        }
+        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
+        let strategy = self.copy_strategy(&src, &ranges, splices.len());
+        self.copy_splices_with(src, &splices, strategy);
+    }
+
+    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
+    /// `splices` must already be normalized.
+    pub(crate) fn copy_splices_with(
+        &mut self,
+        mut src: Self,
+        splices: &[Splice],
+        strategy: CopyStrategy,
+    ) where
+        for<'b> T::Get<'b>: AsColumnRef<T>,
+    {
+        use crate::shift::Shiftable;
+        match strategy {
+            CopyStrategy::Direct => {
+                let mut shift = 0isize;
+                for sp in splices {
+                    let at = (sp.pos as isize + shift) as usize;
+                    self.splice_runs(at, sp.delete, src.iter().runs().ranges([sp.range.clone()]));
+                    shift += sp.range.len() as isize - sp.delete as isize;
+                }
+            }
+            CopyStrategy::Invert => {
+                // keep src's slabs: swap, drop the gaps (interior slabs
+                // undecoded), then splice the old column's kept
+                // segments in between the retained groups (deleted old
+                // rows simply never come back)
+                let old_len = self.len();
+                self.swap_contents(&mut src);
+                let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
+                self.retain_ranges(&ranges);
+                let mut out_pos = 0usize;
+                let mut prev_end = 0usize;
+                for sp in splices {
+                    if sp.pos > prev_end {
+                        self.splice_runs(out_pos, 0, src.iter_range(prev_end..sp.pos).runs());
+                        out_pos += sp.pos - prev_end;
+                    }
+                    prev_end = sp.pos + sp.delete;
+                    out_pos += sp.range.len();
+                }
+                if old_len > prev_end {
+                    self.splice_runs(out_pos, 0, src.iter_range(prev_end..old_len).runs());
+                }
+            }
+        }
     }
 
     /// Decide direct vs inverted for [`copy_ranges`](Self::copy_ranges)
     /// from stored per-slab item/segment counts — O(slabs), no data
     /// decoded.
-    pub(crate) fn copy_strategy(&self, src: &Self, ranges: &[Range<usize>]) -> CopyStrategy {
+    pub(crate) fn copy_strategy(
+        &self,
+        src: &Self,
+        ranges: &[Range<usize>],
+        points: usize,
+    ) -> CopyStrategy {
         // Inverting keeps src's slabs, built under src's segment
         // budget — only sound when the budgets match.
         if self.max_segments != src.max_segments || src.slabs.len() < 8 {
@@ -1427,21 +1538,27 @@ where
             }
         }
 
+        // Direct-path work also cuts a seam in self per insertion
+        // point.
+        let direct_cost = retained_segs + points * 2 * self.max_segments;
+
         // Inverted-path work: re-encode all of self, boundary segments
-        // per gap seam, O(slabs) bookkeeping.
+        // per gap seam and per insertion point, O(slabs) bookkeeping.
         let dest_segs: usize = self.slabs.iter().map(|s| s.segments).sum();
-        let seam_segs = (ranges.len() + 1) * 2 * self.max_segments;
+        let seam_segs = (ranges.len() + points) * 2 * self.max_segments;
         let invert_cost = dest_segs + seam_segs + src.slabs.len();
 
-        if retained_segs > COPY_INVERT_FACTOR * invert_cost {
+        if direct_cost > COPY_INVERT_FACTOR * invert_cost {
             CopyStrategy::Invert
         } else {
             CopyStrategy::Direct
         }
     }
 
-    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
-    /// `ranges` must already be normalized.
+    /// Single-point [`copy_ranges`](Self::copy_ranges) with a deletion
+    /// count and the strategy pinned — kept for the strategy-agreement
+    /// tests, which exercise `del`.
+    #[cfg(test)]
     pub(crate) fn copy_ranges_with(
         &mut self,
         index: usize,

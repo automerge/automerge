@@ -1,6 +1,7 @@
 use super::meta::ValueMeta;
 use super::op::OpLike;
 use super::op_set::index::{IndexBuilder, ObjRunWalk, RareOps};
+use super::op_set::manifold::CopyRange;
 use super::op_set::MarkIndexColumn;
 use super::op_set::{MarkInfoIter, OpIdIter};
 use super::types::{Action, ActorIdx, ScalarValue};
@@ -505,76 +506,65 @@ impl Columns {
     /// exactly right for groups living entirely inside the fragment;
     /// groups shared with the document get corrected afterwards by the
     /// manifold's conflict/expose sets.
-    pub(super) fn merge(&mut self, frag: &Columns, runs: &[(usize, Range<usize>)]) {
-        // the value column is chunked; one contiguous copy serves every
-        // run's byte-range slice
+    pub(super) fn merge(&mut self, frag: Columns, runs: &[CopyRange]) {
+        // the fragment-side sub/value spans arrive precomputed on each
+        // CopyRange (stamped by the manifold while streaming); only
+        // this column set's own positions are resolved here
         let frag_value = frag.value.save();
-
-        let mut shift = 0usize;
-        for (pos, range) in runs {
-            let at = pos + shift;
-
-            // sub-column spans (prefix sums are exclusive)
-            let succ_a = frag.succ_count.get_prefix(range.start) as usize;
-            let succ_b = frag.succ_count.get_prefix(range.end) as usize;
-            let val_a = frag.value_meta.get_prefix(range.start) as usize;
-            let val_b = frag.value_meta.get_prefix(range.end) as usize;
-            let succ_pos = self.succ_count.get_prefix(at) as usize;
-            let value_pos = self.value_meta.get_prefix(at) as usize;
-
-            self.id_actor
-                .splice(at, 0, frag.id_actor.iter_range(range.clone()));
-            self.id_ctr
-                .splice(at, 0, frag.id_ctr.iter_range(range.clone()));
-            self.obj_actor
-                .splice(at, 0, frag.obj_actor.iter_range(range.clone()));
-            self.obj_ctr
-                .splice(at, 0, frag.obj_ctr.iter_range(range.clone()));
-            self.key_actor
-                .splice(at, 0, frag.key_actor.iter_range(range.clone()));
-            self.key_ctr
-                .splice(at, 0, frag.key_ctr.iter_range(range.clone()));
-            self.key_str
-                .splice(at, 0, frag.key_str.iter_range(range.clone()));
-            self.insert
-                .splice(at, 0, frag.insert.values().iter_range(range.clone()));
-            self.action
-                .splice(at, 0, frag.action.iter_range(range.clone()));
-            self.mark_name
-                .splice(at, 0, frag.mark_name.iter_range(range.clone()));
-            self.expand
-                .splice(at, 0, frag.expand.iter_range(range.clone()));
-            self.value_meta
-                .splice(at, 0, frag.value_meta.values().iter_range(range.clone()));
-            self.value
-                .splice_slice(value_pos, 0, &frag_value[val_a..val_b]);
-
-            self.succ_count
-                .splice(at, 0, frag.succ_count.values().iter_range(range.clone()));
-            self.succ_actor
-                .splice(succ_pos, 0, frag.succ_actor.iter_range(succ_a..succ_b));
-            self.succ_ctr
-                .splice(succ_pos, 0, frag.succ_ctr.iter_range(succ_a..succ_b));
-
-            self.index
-                .inc
-                .splice(succ_pos, 0, frag.index.inc.iter_range(succ_a..succ_b));
-            self.index
-                .visible
-                .splice(at, 0, frag.index.visible.iter_range(range.clone()));
-            self.index
-                .top
-                .splice(at, 0, frag.index.top.values().iter_range(range.clone()));
-            self.index
-                .text
-                .splice(at, 0, frag.index.text.values().iter_range(range.clone()));
-            self.index
-                .mark
-                .splice_from(at, &frag.index.mark, range.clone());
-
-            shift += range.len();
+        let subs: Vec<hexane::Splice> = runs
+            .iter()
+            .map(|cr| hexane::Splice {
+                pos: self.succ_count.get_prefix(cr.pos) as usize,
+                delete: 0,
+                range: cr.sub_range.clone(),
+            })
+            .collect();
+        {
+            let mut shift = 0usize;
+            for cr in runs {
+                let at = self.value_meta.get_prefix(cr.pos) as usize + shift;
+                self.value
+                    .splice_slice(at, 0, &frag_value[cr.val_range.clone()]);
+                shift += cr.val_range.len();
+            }
         }
-        self.index.mark.absorb_cache(&frag.index.mark);
+
+        // one multi-point copy per column, each consuming the
+        // fragment's column — slab adoption engages whenever the
+        // fragment dwarfs the doc
+        let rows = || {
+            runs.iter().map(|cr| hexane::Splice {
+                pos: cr.pos,
+                delete: 0,
+                range: cr.range.clone(),
+            })
+        };
+        self.id_actor.copy_ranges(frag.id_actor, rows());
+        self.id_ctr.copy_ranges(frag.id_ctr, rows());
+        self.obj_actor.copy_ranges(frag.obj_actor, rows());
+        self.obj_ctr.copy_ranges(frag.obj_ctr, rows());
+        self.key_actor.copy_ranges(frag.key_actor, rows());
+        self.key_ctr.copy_ranges(frag.key_ctr, rows());
+        self.key_str.copy_ranges(frag.key_str, rows());
+        self.insert.copy_ranges(frag.insert, rows());
+        self.action.copy_ranges(frag.action, rows());
+        self.mark_name.copy_ranges(frag.mark_name, rows());
+        self.expand.copy_ranges(frag.expand, rows());
+        self.value_meta.copy_ranges(frag.value_meta, rows());
+
+        self.succ_count.copy_ranges(frag.succ_count, rows());
+        self.succ_actor
+            .copy_ranges(frag.succ_actor, subs.iter().cloned());
+        self.succ_ctr
+            .copy_ranges(frag.succ_ctr, subs.iter().cloned());
+
+        self.index
+            .inc
+            .copy_ranges(frag.index.inc, subs.iter().cloned());
+        self.index.visible.copy_ranges(frag.index.visible, rows());
+        self.index.top.copy_ranges(frag.index.top, rows());
+        self.index.text.copy_ranges(frag.index.text, rows());
+        self.index.mark.merge_from(frag.index.mark, rows());
     }
 
     pub(super) fn remap_actors<F>(&mut self, f: &F)

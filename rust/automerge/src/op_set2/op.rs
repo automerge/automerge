@@ -892,6 +892,61 @@ pub(crate) struct SuccInsert {
     pub(crate) sub_pos: usize,
 }
 
+/// Batched document succ additions, accumulated in stream order: the
+/// three sub-column value streams plus the multi-point [`hexane::Splice`]s
+/// that place them, and the row-level count updates and visibility
+/// clears that ride along. Consumed whole by `OpSet::add_succ` — one
+/// `copy_ranges` per column instead of point splices per entry.
+#[derive(Debug, Default)]
+pub(crate) struct DocSucc {
+    /// where each run of new sub entries lands (pre-splice sub
+    /// coordinates, ascending; same-position entries merged)
+    pub(crate) splices: Vec<hexane::Splice>,
+    pub(crate) actors: Vec<ActorIdx>,
+    pub(crate) ctrs: Vec<u32>,
+    pub(crate) incs: Vec<Option<i64>>,
+    /// (row, new succ count) — ascending, one per touched row
+    pub(crate) counts: Vec<(usize, u32)>,
+    /// rows whose visibility clears (an inc-None entry) — ascending
+    pub(crate) clears: Vec<usize>,
+}
+
+impl DocSucc {
+    pub(crate) fn len(&self) -> usize {
+        self.actors.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.actors.is_empty()
+    }
+
+    pub(crate) fn push(&mut self, s: SuccInsert) {
+        debug_assert!(
+            self.splices.last().is_none_or(|sp| sp.pos <= s.sub_pos),
+            "succ entries must arrive in ascending sub order"
+        );
+        let k = self.actors.len();
+        self.actors.push(s.id.actoridx());
+        self.ctrs.push(s.id.counter() as u32);
+        self.incs.push(s.inc);
+        match self.splices.last_mut() {
+            Some(sp) if sp.pos == s.sub_pos => sp.range.end = k + 1,
+            _ => self.splices.push(hexane::Splice {
+                pos: s.sub_pos,
+                delete: 0,
+                range: k..k + 1,
+            }),
+        }
+        match self.counts.last_mut() {
+            Some((p, c)) if *p == s.pos => *c += 1,
+            _ => self.counts.push((s.pos, s.len as u32 + 1)),
+        }
+        if s.inc.is_none() && self.clears.last() != Some(&s.pos) {
+            self.clears.push(s.pos);
+        }
+    }
+}
+
 impl<'a> Op<'a> {
     pub(crate) fn mark_index(&self) -> Option<MarkIndexBuilder> {
         match (&self.action, &self.mark_name) {

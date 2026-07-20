@@ -1316,6 +1316,46 @@ impl Automerge {
         }
     }
 
+    /// Insert every actor in `actors` the document lacks, remapping
+    /// the op columns ONCE for the whole batch instead of once per
+    /// actor. Pure appends (every new actor sorting after the existing
+    /// ones) skip the remap entirely.
+    pub(crate) fn put_actor_refs(&mut self, actors: &[ActorId]) {
+        let mut new: Vec<ActorId> = actors
+            .iter()
+            .filter(|a| self.ops.actors.binary_search(a).is_err())
+            .cloned()
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        new.sort_unstable();
+        new.dedup();
+        // old index -> final index: old actors shift right past the
+        // new ones sorting before them
+        let mut map: Vec<u32> = Vec::with_capacity(self.ops.actors.len());
+        let mut j = 0;
+        for a in &self.ops.actors {
+            while j < new.len() && new[j] < *a {
+                j += 1;
+            }
+            map.push((map.len() + j) as u32);
+        }
+        let identity = map.iter().enumerate().all(|(i, &m)| m as usize == i);
+        if !identity {
+            self.ops.remap_actor_indexes(&map);
+        }
+        // the cheap per-actor state; the op-column rewrite above
+        // already accounted for every insertion, so the ids go in
+        // directly
+        for a in new {
+            let idx = self.ops.actors.binary_search(&a).unwrap_err();
+            self.ops.actors.insert(idx, a);
+            self.change_graph.insert_actor(idx);
+            self.actor.rewrite_with_new_actor(idx);
+        }
+    }
+
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => idx,
@@ -1705,9 +1745,7 @@ impl Automerge {
 
         // insert any new actors, then map bundle actor indexes to the
         // (possibly shifted) document indexes
-        for a in bundle.actors() {
-            self.put_actor_ref(a);
-        }
+        self.put_actor_refs(bundle.actors());
         let actor_map: Vec<usize> = bundle
             .actors()
             .iter()
@@ -1765,14 +1803,13 @@ impl Automerge {
         // fails without altering history. Ops the clock covers belong to
         // skipped members and are dropped.
         let overlap = num_kept < num_members;
-        let mut ops =
-            match FragmentApply::new(bundle, actor_map.clone(), &clock, overlap, &self.ops) {
-                Ok(f) => f,
-                Err(e) => {
-                    self.remove_unused_actors(false);
-                    return Err(e);
-                }
-            };
+        let ops = match FragmentApply::new(bundle, actor_map.clone(), &clock, overlap, &self.ops) {
+            Ok(f) => f,
+            Err(e) => {
+                self.remove_unused_actors(false);
+                return Err(e);
+            }
+        };
         lap("FragmentApply::new (load ops)", &mut t);
 
         // record the boundary pairings — every boundary head is an
