@@ -117,6 +117,29 @@ impl OpSet {
         let mut builder = IndexBuilder::new(self.text_encoding);
         builder.process_op_set(self).unwrap();
         let (fresh, _) = builder.finish();
+        if std::env::var("INDEX_DIFF").is_ok() {
+            let a: Vec<_> = self.cols.index.text.values().iter().collect();
+            let b: Vec<_> = fresh.text.values().iter().collect();
+            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+                if x != y {
+                    eprintln!("text[{}]: have {:?} want {:?}", i, x, y);
+                }
+            }
+            let a: Vec<_> = self.cols.index.top.values().iter().collect();
+            let b: Vec<_> = fresh.top.values().iter().collect();
+            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+                if x != y {
+                    eprintln!("top[{}]: have {:?} want {:?}", i, x, y);
+                }
+            }
+            let a: Vec<_> = self.cols.index.visible.iter().collect();
+            let b: Vec<_> = fresh.visible.iter().collect();
+            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+                if x != y {
+                    eprintln!("vis[{}]: have {:?} want {:?}", i, x, y);
+                }
+            }
+        }
         assert!(
             self.cols
                 .index
@@ -153,7 +176,138 @@ impl OpSet {
         );
     }
 
+    /// Re-run the top/text election over every register inside `range`
+    /// in one forward pass: insert rows bound the registers (map ranges
+    /// contain none and form a single register), the last visible row
+    /// of each register takes top, and each index column is written
+    /// back with a single splice over the range. A row keeping its top
+    /// keeps its text width; a newly-topped row gets its width
+    /// recomputed from the op.
+    pub(crate) fn reset_top_range(&mut self, range: Range<usize>) {
+        let n = range.len();
+        if n == 0 {
+            return;
+        }
+        let mut new_top = vec![false; n];
+        {
+            let ins = self.cols.insert.values().iter_range(range.clone());
+            let vis = self.cols.index.visible.iter_range(range.clone());
+            let mut last_vis: Option<usize> = None;
+            for (i, (insert, v)) in ins.zip(vis).enumerate() {
+                if insert && i > 0 {
+                    if let Some(t) = last_vis {
+                        new_top[t] = true;
+                    }
+                    last_vis = None;
+                }
+                if v {
+                    last_vis = Some(i);
+                }
+            }
+            if let Some(t) = last_vis {
+                new_top[t] = true;
+            }
+        }
+        let mut new_text: Vec<Option<u32>> = Vec::with_capacity(n);
+        let mut widths_needed = vec![];
+        {
+            let top_old = self.cols.index.top.values().iter_range(range.clone());
+            let text_old = self.cols.index.text.values().iter_range(range.clone());
+            for (i, (t_old, w_old)) in top_old.zip(text_old).enumerate() {
+                new_text.push(match (new_top[i], t_old) {
+                    (true, true) => w_old,
+                    (true, false) => {
+                        widths_needed.push(i);
+                        None // patched below
+                    }
+                    (false, _) => None,
+                });
+            }
+        }
+        for i in widths_needed {
+            let w = self
+                .get(range.start + i)
+                .map(|op| op.width(SequenceType::Text, self.text_encoding) as u32);
+            new_text[i] = w;
+        }
+        self.cols.index.top.splice(range.start, n, new_top);
+        self.cols.index.text.splice(range.start, n, new_text);
+    }
+
+    /// Re-elect the single register starting at `pos`: it extends to
+    /// the next insert row (or the op set's end).
+    /// Diagnostic: positions where the incremental top/text/visible
+    /// columns differ from a fresh rebuild.
+    pub(crate) fn index_diff_positions(&self) -> Vec<(&'static str, usize)> {
+        let mut builder = IndexBuilder::new(self.text_encoding);
+        builder.process_op_set(self).unwrap();
+        let (fresh, _) = builder.finish();
+        let mut out = vec![];
+        for (i, (a, b)) in self
+            .cols
+            .index
+            .top
+            .values()
+            .iter()
+            .zip(fresh.top.values().iter())
+            .enumerate()
+        {
+            if a != b {
+                out.push(("top", i));
+            }
+        }
+        for (i, (a, b)) in self
+            .cols
+            .index
+            .text
+            .values()
+            .iter()
+            .zip(fresh.text.values().iter())
+            .enumerate()
+        {
+            if a != b {
+                out.push(("text", i));
+            }
+        }
+        for (i, (a, b)) in self
+            .cols
+            .index
+            .visible
+            .iter()
+            .zip(fresh.visible.iter())
+            .enumerate()
+        {
+            if a != b {
+                out.push(("vis", i));
+            }
+        }
+        out
+    }
+
+    pub(crate) fn reset_register_at(&mut self, pos: usize) {
+        let len = self.len();
+        let mut end = pos + 1;
+        for ins in self.cols.insert.values().iter_range(pos + 1..len) {
+            if ins {
+                break;
+            }
+            end += 1;
+        }
+        self.reset_top(pos..end);
+    }
+
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
+        if std::env::var("RESET_DEBUG").is_ok() {
+            let vis: Vec<bool> = self.cols.index.visible.iter_range(range.clone()).collect();
+            let top: Vec<bool> = self
+                .cols
+                .index
+                .top
+                .values()
+                .iter_range(range.clone())
+                .collect();
+            eprintln!("RESET {:?} vis {:?} top {:?}", range, vis, top);
+        }
         let top = self.cols.index.top.values().iter_range(range.clone());
         let vis = self.cols.index.visible.iter_range(range.clone());
 
@@ -242,6 +396,28 @@ impl OpSet {
             let this_op = Some((op.obj, op.elemid_or_key()));
 
             if this_op != last_op {
+                if first_top != last_vis {
+                    eprintln!(
+                        "TOPFAIL group {:?} first_top {:?} last_vis {:?} (next op pos {})",
+                        last_op, first_top, last_vis, op.pos
+                    );
+                    let lo = op.pos.saturating_sub(8);
+                    let vis: Vec<bool> = self.cols.index.visible.iter().collect();
+                    let top: Vec<bool> = self.cols.index.top.values().iter().collect();
+                    for o in self.iter() {
+                        if o.pos >= lo && o.pos < op.pos + 3 {
+                            eprintln!(
+                                "  row {:>3} id {:?} elem {:?} ins {} vis {} top {}",
+                                o.pos,
+                                o.id,
+                                o.elemid_or_key(),
+                                o.insert,
+                                vis[o.pos],
+                                top[o.pos]
+                            );
+                        }
+                    }
+                }
                 assert_eq!(first_top, last_vis);
                 last_op = this_op;
                 first_top = None;
@@ -1389,6 +1565,71 @@ impl OpSet {
             text_encoding,
         };
         Ok((op_set, index))
+    }
+
+    /// Load a fragment's op columns as a fully indexed op set — the
+    /// document load path applied to a fragment. Actor indexes are
+    /// remapped to the document's *before* the index build, so the
+    /// indexes (including the mark cache and obj_info) come out in
+    /// document actor space, and the obj-run validation checks document
+    /// order. The fragment's pred columns are not part of an op set —
+    /// they ride separately as the manifold's input.
+    ///
+    /// The indexes are built standalone but are final for any group
+    /// living entirely inside the fragment: rows carry their complete
+    /// succ (nothing later in the document can precede them), so
+    /// visibility — and everything derived from it — cannot change on
+    /// merge. Groups shared with the document are corrected by the
+    /// manifold's conflict/expose output.
+    pub(crate) fn load_frag(
+        raw: &RawColumns<Uncompressed>,
+        data: &[u8],
+        id_ctr: &[i64],
+        actor_map: &[usize],
+        actors: Vec<ActorId>,
+        doc_obj_info: &ObjIndex,
+        text_encoding: TextEncoding,
+    ) -> Result<Self, ReadOpError> {
+        let mut cols = Columns::load_frag(raw.as_map(), data, id_ctr)?;
+        if actor_map.iter().enumerate().any(|(i, &m)| i != m) {
+            cols.remap_actors(&|a: ActorIdx| ActorIdx::from(actor_map[u64::from(a) as usize]));
+        }
+        let mut op_set = OpSet {
+            actors,
+            cols,
+            obj_info: ObjIndex::default(),
+            text_encoding,
+        };
+        let mut builder = IndexBuilder::new(text_encoding);
+        // fragment ops can live in document-created objects: without
+        // their types, sequence objects would register-split like maps
+        builder.seed_obj_info(doc_obj_info);
+        builder.process_op_set(&op_set)?;
+        let (indexes, _mark_order) = builder.finish();
+        op_set.set_indexes(indexes);
+        Ok(op_set)
+    }
+
+    /// Splice a loaded fragment op set into this one at the manifold's
+    /// insert runs: a straight copy of op columns and index columns
+    /// (see [`Columns::merge`]), plus the fragment's obj_info entries.
+    pub(crate) fn merge(&mut self, frag: &OpSet, runs: &[(usize, Range<usize>)]) {
+        self.cols.merge(&frag.cols, runs);
+        self.obj_info
+            .0
+            .extend(frag.obj_info.0.iter().map(|(k, v)| (*k, *v)));
+    }
+
+    /// Rebuild every index column (and obj_info) from scratch with the
+    /// load path's [`IndexBuilder`]. The stopgap companion to
+    /// [`Self::merge`] while the incremental index merge is being
+    /// debugged — correct by construction, O(document).
+    pub(crate) fn rebuild_indexes(&mut self) -> Result<(), ReadOpError> {
+        let mut builder = IndexBuilder::new(self.text_encoding);
+        builder.process_op_set(self)?;
+        let (indexes, _mark_order) = builder.finish();
+        self.set_indexes(indexes);
+        Ok(())
     }
 
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {

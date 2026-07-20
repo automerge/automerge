@@ -181,12 +181,6 @@ impl<'a> UntangleLiteIdx<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum Adjust {
-    Conflict(usize),
-    Expose(usize),
-}
-
 /// Increment operations preserve and update counter predecessors, but
 /// act as ordinary overwrites for non-counter predecessors.
 pub(crate) fn normalize_increment_successors(
@@ -358,23 +352,23 @@ impl BatchApply {
         }
         lap("untangle idx");
 
-        // encode the v2 op columns in index (= document) order and
-        // clone the ops into stream order for the splice
+        // encode the v2 op columns in index (= document) order
         let (raw, data, id_ctr) =
             encode_frag_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
         lap("encode v2");
 
-        // from here on this IS the v2 path: streaming manifold + splice
-        let stream_ops: Vec<ChangeOp> =
-            idxs.iter().map(|&i| self.ops[i as usize].clone()).collect();
+        // from here on this IS the v2 path: the columns are loaded back
+        // as an indexed op set, the streaming manifold resolves them,
+        // and the merge copies columns and indexes in wholesale
         let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
         let mut frag = super::fragment::FragmentApply::from_parts(
-            stream_ops,
             clock.clone(),
             actor_map,
             super::fragment::FragSrc::Owned { raw, data, id_ctr },
-        );
-        lap("stream setup");
+            doc.ops(),
+        )
+        .unwrap();
+        lap("load frag opset");
         frag.apply_manifold(doc, log).unwrap();
         lap("fragment apply");
         Ok(())
@@ -439,51 +433,6 @@ where
     let mut data = Vec::new();
     let (cols, id_ctr) = writer.finish(&mapper, &mut data, &members);
     (cols.raw_columns(), data, id_ctr)
-}
-
-/// Splice the manifold's insert runs into the document's columns: each
-/// run is `(pos, start..end)` — the batch ops at indexes `start..end`
-/// land at document position `pos`. Adjacent runs share a position only
-/// when delete ops (which never splice, and are filtered by the column
-/// splice) split the index range, so such runs merge into one call.
-pub(super) fn splice_insert_runs(
-    ops: &[ChangeOp],
-    runs: &[(usize, Range<usize>)],
-    doc: &mut Automerge,
-) {
-    let mut shift = 0;
-    let mut i = 0;
-    let mut calls = 0;
-    while i < runs.len() {
-        let (pos, range) = &runs[i];
-        let mut end = range.end;
-        // merging [(4, 0..1), (4, 100..101)] into one splice of
-        // ops[0..101] at pos 4 is safe because indexes 1..100 can only
-        // be DELETE ops: every non-delete op pushes a position, so if
-        // any op in the gap were a non-delete its run would sit
-        // between these two in the vec and they would not be adjacent.
-        // The column splice filters `Action::Delete` from the slice,
-        // so the merged call inserts exactly ops 0 and 100 — the same
-        // rows two separate calls at pos 4 (with the shift in between)
-        // would have produced, in the same order
-        while matches!(runs.get(i + 1), Some((p, _)) if p == pos) {
-            i += 1;
-            end = runs[i].1.end;
-        }
-        shift += insert_ops(ops, doc, pos + shift, range.start..end);
-        calls += 1;
-        i += 1;
-    }
-    if std::env::var("FRAG_TIMING").is_ok() || std::env::var("BATCH_TIMING").is_ok() {
-        eprintln!("SPLICE   {} runs -> {} splice calls", runs.len(), calls);
-    }
-}
-
-fn insert_ops(ops: &[ChangeOp], doc: &mut Automerge, pos: usize, range: Range<usize>) -> usize {
-    let batch = &ops[range];
-    let start = doc.ops().len();
-    doc.ops_mut().splice(pos, batch);
-    doc.ops().len() - start
 }
 
 impl Automerge {

@@ -267,6 +267,23 @@ impl MarkIndexColumn {
         self.cache = new_cache;
     }
 
+    /// Splice a range of another mark column's rows in at `at` — the
+    /// mark half of a fragment merge. The cache travels separately (see
+    /// [`Self::absorb_cache`]) since one union covers every run.
+    pub(crate) fn splice_from(&mut self, at: usize, other: &Self, range: std::ops::Range<usize>) {
+        self.data
+            .splice(at, 0, other.data.values().iter_range(range));
+    }
+
+    /// Union another column's mark cache into this one. Mark ids are
+    /// globally unique ops, so collisions can only be identical entries.
+    pub(crate) fn absorb_cache(&mut self, other: &Self) {
+        if !other.cache.is_empty() {
+            self.cache
+                .extend(other.cache.iter().map(|(k, v)| (*k, v.clone())));
+        }
+    }
+
     /// Assemble from a pre-built column and cache (the streaming index
     /// builder encodes the column directly).
     pub(crate) fn from_parts(

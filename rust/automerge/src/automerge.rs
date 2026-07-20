@@ -1764,13 +1764,15 @@ impl Automerge {
         // load the ops before touching the graph, so a malformed bundle
         // fails without altering history. Ops the clock covers belong to
         // skipped members and are dropped.
-        let mut ops = match FragmentApply::new(bundle, actor_map.clone(), &clock) {
-            Ok(f) => f,
-            Err(e) => {
-                self.remove_unused_actors(false);
-                return Err(e);
-            }
-        };
+        let overlap = num_kept < num_members;
+        let mut ops =
+            match FragmentApply::new(bundle, actor_map.clone(), &clock, overlap, &self.ops) {
+                Ok(f) => f,
+                Err(e) => {
+                    self.remove_unused_actors(false);
+                    return Err(e);
+                }
+            };
         lap("FragmentApply::new (load ops)", &mut t);
 
         // record the boundary pairings — every boundary head is an

@@ -10,7 +10,6 @@
 //! [`apply_op`]: ApplyManifold::apply_op
 //! [`finish`]: ApplyManifold::finish
 
-use crate::op_set2::change::batch::Adjust;
 use crate::op_set2::types::Action;
 use crate::op_set2::SuccInsert;
 use crate::storage::bundle::{FragMeta, FragOp, FragOps};
@@ -38,13 +37,28 @@ pub(crate) struct ManifoldResult {
     /// between runs — a delete-free batch applied to an empty doc is
     /// the single run `(0, 0..ops.len())`
     pub(crate) insert_runs: Vec<(usize, Range<usize>)>,
-    /// top/text index adjustments for existing rows — apply BEFORE
-    /// add_succ/splice, exactly like v1's conflict/expose pass
-    pub(crate) adjusts: Vec<Adjust>,
-    /// batch ops that lost their group to a sibling: the consumer sets
-    /// `ChangeOp::conflicted` on these before splicing, which is what
-    /// `OpLike::top` reads to write the new row's top bit
-    pub(crate) conflicted: Vec<OpId>,
+    /// groups whose top/text election may have changed: they contain
+    /// visible rows (or fresh deletions) from BOTH the document and the
+    /// batch. Each entry is the group's doc row range (pre-merge) plus
+    /// the min/max batch row indexes merged into it (`None` when the
+    /// batch only deleted). After the merge, re-running the last-visible
+    /// election over each merged range (`OpSet::reset_top`) settles
+    /// top/text — every other group's bits are straight copies
+    pub(crate) mixed_groups: Vec<MixedGroup>,
+}
+
+/// One group flagged for post-merge re-election. See
+/// [`ManifoldResult::mixed_groups`].
+#[derive(Debug)]
+pub(crate) struct MixedGroup {
+    /// the group's doc rows, pre-merge
+    pub(crate) doc: Range<usize>,
+    /// min/max batch row merged into the group (None: deletes only)
+    pub(crate) rows: Option<(usize, usize)>,
+    /// the batch row of the object's last insert before this group's
+    /// first row (deletes included): the head of the standalone
+    /// register the group's rows fused with, needing re-election
+    pub(crate) head_hint: Option<usize>,
 }
 
 impl OpSet {
@@ -107,14 +121,14 @@ pub(crate) struct ApplyManifold<'a> {
     // the current update scope: an element and its group in the doc
     elem: Option<ElemId>,
     last_insert: Option<OpId>,
+    // batch row index of `last_insert` — the head of any standalone
+    // register a following headless run fused with
+    last_ins_row: Option<usize>,
     elem_scope: Range<usize>,
 
-    // top/text delta tracking: one scope at a time, finalized at the
+    // mixed-group detection: one scope at a time, finalized at the
     // same boundaries the succ cache flushes
     top: TopCalc,
-    // lags the stream; shifted to each finalized scope (scopes ascend
-    // globally, so strictly forward)
-    vis_iter: hexane::Iter<'a, bool>,
 }
 
 impl<'a> ApplyManifold<'a> {
@@ -129,7 +143,6 @@ impl<'a> ApplyManifold<'a> {
         let value_iter = op_set.value_iter();
         let ins = op_set.insert().values().iter();
         let ins_upd = op_set.insert().values().iter();
-        let vis_iter = op_set.cols.index.visible.iter();
 
         let obj = ObjId::root();
         let obj_scope = obj_id_iter.seek_to_value(obj);
@@ -163,9 +176,9 @@ impl<'a> ApplyManifold<'a> {
             appending: false,
             elem: None,
             last_insert: None,
+            last_ins_row: None,
             elem_scope: 0..0,
             top: TopCalc::new(),
-            vis_iter,
         }
     }
 
@@ -192,7 +205,7 @@ impl<'a> ApplyManifold<'a> {
             &mut self.value_iter,
             &mut self.top,
         );
-        self.top.finalize(&mut self.vis_iter);
+        self.top.finalize();
     }
 
     /// Whether MANIFOLD_TRACE=<start>-<end> covers the current op index.
@@ -283,6 +296,7 @@ impl<'a> ApplyManifold<'a> {
                 }
                 self.op_index += n;
                 self.last_insert = Some(src.skip_clean(n));
+                self.last_ins_row = Some(self.op_index - 1);
                 self.elem = None;
                 rem -= n;
                 continue;
@@ -332,14 +346,22 @@ impl<'a> ApplyManifold<'a> {
             }
             if pending_after_run {
                 let id = self.last_insert.unwrap();
-                self.top
-                    .candidate_raw(id, meta.counters.contains(&id), true, end);
+                // the run's last insert is the previous stream index
+                let head = self.last_ins_row;
+                self.top.candidate_raw(
+                    id,
+                    self.op_index - 1,
+                    head,
+                    meta.counters.contains(&id),
+                    true,
+                );
             }
             if op.insert {
                 self.last_insert = Some(op.id);
+                self.last_ins_row = Some(self.op_index);
             }
             self.push_pos(end);
-            self.top.candidate(&op, end);
+            self.top.candidate(&op, self.op_index, self.last_ins_row);
             self.op_index += 1;
             rem -= 1;
         }
@@ -402,6 +424,7 @@ impl<'a> ApplyManifold<'a> {
             self.pred_iter.shift(self.obj_scope.clone());
             self.elem = None;
             self.lesser = None;
+            self.last_ins_row = None;
             self.appending = false;
 
             if self.obj_type == ObjType::Map {
@@ -444,18 +467,21 @@ impl<'a> ApplyManifold<'a> {
                 let r = self.id_iter.seek_to_value(&op.id);
                 assert!(r.is_empty());
                 self.push_slot(r.start);
-                self.top.candidate(op, r.start);
+                self.top.candidate(op, self.op_index, self.last_ins_row);
+            } else {
+                self.top.note_del(self.op_index, self.last_ins_row);
             }
         } else if op.insert {
             let e = op.key.elemid().unwrap();
             self.last_insert = Some(op.id);
+            self.last_ins_row = Some(self.op_index);
 
             // every insert starts a new element group: close the
             // previous scope (its updates all precede this op in
             // document order) and open one with no doc rows
             self.flush();
             // slot is irrelevant: an insert's scope never has doc rows
-            self.top.candidate(op, 0);
+            self.top.candidate(op, self.op_index, self.last_ins_row);
             self.elem = None;
 
             if !e.is_head() && self.clock.covers(&e.0) {
@@ -583,13 +609,15 @@ impl<'a> ApplyManifold<'a> {
                 if self.elem_scope.is_empty() {
                     // pending target: rides along at its insert's slot
                     self.push_slot(self.elem_scope.start);
-                    self.top.candidate(op, self.elem_scope.start);
+                    self.top.candidate(op, self.op_index, self.last_ins_row);
                 } else {
                     let r = self.id_iter.seek_to_value(&op.id);
                     assert!(r.is_empty());
                     self.push_slot(r.start);
-                    self.top.candidate(op, r.start);
+                    self.top.candidate(op, self.op_index, self.last_ins_row);
                 }
+            } else {
+                self.top.note_del(self.op_index, self.last_ins_row);
             }
         }
         if self.traced() {
@@ -615,54 +643,49 @@ impl<'a> ApplyManifold<'a> {
             doc_succ: self.succ_cache.doc_succ,
             change_succ: self.succ_cache.change_succ,
             insert_runs: self.insert_runs,
-            adjusts: self.top.adjusts,
-            conflicted: self.top.conflicted,
+            mixed_groups: self.top.mixed_groups,
         }
     }
 }
 
-/// Per-scope top/text delta tracking.
+/// Per-scope mixed-group detection.
 ///
-/// The load-bearing invariant: within a key/element group the doc's
-/// `top` bit is true exactly on the max-id **visible** row. So the
-/// current top (`vmax`), the post-batch doc candidate (`dmax` — max-id
-/// visible row not deleted this batch) and the batch candidate
-/// (`cmax`) decide everything. Neither the `top` column nor any id is
-/// ever read: candidate slots are id-ordered insertion points, so
-/// document order alone ranks batch ops against doc rows:
-///
-/// * batch wins, `vmax` undeleted → `Conflict(vmax)` (old top demoted,
-///   stays visible)
-/// * batch wins, `vmax` deleted → nothing (`add_succ` clears its bits;
-///   any `dmax` was already shadowed)
-/// * doc wins and `vmax` was deleted → `Expose(dmax)` (shadowed row
-///   promoted; its text width is recomputed by `expose()`)
-/// * every other visible batch op in the scope → `conflicted`
-///
-/// Text needs no separate pass: `conflict()`/`expose()` maintain the
-/// text index alongside the top bit, and `Columns::splice` derives new
-/// rows' entries from `OpLike::top`.
+/// The load-bearing invariant: within a key/element group the `top`
+/// bit is true exactly on the max-id **visible** row, and the merged
+/// `visible` column is already correct everywhere (batch rows carry
+/// their final succ; `add_succ` maintains the doc rows). So top/text
+/// need no decisions here at all — they are a pure function of
+/// `visible` within the group. This tracker only *detects* the groups
+/// whose election may have changed: ones with doc rows AND either an
+/// alive batch row landing in them or a doc row deleted by the batch.
+/// The consumer re-runs the last-visible election over each such
+/// group's merged range (`OpSet::reset_top`); every other group's
+/// index bits are straight copies (fragment-standalone or untouched
+/// doc).
 struct TopCalc {
     enabled: bool,
     // current scope: doc row range (empty for insert/pending scopes)
     doc_scope: Range<usize>,
     // visible batch ops in arrival (= ascending id) order
     batch: Vec<BatchTop>,
-    // doc positions given an inc=None succ this scope (from flush,
-    // post-normalization, in ascending position order)
-    deleted: Vec<usize>,
+    // min/max batch row index merged into this scope (all non-delete
+    // ops, including increments — they extend the merged range)
+    rows: Option<(usize, usize)>,
+    // first batch row of any kind in this scope — delete rows count
+    // (they exist in the fragment columns even though they never merge)
+    first_row: Option<usize>,
+    // the last insert row before `first_row` (same object): the head
+    // of the standalone register this scope's rows fused with
+    head_hint: Option<usize>,
+    // the succ flush gave a doc row in this scope an inc=None succ —
+    // its visibility flipped, so the election may have moved
+    saw_delete: bool,
 
-    adjusts: Vec<Adjust>,
-    conflicted: Vec<OpId>,
+    mixed_groups: Vec<MixedGroup>,
 }
 
 struct BatchTop {
     id: OpId,
-    // the op's insertion point within the scope. Rows in a group are
-    // id-sorted and the slot came from an id-ordered seek, so slots
-    // compare against doc row positions exactly as ids compare —
-    // `slot > pos` ⇔ this op's id beats the row's id
-    slot: usize,
     is_counter: bool,
     alive: bool,
 }
@@ -673,14 +696,16 @@ impl TopCalc {
             enabled: std::env::var("MANIFOLD_NO_TOP").is_err(),
             doc_scope: 0..0,
             batch: vec![],
-            deleted: vec![],
-            adjusts: vec![],
-            conflicted: vec![],
+            rows: None,
+            first_row: None,
+            head_hint: None,
+            saw_delete: false,
+            mixed_groups: vec![],
         }
     }
 
     fn open(&mut self, doc_scope: Range<usize>) {
-        debug_assert!(self.batch.is_empty() && self.deleted.is_empty());
+        debug_assert!(self.batch.is_empty() && !self.saw_delete);
         self.doc_scope = doc_scope;
     }
 
@@ -704,31 +729,66 @@ impl TopCalc {
 
     /// [`Self::candidate`] from explicit fields, for candidates whose
     /// op was consumed by a run skip.
-    fn candidate_raw(&mut self, id: OpId, is_counter: bool, alive: bool, slot: usize) {
+    /// Extend the scope's merged-row span with a batch row index.
+    /// `head` is the batch row of the object's most recent insert — the
+    /// standalone register a headless run fused with.
+    fn note_row(&mut self, index: usize, head: Option<usize>) {
+        self.rows = Some(match self.rows {
+            Some((lo, hi)) => (lo.min(index), hi.max(index)),
+            None => (index, index),
+        });
+        self.note_del(index, head);
+    }
+
+    /// Note a batch row that joins the scope without merging (a delete
+    /// row): it still occupies a fragment row, and the fragment's
+    /// standalone index can fuse it into the preceding register.
+    fn note_del(&mut self, index: usize, head: Option<usize>) {
         if !self.enabled {
             return;
         }
+        if self.first_row.is_none() {
+            self.head_hint = head.filter(|&h| h < index);
+        }
+        self.first_row = Some(match self.first_row {
+            Some(f) => f.min(index),
+            None => index,
+        });
+    }
+
+    /// [`Self::candidate`] from explicit fields, for candidates whose
+    /// op was consumed by a run skip.
+    fn candidate_raw(
+        &mut self,
+        id: OpId,
+        index: usize,
+        head: Option<usize>,
+        is_counter: bool,
+        alive: bool,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.note_row(index, head);
         self.batch.push(BatchTop {
             id,
-            slot,
             is_counter,
             alive,
         });
     }
 
-    /// Register a batch op as a top candidate if it is the kind of op
-    /// that can hold top. `slot` is its already-computed insertion
-    /// point within the scope; aliveness comes from the op's own
-    /// (normalized) in-fragment succ.
-    fn candidate(&mut self, op: &FragOp<'_>, slot: usize) {
+    /// Register a batch op in the current scope: its row extends the
+    /// merged range, and — unless it is an increment — it competes for
+    /// top with aliveness from its own (normalized) in-fragment succ.
+    fn candidate(&mut self, op: &FragOp<'_>, index: usize, head: Option<usize>) {
         if !self.enabled {
             return;
         }
 
+        self.note_row(index, head);
         if op.action != Action::Increment {
             self.batch.push(BatchTop {
                 id: op.id,
-                slot,
                 is_counter: op.is_counter,
                 alive: op.alive,
             });
@@ -737,109 +797,53 @@ impl TopCalc {
 
     /// Called by the succ flush for every covered pred resolved with
     /// `inc = None` — the rows `add_succ` will clear.
-    fn note_deleted(&mut self, pos: usize) {
+    fn note_deleted(&mut self, _pos: usize) {
         if !self.enabled {
             return;
         }
 
-        self.deleted.push(pos);
+        self.saw_delete = true;
     }
 
-    /// [`finalize`](Self::finalize) for scopes with no doc rows at all
-    /// (the blank-document path): no visible scan, no candidates but
-    /// the batch's own — straight to the batch winner.
+    /// [`finalize`](Self::finalize) for scopes living entirely in the
+    /// fragment (the tail's blank mode): nothing to emit — the merged-in
+    /// index bits were built standalone over exactly this group, and
+    /// no delete row can be present (delete rows carry doc preds, which
+    /// keep their object off the tail path), so they are already final.
     fn finalize_blank(&mut self) {
-        if !self.enabled {
-            return;
-        }
-        if let Some(winner) = self.batch.iter().rev().find(|b| b.alive).map(|b| b.id) {
-            for b in self.batch.iter().filter(|b| b.alive) {
-                if b.id != winner {
-                    self.conflicted.push(b.id);
-                }
-            }
-        }
         self.batch.clear();
+        self.rows = None;
+        self.first_row = None;
+        self.head_hint = None;
     }
 
     /// Close the scope: decide the group winner and emit adjustments.
-    fn finalize(&mut self, vis_iter: &mut hexane::Iter<'_, bool>) {
+    /// Close the scope: record it as a mixed group when its top/text
+    /// election may have changed — it has doc rows AND either an alive
+    /// batch row joined it or the batch deleted one of its rows.
+    /// Groups with no doc rows keep their fragment-standalone bits (a
+    /// poisoning delete row would need a doc pred in the group, and
+    /// there are no doc rows to target); untouched doc groups keep
+    /// theirs.
+    fn finalize(&mut self) {
         if !self.enabled {
             return;
         }
 
-        let cmax = self.batch.iter().rev().find(|b| b.alive);
-        if cmax.is_none() && self.deleted.is_empty() {
-            // increments-only, deletes-of-nothing, or empty — the hot
-            // insert path exits here with zero column reads
-            self.batch.clear();
-            self.doc_scope = 0..0;
-            return;
-        }
-
-        // scan the scope's visible runs once; the top column is never
-        // read (top == max-id visible row by invariant)
-        let mut vmax: Option<usize> = None;
-        let mut dmax: Option<usize> = None;
-        if !self.doc_scope.is_empty() {
-            vis_iter.shift(self.doc_scope.clone());
-            let mut runs: Vec<Range<usize>> = vec![];
-            let mut pos = self.doc_scope.start;
-            while let Some(run) = vis_iter.next_run() {
-                if run.value {
-                    runs.push(pos..pos + run.count);
-                }
-                pos += run.count;
-            }
-            vmax = runs.last().map(|r| r.end - 1);
-            'outer: for r in runs.iter().rev() {
-                for p in r.clone().rev() {
-                    // deleted is tiny: this loop exits within
-                    // deleted.len() + 1 steps
-                    if !self.deleted.contains(&p) {
-                        dmax = Some(p);
-                        break 'outer;
-                    }
-                }
-            }
-        }
-
-        // no id reads at all: candidate slots are id-ordered insertion
-        // points within the scope, so document order decides —
-        // `slot > pos` ⇔ the batch op's id beats the row's id
-        let batch_wins = match (cmax, dmax) {
-            (Some(c), Some(d)) => c.slot > d,
-            (Some(_), None) => true,
-            (None, _) => false,
-        };
-
-        if batch_wins {
-            if let Some(v) = vmax {
-                if dmax == Some(v) {
-                    // the standing top stays visible but is demoted
-                    self.adjusts.push(Adjust::Conflict(v));
-                }
-            }
-            let winner = cmax.map(|b| b.id);
-            for b in self.batch.iter().filter(|b| b.alive) {
-                if Some(b.id) != winner {
-                    self.conflicted.push(b.id);
-                }
-            }
-        } else {
-            if let (Some(v), Some(d)) = (vmax, dmax) {
-                if v != d {
-                    // the old top was deleted: promote the shadowed row
-                    self.adjusts.push(Adjust::Expose(d));
-                }
-            }
-            for b in self.batch.iter().filter(|b| b.alive) {
-                self.conflicted.push(b.id);
-            }
+        let alive = self.batch.iter().any(|b| b.alive);
+        if !self.doc_scope.is_empty() && (alive || self.saw_delete) {
+            self.mixed_groups.push(MixedGroup {
+                doc: self.doc_scope.clone(),
+                rows: self.rows,
+                head_hint: self.head_hint,
+            });
         }
 
         self.batch.clear();
-        self.deleted.clear();
+        self.rows = None;
+        self.first_row = None;
+        self.head_hint = None;
+        self.saw_delete = false;
         self.doc_scope = 0..0;
     }
 }

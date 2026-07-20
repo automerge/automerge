@@ -5,10 +5,9 @@ use crate::types::OpId;
 use crate::{Automerge, AutomergeError, PatchLog};
 
 use super::super::op::{ChangeOp, OpBuilder};
-use super::batch::{normalize_increment_successors, splice_insert_runs, Adjust};
+use super::batch::normalize_increment_successors;
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 /// Applies the ops of a bundle directly, without converting the bundle
 /// into [`crate::Change`]s first.
@@ -52,60 +51,94 @@ impl FragSrc<'_> {
 
 #[derive(Debug)]
 pub(crate) struct FragmentApply<'a> {
-    /// decoded ops in stream order — the splice input (succ stamped)
-    ops: Vec<ChangeOp>,
     /// the document clock *before* this fragment — the manifold needs
     /// it to split doc preds from in-bundle preds
     clock: Clock,
     /// bundle-actor -> doc-actor translation for the column stream
     actor_map: Vec<usize>,
     src: FragSrc<'a>,
-    /// clock-covered rows were skipped: the stored columns no longer
-    /// match `ops`, so the stream must be re-encoded before use
-    overlap: bool,
+    /// the fragment's op columns loaded through the document load path
+    /// — actor indexes remapped, indexes built — ready to merge. The
+    /// pred columns stay outside (they describe rows *before* the
+    /// fragment and feed the manifold, not the op set).
+    frag: crate::op_set2::op_set::OpSet,
 }
 
 impl<'a> FragmentApply<'a> {
-    /// Wrap already doc-ordered, succ-stamped ops plus their encoded
-    /// columns (the batch path).
+    /// Wrap already doc-ordered, succ-stamped columns (the batch path,
+    /// identity actor map).
     pub(crate) fn from_parts(
-        ops: Vec<ChangeOp>,
         clock: Clock,
         actor_map: Vec<usize>,
         src: FragSrc<'a>,
-    ) -> Self {
-        Self {
-            ops,
+        doc_ops: &crate::op_set2::op_set::OpSet,
+    ) -> Result<Self, AutomergeError> {
+        let frag = load_frag_set(&src, &actor_map, doc_ops)?;
+        Ok(Self {
             clock,
             actor_map,
             src,
-            overlap: false,
-        }
+            frag,
+        })
     }
-    /// Load the bundle's ops, remapping its actor indexes to the
-    /// document's via `actor_map` (every bundle actor must already be
-    /// in the document). `clock` is the document's current clock — ops
-    /// it covers belong to member changes the document already has and
-    /// are dropped.
+
+    /// Prepare a received bundle for application: load its op columns
+    /// as an op set (which also validates them — a malformed bundle
+    /// fails here, before any history is touched), remapping bundle
+    /// actor indexes to the document's via `actor_map` (every bundle
+    /// actor must already be in the document).
     ///
-    /// The bundle's succ column carries each op's in-bundle successors
-    /// (already in id order, increments pre-resolved), so the ops come
-    /// out with `succ` stamped; the pred column holds only references
-    /// to rows from before the bundle.
+    /// `overlap` marks a bundle whose members are partially present:
+    /// the covered rows must not apply again, so the kept ops are
+    /// decoded, filtered against `clock` and re-encoded (rare).
     pub(crate) fn new(
         bundle: &'a Bundle,
         actor_map: Vec<usize>,
         clock: &Clock,
+        overlap: bool,
+        doc_ops: &crate::op_set2::op_set::OpSet,
     ) -> Result<Self, AutomergeError> {
-        let (ops, overlap) = decode_ops(|| bundle.storage.iter_ops(), &actor_map, clock)?;
+        let (src, actor_map) = if overlap {
+            let (ops, _) = decode_ops(|| bundle.storage.iter_ops(), &actor_map, clock)?;
+            let (raw, data, id_ctr) = super::batch::encode_frag_ops(ops.iter(), doc_ops);
+            let identity: Vec<usize> = (0..doc_ops.actors.len()).collect();
+            (FragSrc::Owned { raw, data, id_ctr }, identity)
+        } else {
+            (FragSrc::Bundle(bundle), actor_map)
+        };
+        let frag = load_frag_set(&src, &actor_map, doc_ops)?;
         Ok(Self {
-            ops,
             clock: clock.clone(),
             actor_map,
-            src: FragSrc::Bundle(bundle),
-            overlap,
+            src,
+            frag,
         })
     }
+}
+
+/// Load a fragment source's op columns as a fully indexed op set in
+/// document actor space (see [`OpSet::load_frag`]).
+fn load_frag_set(
+    src: &FragSrc<'_>,
+    actor_map: &[usize],
+    doc_ops: &crate::op_set2::op_set::OpSet,
+) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
+    let (raw, data, id_ctr) = src.parts();
+    crate::op_set2::op_set::OpSet::load_frag(
+        raw,
+        data,
+        id_ctr,
+        actor_map,
+        doc_ops.actors.clone(),
+        &doc_ops.obj_info,
+        doc_ops.text_encoding,
+    )
+    .map_err(|e| {
+        if std::env::var("FRAG_DEBUG").is_ok() {
+            eprintln!("fragment column load failed: {}", e);
+        }
+        AutomergeError::InvalidFragment("invalid fragment op columns")
+    })
 }
 
 /// Decode a doc-ordered succ-format op stream into splice-ready
@@ -234,18 +267,7 @@ impl<'a> FragmentApply<'a> {
         };
         log.migrate_actors(&doc.ops().actors)?;
 
-        if self.overlap {
-            // rare: clock-covered rows were dropped from `ops`, so the
-            // stored columns no longer describe the stream — re-encode
-            // the kept ops (doc actor indexes, identity map)
-            let (raw, data, id_ctr) = super::batch::encode_frag_ops(self.ops.iter(), doc.ops());
-            self.actor_map = (0..doc.ops().actors.len()).collect();
-            self.src = FragSrc::Owned { raw, data, id_ctr };
-            self.overlap = false;
-        }
-        lap("overlap re-encode", &mut t);
-
-        let mut r = {
+        let r = {
             let (raw, data, id_ctr) = self.src.parts();
             let meta = crate::storage::bundle::frag_prepass(raw, data, id_ctr, &self.actor_map);
             let mut fs = crate::storage::bundle::FragOps::new(raw, data, id_ctr, &self.actor_map);
@@ -255,56 +277,75 @@ impl<'a> FragmentApply<'a> {
         };
         lap("manifold", &mut t);
 
-        // same ordering as the walk path: adjust the standing rows,
-        // write the doc succ, then splice
-        for a in r.adjusts.drain(..) {
-            match a {
-                Adjust::Conflict(index) => doc.ops.conflict(index),
-                Adjust::Expose(index) => doc.ops.expose(index),
-            }
+        // in the succ format every pred names a doc row — nothing can
+        // defer to the batch side
+        debug_assert!(r.change_succ.is_empty(), "fragment op had a batch pred");
+
+        if std::env::var("MERGE_DEBUG").is_ok() {
+            eprintln!("== merge: runs {:?}", r.insert_runs);
+            eprintln!("   mixed groups {:?}", r.mixed_groups);
+            eprintln!("== frag opset ==");
+            self.frag.dump();
         }
+
+        // write the doc succ while positions are still pre-merge —
+        // add_succ also clears vis/top/text on rows it deletes, so the
+        // visible column is final before the elections below read it
         doc.ops.add_succ(&r.doc_succ);
-        lap("adjusts + add_succ", &mut t);
+        lap("add_succ", &mut t);
 
-        // stamp the manifold's outputs onto the ops: the splice derives
-        // each new row's succ/top/text entries from them
-        let conflicted: HashSet<OpId> = r.conflicted.iter().copied().collect();
-        for op in self.ops.iter_mut() {
-            op.conflicted = conflicted.contains(&op.id());
-            if let Some(mut succ) = r.change_succ.remove(&op.id()) {
-                // the succ columns want id order, increments normalized
-                // against their target
-                succ.sort_unstable_by_key(|(id, _)| *id);
-                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
-                normalize_increment_successors(is_counter, &mut succ);
-                op.succ = succ;
+        // the merge: copy the fragment's columns and indexes in at the
+        // insert runs
+        doc.ops.merge(&self.frag, &r.insert_runs);
+        lap("merge columns", &mut t);
+
+        // top/text are the only index bits that aren't a straight copy,
+        // and only in groups shared between the doc and the fragment —
+        // re-run the last-visible election over each such group.
+        // INDEX_REBUILD=1 rebuilds everything from scratch instead (A/B
+        // debugging fallback)
+        if std::env::var("INDEX_REBUILD").is_ok() {
+            doc.ops
+                .rebuild_indexes()
+                .map_err(|_| AutomergeError::InvalidFragment("index rebuild failed"))?;
+            lap("index rebuild", &mut t);
+        } else {
+            reset_mixed_groups(doc, &r);
+            lap("reset mixed groups", &mut t);
+            if std::env::var("MERGE_VALIDATE").is_ok() {
+                let diffs = doc.ops.index_diff_positions();
+                if !diffs.is_empty() {
+                    let runs = &r.insert_runs;
+                    let mut shifts = Vec::with_capacity(runs.len());
+                    let mut acc = 0usize;
+                    for (_, rg) in runs.iter() {
+                        shifts.push(acc);
+                        acc += rg.len();
+                    }
+                    for (col, pos) in &diffs {
+                        // provenance: which frag run (or doc row) owns pos
+                        let mut src = "past all runs".to_string();
+                        for (k, (p, rg)) in runs.iter().enumerate() {
+                            let base = p + shifts[k];
+                            if *pos >= base && *pos < base + rg.len() {
+                                src = format!("frag row {}", rg.start + (pos - base));
+                                break;
+                            } else if *pos < base {
+                                src = format!("doc row {}", pos - shifts[k]);
+                                break;
+                            }
+                        }
+                        eprintln!("IDXDIFF {} at {} ({})", col, pos, src);
+                    }
+                    eprintln!("  runs {:?}", r.insert_runs);
+                    eprintln!("  mixed {:?}", r.mixed_groups);
+                    panic!("index diverges after mixed-group reset");
+                }
             }
         }
-        // the runs cover exactly the non-delete ops
-        debug_assert_eq!(
-            r.insert_runs.iter().map(|(_, r)| r.len()).sum::<usize>(),
-            self.ops.iter().filter(|o| !o.bld.is_delete()).count()
-        );
-        lap("stamp", &mut t);
-
-        splice_insert_runs(&self.ops, &r.insert_runs, doc);
-        lap("splice (insert_runs)", &mut t);
 
         #[cfg(debug_assertions)]
         if !doc.ops.validate_op_order() {
-            eprintln!("== stream ops ==");
-            for (k, op) in self.ops.iter().enumerate() {
-                eprintln!(
-                    "  in[{k}] id {:?} obj {:?} key {:?} ins {} del {} pred {:?} succ {:?}",
-                    op.id(),
-                    op.bld.obj,
-                    op.key(),
-                    op.insert(),
-                    op.bld.is_delete(),
-                    op.bld.pred,
-                    op.succ
-                );
-            }
             eprintln!("== insert runs {:?} ==", r.insert_runs);
             eprintln!("== doc rows ==");
             for op in doc.ops().iter() {
@@ -320,6 +361,66 @@ impl<'a> FragmentApply<'a> {
             panic!("op order violated");
         }
         Ok(())
+    }
+}
+
+/// Re-run the top/text election in every group the manifold flagged as
+/// mixed. A group's merged range is its doc rows — shifted by the
+/// fragment rows inserted at or before each end — widened to cover the
+/// fragment rows that landed inside it (mapped through the insert
+/// runs). `OpSet::reset_top` then settles the group from its (already
+/// final) visible bits.
+fn reset_mixed_groups(doc: &mut Automerge, r: &crate::op_set2::op_set::manifold::ManifoldResult) {
+    if r.mixed_groups.is_empty() {
+        return;
+    }
+    let runs = &r.insert_runs;
+    // prefix sums: shifts[i] = rows merged before run i
+    let mut shifts = Vec::with_capacity(runs.len());
+    let mut acc = 0usize;
+    for (_, rg) in runs.iter() {
+        shifts.push(acc);
+        acc += rg.len();
+    }
+    let total = acc;
+    // fragment row -> merged position (rows in mixed groups always merge)
+    let row_pos = |row: usize| -> usize {
+        let i = runs.partition_point(|(_, rg)| rg.start <= row) - 1;
+        let (p, rg) = &runs[i];
+        debug_assert!(rg.contains(&row), "mixed-group row not merged");
+        p + shifts[i] + (row - rg.start)
+    };
+    // pre-merge doc position -> merged position: displaced by every
+    // fragment row inserted at or before it
+    let doc_pos = |p: usize| -> usize {
+        // runs 0..i sit at positions <= p, so exactly their rows
+        // displace this doc row
+        let i = runs.partition_point(|(pos, _)| *pos <= p);
+        p + if i == runs.len() { total } else { shifts[i] }
+    };
+    // consecutive headless runs share one fused register: re-elect each
+    // head once
+    let mut done_head = usize::MAX;
+    for g in &r.mixed_groups {
+        // the fragment's standalone build fused the register holding
+        // this group's first fragment row (deletes included — they
+        // occupy rows too) with the fragment register before it: a
+        // headless run has no insert of its own. That register's
+        // election is poisoned — redo it at its own merged position
+        // (it can sit far from this group)
+        if let Some(head) = g.head_hint {
+            if head != done_head {
+                doc.ops.reset_register_at(row_pos(head));
+                done_head = head;
+            }
+        }
+        let mut start = doc_pos(g.doc.start);
+        let mut end = doc_pos(g.doc.end - 1) + 1;
+        if let Some((lo, hi)) = g.rows {
+            start = start.min(row_pos(lo));
+            end = end.max(row_pos(hi) + 1);
+        }
+        doc.ops.reset_top_range(start..end);
     }
 }
 

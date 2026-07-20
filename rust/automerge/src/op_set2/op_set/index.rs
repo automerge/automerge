@@ -316,6 +316,14 @@ impl IndexBuilder {
         }
     }
 
+    /// Seed the object-type index with entries from outside the columns
+    /// being processed. A fragment's ops can live in objects the
+    /// *document* created — without their types, sequence objects would
+    /// register-split like maps.
+    pub(crate) fn seed_obj_info(&mut self, info: &ObjIndex) {
+        self.obj_info = info.clone();
+    }
+
     /// Number of ops already flushed to the encoders — the absolute index
     /// of the current group's first op.
     fn ops_flushed(&self) -> usize {

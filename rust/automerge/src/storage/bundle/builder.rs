@@ -360,7 +360,7 @@ impl<'a> BundleChangeWriter<'a> {
 #[derive(Default)]
 pub(crate) struct BundleOpWriter<'a> {
     obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    obj_ctr: hexane::Encoder<'a, Option<u64>>,
     key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
     key_str: hexane::Encoder<'a, Option<String>>,
@@ -400,7 +400,7 @@ impl<'a> BundleOpWriter<'a> {
         }
         self.id_actor.append(op.id.actoridx());
         self.obj_actor.append(op.obj.actor());
-        self.obj_ctr.append(op.obj.icounter());
+        self.obj_ctr.append(op.obj.counter());
         self.key_actor.append(op.key.actor());
         self.key_ctr.append(op.key.icounter());
         self.key_str
@@ -810,7 +810,7 @@ impl<'a> OpIterUnverified<'a> {
 
 struct OpIterInner<'a> {
     obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    obj_ctr: hexane::Decoder<'a, Option<u64>>,
     key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     key_str: hexane::Decoder<'a, Option<String>>,
@@ -887,7 +887,7 @@ impl<'a> OpIterInner<'a> {
         };
 
         let obj_actor = self.obj_actor.next().flatten();
-        let obj_ctr = self.obj_ctr.next().flatten();
+        let obj_ctr = self.obj_ctr.next().flatten().map(|v| v as i64);
         let obj = ObjId::try_load(obj_actor, obj_ctr)?;
 
         let key_str = self.key_str.next().flatten();
@@ -952,7 +952,7 @@ impl<'a> OpIterInner<'a> {
         id_ctr_values: &'a [i64],
     ) -> Result<Self, ParseError> {
         let mut obj_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
-        let mut obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut obj_ctr = hexane::decoder::<Option<u64>>(&[]);
         let mut key_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
         let mut key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
         let mut key_str = hexane::decoder::<Option<String>>(&[]);
@@ -976,9 +976,7 @@ impl<'a> OpIterInner<'a> {
             type C = ColumnType;
             match (col.spec().id(), col.spec().col_type()) {
                 (ops::OBJ_COL_ID, C::Actor) => obj_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::OBJ_COL_ID, C::DeltaInteger) => {
-                    obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
+                (ops::OBJ_COL_ID, C::Integer) => obj_ctr = hexane::decoder::<Option<u64>>(d),
                 (ops::KEY_COL_ID, C::Actor) => key_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::KEY_COL_ID, C::DeltaInteger) => {
                     key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
@@ -1208,7 +1206,7 @@ pub(crate) struct FragOps<'a> {
     id_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     id_ctr: &'a [i64],
     obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    obj_ctr: hexane::Decoder<'a, Option<u64>>,
     key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     key_str: hexane::Decoder<'a, Option<String>>,
@@ -1222,7 +1220,7 @@ pub(crate) struct FragOps<'a> {
     succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     /// raw (unmapped) obj actor of the last-read op, for same-obj run
     /// peeks against the raw column
-    cur_obj_raw: (Option<ActorIdx>, Option<i64>),
+    cur_obj_raw: (Option<ActorIdx>, Option<u64>),
     /// elided columns decode as empty but mean "all default": the run
     /// peeks must treat them as unbounded default runs
     pred_absent: bool,
@@ -1244,7 +1242,7 @@ impl<'a> FragOps<'a> {
             id_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
             id_ctr,
             obj_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
-            obj_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
+            obj_ctr: hexane::decoder::<Option<u64>>(&[]),
             key_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
             key_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
             key_str: hexane::decoder::<Option<String>>(&[]),
@@ -1269,9 +1267,7 @@ impl<'a> FragOps<'a> {
                     s.obj_actor = hexane::decoder::<Option<ActorIdx>>(d);
                     s.obj_absent = d.is_empty();
                 }
-                (ops::OBJ_COL_ID, C::DeltaInteger) => {
-                    s.obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
+                (ops::OBJ_COL_ID, C::Integer) => s.obj_ctr = hexane::decoder::<Option<u64>>(d),
                 (ops::KEY_COL_ID, C::Actor) => s.key_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::KEY_COL_ID, C::DeltaInteger) => {
                     s.key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
@@ -1319,9 +1315,7 @@ impl<'a> FragOps<'a> {
         let oc = self.obj_ctr.next().flatten();
         self.cur_obj_raw = (oa, oc);
         let obj = match (oa, oc) {
-            (Some(a), Some(c)) if c > 0 => {
-                ObjId(OpId::new(c as u64, self.actor_map[usize::from(a)]))
-            }
+            (Some(a), Some(c)) if c > 0 => ObjId(OpId::new(c, self.actor_map[usize::from(a)])),
             _ => ObjId::root(),
         };
 
@@ -1429,12 +1423,12 @@ impl<'a> FragOps<'a> {
             // every op is in the root object
             return max.min(self.len - self.pos);
         }
-        // same object ⇔ zero obj-ctr delta and repeating obj actor
+        // same object ⇔ both obj columns keep repeating their value
         let mut n = 0;
         let mut ctr = self.obj_ctr.clone();
         while n < max {
-            match ctr.next_delta_run_max(max - n) {
-                Some(run) if run.value == Some(0) => n += run.count,
+            match ctr.next_run_max(max - n) {
+                Some(run) if run.value == self.cur_obj_raw.1 => n += run.count,
                 _ => break,
             }
         }
@@ -1456,7 +1450,7 @@ impl<'a> FragOps<'a> {
         debug_assert!(n > 0 && self.pos + n <= self.len);
         let last_actor = self.id_actor.nth(n - 1).flatten().expect("id actor");
         skip_rle(&mut self.obj_actor, n);
-        skip_delta(&mut self.obj_ctr, n);
+        skip_rle(&mut self.obj_ctr, n);
         skip_rle(&mut self.key_actor, n);
         skip_delta(&mut self.key_ctr, n);
         skip_rle(&mut self.key_str, n);
@@ -1502,7 +1496,7 @@ pub(crate) mod ops {
     pub(super) const ID_ACTOR:   ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
     pub(super) const ID_CTR_INVERSE: ColumnSpec = ColumnSpec::new_delta(ID_CTR_INVERSE_COL_ID);
     pub(super) const OBJ_ACTOR:  ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
-    pub(super) const OBJ_CTR:    ColumnSpec = ColumnSpec::new_delta(OBJ_COL_ID);
+    pub(super) const OBJ_CTR:    ColumnSpec = ColumnSpec::new_integer(OBJ_COL_ID);
     pub(super) const KEY_ACTOR:  ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
     pub(super) const KEY_CTR:    ColumnSpec = ColumnSpec::new_delta(KEY_COL_ID);
     pub(super) const KEY_STR:    ColumnSpec = ColumnSpec::new_string(KEY_COL_ID);

@@ -431,7 +431,153 @@ impl Columns {
         })
     }
 
-    fn remap_actors<F>(&mut self, f: &F)
+    /// Load a fragment's op columns through the same per-column loaders
+    /// as [`Self::load`]. Fragments carry the same specs as documents
+    /// (their extra pred/inverse columns are simply not consulted) except
+    /// the id counter, which arrives realized (decoded from the inverse
+    /// column) instead of as a delta column — so it is built from values
+    /// here.
+    pub(super) fn load_frag(
+        cols: BTreeMap<ColumnSpec, Range<usize>>,
+        data: &[u8],
+        id_ctr: &[i64],
+    ) -> Result<Self, PackError> {
+        let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
+
+        let id_actor = hexane::Column::load(_d(ID_ACTOR_COL_SPEC))?;
+        let len = id_actor.len();
+        let opts = hexane::LoadOpts::new().with_length(len);
+
+        if id_ctr.len() != len {
+            return Err(PackError::InvalidLength(id_ctr.len(), len));
+        }
+        let id_ctr =
+            hexane::DeltaColumn::from_values(id_ctr.iter().map(|&v| v as u32).collect::<Vec<_>>());
+        let obj_actor = hexane::Column::load_with(_d(OBJ_ID_ACTOR_COL_SPEC), opts.with_fill(None))?;
+        let obj_ctr = hexane::Column::load_with(_d(OBJ_ID_COUNTER_COL_SPEC), opts.with_fill(None))?;
+        let key_actor = hexane::Column::load_with(_d(KEY_ACTOR_COL_SPEC), opts.with_fill(None))?;
+        let key_ctr =
+            hexane::DeltaColumn::load_with(_d(KEY_COUNTER_COL_SPEC), opts.with_fill(None))?;
+        let key_str = hexane::Column::load_with(_d(KEY_STR_COL_SPEC), opts.with_fill(None))?;
+        let insert = hexane::PrefixColumn::load_with(_d(INSERT_COL_SPEC), opts.with_fill(false))?;
+        let action = hexane::Column::load_with(_d(ACTION_COL_SPEC), opts)?;
+        let value_meta = hexane::PrefixColumn::load_with(_d(VALUE_META_COL_SPEC), opts)?;
+        let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
+        let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+        let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
+        let succ_count = hexane::PrefixColumn::load_with(_d(SUCC_COUNT_COL_SPEC), opts)?;
+
+        let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
+        let succ_opts = hexane::LoadOpts::new().with_length(succ_len);
+
+        let succ_actor = hexane::Column::load_with(_d(SUCC_ACTOR_COL_SPEC), succ_opts)?;
+        let succ_ctr = hexane::DeltaColumn::load_with(_d(SUCC_COUNTER_COL_SPEC), succ_opts)?;
+
+        Ok(Self {
+            id_actor,
+            id_ctr,
+            obj_actor,
+            obj_ctr,
+            key_actor,
+            key_ctr,
+            key_str,
+            succ_count,
+            succ_actor,
+            succ_ctr,
+            insert,
+            action,
+            value_meta,
+            value,
+            mark_name,
+            expand,
+            index: Indexes::default(),
+        })
+    }
+
+    /// Splice another column set's rows — op columns *and* index columns
+    /// — into this one at the manifold's insert runs. Each run
+    /// `(pos, start..end)` copies the fragment rows `start..end` to
+    /// document position `pos` (pre-merge coordinates; runs ascend, so a
+    /// running shift converts). Rows in the gaps between runs are the
+    /// fragment's delete ops, which have no document row.
+    ///
+    /// The fragment's index bits were built standalone, so they are
+    /// exactly right for groups living entirely inside the fragment;
+    /// groups shared with the document get corrected afterwards by the
+    /// manifold's conflict/expose sets.
+    pub(super) fn merge(&mut self, frag: &Columns, runs: &[(usize, Range<usize>)]) {
+        // the value column is chunked; one contiguous copy serves every
+        // run's byte-range slice
+        let frag_value = frag.value.save();
+
+        let mut shift = 0usize;
+        for (pos, range) in runs {
+            let at = pos + shift;
+
+            // sub-column spans (prefix sums are exclusive)
+            let succ_a = frag.succ_count.get_prefix(range.start) as usize;
+            let succ_b = frag.succ_count.get_prefix(range.end) as usize;
+            let val_a = frag.value_meta.get_prefix(range.start) as usize;
+            let val_b = frag.value_meta.get_prefix(range.end) as usize;
+            let succ_pos = self.succ_count.get_prefix(at) as usize;
+            let value_pos = self.value_meta.get_prefix(at) as usize;
+
+            self.id_actor
+                .splice(at, 0, frag.id_actor.iter_range(range.clone()));
+            self.id_ctr
+                .splice(at, 0, frag.id_ctr.iter_range(range.clone()));
+            self.obj_actor
+                .splice(at, 0, frag.obj_actor.iter_range(range.clone()));
+            self.obj_ctr
+                .splice(at, 0, frag.obj_ctr.iter_range(range.clone()));
+            self.key_actor
+                .splice(at, 0, frag.key_actor.iter_range(range.clone()));
+            self.key_ctr
+                .splice(at, 0, frag.key_ctr.iter_range(range.clone()));
+            self.key_str
+                .splice(at, 0, frag.key_str.iter_range(range.clone()));
+            self.insert
+                .splice(at, 0, frag.insert.values().iter_range(range.clone()));
+            self.action
+                .splice(at, 0, frag.action.iter_range(range.clone()));
+            self.mark_name
+                .splice(at, 0, frag.mark_name.iter_range(range.clone()));
+            self.expand
+                .splice(at, 0, frag.expand.iter_range(range.clone()));
+            self.value_meta
+                .splice(at, 0, frag.value_meta.values().iter_range(range.clone()));
+            self.value
+                .splice_slice(value_pos, 0, &frag_value[val_a..val_b]);
+
+            self.succ_count
+                .splice(at, 0, frag.succ_count.values().iter_range(range.clone()));
+            self.succ_actor
+                .splice(succ_pos, 0, frag.succ_actor.iter_range(succ_a..succ_b));
+            self.succ_ctr
+                .splice(succ_pos, 0, frag.succ_ctr.iter_range(succ_a..succ_b));
+
+            self.index
+                .inc
+                .splice(succ_pos, 0, frag.index.inc.iter_range(succ_a..succ_b));
+            self.index
+                .visible
+                .splice(at, 0, frag.index.visible.iter_range(range.clone()));
+            self.index
+                .top
+                .splice(at, 0, frag.index.top.values().iter_range(range.clone()));
+            self.index
+                .text
+                .splice(at, 0, frag.index.text.values().iter_range(range.clone()));
+            self.index
+                .mark
+                .splice_from(at, &frag.index.mark, range.clone());
+
+            shift += range.len();
+        }
+        self.index.mark.absorb_cache(&frag.index.mark);
+    }
+
+    pub(super) fn remap_actors<F>(&mut self, f: &F)
     where
         F: Fn(ActorIdx) -> ActorIdx,
     {
