@@ -252,19 +252,12 @@ impl MarkIndexColumn {
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        let new_values: Vec<Option<MarkIdx>> = self
-            .data
-            .values()
-            .iter()
-            .map(|v| v.map(|m| m.with_new_actor(idx)))
-            .collect();
-        let new_cache = self
+        self.remap_values(|m| m.with_new_actor(idx));
+        self.cache = self
             .cache
             .iter()
             .map(|(key, val)| (key.with_new_actor(idx), val.clone()))
             .collect();
-        self.data = PrefixColumn::from_values(new_values);
-        self.cache = new_cache;
     }
 
     /// Map every actor index through `map` — the batched-actor-insert
@@ -275,19 +268,28 @@ impl MarkIndexColumn {
             MarkIdx::Start(id) => MarkIdx::Start(remap_id(&id)),
             MarkIdx::End(id) => MarkIdx::End(remap_id(&id)),
         };
-        let new_values: Vec<Option<MarkIdx>> = self
-            .data
-            .values()
-            .iter()
-            .map(|v| v.map(remap_idx))
-            .collect();
-        let new_cache = self
+        self.remap_values(remap_idx);
+        self.cache = self
             .cache
             .iter()
             .map(|(key, val)| (remap_id(key), val.clone()))
             .collect();
-        self.data = PrefixColumn::from_values(new_values);
-        self.cache = new_cache;
+    }
+
+    /// Rebuild the data column with `f` applied to every mark idx —
+    /// run at a time, so an unmarked document (all-null runs) costs a
+    /// handful of run headers rather than a per-row materialize.
+    fn remap_values(&mut self, f: impl Fn(MarkIdx) -> MarkIdx) {
+        let mut new_data = PrefixColumn::new();
+        new_data.splice_runs(
+            0,
+            0,
+            self.data.values().iter().runs().map(|r| hexane::Run {
+                count: r.count,
+                value: r.value.map(&f),
+            }),
+        );
+        self.data = new_data;
     }
 
     /// Splice a range of another mark column's rows in at `at` — the
