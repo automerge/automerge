@@ -55,7 +55,6 @@ fn main() {
             tx.commit();
         }
         let changes = src.get_changes(&heads).unwrap();
-        let change_bytes: Vec<Vec<u8>> = changes.iter().map(|c| c.raw_bytes().to_vec()).collect();
 
         // the same keystrokes as single-member fragments
         let v2_bytes: Vec<Vec<u8>> = changes
@@ -97,11 +96,11 @@ fn main() {
             d.apply_fragment(&v2).unwrap();
         });
         let (inc_new, inc_steady) = bench(&|d: &mut Automerge, i: usize| {
-            d.load_incremental(&change_bytes[i]).unwrap();
+            d.apply_changes([changes[i].clone()]).unwrap();
         });
 
         println!(
-            "{name}: text len {:>7} | fragment new-actor {:>8.1}µs steady {:>8.1}µs | load_incremental new-actor {:>8.1}µs steady {:>8.1}µs",
+            "{name}: text len {:>7} | fragment new-actor {:>8.1}µs steady {:>8.1}µs | apply_changes new-actor {:>8.1}µs steady {:>8.1}µs",
             base.length(&text),
             frag_new,
             frag_steady,

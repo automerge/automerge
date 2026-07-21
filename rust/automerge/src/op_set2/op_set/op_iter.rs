@@ -1,3 +1,4 @@
+use super::mapped_column::{MappedIter, MappedIterState};
 use super::Op;
 use crate::iter::tools::Shiftable;
 use crate::{
@@ -272,21 +273,21 @@ impl<'a> KeyRef<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct OpIdIter<'a> {
-    pub(super) actor: hexane::Iter<'a, ActorIdx>,
+    pub(super) actor: MappedIter<'a, ActorIdx>,
     ctr: hexane::DeltaIter<'a, u32>,
 }
 
 impl OpIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<OpIdIter<'a>, AutomergeError> {
         Ok(OpIdIter {
-            actor: self.actor_state.try_resume(&op_set.cols.id_actor)?,
+            actor: op_set.cols.id_actor.try_resume(&self.actor_state)?,
             ctr: self.ctr_state.try_resume(&op_set.cols.id_ctr)?,
         })
     }
 }
 
 pub(crate) struct OpIdIterState {
-    actor_state: hexane::column::IterState,
+    actor_state: MappedIterState,
     ctr_state: hexane::DeltaIterState,
 }
 
@@ -339,7 +340,7 @@ impl Iterator for SuccWalker<'_> {
 }
 
 impl<'a> OpIdIter<'a> {
-    pub(crate) fn new(actor: hexane::Iter<'a, ActorIdx>, ctr: hexane::DeltaIter<'a, u32>) -> Self {
+    pub(crate) fn new(actor: MappedIter<'a, ActorIdx>, ctr: hexane::DeltaIter<'a, u32>) -> Self {
         Self { actor, ctr }
     }
 
@@ -563,14 +564,14 @@ impl Iterator for InsertIter<'_> {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct ElemIter<'a> {
-    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    key_actor: MappedIter<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaIter<'a, Option<u32>>,
 }
 
 #[allow(dead_code)]
 impl<'a> ElemIter<'a> {
     pub(crate) fn new(
-        key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        key_actor: MappedIter<'a, Option<ActorIdx>>,
         key_ctr: hexane::DeltaIter<'a, Option<u32>>,
     ) -> Self {
         Self { key_actor, key_ctr }
@@ -637,13 +638,13 @@ impl<'a> Iterator for ElemIter<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a> {
     key_str: hexane::Iter<'a, Option<String>>,
-    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    key_actor: MappedIter<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaIter<'a, Option<u32>>,
 }
 
 pub(crate) struct KeyIterState {
     key_str: hexane::IterState,
-    key_actor: hexane::column::IterState,
+    key_actor: MappedIterState,
     key_ctr: hexane::DeltaIterState,
 }
 
@@ -651,7 +652,7 @@ impl KeyIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<KeyIter<'a>, AutomergeError> {
         Ok(KeyIter {
             key_str: self.key_str.try_resume(&op_set.cols.key_str)?,
-            key_actor: self.key_actor.try_resume(&op_set.cols.key_actor)?,
+            key_actor: op_set.cols.key_actor.try_resume(&self.key_actor)?,
             key_ctr: self.key_ctr.try_resume(&op_set.cols.key_ctr)?,
         })
     }
@@ -660,7 +661,7 @@ impl KeyIterState {
 impl<'a> KeyIter<'a> {
     pub(crate) fn new(
         key_str: hexane::Iter<'a, Option<String>>,
-        key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        key_actor: MappedIter<'a, Option<ActorIdx>>,
         key_ctr: hexane::DeltaIter<'a, Option<u32>>,
     ) -> Self {
         Self {
@@ -748,19 +749,19 @@ impl<'a> Iterator for KeyIter<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ObjIdIter<'a> {
-    obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    obj_actor: MappedIter<'a, Option<ActorIdx>>,
     obj_ctr: hexane::Iter<'a, Option<u32>>,
 }
 
 pub(crate) struct ObjIdIterState {
-    obj_actor: hexane::column::IterState,
+    obj_actor: MappedIterState,
     obj_ctr: hexane::column::IterState,
 }
 
 impl ObjIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ObjIdIter<'a>, AutomergeError> {
         Ok(ObjIdIter {
-            obj_actor: self.obj_actor.try_resume(&op_set.cols.obj_actor)?,
+            obj_actor: op_set.cols.obj_actor.try_resume(&self.obj_actor)?,
             obj_ctr: self.obj_ctr.try_resume(&op_set.cols.obj_ctr)?,
         })
     }
@@ -768,14 +769,14 @@ impl ObjIdIterState {
 
 impl<'a> ObjIdIter<'a> {
     pub(crate) fn new(
-        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        obj_actor: MappedIter<'a, Option<ActorIdx>>,
         obj_ctr: hexane::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
     }
 
     pub(crate) fn new_range(
-        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        obj_actor: MappedIter<'a, Option<ActorIdx>>,
         obj_ctr: hexane::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
@@ -1179,14 +1180,14 @@ impl<'a> Iterator for ValueIter<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct SuccIterIter<'a> {
     count: hexane::PrefixIter<'a, u32>,
-    actor: hexane::Iter<'a, ActorIdx>,
+    actor: MappedIter<'a, ActorIdx>,
     ctr: hexane::DeltaIter<'a, u32>,
     incs: hexane::Iter<'a, Option<i64>>,
 }
 
 pub(crate) struct SuccIterIterState {
     count: hexane::PrefixIterState<u32>,
-    actor: hexane::column::IterState,
+    actor: MappedIterState,
     ctr: hexane::DeltaIterState,
     incs: hexane::column::IterState,
 }
@@ -1195,7 +1196,7 @@ impl SuccIterIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<SuccIterIter<'a>, AutomergeError> {
         Ok(SuccIterIter {
             count: self.count.try_resume(&op_set.cols.succ_count)?,
-            actor: self.actor.try_resume(&op_set.cols.succ_actor)?,
+            actor: op_set.cols.succ_actor.try_resume(&self.actor)?,
             ctr: self.ctr.try_resume(&op_set.cols.succ_ctr)?,
             incs: self.incs.try_resume(&op_set.cols.index.inc)?,
         })
@@ -1253,7 +1254,7 @@ impl Shiftable for SuccIterIter<'_> {
 impl<'a> SuccIterIter<'a> {
     pub(crate) fn new(
         count: hexane::PrefixIter<'a, u32>,
-        actor: hexane::Iter<'a, ActorIdx>,
+        actor: MappedIter<'a, ActorIdx>,
         ctr: hexane::DeltaIter<'a, u32>,
         incs: hexane::Iter<'a, Option<i64>>,
     ) -> Self {
@@ -1545,7 +1546,7 @@ mod tests {
         );
 
         // seek each element and read it
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
@@ -1583,7 +1584,7 @@ mod tests {
         assert_eq!(iter.next(), Some(o32));
 
         // seek each element and DONT read it
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
@@ -1607,7 +1608,7 @@ mod tests {
         assert_eq!(iter.pos(), 12);
 
         // seek only odd items
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(o11);
         assert_eq!(range, 4..6);
         assert_eq!(iter.pos(), 4);
@@ -1619,7 +1620,7 @@ mod tests {
         assert_eq!(iter.pos(), 12);
 
         // seek only even items
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);

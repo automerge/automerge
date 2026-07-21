@@ -18,6 +18,17 @@ use crate::{
     Change, ChangeHash,
 };
 
+/// actor-insert attribution counters (nanos), dumped by
+/// [`crate::dump_manifold_stats`]
+pub(crate) static STAT_GRAPH_BUMP: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_GRAPH_CLOCKS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_GRAPH_FRAGCLK: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_GRAPH_TOP: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// The graph of changes
 ///
 /// This is a sort of adjacency list based representation, except that instead of using linked
@@ -380,6 +391,14 @@ impl ChangeGraph {
     }
 
     pub(crate) fn insert_actor(&mut self, idx: usize) {
+        let mut t = std::time::Instant::now();
+        let lap = |slot: &std::sync::atomic::AtomicU64, t: &mut std::time::Instant| {
+            slot.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            *t = std::time::Instant::now();
+        };
         if self.seq_index.len() != idx {
             for actor_index in &mut self.actors {
                 if actor_index.0 >= idx as u32 {
@@ -387,14 +406,18 @@ impl ChangeGraph {
                 }
             }
         }
+        lap(&STAT_GRAPH_BUMP, &mut t);
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
+        lap(&STAT_GRAPH_CLOCKS, &mut t);
         for f in &mut self.fragments {
             f.clock.rewrite_with_new_actor(idx)
         }
+        lap(&STAT_GRAPH_FRAGCLK, &mut t);
         self.fragment_top.rewrite_with_new_actor(idx);
         self.seq_index.insert(idx, vec![]);
+        lap(&STAT_GRAPH_TOP, &mut t);
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {

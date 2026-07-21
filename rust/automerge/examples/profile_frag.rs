@@ -31,5 +31,19 @@ fn main() {
         );
         automerge::dump_manifold_stats();
         assert_eq!(d.get_heads(), doc.get_heads());
+
+        // same chain with an active patch log — the JS-facing path
+        let t = std::time::Instant::now();
+        let mut d2 = Automerge::new();
+        let mut log = automerge::PatchLog::active();
+        for b in &v2 {
+            d2.apply_fragment_log_patches(b, &mut log).unwrap();
+        }
+        eprintln!(
+            "TOTAL {} {:.3}s with active patch log",
+            name,
+            t.elapsed().as_secs_f64()
+        );
+        automerge::dump_manifold_stats();
     }
 }

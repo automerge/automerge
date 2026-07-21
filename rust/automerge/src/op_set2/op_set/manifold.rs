@@ -53,6 +53,26 @@ pub fn dump_manifold_stats() {
     eprintln!("MSTATS add-succ      applies {:>9} entries {:>9}", c6, r6);
     eprintln!("MSTATS reset-mixed    groups {:>9} rows {:>12}", c7, r7);
     eprintln!("MSTATS hint-jump       jumps {:>9} dist {:>12}", c8, r8);
+    let ms = |s: &AtomicU64| s.swap(0, Relaxed) as f64 / 1e6;
+    eprintln!(
+        "ASTATS actor-insert scan {:.2}ms sidecars {:.2}ms insert+amap {:.2}ms graph {:.2}ms tail {:.2}ms",
+        ms(&crate::automerge::STAT_ACT_SCAN),
+        ms(&crate::automerge::STAT_ACT_SIDECARS),
+        ms(&crate::automerge::STAT_ACT_INSERT),
+        ms(&crate::automerge::STAT_ACT_GRAPH),
+        ms(&crate::automerge::STAT_ACT_TAIL),
+    );
+    eprintln!(
+        "ASTATS graph-detail bump {:.2}ms clocks {:.2}ms frag-clocks {:.2}ms top+seq {:.2}ms",
+        ms(&crate::change_graph::STAT_GRAPH_BUMP),
+        ms(&crate::change_graph::STAT_GRAPH_CLOCKS),
+        ms(&crate::change_graph::STAT_GRAPH_FRAGCLK),
+        ms(&crate::change_graph::STAT_GRAPH_TOP),
+    );
+    eprintln!(
+        "ASTATS patch-diff {:.2}ms",
+        ms(&crate::automerge::STAT_PATCH_DIFF)
+    );
 }
 
 /// What a batch resolves to.

@@ -269,6 +269,21 @@ pub struct Automerge {
     actor: Actor,
 }
 
+/// actor-insert attribution counters (nanos), dumped by
+/// [`crate::dump_manifold_stats`]
+pub(crate) static STAT_ACT_SCAN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_SIDECARS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_INSERT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_GRAPH: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_TAIL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_PATCH_DIFF: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
@@ -1331,6 +1346,14 @@ impl Automerge {
         }
         new.sort_unstable();
         new.dedup();
+        let mut t = std::time::Instant::now();
+        let lap = |slot: &std::sync::atomic::AtomicU64, t: &mut std::time::Instant| {
+            slot.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            *t = std::time::Instant::now();
+        };
         // old index -> final index: old actors shift right past the
         // new ones sorting before them
         let mut map: Vec<u32> = Vec::with_capacity(self.ops.actors.len());
@@ -1342,18 +1365,25 @@ impl Automerge {
             map.push((map.len() + j) as u32);
         }
         let identity = map.iter().enumerate().all(|(i, &m)| m as usize == i);
+        lap(&STAT_ACT_SCAN, &mut t);
         if !identity {
             self.ops.remap_actor_indexes(&map);
         }
-        // the cheap per-actor state; the op-column rewrite above
-        // already accounted for every insertion, so the ids go in
-        // directly
+        lap(&STAT_ACT_SIDECARS, &mut t);
+        // the cheap per-actor state; the op columns defer their
+        // renumbering through the actor map
+        let mut amap = self.ops.actor_map();
         for a in new {
             let idx = self.ops.actors.binary_search(&a).unwrap_err();
+            amap = amap.insert(idx, self.ops.actors.len());
             self.ops.actors.insert(idx, a);
+            lap(&STAT_ACT_INSERT, &mut t);
             self.change_graph.insert_actor(idx);
+            lap(&STAT_ACT_GRAPH, &mut t);
             self.actor.rewrite_with_new_actor(idx);
         }
+        self.ops.set_actor_map(amap);
+        lap(&STAT_ACT_TAIL, &mut t);
     }
 
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {

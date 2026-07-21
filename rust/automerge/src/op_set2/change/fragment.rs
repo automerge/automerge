@@ -124,16 +124,7 @@ fn load_frag_set(
     doc_ops: &crate::op_set2::op_set::OpSet,
 ) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
     let (raw, data, id_ctr) = src.parts();
-    crate::op_set2::op_set::OpSet::load_frag(
-        raw,
-        data,
-        id_ctr,
-        actor_map,
-        doc_ops.actors.clone(),
-        &doc_ops.obj_info,
-        doc_ops.text_encoding,
-    )
-    .map_err(|e| {
+    crate::op_set2::op_set::OpSet::load_frag(raw, data, id_ctr, actor_map, doc_ops).map_err(|e| {
         if std::env::var("FRAG_DEBUG").is_ok() {
             eprintln!("fragment column load failed: {}", e);
         }
@@ -236,7 +227,20 @@ impl<'a> FragmentApply<'a> {
         let before = log.is_active().then(|| doc.get_heads());
         self.apply_manifold(doc, log)?;
         if let Some(before) = before {
+            let timing = std::env::var("FRAG_TIMING").is_ok();
+            let t = std::time::Instant::now();
             doc.log_diff(&before, log);
+            crate::automerge::STAT_PATCH_DIFF.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            if timing {
+                eprintln!(
+                    "TIMING   {:<26} {:>10.3}ms",
+                    "patch diff",
+                    t.elapsed().as_secs_f64() * 1e3
+                );
+            }
         }
         Ok(())
     }

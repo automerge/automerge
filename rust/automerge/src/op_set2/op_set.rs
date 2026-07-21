@@ -35,6 +35,7 @@ mod insert;
 // batch apply switches over to it
 #[allow(dead_code)]
 pub(crate) mod manifold;
+pub(crate) mod mapped_column;
 mod mark_index;
 mod marks;
 mod op_iter;
@@ -48,6 +49,8 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
+#[allow(unused_imports)]
+pub(crate) use mapped_column::{ActorMap, MapActor, MappedColumn, MappedIter};
 pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
@@ -522,9 +525,10 @@ impl OpSet {
             return;
         }
         let splices = || s.splices.iter().cloned();
-        self.cols
-            .succ_actor
-            .copy_ranges(hexane::Column::from_values(s.actors), splices());
+        self.cols.succ_actor.copy_ranges(
+            MappedColumn::from_logical_values(s.actors, self.cols.succ_actor.actor_map().clone()),
+            splices(),
+        );
         self.cols
             .succ_ctr
             .copy_ranges(hexane::DeltaColumn::from_values(s.ctrs), splices());
@@ -1655,16 +1659,20 @@ impl OpSet {
         data: &[u8],
         id_ctr: &[i64],
         actor_map: &[usize],
-        actors: Vec<ActorId>,
-        doc_obj_info: &ObjIndex,
-        text_encoding: TextEncoding,
+        doc: &OpSet,
     ) -> Result<Self, ReadOpError> {
         let mut cols = Columns::load_frag(raw.as_map(), data, id_ctr)?;
-        if actor_map.iter().enumerate().any(|(i, &m)| i != m) {
-            cols.remap_actors(&|a: ActorIdx| ActorIdx::from(actor_map[u64::from(a) as usize]));
+        let doc_actor_map = doc.actor_map();
+        let identity_f = actor_map.iter().enumerate().all(|(i, &m)| i == m);
+        if !identity_f || !doc_actor_map.is_identity() {
+            cols.rebase_actors(
+                &|a: ActorIdx| ActorIdx::from(actor_map[u64::from(a) as usize]),
+                &doc_actor_map,
+            );
         }
+        let text_encoding = doc.text_encoding;
         let mut op_set = OpSet {
-            actors,
+            actors: doc.actors.clone(),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding,
@@ -1672,7 +1680,7 @@ impl OpSet {
         let mut builder = IndexBuilder::new(text_encoding);
         // fragment ops can live in document-created objects: without
         // their types, sequence objects would register-split like maps
-        builder.seed_obj_info(doc_obj_info);
+        builder.seed_obj_info(&doc.obj_info);
         builder.process_op_set(&op_set)?;
         let (indexes, _mark_order) = builder.finish();
         op_set.set_indexes(indexes);
@@ -1916,19 +1924,30 @@ impl OpSet {
     // * maybe do something with types to make scan required to get
     //    validated bytes
 
+    pub(crate) fn actor_map(&self) -> std::sync::Arc<ActorMap> {
+        self.cols.actor_map()
+    }
+
+    pub(crate) fn set_actor_map(&mut self, map: std::sync::Arc<ActorMap>) {
+        self.cols.set_actor_map(map);
+    }
+
     pub(crate) fn insert_actor(&mut self, idx: usize, actor: ActorId) {
         if self.actors.len() != idx {
-            self.rewrite_with_new_actor(idx)
+            self.rewrite_small_with_new_actor(idx);
         }
+        let map = self.cols.actor_map().insert(idx, self.actors.len());
+        self.cols.set_actor_map(map);
         self.actors.insert(idx, actor)
     }
 
     /// Map every actor index through `map` in one pass — the batched
     /// form of [`Self::rewrite_with_new_actor`] for inserting several
     /// actors at once.
+    /// The op columns are not touched — their renumbering is deferred
+    /// through [`ActorMap`]; this rewrites the eager sidecars (mark
+    /// index, obj_info).
     pub(crate) fn remap_actor_indexes(&mut self, map: &[u32]) {
-        self.cols
-            .remap_actors(&|a: ActorIdx| ActorIdx::from(map[u64::from(a) as usize] as usize));
         self.cols.index.mark.remap_actor_indexes(map);
         let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
         self.obj_info = ObjIndex(
@@ -1953,8 +1972,9 @@ impl OpSet {
         );
     }
 
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        self.cols.rewrite_with_new_actor(idx);
+    /// The eager sidecars' half of an actor insert (mark index,
+    /// obj_info); the op columns defer theirs through [`ActorMap`].
+    fn rewrite_small_with_new_actor(&mut self, idx: usize) {
         self.cols.index.mark.rewrite_with_new_actor(idx);
         self.obj_info = ObjIndex(
             self.obj_info
@@ -1967,6 +1987,7 @@ impl OpSet {
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
         self.actors.remove(idx);
+        self.cols.flush_actor_map();
         self.cols.rewrite_without_actor(idx);
         self.obj_info = ObjIndex(
             self.obj_info
@@ -2105,7 +2126,7 @@ pub(crate) enum ColumnValidationError {
 
 pub(crate) struct IterObjIds<'a> {
     ctr: hexane::Iter<'a, Option<u32>>,
-    actor: hexane::Iter<'a, Option<ActorIdx>>,
+    actor: MappedIter<'a, Option<ActorIdx>>,
     next_ctr: Option<hexane::Run<Option<u32>>>,
     next_actor: Option<hexane::Run<Option<ActorIdx>>>,
     pos: usize,
@@ -2348,7 +2369,7 @@ mod tests {
                 succ_cursors: SuccCursors {
                     len: group_count as usize,
                     succ_counter: counter_iter.clone(),
-                    succ_actor: actor_iter.clone(),
+                    succ_actor: MappedIter::raw(actor_iter.clone()),
                     inc_values: inc_values.clone(),
                 },
             };

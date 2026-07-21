@@ -51,6 +51,28 @@ fn main() {
 
         let t_changes = best_of(|| ingest(&changes), &doc);
         let t_bundles = best_of(|| ingest(&bundles), &doc);
+        let t_load_p = best_of(
+            || {
+                let mut log = automerge::PatchLog::active();
+                Automerge::load_with(
+                    &bytes,
+                    automerge::OnPartialLoad::Error,
+                    automerge::VerificationMode::Check,
+                    &mut log,
+                )
+                .unwrap()
+            },
+            &doc,
+        );
+        let t_changes_p = best_of(
+            || {
+                let mut d = Automerge::new();
+                let mut log = automerge::PatchLog::active();
+                d.load_incremental_log_patches(&changes, &mut log).unwrap();
+                d
+            },
+            &doc,
+        );
 
         // the branch's own path: v2 fragment chain via apply_fragment
         // (parsed from bytes, so the wire round-trip is included)
@@ -72,13 +94,13 @@ fn main() {
         );
 
         println!(
-            "{name}: changes {:>9}B bundles {:>9}B | changes {:>7.3}s | bundles {:>7.3}s | fragments {:>7.3}s | full load {:>6.3}s",
-            changes.len(),
-            bundles.len(),
+            "{name}: changes {:>7.3}s (patches {:>7.3}s) | fragments {:>7.3}s | full load {:>6.3}s (patches {:>6.3}s) | bundles {:>7.3}s",
             t_changes,
-            t_bundles,
+            t_changes_p,
             t_frag,
-            full
+            full,
+            t_load_p,
+            t_bundles,
         );
     }
 }

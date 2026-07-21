@@ -260,10 +260,10 @@ macro_rules! __log {
  }
 
 mod autocommit;
-mod automerge;
+pub(crate) mod automerge;
 mod autoserde;
 mod change;
-mod change_graph;
+pub(crate) mod change_graph;
 mod change_queue;
 mod clock;
 mod columnar;
