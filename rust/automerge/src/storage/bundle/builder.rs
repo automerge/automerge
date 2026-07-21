@@ -124,9 +124,27 @@ impl<'a> BundleBuilder<'a> {
                 .copied()
                 .filter(|s| self.builders_index(*s).is_some())
                 .collect();
+            // the RAW key: for an insert that is its anchor (the row
+            // the receiver's slot search must locate) — elemid_or_key
+            // would give the insert's own element instead
+            let target = self.hint_target(&op.key);
             let op = op.build(pred);
             self.op_writer
-                .add(&op, &internal_succ, index, &mut self.mapper);
+                .add_with_target(&op, &internal_succ, index, &mut self.mapper, target);
+        }
+    }
+
+    /// The op's covered seq target: its key elem when that elem is a
+    /// doc row (non-head, not a member) — the row the receiver's
+    /// manifold will have to locate.
+    fn hint_target(&self, key: &crate::op_set2::types::KeyRef<'_>) -> Option<OpId> {
+        match key {
+            crate::op_set2::types::KeyRef::Seq(e)
+                if !e.is_head() && self.builders_index(e.0).is_none() =>
+            {
+                Some(e.0)
+            }
+            _ => None,
         }
     }
 
@@ -146,18 +164,33 @@ impl<'a> BundleBuilder<'a> {
     /// column.
     pub(crate) fn flush_deletes(&mut self) {
         if let Some((obj, key)) = self.last.take() {
+            let target = self.hint_target(&key);
             for (id, pred) in &self.preds {
                 let op = Op::del(*id, obj, key.clone());
                 let op = op.build(pred.to_vec());
                 if let Some(index) = self.builders_index(op.id) {
-                    self.op_writer.add(&op, &[], index, &mut self.mapper);
+                    self.op_writer
+                        .add_with_target(&op, &[], index, &mut self.mapper, target);
                 }
             }
             self.preds.clear();
         }
     }
 
-    pub(crate) fn finish(mut self) -> Bundle {
+    /// The covered seq targets referenced by the member ops — the rows
+    /// whose covered-rank the hint column carries.
+    pub(crate) fn hint_targets(&self) -> rustc_hash::FxHashSet<OpId> {
+        self.op_writer.targets.iter().flatten().copied().collect()
+    }
+
+    pub(crate) fn is_member(&self, id: OpId) -> bool {
+        self.builders_index(id).is_some()
+    }
+
+    pub(crate) fn finish_with_ranks(
+        mut self,
+        ranks: &std::collections::HashMap<OpId, u64>,
+    ) -> Bundle {
         self.flush_deletes();
 
         let mut mapper = self.mapper;
@@ -191,7 +224,9 @@ impl<'a> BundleBuilder<'a> {
             .iter()
             .map(|b| (b.actor, b.start_op, b.max_op))
             .collect();
-        let (ops_cols, id_ctr) = self.op_writer.finish(&mapper, &mut ops_data_buf, &members);
+        let (ops_cols, id_ctr) =
+            self.op_writer
+                .finish_with_ranks(&mapper, &mut ops_data_buf, &members, ranks);
         let ops_meta = ops_cols.raw_columns();
 
         // ---- Uncompressed assembly (used in-memory for iteration) ----
@@ -359,6 +394,8 @@ impl<'a> BundleChangeWriter<'a> {
 
 #[derive(Default)]
 pub(crate) struct BundleOpWriter<'a> {
+    /// per-op covered seq target (key elem) for the hint column
+    targets: Vec<Option<OpId>>,
     obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
     obj_ctr: hexane::Encoder<'a, Option<u64>>,
     key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
@@ -391,6 +428,20 @@ impl<'a> BundleOpWriter<'a> {
         _index: usize,
         mapper: &mut ActorMapper<'a>,
     ) {
+        self.add_with_target(op, succ, _index, mapper, None)
+    }
+
+    /// [`Self::add`], recording the op's covered seq target (its key
+    /// elem when that elem is a doc row) for the hint column.
+    pub(crate) fn add_with_target(
+        &mut self,
+        op: &OpBuilder<'_>,
+        succ: &[OpId],
+        _index: usize,
+        mapper: &mut ActorMapper<'a>,
+        target: Option<OpId>,
+    ) {
+        self.targets.push(target);
         mapper.process_op(op);
         let doc_pos = self.id_actor.len() as u32;
         self.succ_count.append(succ.len() as u32);
@@ -427,11 +478,29 @@ impl<'a> BundleOpWriter<'a> {
     /// by (actor, seq) — the inverse column carries one entry per op in
     /// these ranges, null for ops with no row.
     pub(crate) fn finish(
-        mut self,
+        self,
         mapper: &ActorMapper<'a>,
         data: &mut Vec<u8>,
         members: &[(usize, u64, u64)],
     ) -> (BundleOpsColumns, Vec<i64>) {
+        self.finish_with_ranks(mapper, data, members, &Default::default())
+    }
+
+    /// [`Self::finish`] with the covered-rank of every recorded target:
+    /// each op's hint value is `ranks[target]` — the number of
+    /// dep-covered ops preceding the target row in document order.
+    pub(crate) fn finish_with_ranks(
+        mut self,
+        mapper: &ActorMapper<'a>,
+        data: &mut Vec<u8>,
+        members: &[(usize, u64, u64)],
+        ranks: &std::collections::HashMap<OpId, u64>,
+    ) -> (BundleOpsColumns, Vec<i64>) {
+        let mut hint_enc = hexane::DeltaEncoder::<Option<i64>>::default();
+        for t in &self.targets {
+            hint_enc.append(t.and_then(|id| ranks.get(&id)).map(|&r| r as i64));
+        }
+        let hint = hint_enc.save_to_unless(data, None);
         let obj_actor = save_opt_actor_unless_empty(self.obj_actor, &mapper.mapping, data);
         let obj_ctr = self.obj_ctr.save_to_unless(data, None);
         let key_actor = save_opt_actor_unless_empty(self.key_actor, &mapper.mapping, data);
@@ -511,6 +580,7 @@ impl<'a> BundleOpWriter<'a> {
                 succ_ctr,
                 expand,
                 mark_name,
+                hint,
             },
             id_ctr_values,
         )
@@ -538,6 +608,7 @@ pub(crate) struct BundleOpsColumns {
     pub(crate) succ_ctr: Range<usize>,
     pub(crate) expand: Range<usize>,
     pub(crate) mark_name: Range<usize>,
+    pub(crate) hint: Range<usize>,
 }
 
 #[derive(Default)]
@@ -597,6 +668,7 @@ impl BundleOpsColumns {
             (ops::EXPAND, &self.expand),
             (ops::MARK_NAME, &self.mark_name),
             (ops::ID_CTR_INVERSE, &self.id_ctr_inverse),
+            (ops::HINT, &self.hint),
         ]
         .into_iter()
         .filter(|(_, range)| !range.is_empty())
@@ -997,6 +1069,7 @@ impl<'a> OpIterInner<'a> {
                 (ops::PRED_COL_ID, C::DeltaInteger) => {
                     pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
+                (ops::HINT_COL_ID, C::DeltaInteger) => {}
                 (ops::SUCC_COL_ID, C::Group) => succ_count = hexane::decoder::<Option<u64>>(d),
                 (ops::SUCC_COL_ID, C::Actor) => succ_actor = hexane::decoder::<Option<ActorIdx>>(d),
                 (ops::SUCC_COL_ID, C::DeltaInteger) => {
@@ -1119,6 +1192,9 @@ pub(crate) struct FragOp<'a> {
     pub(crate) sub_len: usize,
     /// value bytes this row carries
     pub(crate) val_len: usize,
+    /// covered-rank position floor for this op's seq target (see
+    /// `ops::HINT_COL_ID`)
+    pub(crate) hint: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1223,6 +1299,7 @@ pub(crate) struct FragOps<'a> {
     succ_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     value_meta: hexane::Decoder<'a, Option<ValueMeta>>,
+    hint: hexane::DeltaDecoder<'a, Option<i64>>,
     /// raw (unmapped) obj actor of the last-read op, for same-obj run
     /// peeks against the raw column
     cur_obj_raw: (Option<ActorIdx>, Option<u64>),
@@ -1260,6 +1337,7 @@ impl<'a> FragOps<'a> {
             succ_actor: hexane::decoder::<Option<ActorIdx>>(&[]),
             succ_ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
             value_meta: hexane::decoder::<Option<ValueMeta>>(&[]),
+            hint: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
             cur_obj_raw: (None, None),
             pred_absent: true,
             succ_absent: true,
@@ -1304,6 +1382,9 @@ impl<'a> FragOps<'a> {
                 }
                 (ops::VAL_COL_ID, C::ValueMetadata) => {
                     s.value_meta = hexane::decoder::<Option<ValueMeta>>(d)
+                }
+                (ops::HINT_COL_ID, C::DeltaInteger) => {
+                    s.hint = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
                 _ => {}
             }
@@ -1369,6 +1450,7 @@ impl<'a> FragOps<'a> {
         }
 
         let inc = meta.increments.get(&id).copied();
+        let hint = self.hint.next().flatten().map(|h| h as u64);
         let val_len = self.value_meta.next().flatten().map_or(0, |m| m.length());
 
         FragOp {
@@ -1383,6 +1465,7 @@ impl<'a> FragOps<'a> {
             is_counter,
             sub_len: n_succ,
             val_len,
+            hint,
         }
     }
 
@@ -1473,6 +1556,7 @@ impl<'a> FragOps<'a> {
         // sub-columns do not advance
         skip_rle(&mut self.pred_count, n);
         skip_rle(&mut self.succ_count, n);
+        skip_delta(&mut self.hint, n);
         // value bytes ride along in the copy ranges: sum the skipped
         // rows' meta lengths run by run
         let mut vbytes = 0usize;
@@ -1521,9 +1605,17 @@ pub(crate) mod ops {
     /// column plus the change metadata — no separate `ID_CTR` column on
     /// the wire.
     pub(super) const ID_CTR_INVERSE_COL_ID: ColumnId = ColumnId::new(11);
+    /// Per-op position hint: the rank of the op's key-elem row among
+    /// the ops covered by the fragment's dependency clock — a sound
+    /// lower bound on that row's position in any document the fragment
+    /// can apply to, and identical no matter when (or from what doc
+    /// state) the fragment is generated. Null for ops without a
+    /// covered seq target.
+    pub(super) const HINT_COL_ID:           ColumnId = ColumnId::new(12);
 
     pub(super) const ID_ACTOR:   ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
     pub(super) const ID_CTR_INVERSE: ColumnSpec = ColumnSpec::new_delta(ID_CTR_INVERSE_COL_ID);
+    pub(super) const HINT:       ColumnSpec = ColumnSpec::new_delta(HINT_COL_ID);
     pub(super) const OBJ_ACTOR:  ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
     pub(super) const OBJ_CTR:    ColumnSpec = ColumnSpec::new_integer(OBJ_COL_ID);
     pub(super) const KEY_ACTOR:  ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);

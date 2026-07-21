@@ -33,6 +33,7 @@ pub(crate) static STAT_INS_LESSER: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU6
 pub(crate) static STAT_MAP_SEEK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 pub(crate) static STAT_ADD_SUCC: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 pub(crate) static STAT_RESET: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(crate) static STAT_JUMP: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
 pub fn dump_manifold_stats() {
     let d = |s: &[AtomicU64; 2]| (s[0].swap(0, Relaxed), s[1].swap(0, Relaxed));
@@ -43,6 +44,7 @@ pub fn dump_manifold_stats() {
     let (c5, r5) = d(&STAT_MAP_SEEK);
     let (c6, r6) = d(&STAT_ADD_SUCC);
     let (c7, r7) = d(&STAT_RESET);
+    let (c8, r8) = d(&STAT_JUMP);
     eprintln!("MSTATS upd-elem-scan   calls {:>9} rows {:>12}", c1, r1);
     eprintln!("MSTATS ins-anchor-scan calls {:>9} rows {:>12}", c2, r2);
     eprintln!("MSTATS ins-anchor-MISS calls {:>9} rows {:>12}", c3, r3);
@@ -50,6 +52,7 @@ pub fn dump_manifold_stats() {
     eprintln!("MSTATS map-key-seek    calls {:>9} rows {:>12}", c5, r5);
     eprintln!("MSTATS add-succ      applies {:>9} entries {:>9}", c6, r6);
     eprintln!("MSTATS reset-mixed    groups {:>9} rows {:>12}", c7, r7);
+    eprintln!("MSTATS hint-jump       jumps {:>9} dist {:>12}", c8, r8);
 }
 
 /// What a batch resolves to.
@@ -585,8 +588,31 @@ impl<'a> ApplyManifold<'a> {
                 // never stopped on it
                 if !self.consumed.contains(&e.0) {
                     let start = self.id_iter.pos();
-                    // most of the time the anchor is ahead of us
-                    if self.id_iter.scan_to_value(&e.0).is_some() {
+                    // HINT JUMP: the fragment's covered-rank floor for
+                    // the anchor row — sound in any doc holding the
+                    // fragment's deps, exact on a chain. A miss after
+                    // a jump is re-checked from the pre-jump cursor
+                    // before it may mean anything
+                    let mut jumped = false;
+                    if let Some(h) = op.hint {
+                        let h = h as usize;
+                        if h > start && h < self.obj_scope.end {
+                            self.id_iter.advance_to(h);
+                            STAT_JUMP[0].fetch_add(1, Relaxed);
+                            STAT_JUMP[1].fetch_add((h - start) as u64, Relaxed);
+                            jumped = true;
+                        }
+                    }
+                    let mut found = self.id_iter.scan_to_value(&e.0).is_some();
+
+                    if !found && jumped {
+                        // suspect hint (receiver diverged from the
+                        // fragment's causal past): rescan the skipped
+                        // region
+                        self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
+                        found = self.id_iter.scan_to_value(&e.0).is_some();
+                    }
+                    if found {
                         STAT_SLOT_WALK[0].fetch_add(1, Relaxed);
                         STAT_SLOT_WALK[1].fetch_add((self.id_iter.pos() - start) as u64, Relaxed);
                         self.consumed.insert(e.0);
@@ -684,7 +710,24 @@ impl<'a> ApplyManifold<'a> {
                         _ => {
                             self.id_iter.set_max(self.obj_scope.end);
                             let start = self.id_iter.pos();
-                            let found = self.id_iter.scan_to_value(&e.0);
+                            // HINT JUMP (see the insert arm)
+                            let mut jumped = false;
+                            if let Some(h) = op.hint {
+                                let h = h as usize;
+                                if h > start && h < self.obj_scope.end {
+                                    self.id_iter.advance_to(h);
+                                    STAT_JUMP[0].fetch_add(1, Relaxed);
+                                    STAT_JUMP[1].fetch_add((h - start) as u64, Relaxed);
+                                    jumped = true;
+                                }
+                            }
+                            let mut found = self.id_iter.scan_to_value(&e.0);
+
+                            if found.is_none() && jumped {
+                                self.id_iter =
+                                    self.op_set.id_iter_range(&(start..self.obj_scope.end));
+                                found = self.id_iter.scan_to_value(&e.0);
+                            }
                             STAT_UPD_SCAN[0].fetch_add(1, Relaxed);
                             STAT_UPD_SCAN[1].fetch_add(
                                 (self.id_iter.pos().saturating_sub(start)) as u64,

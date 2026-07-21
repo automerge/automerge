@@ -51,7 +51,8 @@ impl Bundle {
         let changes = change_graph
             .get_bundle_metadata(hashes)
             .collect::<Result<_, _>>()?;
-        Ok(Self::from_meta(op_set, changes))
+        // v1 bundles carry no hint column
+        Ok(Self::from_meta(op_set, changes, None))
     }
 
     /// Build a bundle from member nodes directly — only the boundary
@@ -62,13 +63,18 @@ impl Bundle {
         change_graph: &ChangeGraph,
         nodes: Vec<crate::change_graph::NodeIdx>,
     ) -> Result<Bundle, AutomergeError> {
+        let clock = change_graph.clock_for_nodes(nodes.clone());
         let changes = change_graph
             .bundle_metadata_for_nodes(nodes)
             .collect::<Result<_, _>>()?;
-        Ok(Self::from_meta(op_set, changes))
+        Ok(Self::from_meta(op_set, changes, Some(&clock)))
     }
 
-    fn from_meta(op_set: &OpSet, changes: Vec<BundleMetadata<'_>>) -> Bundle {
+    fn from_meta(
+        op_set: &OpSet,
+        changes: Vec<BundleMetadata<'_>>,
+        clock: Option<&crate::clock::Clock>,
+    ) -> Bundle {
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)
@@ -90,7 +96,37 @@ impl Bundle {
             }
         }
 
-        collector.finish()
+        // the hint ranks: for every covered seq target the member ops
+        // reference, its rank among the dep-covered rows (in document
+        // order) — a receiver-independent position floor. One id-column
+        // walk with early exit; members do not count (a receiver about
+        // to apply the fragment does not have them yet)
+        let mut ranks = std::collections::HashMap::new();
+        if let Some(clock) = clock {
+            let needed = collector.hint_targets();
+            if !needed.is_empty() {
+                let mut remaining = needed.len();
+                let mut rank = 0u64;
+                for id in op_set.id_iter() {
+                    if collector.is_member(id) {
+                        continue;
+                    }
+                    if needed.contains(&id) {
+                        ranks.insert(id, rank);
+                        remaining -= 1;
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
+                    if clock.covers(&id) {
+                        rank += 1;
+                    }
+                }
+                debug_assert_eq!(remaining, 0, "hint target missing from doc");
+            }
+        }
+
+        collector.finish_with_ranks(&ranks)
     }
 
     pub(crate) fn new_from_unverified(

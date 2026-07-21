@@ -1502,7 +1502,7 @@ impl ChangeGraph {
         self.calculate_clock(nodes)
     }
 
-    fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
+    pub(crate) fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
         self.calculate_clock(nodes)
             .iter()
             .map(|(actor, seq)| {
@@ -2684,6 +2684,69 @@ mod tests {
     /// Apply a doc's v1 bundles one at a time, v1 walk vs v2 manifold,
     /// timing each. Loose (single-change) bundles are summarized.
     /// BENCH_DOCS=C2 cargo test -p automerge --release --lib bench_per_bundle -- --ignored --nocapture
+    /// Per-fragment apply table: members, ops and apply time for each
+    /// fragment of a doc's v2 chain; loose (single-member) fragments
+    /// collapse into one summary line.
+    /// BENCH_DOCS=A1 cargo test -p automerge --release --lib fragment_table -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fragment_table() {
+        use std::time::Instant;
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|s| s.split(',').map(|d| d.to_string()).collect())
+            .unwrap_or_else(|_| vec!["A1".to_string()]);
+        for name in docs {
+            let bytes =
+                std::fs::read(format!("/Users/orion/automerge-blog/data/{name}.am")).unwrap();
+            let doc = Automerge::load(&bytes).unwrap();
+            let v2: Vec<crate::BundleV2> = doc
+                .bundle_fragments_v2(doc.fragments(..).unwrap())
+                .unwrap()
+                .iter()
+                .map(|b| crate::BundleV2::try_from(&b[..]).unwrap())
+                .collect();
+
+            let mut d = Automerge::new();
+            let mut loose = (0usize, 0usize, 0f64);
+            eprintln!("== {name}: {} fragments ==", v2.len());
+            eprintln!(
+                "{:>5} {:>8} {:>8} {:>10} {:>10}",
+                "frag", "members", "ops", "ms", "doc rows"
+            );
+            for (k, b) in v2.iter().enumerate() {
+                let members = b.bundle().iter_changes().count();
+                let ops = b.bundle().storage.id_ctr.len();
+                let t = Instant::now();
+                d.apply_fragment(b).unwrap();
+                let secs = t.elapsed().as_secs_f64();
+                if members == 1 {
+                    loose.0 += 1;
+                    loose.1 += ops;
+                    loose.2 += secs;
+                } else {
+                    eprintln!(
+                        "{:>5} {:>8} {:>8} {:>10.2} {:>10}",
+                        k,
+                        members,
+                        ops,
+                        secs * 1e3,
+                        d.ops().len()
+                    );
+                }
+            }
+            if loose.0 > 0 {
+                eprintln!(
+                    "loose {:>8} {:>8} {:>10.2}   ({} single-member fragments)",
+                    loose.0,
+                    loose.1,
+                    loose.2 * 1e3,
+                    loose.0
+                );
+            }
+            assert_eq!(d.get_heads(), doc.get_heads());
+        }
+    }
+
     /// Shape stats for the egwalker docs — what each workload is made
     /// of. BENCH_DOCS=A1 cargo test -p automerge --release --lib doc_shape -- --ignored --nocapture
     #[test]
