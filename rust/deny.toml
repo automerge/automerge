@@ -141,7 +141,7 @@ deny = [
 skip = [
 { crate = "itertools@0.13.0", reason = "this is brought in by criterion-plot, which we only use in benchmarks" },
     { crate = "winnow@0.7.15", reason = "brought in by toml via cbindgen; 1.0.0 brought in by toml_parser via the same path" },
-    { crate = "wit-bindgen@0.51.0", reason = "wasip3 (getrandom 0.4) uses 0.51.0 while wasip2 (getrandom 0.3 via proptest) uses 0.57.1" },
+    { crate = "syn@2.0.119", reason = "both versions are pulled in by wasm-bindgen" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
