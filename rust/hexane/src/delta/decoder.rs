@@ -11,6 +11,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use crate::delta::DeltaValue;
+use crate::{Codec, Leb128};
 
 /// Streaming decoder over delta-encoded column bytes.  See module docs.
 ///
@@ -18,29 +19,58 @@ use crate::delta::DeltaValue;
 /// decoder doesn't have an index to consult — for skipping, build a
 /// [`DeltaColumn`](crate::delta::DeltaColumn) instead.
 #[derive(Clone)]
-pub struct DeltaDecoder<'a, T: DeltaValue> {
-    inner: crate::Decoder<'a, Option<i64>>,
+pub struct DeltaDecoder<'a, T: DeltaValue, C: Codec = Leb128> {
+    inner: crate::Decoder<'a, T::Inner, C>,
     running: i64,
     _phantom: PhantomData<fn() -> T>,
 }
 
-impl<'a, T: DeltaValue> DeltaDecoder<'a, T> {
+impl<'a, T: DeltaValue, C: Codec> DeltaDecoder<'a, T, C> {
     /// Construct a decoder over delta-encoded column `data`.
     pub fn new(data: &'a [u8]) -> Self {
         Self {
-            inner: crate::decoder::<Option<i64>>(data),
+            inner: crate::decoder_in::<T::Inner, C>(data),
             running: 0,
             _phantom: PhantomData,
         }
     }
+
+    /// Consume the next run of *raw deltas* (at most `max` items),
+    /// folding them into the running sum. `value` is the shared delta:
+    /// `Some(0)` means the realized value repeats for the whole run,
+    /// `None` is a null run, and literal (varying) deltas come out one
+    /// item at a time.
+    pub fn next_delta_run_max(&mut self, max: usize) -> Option<crate::Run<Option<i64>>> {
+        use crate::delta::DeltaInner;
+        use crate::encoding::RunDecoder;
+        let run = self.inner.next_run_max(max)?;
+        let value = T::Inner::to_opt(run.value);
+        if let Some(d) = value {
+            self.running += d * run.count as i64;
+        }
+        Some(crate::Run {
+            count: run.count,
+            value,
+        })
+    }
+
+    /// Advance past `n` items in O(runs), keeping the running sum
+    /// correct. Panics if fewer than `n` items remain.
+    pub fn advance_by(&mut self, mut n: usize) {
+        while n > 0 {
+            let run = self.next_delta_run_max(n).expect("advance past column end");
+            n -= run.count;
+        }
+    }
 }
 
-impl<T: DeltaValue> Iterator for DeltaDecoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Iterator for DeltaDecoder<'_, T, C> {
     type Item = T;
 
     #[inline]
     fn next(&mut self) -> Option<T> {
-        match self.inner.next()? {
+        use crate::delta::DeltaInner;
+        match T::Inner::to_opt(self.inner.next()?) {
             None => Some(T::null_value()),
             Some(d) => {
                 self.running += d;
@@ -50,7 +80,7 @@ impl<T: DeltaValue> Iterator for DeltaDecoder<'_, T> {
     }
 }
 
-impl<T: DeltaValue> Debug for DeltaDecoder<'_, T> {
+impl<T: DeltaValue, C: Codec> Debug for DeltaDecoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaDecoder")
             .field("running", &self.running)

@@ -567,7 +567,7 @@ impl ChangeGraph {
                 self.add_parent(node_idx, parent_hash);
             }
 
-            if (node_idx + 1).0 % CACHE_STEP == 0 {
+            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
                 self.cache_clock(node_idx);
             }
 
@@ -939,12 +939,11 @@ impl ChangeGraphCols {
         let len = actors.len();
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let timestamps =
-            hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(Some(0i64)))?;
+        let timestamps = hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
         let messages =
             hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
         let extra_bytes_meta =
-            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts.into())?;
+            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts)?;
 
         if max_ops.len() != len {
             return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));

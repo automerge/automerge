@@ -1,10 +1,10 @@
 //! RLE encoding state machine for cursor-aware splice.
 
-use crate::leb::{encode_signed, encode_unsigned, rewrite_lit_header};
 use crate::rle::splice::Postfix;
 use crate::rle::RleTail;
-use crate::{AsColumnRef, RleValue};
+use crate::{AsColumnRef, Codec, Leb128, RleValue};
 
+use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
 /// A Cow-like type for RLE values. Holds either an owned value from the
@@ -43,11 +43,11 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleCow<'a, T, V> {
     }
 
     #[inline]
-    pub fn pack(&self, buf: &mut Vec<u8>) -> usize {
+    pub fn pack<C: Codec>(&self, buf: &mut Vec<u8>) -> usize {
         let pos = buf.len();
         match self {
-            Self::Owned(v) => T::pack(v.as_column_ref(), buf),
-            Self::Ref(g) => T::pack(*g, buf),
+            Self::Owned(v) => T::pack::<C>(v.as_column_ref(), buf),
+            Self::Ref(g) => T::pack::<C>(*g, buf),
         };
         buf.len() - pos
     }
@@ -217,9 +217,13 @@ impl std::ops::AddAssign<Option<FlushState>> for FlushState {
 /// (e.g. `&'a str` for String columns) from the slab. All borrowed data
 /// must be written to the output buffer before `RleState` is dropped and
 /// the slab is mutated.
+///
+/// `C` is the varint codec used for run headers and packed values.  It is
+/// a type parameter (rather than per-method) so one state machine can
+/// never mix codecs across appends.  Construct via [`RleState::empty`].
 #[derive(Debug)]
-pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>> {
-    Empty,
+pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>, C: Codec = Leb128> {
+    Empty(PhantomData<fn() -> C>),
     Lone(RleCow<'a, T, V>),
     Run(usize, RleCow<'a, T, V>),
     /// `count`: items already written to buf (after header at `header_pos`).
@@ -237,11 +241,16 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>> {
 
 type Cow<'a, T, V> = RleCow<'a, T, V>;
 
-impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
+impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
+    /// The initial (empty) state.
+    pub const fn empty() -> Self {
+        RleState::Empty(PhantomData)
+    }
+
     /// Segments that will be produced when this state is flushed.
     pub fn pending_segments(&self) -> usize {
         match self {
-            RleState::Empty => 0,
+            RleState::Empty(_) => 0,
             RleState::Lone(_) => 1,
             RleState::Run(_, _) => 1,
             RleState::Lit { local, .. } => local + 1,
@@ -252,7 +261,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     pub(crate) fn is_single_run_of(&self, value: impl Into<Cow<'a, T, V>>) -> bool {
         let value = value.into();
         match self {
-            RleState::Empty => true,
+            RleState::Empty(_) => true,
             RleState::Lone(v) => v == &value,
             RleState::Run(_, v) => v == &value,
             RleState::Null(_) => value.is_null(),
@@ -292,7 +301,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 bytes,
             } if &value == current => {
                 if *local == *count {
-                    rewrite_lit_header(buf, *header_pos, *count);
+                    C::rewrite_lit_header(buf, *header_pos, *count);
                 } else {
                     flushed.rewrite = Some(RewriteHeader::new(*count, *header_pos));
                 }
@@ -307,7 +316,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 bytes,
                 ..
             } if n == 1 => {
-                *bytes = current.pack(buf);
+                *bytes = current.pack::<C>(buf);
                 *count += 1;
                 *local += 1;
                 *current = value;
@@ -320,21 +329,21 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 current,
                 ..
             } => {
-                let bytes = current.pack(buf);
+                let bytes = current.pack::<C>(buf);
                 flushed.wpos = WPos::lit(*header_pos, bytes, *count == *local);
                 if *local == *count {
-                    rewrite_lit_header(buf, *header_pos, *count + 1);
+                    C::rewrite_lit_header(buf, *header_pos, *count + 1);
                 } else {
                     flushed.rewrite = Some(RewriteHeader::new(*count + 1, *header_pos));
                 }
                 flushed.segments = *local + 1;
                 Some(RleState::Run(n, value))
             }
-            RleState::Empty if n == 1 => Some(RleState::Lone(value)),
-            RleState::Empty => Some(RleState::Run(n, value)),
+            RleState::Empty(_) if n == 1 => Some(RleState::Lone(value)),
+            RleState::Empty(_) => Some(RleState::Run(n, value)),
             RleState::Lone(prev) if &value == prev => Some(RleState::Run(n + 1, value)),
             RleState::Lone(prev) if n == 1 => {
-                let (header_pos, bytes) = emit_lit(buf, prev);
+                let (header_pos, bytes) = Self::emit_lit(buf, prev);
                 Some(RleState::Lit {
                     count: 1,
                     local: 1,
@@ -344,18 +353,18 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 })
             }
             RleState::Lone(prev) => {
-                let (pos, bytes) = emit_lit(buf, prev);
+                let (pos, bytes) = Self::emit_lit(buf, prev);
                 flushed.wpos = WPos::lit(pos, bytes, true);
                 flushed.segments = 1;
                 Some(RleState::Run(n, value))
             }
             RleState::Run(count, prev) => {
-                flushed.wpos = emit_run(buf, *count, prev);
+                flushed.wpos = Self::emit_run(buf, *count, prev);
                 flushed.segments = 1;
                 Some(Self::make_run(n, value))
             }
             RleState::Null(count) => {
-                flushed.wpos = emit_null(buf, *count);
+                flushed.wpos = Self::emit_null(buf, *count);
                 flushed.segments = 1;
                 Some(Self::make_run(n, value))
             }
@@ -382,7 +391,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
 
     pub fn make_run(n: usize, value: Cow<'a, T, V>) -> Self {
         match n {
-            0 => Self::Empty,
+            0 => Self::empty(),
             1 => Self::Lone(value),
             n => Self::Run(n, value),
         }
@@ -436,9 +445,9 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
 
     pub fn append_null_n(&mut self, buf: &mut Vec<u8>, count: usize) -> FlushState {
         let mut flushed = FlushState::default();
-        let old = std::mem::replace(self, RleState::Empty);
+        let old = std::mem::replace(self, Self::empty());
         *self = match old {
-            RleState::Empty => RleState::Null(count),
+            RleState::Empty(_) => RleState::Null(count),
             RleState::Null(n) => RleState::Null(n + count),
             other => {
                 flushed = Self::do_flush(other, buf);
@@ -449,7 +458,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     }
 
     fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> FlushState {
-        let old = std::mem::replace(self, RleState::Empty);
+        let old = std::mem::replace(self, Self::empty());
         if lit == 0 {
             return Self::do_flush(old, buf);
         }
@@ -462,11 +471,11 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 current,
                 ..
             } => {
-                let bytes = current.pack(buf);
+                let bytes = current.pack::<C>(buf);
                 let wpos = WPos::lit(header_pos, bytes, count == local);
                 let total = count + 1 + lit;
                 if local == count {
-                    rewrite_lit_header(buf, header_pos, total);
+                    C::rewrite_lit_header(buf, header_pos, total);
                     FlushState::new(local + 1, wpos)
                 } else {
                     FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos), wpos)
@@ -475,14 +484,14 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
             RleState::Lone(value) => {
                 let total = 1 + lit;
                 let pos = buf.len();
-                buf.extend(encode_signed(-(total as i64)));
-                let bytes = value.pack(buf);
+                buf.extend(C::encode_signed(-(total as i64)));
+                let bytes = value.pack::<C>(buf);
                 FlushState::new(1, WPos::lit(pos, bytes, true))
             }
             other => {
                 let mut flushed = Self::do_flush(other, buf);
                 let pos = buf.len();
-                buf.extend(encode_signed(-(lit as i64)));
+                buf.extend(C::encode_signed(-(lit as i64)));
                 // fill in bytes later in merge() -> with_lit_tail()
                 flushed.wpos = WPos::lit(pos, 0, true);
                 flushed
@@ -491,19 +500,19 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     }
 
     pub fn flush(&mut self, buf: &mut Vec<u8>) -> FlushState {
-        let old = std::mem::replace(self, RleState::Empty);
+        let old = std::mem::replace(self, Self::empty());
         Self::do_flush(old, buf)
     }
 
     pub fn do_flush(state: Self, buf: &mut Vec<u8>) -> FlushState {
         match state {
-            RleState::Empty => FlushState::default(),
+            RleState::Empty(_) => FlushState::default(),
             RleState::Lone(value) => {
-                let wpos = emit_run(buf, 1, &value);
+                let wpos = Self::emit_run(buf, 1, &value);
                 FlushState::new(1, wpos)
             }
             RleState::Run(count, value) => {
-                let wpos = emit_run(buf, count, &value);
+                let wpos = Self::emit_run(buf, count, &value);
                 FlushState::new(1, wpos)
             }
             RleState::Lit {
@@ -513,11 +522,11 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 current,
                 ..
             } => {
-                let bytes = current.pack(buf);
+                let bytes = current.pack::<C>(buf);
                 let wpos = WPos::lit(header_pos, bytes, count == local);
                 let total = count + 1;
                 if local == count {
-                    rewrite_lit_header(buf, header_pos, total);
+                    C::rewrite_lit_header(buf, header_pos, total);
                     FlushState::new(total, wpos)
                 } else {
                     let rewrite = RewriteHeader::new(total, header_pos);
@@ -525,56 +534,48 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 }
             }
             RleState::Null(count) => {
-                let wpos = emit_null(buf, count);
+                let wpos = Self::emit_null(buf, count);
                 FlushState::new(1, wpos)
             }
         }
     }
-}
 
-fn emit_lit<'a, T: RleValue, V: AsColumnRef<T>>(
-    buf: &mut Vec<u8>,
-    value: &RleCow<'a, T, V>,
-) -> (usize, usize) {
-    let pos = buf.len();
-    buf.extend(encode_signed(-1));
-    let bytes = value.pack(buf);
-    (pos, bytes)
-}
+    fn emit_lit(buf: &mut Vec<u8>, value: &RleCow<'a, T, V>) -> (usize, usize) {
+        let pos = buf.len();
+        buf.extend(C::encode_signed(-1));
+        let bytes = value.pack::<C>(buf);
+        (pos, bytes)
+    }
 
-fn emit_run<'a, T: RleValue, V: AsColumnRef<T>>(
-    buf: &mut Vec<u8>,
-    count: usize,
-    value: &RleCow<'a, T, V>,
-) -> WPos {
-    let pos = buf.len();
-    if count == 1 {
-        buf.extend(encode_signed(-1));
-        let bytes = value.pack(buf);
-        WPos::lit(pos, bytes, true)
-    } else {
-        buf.extend(encode_signed(count as i64));
-        value.pack(buf);
+    fn emit_run(buf: &mut Vec<u8>, count: usize, value: &RleCow<'a, T, V>) -> WPos {
+        let pos = buf.len();
+        if count == 1 {
+            buf.extend(C::encode_signed(-1));
+            let bytes = value.pack::<C>(buf);
+            WPos::lit(pos, bytes, true)
+        } else {
+            buf.extend(C::encode_signed(count as i64));
+            value.pack::<C>(buf);
+            WPos::run(pos, true)
+        }
+    }
+
+    fn emit_null(buf: &mut Vec<u8>, count: usize) -> WPos {
+        let pos = buf.len();
+        buf.extend(C::encode_signed(0));
+        buf.extend(C::encode_unsigned(count as u64));
         WPos::run(pos, true)
     }
-}
-
-fn emit_null(buf: &mut Vec<u8>, count: usize) -> WPos {
-    let pos = buf.len();
-    buf.extend(encode_signed(0));
-    buf.extend(encode_unsigned(count as u64));
-    WPos::run(pos, true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::leb::{read_signed, read_unsigned};
     use crate::rle::rle_validate_encoding;
 
     fn encode_vals(vals: &[u64]) -> Vec<u8> {
         let mut buf = Vec::new();
-        let mut state = RleState::<u64, u64>::Empty;
+        let mut state = RleState::<u64, u64>::empty();
         for &v in vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
@@ -586,10 +587,10 @@ mod tests {
         let mut result = Vec::new();
         let mut pos = 0;
         while pos < buf.len() {
-            let (cb, raw) = read_signed(&buf[pos..]).unwrap();
+            let (cb, raw) = Leb128::read_signed(&buf[pos..]).unwrap();
             match raw {
                 n if n > 0 => {
-                    let (vl, val) = u64::try_unpack(&buf[pos + cb..]).unwrap();
+                    let (vl, val) = u64::try_unpack::<Leb128>(&buf[pos + cb..]).unwrap();
                     for _ in 0..n as usize {
                         result.push(val);
                     }
@@ -598,14 +599,14 @@ mod tests {
                 n if n < 0 => {
                     let mut scan = pos + cb;
                     for _ in 0..(-n) as usize {
-                        let (vl, val) = u64::try_unpack(&buf[scan..]).unwrap();
+                        let (vl, val) = u64::try_unpack::<Leb128>(&buf[scan..]).unwrap();
                         result.push(val);
                         scan += vl;
                     }
                     pos = scan;
                 }
                 _ => {
-                    let (ncb, nc) = read_unsigned(&buf[pos + cb..]).unwrap();
+                    let (ncb, nc) = Leb128::read_unsigned(&buf[pos + cb..]).unwrap();
                     result.resize(result.len() + nc as usize, 0);
                     pos += cb + ncb;
                 }
@@ -616,7 +617,7 @@ mod tests {
 
     fn check(vals: &[u64]) {
         let buf = encode_vals(vals);
-        if let Err(e) = rle_validate_encoding::<u64>(&buf) {
+        if let Err(e) = rle_validate_encoding::<u64, Leb128>(&buf) {
             panic!("invalid encoding for {vals:?}: {e}\n  bytes: {buf:?}");
         }
         assert_eq!(decode(&buf), vals, "roundtrip failed for {vals:?}");
@@ -695,33 +696,33 @@ mod tests {
     fn nullable_with_nulls() {
         let vals: Vec<Option<u64>> = vec![Some(1), None, None, Some(2), Some(2)];
         let mut buf = Vec::new();
-        let mut state = RleState::<Option<u64>, Option<u64>>::Empty;
+        let mut state = RleState::<Option<u64>, Option<u64>>::empty();
         for &v in &vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
         state.flush(&mut buf);
-        rle_validate_encoding::<Option<u64>>(&buf).unwrap();
+        rle_validate_encoding::<Option<u64>, Leb128>(&buf).unwrap();
     }
     #[test]
     fn nullable_null_value_null() {
         let vals: Vec<Option<u64>> = vec![None, Some(5), None];
         let mut buf = Vec::new();
-        let mut state = RleState::<Option<u64>, Option<u64>>::Empty;
+        let mut state = RleState::<Option<u64>, Option<u64>>::empty();
         for &v in &vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
         state.flush(&mut buf);
-        rle_validate_encoding::<Option<u64>>(&buf).unwrap();
+        rle_validate_encoding::<Option<u64>, Leb128>(&buf).unwrap();
     }
     #[test]
     fn nullable_value_then_null() {
         let vals: Vec<Option<u64>> = vec![Some(5), None];
         let mut buf = Vec::new();
-        let mut state = RleState::<Option<u64>, Option<u64>>::Empty;
+        let mut state = RleState::<Option<u64>, Option<u64>>::empty();
         for &v in &vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
         state.flush(&mut buf);
-        rle_validate_encoding::<Option<u64>>(&buf).unwrap();
+        rle_validate_encoding::<Option<u64>, Leb128>(&buf).unwrap();
     }
 }

@@ -31,7 +31,7 @@ fn initial_values() -> Vec<u64> {
     let mut block_idx = 0usize;
     while out.len() < N {
         let len = BLOCK.min(N - out.len());
-        if block_idx % 2 == 0 {
+        if block_idx.is_multiple_of(2) {
             for i in 0..len {
                 out.push(base + i as u64);
             }

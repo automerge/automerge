@@ -1,6 +1,7 @@
-use crate::leb::{encode_signed, encode_unsigned};
+use crate::codec::Codec;
 use crate::rle::state::{RleCow, RleState};
 use crate::rle::*;
+use crate::Leb128;
 use crate::{AsColumnRef, Column, RleValue};
 
 pub(crate) fn rle_encode_state<T: RleValue>(
@@ -10,7 +11,7 @@ pub(crate) fn rle_encode_state<T: RleValue>(
 where
     T::Get<'static>: AsColumnRef<T>,
 {
-    let mut state = RleState::<'static, T, T::Get<'static>>::Empty;
+    let mut state = RleState::<'static, T, T::Get<'static>>::empty();
     let mut segments = 0;
     let mut items = 0;
     for v in values {
@@ -29,10 +30,7 @@ mod load_verify_tests {
     fn load_verify_roundtrip() {
         let mut buf = Vec::new();
         rle_encode_state::<u64>((0..1000u64).map(|i| i % 7), &mut buf);
-        let slabs = load::rle_load_and_verify::<fn((), usize, u64) -> Result<(), String>, (), u64>(
-            &buf, 16, None,
-        )
-        .unwrap();
+        let slabs = load::RleLoadIter::<u64>::new(&buf, 16).finalize().unwrap();
         let total: usize = slabs.iter().map(|s| s.len).sum();
         assert_eq!(total, 1000);
         let vals: Vec<u64> = slabs
@@ -43,7 +41,7 @@ mod load_verify_tests {
         assert_eq!(vals, expected);
         for (i, s) in slabs.iter().enumerate() {
             assert!(
-                rle_validate_encoding::<u64>(&s.data).is_ok(),
+                rle_validate_encoding::<u64, Leb128>(&s.data).is_ok(),
                 "slab {i} invalid"
             );
             assert!(s.segments <= 16, "slab {i} exceeds max_segments");
@@ -57,12 +55,9 @@ mod load_verify_tests {
             [Some(1u64), None, None, Some(2), Some(2), None].into_iter(),
             &mut buf,
         );
-        let slabs = load::rle_load_and_verify::<
-            fn((), usize, Option<u64>) -> Result<(), String>,
-            (),
-            Option<u64>,
-        >(&buf, 16, None)
-        .unwrap();
+        let slabs = load::RleLoadIter::<Option<u64>>::new(&buf, 16)
+            .finalize()
+            .unwrap();
         let vals: Vec<Option<u64>> = slabs
             .iter()
             .flat_map(|s| RleDecoder::<Option<u64>>::new(&s.data))
@@ -74,18 +69,11 @@ mod load_verify_tests {
     fn load_verify_rejects_null_in_non_nullable() {
         // Encode a null run (0, count=1) into raw bytes.
         let mut buf = Vec::new();
-        buf.extend(encode_signed(0));
-        buf.extend(encode_unsigned(1));
+        buf.extend(Leb128::encode_signed(0));
+        buf.extend(Leb128::encode_unsigned(1));
 
         // Non-nullable u64 should reject.
-        fn reject_all(_: (), _count: usize, _v: u64) -> Result<(), String> {
-            Err("unexpected value validation call".to_string())
-        }
-        let result = load::rle_load_and_verify::<fn((), usize, u64) -> Result<(), String>, (), u64>(
-            &buf,
-            16,
-            Some(&(reject_all as fn((), usize, u64) -> Result<(), String>)),
-        );
+        let result = load::RleLoadIter::<u64>::new(&buf, 16).finalize();
         assert!(result.is_err());
     }
 

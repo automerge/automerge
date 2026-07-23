@@ -62,19 +62,17 @@ impl MarkIdx {
 // ── v1 hexane column-value traits ────────────────────────────────────────────
 
 impl ColumnValue for MarkIdx {
-    type Encoding = RleEncoding<MarkIdx>;
+    type Encoding<C: hexane::Codec> = RleEncoding<MarkIdx, C>;
 }
 
 impl RleValue for MarkIdx {
-    fn try_unpack(data: &[u8]) -> Result<(usize, MarkIdx), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::signed(&mut buf)?;
-        Ok((start - buf.len(), MarkIdx::load(v)))
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, MarkIdx), PackError> {
+        let (n, v) = C::try_read_signed(data)?;
+        Ok((n, MarkIdx::load(v)))
     }
 
-    fn pack(value: MarkIdx, out: &mut Vec<u8>) -> bool {
-        leb128::write::signed(out, value.as_i64()).unwrap();
+    fn pack<C: hexane::Codec>(value: MarkIdx, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_signed(value.as_i64()));
         true
     }
 }

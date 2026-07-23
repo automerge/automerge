@@ -43,6 +43,7 @@ const B: usize = 64;
 /// associative and order-preserving.  Specifically, `merge(a, b) != merge(b, a)`
 /// is fine (e.g. delta-running-min semantics) as long as the tree
 /// always walks children left-to-right.
+#[allow(clippy::len_without_is_empty)]
 pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
     /// Combine two adjacent subtree aggregates into one.
     fn merge(l: &Self, r: &Self) -> Self;
