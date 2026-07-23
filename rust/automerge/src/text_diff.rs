@@ -6,7 +6,7 @@ use crate::{
     clock::Clock,
     iter::{SpanInternal, SpansInternal},
     transaction::TransactionInner,
-    ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
+    ObjId as ExId, ReadDoc, TextEncoding,
 };
 mod myers;
 mod replace;
@@ -15,7 +15,6 @@ mod utils;
 pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &mut PatchLog,
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
@@ -27,7 +26,6 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     let mut hook = TxHook {
         tx,
         doc,
-        patch_log,
         obj: text_obj,
         idx: 0,
         old: &old_graphemes,
@@ -46,7 +44,6 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
 struct TxHook<'a> {
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &'a mut PatchLog,
     old: &'a [&'a str],
     new: &'a [&'a str],
     obj: &'a ExId,
@@ -82,14 +79,8 @@ impl myers::DiffHook for TxHook<'_> {
             .iter()
             .map(|s| self.text_encoding.width(s))
             .sum::<usize>();
-        self.tx.splice_text(
-            self.doc,
-            self.patch_log,
-            self.obj,
-            self.idx,
-            deleted as isize,
-            &new_chars,
-        )?;
+        self.tx
+            .splice_text(self.doc, self.obj, self.idx, deleted as isize, &new_chars)?;
         self.idx += self.text_encoding.width(&new_chars);
         Ok(())
     }
@@ -108,14 +99,8 @@ impl myers::DiffHook for TxHook<'_> {
             .iter()
             .map(|s| self.text_encoding.width(s))
             .sum();
-        self.tx.splice_text(
-            self.doc,
-            self.patch_log,
-            self.obj,
-            self.idx,
-            deleted_len as isize,
-            "",
-        )?;
+        self.tx
+            .splice_text(self.doc, self.obj, self.idx, deleted_len as isize, "")?;
         Ok(())
     }
 
@@ -127,7 +112,7 @@ impl myers::DiffHook for TxHook<'_> {
     ) -> Result<(), Self::Error> {
         let new_chars = self.new[new_index..new_index + new_len].concat();
         self.tx
-            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, &new_chars)?;
+            .splice_text(self.doc, self.obj, self.idx, 0, &new_chars)?;
         self.idx += self.text_encoding.width(&new_chars);
         Ok(())
     }
@@ -136,7 +121,6 @@ impl myers::DiffHook for TxHook<'_> {
 pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &mut PatchLog,
     text_obj: &crate::ObjId,
     new: I,
     config: &crate::marks::UpdateSpansConfig,
@@ -150,7 +134,6 @@ pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     let mut hook = replace::Replace::new(BlockDiffHook {
         tx,
         doc,
-        patch_log,
         obj: text_obj,
         idx: 0,
         old: &old,
@@ -159,13 +142,12 @@ pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     myers::diff(&mut hook, &old, 0..old.len(), &new, 0..new.len())?;
 
     // Second pass: Apply marks
-    apply_marks_diff(doc, tx, patch_log, text_obj, &new_spans, config)
+    apply_marks_diff(doc, tx, text_obj, &new_spans, config)
 }
 
 fn apply_marks_diff(
     doc: &mut Automerge,
     tx: &mut TransactionInner,
-    patch_log: &mut PatchLog,
     text_obj: &crate::ObjId,
     new_spans: &[Span],
     config: &crate::marks::UpdateSpansConfig,
@@ -220,9 +202,7 @@ fn apply_marks_diff(
             .copied()
             .unwrap_or(config.default_expand);
 
-        tx.unmark(
-            doc, patch_log, text_obj, &mark.name, mark.start, mark.end, expand,
-        )?;
+        tx.unmark(doc, text_obj, &mark.name, mark.start, mark.end, expand)?;
     }
 
     // Add new marks that don't already exist
@@ -240,7 +220,7 @@ fn apply_marks_diff(
 
             let mark = crate::marks::Mark::new(mark_name, mark_value, start, end);
 
-            tx.mark(doc, patch_log, text_obj, mark, expand)?;
+            tx.mark(doc, text_obj, mark, expand)?;
         }
     }
 
@@ -250,7 +230,6 @@ fn apply_marks_diff(
 struct BlockDiffHook<'a> {
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &'a mut PatchLog,
     old: &'a [BlockOrGrapheme],
     new: &'a [BlockOrGrapheme],
     obj: &'a ExId,
@@ -296,12 +275,10 @@ impl myers::DiffHook for BlockDiffHook<'_> {
         for i in old_index..old_index + old_len {
             match &self.old[i] {
                 BlockOrGrapheme::Block(_) => {
-                    self.tx
-                        .join_block(self.doc, self.patch_log, self.obj, self.idx)?;
+                    self.tx.join_block(self.doc, self.obj, self.idx)?;
                 }
                 BlockOrGrapheme::Grapheme(_) => {
-                    self.tx
-                        .delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                    self.tx.delete(self.doc, self.obj, self.idx)?;
                 }
             }
         }
@@ -320,18 +297,11 @@ impl myers::DiffHook for BlockDiffHook<'_> {
             match &self.new[i] {
                 BlockOrGrapheme::Block(b) => {
                     if !run.is_empty() {
-                        self.tx.splice_text(
-                            self.doc,
-                            self.patch_log,
-                            self.obj,
-                            self.idx,
-                            0,
-                            &run,
-                        )?;
+                        self.tx.splice_text(self.doc, self.obj, self.idx, 0, &run)?;
                         self.idx += self.doc.text_encoding().width(&run);
                         run.clear();
                     }
-                    split_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, b)?;
+                    split_block(self.doc, self.tx, self.obj, self.idx, b)?;
                     self.idx += 1;
                 }
                 BlockOrGrapheme::Grapheme(g) => {
@@ -340,8 +310,7 @@ impl myers::DiffHook for BlockDiffHook<'_> {
             }
         }
         if !run.is_empty() {
-            self.tx
-                .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, &run)?;
+            self.tx.splice_text(self.doc, self.obj, self.idx, 0, &run)?;
             self.idx += self.doc.text_encoding().width(&run);
         }
         Ok(())
@@ -373,60 +342,52 @@ impl myers::DiffHook for BlockDiffHook<'_> {
                 (None, None) => {}
                 (None, Some(val)) => match val {
                     BlockOrGrapheme::Block(b) => {
-                        split_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, b)?;
+                        split_block(self.doc, self.tx, self.obj, self.idx, b)?;
                         self.idx += 1;
                         new_idx += 1;
                     }
                     BlockOrGrapheme::Grapheme(g) => {
-                        self.tx
-                            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g)?;
+                        self.tx.splice_text(self.doc, self.obj, self.idx, 0, g)?;
                         self.idx += self.doc.text_encoding().width(g);
                         new_idx += 1;
                     }
                 },
                 (Some(val), None) => match val {
                     BlockOrGrapheme::Block(_) => {
-                        self.tx
-                            .join_block(self.doc, self.patch_log, self.obj, self.idx)?;
+                        self.tx.join_block(self.doc, self.obj, self.idx)?;
                         old_idx += 1;
                     }
                     BlockOrGrapheme::Grapheme(_) => {
-                        self.tx
-                            .delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                        self.tx.delete(self.doc, self.obj, self.idx)?;
                         old_idx += 1;
                     }
                 },
                 (Some(old), Some(new)) => match (old, new) {
                     (BlockOrGrapheme::Block(b1), BlockOrGrapheme::Block(b2)) => {
                         if b1 != b2 {
-                            update_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, b2)?
+                            update_block(self.doc, self.tx, self.obj, self.idx, b2)?
                         }
                         self.idx += 1;
                         old_idx += 1;
                         new_idx += 1;
                     }
                     (BlockOrGrapheme::Grapheme(_g1), BlockOrGrapheme::Grapheme(g2)) => {
-                        self.tx
-                            .delete(self.doc, self.patch_log, self.obj, self.idx)?;
-                        self.tx
-                            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
+                        self.tx.delete(self.doc, self.obj, self.idx)?;
+                        self.tx.splice_text(self.doc, self.obj, self.idx, 0, g2)?;
                         self.idx += self.doc.text_encoding().width(g2);
                         old_idx += 1;
                         new_idx += 1;
                     }
                     (BlockOrGrapheme::Block(_), BlockOrGrapheme::Grapheme(g2)) => {
-                        self.tx
-                            .join_block(self.doc, self.patch_log, self.obj, self.idx)?;
-                        self.tx
-                            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
+                        self.tx.join_block(self.doc, self.obj, self.idx)?;
+                        self.tx.splice_text(self.doc, self.obj, self.idx, 0, g2)?;
                         self.idx += self.doc.text_encoding().width(g2);
                         old_idx += 1;
                         new_idx += 1;
                     }
                     (BlockOrGrapheme::Grapheme(_g1), BlockOrGrapheme::Block(b2)) => {
-                        self.tx
-                            .delete(self.doc, self.patch_log, self.obj, self.idx)?;
-                        split_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, b2)?;
+                        self.tx.delete(self.doc, self.obj, self.idx)?;
+                        split_block(self.doc, self.tx, self.obj, self.idx, b2)?;
                         self.idx += 1;
                         old_idx += 1;
                         new_idx += 1;
@@ -490,19 +451,17 @@ fn span_as_grapheme<I: Iterator<Item = Span>>(iter: I) -> Vec<BlockOrGrapheme> {
 fn split_block(
     doc: &mut Automerge,
     tx: &mut TransactionInner,
-    patch_log: &mut PatchLog,
     obj: &crate::ObjId,
     index: usize,
     block: &crate::hydrate::Map,
 ) -> Result<(), crate::error::AutomergeError> {
-    let new_block = tx.split_block(doc, patch_log, obj, index)?;
-    tx.update_map(doc, patch_log, &new_block, block)
+    let new_block = tx.split_block(doc, obj, index)?;
+    tx.update_map(doc, &new_block, block)
 }
 
 fn update_block(
     doc: &mut Automerge,
     tx: &mut TransactionInner,
-    patch_log: &mut PatchLog,
     obj: &crate::ObjId,
     index: usize,
     new_block: &crate::hydrate::Map,
@@ -511,5 +470,5 @@ fn update_block(
         return Err(crate::error::AutomergeError::InvalidIndex(index));
     };
 
-    tx.update_map(doc, patch_log, &block_id, new_block)
+    tx.update_map(doc, &block_id, new_block)
 }

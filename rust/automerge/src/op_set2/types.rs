@@ -564,12 +564,6 @@ impl<'a> From<&'a str> for ScalarValue<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum PropRef<'a> {
-    Map(Cow<'a, str>),
-    Seq(usize),
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum KeyRef<'a> {
     Map(Cow<'a, str>),
     Seq(ElemId),

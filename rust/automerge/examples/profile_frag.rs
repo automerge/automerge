@@ -35,9 +35,9 @@ fn main() {
         // same chain with an active patch log — the JS-facing path
         let t = std::time::Instant::now();
         let mut d2 = Automerge::new();
-        let mut log = automerge::PatchLog::active();
         for b in &v2 {
-            d2.apply_fragment_log_patches(b, &mut log).unwrap();
+            d2.apply_fragment(b).unwrap();
+            let _patches = d2.diff_incremental();
         }
         eprintln!(
             "TOTAL {} {:.3}s with active patch log",

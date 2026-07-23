@@ -90,8 +90,31 @@ where
 
     /// Push the `element` onto the back of the sequence.
     pub fn push(&mut self, element: T) {
-        let l = self.len();
-        self.insert(l, element)
+        let old_len = self.len();
+        if let Some(root) = self.root_node.as_mut() {
+            #[cfg(feature = "slow_path_assertions")]
+            root.check();
+
+            if root.is_full() {
+                let original_len = root.len();
+                let new_root = SequenceTreeNode::new();
+                let old_root = mem::replace(root, new_root);
+
+                root.length += old_root.len();
+                root.children.push(old_root);
+                root.split_child(0);
+
+                assert_eq!(original_len, root.len());
+            }
+            root.push_into_non_full_node(element);
+        } else {
+            self.root_node = Some(SequenceTreeNode {
+                elements: vec![element],
+                children: Vec::new(),
+                length: 1,
+            })
+        }
+        assert_eq!(self.len(), old_len + 1, "{:#?}", self);
     }
 
     /// Get the `element` at `index` in the sequence.
@@ -190,6 +213,21 @@ where
                 child.insert_into_non_full_node(sub_index, element);
             }
             self.length += 1;
+        }
+    }
+
+    fn push_into_non_full_node(&mut self, element: T) {
+        assert!(!self.is_full());
+        self.length += 1;
+        if self.is_leaf() {
+            self.elements.push(element);
+        } else {
+            let mut child_index = self.children.len() - 1;
+            if self.children[child_index].is_full() {
+                self.split_child(child_index);
+                child_index += 1;
+            }
+            self.children[child_index].push_into_non_full_node(element);
         }
     }
 

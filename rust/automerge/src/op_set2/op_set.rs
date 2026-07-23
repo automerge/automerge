@@ -265,6 +265,9 @@ impl OpSet {
         }
         self.cols.index.top.splice(range.start, n, new_top);
         self.cols.index.text.splice(range.start, n, new_text);
+        // the election moved: mark the register range dirty (register
+        // granularity matches how the diff expands a dirty row anyway)
+        self.cols.index.dirty.splice(range.start, n, vec![true; n]);
     }
 
     /// Re-elect the single register starting at `pos`: it extends to
@@ -378,10 +381,12 @@ impl OpSet {
         self.cols.index.top.splice(pos, 1, [false]);
         // Make sure losing ops are not contributing width to the text sequence length.
         self.cols.index.text.splice(pos, 1, [NONE]);
+        self.cols.index.dirty.splice(pos, 1, [true]);
     }
 
     pub(crate) fn expose(&mut self, pos: usize) {
         self.cols.index.top.splice(pos, 1, [true]);
+        self.cols.index.dirty.splice(pos, 1, [true]);
         // Note we alwasy set the exposed widht using the text type, as the text
         // index is only used for text width. Non-text ops are never measured
         // anyway. We could alternatively require the caller pass the object type
@@ -485,6 +490,211 @@ impl OpSet {
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
         self.obj_info = indexes.obj_info;
+        // the builder has no change history: initialize the dirty bitmap
+        // clean on (re)load, but preserve live bits when an index rebuild
+        // runs mid-life (lengths already match then)
+        if self.cols.index.dirty.len() != self.cols.len() {
+            self.cols.index.dirty = hexane::Column::fill(self.cols.len(), false);
+        }
+    }
+
+    /// Reset the change-tracking bitmap: everything clean. Called after
+    /// an incremental diff has consumed the dirty rows.
+    pub(crate) fn clear_dirty(&mut self) {
+        self.cols.index.dirty = hexane::Column::fill(self.cols.len(), false);
+    }
+
+    /// Conservatively mark every row dirty (view transitions — the
+    /// visible-at-heads window can move arbitrarily).
+    pub(crate) fn mark_all_dirty(&mut self) {
+        self.cols.index.dirty = hexane::Column::fill(self.cols.len(), true);
+    }
+
+    /// Mark a single row dirty.
+    #[cfg(test)]
+    pub(crate) fn mark_dirty(&mut self, pos: usize) {
+        self.cols.index.dirty.splice(pos, 1, [true]);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dirty_positions(&self) -> impl Iterator<Item = usize> {
+        self.dirty_runs().flatten()
+    }
+
+    /// Maximal contiguous spans of dirty rows, in document order.
+    /// Adjacent true runs (split across slab boundaries) are merged.
+    pub(crate) fn dirty_runs(&self) -> impl Iterator<Item = Range<usize>> {
+        let mut out: Vec<Range<usize>> = vec![];
+        let mut pos = 0;
+        let mut iter = self.cols.index.dirty.iter();
+        while let Some(run) = iter.next_run() {
+            let start = pos;
+            pos += run.count;
+            if run.value {
+                match out.last_mut() {
+                    Some(last) if last.end == start => last.end = pos,
+                    _ => out.push(start..pos),
+                }
+            }
+        }
+        out.into_iter()
+    }
+
+    pub(crate) fn obj_range_containing(&self, pos: usize) -> Option<(ObjId, Range<usize>)> {
+        if pos >= self.len() {
+            return None;
+        }
+        let ctr = self.cols.obj_ctr.get(pos)?;
+        let actor = self.cols.obj_actor.get(pos)?;
+        let obj = ObjId::load(ctr.map(u64::from), actor)?;
+        Some((obj, self.scope_to_obj(&obj)))
+    }
+
+    /// The contiguous run of ops sharing the map key of the op at `pos`,
+    /// clamped to `obj_range`.
+    pub(crate) fn map_key_register_at_pos(
+        &self,
+        pos: usize,
+        obj_range: Range<usize>,
+    ) -> Range<usize> {
+        let Some(op) = self.get(pos) else {
+            return pos..pos;
+        };
+        let key = op.elemid_or_key();
+        let mut start = pos;
+        while start > obj_range.start {
+            let Some(prev) = self.get(start - 1) else {
+                break;
+            };
+            if prev.elemid_or_key() != key {
+                break;
+            }
+            start -= 1;
+        }
+        let mut end = pos + 1;
+        while end < obj_range.end {
+            let Some(next) = self.get(end) else {
+                break;
+            };
+            if next.elemid_or_key() != key {
+                break;
+            }
+            end += 1;
+        }
+        start..end
+    }
+
+    /// Expand `range` (within `obj_range`) outwards to sequence register
+    /// boundaries: the start of the register containing `range.start` and
+    /// the end of the register containing `range.end - 1`.
+    pub(crate) fn expand_to_seq_register_boundaries(
+        &self,
+        range: Range<usize>,
+        obj_range: Range<usize>,
+    ) -> Range<usize> {
+        if range.is_empty() {
+            return range;
+        }
+        let start = self
+            .list_register_at_pos(range.start, obj_range.clone())
+            .start;
+        let end = self.list_register_at_pos(range.end - 1, obj_range).end;
+        start..end.max(range.end)
+    }
+
+    pub(crate) fn map_range_is_on_key_boundaries(&self, range: &Range<usize>) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        let Some(first) = self.get(range.start) else {
+            return false;
+        };
+        if range.start > 0 {
+            if let Some(prev) = self.get(range.start - 1) {
+                if prev.obj == first.obj && prev.elemid_or_key() == first.elemid_or_key() {
+                    return false;
+                }
+            }
+        }
+        if range.end < self.len() {
+            let Some(last) = self.get(range.end - 1) else {
+                return false;
+            };
+            if let Some(next) = self.get(range.end) {
+                if next.obj == last.obj && next.elemid_or_key() == last.elemid_or_key() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    pub(crate) fn list_range_is_on_register_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+    ) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        if self
+            .list_register_at_pos(range.start, obj_range.clone())
+            .start
+            != range.start
+        {
+            return false;
+        }
+        if range.end < obj_range.end {
+            self.list_register_at_pos(range.end, obj_range).start == range.end
+        } else {
+            true
+        }
+    }
+
+    pub(crate) fn list_visible_items_in_range(&self, range: Range<usize>) -> usize {
+        self.cols
+            .index
+            .top
+            .values()
+            .iter_range(range)
+            .filter(|value| *value)
+            .count()
+    }
+
+    pub(crate) fn text_visible_width_in_range(&self, range: Range<usize>) -> usize {
+        let start = range.start.min(self.len());
+        let end = range.end.min(self.len());
+        if start >= end {
+            return 0;
+        }
+        self.cols.index.text.sum_range(start..end) as usize
+    }
+
+    pub(crate) fn has_marks(&self) -> bool {
+        !self.cols.index.mark.is_empty()
+    }
+
+    /// Positions of mark ops inside `range`, found by walking the sparse
+    /// mark index run-by-run — O(runs), not O(rows), so long mark-free
+    /// stretches cost one run step.
+    pub(crate) fn mark_op_positions(&self, range: Range<usize>) -> Vec<usize> {
+        let mut out = vec![];
+        let mut pos = range.start;
+        let mut iter = self.cols.index.mark.iter_range(range);
+        while let Some(run) = iter.next_run() {
+            if run.value.is_some() {
+                out.extend(pos..pos + run.count);
+            }
+            pos += run.count;
+        }
+        out
+    }
+
+    pub(crate) fn range_has_mark(&self, range: Range<usize>) -> bool {
+        self.cols
+            .action
+            .iter_range(range)
+            .any(|value| value == Action::Mark)
     }
 
     pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
@@ -551,6 +761,21 @@ impl OpSet {
             .succ_count
             .copy_ranges(hexane::PrefixColumn::from_column(counts), count_splices);
 
+        // every row whose succ changed is dirty
+        let dirty_splices = s
+            .counts
+            .iter()
+            .enumerate()
+            .map(|(k, (pos, _))| hexane::Splice {
+                pos: *pos,
+                delete: 1,
+                range: k..k + 1,
+            });
+        self.cols
+            .index
+            .dirty
+            .copy_ranges(hexane::Column::fill(s.counts.len(), true), dirty_splices);
+
         if !s.clears.is_empty() {
             let n = s.clears.len();
             let clear_splices = || {
@@ -591,6 +816,7 @@ impl OpSet {
             self.cols
                 .succ_count
                 .splice(i.pos, 1, [(i.len + succ_inc) as u32]);
+            self.cols.index.dirty.splice(i.pos, 1, [true]);
             self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
             self.cols
                 .succ_ctr
@@ -1077,7 +1303,7 @@ impl OpSet {
         }
     }
 
-    fn get(&self, pos: usize) -> Option<Op<'_>> {
+    pub(crate) fn get(&self, pos: usize) -> Option<Op<'_>> {
         self.iter_range(&(pos..(pos + 1))).next()
     }
 

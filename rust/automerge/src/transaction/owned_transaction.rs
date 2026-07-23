@@ -1,7 +1,6 @@
 use crate::automerge::Automerge;
 use crate::exid::ExId;
-use crate::patches::PatchLog;
-use crate::{AutomergeError, ChangeHash, PatchLogMismatch};
+use crate::{AutomergeError, ChangeHash};
 
 use super::{CommitOptions, TransactionInner};
 
@@ -20,7 +19,6 @@ pub struct OwnedTransaction {
     // macro (also used by `Transaction<'a>`, which needs `Option` for its `Drop` impl) accesses
     // `self.inner` directly and expects it to be an Option<TransactionInner>
     inner: Option<TransactionInner>,
-    patch_log: PatchLog,
     doc: Automerge,
 }
 
@@ -34,24 +32,17 @@ const _: () = {
 
 impl OwnedTransaction {
     /// Create a new transaction, consuming the document.
-    pub(crate) fn new(
-        mut doc: Automerge,
-        patch_log: Option<PatchLog>,
-        heads: Option<&[ChangeHash]>,
-    ) -> Result<Self, PatchLogMismatch> {
+    pub(crate) fn new(mut doc: Automerge, heads: Option<&[ChangeHash]>) -> Self {
         let args = doc.transaction_args(heads);
-        let mut patch_log = patch_log.unwrap_or_else(PatchLog::inactive);
-        patch_log.begin_transaction(&doc, &args)?;
-        Ok(Self {
+        Self {
             inner: Some(TransactionInner::new(args)),
-            patch_log,
             doc,
-        })
+        }
     }
 
     /// Get the hash of the change that contains the given opid.
     ///
-    /// Returns `Ok(None)` if the opid:
+    /// Returns none if the opid:
     /// - is the root object id
     /// - does not exist in this document
     /// - is for an operation in this transaction
@@ -64,50 +55,38 @@ impl OwnedTransaction {
         self.doc.get_heads()
     }
 
-    /// Commit the transaction, returning the document, commit hash, and patch log.
-    ///
-    /// Unlike [`super::Transaction::commit`], no `PatchLog` clone is needed — it is moved out.
-    pub fn commit(mut self) -> (Automerge, Option<ChangeHash>, PatchLog) {
-        let tx = self.inner.take().unwrap();
-        let hash = super::commit_transaction(
-            tx,
-            &mut self.doc,
-            &mut self.patch_log,
-            CommitOptions::default(),
-        );
-        (self.doc, hash, self.patch_log)
+    /// Commit the transaction, returning the document and commit hash.
+    pub fn commit(mut self) -> (Automerge, Option<ChangeHash>) {
+        let hash = self.inner.take().unwrap().commit(&mut self.doc, None, None);
+        (self.doc, hash)
     }
 
     /// Commit with options.
-    pub fn commit_with(
-        mut self,
-        options: CommitOptions,
-    ) -> (Automerge, Option<ChangeHash>, PatchLog) {
-        let tx = self.inner.take().unwrap();
-        let hash = super::commit_transaction(tx, &mut self.doc, &mut self.patch_log, options);
-        (self.doc, hash, self.patch_log)
+    pub fn commit_with(mut self, options: CommitOptions) -> (Automerge, Option<ChangeHash>) {
+        let hash = self
+            .inner
+            .take()
+            .unwrap()
+            .commit(&mut self.doc, options.message, options.time);
+        (self.doc, hash)
     }
 
     /// Rollback the transaction, returning the document and number of cancelled ops.
     pub fn rollback(mut self) -> (Automerge, usize) {
         let cancelled = self.inner.take().unwrap().rollback(&mut self.doc);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
         (self.doc, cancelled)
     }
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
+        F: FnOnce(&mut TransactionInner, &mut Automerge) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        f(tx, &mut self.doc, &mut self.patch_log)
+        f(tx, &mut self.doc)
     }
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
         if let Some(h) = heads {
-            // a transaction is in flight: its pending ops are in the op
-            // set but not under the graph's heads, so the current-heads
-            // shortcut in `Automerge::clock_at` must not be used here
             Some(self.doc.change_graph.clock_for_heads_lossy(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
@@ -121,14 +100,14 @@ super::impl_transactable_for_tx!(OwnedTransaction);
 #[cfg(test)]
 mod tests {
     use crate::transaction::{CommitOptions, Transactable};
-    use crate::{Automerge, ObjType, PatchLog, ReadDoc, ROOT};
+    use crate::{Automerge, ObjType, ReadDoc, ROOT};
 
     #[test]
     fn put_and_get_roundtrip() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None, None).unwrap();
+        let mut tx = doc.into_transaction(None);
         tx.put(ROOT, "key", "value").unwrap();
-        let (doc, hash, _) = tx.commit();
+        let (doc, hash) = tx.commit();
         assert!(hash.is_some());
         assert_eq!(
             doc.get(ROOT, "key").unwrap().unwrap().0.to_str().unwrap(),
@@ -139,7 +118,7 @@ mod tests {
     #[test]
     fn read_during_transaction() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None, None).unwrap();
+        let mut tx = doc.into_transaction(None);
         tx.put(ROOT, "a", "1").unwrap();
         // ReadDoc works on the transaction itself
         let (val, _) = tx.get(ROOT, "a").unwrap().unwrap();
@@ -150,11 +129,11 @@ mod tests {
     #[test]
     fn nested_objects() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None, None).unwrap();
+        let mut tx = doc.into_transaction(None);
         let list = tx.put_object(ROOT, "items", ObjType::List).unwrap();
         tx.insert(&list, 0, "first").unwrap();
         tx.insert(&list, 1, "second").unwrap();
-        let (doc, hash, _) = tx.commit();
+        let (doc, hash) = tx.commit();
         assert!(hash.is_some());
         assert_eq!(doc.length(list), 2);
     }
@@ -162,13 +141,12 @@ mod tests {
     #[test]
     fn commit_with_options() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None, None).unwrap();
+        let mut tx = doc.into_transaction(None);
         tx.put(ROOT, "x", 42).unwrap();
-        let (doc, id, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
-        assert!(id.is_some());
-        let hash = id.unwrap();
-        let change = doc.get_change_by_hash(&hash).unwrap().unwrap();
-        assert_eq!(change.message(), Some("test commit"));
+        let (doc, hash) = tx.commit_with(CommitOptions::default().with_message("test commit"));
+        assert!(hash.is_some());
+        let change = doc.get_change_by_hash(&hash.unwrap()).unwrap();
+        assert_eq!(change.unwrap().message(), Some("test commit"));
     }
 
     #[test]
@@ -179,7 +157,7 @@ mod tests {
             tx.put(ROOT, "keep", "yes").unwrap();
             tx.commit();
         }
-        let doc = doc.into_transaction(None, None).unwrap();
+        let doc = doc.into_transaction(None);
         // Haven't written anything, just rollback
         let (doc, cancelled) = doc.rollback();
         assert_eq!(cancelled, 0);
@@ -192,11 +170,44 @@ mod tests {
     #[test]
     fn rollback_undoes_writes() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None, None).unwrap();
+        let mut tx = doc.into_transaction(None);
         tx.put(ROOT, "gone", "soon").unwrap();
         let (doc, cancelled) = tx.rollback();
         assert_eq!(cancelled, 1);
         assert!(doc.get(ROOT, "gone").unwrap().is_none());
+    }
+
+    #[test]
+    fn rollback_restores_clean_dirty_state() {
+        let mut doc = Automerge::new();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "gone", "soon").unwrap();
+        assert_eq!(tx.rollback(), 1);
+
+        assert_eq!(
+            doc.ops().dirty_positions().collect::<Vec<_>>(),
+            Vec::<usize>::new()
+        );
+    }
+
+    #[test]
+    fn rollback_preserves_preexisting_dirty_state() {
+        let mut doc = Automerge::new();
+        doc.ops_mut().clear_dirty();
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "keep", "yes").unwrap();
+        tx.commit();
+        let before = doc.ops().dirty_positions().collect::<Vec<_>>();
+        assert!(!before.is_empty());
+
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "gone", "soon").unwrap();
+        assert_eq!(tx.rollback(), 1);
+
+        assert_eq!(doc.ops().dirty_positions().collect::<Vec<_>>(), before);
     }
 
     #[test]
@@ -215,28 +226,15 @@ mod tests {
         tx.commit();
 
         // Start an owned transaction isolated at v1 heads
-        let mut tx = doc.into_transaction(None, Some(&heads_v1)).unwrap();
+        let mut tx = doc.into_transaction(Some(&heads_v1));
         // Should see v=1, not v=2
         let (val, _) = tx.get(ROOT, "v").unwrap().unwrap();
         assert_eq!(val.to_i64().unwrap(), 1);
 
         tx.put(ROOT, "from_v1", true).unwrap();
-        let (doc, hash, _) = tx.commit();
+        let (doc, hash) = tx.commit();
         assert!(hash.is_some());
         assert!(doc.get(ROOT, "from_v1").unwrap().is_some());
-    }
-
-    #[test]
-    fn log_patches() {
-        let doc = Automerge::new();
-        let mut tx = doc
-            .into_transaction(Some(PatchLog::active()), None)
-            .unwrap();
-        tx.put(ROOT, "patched", "yes").unwrap();
-        let (doc, _, mut patch_log) = tx.commit();
-        let patches = doc.make_patches(&mut patch_log);
-        // We should have at least one patch from the put
-        assert!(!patches.is_empty());
     }
 
     #[test]
@@ -247,7 +245,7 @@ mod tests {
         tx.commit();
         let heads = doc.get_heads();
 
-        let tx = doc.into_transaction(None, None).unwrap();
+        let tx = doc.into_transaction(None);
         assert_eq!(tx.get_heads(), heads);
         tx.commit();
     }
@@ -255,7 +253,7 @@ mod tests {
     #[test]
     fn pending_ops() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None, None).unwrap();
+        let mut tx = doc.into_transaction(None);
         assert_eq!(tx.pending_ops(), 0);
         tx.put(ROOT, "a", 1).unwrap();
         assert_eq!(tx.pending_ops(), 1);
@@ -267,8 +265,8 @@ mod tests {
     #[test]
     fn empty_commit_returns_none_hash() {
         let doc = Automerge::new();
-        let tx = doc.into_transaction(None, None).unwrap();
-        let (_, hash, _) = tx.commit();
+        let tx = doc.into_transaction(None);
+        let (_, hash) = tx.commit();
         assert!(hash.is_none());
     }
 }

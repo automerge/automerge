@@ -51,22 +51,12 @@ fn main() {
 
         let t_changes = best_of(|| ingest(&changes), &doc);
         let t_bundles = best_of(|| ingest(&bundles), &doc);
-        let t_load_p = best_of(
-            || {
-                let mut log = automerge::PatchLog::active();
-                Automerge::load_with_options(
-                    &bytes,
-                    automerge::LoadOptions::new().patch_log(&mut log),
-                )
-                .unwrap()
-            },
-            &doc,
-        );
+        let t_load_p = best_of(|| Automerge::load(&bytes).unwrap(), &doc);
         let t_changes_p = best_of(
             || {
                 let mut d = Automerge::new();
-                let mut log = automerge::PatchLog::active();
-                d.load_incremental_log_patches(&changes, &mut log).unwrap();
+                d.load_incremental(&changes).unwrap();
+                let _patches = d.diff_incremental();
                 d
             },
             &doc,

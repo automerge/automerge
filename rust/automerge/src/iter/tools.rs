@@ -399,7 +399,7 @@ impl<'a> DiffSkipper<VisIter<'a>> {
             }
             ClockRange::Diff(before, after) => {
                 let before = VisIter::new(op_set, Some(&before), range.clone());
-                let after = VisIter::new(op_set, Some(&after), range);
+                let after = VisIter::new(op_set, after.as_ref(), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
             }
         }
@@ -412,7 +412,7 @@ impl<'a> DiffSkipper<TopIter<'a>> {
             ClockRange::Current(clock) => DiffSkipper::Current(TopIter::new(op_set, clock, range)),
             ClockRange::Diff(before, after) => {
                 let before = TopIter::new(op_set, Some(before), range.clone());
-                let after = TopIter::new(op_set, Some(after), range);
+                let after = TopIter::new(op_set, after, range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
             }
         }

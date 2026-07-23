@@ -2,7 +2,7 @@ use crate::change_queue::ChangeBatch;
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
 use crate::AutomergeError;
-use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
+use crate::{Automerge, Change, ChangeHash};
 
 use super::super::op::{ChangeOp, OpBuilder};
 use super::super::op_set::{ObjIdIter, OpSet};
@@ -230,19 +230,11 @@ impl BatchApply {
     }
 
     /// Apply the batch: convert the v1 changes into the v2 succ-format
-    /// columns and run the v2 pipeline. Patches for an active log are
-    /// produced by diffing the document across the apply.
-    pub(crate) fn apply(
-        &mut self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
-        let before = log.is_active().then(|| doc.get_heads());
-        self.apply_v2(doc, log)?;
-        if let Some(before) = before {
-            doc.log_diff(&before, log);
-        }
-        Ok(())
+    /// columns and run the v2 pipeline. Patch generation is deferred to
+    /// the dirty diff — the merge/succ/re-election writes mark exactly
+    /// the touched rows dirty as they land.
+    pub(crate) fn apply(&mut self, doc: &mut Automerge) {
+        self.apply_v2(doc);
     }
 
     /// Normalize to the succ-carrying shape fragment bundles arrive in:
@@ -283,35 +275,15 @@ impl BatchApply {
     /// [`FragmentApply`], which decodes and applies them exactly like a
     /// received fragment. Measures the conversion tax of making the
     /// compressed columns canonical.
-    fn apply_v2(
-        &mut self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
-        let timing = std::env::var("BATCH_TIMING").is_ok();
-        let mut t = std::time::Instant::now();
-        let mut lap = |label: &str| {
-            if timing {
-                eprintln!(
-                    "V2CONV {:<22} {:>9.3}ms",
-                    label,
-                    t.elapsed().as_secs_f64() * 1e3
-                );
-                t = std::time::Instant::now();
-            }
-        };
+    fn apply_v2(&mut self, doc: &mut Automerge) {
         self.insert_new_actors(doc);
-        log.migrate_actors(&doc.ops().actors)?;
         for c in &self.changes {
             doc.import_ops_to(c, &mut self.ops).unwrap();
         }
-        lap("import_ops");
         let clock = doc.change_graph.current_clock();
         doc.update_history_batch(&self.changes);
-        lap("update_history");
 
         self.stamp_succ(&clock);
-        lap("normalize succ");
 
         // sort and filter u32 indexes, not 200-byte ChangeOps
         let mut idxs: Vec<u32> = (0..self.ops.len() as u32)
@@ -321,7 +293,6 @@ impl BatchApply {
             })
             .collect();
         idxs.sort_unstable_by(|&a, &b| doc_order_cmp(&self.ops[a as usize], &self.ops[b as usize]));
-        lap("index sort");
 
         let mut obj_info = doc.ops().obj_info.clone();
         for &i in &idxs {
@@ -350,12 +321,10 @@ impl BatchApply {
             }
             start = end;
         }
-        lap("untangle idx");
 
         // encode the v2 op columns in index (= document) order
         let (raw, data, id_ctr) =
             encode_frag_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
-        lap("encode v2");
 
         // from here on this IS the v2 path: the columns are loaded back
         // as an indexed op set, the streaming manifold resolves them,
@@ -368,10 +337,7 @@ impl BatchApply {
             doc.ops(),
         )
         .unwrap();
-        lap("load frag opset");
-        frag.apply_manifold(doc, log).unwrap();
-        lap("fragment apply");
-        Ok(())
+        frag.apply_manifold(doc).unwrap();
     }
 }
 
@@ -436,17 +402,9 @@ where
 }
 
 impl Automerge {
-    pub fn apply_changes_batch(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
-    }
-
-    pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
+    pub fn apply_changes_batch<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
-        log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Add new changes, deduplicating and checking for duplicate seq numbers.
         let mut batch = ChangeBatch::new();
@@ -486,7 +444,8 @@ impl Automerge {
             chap.push(c);
         }
 
-        Ok(chap.apply(self, log)?)
+        chap.apply(self);
+        Ok(())
     }
 
     pub(crate) fn import_ops_to(

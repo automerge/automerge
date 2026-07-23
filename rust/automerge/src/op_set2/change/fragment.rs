@@ -2,7 +2,7 @@ use crate::clock::Clock;
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::storage::bundle::Bundle;
 use crate::types::OpId;
-use crate::{Automerge, AutomergeError, PatchLog};
+use crate::{Automerge, AutomergeError};
 
 use super::super::op::{ChangeOp, OpBuilder};
 use super::batch::normalize_increment_successors;
@@ -217,31 +217,12 @@ where
 }
 
 impl<'a> FragmentApply<'a> {
-    /// Apply the bundle's ops. Patches for an active log are produced
-    /// by diffing the document across the apply.
-    pub(crate) fn apply(
-        self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        let before = log.is_active().then(|| doc.get_heads());
-        self.apply_manifold(doc, log)?;
-        if let Some(before) = before {
-            let timing = std::env::var("FRAG_TIMING").is_ok();
-            let t = std::time::Instant::now();
-            doc.log_diff(&before, log);
-            crate::automerge::STAT_PATCH_DIFF.fetch_add(
-                t.elapsed().as_nanos() as u64,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            if timing {
-                eprintln!(
-                    "TIMING   {:<26} {:>10.3}ms",
-                    "patch diff",
-                    t.elapsed().as_secs_f64() * 1e3
-                );
-            }
-        }
+    /// Apply the bundle's ops. Patch generation is deferred: the
+    /// merge/succ/re-election writes mark exactly the touched rows
+    /// dirty as they land, and patches materialize on the next dirty
+    /// diff ([`Automerge::diff_incremental`]).
+    pub(crate) fn apply(self, doc: &mut Automerge) -> Result<(), AutomergeError> {
+        self.apply_manifold(doc)?;
         Ok(())
     }
 
@@ -252,35 +233,14 @@ impl<'a> FragmentApply<'a> {
     ///
     /// `pub(super)` so the batch path can join this pipeline after
     /// converting a v1 batch into the succ-format columns.
-    pub(super) fn apply_manifold(
-        self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        let timing = std::env::var("FRAG_TIMING").is_ok();
-        let mut t = std::time::Instant::now();
-        let lap = |label: &str, t: &mut std::time::Instant| {
-            if timing {
-                eprintln!(
-                    "TIMING   {:<26} {:>10.3}ms",
-                    label,
-                    t.elapsed().as_secs_f64() * 1e3
-                );
-                *t = std::time::Instant::now();
-            }
-        };
-        log.migrate_actors(&doc.ops().actors)?;
-
+    pub(super) fn apply_manifold(self, doc: &mut Automerge) -> Result<(), AutomergeError> {
         let mut r = {
             let (raw, data, id_ctr) = self.src.parts();
             let meta = crate::storage::bundle::frag_prepass(raw, data, id_ctr, &self.actor_map);
             let mut fs = crate::storage::bundle::FragOps::new(raw, data, id_ctr, &self.actor_map);
-            lap("manifold: prepass", &mut t);
             let m = doc.ops().apply_manifold(self.clock.clone());
-            lap("manifold: setup", &mut t);
             m.apply_frag(&mut fs, &meta)
         };
-        lap("manifold: stream", &mut t);
 
         // in the succ format every pred names a doc row — nothing can
         // defer to the batch side
@@ -303,12 +263,10 @@ impl<'a> FragmentApply<'a> {
             std::sync::atomic::Ordering::Relaxed,
         );
         doc.ops.add_succ(std::mem::take(&mut r.doc_succ));
-        lap("add_succ", &mut t);
 
         // the merge: copy the fragment's columns and indexes in at the
         // insert runs
         doc.ops.merge(self.frag, &r.insert_runs);
-        lap("merge columns", &mut t);
 
         // top/text are the only index bits that aren't a straight copy,
         // and only in groups shared between the doc and the fragment —
@@ -319,10 +277,8 @@ impl<'a> FragmentApply<'a> {
             doc.ops
                 .rebuild_indexes()
                 .map_err(|_| AutomergeError::InvalidFragment("index rebuild failed"))?;
-            lap("index rebuild", &mut t);
         } else {
             reset_mixed_groups(doc, &r);
-            lap("reset mixed groups", &mut t);
             if std::env::var("MERGE_VALIDATE").is_ok() {
                 let diffs = doc.ops.index_diff_positions();
                 if !diffs.is_empty() {

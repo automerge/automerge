@@ -45,6 +45,11 @@ pub(super) struct Indexes {
     pub(super) visible: hexane::Column<bool>,
     pub(super) inc: hexane::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
+    // Transient change-tracking bitmap: true on rows touched since the
+    // last incremental diff (new rows, succ changes, top re-elections).
+    // Never persisted, excluded from index validation (a rebuild cannot
+    // reproduce change history) — only the length invariant holds.
+    pub(super) dirty: hexane::Column<bool>,
 }
 
 impl Default for Indexes {
@@ -55,6 +60,7 @@ impl Default for Indexes {
             visible: hexane::Column::new(),
             inc: hexane::Column::new(),
             mark: MarkIndexColumn::new(),
+            dirty: hexane::Column::new(),
         }
     }
 }
@@ -511,6 +517,7 @@ impl Columns {
         // the fragment-side sub/value spans arrive precomputed on each
         // CopyRange (stamped by the manifold while streaming); only
         // this column set's own positions are resolved here
+        let frag_len = frag.len();
         let frag_value = frag.value.save();
         let subs: Vec<hexane::Splice> = runs
             .iter()
@@ -566,6 +573,10 @@ impl Columns {
         self.index.top.copy_ranges(frag.index.top, rows());
         self.index.text.copy_ranges(frag.index.text, rows());
         self.index.mark.merge_from(frag.index.mark, rows());
+        // every merged fragment row is a new row
+        self.index
+            .dirty
+            .copy_ranges(hexane::Column::fill(frag_len, true), rows());
     }
 
     pub(super) fn actor_map(&self) -> std::sync::Arc<super::op_set::ActorMap> {
@@ -691,6 +702,7 @@ impl Columns {
         self.index.text.splice(pos, del, [] as [Option<u32>; 0]);
         self.index.top.splice(pos, del, [] as [bool; 0]);
         self.index.visible.splice(pos, del, [] as [bool; 0]);
+        self.index.dirty.splice(pos, del, [] as [bool; 0]);
 
         ops.count()
     }
@@ -766,6 +778,7 @@ impl Columns {
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+        self.index.dirty.splice(pos, 0, ops.clone().map(|_| true));
 
         ops.count()
     }

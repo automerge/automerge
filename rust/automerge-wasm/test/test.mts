@@ -807,8 +807,9 @@ describe("Automerge", () => {
         ["str", "Chaffinch", "1@bbbb"],
         ["str", "Goldfinch", "1@cccc"],
       ]);
+      // the diff reports the net state change: one conflicted put of the
+      // final winner (intermediate merge steps are not replayed)
       assert.deepEqual(doc1.diffIncremental(), [
-        { action: "put", path: ["bird"], conflict: true, value: "Chaffinch" },
         { action: "put", path: ["bird"], conflict: true, value: "Goldfinch" },
       ]);
       assert.deepEqual(doc2.diffIncremental(), [
@@ -840,9 +841,9 @@ describe("Automerge", () => {
       assert.deepEqual(doc3.getAll("_root", "bird"), [
         ["str", "Goldfinch", "2@aaaa"],
       ]);
+      // net state change: the conflict was created and resolved inside
+      // the window, so only the final uncontested value is reported
       assert.deepEqual(doc3.diffIncremental(), [
-        { action: "put", path: ["bird"], value: "Greenfinch" },
-        { action: "put", path: ["bird"], value: "Chaffinch", conflict: true },
         { action: "put", path: ["bird"], value: "Goldfinch" },
       ]);
     });
@@ -905,8 +906,9 @@ describe("Automerge", () => {
         ["str", "Song Thrush", "4@aaaa"],
         ["str", "Redwing", "4@bbbb"],
       ]);
+      // both docs report the same net state change regardless of the
+      // order the concurrent changes arrived in
       assert.deepEqual(doc3.diffIncremental(), [
-        { action: "put", path: ["birds", 0], value: "Song Thrush" },
         { action: "put", path: ["birds", 0], value: "Redwing", conflict: true },
       ]);
       assert.deepEqual(doc4.diffIncremental(), [
@@ -949,14 +951,10 @@ describe("Automerge", () => {
         ["str", "Song Thrush", "6@aaaa"],
         ["str", "Redwing", "6@bbbb"],
       ]);
+      // both docs report the same net state change regardless of the
+      // order the concurrent changes arrived in
       assert.deepEqual(doc3.diffIncremental(), [
-        { action: "del", path: ["birds", 0] },
-        { action: "put", path: ["birds", 1], value: "Song Thrush" },
-        {
-          action: "insert",
-          path: ["birds", 0],
-          values: ["Ring-necked parakeet"],
-        },
+        { action: "put", path: ["birds", 0], value: "Ring-necked parakeet" },
         { action: "put", path: ["birds", 2], value: "Redwing", conflict: true },
       ]);
       assert.deepEqual(doc4.diffIncremental(), [
@@ -1103,7 +1101,8 @@ describe("Automerge", () => {
 
     it("should capture local increment ops", () => {
       const doc1 = create({ actor: "aaaa" });
-      // the first diff incremental collapses increments for efficent loading
+      // a counter created and incremented inside one window diffs to a
+      // single put of its final value
       doc1.put("_root", "counter0", 10, "counter");
       doc1.increment("_root", "counter0", 2);
       assert.deepEqual(doc1.diffIncremental(), [
@@ -1114,14 +1113,18 @@ describe("Automerge", () => {
       doc1.increment("_root", "counter", 4);
 
       assert.deepEqual(doc1.diffIncremental(), [
-        { action: "put", path: ["counter"], value: 2 },
-        { action: "inc", path: ["counter"], value: 4 },
+        { action: "put", path: ["counter"], value: 6 },
+      ]);
+      // an increment of a counter that predates the window is an inc
+      doc1.increment("_root", "counter", 3);
+      assert.deepEqual(doc1.diffIncremental(), [
+        { action: "inc", path: ["counter"], value: 3 },
       ]);
     });
 
     it("should capture local delete ops", () => {
       const doc1 = create({ actor: "aaaa" });
-      // the first diff incremental collapses deletes for efficient loading
+      // keys created and deleted inside one window net out to nothing
       doc1.put("_root", "key0", 1);
       doc1.delete("_root", "key0");
       assert.deepEqual(doc1.diffIncremental(), []);
@@ -1129,11 +1132,13 @@ describe("Automerge", () => {
       doc1.put("_root", "key2", 2);
       doc1.delete("_root", "key1");
       doc1.delete("_root", "key2");
+      assert.deepEqual(doc1.diffIncremental(), []);
+      // a delete of a key that predates the window is a del
+      doc1.put("_root", "key3", 3);
+      doc1.diffIncremental();
+      doc1.delete("_root", "key3");
       assert.deepEqual(doc1.diffIncremental(), [
-        { action: "put", path: ["key1"], value: 1 },
-        { action: "put", path: ["key2"], value: 2 },
-        { action: "del", path: ["key1"] },
-        { action: "del", path: ["key2"] },
+        { action: "del", path: ["key3"] },
       ]);
     });
 

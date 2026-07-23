@@ -1,14 +1,14 @@
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
-use crate::clock::{Clock, ClockRange};
+use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
 use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
-use crate::patches::PatchLog;
+use crate::patches::PatchAccumulator;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
@@ -59,15 +59,14 @@ use crate::{LoadOptions, VerificationMode};
 #[derive(Debug, Clone)]
 pub struct AutoCommit {
     pub(crate) doc: Automerge,
-    transaction: Option<(PatchLog, TransactionInner)>,
-    patch_log: PatchLog,
+    transaction: Option<TransactionInner>,
     diff_cursor: Vec<ChangeHash>,
     diff_cache: Option<(OpRange, ObjId, bool, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
 }
 
-/// An autocommit document with an inactive [`PatchLog`]
+/// An autocommit document with an inactive [`PatchAccumulator`]
 ///
 /// See [`AutoCommit`]
 impl Default for AutoCommit {
@@ -75,7 +74,6 @@ impl Default for AutoCommit {
         AutoCommit {
             doc: Automerge::new(),
             transaction: None,
-            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -98,7 +96,6 @@ impl AutoCommit {
         AutoCommit {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -111,7 +108,6 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -124,7 +120,6 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -146,10 +141,7 @@ impl AutoCommit {
         )
     }
 
-    pub fn load_with_options(
-        data: &[u8],
-        options: LoadOptions<'_>,
-    ) -> Result<Self, AutomergeError> {
+    pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_with_options(data, options)?;
         // on an unchecked document only changes made after load can be
         // exported, so start the incremental-save cursor at the load heads
@@ -162,7 +154,6 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor,
@@ -174,7 +165,7 @@ impl AutoCommit {
     /// longer indexes changes to the document.
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_log = PatchLog::inactive();
+        self.doc.clear_dirty();
         self.diff_cursor = Vec::new();
     }
 
@@ -190,8 +181,7 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
         if !heads.is_empty() {
-            self.patch_log.set_active(true);
-            self.patch_log.truncate();
+            self.doc.clear_dirty();
             self.diff_cursor = heads;
         }
     }
@@ -199,11 +189,6 @@ impl AutoCommit {
     /// Returns the cursor set by [`Self::update_diff_cursor()`]
     pub fn diff_cursor(&self) -> Vec<ChangeHash> {
         self.diff_cursor.clone()
-    }
-
-    /// Generate the patches recorded in `patch_log`
-    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
-        self.doc.make_patches(patch_log)
     }
 
     /// Generates a diff from `before` to `after`
@@ -247,7 +232,7 @@ impl AutoCommit {
 
     fn diff_inner(
         &mut self,
-        exid: &ExId,
+        _exid: &ExId,
         obj: ObjMeta,
         before: &[ChangeHash],
         after: &[ChangeHash],
@@ -264,33 +249,27 @@ impl AutoCommit {
         let heads = self.doc.get_heads();
         let patches = if range.after() == heads
             && range.before() == self.diff_cursor
-            && self.patch_log.is_active()
+            && obj.id.is_root()
+            && recursive
         {
-            if obj.id.is_root() && recursive {
-                self.patch_log.make_patches(&self.doc)
-            } else {
-                self.patch_log
-                    .make_patches(&self.doc)
-                    .into_iter()
-                    .filter(|p| p.has(exid, recursive))
-                    .collect()
-            }
+            self.doc
+                .dirty_diff_patches(range.before(), range.after())
+                .expect("dirty diff should support AutoCommit cursor intervals")
         } else if range.before().is_empty() && range.after() == heads {
-            let mut patch_log = PatchLog::active();
+            let mut patch_accumulator = PatchAccumulator::event_log();
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
-            patch_log.heads_clock = None;
-            self.doc.log_current_state(obj, &mut patch_log, recursive);
-            patch_log.make_patches(&self.doc)
+            patch_accumulator.heads = None;
+            self.doc
+                .log_current_state(obj, &mut patch_accumulator, recursive);
+            patch_accumulator.make_patches(&self.doc)
         } else {
-            let before_clock = self.doc.change_graph.clock_for_heads_lossy(range.before());
-            let after_clock = self.doc.change_graph.clock_for_heads_lossy(range.after());
-            let clock = ClockRange::Diff(before_clock, after_clock.clone());
-            let mut patch_log = PatchLog::active();
-            patch_log.heads_clock = Some(after_clock);
-            DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
-            patch_log.make_patches(&self.doc)
+            let clock = self.doc.clock_range(range.before(), range.after());
+            let mut patch_accumulator = PatchAccumulator::event_log();
+            patch_accumulator.heads = Some(range.after().to_vec());
+            DiffIter::log(&self.doc, obj, clock, &mut patch_accumulator, recursive);
+            patch_accumulator.make_patches(&self.doc)
         };
         self.diff_cache = Some((range, obj.id, recursive, patches.clone()));
         patches
@@ -340,8 +319,34 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
         let diff_cursor = self.diff_cursor();
-        let patches = self.diff(&diff_cursor, &heads);
-        self.update_diff_cursor();
+        if heads != self.doc.get_heads() {
+            // isolated view: the dirty diff is anchored to the graph's
+            // current heads, so serve the interval with a full diff
+            let patches = self.diff(&diff_cursor, &heads);
+            if !heads.is_empty() {
+                self.diff_cursor = heads;
+            }
+            return patches;
+        }
+        #[cfg(any(test, debug_assertions, feature = "patchless_assertions"))]
+        let expected = self.diff(&diff_cursor, &heads);
+        let patches = self
+            .doc
+            .dirty_diff_patches_and_clear(&diff_cursor, &heads)
+            .expect("dirty diff should support AutoCommit incremental intervals");
+        #[cfg(any(test, debug_assertions, feature = "patchless_assertions"))]
+        crate::patches::effect::assert_patches_have_same_effect(
+            &self.doc,
+            &diff_cursor,
+            &heads,
+            "dirty diff",
+            &patches,
+            "diff cursor",
+            &expected,
+        );
+        if !heads.is_empty() {
+            self.diff_cursor = heads;
+        }
         patches
     }
 
@@ -350,7 +355,6 @@ impl AutoCommit {
         Self {
             doc: self.doc.fork(),
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
             diff_cache: None,
             save_cursor: vec![],
@@ -363,7 +367,6 @@ impl AutoCommit {
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
             diff_cache: None,
             save_cursor: vec![],
@@ -432,26 +435,26 @@ impl AutoCommit {
     pub(crate) fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args(self.isolation.as_deref());
-            // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
-            // always belongs to this document and can never mismatch.
-            self.patch_log
-                .begin_transaction(&self.doc, &args)
-                .expect("AutoCommit's patch log always belongs to its document");
-            let inner = TransactionInner::new(args);
-            let branch = self.patch_log.branch();
-            self.transaction = Some((branch, inner));
+            self.transaction = Some(TransactionInner::new(args));
         }
     }
 
     pub(crate) fn ensure_transaction_closed(&mut self) {
-        if let Some((patch_log, tx)) = self.transaction.take() {
-            self.patch_log.merge(patch_log);
+        if let Some(tx) = self.transaction.take() {
             let hash = tx.commit(&mut self.doc, None, None);
-            self.patch_log.finish_transaction(&self.doc.ops().actors);
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
         }
+    }
+
+    fn with_transaction<R>(
+        &mut self,
+        f: impl FnOnce(&mut TransactionInner, &mut Automerge) -> R,
+    ) -> R {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        f(tx, &mut self.doc)
     }
 
     /// Load an incremental save of a document.
@@ -463,13 +466,7 @@ impl AutoCommit {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .load_incremental_log_patches(data, &mut PatchLog::null())
-        } else {
-            self.doc
-                .load_incremental_log_patches(data, &mut self.patch_log)
-        }
+        self.doc.load_incremental(data)
     }
 
     pub fn apply_changes(
@@ -477,13 +474,7 @@ impl AutoCommit {
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .apply_changes_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_log_patches(changes, &mut self.patch_log)
-        }
+        self.doc.apply_changes(changes)
     }
 
     pub fn apply_changes_batch(
@@ -491,26 +482,14 @@ impl AutoCommit {
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .apply_changes_batch_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_batch_log_patches(changes, &mut self.patch_log)
-        }
+        self.doc.apply_changes_batch(changes)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut PatchLog::null())
-        } else {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
-        }
+        self.doc.merge(&mut other.doc)
     }
 
     /// Save the entirety of this document in a compact form.
@@ -752,10 +731,8 @@ impl AutoCommit {
     pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeHash> {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.take().unwrap();
-        self.patch_log.merge(patch_log);
+        let tx = self.transaction.take().unwrap();
         let hash = tx.commit(&mut self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
         }
@@ -766,11 +743,7 @@ impl AutoCommit {
     pub fn rollback(&mut self) -> usize {
         self.transaction
             .take()
-            .map(|(_, tx)| {
-                let num = tx.rollback(&mut self.doc);
-                self.patch_log.finish_transaction(&self.doc.ops().actors);
-                num
-            })
+            .map(|tx| tx.rollback(&mut self.doc))
             .unwrap_or(0)
     }
 
@@ -786,14 +759,7 @@ impl AutoCommit {
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_closed();
         let args = self.doc.transaction_args(None);
-        // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
-        // always belongs to this document and can never mismatch.
-        self.patch_log
-            .begin_transaction(&self.doc, &args)
-            .expect("AutoCommit's patch log always belongs to its document");
-        let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops.actors);
-        result
+        TransactionInner::empty(&mut self.doc, args, options.message, options.time)
     }
 
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
@@ -827,7 +793,7 @@ impl AutoCommit {
         }
         match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
-            (Some(_), Some((_, t))) => t.get_scope().clone(),
+            (Some(_), Some(t)) => t.get_scope().clone(),
             // then look at clock for isolation (no transaction is open, so
             // isolation at the current heads can read unscoped)
             (Some(i), None) => self.doc.clock_at(i),
@@ -844,14 +810,9 @@ impl AutoCommit {
             self.doc.get_heads()
         };
         if before.as_slice() != after {
-            self.patch_log.finish_current_view(&self.doc, &before);
-            // both sides are hashes of changes in this document (current
-            // heads or a previously resolved isolation) so the clocks are
-            // always computable
-            let before = self.doc.change_graph.clock_for_heads_lossy(&before);
-            let after = self.doc.change_graph.clock_for_heads_lossy(after);
-            let clock = ClockRange::Diff(before, after);
-            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
+            // patch generation is deferred to the dirty diff; a view
+            // transition can touch anything, so mark everything
+            self.doc.ops_mut().mark_all_dirty();
         }
     }
 
@@ -1102,7 +1063,7 @@ impl Transactable for AutoCommit {
     fn pending_ops(&self) -> usize {
         self.transaction
             .as_ref()
-            .map(|(_, t)| t.pending_ops())
+            .map(|t| t.pending_ops())
             .unwrap_or(0)
     }
 
@@ -1112,9 +1073,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.put(&mut self.doc, patch_log, obj.as_ref(), prop, value)
+        self.with_transaction(|tx, doc| tx.put(doc, obj.as_ref(), prop, value))
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1123,9 +1082,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.put_object(&mut self.doc, patch_log, obj.as_ref(), prop, value)
+        self.with_transaction(|tx, doc| tx.put_object(doc, obj.as_ref(), prop, value))
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -1134,9 +1091,7 @@ impl Transactable for AutoCommit {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.insert(&mut self.doc, patch_log, obj.as_ref(), index, value)
+        self.with_transaction(|tx, doc| tx.insert(doc, obj.as_ref(), index, value))
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -1145,9 +1100,7 @@ impl Transactable for AutoCommit {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.insert_object(&mut self.doc, patch_log, obj.as_ref(), index, value)
+        self.with_transaction(|tx, doc| tx.insert_object(doc, obj.as_ref(), index, value))
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1156,9 +1109,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.increment(&mut self.doc, patch_log, obj.as_ref(), prop, value)
+        self.with_transaction(|tx, doc| tx.increment(doc, obj.as_ref(), prop, value))
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1166,9 +1117,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.delete(&mut self.doc, patch_log, obj.as_ref(), prop)
+        self.with_transaction(|tx, doc| tx.delete(doc, obj.as_ref(), prop))
     }
 
     /// Splice new elements into the given sequence
@@ -1179,9 +1128,7 @@ impl Transactable for AutoCommit {
         del: isize,
         vals: I,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice(&mut self.doc, patch_log, obj.as_ref(), pos, del, vals)
+        self.with_transaction(|tx, doc| tx.splice(doc, obj.as_ref(), pos, del, vals))
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -1191,10 +1138,7 @@ impl Transactable for AutoCommit {
         del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice_text(&mut self.doc, patch_log, obj.as_ref(), pos, del, text)?;
-        Ok(())
+        self.with_transaction(|tx, doc| tx.splice_text(doc, obj.as_ref(), pos, del, text))
     }
 
     fn mark<O: AsRef<ExId>>(
@@ -1203,9 +1147,7 @@ impl Transactable for AutoCommit {
         mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.mark(&mut self.doc, patch_log, obj.as_ref(), mark, expand)
+        self.with_transaction(|tx, doc| tx.mark(doc, obj.as_ref(), mark, expand))
     }
 
     fn unmark<O: AsRef<ExId>>(
@@ -1216,41 +1158,25 @@ impl Transactable for AutoCommit {
         end: usize,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.unmark(
-            &mut self.doc,
-            patch_log,
-            obj.as_ref(),
-            key,
-            start,
-            end,
-            expand,
-        )
+        self.with_transaction(|tx, doc| tx.unmark(doc, obj.as_ref(), key, start, end, expand))
     }
 
     fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>,
     {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index)
+        self.with_transaction(|tx, doc| tx.split_block(doc, obj.as_ref(), index))
     }
 
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.join_block(&mut self.doc, patch_log, text.as_ref(), index)
+        self.with_transaction(|tx, doc| tx.join_block(doc, text.as_ref(), index))
     }
 
     fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>,
     {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.replace_block(&mut self.doc, patch_log, text.as_ref(), index)
+        self.with_transaction(|tx, doc| tx.replace_block(doc, text.as_ref(), index))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
@@ -1266,9 +1192,7 @@ impl Transactable for AutoCommit {
         obj: &ExId,
         new_text: S,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
+        self.with_transaction(|tx, doc| crate::text_diff::myers_diff(doc, tx, obj, new_text))
     }
 
     fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
@@ -1277,16 +1201,9 @@ impl Transactable for AutoCommit {
         config: UpdateSpansConfig,
         new_text: I,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        crate::text_diff::myers_block_diff(
-            &mut self.doc,
-            tx,
-            patch_log,
-            text.as_ref(),
-            new_text,
-            &config,
-        )
+        self.with_transaction(|tx, doc| {
+            crate::text_diff::myers_block_diff(doc, tx, text.as_ref(), new_text, &config)
+        })
     }
 
     fn update_object<O: AsRef<ExId>>(
@@ -1294,9 +1211,7 @@ impl Transactable for AutoCommit {
         obj: O,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.update_object(&mut self.doc, patch_log, obj.as_ref(), new_value)
+        self.with_transaction(|tx, doc| tx.update_object(doc, obj.as_ref(), new_value))
     }
 
     fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1306,26 +1221,16 @@ impl Transactable for AutoCommit {
         value: &crate::hydrate::Value,
         insert: bool,
     ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.batch_create_object(
-            &mut self.doc,
-            patch_log,
-            obj.as_ref(),
-            prop.into(),
-            value,
-            insert,
-        )
+        self.with_transaction(|tx, doc| {
+            tx.batch_create_object(doc, obj.as_ref(), prop.into(), value, insert)
+        })
     }
 
     fn init_root_from_hydrate(
         &mut self,
         value: &crate::hydrate::Map,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.batch_init_root_map(&mut self.doc, patch_log, value)?;
-        Ok(())
+        self.with_transaction(|tx, doc| tx.batch_init_root_map(doc, value))
     }
 }
 
@@ -1349,32 +1254,7 @@ impl SyncDoc for SyncWrapper<'_> {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.inner.ensure_transaction_closed();
-        if self.inner.isolation.is_some() {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut PatchLog::null(),
-            )
-        } else {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut self.inner.patch_log,
-            )
-        }
-    }
-
-    // I dont like this function - it makes sense on automerge but not autocommit
-    // FIXME
-    fn receive_sync_message_log_patches(
-        &mut self,
-        sync_state: &mut sync::State,
-        message: sync::Message,
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        self.inner
-            .doc
-            .receive_sync_message_log_patches(sync_state, message, patch_log)
+        self.inner.doc.receive_sync_message(sync_state, message)
     }
 }
 
@@ -1409,11 +1289,212 @@ impl OpRange {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        sync::{State as SyncState, SyncDoc},
+        transaction::Transactable,
+        ObjType, ROOT,
+    };
+
+    use super::AutoCommit;
 
     fn is_send<S: Send>() {}
 
+    fn assert_incremental_matches_diff(doc: &mut AutoCommit) {
+        let before = doc.diff_cursor();
+        let after = doc.get_heads();
+        let expected = doc.diff(&before, &after);
+        let actual = doc.diff_incremental();
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc.document(),
+            &before,
+            &after,
+            "incremental diff",
+            &actual,
+            "cursor diff",
+            &expected,
+        );
+        assert!(doc.diff_incremental().is_empty());
+    }
+
     #[test]
     fn test_autocommit_is_send() {
-        is_send::<super::AutoCommit>();
+        is_send::<AutoCommit>();
+    }
+
+    #[test]
+    fn diff_incremental_public_style_local_mutations() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "map", 1).unwrap();
+        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "abc").unwrap();
+        assert_incremental_matches_diff(&mut doc);
+
+        doc.put(ROOT, "map", 2).unwrap();
+        doc.put(&list, 0, "A").unwrap();
+        doc.splice_text(&text, 1, 1, "B").unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_with_cursor_uses_dirty_diff_without_consuming_dirty_bits() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "base", 1).unwrap();
+        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        doc.update_diff_cursor();
+        let before = doc.diff_cursor();
+
+        doc.put(ROOT, "base", 2).unwrap();
+        doc.put(&list, 0, "A").unwrap();
+        let after = doc.get_heads();
+
+        let patches = doc.diff(&before, &after);
+        assert!(!patches.is_empty());
+        assert!(doc.document().ops().dirty_runs().next().is_some());
+        let incremental = doc.diff_incremental();
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc.document(),
+            &before,
+            &after,
+            "incremental diff",
+            &incremental,
+            "cursor diff",
+            &patches,
+        );
+        assert!(doc.document().ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn diff_incremental_public_style_object_creation_ordering_fallback() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "base", 1).unwrap();
+        doc.update_diff_cursor();
+
+        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        doc.put(ROOT, "base", 2).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_apply_changes() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+        let changes = source.get_changes(&[]).unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.apply_changes(changes).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_apply_changes_batch() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+        let list = source.put_object(ROOT, "list", ObjType::List).unwrap();
+        source.insert(&list, 0, "a").unwrap();
+        let changes = source.get_changes(&[]).unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.apply_changes_batch(changes).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_load_incremental() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "base", 1).unwrap();
+        let base_heads = source.get_heads();
+        let base_data = source.save();
+
+        let mut doc = AutoCommit::new();
+        doc.load_incremental(&base_data).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+
+        source.put(ROOT, "later", 2).unwrap();
+        let data = source.save_after(&base_heads).unwrap();
+        doc.load_incremental(&data).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_merge() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.merge(&mut source).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_sync_receive() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+        let mut sync_state = SyncState::new();
+        let message = source
+            .sync()
+            .generate_sync_message(&mut sync_state)
+            .unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.sync()
+            .receive_sync_message(&mut SyncState::new(), message.unwrap())
+            .unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_reset_and_rollback() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "key", 1).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+
+        let heads = doc.get_heads();
+        let expected = doc.diff(&[], &heads);
+        doc.reset_diff_cursor();
+        let incremental = doc.diff_incremental();
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc.document(),
+            &[],
+            &heads,
+            "incremental diff",
+            &incremental,
+            "full diff",
+            &expected,
+        );
+        assert!(doc.diff_incremental().is_empty());
+
+        doc.put(ROOT, "key", 2).unwrap();
+        assert_eq!(doc.rollback(), 1);
+        assert!(doc.diff_incremental().is_empty());
+
+        doc.put(ROOT, "key", 3).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_isolate_and_integrate() {
+        let mut doc = AutoCommit::new();
+        let beginning = doc.get_heads();
+
+        let name = doc.put_object(ROOT, "name", ObjType::Text).unwrap();
+        doc.splice_text(&name, 0, 0, "name").unwrap();
+
+        doc.isolate(&beginning).unwrap();
+        let color = doc.put_object(ROOT, "color", ObjType::Text).unwrap();
+        doc.splice_text(&color, 0, 0, "red").unwrap();
+        doc.integrate();
+        assert_incremental_matches_diff(&mut doc);
+
+        doc.commit();
+        doc.isolate(&beginning).unwrap();
+        let color = doc.put_object(ROOT, "color", ObjType::Text).unwrap();
+        doc.splice_text(&color, 0, 0, "unset").unwrap();
+        doc.commit();
+        doc.integrate();
+        assert_incremental_matches_diff(&mut doc);
     }
 }

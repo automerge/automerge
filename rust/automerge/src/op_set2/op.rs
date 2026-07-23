@@ -1,5 +1,5 @@
 use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction, SuccUndo};
-use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
+use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 use super::{ValueMeta, ValueRef};
 
 use crate::clock::Clock;
@@ -7,7 +7,7 @@ use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::types;
 use crate::types::{ElemId, ObjId, ObjMeta, ObjType, OpId, SequenceType};
-use crate::{hydrate, TextEncoding};
+use crate::TextEncoding;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -97,10 +97,8 @@ impl ChangeOp {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TxOp {
-    pub(crate) obj_type: ObjType,
     pub(crate) index: usize,
     pub(crate) pos: usize,
-    pub(crate) noop: bool,
     pub(crate) bld: OpBuilder<'static>,
     pub(crate) undo: Vec<SuccUndo>,
     // Pre-insert register range for scoped transactions. When present,
@@ -171,20 +169,6 @@ impl OpBuilder<'_> {
             _ => None,
         }
     }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        // FIXME
-        match self.action {
-            Action::Set => hydrate::Value::Scalar(self.value.to_owned()),
-            Action::MakeMap => hydrate::Value::map(),
-            Action::MakeList => hydrate::Value::list(),
-            Action::MakeText => hydrate::Value::new(ObjType::Text, text_encoding),
-            Action::MakeTable => hydrate::Value::new(ObjType::Table, text_encoding),
-            //Action::Mark if self.mark_name.is_some() => hydrate::Value::new(&self.value, text_rep),
-            //Action::Mark => hydrate::Value::Scalar("markEnd".into()),
-            _ => panic!("cant convert op into a value"),
-        }
-    }
 }
 
 impl TxOp {
@@ -202,16 +186,14 @@ impl TxOp {
         elemid: ElemId,
         pred: Vec<OpId>,
     ) -> Self {
-        let (op_type, noop) = match action {
-            ResolvedAction::ConflictResolution(action) => (action, true),
-            ResolvedAction::VisibleUpdate(action) => (action, false),
+        let op_type = match action {
+            ResolvedAction::ConflictResolution(action) => action,
+            ResolvedAction::VisibleUpdate(action) => action,
         };
         let (action, value, expand, mark_name) = op_type.decompose();
         TxOp {
-            obj_type: obj.typ,
             pos,
             index,
-            noop,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -236,16 +218,14 @@ impl TxOp {
         prop: String,
         pred: Vec<OpId>,
     ) -> Self {
-        let (action, noop) = match action {
-            ResolvedAction::ConflictResolution(action) => (action, true),
-            ResolvedAction::VisibleUpdate(action) => (action, false),
+        let action = match action {
+            ResolvedAction::ConflictResolution(action) => action,
+            ResolvedAction::VisibleUpdate(action) => action,
         };
         let (action, value, expand, mark_name) = action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             index: 0,
             pos,
-            noop,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -272,10 +252,8 @@ impl TxOp {
     ) -> Self {
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             pos,
             index,
-            noop: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -304,8 +282,6 @@ impl TxOp {
         TxOp {
             pos,
             index: 0,
-            obj_type: obj.typ,
-            noop: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -333,10 +309,8 @@ impl TxOp {
         let _action = types::OpType::Make(obj_type);
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             pos,
             index,
-            noop: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -363,10 +337,8 @@ impl TxOp {
         let _action = types::OpType::Delete;
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             pos: 0,
             index,
-            noop: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -383,32 +355,8 @@ impl TxOp {
         }
     }
 
-    pub(crate) fn prop(&self) -> PropRef<'_> {
-        if let KeyRef::Map(s) = &self.bld.key {
-            PropRef::Map(s.clone())
-        } else {
-            PropRef::Seq(self.index)
-        }
-    }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        self.bld.hydrate_value(text_encoding)
-    }
-
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
         self.bld.get_increment_value()
-    }
-
-    pub(crate) fn is_delete(&self) -> bool {
-        self.bld.is_delete()
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        self.bld.as_str()
-    }
-
-    pub(crate) fn is_mark(&self) -> bool {
-        self.bld.is_mark()
     }
 }
 
@@ -1095,16 +1043,6 @@ impl<'a> Op<'a> {
             }
             OpType::MarkEnd(_) => ValueRef::Scalar(ScalarValue::Str(Cow::Borrowed("markEnd"))),
             _ => panic!("cant convert op into a value - {:?}", self),
-        }
-    }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        match &self.action() {
-            OpType::Make(obj_type) => hydrate::Value::new(*obj_type, text_encoding),
-            OpType::Put(scalar) => hydrate::Value::Scalar(scalar.to_owned()),
-            OpType::MarkBegin(_, mark) => hydrate::Value::new(&mark.value, text_encoding),
-            OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
-            _ => panic!("cant convert op into a value"),
         }
     }
 

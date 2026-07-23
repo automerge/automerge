@@ -6,7 +6,7 @@ use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
-use crate::patches::PatchLog;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, ObjMeta, ObjType, Prop};
 use crate::Automerge;
 use crate::TextEncoding;
@@ -80,7 +80,7 @@ impl<'a> DiffIter<'a> {
         doc: &'a Automerge,
         obj: ObjMeta,
         clock: ClockRange,
-        log: &mut PatchLog,
+        log: &mut PatchAccumulator,
         recursive: bool,
     ) -> BTreeMap<ObjId, (Prop, ObjId)> {
         let encoding = doc.text_encoding();
@@ -352,7 +352,7 @@ pub(crate) struct DocObjDiffItem<'a> {
 }
 
 impl DocObjDiffItem<'_> {
-    pub(crate) fn log(self, log: &mut PatchLog, encoding: TextEncoding) {
+    pub(crate) fn log(self, log: &mut PatchAccumulator, encoding: TextEncoding) {
         match self.item {
             DocDiffItem::Map(m) => m.log(self.obj, log, encoding),
             DocDiffItem::List(l) => l.log(self.obj, log, encoding),

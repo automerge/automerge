@@ -3,7 +3,7 @@ use automerge::{
     HashGraphRebuild, LoadOptions, ReadDoc, ROOT,
 };
 
-fn unchecked_opts() -> LoadOptions<'static> {
+fn unchecked_opts() -> LoadOptions {
     LoadOptions::new().hash_graph(HashGraphRebuild::None)
 }
 
@@ -133,17 +133,14 @@ fn unchecked_transaction_at_load_heads_works() {
     // isolating at the load heads works: their hashes come from the
     // document's head index suffix
     let load_heads = doc.get_heads();
-    let tx = doc.transaction_at(automerge::PatchLog::active(), &load_heads);
-    assert!(tx.is_ok());
+    let tx = doc.transaction_at(&load_heads);
     drop(tx);
 
     // make a post-load change, then isolate at it
     let mut tx = doc.transaction();
     tx.put(ROOT, "k", 50).unwrap();
-    let (hash, _) = tx.commit();
-    let hash = hash.unwrap();
-    let tx = doc.transaction_at(automerge::PatchLog::active(), &[hash]);
-    assert!(tx.is_ok());
+    let hash = tx.commit().unwrap();
+    let tx = doc.transaction_at(&[hash]);
     drop(tx);
 }
 

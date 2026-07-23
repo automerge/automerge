@@ -134,16 +134,18 @@ describe("Automerge", () => {
       ])
     })
 
+    // the change's patches arrive in final-document position order:
+    // ">" landed at 3, which pushed "<" (inserted at 6) out to 7
     assert.deepStrictEqual(patches.pop(), {
       action: "splice",
-      path: ["text", 3],
-      value: ">",
+      path: ["text", 7],
+      value: "<",
       marks: { bold: true },
     })
     assert.deepStrictEqual(patches.pop(), {
       action: "splice",
-      path: ["text", 6],
-      value: "<",
+      path: ["text", 3],
+      value: ">",
       marks: { bold: true },
     })
 

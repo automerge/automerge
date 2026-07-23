@@ -4,7 +4,7 @@ use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
 use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, TopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
-use crate::patches::PatchLog;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, OpId, TextEncoding};
 use crate::value;
 
@@ -19,7 +19,7 @@ pub(crate) struct SpanDiff {
 }
 
 impl SpanDiff {
-    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchAccumulator, encoding: TextEncoding) {
         match (self.diff, self.span) {
             (Diff::Add, SpanInternal::Text(text, index, marks)) => {
                 log.splice(obj, index, &text, marks.export());
@@ -51,7 +51,7 @@ impl SpanDiff {
 // case we avoid the overhead of TopIter and stream action/value columns
 // directly.
 #[derive(Debug, Clone)]
-// Boxing the variants leads to losing a few milliseconds on some iteration benchmarks
+// Boxing the variants loses a few milliseconds on some iteration benchmarks
 #[expect(clippy::large_enum_variant)]
 enum SpansActionValue<'a> {
     Current(Unshift<ActionValueIter<'a>>),
@@ -165,13 +165,45 @@ impl<'a> SpansDiff<'a> {
         clock: ClockRange,
         encoding: TextEncoding,
     ) -> Self {
+        Self::new_with_index(op_set, range, clock, encoding, 0)
+    }
+
+    pub(crate) fn new_with_index(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+    ) -> Self {
+        Self::new_with_index_and_marks(op_set, range, clock, encoding, index, Default::default())
+    }
+
+    pub(crate) fn new_with_index_and_marks(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+        marks: RichTextDiff<'a>,
+    ) -> Self {
+        Self::new_with_index_and_marks_inner(op_set, range, clock, encoding, index, marks)
+    }
+
+    fn new_with_index_and_marks_inner(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange,
+        encoding: TextEncoding,
+        index: usize,
+        marks: RichTextDiff<'a>,
+    ) -> Self {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
         let mark_info = op_set.mark_info_iter_range(&range);
 
         let action_value = SpansActionValue::new(op_set, &clock, range.clone());
-        let marks = Default::default();
-        let state = SpanState::empty(encoding);
+        let mut state = SpanState::empty_at(encoding, index);
+        state.push_marks(marks.current());
         let op_set = Some(op_set);
 
         Self {
@@ -479,8 +511,12 @@ impl NextText {
 
 impl SpanState {
     fn empty(encoding: TextEncoding) -> Self {
+        Self::empty_at(encoding, 0)
+    }
+
+    fn empty_at(encoding: TextEncoding, index: usize) -> Self {
         Self {
-            index: 0,
+            index,
             next_text: None,
             next_diff: None,
             marks: MarkDiff::default(),
@@ -660,7 +696,7 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    fn mark_begin_diff(&mut self, diff: Diff, id: OpId, data: MarkData<'a>) -> bool {
+    pub(crate) fn mark_begin_diff(&mut self, diff: Diff, id: OpId, data: MarkData<'a>) -> bool {
         match diff {
             Diff::Add => self.after.mark_begin(id, data),
             Diff::Del => self.before.mark_begin(id, data),
@@ -671,7 +707,7 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    fn mark_end_diff(&mut self, diff: Diff, id: OpId) -> bool {
+    pub(crate) fn mark_end_diff(&mut self, diff: Diff, id: OpId) -> bool {
         match diff {
             Diff::Add => self.after.mark_end(id),
             Diff::Del => self.before.mark_end(id),

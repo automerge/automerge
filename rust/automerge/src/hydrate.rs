@@ -1,5 +1,5 @@
 use crate::op_set2::{Op, OpSet, OpType};
-use crate::types::{Clock, ObjId, ScalarValue, SequenceType};
+use crate::types::{Clock, ObjId, ScalarValue};
 use crate::TextEncoding;
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
@@ -55,13 +55,6 @@ impl Value {
 
     pub fn is_scalar(&self) -> bool {
         matches!(self, Value::Scalar(_))
-    }
-
-    pub(crate) fn width(&self, seq_type: SequenceType, encoding: TextEncoding) -> usize {
-        match seq_type {
-            SequenceType::List => 1,
-            SequenceType::Text => encoding.width(self.as_str()),
-        }
     }
 
     pub fn is_object(&self) -> bool {

@@ -72,10 +72,19 @@ impl Shiftable for ScanVisIter<'_> {
     }
 
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
-        let id = self.id.shift_next(range.clone());
-        let action = self.action.shift_next(range.clone());
-        let succ = self.succ.shift_next(range);
-        let vis = Self::is_visible(id?, action?, succ?, &self.clock);
+        let id = self.id.shift_next(range.clone())?;
+        let action = self.action.shift_next(range.clone())?;
+        let vis = if action == Action::Increment || !self.clock.covers(&id) {
+            // This is the same visibility predicate ScanVisIter has always
+            // applied, but checked before reading successors. If the op itself
+            // is not visible at the clock, successor visibility cannot make it
+            // visible.
+            self.succ.shift_skip_next(range)?;
+            false
+        } else {
+            let succ = self.succ.shift_next(range)?;
+            Self::is_visible_with_succ(succ, &self.clock)
+        };
         if vis {
             Some(0)
         } else {
@@ -187,22 +196,26 @@ impl<'a> ScanVisIter<'a> {
         }
     }
 
-    fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
-        let is_inc = action == Action::Increment;
-        let mut deleted = false;
+    fn is_visible_with_succ(succ: SuccCursors<'_>, clock: &Clock) -> bool {
         for (id, inc) in succ.with_inc() {
             if inc.is_none() && clock.covers(&id) {
-                deleted = true;
+                return false;
             }
         }
-        !(deleted || !clock.covers(&id) || is_inc)
+        true
     }
 
     fn next_visible(&mut self) -> Option<bool> {
         let id = self.id.next()?;
         let action = self.action.next()?;
+        if action == Action::Increment || !self.clock.covers(&id) {
+            // The op is invisible regardless of its successors, so just keep
+            // the successor iterator aligned.
+            self.succ.skip_next()?;
+            return Some(false);
+        }
         let succ = self.succ.next()?;
-        Some(Self::is_visible(id, action, succ, &self.clock))
+        Some(Self::is_visible_with_succ(succ, &self.clock))
     }
 }
 
