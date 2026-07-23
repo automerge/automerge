@@ -218,9 +218,10 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
-    to_result::<Result<Vec<am::Change>, _>>(
-        am::Automerge::load(data).map(|d| d.get_changes(&[]).into_iter().collect()),
-    )
+    to_result::<Result<Vec<am::Change>, _>>(am::Automerge::load(data).map(|d| {
+        d.get_changes(&[])
+            .expect("C documents always have a checked hash graph")
+    }))
 }
 
 /// \memberof AMchange

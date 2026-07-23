@@ -267,6 +267,21 @@ struct ListIter<'a> {
 }
 
 impl Shiftable for ListIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.id.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.id.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.id.set_max(pos);
+        self.inserts.set_max(pos);
+        self.action.set_max(pos);
+        self.value.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let id = self.id.shift_next(range.clone());
         let action = self.action.shift_next(range.clone());
@@ -408,7 +423,7 @@ mod tests {
     fn list_range_conflict() {
         let actor1 = "aaaaaaaa".try_into().unwrap();
         let actor2 = "bbbbbbbb".try_into().unwrap();
-        let mut doc1 = Automerge::new().with_actor(actor1);
+        let mut doc1 = Automerge::new().with_actor(actor1).unwrap();
         let mut tx1 = doc1.transaction();
         let list = tx1.put_object(&ROOT, "list", ObjType::List).unwrap();
         let values = [1, 2, 3, 4, 5]
@@ -418,7 +433,7 @@ mod tests {
         tx1.splice(&list, 0, 0, values.clone()).unwrap();
         tx1.commit();
 
-        let mut doc2 = doc1.fork().with_actor(actor2);
+        let mut doc2 = doc1.fork().with_actor(actor2).unwrap();
 
         let mut tx2 = doc2.transaction();
         tx2.put(&list, 3, 11).unwrap();

@@ -12,6 +12,34 @@ use std::sync::Arc;
 use crate::iter::tools::{BoolColumnSkipper, Shiftable, Skipper};
 
 impl Shiftable for VisIter<'_> {
+    fn get_pos(&self) -> usize {
+        match self {
+            Self::Indexed(index) => index.get_pos(),
+            Self::Scan(scan) => scan.get_pos(),
+        }
+    }
+
+    fn get_max(&self) -> usize {
+        match self {
+            Self::Indexed(index) => index.get_max(),
+            Self::Scan(scan) => scan.get_max(),
+        }
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        match self {
+            Self::Indexed(index) => index.set_max(pos),
+            Self::Scan(scan) => scan.set_max(pos),
+        }
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        match self {
+            Self::Indexed(index) => index.shift(range),
+            Self::Scan(scan) => scan.shift(range),
+        }
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         match self {
             Self::Indexed(index) => index.shift_next(range),
@@ -21,6 +49,28 @@ impl Shiftable for VisIter<'_> {
 }
 
 impl Shiftable for ScanVisIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.id.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.id.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.id.set_max(pos);
+        self.action.set_max(pos);
+        self.succ.set_max(pos);
+    }
+
+    // this iterator yields skip counts, so the nth-walking default
+    // would consume items instead of repositioning — shift the columns
+    fn shift(&mut self, range: Range<usize>) {
+        self.id.shift(range.clone());
+        self.action.shift(range.clone());
+        self.succ.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         let id = self.id.shift_next(range.clone());
         let action = self.action.shift_next(range.clone());
@@ -36,6 +86,22 @@ impl Shiftable for ScanVisIter<'_> {
 }
 
 impl Shiftable for IndexedVisIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.iter.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.iter.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         self.iter.shift_next(range)
     }
@@ -87,7 +153,7 @@ impl<'a> IndexedVisIter<'a> {
     fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
         let iter = op_set.cols.index.visible.iter_range(range.clone());
         Self {
-            iter: BoolColumnSkipper::new(iter, range),
+            iter: BoolColumnSkipper::new(iter),
         }
     }
 }

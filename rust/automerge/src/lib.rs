@@ -260,10 +260,10 @@ macro_rules! __log {
  }
 
 mod autocommit;
-mod automerge;
+pub(crate) mod automerge;
 mod autoserde;
 mod change;
-mod change_graph;
+pub(crate) mod change_graph;
 mod change_queue;
 mod clock;
 mod columnar;
@@ -290,12 +290,14 @@ pub mod transaction;
 mod types;
 mod value;
 
-pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
+pub use crate::automerge::{
+    Automerge, HashGraphRebuild, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
+};
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
-pub use change_graph::Fragment;
+pub use change_graph::{ChangeId, Fragment, HashGraphState, ParseChangeIdError};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
@@ -306,7 +308,9 @@ pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
-pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
+pub use storage::{
+    Bundle, BundleChange, BundleChangeIter, BundleV2, InvalidBundleV2, VerificationMode,
+};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
@@ -327,3 +331,6 @@ fn make_rng() -> rand::rngs::SmallRng {
     log!("SEED: {}", seed);
     rand::rngs::SmallRng::seed_from_u64(seed)
 }
+
+#[doc(hidden)]
+pub use crate::op_set2::op_set::manifold::dump_manifold_stats;

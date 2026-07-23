@@ -10,13 +10,15 @@ use serde::ser::{SerializeMap, SerializeSeq};
 
 pub fn new_doc() -> automerge::AutoCommit {
     let mut d = automerge::AutoCommit::new();
-    d.set_actor(automerge::ActorId::random());
+    d.set_actor(automerge::ActorId::random())
+        .expect("a fresh document accepts any actor");
     d
 }
 
 pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::AutoCommit {
     let mut d = automerge::AutoCommit::new();
-    d.set_actor(actor);
+    d.set_actor(actor)
+        .expect("a fresh document accepts any actor");
     d
 }
 

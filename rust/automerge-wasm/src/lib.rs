@@ -168,13 +168,18 @@ export type ChangeMetadata = {
   hash: Hash;
 };
 
+/** A change identified as "{seq}@{actor}", like object ids and cursors. */
+export type ChangeId = string;
+
 export type FragmentMeta = {
   head: Hash;
   level: number;
   boundary: Heads;
   checkpoints: Heads;
-  members: Heads;
+  members: ChangeId[];
 };
+
+export type HashGraphState = "checked" | "fragmentHashes" | "unchecked";
 
 export type Commit = {
   head: Hash;
@@ -365,6 +370,13 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  /** How much of the change-hash graph to rebuild on load. "full" (the
+   * default) rebuilds and verifies it. "none" skips the rebuild for a
+   * much faster load; hash-based APIs throw until `rebuildHashGraph()`
+   * is called. "fragments" uses the fragment hashes stored in the
+   * document if present (fast, and fragment APIs work immediately),
+   * falling back to a full rebuild if not. */
+  hashGraphRebuild?: "full" | "fragments" | "none";
 };
 
 // if recursive is false do not diff child objects
@@ -451,7 +463,8 @@ impl Automerge {
         let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
-            doc.set_actor(a);
+            doc.set_actor(a)
+                .expect("a fresh document always has a checked hash graph");
         }
         Ok(Automerge {
             doc,
@@ -477,15 +490,16 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
-            automerge.doc.set_actor(actor);
+            let actor =
+                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -512,7 +526,7 @@ impl Automerge {
         if let Some(s) = actor {
             let actor =
                 automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor);
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -1220,6 +1234,8 @@ impl Automerge {
             .map_err(error::Diff::InvalidAfterHeads)?
             .ok_or_else(|| error::Diff::MissingAfterHeads)?;
 
+        let before = before.clone();
+        let after = after.clone();
         let patches = self.doc.diff(&before, &after);
 
         Ok(interop::export_patches(&self.external_types, patches)?)
@@ -1246,6 +1262,8 @@ impl Automerge {
             .map_err(error::Diff::InvalidBeforeHeads)?
             .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
 
+        let before = before.clone();
+        let after = after.clone();
         let patches = self.doc.diff_obj(&obj, &before, &after, recursive)?;
 
         Ok(interop::export_patches(&self.external_types, patches)?)
@@ -1259,7 +1277,7 @@ impl Automerge {
             return Err(error::Isolate::NoHeads);
         };
 
-        self.doc.isolate(&heads);
+        self.doc.isolate(&heads)?;
         Ok(())
     }
 
@@ -1303,9 +1321,10 @@ impl Automerge {
     pub fn save_since(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
-    ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
+    ) -> Result<Uint8Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or(Vec::new());
-        let bytes = self.doc.save_after(&heads);
+        let ids = heads.clone();
+        let bytes = self.doc.save_after(&ids)?;
         Ok(Uint8Array::from(bytes.as_slice()))
     }
 
@@ -1347,8 +1366,9 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
     ) -> Result<Array, error::Get> {
-        let deps: Vec<_> = JS(have_deps).try_into()?;
-        let changes = self.doc.get_changes(&deps);
+        let deps: Vec<am::ChangeHash> = JS(have_deps).try_into()?;
+        let ids = deps.clone();
+        let changes = self.doc.get_changes(&ids)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
@@ -1361,8 +1381,9 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
     ) -> Result<Array, error::Get> {
-        let deps: Vec<_> = JS(have_deps).try_into()?;
-        let changes = self.doc.get_changes_meta(&deps);
+        let deps: Vec<am::ChangeHash> = JS(have_deps).try_into()?;
+        let ids = deps.clone();
+        let changes = self.doc.get_changes_meta(&ids)?;
         let changes: Array = changes.iter().map(JS::from).collect();
         Ok(changes)
     }
@@ -1371,9 +1392,9 @@ impl Automerge {
     pub fn get_change_by_hash(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, interop::error::BadChangeHash> {
+    ) -> Result<JsValue, error::GetChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change = self.doc.get_change_by_hash(&hash);
+        let change = self.doc.get_change_by_hash(&hash)?;
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
         } else {
@@ -1385,9 +1406,9 @@ impl Automerge {
     pub fn get_change_meta_by_hash(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, interop::error::BadChangeHash> {
+    ) -> Result<JsValue, error::GetChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change_meta = self.doc.get_change_meta_by_hash(&hash);
+        let change_meta = self.doc.get_change_meta_by_hash(&hash)?;
         if let Some(c) = change_meta {
             Ok(JS::from(&c).0)
         } else {
@@ -1401,7 +1422,7 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
     ) -> Result<JsValue, error::GetDecodedChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change = self.doc.get_change_by_hash(&hash);
+        let change = self.doc.get_change_by_hash(&hash)?;
         if let Some(c) = change {
             let change: am::ExpandedChange = c.decode();
             let serializer = serde_wasm_bindgen::Serializer::json_compatible();
@@ -1412,13 +1433,13 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getChangesAdded, unchecked_return_type="Change[]")]
-    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
-        let changes = self.doc.get_changes_added(&mut other.doc);
+    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
+        let changes = self.doc.get_changes_added(&mut other.doc)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
-        changes
+        Ok(changes)
     }
 
     #[wasm_bindgen(js_name = getFragmentMetadata, unchecked_return_type = "FragmentMeta[]")]
@@ -1429,7 +1450,7 @@ impl Automerge {
         let levels = JsFragmentLevelRange::try_from(levels)?;
         Ok(self
             .doc
-            .fragments(levels)
+            .fragments(levels)?
             .iter()
             .map(fragment_to_js)
             .collect())
@@ -1439,11 +1460,11 @@ impl Automerge {
     pub fn get_fragment_meta(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] head: JsValue,
-    ) -> Result<JsValue, interop::error::BadChangeHash> {
+    ) -> Result<JsValue, error::GetChangeByHash> {
         let head = JS(head).try_into()?;
         Ok(self
             .doc
-            .get_fragment(head)
+            .get_fragment(head)?
             .map(|f| fragment_to_js(&f))
             .unwrap_or(JsValue::null()))
     }
@@ -1456,7 +1477,7 @@ impl Automerge {
         let fragments = Vec::<am::Fragment>::try_from(JS(fragments))?;
         Ok(self
             .doc
-            .bundle_fragments(fragments)
+            .bundle_fragments(fragments)?
             .iter()
             .map(|bytes| Uint8Array::from(bytes.as_slice()))
             .collect())
@@ -1499,17 +1520,39 @@ impl Automerge {
         AR::from(heads).into()
     }
 
+    /// Build the hash graph on a document that was loaded with
+    /// `hashGraphRebuild: "none"`, re-enabling the hash-based APIs. The
+    /// recomputed head hashes are verified against the heads recorded in
+    /// the document. No-op if the graph is already built.
+    #[wasm_bindgen(js_name = rebuildHashGraph)]
+    pub fn rebuild_hash_graph(&mut self) -> Result<(), error::Merge> {
+        self.doc.rebuild_hash_graph()?;
+        Ok(())
+    }
+
+    /// How much of the change-hash graph is known: "checked",
+    /// "fragmentHashes" (fragments work, other hash APIs throw) or
+    /// "unchecked".
+    #[wasm_bindgen(js_name = hashGraphState, unchecked_return_type = "HashGraphState")]
+    pub fn hash_graph_state(&self) -> String {
+        match self.doc.hash_graph_state() {
+            am::HashGraphState::Checked => "checked".into(),
+            am::HashGraphState::FragmentHashes => "fragmentHashes".into(),
+            am::HashGraphState::Unchecked => "unchecked".into(),
+        }
+    }
+
     #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
     pub fn get_actor_id(&self) -> String {
         self.doc.get_actor().to_string()
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
-    pub fn get_last_local_change(&mut self) -> JsValue {
-        if let Some(change) = self.doc.get_last_local_change() {
-            Uint8Array::from(change.raw_bytes()).into()
+    pub fn get_last_local_change(&mut self) -> Result<JsValue, error::Merge> {
+        if let Some(change) = self.doc.get_last_local_change()? {
+            Ok(Uint8Array::from(change.raw_bytes()).into())
         } else {
-            JsValue::null()
+            Ok(JsValue::null())
         }
     }
 
@@ -1521,7 +1564,8 @@ impl Automerge {
     #[wasm_bindgen(js_name = getMissingDeps, skip_typescript)]
     pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or_default();
-        let deps = self.doc.get_missing_deps(&heads);
+        let ids = heads.clone();
+        let deps = self.doc.get_missing_deps(&ids)?;
         let deps: Array = deps
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(h.0)))
@@ -1545,13 +1589,17 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
-    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
-        if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
+    pub fn generate_sync_message(
+        &mut self,
+        state: &mut SyncState,
+    ) -> Result<JsValue, error::Merge> {
+        let message = self.doc.sync().generate_sync_message(&mut state.0)?;
+        if let Some(message) = message {
             let message = message.encode();
             //am::log!("generate sync message: {:?}", message.as_slice());
-            Uint8Array::from(message.as_slice()).into()
+            Ok(Uint8Array::from(message.as_slice()).into())
         } else {
-            JsValue::null()
+            Ok(JsValue::null())
         }
     }
 
@@ -1765,14 +1813,14 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = topoHistoryTraversal, unchecked_return_type="Hash[]")]
-    pub fn topo_history_traversal(&mut self) -> JsValue {
+    pub fn topo_history_traversal(&mut self) -> Result<JsValue, error::Merge> {
         let hashes = self
             .doc
-            .get_changes(&[])
+            .get_changes(&[])?
             .into_iter()
             .map(|c| c.hash())
             .collect::<Vec<_>>();
-        AR::from(hashes).into()
+        Ok(AR::from(hashes).into())
     }
 
     #[wasm_bindgen(js_name = stats, unchecked_return_type="Stats")]
@@ -1848,18 +1896,31 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
+    let hash_graph = match js_get(&options, "hashGraphRebuild")
+        .ok()
+        .filter(|v| !v.is_undefined() && !v.is_null())
+    {
+        None => am::HashGraphRebuild::Full,
+        Some(v) => match v.as_string().as_deref() {
+            Some("none") => am::HashGraphRebuild::None,
+            Some("fragments") => am::HashGraphRebuild::Fragments,
+            Some("full") => am::HashGraphRebuild::Full,
+            _ => return Err(error::Load::BadHashGraph),
+        },
+    };
     let mut doc = am::AutoCommit::load_with_options(
         &data,
         am::LoadOptions::new()
             .on_partial_load(on_partial_load)
             .verification_mode(verification_mode)
+            .hash_graph(hash_graph)
             .migrate_strings(string_migration)
             .text_encoding(TextEncoding::Utf16CodeUnit),
     )?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-        doc.set_actor(actor);
+        doc.set_actor(actor)?;
     }
     Ok(Automerge {
         doc,
@@ -2051,8 +2112,27 @@ fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
         AR::from(fragment.checkpoints.as_slice()),
     )
     .unwrap();
-    js_set(&obj, "members", AR::from(fragment.members.as_slice())).unwrap();
+    let members: Array = fragment
+        .members
+        .iter()
+        .map(|m| JsValue::from_str(&m.to_string()))
+        .collect();
+    js_set(&obj, "members", members).unwrap();
     obj
+}
+
+fn js_to_change_ids(value: JS) -> Result<Vec<am::ChangeId>, error::BadJSChangeIds> {
+    let arr = value
+        .0
+        .dyn_into::<Array>()
+        .map_err(|_| error::BadJSChangeIds::NotArray)?;
+    arr.iter()
+        .map(|v| {
+            let s = v.as_string().ok_or(error::BadJSChangeIds::NotAString)?;
+            s.parse::<am::ChangeId>()
+                .map_err(|_| error::BadJSChangeIds::BadChangeId(s))
+        })
+        .collect()
 }
 
 struct Commit {
@@ -2170,8 +2250,7 @@ impl TryFrom<JS> for am::Fragment {
         let checkpoints = js_get(&value.0, "checkpoints")?
             .try_into()
             .map_err(error::BadJSFragmentInput::BadCheckpoints)?;
-        let members = js_get(&value.0, "members")?
-            .try_into()
+        let members = js_to_change_ids(js_get(&value.0, "members")?)
             .map_err(error::BadJSFragmentInput::BadMembers)?;
         Ok(Self {
             head,
@@ -2288,6 +2367,8 @@ pub mod error {
     pub enum Fragments {
         #[error(transparent)]
         BadLevelRange(#[from] BadFragmentLevelRange),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
     }
 
     impl From<Fragments> for JsValue {
@@ -2355,7 +2436,7 @@ pub mod error {
         #[error("bad fragment checkpoints: {0}")]
         BadCheckpoints(BadChangeHashes),
         #[error("bad fragment members: {0}")]
-        BadMembers(BadChangeHashes),
+        BadMembers(super::error::BadJSChangeIds),
         #[error("bad fragment bytes: {0}")]
         BadBytes(BadUint8Array),
     }
@@ -2374,6 +2455,8 @@ pub mod error {
         NotArray,
         #[error("bad fragment at index {0}: {1}")]
         BadElem(usize, BadJSFragmentInput),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
     }
 
     impl From<BadJSFragments> for JsValue {
@@ -2708,6 +2791,8 @@ pub mod error {
         Heads(#[from] interop::error::BadChangeHashes),
         #[error("no heads specified")]
         NoHeads,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
     }
 
     impl From<Isolate> for JsValue {
@@ -2774,6 +2859,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error("hashGraphRebuild must be one of \"full\", \"fragments\" or \"none\"")]
+        BadHashGraph,
     }
 
     impl From<Load> for JsValue {
@@ -2918,6 +3005,38 @@ pub mod error {
         BadChangeHash(#[from] super::interop::error::BadChangeHash),
         #[error(transparent)]
         SerdeWasm(#[from] serde_wasm_bindgen::Error),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSChangeIds {
+        #[error("members must be an array of \"seq@actor\" strings")]
+        NotArray,
+        #[error("change id must be a \"seq@actor\" string")]
+        NotAString,
+        #[error("invalid change id: {0}")]
+        BadChangeId(String),
+    }
+
+    impl From<BadJSChangeIds> for JsValue {
+        fn from(e: BadJSChangeIds) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetChangeByHash {
+        #[error(transparent)]
+        BadChangeHash(#[from] super::interop::error::BadChangeHash),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<GetChangeByHash> for JsValue {
+        fn from(e: GetChangeByHash) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
     }
 
     impl From<GetDecodedChangeByHash> for JsValue {

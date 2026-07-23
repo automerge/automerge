@@ -14,15 +14,18 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
-use crate::change_graph::ChangeGraph;
+use crate::change_graph::{ChangeGraph, FragmentDep, FragmentMember};
 use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
+use crate::op_set2::change::fragment::FragmentApply;
 use crate::patches::{Patch, PatchLog};
 use crate::storage::document::ReconstructError;
-use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
+use crate::storage::{
+    self, change, load, Bundle, BundleV2, CompressConfig, Document, VerificationMode,
+};
 use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
     TransactionArgs,
@@ -31,7 +34,8 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
+use crate::{AutomergeError, Change, ChangeId, Cursor, Fragment, HashGraphState, ObjType, Prop};
+use std::borrow::Cow;
 
 pub(crate) mod current_state;
 
@@ -77,6 +81,30 @@ pub enum OnPartialLoad {
     Error,
 }
 
+/// How much of the change hash graph to rebuild when loading a document
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HashGraphRebuild {
+    /// Don't rebuild the hash graph at all.
+    ///
+    /// This is the fastest option: no change is re-serialized and hashed, and
+    /// the head hashes are not verified. The document is left with an
+    /// unchecked hash graph (see [`LoadOptions::hash_graph`]).
+    None,
+    /// Use the fragment hashes stored in the document if they are present,
+    /// falling back to a full rebuild (as in [`HashGraphRebuild::Full`]) if they
+    /// are not.
+    ///
+    /// When the stored hashes are used the load is as fast as
+    /// [`HashGraphRebuild::None`] and the document comes up in the
+    /// [`HashGraphState::FragmentHashes`] state, where fragment generation
+    /// works without a rebuild.
+    Fragments,
+    /// Rebuild the full hash graph from the loaded changes, verifying the
+    /// document's recorded heads. This is the default.
+    #[default]
+    Full,
+}
+
 /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
 #[derive(Debug)]
 pub enum StringMigration {
@@ -93,6 +121,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
+    hash_graph: HashGraphRebuild,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -160,6 +189,29 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    /// How to handle the change hash graph while loading.
+    ///
+    /// [`HashGraphRebuild::None`] makes loading faster (no change is re-serialized
+    /// and hashed, and the head hashes are not verified) at the cost of
+    /// leaving the document with an unchecked hash graph: any operation which
+    /// needs the hash of a pre-load change (exporting changes, syncing,
+    /// isolating at pre-load heads, ...) will return
+    /// [`AutomergeError::UncheckedHashGraph`] until
+    /// [`Automerge::rebuild_hash_graph`] is called.
+    ///
+    /// Reading — current state, or historical state at the load heads — as
+    /// well as making new transactions and saving all work on an unchecked
+    /// document.
+    ///
+    /// [`HashGraphRebuild::Fragments`] loads like [`HashGraphRebuild::None`] when the
+    /// document carries stored fragment hashes (fragment generation works
+    /// immediately), and falls back to a full rebuild when it doesn't.
+    ///
+    /// The default is [`HashGraphRebuild::Full`].
+    pub fn hash_graph(self, hash_graph: HashGraphRebuild) -> Self {
+        Self { hash_graph, ..self }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -170,6 +222,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
+            hash_graph: HashGraphRebuild::Full,
         }
     }
 }
@@ -215,6 +268,21 @@ pub struct Automerge {
     /// The current actor.
     actor: Actor,
 }
+
+/// actor-insert attribution counters (nanos), dumped by
+/// [`crate::dump_manifold_stats`]
+pub(crate) static STAT_ACT_SCAN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_SIDECARS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_INSERT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_GRAPH: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_ACT_TAIL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_PATCH_DIFF: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 impl Automerge {
     /// Create a new document with a random actor id.
@@ -287,18 +355,41 @@ impl Automerge {
     }
 
     /// Set the actor id for this document.
-    pub fn with_actor(mut self, actor: ActorId) -> Self {
-        self.set_actor(actor);
-        self
+    ///
+    /// Returns [`AutomergeError::UncheckedHashGraph`] if the actor has made
+    /// changes to this document, the hash of its latest change is unknown
+    /// (because the hash graph has not been built) and that change is not one
+    /// of the current heads — committing as this actor would require the
+    /// missing hash.
+    pub fn with_actor(mut self, actor: ActorId) -> Result<Self, AutomergeError> {
+        self.set_actor(actor)?;
+        Ok(self)
     }
 
     /// Set the actor id for this document.
-    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+    ///
+    /// See [`Self::with_actor`] for the error contract.
+    pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
         match self.ops.actors.binary_search(&actor) {
-            Ok(idx) => self.actor = Actor::Cached(idx),
+            Ok(idx) => {
+                self.check_actor_tip_hash(idx)?;
+                self.actor = Actor::Cached(idx)
+            }
             Err(_) => self.actor = Actor::Unused(actor),
         }
-        self
+        Ok(self)
+    }
+
+    /// Committing as an actor with prior history needs the hash of the
+    /// actor's latest change (to record the sequential dependency). Refuse
+    /// actors for which that hash is missing.
+    fn check_actor_tip_hash(&self, actor_idx: usize) -> Result<(), AutomergeError> {
+        let seq = self.change_graph.seq_for_actor(actor_idx);
+        if seq == 0 {
+            return Ok(());
+        }
+        self.change_graph.get_hash_for_actor_seq(actor_idx, seq)?;
+        Ok(())
     }
 
     /// Get the current actor id of this document.
@@ -386,7 +477,7 @@ impl Automerge {
         &mut self,
         mut patch_log: PatchLog,
         heads: &[ChangeHash],
-    ) -> Result<Transaction<'_>, crate::PatchLogMismatch> {
+    ) -> Result<Transaction<'_>, AutomergeError> {
         let args = self.transaction_args(Some(heads));
         patch_log.begin_transaction(self, &args)?;
         Ok(Transaction::new(self, args, patch_log))
@@ -410,8 +501,8 @@ impl Automerge {
         self,
         patch_log: Option<PatchLog>,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<OwnedTransaction, crate::PatchLogMismatch> {
-        OwnedTransaction::new(self, patch_log, heads)
+    ) -> Result<OwnedTransaction, AutomergeError> {
+        Ok(OwnedTransaction::new(self, patch_log, heads)?)
     }
 
     pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
@@ -433,7 +524,11 @@ impl Automerge {
                 deps = self.get_heads();
                 scope = None;
                 if seq > 1 {
-                    let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
+                    // set_actor refuses actors whose latest change hash is
+                    // missing, so the hash is always available here
+                    let last_hash = self
+                        .get_hash(actor_index, seq - 1)
+                        .expect("hash of the current actor's last change is always known");
                     if !deps.contains(&last_hash) {
                         deps.push(last_hash);
                     }
@@ -584,13 +679,18 @@ impl Automerge {
     /// This will create a new actor ID for the forked document
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
-        f.set_actor(ActorId::random());
+        f.set_actor(ActorId::random())
+            .expect("a random actor is always acceptable");
         f
     }
 
     /// Fork this document at the given heads
     ///
     /// This will create a new actor ID for the forked document
+    ///
+    /// Unlike the `*_at` query methods (which silently skip unknown hashes),
+    /// this returns [`AutomergeError::InvalidHash`] if any of `heads` is not
+    /// a change in this document.
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         let mut seen = HashSet::new();
         let mut heads = heads
@@ -600,10 +700,11 @@ impl Automerge {
             .collect::<Vec<_>>();
         let mut hashes = vec![];
         while let Some(hash) = heads.pop() {
-            if !self.change_graph.has_change(&hash) {
+            if !self.change_graph.has_change(&hash)? {
                 return Err(AutomergeError::InvalidHash(hash));
             }
             for dep in self.change_graph.deps_for_hash(&hash) {
+                let dep = dep?;
                 if seen.insert(dep) {
                     heads.push(dep);
                 }
@@ -611,7 +712,8 @@ impl Automerge {
             hashes.push(hash);
         }
         let mut f = Self::new_with_encoding(self.text_encoding());
-        f.set_actor(ActorId::random());
+        f.set_actor(ActorId::random())
+            .expect("a random actor is always acceptable");
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
         Ok(f)
@@ -808,7 +910,11 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                match d.reconstruct(options.verification_mode, options.text_encoding) {
+                match d.reconstruct(
+                    options.verification_mode,
+                    options.text_encoding,
+                    options.hash_graph,
+                ) {
                     Ok(doc) => doc,
                     Err(ReconstructError::InvalidMarkOrderDoc {
                         doc,
@@ -926,13 +1032,14 @@ impl Automerge {
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check),
             )?;
-            doc = doc.with_actor(self.actor_id().clone());
+            doc = doc.with_actor(self.actor_id().clone())?;
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
             *self = doc;
             return Ok(self.ops.len());
         }
+        let parse_t = std::time::Instant::now();
         let changes = match load::load_changes(
             storage::parse::Input::new(data),
             self.text_encoding(),
@@ -945,6 +1052,13 @@ impl Automerge {
                 loaded
             }
         };
+        if std::env::var("BATCH_TIMING").is_ok() {
+            eprintln!(
+                "BATCH {:<22} {:>9.3}ms",
+                "parse+load_changes",
+                parse_t.elapsed().as_secs_f64() * 1e3
+            );
+        }
         let start = self.ops.len();
         self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;
@@ -1006,8 +1120,8 @@ impl Automerge {
         other: &mut Self,
         patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        // TODO: Make this fallible and figure out how to do this transactionally
-        let changes = self.get_changes_added(other);
+        // TODO: figure out how to do this transactionally
+        let changes = self.get_changes_added(other)?;
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_log_patches(changes, patch_log)?;
         Ok(self.get_heads())
@@ -1074,13 +1188,13 @@ impl Automerge {
     /// changes. This is useful if you know you have only made a small change since the last
     /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
     /// single character in a text object).
-    pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
-        let changes = self.get_changes(heads);
+    pub fn save_after(&self, heads: &[ChangeHash]) -> Result<Vec<u8>, AutomergeError> {
+        let changes = self.get_changes(heads)?;
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
         }
-        bytes
+        Ok(bytes)
     }
 
     /// Filter the changes down to those that are not transitive dependencies of the heads.
@@ -1093,27 +1207,26 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let heads = heads
             .iter()
-            .filter(|hash| self.has_change(hash))
-            .copied()
-            .collect::<Vec<_>>();
+            .map(|hash| Ok(self.change_graph.has_change(hash)?.then_some(*hash)))
+            .filter_map(|r| r.transpose())
+            .collect::<Result<Vec<_>, AutomergeError>>()?;
 
-        self.change_graph.remove_ancestors(changes, &heads);
+        self.change_graph.remove_ancestors(changes, &heads)?;
 
         Ok(())
     }
 
     /// Get the last change this actor made to the document.
-    pub fn get_last_local_change(&self) -> Option<Change> {
-        let actor = self.get_actor_index()?;
+    pub fn get_last_local_change(&self) -> Result<Option<Change>, AutomergeError> {
+        let Some(actor) = self.get_actor_index() else {
+            return Ok(None);
+        };
         let seq = self.change_graph.seq_for_actor(actor);
-        let hash = self.change_graph.get_hash_for_actor_seq(actor, seq).ok()?;
+        if seq == 0 {
+            return Ok(None);
+        }
+        let hash = self.change_graph.get_hash_for_actor_seq(actor, seq)?;
         self.get_change_by_hash(&hash)
-    }
-
-    pub(crate) fn clock_range(&self, before: &[ChangeHash], after: &[ChangeHash]) -> ClockRange {
-        let before = self.change_graph.clock_at(before);
-        let after = self.change_graph.clock_at(after);
-        ClockRange::Diff(before, after)
     }
 
     /// Clock for reading the document as at `heads`.
@@ -1121,11 +1234,22 @@ impl Automerge {
     /// Returns `None` — an unscoped read of the present document — when
     /// `heads` is exactly the current heads, so `*_at(doc.get_heads())`
     /// takes the same indexed fast paths as the un-suffixed methods.
+    /// Otherwise resolves `heads` silently skipping unknown hashes: the
+    /// pre-unchecked-load semantics of every `*_at` read (hashes known on
+    /// an unchecked graph — the load heads and any change added since —
+    /// resolve normally).
+    ///
+    /// The shortcut is sound here because pending transaction ops enter
+    /// the op set before the graph's heads advance, and an `Automerge`
+    /// cannot be read through `&self` while a transaction holds it
+    /// mutably. Anything reading *around* an in-flight transaction
+    /// (`AutoCommit`, the transaction types) — or needing a concrete
+    /// clock — must use the [`ChangeGraph`] resolvers instead.
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Option<Clock> {
         if self.change_graph.heads_are_current(heads) {
             None
         } else {
-            Some(self.change_graph.clock_at(heads))
+            Some(self.change_graph.clock_for_heads_lossy(heads))
         }
     }
 
@@ -1140,8 +1264,10 @@ impl Automerge {
     }
 
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
+        // callers resolve heads before isolating, so the clock is always
+        // computable
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.change_graph.clock_at(heads);
+        let mut clock = self.change_graph.clock_for_heads_lossy(heads);
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
@@ -1151,7 +1277,7 @@ impl Automerge {
             }
             actor_index = self.get_isolated_actor_index(i);
             // need to recompute the clock b/c the actor indexes may have changed
-            clock = self.change_graph.clock_at(heads);
+            clock = self.change_graph.clock_for_heads_lossy(heads);
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
@@ -1165,6 +1291,17 @@ impl Automerge {
 
     fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
+    }
+
+    pub(crate) fn update_history_batch(&mut self, changes: &[Change]) {
+        self.change_graph
+            .add_changes(
+                changes
+                    .iter()
+                    .map(|c| (c, self.ops.actors.binary_search(c.actor_id()).unwrap())),
+            )
+            .unwrap();
+        self.deps = self.change_graph.heads().collect();
     }
 
     pub(crate) fn update_history(&mut self, change: &Change) {
@@ -1192,6 +1329,61 @@ impl Automerge {
             Ok(idx) => idx,
             Err(idx) => self.insert_actor(idx, actor.clone()),
         }
+    }
+
+    /// Insert every actor in `actors` the document lacks, remapping
+    /// the op columns ONCE for the whole batch instead of once per
+    /// actor. Pure appends (every new actor sorting after the existing
+    /// ones) skip the remap entirely.
+    pub(crate) fn put_actor_refs(&mut self, actors: &[ActorId]) {
+        let mut new: Vec<ActorId> = actors
+            .iter()
+            .filter(|a| self.ops.actors.binary_search(a).is_err())
+            .cloned()
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        new.sort_unstable();
+        new.dedup();
+        let mut t = std::time::Instant::now();
+        let lap = |slot: &std::sync::atomic::AtomicU64, t: &mut std::time::Instant| {
+            slot.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            *t = std::time::Instant::now();
+        };
+        // old index -> final index: old actors shift right past the
+        // new ones sorting before them
+        let mut map: Vec<u32> = Vec::with_capacity(self.ops.actors.len());
+        let mut j = 0;
+        for a in &self.ops.actors {
+            while j < new.len() && new[j] < *a {
+                j += 1;
+            }
+            map.push((map.len() + j) as u32);
+        }
+        let identity = map.iter().enumerate().all(|(i, &m)| m as usize == i);
+        lap(&STAT_ACT_SCAN, &mut t);
+        if !identity {
+            self.ops.remap_actor_indexes(&map);
+        }
+        lap(&STAT_ACT_SIDECARS, &mut t);
+        // the cheap per-actor state; the op columns defer their
+        // renumbering through the actor map
+        let mut amap = self.ops.actor_map();
+        for a in new {
+            let idx = self.ops.actors.binary_search(&a).unwrap_err();
+            amap = amap.insert(idx, self.ops.actors.len());
+            self.ops.actors.insert(idx, a);
+            lap(&STAT_ACT_INSERT, &mut t);
+            self.change_graph.insert_actor(idx);
+            lap(&STAT_ACT_GRAPH, &mut t);
+            self.actor.rewrite_with_new_actor(idx);
+        }
+        self.ops.set_actor_map(amap);
+        lap(&STAT_ACT_TAIL, &mut t);
     }
 
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
@@ -1295,14 +1487,34 @@ impl Automerge {
         */
     }
 
+    /// Fill `log` with patches for everything that changed between
+    /// `before` and the document's current heads. The apply pipeline
+    /// produces no patches itself — an active log is served by diffing
+    /// the document across the apply.
+    pub(crate) fn log_diff(&self, before: &[ChangeHash], log: &mut PatchLog) {
+        let after = self.get_heads();
+        let b = self.change_graph.clock_for_heads_lossy(before);
+        let a = self.change_graph.clock_for_heads_lossy(&after);
+        DiffIter::log(
+            self,
+            ObjMeta::root(),
+            ClockRange::Diff(b, a.clone()),
+            log,
+            true,
+        );
+        log.heads_clock = Some(a);
+    }
+
     /// Create patches representing the change in the current state of the document between the
     /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
-        let clock = self.clock_range(before_heads, after_heads);
+        let before = self.change_graph.clock_for_heads_lossy(before_heads);
+        let after = self.change_graph.clock_for_heads_lossy(after_heads);
+        let clock = ClockRange::Diff(before, after.clone());
         let mut patch_log = PatchLog::active();
         DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
-        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.heads_clock = Some(after);
         patch_log.make_patches(self)
     }
 
@@ -1330,11 +1542,19 @@ impl Automerge {
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_range(before_heads, after_heads);
+        let before = self.change_graph.clock_for_heads_lossy(before_heads);
+        let after = self.change_graph.clock_for_heads_lossy(after_heads);
+        let clock = ClockRange::Diff(before, after.clone());
         let mut patch_log = PatchLog::active();
         DiffIter::log(self, obj, clock, &mut patch_log, recursive);
-        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.heads_clock = Some(after);
         Ok(patch_log.make_patches(self))
+    }
+
+    /// How much of the change-hash graph is known — see
+    /// [`HashGraphState`].
+    pub fn hash_graph_state(&self) -> HashGraphState {
+        self.change_graph.state()
     }
 
     /// EXPERIMENTAL: Return the fragments covering the document history at
@@ -1342,70 +1562,522 @@ impl Automerge {
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
+    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
+    /// loaded with [`LoadOptions::hash_graph`] — fragments need the
+    /// whole hash graph.
     #[doc(hidden)]
-    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
-        // these produce fragments newest to oldest
+    pub fn fragments<R: RangeBounds<usize>>(
+        &self,
+        levels: R,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        if self.hash_graph_state() == HashGraphState::Unchecked {
+            return Err(AutomergeError::UncheckedHashGraph);
+        }
         let mut fragments: Vec<_> = self
             .change_graph
-            .fragments(&self.get_heads(), levels)
+            .fragments(&self.get_heads(), levels, &self.ops.actors)
             .collect();
-        // but we want to return them oldest to newest
-        fragments.reverse();
-        fragments
+        // return them oldest to newest, in causal order — the order
+        // apply_fragment needs them in
+        self.change_graph
+            .sort_fragments_for_apply(&mut fragments, &self.ops.actors);
+        Ok(fragments)
     }
 
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
+    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
+    /// loaded with [`LoadOptions::hash_graph`].
     #[doc(hidden)]
-    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        self.change_graph.get_fragment(head)
+    pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
+        if self.hash_graph_state() == HashGraphState::Unchecked {
+            return Err(AutomergeError::UncheckedHashGraph);
+        }
+        Ok(self.change_graph.get_fragment(head, &self.ops.actors))
     }
 
-    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
-    /// (level-0 fragments with one member) or as a bundle.
+    /// EXPERIMENTAL: Encode each fragment as a bundle's bytes.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
+    /// loaded with [`LoadOptions::hash_graph`].
+    #[doc(hidden)]
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
+        &self,
+        fragments: I,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        if self.hash_graph_state() == HashGraphState::Unchecked {
+            return Err(AutomergeError::UncheckedHashGraph);
+        }
+        Ok(fragments
+            .into_iter()
+            .filter_map(|f| {
+                // members are (actor, seq) ids; bundles are built from
+                // nodes so only boundary hashes are required
+                let mut nodes = f
+                    .members
+                    .iter()
+                    .map(|id| self.change_graph.node_for_change_id(id, &self.ops.actors))
+                    .collect::<Option<Vec<_>>>()?;
+                nodes.sort_unstable();
+                let bundle =
+                    crate::storage::Bundle::for_nodes(&self.ops, &self.change_graph, nodes).ok()?;
+                Some(bundle.bytes().to_vec())
+            })
+            .collect())
+    }
+
+    /// EXPERIMENTAL: Encode a fragment as a [`BundleV2`]: a v1 bundle
+    /// plus the metadata a fragments-mode document needs to apply it —
+    /// the head, checkpoint and boundary hashes paired with their
+    /// change ids, and the `(actor, seq)` id of every external dep.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+    pub fn bundle_fragment_v2(&self, f: &Fragment) -> Result<BundleV2, AutomergeError> {
+        let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
+        let mut nodes = f
+            .members
+            .iter()
+            .map(|id| self.change_graph.node_for_change_id(id, &self.ops.actors))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(unknown)?;
+        nodes.sort_unstable();
+        // fragments can share members (a loose commit covered by more
+        // than one fragment clock) — a member must appear once
+        nodes.dedup();
+        let bundle = storage::Bundle::for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+
+        // member indexes are positions in the bundle's (topologically
+        // ordered) change list, which is node order
+        let member_index = |h: &ChangeHash| -> Option<usize> {
+            let n = self.change_graph.node_by_hash(h)?;
+            nodes.binary_search(&n).ok()
+        };
+        let head_index = member_index(&f.head).ok_or_else(unknown)?;
+        let checkpoints = f
+            .checkpoints
+            .iter()
+            .filter(|h| **h != f.head)
+            .map(|h| member_index(h).map(|i| (i, *h)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(unknown)?;
+        let change_id = |h: &ChangeHash| -> Option<ChangeId> {
+            let n = self.change_graph.node_by_hash(h)?;
+            Some(self.change_graph.change_id(n, &self.ops.actors))
+        };
+        let boundary = f
+            .boundary
+            .iter()
+            .map(|h| change_id(h).map(|id| (*h, id.actor, id.seq)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(unknown)?;
+        let dep_ids = bundle
+            .deps()
+            .iter()
+            .map(|h| change_id(h).map(|id| (id.actor, id.seq)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(unknown)?;
+
+        Ok(BundleV2::new(
+            f.head,
+            head_index,
+            checkpoints,
+            boundary,
+            dep_ids,
+            bundle,
+        ))
+    }
+
+    /// EXPERIMENTAL: [`Self::bundle_fragment_v2`] for several fragments,
+    /// returning each one's encoded bytes.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn bundle_fragments_v2<I: IntoIterator<Item = Fragment>>(
+        &self,
+        fragments: I,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
         fragments
             .into_iter()
-            .filter_map(|f| {
-                if f.head.fragment_level() == 0 && f.members.len() == 1 {
-                    // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
-                    Some(self.get_change_by_hash(&f.head)?.bytes().to_vec())
-                } else {
-                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
-                }
-            })
+            .map(|f| Ok(self.bundle_fragment_v2(&f)?.bytes()))
             .collect()
     }
 
+    /// EXPERIMENTAL: Apply a fragment's bundle directly, without
+    /// converting it into [`Change`]s.
+    ///
+    /// This is the fast path for ingesting the output of
+    /// [`Self::fragments`]/[`Self::bundle_fragments_v2`]: a bundle's ops
+    /// are already in document order, so they merge into the op set in a
+    /// single pass — no per-change reconstruction and no hashing. The
+    /// bundle's metadata prefix supplies the hashes worth knowing (head,
+    /// checkpoints, boundary, deps), each paired with its change, and the
+    /// document records them as it applies — so its heads stay exact and
+    /// later fragments' deps keep resolving.
+    ///
+    /// Unlike [`Self::load_incremental`] nothing is queued — the bundle
+    /// must be immediately applicable, and errors with
+    /// [`AutomergeError::MissingDeps`] otherwise (a dependency is not in
+    /// this document, or a member change's seq leaves a gap in its
+    /// actor's change sequence). Member changes the document already has
+    /// are skipped, along with their ops — applying a fully present
+    /// fragment is a no-op.
+    ///
+    /// The interior member changes are never reconstructed, so their
+    /// hashes stay unknown: a checked hash graph downgrades to
+    /// [`HashGraphState::FragmentHashes`]. APIs needing interior hashes
+    /// error until [`Self::rebuild_hash_graph`] — which also verifies
+    /// every hash this call took on trust.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn apply_fragment(&mut self, bundle: &BundleV2) -> Result<(), AutomergeError> {
+        self.apply_fragment_log_patches(bundle, &mut PatchLog::inactive())
+    }
+
+    /// Like [`Self::apply_fragment`] but logs the changes to the current
+    /// state of the document into `log`.
+    #[doc(hidden)]
+    pub fn apply_fragment_log_patches(
+        &mut self,
+        v2: &BundleV2,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        let bundle = v2.bundle();
+
+        let timing = std::env::var("FRAG_TIMING").is_ok();
+        let mut t = std::time::Instant::now();
+        let lap = |label: &str, t: &mut std::time::Instant| {
+            if timing {
+                eprintln!(
+                    "TIMING {:<28} {:>10.3}ms",
+                    label,
+                    t.elapsed().as_secs_f64() * 1e3
+                );
+                *t = std::time::Instant::now();
+            }
+        };
+
+        // member changes are in topological order
+        let members: Vec<storage::BundleChange<'_>> = bundle.iter_changes().collect();
+        let num_members = members.len();
+        lap("collect members", &mut t);
+
+        // BundleV2 parsing catches all shape errors — a bundle that
+        // exists is well formed, so indexes below need no bounds checks
+
+        // insert any new actors, then map bundle actor indexes to the
+        // (possibly shifted) document indexes
+        self.put_actor_refs(bundle.actors());
+        let actor_map: Vec<usize> = bundle
+            .actors()
+            .iter()
+            .map(|a| self.ops.lookup_actor(a).expect("actor was just inserted"))
+            .collect();
+        lap("insert+map actors", &mut t);
+
+        // everything the document already has, as clocks: a member (or
+        // one of its ops) is already here exactly when the clock covers
+        // it, since changes arrive in per-actor order
+        let clock = self.change_graph.current_clock();
+        let seq_clock = self.change_graph.current_seq_clock();
+
+        // Split the members into ones we already have (skipped — applying
+        // them twice would be an error) and new ones, which must extend
+        // their actor's change sequence without gaps.
+        let mut keep = vec![false; num_members];
+        // a kept member's position among the kept (its graph-member index)
+        let mut kept_index = vec![usize::MAX; num_members];
+        let mut num_kept = 0;
+        let mut next_seq: Vec<Option<u64>> = vec![None; bundle.actors().len()];
+        for (i, m) in members.iter().enumerate() {
+            let have = seq_clock
+                .get_for_actor(&actor_map[m.actor])
+                .map(|s| s.get() as u64)
+                .unwrap_or(0);
+            let next = next_seq[m.actor].unwrap_or(have + 1);
+            match m.seq.cmp(&next) {
+                Ordering::Less => continue, // already have this change
+                Ordering::Greater => {
+                    if std::env::var("FRAG_DEBUG").is_ok() {
+                        eprintln!(
+                            "member {} of {}: actor {} seq {} but expected {}",
+                            i, num_members, m.actor, m.seq, next
+                        );
+                    }
+                    return Err(AutomergeError::MissingDeps);
+                }
+                Ordering::Equal => {}
+            }
+            next_seq[m.actor] = Some(next + 1);
+            keep[i] = true;
+            kept_index[i] = num_kept;
+            num_kept += 1;
+        }
+
+        lap("clocks + classify members", &mut t);
+
+        if num_kept == 0 {
+            // everything is already in the document
+            return Ok(());
+        }
+
+        // load the ops before touching the graph, so a malformed bundle
+        // fails without altering history. Ops the clock covers belong to
+        // skipped members and are dropped.
+        let overlap = num_kept < num_members;
+        let ops = match FragmentApply::new(bundle, actor_map.clone(), &clock, overlap, &self.ops) {
+            Ok(f) => f,
+            Err(e) => {
+                self.remove_unused_actors(false);
+                return Err(e);
+            }
+        };
+        lap("FragmentApply::new (load ops)", &mut t);
+
+        // record the boundary pairings — every boundary head is an
+        // ancestor of the members, so it must already be a node here
+        for (hash, actor, seq) in &v2.boundary {
+            let node = self
+                .ops
+                .lookup_actor(actor)
+                .and_then(|a| self.change_graph.node_for_actor_seq(a, *seq))
+                .ok_or(AutomergeError::MissingDeps)?;
+            self.change_graph.record_node_hash(node, *hash);
+        }
+
+        // A kept member's deps resolve to other kept members (by their
+        // kept position) or to existing nodes: skipped members, and
+        // external deps via their (actor, seq) ids from the metadata
+        // prefix — whose hash pairings we record for later fragments.
+        // Skipped members' deps are not consulted at all.
+        let member_ids: Vec<(usize, u64)> = members.iter().map(|m| (m.actor, m.seq)).collect();
+        let mut graph_members = Vec::with_capacity(num_kept);
+        for (i, m) in members.into_iter().enumerate() {
+            if !keep[i] {
+                continue;
+            }
+            let mut deps = Vec::with_capacity(m.deps.len());
+            for d in &m.deps {
+                let d = *d as usize;
+                if d < num_members {
+                    if keep[d] {
+                        deps.push(FragmentDep::Member(kept_index[d]));
+                    } else {
+                        let (dep_actor, dep_seq) = member_ids[d];
+                        let node = self
+                            .change_graph
+                            .node_for_actor_seq(actor_map[dep_actor], dep_seq);
+                        deps.push(FragmentDep::Node(node.ok_or(AutomergeError::MissingDeps)?));
+                    }
+                } else {
+                    let (dep_actor, dep_seq) = v2
+                        .dep_ids
+                        .get(d - num_members)
+                        .ok_or(AutomergeError::InvalidFragment("bad dep index"))?;
+                    let node = self
+                        .ops
+                        .lookup_actor(dep_actor)
+                        .and_then(|a| self.change_graph.node_for_actor_seq(a, *dep_seq))
+                        .ok_or(AutomergeError::MissingDeps)?;
+                    // learn the dep's hash pairing — an anchor for
+                    // later fragments that reference it by hash
+                    self.change_graph
+                        .record_node_hash(node, bundle.deps()[d - num_members]);
+                    deps.push(FragmentDep::Node(node));
+                }
+            }
+            graph_members.push(FragmentMember {
+                actor: actor_map[m.actor],
+                seq: m.seq,
+                max_op: m.max_op,
+                num_ops: 1 + m.max_op - m.start_op,
+                timestamp: m.timestamp,
+                message: m.message.map(|s| s.into_owned()),
+                extra: Cow::Owned(m.extra.into_owned()),
+                deps,
+            });
+        }
+        // the covered heads move on to the fragment head. The covered
+        // parents are the resolved dep nodes — with skipped members in
+        // play a covered head can be an internal dep, so bundle.deps()
+        // alone is not enough
+        for m in &graph_members {
+            for d in &m.deps {
+                if let FragmentDep::Node(n) = d {
+                    if let Some(h) = self.change_graph.hash_for_node(*n) {
+                        self.deps.remove(&h);
+                    }
+                }
+            }
+        }
+
+        lap("resolve member deps", &mut t);
+        self.change_graph.add_fragment_members(graph_members);
+        lap("add_fragment_members", &mut t);
+
+        // record the head and checkpoint hashes on their nodes: the head
+        // so it can serve as a head of the document and an anchor for
+        // the next fragment, the checkpoints so nested fragments stay
+        // exportable
+        let (head_actor, head_seq) = member_ids[v2.head_index];
+        let head_node = self
+            .change_graph
+            .node_for_actor_seq(actor_map[head_actor], head_seq)
+            .ok_or(AutomergeError::InvalidFragment(
+                "fragment head is not a member of the bundle",
+            ))?;
+        self.change_graph.record_fragment_head(head_node, v2.head);
+        for (i, hash) in &v2.checkpoints {
+            let (actor, seq) = member_ids[*i];
+            if let Some(node) = self.change_graph.node_for_actor_seq(actor_map[actor], seq) {
+                self.change_graph.record_node_hash(node, *hash);
+            }
+        }
+
+        self.deps.insert(v2.head);
+
+        self.remove_unused_actors(true);
+        lap("record hashes + misc", &mut t);
+
+        let r = ops.apply(self, log);
+        lap("ops.apply total", &mut t);
+        r
+    }
+
+    /// Test-support deep validation of the document.
+    ///
+    /// 1. Op columns must be in document order.
+    /// 2. The incrementally-maintained indexes (top/visible/text/inc/
+    ///    mark/obj-info) must match a from-scratch rebuild by the load
+    ///    path's index builder.
+    /// 3. The op columns must reproduce the document's history: every
+    ///    change is re-encoded from the columns and its hash
+    ///    recomputed — replaying those changes into a fresh document
+    ///    can only reach the same heads if every column value is
+    ///    exactly right, because any miswritten value changes a
+    ///    reconstructed change's bytes and breaks the hash chain.
+    #[doc(hidden)]
+    pub fn validate_document(&self) {
+        assert!(self.ops.validate_op_order(), "op columns out of order");
+        self.ops.validate_indexes();
+
+        let mut redoc = Automerge::new();
+        redoc
+            .apply_changes(self.get_changes(&[]).expect("change reconstruction"))
+            .expect("replaying reconstructed changes");
+        assert_eq!(
+            self.get_heads(),
+            redoc.get_heads(),
+            "hash round-trip diverges"
+        );
+    }
+
+    /// Whether this document's hash graph has been built and validated.
+    ///
+    /// This is `true` for every document except those loaded with
+    /// [`LoadOptions::hash_graph`] which have not yet had
+    /// [`Self::rebuild_hash_graph`] called on them.
+    pub fn hash_graph_is_checked(&self) -> bool {
+        self.change_graph.is_checked()
+    }
+
+    /// Build and validate the hash graph of a document loaded with
+    /// [`LoadOptions::hash_graph`].
+    ///
+    /// This performs the work the load skipped: every change is
+    /// reconstructed and hashed and the heads are verified against the
+    /// hashes recorded when the document was saved. Afterwards all
+    /// hash-based APIs work again.
+    ///
+    /// This is a no-op on a document whose hash graph is already built.
+    pub fn rebuild_hash_graph(&mut self) -> Result<(), AutomergeError> {
+        if self.change_graph.is_checked() {
+            return Ok(());
+        }
+
+        let inflate = |e: Box<dyn std::error::Error + Send + Sync + 'static>| {
+            AutomergeError::Load(load::Error::InflateDocument(e))
+        };
+
+        // reconstruct and hash every change directly from our own op set
+        // and change graph; changes are emitted in node (topological) order
+        // so each change's deps are hashed before it is
+        let mut collector = ChangeCollector::try_new(self.change_graph.iter(), &self.ops.actors)
+            .map_err(|e| inflate(Box::new(e)))?;
+        let mut iter = self.ops.iter();
+        while let Some(op) = iter.try_next().map_err(|e| inflate(Box::new(e)))? {
+            let op_id = op.id;
+            let op_succ = op.succ();
+            collector.process_op(op);
+            for id in op_succ {
+                collector.process_succ(op_id, id);
+            }
+        }
+        let collected = collector
+            .collect(&self.ops)
+            .map_err(|e| inflate(Box::new(e)))?;
+
+        // this also verifies the hashes we already knew: the claimed head
+        // pairing from load time and everything added since
+        self.change_graph
+            .install_checked_hashes(collected.changes.iter().map(|c| c.hash()).collect())
+            .map_err(AutomergeError::InvalidHash)?;
+
+        // the fragment index is only maintained on checked graphs — now
+        // that every hash is known, regenerate it
+        self.change_graph.cache_fragments();
+        Ok(())
+    }
+
     /// Get the heads of this document.
+    ///
+    /// The heads are the hashes of the changes which have no successors in
+    /// this document — collectively they identify the current state. The
+    /// heads are always known, even on a document loaded with
+    /// [`crate::LoadOptions::hash_graph`].
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
-        ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<Change>, AutomergeError> {
+        // resolve the exclusion set to a seq clock (silently skipping
+        // unknown hashes, like the old hash traversal did) so that the load
+        // heads work on unchecked graphs; building the emitted changes is
+        // still fallible if their deps are unknown
+        let clock = self.change_graph.seq_clock_for_heads_lossy(have_deps);
+        ChangeCollector::exclude_seq_clock(&self.ops, &self.change_graph, clock)
     }
 
-    pub fn get_changes_meta(&self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
+    pub fn get_changes_meta(
+        &self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<ChangeMetadata<'_>>, AutomergeError> {
         ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
     }
 
-    pub fn get_change_meta_by_hash(&self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
-        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash])
-            .ok()?
-            .pop()
+    pub fn get_change_meta_by_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> Result<Option<ChangeMetadata<'_>>, AutomergeError> {
+        match ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash]) {
+            Ok(mut metas) => Ok(metas.pop()),
+            Err(AutomergeError::UncheckedHashGraph) => Err(AutomergeError::UncheckedHashGraph),
+            Err(_) => Ok(None),
+        }
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added(&self, other: &Self) -> Vec<Change> {
+    pub fn get_changes_added(&self, other: &Self) -> Result<Vec<Change>, AutomergeError> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
         let mut stack: Vec<_> = other.get_heads();
@@ -1413,31 +2085,42 @@ impl Automerge {
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
         while let Some(hash) = stack.pop() {
-            if !seen_hashes.contains(&hash) && !self.has_change(&hash) {
+            if !seen_hashes.contains(&hash) && !self.has_change(&hash)? {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
-                stack.extend(other.change_graph.deps_for_hash(&hash));
+                for dep in other.change_graph.deps_for_hash(&hash) {
+                    stack.push(dep?);
+                }
             }
         }
         // Return those changes in the reverse of the order in which the depth-first search
         // found them. This is not necessarily a topological sort, but should usually be close.
         added_change_hashes.reverse();
 
-        // safe to unwrap here b/c added_changes all came from the change_graph
-        other.get_changes_by_hashes(added_change_hashes).unwrap()
+        other.get_changes_by_hashes(added_change_hashes)
     }
 
     /// Get the hash of the change that contains the given `opid`.
     ///
-    /// Returns [`None`] if the `opid`:
+    /// Returns `Ok(None)` if the `opid`:
     /// - is the root object id
     /// - does not exist in this document
-    pub fn hash_for_opid(&self, exid: &ExId) -> Option<ChangeHash> {
+    ///
+    /// Returns [`AutomergeError::UncheckedHashGraph`] if the change is in
+    /// this document but the hash graph has not been built.
+    pub fn hash_for_opid(&self, exid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
         match exid {
-            ExId::Root => None,
+            ExId::Root => Ok(None),
             ExId::Id(..) => {
-                let opid = self.exid_to_opid(exid).ok()?;
-                self.change_graph.opid_to_hash(opid)
+                let Ok(opid) = self.exid_to_opid(exid) else {
+                    return Ok(None);
+                };
+                let Some((actor_idx, seq)) = self.change_graph.opid_to_actor_seq(opid) else {
+                    return Ok(None);
+                };
+                Ok(Some(
+                    self.change_graph.get_hash_for_actor_seq(actor_idx, seq)?,
+                ))
             }
         }
     }
@@ -1875,8 +2558,18 @@ impl Automerge {
         other.shared_heads == self.get_heads()
     }
 
-    pub(crate) fn has_change(&self, head: &ChangeHash) -> bool {
-        self.change_graph.has_change(head)
+    pub(crate) fn has_change(&self, head: &ChangeHash) -> Result<bool, AutomergeError> {
+        Ok(self.change_graph.has_change(head)?)
+    }
+
+    /// Hash-based version of [`ReadDoc::get_missing_deps`], for callers (like the
+    /// sync protocol) which hold hashes for changes this document may not have.
+    pub(crate) fn get_missing_deps_hashes(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        let queued = self.queue.iter().map(|change| change.hash());
+        self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 
     /// The first hash on each path back from `start` which is neither applied nor queued,
@@ -1884,7 +2577,7 @@ impl Automerge {
     pub(crate) fn missing_deps_from(
         &self,
         start: impl Iterator<Item = ChangeHash>,
-    ) -> Vec<ChangeHash> {
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         let queued_changes = self
             .queue
             .iter()
@@ -1896,7 +2589,7 @@ impl Automerge {
         let mut stack = start.collect::<Vec<_>>();
 
         while let Some(hash) = stack.pop() {
-            if self.has_change(&hash) || !seen.insert(hash) {
+            if self.has_change(&hash)? || !seen.insert(hash) {
                 continue;
             }
 
@@ -1909,7 +2602,7 @@ impl Automerge {
 
         let mut missing = missing.into_iter().collect::<Vec<_>>();
         missing.sort();
-        missing
+        Ok(missing)
     }
 
     pub fn text_encoding(&self) -> TextEncoding {
@@ -2133,15 +2826,16 @@ impl ReadDoc for Automerge {
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let queued = self.queue.iter().map(|change| change.hash());
-        self.missing_deps_from(queued.chain(heads.iter().copied()))
+    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.get_missing_deps_hashes(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {
-        ChangeCollector::for_hashes(&self.ops, &self.change_graph, [*hash])
-            .ok()?
-            .pop()
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
+        match ChangeCollector::for_hashes(&self.ops, &self.change_graph, [*hash]) {
+            Ok(mut changes) => Ok(changes.pop()),
+            Err(AutomergeError::UncheckedHashGraph) => Err(AutomergeError::UncheckedHashGraph),
+            Err(_) => Ok(None),
+        }
     }
 
     fn stats(&self) -> crate::read::Stats {

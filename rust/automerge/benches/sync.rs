@@ -32,12 +32,20 @@ fn increasing_put(n: u64) -> Automerge {
 
 // keep syncing until doc1 no longer generates a sync message for doc2.
 fn sync(doc1: &mut DocWithSync, doc2: &mut DocWithSync) {
-    while let Some(message1) = doc1.doc.generate_sync_message(&mut doc1.peer_state) {
+    while let Some(message1) = doc1
+        .doc
+        .generate_sync_message(&mut doc1.peer_state)
+        .unwrap()
+    {
         doc2.doc
             .receive_sync_message(&mut doc2.peer_state, message1)
             .unwrap();
 
-        if let Some(message2) = doc2.doc.generate_sync_message(&mut doc2.peer_state) {
+        if let Some(message2) = doc2
+            .doc
+            .generate_sync_message(&mut doc2.peer_state)
+            .unwrap()
+        {
             doc1.doc
                 .receive_sync_message(&mut doc1.peer_state, message2)
                 .unwrap()

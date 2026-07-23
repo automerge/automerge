@@ -31,7 +31,11 @@ describe("the fragments API", () => {
     for (const fragment of allFragments) {
       assert.equal(fragment.head.length, 64)
       assert.equal(fragment.level, leadingZeroBytes(fragment.head))
-      assert.ok(fragment.members.includes(fragment.head))
+      const headMeta = Automerge.getBackend(doc).getChangeMetaByHash(
+        fragment.head,
+      )
+      assert.ok(headMeta != null)
+      assert.ok(fragment.members.includes(`${headMeta.seq}@${headMeta.actor}`))
       assert.deepEqual(Automerge.getFragmentMeta(doc, fragment.head), fragment)
     }
 

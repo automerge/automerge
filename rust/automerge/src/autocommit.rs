@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
-use crate::clock::Clock;
+use crate::clock::{Clock, ClockRange};
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
@@ -151,13 +151,21 @@ impl AutoCommit {
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_with_options(data, options)?;
+        // on an unchecked document only changes made after load can be
+        // exported, so start the incremental-save cursor at the load heads
+        // (the loaded bytes are, by definition, already saved)
+        let save_cursor = if doc.hash_graph_is_checked() {
+            Vec::new()
+        } else {
+            doc.get_heads()
+        };
         Ok(Self {
             doc,
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
-            save_cursor: Vec::new(),
+            save_cursor,
             isolation: None,
         })
     }
@@ -272,13 +280,15 @@ impl AutoCommit {
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
-            patch_log.heads = None;
+            patch_log.heads_clock = None;
             self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
-            let clock = self.doc.clock_range(range.before(), range.after());
+            let before_clock = self.doc.change_graph.clock_for_heads_lossy(range.before());
+            let after_clock = self.doc.change_graph.clock_for_heads_lossy(range.after());
+            let clock = ClockRange::Diff(before_clock, after_clock.clone());
             let mut patch_log = PatchLog::active();
-            patch_log.heads = Some(range.after().to_vec());
+            patch_log.heads_clock = Some(after_clock);
             DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         };
@@ -368,31 +378,54 @@ impl AutoCommit {
         &self.doc
     }
 
-    pub fn with_actor(mut self, actor: ActorId) -> Self {
+    /// Set the actor id for this document.
+    ///
+    /// See [`Automerge::with_actor`] for the error contract.
+    pub fn with_actor(mut self, actor: ActorId) -> Result<Self, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor);
-        self
+        self.doc.set_actor(actor)?;
+        Ok(self)
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+    /// Set the actor id for this document.
+    ///
+    /// See [`Automerge::with_actor`] for the error contract.
+    pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor);
-        self
+        self.doc.set_actor(actor)?;
+        Ok(self)
     }
 
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
     }
 
-    pub fn isolate(&mut self, heads: &[ChangeHash]) {
+    pub fn isolate(&mut self, heads: &[ChangeHash]) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.patch_to(heads);
-        self.isolation = Some(heads.to_vec());
+        // hashes not in this document are silently skipped, matching the
+        // behaviour of the `*_at` read methods; on an unchecked graph a
+        // missing hash may merely be unknowable, so refuse rather than
+        // guess
+        let heads: Vec<ChangeHash> = heads
+            .iter()
+            .map(|h| {
+                let known = self.doc.change_graph.has_change(h)?;
+                Ok((*h, known))
+            })
+            .filter_map(|r: Result<_, AutomergeError>| match r {
+                Ok((h, true)) => Some(Ok(h)),
+                Ok((_, false)) => None,
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<Result<_, _>>()?;
+        self.patch_to(&heads);
+        self.isolation = Some(heads);
+        Ok(())
     }
 
     pub fn integrate(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_to(self.doc.get_heads().as_slice());
+        self.patch_to(&self.doc.get_heads());
         self.isolation = None;
     }
 
@@ -543,7 +576,10 @@ impl AutoCommit {
     /// text object).
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
-        let bytes = self.doc.save_after(&self.save_cursor);
+        let bytes = self
+            .doc
+            .save_after(&self.save_cursor)
+            .expect("changes since the save cursor are always exportable");
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
@@ -555,44 +591,56 @@ impl AutoCommit {
     }
 
     /// Save everything which is not a (transitive) dependency of `heads`
-    pub fn save_after(&mut self, heads: &[ChangeHash]) -> Vec<u8> {
+    pub fn save_after(&mut self, heads: &[ChangeHash]) -> Result<Vec<u8>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.save_after(heads)
     }
 
-    pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+    pub fn get_missing_deps(
+        &mut self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_missing_deps(heads)
     }
 
     /// Get the last change made by this documents actor ID
-    pub fn get_last_local_change(&mut self) -> Option<Change> {
+    pub fn get_last_local_change(&mut self) -> Result<Option<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<Change> {
+    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Result<Vec<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }
 
-    pub fn get_changes_meta(&mut self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
+    pub fn get_changes_meta(
+        &mut self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<ChangeMetadata<'_>>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes_meta(have_deps)
     }
 
-    pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<Change> {
+    pub fn get_change_by_hash(
+        &mut self,
+        hash: &ChangeHash,
+    ) -> Result<Option<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_change_by_hash(hash)
     }
 
-    pub fn get_change_meta_by_hash(&mut self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
+    pub fn get_change_meta_by_hash(
+        &mut self,
+        hash: &ChangeHash,
+    ) -> Result<Option<ChangeMetadata<'_>>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_change_meta_by_hash(hash)
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added(&mut self, other: &mut Self) -> Vec<Change> {
+    pub fn get_changes_added(&mut self, other: &mut Self) -> Result<Vec<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
@@ -614,13 +662,21 @@ impl AutoCommit {
         self.doc.dump()
     }
 
+    /// See [`Automerge::hash_graph_state`]
+    pub fn hash_graph_state(&self) -> crate::HashGraphState {
+        self.doc.hash_graph_state()
+    }
+
     /// EXPERIMENTAL: Return the fragments covering the document history at
     /// the given levels, ordered oldest to newest.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+    pub fn fragments<R: RangeBounds<usize>>(
+        &self,
+        levels: R,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
         self.doc.fragments(levels)
     }
 
@@ -629,7 +685,7 @@ impl AutoCommit {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+    pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
         self.doc.get_fragment(head)
     }
 
@@ -639,8 +695,22 @@ impl AutoCommit {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
+        &self,
+        fragments: I,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
         self.doc.bundle_fragments(fragments)
+    }
+
+    /// See [`Automerge::hash_graph_is_checked`]
+    pub fn hash_graph_is_checked(&self) -> bool {
+        self.doc.hash_graph_is_checked()
+    }
+
+    /// See [`Automerge::rebuild_hash_graph`]
+    pub fn rebuild_hash_graph(&mut self) -> Result<(), AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.rebuild_hash_graph()
     }
 
     /// Get the current heads of the document.
@@ -711,7 +781,7 @@ impl AutoCommit {
     ///
     /// Because this structure is an "autocommit" there may actually be outstanding operations to
     /// submit. If this is the case this function will create two changes, one with the outstanding
-    /// operations and a new one with no operations. The returned [`ChangeHash`] will always be the
+    /// operations and a new one with no operations. The returned hash will always be the
     /// hash of the empty change.
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_closed();
@@ -735,13 +805,11 @@ impl AutoCommit {
         SyncWrapper { inner: self }
     }
 
-    /// Get the hash of the change that contains the given `opid`.
+    /// See [`Automerge::hash_for_opid`]
     ///
-    /// Returns [`None`] if the `opid`:
-    /// - Is the root object id
-    /// - Does not exist in this document
-    /// - Is for an operation in a transaction
-    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+    /// Note this also returns `Ok(None)` for operations in the current
+    /// uncommitted transaction.
+    pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
         self.doc.hash_for_opid(opid)
     }
 
@@ -754,7 +822,7 @@ impl AutoCommit {
             return if self.transaction.is_none() {
                 self.doc.clock_at(h)
             } else {
-                Some(self.doc.change_graph.clock_at(h))
+                Some(self.doc.change_graph.clock_for_heads_lossy(h))
             };
         }
         match (&self.isolation, &self.transaction) {
@@ -768,11 +836,21 @@ impl AutoCommit {
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
-        // we may be isolated so we dont use self.doc.get_heads()
-        let before = self.get_heads();
+        // we may be isolated so we dont use the document's heads directly
+        self.ensure_transaction_closed();
+        let before = if let Some(i) = &self.isolation {
+            i.clone()
+        } else {
+            self.doc.get_heads()
+        };
         if before.as_slice() != after {
             self.patch_log.finish_current_view(&self.doc, &before);
-            let clock = self.doc.clock_range(&before, after);
+            // both sides are hashes of changes in this document (current
+            // heads or a previously resolved isolation) so the clocks are
+            // always computable
+            let before = self.doc.change_graph.clock_for_heads_lossy(&before);
+            let after = self.doc.change_graph.clock_for_heads_lossy(after);
+            let clock = ClockRange::Diff(before, after);
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
         }
     }
@@ -1003,11 +1081,11 @@ impl ReadDoc for AutoCommit {
             .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
         self.doc.get_change_by_hash(hash)
     }
 
@@ -1258,7 +1336,10 @@ struct SyncWrapper<'a> {
 }
 
 impl SyncDoc for SyncWrapper<'_> {
-    fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
+    fn generate_sync_message(
+        &self,
+        sync_state: &mut sync::State,
+    ) -> Result<Option<sync::Message>, AutomergeError> {
         self.inner.doc.generate_sync_message(sync_state)
     }
 
@@ -1300,17 +1381,17 @@ impl SyncDoc for SyncWrapper<'_> {
 #[derive(Debug, Clone, PartialEq)]
 struct OpRange {
     before_len: usize,
-    hashes: Vec<ChangeHash>,
+    ids: Vec<ChangeHash>,
 }
 
 impl OpRange {
     fn new(before: &[ChangeHash], after: &[ChangeHash]) -> Self {
-        let mut hashes = Vec::with_capacity(before.len() + after.len());
-        hashes.extend(before);
-        hashes.extend(after);
+        let mut ids = Vec::with_capacity(before.len() + after.len());
+        ids.extend_from_slice(before);
+        ids.extend_from_slice(after);
         let range = Self {
             before_len: before.len(),
-            hashes,
+            ids,
         };
         assert_eq!(before, range.before());
         assert_eq!(after, range.after());
@@ -1318,11 +1399,11 @@ impl OpRange {
     }
 
     fn before(&self) -> &[ChangeHash] {
-        &self.hashes[0..self.before_len]
+        &self.ids[0..self.before_len]
     }
 
     fn after(&self) -> &[ChangeHash] {
-        &self.hashes[self.before_len..]
+        &self.ids[self.before_len..]
     }
 }
 

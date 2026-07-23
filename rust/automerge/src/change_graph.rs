@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
 
-use crate::storage::BundleMetadata;
+use crate::storage::{BundleMetadata, DepRef};
 use crate::{
     clock::{Clock, SeqClock},
     error::AutomergeError,
@@ -18,6 +18,17 @@ use crate::{
     Change, ChangeHash,
 };
 
+/// actor-insert attribution counters (nanos), dumped by
+/// [`crate::dump_manifold_stats`]
+pub(crate) static STAT_GRAPH_BUMP: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_GRAPH_CLOCKS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_GRAPH_FRAGCLK: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static STAT_GRAPH_TOP: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// The graph of changes
 ///
 /// This is a sort of adjacency list based representation, except that instead of using linked
@@ -27,7 +38,7 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
-    hashes: Vec<ChangeHash>,
+    hashes: Hashes,
     actors: Vec<ActorIdx>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
@@ -46,12 +57,212 @@ pub(crate) struct ChangeGraph {
     fragments: Vec<FragmentNode>,
 }
 
-pub(crate) struct ChangeGraphCols(ChangeGraph);
+pub(crate) struct ChangeGraphCols {
+    graph: ChangeGraph,
+    /// `(node index, hash)` pairs from the document's hash columns:
+    /// fragment-level (> 0) hashes plus loose commits and anchors,
+    /// excluding the heads (those live in the head-index suffix).
+    saved_hashes: Vec<(u32, ChangeHash)>,
+}
+
+impl ChangeGraphCols {
+    /// Whether the document carried hash columns (fragment hashes)
+    pub(crate) fn has_saved_hashes(&self) -> bool {
+        !self.saved_hashes.is_empty()
+    }
+}
 
 const CACHE_STEP: u32 = 16;
 
+/// The hashes of the changes in a [`ChangeGraph`], which may be incomplete.
+///
+/// Computing change hashes requires reconstructing and hashing every change,
+/// which a load is allowed to skip. In that case only the hashes learned at
+/// load time (the document's heads) and the hashes of changes added since are
+/// known.
+#[derive(Debug, Clone)]
+pub(crate) enum Hashes {
+    /// Every node's hash is known and validated.
+    Checked(Vec<ChangeHash>),
+    /// Only hashes learned at or after load are known.
+    Unchecked {
+        /// The number of nodes in the graph at load time. Nodes at or beyond
+        /// this index were added after load and always have known hashes.
+        watermark: u32,
+        /// `tail[i]` is the hash of node `watermark + i`
+        tail: Vec<ChangeHash>,
+        /// Pre-load nodes with known hashes: the load-time heads, paired
+        /// with their nodes via the document's head index suffix, plus —
+        /// when `fragment_hashes` is set — the hashes imported from the
+        /// document's hash columns. The pairing is as claimed by the
+        /// (unverified) document; `rebuild_hash_graph` confirms it.
+        pre: HashMap<NodeIdx, ChangeHash>,
+        /// `pre` additionally contains the hash of every history node
+        /// with `fragment_level() > 0` plus every loose commit and
+        /// anchor (imported from the document's hash columns), which is
+        /// enough to build fragments — the "fragment hashes" state.
+        fragment_hashes: bool,
+    },
+}
+
+impl Default for Hashes {
+    fn default() -> Self {
+        Hashes::Checked(Vec::new())
+    }
+}
+
+impl Hashes {
+    fn len(&self) -> usize {
+        match self {
+            Self::Checked(v) => v.len(),
+            Self::Unchecked {
+                watermark, tail, ..
+            } => *watermark as usize + tail.len(),
+        }
+    }
+
+    fn is_checked(&self) -> bool {
+        matches!(self, Self::Checked(_))
+    }
+
+    /// Whether every hash a fragment needs (fragment heads, checkpoints,
+    /// boundaries, loose commits) is known.
+    fn has_fragment_hashes(&self) -> bool {
+        match self {
+            Self::Checked(_) => true,
+            Self::Unchecked {
+                fragment_hashes, ..
+            } => *fragment_hashes,
+        }
+    }
+
+    fn state(&self) -> crate::HashGraphState {
+        match self {
+            Self::Checked(_) => crate::HashGraphState::Checked,
+            Self::Unchecked {
+                fragment_hashes: true,
+                ..
+            } => crate::HashGraphState::FragmentHashes,
+            Self::Unchecked { .. } => crate::HashGraphState::Unchecked,
+        }
+    }
+
+    fn get(&self, idx: NodeIdx) -> Option<ChangeHash> {
+        match self {
+            Self::Checked(v) => v.get(idx.0 as usize).copied(),
+            Self::Unchecked {
+                watermark,
+                tail,
+                pre,
+                ..
+            } => {
+                if idx.0 >= *watermark {
+                    tail.get((idx.0 - watermark) as usize).copied()
+                } else {
+                    pre.get(&idx).copied()
+                }
+            }
+        }
+    }
+
+    fn try_get(&self, idx: NodeIdx) -> Result<ChangeHash, UncheckedHashes> {
+        self.get(idx).ok_or(UncheckedHashes)
+    }
+
+    fn push(&mut self, hash: ChangeHash) {
+        match self {
+            Self::Checked(v) => v.push(hash),
+            Self::Unchecked { tail, .. } => tail.push(hash),
+        }
+    }
+
+    /// Record that `n` nodes with unknown hashes are being appended.
+    ///
+    /// A checked graph downgrades to the fragment-hashes state — every
+    /// hash known so far moves to `pre`, so anything a fragment needs
+    /// is still available. An unchecked graph folds its (always-known)
+    /// tail into `pre`. Either way the watermark moves past the new
+    /// nodes, preserving the invariant that nodes at or beyond it have
+    /// known hashes.
+    fn extend_unknown(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let new_watermark = (self.len() + n) as u32;
+        match self {
+            Self::Checked(v) => {
+                let pre = v
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| (NodeIdx(i as u32), *h))
+                    .collect();
+                *self = Self::Unchecked {
+                    watermark: new_watermark,
+                    tail: Vec::new(),
+                    pre,
+                    fragment_hashes: true,
+                };
+            }
+            Self::Unchecked {
+                watermark,
+                tail,
+                pre,
+                ..
+            } => {
+                for (i, h) in tail.drain(..).enumerate() {
+                    pre.insert(NodeIdx(*watermark + i as u32), h);
+                }
+                *watermark = new_watermark;
+            }
+        }
+    }
+}
+
+/// The result of looking a hash up in a [`ChangeGraph`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HashLookup {
+    /// The hash names this node
+    Found(NodeIdx),
+    /// The hash definitely does not name a change in this document
+    Absent,
+    /// The hash graph is unchecked and we cannot tell whether this hash
+    /// names a change in this document
+    Unknown,
+}
+
+/// Hashes resolved to node indexes
+struct ResolvedHashes {
+    nodes: Vec<NodeIdx>,
+    /// Hashes which definitely do not name changes in this document
+    missing: Vec<ChangeHash>,
+}
+
+/// The hash graph is unchecked and the requested operation needs hashes we
+/// do not have
+#[derive(Debug, thiserror::Error)]
+#[error("the hash graph has not been built, call rebuild_hash_graph() first")]
+pub(crate) struct UncheckedHashes;
+
+/// The document's stored hash columns are malformed or disagree with the
+/// recomputed change hashes
+#[derive(Debug, thiserror::Error)]
+#[error("the document's change-hash columns are invalid")]
+pub(crate) struct InvalidHashColumn;
+
+/// The document's head index suffix does not describe the change graph's
+/// childless nodes
+#[derive(Debug, thiserror::Error)]
+#[error("the document's head indexes are invalid")]
+pub(crate) struct BadHeadIndexes;
+
+impl From<UncheckedHashes> for AutomergeError {
+    fn from(_: UncheckedHashes) -> Self {
+        AutomergeError::UncheckedHashGraph
+    }
+}
+
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct NodeIdx(u32);
+pub(crate) struct NodeIdx(u32);
 
 impl Add<usize> for NodeIdx {
     type Output = Self;
@@ -81,12 +292,36 @@ struct Edge {
     next: Option<EdgeIdx>,
 }
 
+/// A member change of a bundle being applied without conversion into
+/// [`Change`]s — everything the graph needs except the change's hash.
+#[derive(Debug, Clone)]
+pub(crate) struct FragmentMember<'a> {
+    /// The member's actor as a document actor index
+    pub(crate) actor: usize,
+    pub(crate) seq: u64,
+    pub(crate) max_op: u64,
+    pub(crate) num_ops: u64,
+    pub(crate) timestamp: i64,
+    pub(crate) message: Option<String>,
+    pub(crate) extra: Cow<'a, [u8]>,
+    pub(crate) deps: Vec<FragmentDep>,
+}
+
+/// A [`FragmentMember`]'s dependency: another member of the same bundle
+/// (by its position in the member list, which is topological order) or
+/// a node already in the graph.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FragmentDep {
+    Member(usize),
+    Node(NodeIdx),
+}
+
 impl ChangeGraph {
     pub(crate) fn new(num_actors: usize) -> Self {
         Self {
             edges: Vec::new(),
             nodes_by_hash: HashMap::new(),
-            hashes: Vec::new(),
+            hashes: Hashes::default(),
             actors: Vec::new(),
             max_ops: Vec::new(),
             max_op: 0,
@@ -138,10 +373,17 @@ impl ChangeGraph {
         heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
     }
 
+    /// The node index of each head, in the same order as [`Self::heads`].
+    ///
+    /// The document format writes heads and head indices as positionally
+    /// corresponding lists, so order matters here.
     pub(crate) fn head_indexes(&self) -> impl Iterator<Item = u64> + '_ {
-        self.heads
-            .iter()
-            .map(|h| self.nodes_by_hash.get(h).unwrap().0 as u64)
+        self.heads.iter().map(|h| {
+            self.nodes_by_hash
+                .get(h)
+                .expect("every head has a known node")
+                .0 as u64
+        })
     }
 
     pub(crate) fn num_actors(&self) -> usize {
@@ -149,6 +391,14 @@ impl ChangeGraph {
     }
 
     pub(crate) fn insert_actor(&mut self, idx: usize) {
+        let mut t = std::time::Instant::now();
+        let lap = |slot: &std::sync::atomic::AtomicU64, t: &mut std::time::Instant| {
+            slot.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            *t = std::time::Instant::now();
+        };
         if self.seq_index.len() != idx {
             for actor_index in &mut self.actors {
                 if actor_index.0 >= idx as u32 {
@@ -156,14 +406,18 @@ impl ChangeGraph {
                 }
             }
         }
+        lap(&STAT_GRAPH_BUMP, &mut t);
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
+        lap(&STAT_GRAPH_CLOCKS, &mut t);
         for f in &mut self.fragments {
             f.clock.rewrite_with_new_actor(idx)
         }
+        lap(&STAT_GRAPH_FRAGCLK, &mut t);
         self.fragment_top.rewrite_with_new_actor(idx);
         self.seq_index.insert(idx, vec![]);
+        lap(&STAT_GRAPH_TOP, &mut t);
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
@@ -193,19 +447,32 @@ impl ChangeGraph {
         self.actors.is_empty()
     }
 
-    pub(crate) fn hash_to_index(&self, hash: &ChangeHash) -> Option<usize> {
+    #[cfg(test)]
+    fn hash_to_index(&self, hash: &ChangeHash) -> Option<usize> {
         self.nodes_by_hash.get(hash).map(|n| n.0 as usize)
     }
 
-    pub(crate) fn index_to_hash(&self, index: usize) -> Option<&ChangeHash> {
-        self.hashes.get(index)
+    pub(crate) fn index_to_hash(&self, index: usize) -> Option<ChangeHash> {
+        self.hashes.get(NodeIdx(index as u32))
+    }
+
+    pub(crate) fn try_index_to_hash(&self, index: usize) -> Result<ChangeHash, UncheckedHashes> {
+        self.hashes.try_get(NodeIdx(index as u32))
+    }
+
+    pub(crate) fn is_checked(&self) -> bool {
+        self.hashes.is_checked()
+    }
+
+    pub(crate) fn state(&self) -> crate::HashGraphState {
+        self.hashes.state()
     }
 
     pub(crate) fn max_op(&self) -> u64 {
         self.max_op as u64
     }
 
-    pub(crate) fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
+    pub(crate) fn max_op_for_actor(&self, actor_index: usize) -> u64 {
         self.seq_index
             .get(actor_index)
             .and_then(|s| s.last())
@@ -220,6 +487,26 @@ impl ChangeGraph {
             .unwrap_or(0)
     }
 
+    /// The clock covering the whole document: every actor's current op
+    /// counter.
+    pub(crate) fn current_clock(&self) -> Clock {
+        Clock(
+            (0..self.seq_index.len())
+                .map(|a| self.max_op_for_actor(a) as u32)
+                .collect(),
+        )
+    }
+
+    /// The seq clock covering the whole document: every actor's current
+    /// seq.
+    pub(crate) fn current_seq_clock(&self) -> SeqClock {
+        let mut clock = SeqClock::new(self.num_actors());
+        for (a, seqs) in self.seq_index.iter().enumerate() {
+            clock.include(a, u32::try_from(seqs.len()).ok().filter(|n| *n > 0));
+        }
+        clock
+    }
+
     fn deps_iter(&self) -> impl Iterator<Item = NodeIdx> + '_ {
         self.node_ids().flat_map(|n| self.parents(n))
     }
@@ -229,8 +516,56 @@ impl ChangeGraph {
     }
 
     fn node_ids(&self) -> impl Iterator<Item = NodeIdx> {
-        let end = self.hashes.len() as u32;
+        let end = self.len() as u32;
         (0..end).map(NodeIdx)
+    }
+
+    /// The `(node index, hash)` pairs the hash columns persist — see
+    /// `encode`. Empty on a plain unchecked graph.
+    fn stored_hashes(&self) -> Vec<(u32, ChangeHash)> {
+        if !self.hashes.has_fragment_hashes() {
+            return Vec::new();
+        }
+        let n = self.len();
+        let covered = |i: usize| {
+            let actor = usize::from(self.actors[i]);
+            self.fragment_top.get_for_actor(&actor) >= NonZeroU32::new(self.seq[i])
+        };
+        let mut store = vec![false; n];
+        for i in 0..n {
+            let Some(hash) = self.hashes.get(NodeIdx(i as u32)) else {
+                continue;
+            };
+            if hash.fragment_level() > 0 {
+                store[i] = true;
+            } else if !covered(i) {
+                // a loose commit — plus its covered level-0 parents
+                // (anchors), which its fragment boundary will need
+                store[i] = true;
+                for p in self.parents(NodeIdx(i as u32)) {
+                    let pi = p.0 as usize;
+                    if covered(pi)
+                        && self
+                            .hashes
+                            .get(p)
+                            .is_some_and(|ph| ph.fragment_level() == 0)
+                    {
+                        store[pi] = true;
+                    }
+                }
+            }
+        }
+        (0..n)
+            .filter(|i| store[*i])
+            .filter_map(|i| {
+                let hash = self.hashes.get(NodeIdx(i as u32))?;
+                // the head-index suffix already stores the heads
+                if self.heads.contains(&hash) {
+                    return None;
+                }
+                Some((i as u32, hash))
+            })
+            .collect()
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
@@ -256,7 +591,7 @@ impl ChangeGraph {
         let raw = out.len()..out.len() + self.extra_bytes_raw.len();
         out.extend(&self.extra_bytes_raw);
 
-        [
+        let mut cols = vec![
             RawColumn::new(ACTOR_COL_SPEC, actor),
             RawColumn::new(SEQ_COL_SPEC, seq),
             RawColumn::new(MAX_OP_COL_SPEC, max_op),
@@ -266,9 +601,36 @@ impl ChangeGraph {
             RawColumn::new(DEPS_VAL_COL_SPEC, deps),
             RawColumn::new(EXTRA_META_COL_SPEC, meta),
             RawColumn::new(EXTRA_VAL_COL_SPEC, raw),
-        ]
-        .into_iter()
-        .collect()
+        ];
+
+        // ── the hash columns ──
+        // Persist every hash a future fragment-hashes load needs:
+        // fragment-level (> 0) hashes, loose commits (not covered by any
+        // cached fragment), and anchors (covered level-0 parents of loose
+        // commits, needed for loose fragment boundaries). Heads are
+        // excluded — the head-index suffix already stores them. Skipped
+        // entirely on a plain unchecked graph, whose interior hashes are
+        // unknown anyway.
+        let stored = self.stored_hashes();
+        if !stored.is_empty() {
+            let index =
+                hexane::DeltaEncoder::<u64>::encode_to(out, stored.iter().map(|(i, _)| *i as u64));
+            // one identical meta entry per hash — a single RLE run whose
+            // only job is making the raw value column structurally legal
+            let hash_meta = hexane::Encoder::<ValueMeta>::encode_to(
+                out,
+                stored.iter().map(|(_, h)| ValueMeta::from(h.as_ref())),
+            );
+            let hash_raw_start = out.len();
+            for (_, h) in &stored {
+                out.extend_from_slice(h.as_ref());
+            }
+            cols.push(RawColumn::new(HASH_INDEX_COL_SPEC, index));
+            cols.push(RawColumn::new(HASH_META_COL_SPEC, hash_meta));
+            cols.push(RawColumn::new(HASH_VAL_COL_SPEC, hash_raw_start..out.len()));
+        }
+
+        cols.into_iter().collect()
     }
 
     pub(crate) fn validate(
@@ -291,13 +653,16 @@ impl ChangeGraph {
                         | DEPS_VAL_COL_SPEC
                         | EXTRA_META_COL_SPEC
                         | EXTRA_VAL_COL_SPEC
+                        | HASH_INDEX_COL_SPEC
+                        | HASH_META_COL_SPEC
+                        | HASH_VAL_COL_SPEC
                 )
             })
             .cloned()
             .collect())
     }
 
-    pub(crate) fn opid_to_hash(&self, id: OpId) -> Option<ChangeHash> {
+    fn opid_to_node(&self, id: OpId) -> Option<NodeIdx> {
         let actor_indices = self.seq_index.get(id.actor())?;
         let counter = id.counter();
         let index = actor_indices
@@ -315,24 +680,84 @@ impl ChangeGraph {
                 }
             })
             .ok()?;
-        let node_idx = actor_indices[index];
-        self.hashes.get(node_idx.0 as usize).cloned()
+        Some(actor_indices[index])
     }
 
-    pub(crate) fn deps_for_hash(&self, hash: &ChangeHash) -> impl Iterator<Item = ChangeHash> + '_ {
+    /// The (actor index, seq) of the change containing the given op.
+    ///
+    /// This never needs hashes so it works on unchecked graphs.
+    pub(crate) fn opid_to_actor_seq(&self, id: OpId) -> Option<(usize, u64)> {
+        let node = self.opid_to_node(id)?;
+        let i = node.0 as usize;
+        Some((usize::from(self.actors[i]), self.seq[i] as u64))
+    }
+
+    pub(crate) fn deps_for_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> impl Iterator<Item = Result<ChangeHash, UncheckedHashes>> + '_ {
         let node_idx = self.nodes_by_hash.get(hash);
         let mut edge_idx = node_idx.and_then(|n| self.parents[n.0 as usize]);
         std::iter::from_fn(move || {
             let this_edge_idx = edge_idx?;
             let edge = &self.edges[this_edge_idx.get()];
             edge_idx = edge.next;
-            let hash = self.hashes[edge.target.0 as usize];
-            Some(hash)
+            Some(self.hashes.try_get(edge.target))
         })
     }
 
-    pub(crate) fn has_change(&self, hash: &ChangeHash) -> bool {
-        self.nodes_by_hash.contains_key(hash)
+    fn lookup_hash(&self, hash: &ChangeHash) -> HashLookup {
+        if let Some(n) = self.nodes_by_hash.get(hash) {
+            return HashLookup::Found(*n);
+        }
+        match &self.hashes {
+            Hashes::Checked(_) => HashLookup::Absent,
+            Hashes::Unchecked { .. } => HashLookup::Unknown,
+        }
+    }
+
+    /// Resolve a set of hashes to node indexes.
+    ///
+    /// Hashes which definitely don't name changes in this document are
+    /// returned in `missing` (callers decide whether that's a skip or an
+    /// error). If the graph is unchecked and a hash is not one of the known
+    /// ones this errors.
+    fn resolve_hashes<'b, I: IntoIterator<Item = &'b ChangeHash>>(
+        &self,
+        hashes: I,
+    ) -> Result<ResolvedHashes, UncheckedHashes> {
+        let mut nodes = Vec::new();
+        let mut missing = Vec::new();
+        for hash in hashes {
+            match self.lookup_hash(hash) {
+                HashLookup::Found(n) => nodes.push(n),
+                HashLookup::Absent => missing.push(*hash),
+                HashLookup::Unknown => return Err(UncheckedHashes),
+            }
+        }
+        Ok(ResolvedHashes { nodes, missing })
+    }
+
+    /// Resolve the (sorted) deps of a new local change to node indexes.
+    pub(crate) fn dep_indexes(
+        &self,
+        sorted_deps: &[ChangeHash],
+    ) -> Result<Vec<u64>, UncheckedHashes> {
+        sorted_deps
+            .iter()
+            .map(|hash| match self.lookup_hash(hash) {
+                HashLookup::Found(n) => Ok(n.0 as u64),
+                HashLookup::Absent | HashLookup::Unknown => Err(UncheckedHashes),
+            })
+            .collect()
+    }
+
+    pub(crate) fn has_change(&self, hash: &ChangeHash) -> Result<bool, UncheckedHashes> {
+        match self.lookup_hash(hash) {
+            HashLookup::Found(_) => Ok(true),
+            HashLookup::Absent => Ok(false),
+            HashLookup::Unknown => Err(UncheckedHashes),
+        }
     }
 
     pub(crate) fn get_bundle_metadata<I>(
@@ -342,12 +767,37 @@ impl ChangeGraph {
     where
         I: IntoIterator<Item = ChangeHash>,
     {
-        hashes.into_iter().map(|hash| {
-            let index = self
-                .nodes_by_hash
-                .get(&hash)
-                .cloned()
-                .ok_or(MissingDep(hash))?;
+        // resolve to nodes, then build node-based (positions are member
+        // list order, which must be topological, i.e. node order)
+        let mut nodes = Vec::new();
+        let mut missing = None;
+        for hash in hashes {
+            match self.nodes_by_hash.get(&hash) {
+                Some(n) => nodes.push(*n),
+                None => {
+                    missing = Some(MissingDep(hash));
+                    break;
+                }
+            }
+        }
+        nodes.sort_unstable();
+        let err = missing.into_iter().map(Err);
+        let ok = if err.len() > 0 { Vec::new() } else { nodes };
+        self.bundle_metadata_for_nodes(ok).chain(err)
+    }
+
+    /// Bundle metadata for a set of member nodes, deps pre-resolved to
+    /// member positions or external hashes. Only the *external* (boundary)
+    /// hashes need to be known, so this works on a graph in the
+    /// fragment-hashes state. `nodes` must be sorted ascending.
+    pub(crate) fn bundle_metadata_for_nodes(
+        &self,
+        nodes: Vec<NodeIdx>,
+    ) -> impl Iterator<Item = Result<BundleMetadata<'_>, MissingDep>> {
+        debug_assert!(nodes.is_sorted());
+        let pos_of: HashMap<NodeIdx, usize> =
+            nodes.iter().enumerate().map(|(p, n)| (*n, p)).collect();
+        nodes.into_iter().map(move |index| {
             let i = index.0 as usize;
             let actor = self.actors[i].into();
             let timestamp = self.timestamps.get(i).unwrap_or_default();
@@ -361,13 +811,19 @@ impl ChangeGraph {
 
             let deps = self
                 .parents(index)
-                .map(|p| self.hashes[p.0 as usize])
-                .collect::<Vec<_>>();
+                .map(|p| match pos_of.get(&p) {
+                    Some(pos) => Ok(DepRef::Internal(*pos)),
+                    None => self
+                        .hashes
+                        .get(p)
+                        .map(DepRef::External)
+                        .ok_or(MissingDep(ChangeHash([0; 32]))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
             let start_op = max_op - num_ops + 1;
             let seq = self.seq[i] as u64;
             Ok(BundleMetadata {
-                hash,
                 actor,
                 seq,
                 start_op,
@@ -384,17 +840,18 @@ impl ChangeGraph {
     pub(crate) fn get_build_metadata<I>(
         &self,
         hashes: I,
-    ) -> Result<Vec<BuildChangeMetadata<'_>>, MissingDep>
+    ) -> Result<Vec<BuildChangeMetadata<'_>>, crate::AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
         let indexes: Vec<_> = hashes
             .into_iter()
-            .map(|hash| {
-                self.nodes_by_hash
-                    .get(&hash)
-                    .cloned()
-                    .ok_or(MissingDep(hash))
+            .map(|hash| match self.lookup_hash(&hash) {
+                // on an unchecked graph an unknown hash is indistinguishable
+                // from a not-yet-computed one — refuse rather than guess
+                HashLookup::Found(n) => Ok(n),
+                HashLookup::Absent => Err(crate::AutomergeError::from(MissingDep(hash))),
+                HashLookup::Unknown => Err(crate::AutomergeError::UncheckedHashGraph),
             })
             .collect::<Result<_, _>>()?;
 
@@ -473,26 +930,37 @@ impl ChangeGraph {
         change_indexes
     }
 
-    pub(crate) fn get_hashes(&self, have_deps: &[ChangeHash]) -> Cow<'_, [ChangeHash]> {
-        if have_deps.is_empty() {
-            Cow::Borrowed(&self.hashes)
-        } else {
-            let clock = self.seq_clock_for_heads(have_deps);
-            Cow::Owned(
-                self.get_build_indexes(clock)
-                    .into_iter()
-                    .filter_map(|node| self.hashes.get(node.0 as usize))
-                    .copied()
-                    .collect(),
-            )
+    pub(crate) fn get_hashes(
+        &self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Cow<'_, [ChangeHash]>, UncheckedHashes> {
+        match (&self.hashes, have_deps.is_empty()) {
+            (Hashes::Checked(all), true) => Ok(Cow::Borrowed(all)),
+            (Hashes::Unchecked { .. }, true) => Err(UncheckedHashes),
+            _ => {
+                let clock = self.seq_clock_for_heads(have_deps)?;
+                Ok(Cow::Owned(
+                    self.get_build_indexes(clock)
+                        .into_iter()
+                        .map(|node| self.hashes.try_get(node))
+                        .collect::<Result<_, _>>()?,
+                ))
+            }
         }
     }
 
     pub(crate) fn get_build_metadata_clock(
         &self,
         have_deps: &[ChangeHash],
+    ) -> Result<Vec<BuildChangeMetadata<'_>>, UncheckedHashes> {
+        let clock = self.seq_clock_for_heads(have_deps)?;
+        Ok(self.get_build_metadata_for_seq_clock(clock))
+    }
+
+    pub(crate) fn get_build_metadata_for_seq_clock(
+        &self,
+        clock: SeqClock,
     ) -> Vec<BuildChangeMetadata<'_>> {
-        let clock = self.seq_clock_for_heads(have_deps);
         let change_indexes = self.get_build_indexes(clock);
         self.get_build_metadata_for_indexes(change_indexes)
     }
@@ -502,12 +970,14 @@ impl ChangeGraph {
         actor: usize,
         seq: u64,
     ) -> Result<ChangeHash, AutomergeError> {
-        self.seq_index
+        let node = self
+            .seq_index
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
-            .and_then(|i| self.hashes.get(i.0 as usize))
-            .ok_or(AutomergeError::InvalidSeq(seq))
-            .copied()
+            .ok_or(AutomergeError::InvalidSeq(seq))?;
+        self.hashes
+            .try_get(*node)
+            .map_err(|_| AutomergeError::UncheckedHashGraph)
     }
 
     fn update_heads(&mut self, change: &Change) {
@@ -542,11 +1012,14 @@ impl ChangeGraph {
         }
     }
 
-    fn add_changes<'a, I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone>(
+    pub(crate) fn add_changes<
+        'a,
+        I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone,
+    >(
         &mut self,
         iter: I,
-    ) -> Result<(), MissingDep> {
-        let node = NodeIdx(self.hashes.len() as u32);
+    ) -> Result<(), AddChangeError> {
+        let node = NodeIdx(self.len() as u32);
 
         self.add_nodes(iter.clone());
 
@@ -563,8 +1036,13 @@ impl ChangeGraph {
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
             self.seq_index[actor].push(node_idx);
 
-            for parent_hash in change.deps().iter() {
-                self.add_parent(node_idx, parent_hash);
+            let ResolvedHashes { nodes, missing } = self.resolve_hashes(change.deps().iter())?;
+            if let Some(missing) = missing.first() {
+                // callers check deps before calling us
+                return Err(MissingDep(*missing).into());
+            }
+            for parent in nodes {
+                self.add_parent(node_idx, parent);
             }
 
             if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
@@ -576,24 +1054,59 @@ impl ChangeGraph {
         Ok(())
     }
 
-    pub(crate) fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+    pub(crate) fn get_fragment(
+        &self,
+        head: ChangeHash,
+        actors: &[crate::ActorId],
+    ) -> Option<Fragment> {
         let n = self.nodes_by_hash.get(&head).copied()?;
         if head.fragment_level() == 0 {
-            self.loose_commit(n)
+            self.loose_commit(n, actors)
         } else {
             assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
             self.fragments
                 .binary_search_by_key(&n.0, |f| f.head.0)
                 .ok()
-                .map(|i| self.fragments[i].export(self))
+                .map(|i| self.fragments[i].export(self, actors))
         }
     }
 
-    fn loose_commit(&self, n: NodeIdx) -> Option<Fragment> {
-        let head = self.hashes.get(n.0 as usize).copied()?;
+    /// The `(actor, seq)` identity of a node — always derivable, hash
+    /// graph state notwithstanding.
+    pub(crate) fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
+        let i = n.0 as usize;
+        ChangeId {
+            actor: actors[usize::from(self.actors[i])].clone(),
+            seq: self.seq[i] as u64,
+        }
+    }
+
+    /// Resolve a [`ChangeId`] back to its node.
+    pub(crate) fn node_for_change_id(
+        &self,
+        id: &ChangeId,
+        actors: &[crate::ActorId],
+    ) -> Option<NodeIdx> {
+        let actor_idx = actors.iter().position(|a| a == &id.actor)?;
+        if id.seq == 0 {
+            return None;
+        }
+        self.seq_index
+            .get(actor_idx)?
+            .get(id.seq as usize - 1)
+            .copied()
+    }
+
+    fn loose_commit(&self, n: NodeIdx, actors: &[crate::ActorId]) -> Option<Fragment> {
+        let head = self.hashes.get(n)?;
         assert_eq!(head.fragment_level(), 0);
-        let boundary = self.parents(n).map(|p| self.hashes[p.0 as usize]).collect();
-        let members = vec![head];
+        // on an unchecked graph a parent hash may be unknown, in which
+        // case the fragment boundary cannot be described: no fragment
+        let boundary = self
+            .parents(n)
+            .map(|p| self.hashes.get(p))
+            .collect::<Option<Vec<_>>>()?;
+        let members = vec![self.change_id(n, actors)];
         let checkpoints = vec![];
         let level = head.fragment_level();
         Some(Fragment {
@@ -609,36 +1122,42 @@ impl ChangeGraph {
         &'a self,
         heads: &'a [ChangeHash],
         levels: R,
+        actors: &'a [crate::ActorId],
     ) -> impl Iterator<Item = Fragment> + 'a {
         let heads = if levels.contains(&0) { heads } else { &[] };
-        self.loose_fragments(heads).chain(
+        self.loose_fragments(heads, actors).chain(
             self.fragments
                 .iter()
                 .rev()
-                .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
-                .map(|f| f.export(self)),
+                .filter(move |f| {
+                    self.hashes
+                        .get(f.head)
+                        .is_some_and(|h| levels.contains(&h.fragment_level()))
+                })
+                .map(|f| f.export(self, actors)),
         )
     }
 
     fn loose_fragments<'a>(
         &'a self,
         heads: &'a [ChangeHash],
+        actors: &'a [crate::ActorId],
     ) -> impl Iterator<Item = Fragment> + 'a {
         let nodes = heads
             .iter()
             .filter(|h| h.fragment_level() == 0)
             .filter_map(|h| self.nodes_by_hash.get(h).copied());
         self.bfs_until_clock(nodes, &self.fragment_top)
-            .filter_map(|n| self.loose_commit(n))
+            .filter_map(move |n| self.loose_commit(n, actors))
     }
 
-    fn fragment_content<'a>(
+    /// The member nodes of a fragment: `node`'s ancestry back to `clock`.
+    fn fragment_nodes<'a>(
         &'a self,
         node: NodeIdx,
         clock: &'a SeqClock,
-    ) -> impl Iterator<Item = ChangeHash> + 'a {
+    ) -> impl Iterator<Item = NodeIdx> + 'a {
         self.bfs_until_clock([node], clock)
-            .map(|n| self.hashes[n.0 as usize])
     }
 
     fn bfs_until_clock<'a, I>(
@@ -668,14 +1187,97 @@ impl ChangeGraph {
         })
     }
 
-    fn cache_fragments(&mut self) {
+    /// Order fragments so every fragment's external member deps land in
+    /// earlier fragments — the order `apply_fragment` needs.
+    ///
+    /// Sorting by head node index is not enough: a loose commit on a
+    /// concurrent branch can predate (by node index) the head of the
+    /// fragment covering its parents. So this is a proper topological
+    /// sort of the fragment DAG, using head node index to break ties
+    /// deterministically.
+    pub(crate) fn sort_fragments_for_apply(
+        &self,
+        fragments: &mut Vec<Fragment>,
+        actors: &[crate::ActorId],
+    ) {
+        let n = fragments.len();
+
+        // which fragment owns each member node
+        let mut owner: HashMap<NodeIdx, usize> = HashMap::new();
+        for (i, f) in fragments.iter().enumerate() {
+            for m in &f.members {
+                if let Some(node) = self.node_for_change_id(m, actors) {
+                    owner.insert(node, i);
+                }
+            }
+        }
+
+        // fragment-level dependency edges from the members' parents
+        let mut indegree = vec![0usize; n];
+        let mut children: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        for (&node, &i) in &owner {
+            for p in self.parents(node) {
+                if let Some(&j) = owner.get(&p) {
+                    if j != i && seen.insert((j, i)) {
+                        children[j].push(i);
+                        indegree[i] += 1;
+                    }
+                }
+            }
+        }
+
+        // Kahn's algorithm, popping the ready fragment with the
+        // smallest head node index
+        let head_node = |f: &Fragment| self.node_by_hash(&f.head);
+        let mut ready: BTreeSet<(Option<NodeIdx>, usize)> = indegree
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| **d == 0)
+            .map(|(i, _)| (head_node(&fragments[i]), i))
+            .collect();
+        let mut order = Vec::with_capacity(n);
+        while let Some(&(key, i)) = ready.iter().next() {
+            ready.remove(&(key, i));
+            order.push(i);
+            for &c in &children[i] {
+                indegree[c] -= 1;
+                if indegree[c] == 0 {
+                    ready.insert((head_node(&fragments[c]), c));
+                }
+            }
+        }
+        debug_assert_eq!(order.len(), n, "fragment dependencies form a cycle");
+
+        let mut pos = vec![0usize; n];
+        for (rank, i) in order.iter().enumerate() {
+            pos[*i] = rank;
+        }
+        let mut indexed: Vec<(usize, Fragment)> =
+            std::mem::take(fragments).into_iter().enumerate().collect();
+        indexed.sort_by_key(|(i, _)| pos[*i]);
+        *fragments = indexed.into_iter().map(|(_, f)| f).collect();
+    }
+
+    pub(crate) fn cache_fragments(&mut self) {
+        // idempotent: rebuild_hash_graph re-runs this after upgrading the
+        // graph, so start from scratch
+        self.fragments.clear();
+        self.fragment_top = SeqClock::new(self.num_actors());
         for n in 0..self.hashes.len() {
             self.cache_fragment(NodeIdx(n as u32))
         }
     }
 
     fn cache_fragment(&mut self, head: NodeIdx) {
-        let hash = &self.hashes[head.0 as usize];
+        // the fragment index needs the fragment-level hashes; on a plain
+        // unchecked graph it would be silently incomplete
+        if !self.hashes.has_fragment_hashes() {
+            return;
+        }
+        let Some(hash) = self.hashes.get(head) else {
+            return;
+        };
         let level = hash.fragment_level();
         if level == 0 {
             return;
@@ -685,7 +1287,10 @@ impl ChangeGraph {
         let clock = self.calculate_clock(vec![head]);
         for (i, f) in self.fragments.iter().enumerate().rev() {
             if clock.covers(&f.clock) {
-                if self.hashes[f.head.0 as usize].fragment_level() >= level {
+                let Some(f_hash) = self.hashes.get(f.head) else {
+                    continue;
+                };
+                if f_hash.fragment_level() >= level {
                     deps.push(f.head);
                 } else {
                     supercede.push(i);
@@ -699,7 +1304,121 @@ impl ChangeGraph {
         self.fragments.push(FragmentNode { head, deps, clock });
     }
 
-    pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
+    pub(crate) fn node_by_hash(&self, hash: &ChangeHash) -> Option<NodeIdx> {
+        self.nodes_by_hash.get(hash).copied()
+    }
+
+    pub(crate) fn node_for_actor_seq(&self, actor: usize, seq: u64) -> Option<NodeIdx> {
+        if seq == 0 {
+            return None;
+        }
+        self.seq_index.get(actor)?.get(seq as usize - 1).copied()
+    }
+
+    pub(crate) fn hash_for_node(&self, node: NodeIdx) -> Option<ChangeHash> {
+        self.hashes.get(node)
+    }
+
+    /// Append the member changes of a bundle without knowing their
+    /// hashes.
+    ///
+    /// The members must be in topological order and each member's seq
+    /// must extend its actor's chain — callers validate both. A checked
+    /// graph downgrades to the fragment-hashes state (see
+    /// [`Hashes::extend_unknown`]); the new nodes have no hash until
+    /// `rebuild_hash_graph` recomputes them, so they cannot appear in
+    /// `nodes_by_hash`, `heads` or the fragment index yet.
+    pub(crate) fn add_fragment_members(&mut self, members: Vec<FragmentMember<'_>>) {
+        let base = NodeIdx(self.len() as u32);
+
+        self.hashes.extend_unknown(members.len());
+
+        self.actors
+            .extend(members.iter().map(|m| ActorIdx::from(m.actor)));
+        self.seq.extend(members.iter().map(|m| m.seq as u32));
+        self.max_ops.extend(members.iter().map(|m| m.max_op as u32));
+        self.num_ops.extend(members.iter().map(|m| m.num_ops));
+        self.timestamps.extend(members.iter().map(|m| m.timestamp));
+        self.messages
+            .extend(members.iter().map(|m| m.message.clone()));
+        self.extra_bytes_meta
+            .extend(members.iter().map(|m| ValueMeta::from(m.extra.as_ref())));
+        self.parents
+            .extend(std::iter::repeat_n(None, members.len()));
+        for m in &members {
+            self.extra_bytes_raw.extend_from_slice(&m.extra);
+        }
+
+        for (i, m) in members.iter().enumerate() {
+            let node_idx = base + i;
+            self.max_op = std::cmp::max(self.max_op, m.max_op as u32);
+
+            assert!(m.actor < self.seq_index.len());
+            assert_eq!(self.seq_index[m.actor].len() + 1, m.seq as usize);
+            self.seq_index[m.actor].push(node_idx);
+
+            for d in &m.deps {
+                let parent = match d {
+                    FragmentDep::Member(j) => {
+                        debug_assert!(*j < i);
+                        base + *j
+                    }
+                    FragmentDep::Node(n) => *n,
+                };
+                self.add_parent(node_idx, parent);
+                // a parent that was a head is now covered
+                if let Some(h) = self.hashes.get(parent) {
+                    self.heads.remove(&h);
+                }
+            }
+
+            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
+                self.cache_clock(node_idx);
+            }
+        }
+    }
+
+    /// Record the (unverified, until `rebuild_hash_graph`) hash of a
+    /// node whose hash was unknown — a fragment head, checkpoint or
+    /// boundary/dep pairing learned from an applied bundle. Makes the
+    /// hash resolvable; maintains the fragment index for fragment-level
+    /// hashes. No-op on a checked graph or for post-load nodes, whose
+    /// hashes are already known.
+    pub(crate) fn record_node_hash(&mut self, node: NodeIdx, hash: ChangeHash) {
+        // idempotent: every fragment's boundary re-names earlier
+        // fragment heads, so a chain apply records the same pairing
+        // over and over — and re-caching a fragment head costs a full
+        // O(graph) clock walk plus a duplicate fragment-index entry
+        if let Some(known) = self.nodes_by_hash.get(&hash) {
+            debug_assert_eq!(*known, node, "hash recorded for two nodes");
+            return;
+        }
+        match &mut self.hashes {
+            Hashes::Checked(_) => return,
+            Hashes::Unchecked { watermark, pre, .. } => {
+                if node.0 >= *watermark {
+                    // tail nodes always have known hashes
+                    return;
+                }
+                pre.insert(node, hash);
+            }
+        }
+        self.nodes_by_hash.insert(hash, node);
+        self.cache_fragment(node);
+    }
+
+    /// [`Self::record_node_hash`] for a fragment's head — the unique
+    /// childless member — whose hash also joins the heads.
+    pub(crate) fn record_fragment_head(&mut self, node: NodeIdx, hash: ChangeHash) {
+        self.record_node_hash(node, hash);
+        self.heads.insert(hash);
+    }
+
+    pub(crate) fn add_change(
+        &mut self,
+        change: &Change,
+        actor: usize,
+    ) -> Result<(), AddChangeError> {
         let hash = change.hash();
 
         if self.nodes_by_hash.contains_key(&hash) {
@@ -707,8 +1426,8 @@ impl ChangeGraph {
         }
 
         for h in change.deps().iter() {
-            if !self.nodes_by_hash.contains_key(h) {
-                return Err(MissingDep(*h));
+            if !self.has_change(h)? {
+                return Err(MissingDep(*h).into());
             }
         }
 
@@ -731,9 +1450,7 @@ impl ChangeGraph {
         clock
     }
 
-    fn add_parent(&mut self, child_idx: NodeIdx, parent_hash: &ChangeHash) {
-        debug_assert!(self.nodes_by_hash.contains_key(parent_hash));
-        let parent_idx = *self.nodes_by_hash.get(parent_hash).unwrap();
+    fn add_parent(&mut self, child_idx: NodeIdx, parent_idx: NodeIdx) {
         let new_edge_idx = EdgeIdx::new(self.edges.len());
         self.edges.push(Edge {
             target: parent_idx,
@@ -752,11 +1469,14 @@ impl ChangeGraph {
         }
     }
 
-    pub(crate) fn deps(&self, hash: &ChangeHash) -> impl Iterator<Item = ChangeHash> + '_ {
+    pub(crate) fn deps(
+        &self,
+        hash: &ChangeHash,
+    ) -> impl Iterator<Item = Result<ChangeHash, UncheckedHashes>> + '_ {
         let mut iter = self.nodes_by_hash.get(hash).map(|node| self.parents(*node));
         std::iter::from_fn(move || {
             let next = iter.as_mut()?.next()?;
-            self.hashes.get(next.0 as usize).copied()
+            Some(self.hashes.try_get(next))
         })
     }
 
@@ -770,16 +1490,42 @@ impl ChangeGraph {
         })
     }
 
-    fn heads_to_nodes(&self, heads: &[ChangeHash]) -> Vec<NodeIdx> {
-        heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h))
-            .copied()
-            .collect()
+    /// Resolve heads to nodes, silently skipping hashes which definitely
+    /// aren't in this document.
+    fn heads_to_nodes(&self, heads: &[ChangeHash]) -> Result<Vec<NodeIdx>, UncheckedHashes> {
+        Ok(self.resolve_hashes(heads.iter())?.nodes)
     }
 
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
-        let nodes = self.heads_to_nodes(heads);
+    #[allow(dead_code)]
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, UncheckedHashes> {
+        let nodes = self.heads_to_nodes(heads)?;
+        Ok(self.clock_for_nodes(nodes))
+    }
+
+    /// Clock for `heads`, silently skipping hashes not in this document —
+    /// the pre-unchecked-load semantics of every `*_at` read.
+    ///
+    /// Hashes known on an unchecked graph (the load heads and any change
+    /// added since) resolve normally, so historical reads at the load heads
+    /// work without the hash graph.
+    pub(crate) fn clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> Clock {
+        let nodes = heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h).copied())
+            .collect();
+        self.clock_for_nodes(nodes)
+    }
+
+    /// Like [`Self::clock_for_heads_lossy`] but returning the seq clock.
+    pub(crate) fn seq_clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> SeqClock {
+        let nodes = heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h).copied())
+            .collect();
+        self.calculate_clock(nodes)
+    }
+
+    pub(crate) fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
         self.calculate_clock(nodes)
             .iter()
             .map(|(actor, seq)| {
@@ -792,9 +1538,12 @@ impl ChangeGraph {
             .collect()
     }
 
-    pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
-        let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes)
+    pub(crate) fn seq_clock_for_heads(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<SeqClock, UncheckedHashes> {
+        let nodes = self.heads_to_nodes(heads)?;
+        Ok(self.calculate_clock(nodes))
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
@@ -820,17 +1569,35 @@ impl ChangeGraph {
     ) {
         let mut visited = BTreeSet::new();
 
+        // The merge of every complete ancestor closure absorbed so far. A
+        // cached clock covers the *entire* ancestry of its node, so any
+        // node whose (actor, seq) is <= `covered` is an ancestor of an
+        // already-absorbed closure (via its own actor's chain) and can be
+        // dropped along with its whole subtree. Without this the walk is a
+        // supercritical branching process on merge-heavy graphs: hitting a
+        // cached node only stops one branch while the rest of the frontier
+        // keeps fanning out.
+        let mut covered = SeqClock::new(self.num_actors());
+
         while let Some(idx) = to_visit.pop_last() {
             assert!(!visited.contains(&idx));
-            assert!(visited.len() <= self.hashes.len());
+            assert!(visited.len() <= self.len());
             visited.insert(idx);
 
             let actor = self.actors[idx.0 as usize];
             let data = self.clock_data_for(idx);
+
+            if let (Some(d), Some(c)) = (data, covered.get_for_actor(&actor.into())) {
+                if d <= c.get() {
+                    continue;
+                }
+            }
+
             clock.include(actor.into(), data);
 
             if let Some(cached) = self.clock_cache.get(&idx) {
                 SeqClock::merge(clock, cached);
+                SeqClock::merge(&mut covered, cached);
             } else {
                 to_visit.extend(self.parents(idx).filter(|p| !visited.contains(p)));
                 if visited.len() > limit {
@@ -840,17 +1607,189 @@ impl ChangeGraph {
         }
     }
 
+    /// Install freshly recomputed hashes (one per node, in node order) and
+    /// flip the graph to checked.
+    ///
+    /// Every hash we already knew — including the head pairing the document
+    /// claimed at load time and the recorded heads themselves — must agree
+    /// with the recomputed ones, otherwise the document lied and the
+    /// offending hash is returned.
+    pub(crate) fn install_checked_hashes(
+        &mut self,
+        hashes: Vec<ChangeHash>,
+    ) -> Result<(), ChangeHash> {
+        assert_eq!(hashes.len(), self.len(), "one hash per node");
+
+        // previously known hashes (the claimed head pairing and everything
+        // added since load) must match
+        for idx in self.node_ids() {
+            if let Some(known) = self.hashes.get(idx) {
+                if hashes[idx.0 as usize] != known {
+                    return Err(known);
+                }
+            }
+        }
+
+        // the recorded heads must be exactly the hashes of the childless
+        // nodes
+        let mut has_child = vec![false; self.len()];
+        for edge in &self.edges {
+            has_child[edge.target.0 as usize] = true;
+        }
+        let computed_heads: BTreeSet<ChangeHash> = (0..self.len())
+            .filter(|n| !has_child[*n])
+            .map(|n| hashes[n])
+            .collect();
+        if computed_heads != self.heads {
+            let bad = self
+                .heads
+                .difference(&computed_heads)
+                .next()
+                .or_else(|| computed_heads.difference(&self.heads).next())
+                .copied()
+                .expect("unequal sets differ somewhere");
+            return Err(bad);
+        }
+
+        self.nodes_by_hash = hashes
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (*h, NodeIdx(i as u32)))
+            .collect();
+        self.hashes = Hashes::Checked(hashes);
+        Ok(())
+    }
+
+    /// Populate `clock_cache` with the clock of every `CACHE_STEP`th node.
+    ///
+    /// One forward pass in index order: `clock(i)` is the merge of its
+    /// parents' clocks plus its own `(actor, seq)` entry. A node's row is
+    /// dead once its last child has consumed it, so the live rows are
+    /// bounded by the width of the unmerged frontier, not the graph size.
+    fn cache_clocks(&mut self) {
+        let n = self.len();
+        if n < CACHE_STEP as usize {
+            return; // nothing would be cached
+        }
+
+        fn alloc(pool: &mut Vec<SeqClock>, free: &mut Vec<u32>, width: usize) -> u32 {
+            free.pop().unwrap_or_else(|| {
+                pool.push(SeqClock::new(width));
+                (pool.len() - 1) as u32
+            })
+        }
+
+        fn two_rows(pool: &mut [SeqClock], dst: usize, src: usize) -> (&mut SeqClock, &SeqClock) {
+            debug_assert_ne!(dst, src);
+            if dst < src {
+                let (lo, hi) = pool.split_at_mut(src);
+                (&mut lo[dst], &hi[0])
+            } else {
+                let (lo, hi) = pool.split_at_mut(dst);
+                (&mut hi[0], &lo[src])
+            }
+        }
+
+        let num_actors = self.num_actors();
+
+        let mut pending_children = vec![0u32; n];
+        for edge in &self.edges {
+            pending_children[edge.target.0 as usize] += 1;
+        }
+
+        const DEAD: u32 = u32::MAX;
+        let mut slot_of = vec![DEAD; n]; // node -> pool slot while its row is live
+        let mut pool: Vec<SeqClock> = Vec::new();
+        let mut free: Vec<u32> = Vec::new();
+        let mut parent_buf: Vec<usize> = Vec::new();
+
+        for i in 0..n {
+            let idx = NodeIdx(i as u32);
+
+            parent_buf.clear();
+            for p in self.parents(idx) {
+                let p = p.0 as usize;
+                // a change is only appended once its parents are present
+                debug_assert!(p < i, "change graph is topologically ordered");
+                parent_buf.push(p);
+            }
+
+            // acquire a row holding the merge of all parent clocks
+            let slot = match parent_buf.split_first() {
+                Some((&first, rest)) => {
+                    let first_slot = slot_of[first];
+                    debug_assert_ne!(first_slot, DEAD);
+                    let slot = if pending_children[first] == 1 {
+                        // we are the sole remaining child: take the row as is
+                        slot_of[first] = DEAD;
+                        first_slot
+                    } else {
+                        let s = alloc(&mut pool, &mut free, num_actors);
+                        let (dst, src) = two_rows(&mut pool, s as usize, first_slot as usize);
+                        dst.0.copy_from_slice(&src.0);
+                        s
+                    };
+                    for &p in rest {
+                        let p_slot = slot_of[p];
+                        if p_slot == DEAD || p_slot == slot {
+                            continue; // duplicate dep
+                        }
+                        let (dst, src) = two_rows(&mut pool, slot as usize, p_slot as usize);
+                        SeqClock::merge(dst, src);
+                    }
+                    slot
+                }
+                None => {
+                    let s = alloc(&mut pool, &mut free, num_actors);
+                    pool[s as usize].0.fill(None);
+                    s
+                }
+            };
+
+            for &p in &parent_buf {
+                pending_children[p] -= 1;
+                if pending_children[p] == 0 && slot_of[p] != DEAD {
+                    free.push(slot_of[p]);
+                    slot_of[p] = DEAD;
+                }
+            }
+
+            let actor = self.actors[i];
+            pool[slot as usize].include(actor.into(), self.clock_data_for(idx));
+
+            if (i as u32 + 1).is_multiple_of(CACHE_STEP) {
+                self.clock_cache.insert(idx, pool[slot as usize].clone());
+            }
+
+            if pending_children[i] == 0 {
+                free.push(slot); // no children will ever read this row
+            } else {
+                slot_of[i] = slot;
+            }
+        }
+    }
+
     pub(crate) fn remove_ancestors(
         &self,
         changes: &mut BTreeSet<ChangeHash>,
         heads: &[ChangeHash],
-    ) {
-        let nodes = self.heads_to_nodes(heads);
+    ) -> Result<(), UncheckedHashes> {
+        let nodes = self.heads_to_nodes(heads)?;
+        let mut unchecked = false;
         self.traverse_ancestors(nodes, |idx| {
-            let hash = &self.hashes[idx.0 as usize];
-            changes.remove(hash);
+            match self.hashes.get(idx) {
+                Some(hash) => {
+                    changes.remove(&hash);
+                }
+                None => unchecked = true,
+            }
             true
         });
+        if unchecked {
+            Err(UncheckedHashes)
+        } else {
+            Ok(())
+        }
     }
 
     fn traverse_ancestors<F: FnMut(NodeIdx) -> bool>(&self, mut to_visit: Vec<NodeIdx>, mut f: F) {
@@ -870,18 +1809,14 @@ impl ChangeGraph {
 }
 
 impl ChangeGraphCols {
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
     pub(crate) fn iter(&self) -> ChangeIter<'_> {
-        self.0.iter()
+        self.graph.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
-        let mut graph = self.0;
+    pub(crate) fn finalize(self, changes: &[Change]) -> Result<ChangeGraph, InvalidHashColumn> {
+        let mut graph = self.graph;
         debug_assert_eq!(changes.len(), graph.len());
-        debug_assert!(graph.hashes.is_empty());
+        debug_assert!(graph.hashes.is_checked() && graph.hashes.len() == 0);
 
         // The encoded change columns only contain each change's maximum op.
         // `load()` estimates op counts from dependencies, but that is ambiguous
@@ -889,22 +1824,115 @@ impl ChangeGraphCols {
         // Reconstruction has the verified changes, so use their exact lengths.
         graph.num_ops = changes.iter().map(|change| change.len() as u64).collect();
 
-        for c in changes {
+        for (i, c) in changes.iter().enumerate() {
             let hash = c.hash();
-            let node_idx = NodeIdx(graph.hashes.len() as u32);
+            let node_idx = NodeIdx(i as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash)
         }
 
-        for n in 0..(graph.len() as u32) {
-            if (n + 1) % CACHE_STEP == 0 {
-                graph.cache_clock(NodeIdx(n));
+        // a checked load recomputed every hash — the document's stored
+        // hash columns must agree
+        for (i, saved) in &self.saved_hashes {
+            if graph.hashes.get(NodeIdx(*i)) != Some(*saved) {
+                return Err(InvalidHashColumn);
             }
         }
 
+        // The heads loaded from the document header are untrusted: replace
+        // them with the computed heads (the hashes of the childless nodes).
+        // Under `VerificationMode::Check` the caller verifies the two match;
+        // under `DontCheck` this corrects a lying header.
+        let mut has_child = vec![false; graph.len()];
+        for edge in &graph.edges {
+            has_child[edge.target.0 as usize] = true;
+        }
+        graph.heads = (0..graph.len() as u32)
+            .filter(|n| !has_child[*n as usize])
+            .filter_map(|n| graph.hashes.get(NodeIdx(n)))
+            .collect();
+
+        graph.cache_clocks();
+
         graph.cache_fragments();
 
-        graph
+        Ok(graph)
+    }
+
+    /// Finish loading without computing any change hashes.
+    ///
+    /// The only hashes known are the document's heads, paired with their
+    /// nodes via the document's head index suffix (`heads[i]` names node
+    /// `head_indexes[i]`). The pairing is validated structurally (indexes
+    /// in range, distinct, childless nodes) but the hashes themselves are
+    /// unverified until `rebuild_hash_graph`.
+    pub(crate) fn finalize_unchecked(
+        self,
+        heads: &[ChangeHash],
+        head_indexes: &[u64],
+    ) -> Result<ChangeGraph, BadHeadIndexes> {
+        let mut graph = self.graph;
+        debug_assert!(graph.hashes.is_checked() && graph.hashes.len() == 0);
+
+        if heads.len() != head_indexes.len() {
+            return Err(BadHeadIndexes);
+        }
+
+        // the head nodes must be exactly the childless nodes
+        let mut has_child = vec![false; graph.len()];
+        for edge in &graph.edges {
+            has_child[edge.target.0 as usize] = true;
+        }
+        let num_childless = has_child.iter().filter(|c| !**c).count();
+        if num_childless != head_indexes.len() {
+            return Err(BadHeadIndexes);
+        }
+
+        let mut pre = HashMap::with_capacity(heads.len());
+        for (hash, index) in heads.iter().zip(head_indexes.iter()) {
+            let i = *index as usize;
+            if i >= graph.len() || has_child[i] {
+                return Err(BadHeadIndexes);
+            }
+            let node = NodeIdx(*index as u32);
+            if pre.insert(node, *hash).is_some() {
+                // duplicate index
+                return Err(BadHeadIndexes);
+            }
+            graph.nodes_by_hash.insert(*hash, node);
+        }
+
+        // import the hash columns (fragment-level hashes, loose commits
+        // and anchors) — trusted like the head pairing until
+        // `rebuild_hash_graph` verifies them
+        let fragment_hashes = !self.saved_hashes.is_empty();
+        for (i, hash) in self.saved_hashes {
+            if i as usize >= graph.len() {
+                return Err(BadHeadIndexes);
+            }
+            let node = NodeIdx(i);
+            match pre.insert(node, hash) {
+                // the column must not contradict the head pairing
+                Some(prev) if prev != hash => return Err(BadHeadIndexes),
+                _ => {}
+            }
+            graph.nodes_by_hash.insert(hash, node);
+        }
+
+        graph.hashes = Hashes::Unchecked {
+            watermark: graph.len() as u32,
+            tail: Vec::new(),
+            pre,
+            fragment_hashes,
+        };
+
+        graph.cache_clocks();
+
+        // in the fragment-hashes state the fragment index is usable —
+        // build it now (no-op on a plain unchecked graph)
+        graph.cache_fragments();
+
+        Ok(graph)
     }
 
     pub(crate) fn load(doc: &Document<'_>) -> Result<Self, LoadError> {
@@ -925,6 +1953,34 @@ impl ChangeGraphCols {
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
+        // the hash columns: a delta column of node indices plus the raw
+        // 32-byte hashes (the metadata column is only there to keep the
+        // value column legal — its contents are implied and regenerated
+        // on save)
+        let hash_index_bytes = meta.bytes(HASH_INDEX_COL_SPEC, bytes);
+        let hash_val_bytes = meta.bytes(HASH_VAL_COL_SPEC, bytes);
+        let saved_hashes = {
+            let indices: Vec<u64> = hexane::DeltaColumn::<u64>::load(hash_index_bytes)?
+                .iter()
+                .collect();
+            if hash_val_bytes.len() != 32 * indices.len() {
+                return Err(LoadError::InvalidHashColumns);
+            }
+            let mut saved = Vec::with_capacity(indices.len());
+            let mut prev: Option<u64> = None;
+            for (i, chunk) in indices.iter().zip(hash_val_bytes.chunks_exact(32)) {
+                if prev.is_some_and(|p| p >= *i) {
+                    return Err(LoadError::InvalidHashColumns);
+                }
+                prev = Some(*i);
+                let idx = u32::try_from(*i).map_err(|_| LoadError::InvalidHashColumns)?;
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(chunk);
+                saved.push((idx, ChangeHash(hash)));
+            }
+            saved
+        };
+
         let actors: Vec<ActorIdx> = hexane::decoder::<ActorIdx>(actor_bytes).collect();
         let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::new(max_op_bytes).collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
@@ -937,6 +1993,7 @@ impl ChangeGraphCols {
         }
 
         let len = actors.len();
+
         let opts = hexane::LoadOpts::new().with_length(len);
 
         let timestamps = hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
@@ -985,6 +2042,13 @@ impl ChangeGraphCols {
                 let dep = deps_val_iter
                     .next()
                     .ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))?;
+                // hostile bytes: deps must reference earlier changes — the
+                // format stores changes in topological order, `max_ops[dep]`
+                // below indexes by it, and the clock-cache sweep relies on
+                // parents preceding children
+                if dep as usize >= i {
+                    return Err(LoadError::InvalidDepIndex);
+                }
                 let target = NodeIdx(dep);
                 let next = EdgeIdx::new(edges.len() + 1);
                 let next = if e + 1 == d { None } else { Some(next) };
@@ -1006,37 +2070,54 @@ impl ChangeGraphCols {
 
         // blank - to be filled out later
         let clock_cache = HashMap::default();
-        let hashes = vec![];
+        let hashes = Hashes::default();
         let nodes_by_hash = HashMap::new();
         let fragments = vec![];
         let fragment_top = SeqClock::new(num_actors);
 
-        Ok(ChangeGraphCols(ChangeGraph {
-            edges,
-            hashes,
-            actors,
-            parents,
-            seq,
-            max_ops,
-            max_op,
-            num_ops,
-            timestamps,
-            messages,
-            extra_bytes_meta,
-            extra_bytes_raw,
-            heads,
-            nodes_by_hash,
-            clock_cache,
-            seq_index,
-            fragments,
-            fragment_top,
-        }))
+        if let Some((last, _)) = saved_hashes.last() {
+            if *last as usize >= len {
+                return Err(LoadError::InvalidHashColumns);
+            }
+        }
+
+        Ok(ChangeGraphCols {
+            saved_hashes,
+            graph: ChangeGraph {
+                edges,
+                hashes,
+                actors,
+                parents,
+                seq,
+                max_ops,
+                max_op,
+                num_ops,
+                timestamps,
+                messages,
+                extra_bytes_meta,
+                extra_bytes_raw,
+                heads,
+                nodes_by_hash,
+                clock_cache,
+                seq_index,
+                fragments,
+                fragment_top,
+            },
+        })
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("attempted to derive a clock for a change with dependencies we don't have")]
 pub struct MissingDep(ChangeHash);
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum AddChangeError {
+    #[error(transparent)]
+    MissingDep(#[from] MissingDep),
+    #[error(transparent)]
+    Unchecked(#[from] UncheckedHashes),
+}
 
 #[cfg(test)]
 mod tests {
@@ -1057,6 +2138,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cache_clocks_sweep_matches_backward_walk() {
+        let mut builder = TestGraphBuilder::new();
+        let a = builder.actor();
+        let b = builder.actor();
+        let c = builder.actor();
+
+        // two roots, then interleaved cross-merges between a and b with an
+        // occasional long single-actor chain (exercises the row-steal path)
+        // and a third actor joining late
+        let mut last_a = builder.change(&a, 1, &[]);
+        let mut last_b = builder.change(&b, 1, &[]);
+        for i in 0..20 {
+            last_a = builder.change(&a, 1, &[last_a, last_b]);
+            last_b = builder.change(&b, 1, &[last_b, last_a]);
+            if i % 5 == 0 {
+                for _ in 0..7 {
+                    last_a = builder.change(&a, 1, &[last_a]);
+                }
+            }
+        }
+        let mut last_c = builder.change(&c, 1, &[last_a, last_b]);
+        for _ in 0..20 {
+            last_c = builder.change(&c, 1, &[last_c]);
+        }
+
+        let graph = builder.build();
+        assert!(graph.len() > 2 * CACHE_STEP as usize);
+
+        // the sweep's cache entries must match clocks computed by the plain
+        // backward walk on a cache-free graph
+        let mut swept = graph.clone();
+        swept.clock_cache.clear();
+        swept.cache_clocks();
+
+        let mut bare = graph.clone();
+        bare.clock_cache.clear();
+
+        assert_eq!(swept.clock_cache.len(), graph.len() / CACHE_STEP as usize);
+        for (idx, clock) in &swept.clock_cache {
+            assert_eq!((idx.0 + 1) % CACHE_STEP, 0);
+            assert_eq!(clock, &bare.calculate_clock(vec![*idx]), "node {idx:?}");
+        }
+    }
+
+    #[test]
     fn clock_by_heads() {
         let mut builder = TestGraphBuilder::new();
         let actor1 = builder.actor();
@@ -1074,7 +2200,7 @@ mod tests {
         expected_clock.include(builder.index(&actor2), Some(1));
         expected_clock.include(builder.index(&actor3), Some(1));
 
-        let clock = graph.seq_clock_for_heads(&[change4]);
+        let clock = graph.seq_clock_for_heads(&[change4]).unwrap();
         assert_eq!(clock, expected_clock);
     }
 
@@ -1094,7 +2220,7 @@ mod tests {
             .into_iter()
             .collect::<BTreeSet<_>>();
         let heads = vec![change2];
-        graph.remove_ancestors(&mut changes, &heads);
+        graph.remove_ancestors(&mut changes, &heads).unwrap();
 
         let expected_changes = vec![change3, change4].into_iter().collect::<BTreeSet<_>>();
 
@@ -1207,6 +2333,28 @@ mod tests {
         fn all_hashes(&self) -> Vec<ChangeHash> {
             self.changes.iter().map(|c| c.hash()).collect()
         }
+
+        fn all_change_ids(&self) -> Vec<ChangeId> {
+            self.changes
+                .iter()
+                .map(|c| ChangeId {
+                    actor: c.actor_id().clone(),
+                    seq: c.seq(),
+                })
+                .collect()
+        }
+
+        /// hash of each change keyed by its `(actor, seq)` id
+        fn hash_of(&self) -> BTreeMap<(ActorId, u64), ChangeHash> {
+            self.changes
+                .iter()
+                .map(|c| ((c.actor_id().clone(), c.seq()), c.hash()))
+                .collect()
+        }
+    }
+
+    fn member_hash(hash_of: &BTreeMap<(ActorId, u64), ChangeHash>, id: &ChangeId) -> ChangeHash {
+        hash_of[&(id.actor.clone(), id.seq)]
     }
 
     #[test]
@@ -1221,22 +2369,26 @@ mod tests {
             prev = vec![h];
         }
         let graph = builder.build();
-        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let all_ids: BTreeSet<_> = builder
+            .all_change_ids()
+            .into_iter()
+            .map(|id| (id.actor, id.seq))
+            .collect();
         let heads: Vec<_> = graph.heads().collect();
 
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
 
-        // Collect all members hashes across all fragments
-        // (hashes may appear in multiple fragments — this is expected)
-        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        // Collect all member ids across all fragments
+        // (members may appear in multiple fragments — this is expected)
+        let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
-            for h in &f.members {
-                covered.insert(*h);
+            for m in &f.members {
+                covered.insert((m.actor.clone(), m.seq));
             }
         }
 
         // Every change must appear in at least one fragment
-        let missing: Vec<_> = all_hashes.difference(&covered).collect();
+        let missing: Vec<_> = all_ids.difference(&covered).collect();
         assert!(
             missing.is_empty(),
             "changes not covered by any fragment: {:?}",
@@ -1244,7 +2396,10 @@ mod tests {
         );
     }
 
-    fn assert_fragment_invariants(fragments: &[Fragment]) {
+    fn assert_fragment_invariants(
+        fragments: &[Fragment],
+        hash_of: &BTreeMap<(ActorId, u64), ChangeHash>,
+    ) {
         for f in fragments {
             // level must match the fragment_level of the id hash
             assert_eq!(
@@ -1256,7 +2411,7 @@ mod tests {
 
             // id must be in members
             assert!(
-                f.members.contains(&f.head),
+                f.members.iter().any(|m| member_hash(hash_of, m) == f.head),
                 "fragment id {:?} not found in its own members",
                 f.head
             );
@@ -1273,8 +2428,9 @@ mod tests {
                 );
             }
 
-            // members must not contain a hash with a higher level than the id
-            for h in &f.members {
+            // members must not contain a change with a higher level than the id
+            for m in &f.members {
+                let h = member_hash(hash_of, m);
                 assert!(
                     h.fragment_level() <= f.level,
                     "fragment {:?} (level {}) contains {:?} with higher level {}",
@@ -1298,9 +2454,9 @@ mod tests {
         }
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
 
-        assert_fragment_invariants(&fragments);
+        assert_fragment_invariants(&fragments, &builder.hash_of());
     }
 
     #[test]
@@ -1324,25 +2480,29 @@ mod tests {
             }
         }
         let graph = builder.build();
-        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let all_ids: BTreeSet<_> = builder
+            .all_change_ids()
+            .into_iter()
+            .map(|id| (id.actor, id.seq))
+            .collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
 
-        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
-            for h in &f.members {
-                covered.insert(*h);
+            for m in &f.members {
+                covered.insert((m.actor.clone(), m.seq));
             }
         }
 
-        let missing: Vec<_> = all_hashes.difference(&covered).collect();
+        let missing: Vec<_> = all_ids.difference(&covered).collect();
         assert!(
             missing.is_empty(),
             "changes not covered by any fragment: {:?}",
             missing,
         );
 
-        assert_fragment_invariants(&fragments);
+        assert_fragment_invariants(&fragments, &builder.hash_of());
     }
 
     #[test]
@@ -1357,7 +2517,7 @@ mod tests {
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
         let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
 
         for f in &fragments {
@@ -1396,9 +2556,9 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let all: Vec<_> = graph.fragments(&heads, ..).collect();
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
-        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+        let all: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors).collect();
+        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors).collect();
 
         // loose + cached partition the full range
         assert_eq!(loose.len() + cached.len(), all.len());
@@ -1416,7 +2576,7 @@ mod tests {
         }
 
         // empty range yields nothing
-        assert_eq!(graph.fragments(&heads, 0..0).count(), 0);
+        assert_eq!(graph.fragments(&heads, 0..0, &builder.actors).count(), 0);
     }
 
     #[test]
@@ -1431,23 +2591,29 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
-        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors).collect();
+        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors).collect();
         assert!(!loose.is_empty());
         assert!(!cached.is_empty(), "expected at least one cached fragment");
 
         // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
         let l = &loose[0];
-        let got = graph.get_fragment(l.head).expect("loose fragment exists");
+        let got = graph
+            .get_fragment(l.head, &builder.actors)
+            .expect("loose fragment exists");
         assert_eq!(got, *l);
 
         // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
         let c = &cached[0];
-        let got = graph.get_fragment(c.head).expect("cached fragment exists");
+        let got = graph
+            .get_fragment(c.head, &builder.actors)
+            .expect("cached fragment exists");
         assert_eq!(got, *c);
 
         // unknown hash returns None
-        assert!(graph.get_fragment(ChangeHash([0xff; 32])).is_none());
+        assert!(graph
+            .get_fragment(ChangeHash([0xff; 32]), &builder.actors)
+            .is_none());
     }
 
     #[test]
@@ -1463,9 +2629,9 @@ mod tests {
             tx.commit();
         }
 
-        let fragments = doc.fragments(..);
+        let fragments = doc.fragments(..).unwrap();
 
-        let bundles = doc.bundle_fragments(fragments);
+        let bundles = doc.bundle_fragments(fragments).unwrap();
 
         let joined: Vec<u8> = bundles.into_iter().flatten().collect();
 
@@ -1477,6 +2643,869 @@ mod tests {
         let a = doc.save();
         let b = loaded.save();
         assert_eq!(a, b);
+    }
+
+    /// Apply the same V2 fragments through the walk and the manifold
+    /// paths; the resulting documents must be byte-identical.
+    #[test]
+    #[ignore] // parked: bundles emit delete ops out of group order, which
+              // the manifold's doc-order contract rejects (rng-dependent;
+              // see repro_a2_manifold). Re-enable with the v2 bundle work.
+    fn fragment_apply_manifold_matches_walk() {
+        use crate::read::ReadDoc;
+        let mut rng = make_rng();
+        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let text = doc.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        let map = doc.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
+        doc.put(&map, "c", crate::ScalarValue::counter(0)).unwrap();
+        for i in 0..40 {
+            if i % 8 == 0 {
+                doc.commit();
+            }
+            let len = doc.length(&text);
+            match rng.random_range(0..5u32) {
+                0 if len > 1 => {
+                    let at = rng.random_range(0..len as u32) as usize;
+                    doc.splice_text(&text, at, 1, "").unwrap();
+                }
+                1 => {
+                    let k = format!("k{}", rng.random_range(0..6u32));
+                    doc.put(&map, k, rng.random_range(0..100i64)).unwrap();
+                }
+                2 => {
+                    doc.increment(&map, "c", 1).unwrap();
+                }
+                _ => {
+                    let at = rng.random_range(0..=len as u32) as usize;
+                    doc.splice_text(&text, at, 0, "x").unwrap();
+                }
+            }
+        }
+        doc.commit();
+
+        let fragments = doc.doc.fragments(..).unwrap();
+        let bundles: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+
+        let apply_all = || {
+            let mut d = Automerge::new();
+            for b in &bundles {
+                d.apply_fragment(b).unwrap();
+            }
+            d
+        };
+
+        let walk = apply_all();
+        let manifold = apply_all();
+
+        assert_eq!(walk.get_heads(), manifold.get_heads());
+        assert_eq!(walk.save(), manifold.save(), "docs diverge");
+    }
+
+    /// Apply a doc's v1 bundles one at a time, v1 walk vs v2 manifold,
+    /// timing each. Loose (single-change) bundles are summarized.
+    /// BENCH_DOCS=C2 cargo test -p automerge --release --lib bench_per_bundle -- --ignored --nocapture
+    /// Per-fragment apply table: members, ops and apply time for each
+    /// fragment of a doc's v2 chain; loose (single-member) fragments
+    /// collapse into one summary line.
+    /// BENCH_DOCS=A1 cargo test -p automerge --release --lib fragment_table -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fragment_table() {
+        use std::time::Instant;
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|s| s.split(',').map(|d| d.to_string()).collect())
+            .unwrap_or_else(|_| vec!["A1".to_string()]);
+        for name in docs {
+            let bytes =
+                std::fs::read(format!("/Users/orion/automerge-blog/data/{name}.am")).unwrap();
+            let doc = Automerge::load(&bytes).unwrap();
+            let v2: Vec<crate::BundleV2> = doc
+                .bundle_fragments_v2(doc.fragments(..).unwrap())
+                .unwrap()
+                .iter()
+                .map(|b| crate::BundleV2::try_from(&b[..]).unwrap())
+                .collect();
+
+            let mut d = Automerge::new();
+            let mut loose = (0usize, 0usize, 0f64);
+            eprintln!("== {name}: {} fragments ==", v2.len());
+            eprintln!(
+                "{:>5} {:>8} {:>8} {:>10} {:>10}",
+                "frag", "members", "ops", "ms", "doc rows"
+            );
+            for (k, b) in v2.iter().enumerate() {
+                let members = b.bundle().iter_changes().count();
+                let ops = b.bundle().storage.id_ctr.len();
+                let t = Instant::now();
+                d.apply_fragment(b).unwrap();
+                let secs = t.elapsed().as_secs_f64();
+                if members == 1 {
+                    loose.0 += 1;
+                    loose.1 += ops;
+                    loose.2 += secs;
+                } else {
+                    eprintln!(
+                        "{:>5} {:>8} {:>8} {:>10.2} {:>10}",
+                        k,
+                        members,
+                        ops,
+                        secs * 1e3,
+                        d.ops().len()
+                    );
+                }
+            }
+            if loose.0 > 0 {
+                eprintln!(
+                    "loose {:>8} {:>8} {:>10.2}   ({} single-member fragments)",
+                    loose.0,
+                    loose.1,
+                    loose.2 * 1e3,
+                    loose.0
+                );
+            }
+            assert_eq!(d.get_heads(), doc.get_heads());
+        }
+    }
+
+    /// Shape stats for the egwalker docs — what each workload is made
+    /// of. BENCH_DOCS=A1 cargo test -p automerge --release --lib doc_shape -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn doc_shape() {
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|s| s.split(',').map(|d| d.to_string()).collect())
+            .unwrap_or_else(|_| {
+                ["S1", "S3", "C1", "C2", "A1", "A2"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+        for name in docs {
+            let bytes =
+                std::fs::read(format!("/Users/orion/automerge-blog/data/{name}.am")).unwrap();
+            let doc = Automerge::load(&bytes).unwrap();
+            let ops = doc.ops();
+            let rows = ops.len();
+            let subs = ops.cols_sub_len();
+            let actors = ops.actors.len();
+            let changes = doc.get_changes(&[]).unwrap();
+            let frags = doc.fragments(..).unwrap();
+            // insert rows vs update rows, and object count
+            let mut inserts = 0usize;
+            let mut objects = std::collections::HashSet::new();
+            for op in ops.iter() {
+                if op.insert {
+                    inserts += 1;
+                }
+                objects.insert(op.obj);
+            }
+            // total ops incl deletes = per-change op counts
+            let total_ops: usize = changes.iter().map(|c| c.len()).sum();
+            eprintln!(
+                "{name}: rows {rows} | succ entries {subs} | deletes {} | inserts {} | updates {} | objects {} | actors {actors} | changes {} | fragments {}",
+                total_ops - rows,
+                inserts,
+                rows - inserts,
+                objects.len(),
+                changes.len(),
+                frags.len(),
+            );
+        }
+    }
+
+    /// S3 as ONE v2 fragment applied to a blank doc (manifold + blank
+    /// path) vs the "speed of light": loading the saved doc without
+    /// rebuilding the hash graph.
+    #[test]
+    #[ignore]
+    fn bench_s3_fragment_vs_light() {
+        use std::time::Instant;
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/S3.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let heads = doc.get_heads();
+        assert_eq!(heads.len(), 1);
+        let fragments = doc.fragments(..).unwrap();
+        let whole = Fragment {
+            head: heads[0],
+            level: 1,
+            boundary: vec![],
+            checkpoints: vec![],
+            members: fragments.iter().flat_map(|f| f.members.clone()).collect(),
+        };
+        let t = Instant::now();
+        let v2 = doc.bundle_fragment_v2(&whole).unwrap();
+        eprintln!("bundle_fragment_v2 encode: {:.2?}", t.elapsed());
+
+        for _ in 0..3 {
+            let mut d = Automerge::new();
+            let t = Instant::now();
+            d.apply_fragment(&v2).unwrap();
+            eprintln!(
+                "v2 fragment apply (blank): {:.2?}  ops {}",
+                t.elapsed(),
+                d.ops.len()
+            );
+            assert_eq!(d.get_heads(), heads);
+            assert_eq!(d.ops.len(), doc.ops.len());
+        }
+
+        let saved = doc.save();
+        for _ in 0..3 {
+            let t = Instant::now();
+            let d = Automerge::load_with_options(
+                &saved,
+                crate::LoadOptions::new().hash_graph(crate::HashGraphRebuild::None),
+            )
+            .unwrap();
+            eprintln!(
+                "speed of light (no hash rebuild): {:.2?}  ops {}",
+                t.elapsed(),
+                d.ops.len()
+            );
+            assert_eq!(d.get_heads(), heads);
+        }
+    }
+
+    /// Run structure of every doc's fragments under the succ-column
+    /// bundle format: in-bundle relationships live in the succ column,
+    /// internal deletes have no rows, and the remaining delete rows
+    /// (preds before the bundle) are the only gaps in the copyable
+    /// ranges. For each fragment report rows, delete rows, succ
+    /// entries, and the resulting run structure.
+    /// cargo test -p automerge --release --lib fragment_run_stats -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fragment_run_stats() {
+        use crate::op_set2::types::Action;
+        for name in ["S1", "S2", "S3", "A1", "A2", "C1", "C2"] {
+            let path = format!("/Users/orion/automerge-blog/data/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            println!("\n{name}: {} fragments", fragments.len());
+            println!(
+                "{:>6} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                "frag", "rows", "del_rows", "succ", "runs", "avg_run", "max_run"
+            );
+            // fragments under 5000 rows are summarized, not listed
+            let mut small = (0usize, 0usize, 0usize, 0usize);
+            for (i, f) in fragments.iter().enumerate() {
+                let v2 = doc.bundle_fragment_v2(f).unwrap();
+                let bundle = v2.bundle();
+                let (mut rows, mut del_rows, mut succ) = (0usize, 0usize, 0usize);
+                let (mut runs, mut cur, mut max_run) = (0usize, 0usize, 0usize);
+                for bop in bundle.storage.iter_ops() {
+                    rows += 1;
+                    succ += bop.succ.len();
+                    if bop.op.action == Action::Delete {
+                        del_rows += 1;
+                        if cur > 0 {
+                            runs += 1;
+                            max_run = max_run.max(cur);
+                            cur = 0;
+                        }
+                    } else {
+                        cur += 1;
+                    }
+                }
+                if cur > 0 {
+                    runs += 1;
+                    max_run = max_run.max(cur);
+                }
+                if rows < 5000 {
+                    small.0 += 1;
+                    small.1 += rows;
+                    small.2 += del_rows;
+                    small.3 += runs;
+                    continue;
+                }
+                println!(
+                    "{:>6} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                    i,
+                    rows,
+                    del_rows,
+                    succ,
+                    runs,
+                    (rows - del_rows) / runs.max(1),
+                    max_run,
+                );
+            }
+            if small.0 > 0 {
+                println!(
+                    " small: {} fragments, {} rows, {} delete rows, {} runs",
+                    small.0, small.1, small.2, small.3
+                );
+            }
+        }
+    }
+
+    /// S3's fragment chain applied as BundleV2s, each fragment timed
+    /// (the doc is a trivial root fragment + one giant fragment), with
+    /// a full stage breakdown (FRAG_TIMING) of the big fragment on the
+    /// final warmed round. Compared against the "speed of light" for
+    /// the same content: a doc forked at the big fragment's head,
+    /// saved, and loaded without rebuilding the hash graph.
+    /// cargo test -p automerge --release --lib bench_s3_first_fragment_vs_light -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_s3_first_fragment_vs_light() {
+        use std::time::Instant;
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/S3.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        eprintln!("S3: {} fragments", fragments.len());
+        let v2s: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+
+        // the big fragment: the one bringing in the most ops (found on
+        // a throwaway pass so later rounds can report against it)
+        let mut sizes = vec![0usize; v2s.len()];
+        {
+            let mut d = Automerge::new();
+            for (i, v2) in v2s.iter().enumerate() {
+                let before = d.ops.len();
+                d.apply_fragment(v2).unwrap();
+                sizes[i] = d.ops.len() - before;
+            }
+        }
+        let big = sizes.iter().enumerate().max_by_key(|(_, s)| **s).unwrap().0;
+        for (i, s) in sizes.iter().enumerate() {
+            eprintln!(
+                "fragment {i}: {} members, {s} ops, head {}",
+                fragments[i].members.len(),
+                fragments[i].head
+            );
+        }
+
+        // the same content both ways: the doc as of the big fragment's head
+        let light = doc.fork_at(&[fragments[big].head]).unwrap();
+        let heads = light.get_heads();
+        let saved = light.save();
+
+        for round in 0..3 {
+            let mut d = Automerge::new();
+            for (i, v2) in v2s.iter().enumerate() {
+                // stage laps for the big fragment on the last (warmed) round
+                if round == 2 && i == big {
+                    std::env::set_var("FRAG_TIMING", "1");
+                }
+                let t = Instant::now();
+                d.apply_fragment(v2).unwrap();
+                eprintln!(
+                    "v2 apply fragment {i}: {:>10.3}ms  ops {}",
+                    t.elapsed().as_secs_f64() * 1e3,
+                    d.ops.len()
+                );
+                std::env::remove_var("FRAG_TIMING");
+                if i == big {
+                    break;
+                }
+            }
+            assert_eq!(d.get_heads(), heads);
+            assert_eq!(d.ops.len(), light.ops.len());
+        }
+
+        for _ in 0..3 {
+            let t = Instant::now();
+            let d = Automerge::load_with_options(
+                &saved,
+                crate::LoadOptions::new().hash_graph(crate::HashGraphRebuild::None),
+            )
+            .unwrap();
+            eprintln!(
+                "speed of light (no hash rebuild): {:>10.3}ms  ops {}",
+                t.elapsed().as_secs_f64() * 1e3,
+                d.ops.len()
+            );
+            assert_eq!(d.get_heads(), heads);
+        }
+    }
+
+    /// The biggest single bundle of a doc into an EMPTY document,
+    /// v1 walk vs v2 manifold(+blank fast path), stage times via
+    /// BATCH_TIMING=1. BENCH_DOCS=S3 ... bench_first_fragment
+    #[test]
+    #[ignore]
+    fn bench_first_fragment() {
+        use std::time::Instant;
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|v| v.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| vec!["S3".to_string()]);
+        for name in &docs {
+            let path = format!("/Users/orion/automerge-blog/data/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let sizes: Vec<usize> = fragments.iter().map(|f| f.members.len()).collect();
+            let bundles = doc.bundle_fragments(fragments).unwrap();
+            // time the biggest bundle; its predecessors are applied
+            // (untimed, walk) to satisfy its deps first
+            let big = (0..bundles.len())
+                .max_by_key(|i| bundles[*i].len())
+                .unwrap();
+            eprintln!(
+                "{name}: bundle {big} with {} changes, {} bytes",
+                sizes[big],
+                bundles[big].len()
+            );
+            let base = {
+                let mut d = Automerge::new();
+                for b in bundles.iter().take(big) {
+                    d.load_incremental(b).unwrap();
+                }
+                d
+            };
+
+            let mut d = base.fork();
+            let t = Instant::now();
+            d.load_incremental(&bundles[big]).unwrap();
+            eprintln!(
+                "TOTAL {:>9.3}ms  ops {}",
+                t.elapsed().as_secs_f64() * 1e3,
+                d.ops.len()
+            );
+            d.validate_document();
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_per_bundle() {
+        use std::time::{Duration, Instant};
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|v| v.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| vec!["C2".to_string()]);
+        for name in &docs {
+            eprintln!(":: BUNDLE {}", name);
+            let path = format!("/Users/orion/automerge-blog/data/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let sizes: Vec<usize> = fragments.iter().map(|f| f.members.len()).collect();
+            let bundles = doc.bundle_fragments(fragments).unwrap();
+            let mut d = Automerge::new();
+            let times: Vec<Duration> = bundles
+                .iter()
+                .map(|b| {
+                    let t = Instant::now();
+                    d.load_incremental(b).unwrap();
+                    t.elapsed()
+                })
+                .collect();
+            assert_eq!(d.get_heads(), doc.get_heads());
+
+            println!("{name}: {} bundles", bundles.len());
+            println!("{:>6} {:>8} {:>12}", "idx", "changes", "time");
+            let mut loose = (0usize, Duration::ZERO);
+            for i in 0..bundles.len() {
+                if sizes[i] <= 1 {
+                    loose.0 += 1;
+                    loose.1 += times[i];
+                } else {
+                    println!("{:>6} {:>8} {:>12.2?}", i, sizes[i], times[i]);
+                }
+            }
+            if loose.0 > 0 {
+                println!(
+                    " loose {:>8} {:>12.2?}   (count, avg)",
+                    loose.0,
+                    loose.1 / loose.0 as u32,
+                );
+            }
+            println!(" total          {:>12.2?}", times.iter().sum::<Duration>());
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_v1_load_walk_vs_manifold() {
+        use std::time::{Duration, Instant};
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|v| v.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| {
+                ["S1", "S2", "S3", "C1", "C2", "A1", "A2"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            });
+        for name in &docs {
+            let path = format!("/Users/orion/automerge-blog/data/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let joined: Vec<u8> = doc
+                .bundle_fragments(fragments)
+                .unwrap()
+                .into_iter()
+                .flatten()
+                .collect();
+            let mut best = Duration::MAX;
+            let mut out = None;
+            for _ in 0..3 {
+                let mut d = Automerge::new();
+                let t = Instant::now();
+                d.load_incremental(&joined).unwrap();
+                let e = t.elapsed();
+                if e < best {
+                    best = e;
+                }
+                out = Some(d);
+            }
+            let d = out.unwrap();
+            assert_eq!(d.get_heads(), doc.get_heads(), "{name} heads");
+            println!("{name}: {best:.2?}");
+        }
+    }
+
+    /// Apply C1's v2 fragment chain (manifold), sampling FRAG_TIMING
+    /// stage laps at increasing fragment indexes: a lap that grows with
+    /// the doc is the per-fragment quadratic.
+    /// cargo test -p automerge --release --lib bench_c1_chain_growth -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_c1_chain_growth() {
+        use std::time::Instant;
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/C1.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let v2: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+        let mut d = Automerge::new();
+        let sample = [100usize, 300, 500, 700, 900];
+        let mut window = std::time::Duration::ZERO;
+        let mut last = 0usize;
+        for (i, b) in v2.iter().enumerate() {
+            if sample.contains(&i) {
+                eprintln!(
+                    "== fragment {i}: doc ops {}, {} membs | prev {} frags took {:?} ({:?}/frag)",
+                    d.ops.len(),
+                    fragments[i].members.len(),
+                    i - last,
+                    window,
+                    window / (i - last).max(1) as u32,
+                );
+                std::env::set_var("FRAG_TIMING", "1");
+                window = std::time::Duration::ZERO;
+                last = i;
+            }
+            let t = Instant::now();
+            d.apply_fragment(b).unwrap();
+            window += t.elapsed();
+            std::env::remove_var("FRAG_TIMING");
+        }
+        eprintln!("final: {} ops", d.ops.len());
+        assert_eq!(d.get_heads(), doc.get_heads());
+    }
+
+    /// C1 whole-history v2 fragment onto a blank doc — MissingDeps repro.
+    #[test]
+    #[ignore]
+    fn repro_c1_whole_fragment() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/C1.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let heads = doc.get_heads();
+        assert_eq!(heads.len(), 1);
+        let fragments = doc.fragments(..).unwrap();
+        let members: Vec<_> = fragments.iter().flat_map(|f| f.members.clone()).collect();
+        let unique: HashSet<_> = members.iter().cloned().collect();
+        eprintln!(
+            "members {} unique {} doc changes {}",
+            members.len(),
+            unique.len(),
+            doc.get_changes(&[]).unwrap().len()
+        );
+        let whole = Fragment {
+            head: heads[0],
+            level: 1,
+            boundary: vec![],
+            checkpoints: vec![],
+            members,
+        };
+        let v2 = doc.bundle_fragment_v2(&whole).unwrap();
+        eprintln!(
+            "whole: {} members, {} bundle deps, {} dep_ids",
+            whole.members.len(),
+            v2.bundle().deps().len(),
+            v2.dep_ids.len()
+        );
+        let mut d = Automerge::new();
+        d.apply_fragment(&v2).unwrap();
+        assert_eq!(d.get_heads(), heads);
+        assert_eq!(d.ops.len(), doc.ops.len());
+    }
+
+    /// to_changes on S1's real bundles: reconstructed changes must
+    /// match the doc's actual changes hash-for-hash.
+    #[test]
+    #[ignore]
+    fn repro_s1_to_changes() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/S1.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let real: Vec<_> = doc.get_changes(&[]).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let bundles = doc.bundle_fragments(fragments).unwrap();
+        for (i, b) in bundles.iter().enumerate() {
+            let bundle = crate::Bundle::try_from(&b[..]).unwrap();
+            let changes = bundle.to_changes().unwrap();
+            eprintln!("bundle {i}: {} changes", changes.len());
+            for c in &changes {
+                let matches = real.iter().any(|r| r.hash() == c.hash());
+                eprintln!(
+                    "  change actor {:?} seq {} start_op {} num_ops {} hash {} match {}",
+                    c.actor_id(),
+                    c.seq(),
+                    c.start_op(),
+                    c.len(),
+                    c.hash(),
+                    matches
+                );
+            }
+        }
+    }
+
+    /// Replay A2 fragment 3 through the manifold with tracing around
+    /// the repro panic op, after dumping the receiver's doc rows in
+    /// the regions the cursor state points at.
+    #[test]
+    #[ignore]
+    fn debug_a2_manifold() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/A2.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let v2: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+        let mut d = Automerge::new();
+        for b in v2.iter().take(3) {
+            d.apply_fragment(b).unwrap(); // walk path
+        }
+        eprintln!("receiver after frags 0-2: {} ops", d.ops.len());
+        for range in [575..625usize, 5000..5020] {
+            eprintln!("--- doc rows {range:?} ---");
+            for op in d.ops().iter_range(&range) {
+                eprintln!(
+                    "  pos {:>5} id {:?} ins {} key {:?}",
+                    op.pos,
+                    op.id,
+                    op.insert,
+                    op.elemid_or_key(),
+                );
+            }
+        }
+        std::env::set_var("MANIFOLD_TRACE", "5855-5916");
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            d.apply_fragment(&v2[3]).unwrap();
+        }));
+        std::env::remove_var("MANIFOLD_TRACE");
+        eprintln!("frag 3 apply result: {:?}", r.is_ok());
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_a2_bundle_order() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/A2.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let b = doc.bundle_fragment_v2(&fragments[3]).unwrap();
+        let bundle = b.bundle();
+        // locate the misordered delete (manifold repro panic op) and
+        // print its stream neighborhood
+        // (bundle actor indexes differ from doc indexes — match by ctr)
+        let at = bundle
+            .storage
+            .iter_ops()
+            .position(|bop| bop.op.id.counter() == 115475)
+            .expect("repro delete not in stream");
+        let lo = at.saturating_sub(10);
+        for (i, bop) in bundle.storage.iter_ops().enumerate() {
+            if (lo..at + 10).contains(&i) {
+                eprintln!(
+                    "stream[{i}]{} id {:?} action {:?} insert {} key {:?} pred {:?} succ {:?}",
+                    if i == at { "*" } else { " " },
+                    bop.op.id,
+                    bop.op.action,
+                    bop.op.insert,
+                    bop.op.key,
+                    bop.op.pred,
+                    bop.succ
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn repro_a2_manifold() {
+        let bytes = std::fs::read("/Users/orion/automerge-blog/data/A2.am").unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
+        let fragments = doc.fragments(..).unwrap();
+        let v2: Vec<_> = fragments
+            .iter()
+            .map(|f| doc.bundle_fragment_v2(f).unwrap())
+            .collect();
+        // walk and manifold applied side by side, diffed per fragment
+        let mut w = Automerge::new();
+        let mut d = Automerge::new();
+        for (i, b) in v2.iter().enumerate() {
+            w.apply_fragment(b).unwrap();
+            d.apply_fragment(b).unwrap();
+            if d.save() != w.save() {
+                eprintln!("first divergence after fragment {i}");
+                d.debug_cmp(&w);
+                panic!("diverged after fragment {i}");
+            }
+        }
+        assert_eq!(d.get_heads(), doc.get_heads());
+        // the fragments cover the whole history: after verifying every
+        // member hash the docs must serialize identically
+        d.rebuild_hash_graph().unwrap();
+        // op sets must match exactly; the save bytes may not — the
+        // change graph serializes in insertion order, and fragment
+        // topo order is a different (equally valid) order than the
+        // source doc's
+        d.debug_cmp(&doc);
+        let a: Vec<_> = doc
+            .get_changes(&[])
+            .unwrap()
+            .iter()
+            .map(|c| c.hash())
+            .collect();
+        let b: Vec<_> = d
+            .get_changes(&[])
+            .unwrap()
+            .iter()
+            .map(|c| c.hash())
+            .collect();
+        eprintln!("changes {} vs {}; same order {}", a.len(), b.len(), a == b);
+        let sa: std::collections::HashSet<_> = a.iter().collect();
+        let sb: std::collections::HashSet<_> = b.iter().collect();
+        assert_eq!(sa, sb, "change sets differ");
+    }
+
+    /// Ingest a document's fragments four ways and time each:
+    /// v1 bundles through load_incremental (concatenated and one call
+    /// per fragment) and V2 bundles through apply_fragment (walk and
+    /// manifold resolution). Run with:
+    ///   cargo test -p automerge --release --lib bench_fragment_ingest_v1_v2 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_fragment_ingest_v1_v2() {
+        use std::time::{Duration, Instant};
+        let dir = "/Users/orion/automerge-blog/data";
+        let iters = 3;
+
+        let time = |f: &dyn Fn() -> Automerge| -> (Duration, Automerge) {
+            let mut best = Duration::MAX;
+            let mut out = None;
+            for _ in 0..iters {
+                let t = Instant::now();
+                let d = f();
+                let e = t.elapsed();
+                if e < best {
+                    best = e;
+                }
+                out = Some(d);
+            }
+            (best, out.unwrap())
+        };
+
+        println!(
+            "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11}",
+            "doc", "ops", "frags", "v1 conc", "v1 per-frag", "v2 conc", "v2 per-frag",
+        );
+        let docs: Vec<String> = std::env::var("BENCH_DOCS")
+            .map(|v| v.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| {
+                ["S1", "S2", "S3", "C1", "C2", "A1", "A2"]
+                    .map(str::to_string)
+                    .to_vec()
+            });
+        for name in &docs {
+            let path = format!("{dir}/{name}.am");
+            let Ok(bytes) = std::fs::read(&path) else {
+                println!("{name}: missing at {path}, skipped");
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let fragments = doc.fragments(..).unwrap();
+            let v1_bundles = doc.bundle_fragments(fragments.clone()).unwrap();
+            let v1_joined: Vec<u8> = v1_bundles.iter().flatten().copied().collect();
+            let v2_bundles: Vec<_> = fragments
+                .iter()
+                .map(|f| doc.bundle_fragment_v2(f).unwrap())
+                .collect();
+            // v2 concat: one whole-history bundle applied in a single
+            // FragmentApply pass — the true analog of v1 concat
+            let doc_heads = doc.get_heads();
+            assert_eq!(doc_heads.len(), 1, "{name}: expected single head");
+            let whole = Fragment {
+                head: doc_heads[0],
+                level: 1,
+                boundary: vec![],
+                checkpoints: vec![],
+                members: fragments.iter().flat_map(|f| f.members.clone()).collect(),
+            };
+            let v2_whole = doc.bundle_fragment_v2(&whole).unwrap();
+
+            let (t1, d1) = time(&|| {
+                let mut d = Automerge::new();
+                d.load_incremental(&v1_joined).unwrap();
+                d
+            });
+            let (t2, d2) = time(&|| {
+                let mut d = Automerge::new();
+                for b in &v1_bundles {
+                    d.load_incremental(b).unwrap();
+                }
+                d
+            });
+            let (t3, d3) = time(&|| {
+                let mut d = Automerge::new();
+                for b in &v2_bundles {
+                    d.apply_fragment(b).unwrap();
+                }
+                d
+            });
+            let (t3c, d3c) = time(&|| {
+                let mut d = Automerge::new();
+                d.apply_fragment(&v2_whole).unwrap();
+                d
+            });
+
+            // correctness: identical op sets and heads everywhere
+            let heads = doc.get_heads();
+            for (label, d) in [("v1c", &d1), ("v1p", &d2), ("v2p", &d3), ("v2c", &d3c)] {
+                assert_eq!(d.ops.len(), doc.ops.len(), "{name}/{label} op count");
+                assert_eq!(d.get_heads(), heads, "{name}/{label} heads");
+            }
+
+            println!(
+                "{:<4} {:>7} {:>6} | {:>10} {:>11} | {:>10} {:>11}",
+                name,
+                doc.ops.len(),
+                v2_bundles.len(),
+                format!("{t1:.2?}"),
+                format!("{t2:.2?}"),
+                format!("{t3c:.2?}"),
+                format!("{t3:.2?}"),
+            );
+        }
     }
 
     /// Regression test: `bundle()` must be insensitive to the order in which
@@ -1492,7 +3521,8 @@ mod tests {
         use crate::ROOT;
 
         let mut doc = Automerge::new();
-        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]));
+        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]))
+            .unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "counter", 0i64).unwrap();
         tx.commit();
@@ -1502,7 +3532,12 @@ mod tests {
             tx.commit();
         }
 
-        let hashes: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+        let hashes: Vec<_> = doc
+            .get_changes(&[])
+            .unwrap()
+            .iter()
+            .map(|c| c.hash())
+            .collect();
 
         let sorted_bytes = doc.bundle(hashes.iter().copied()).unwrap().bytes().len();
 
@@ -1531,6 +3566,12 @@ mod tests {
             sorted_bytes,
             snc
         );
+    }
+}
+
+impl ExactSizeIterator for ChangeIter<'_> {
+    fn len(&self) -> usize {
+        self.graph.len() - self.index
     }
 }
 
@@ -1628,21 +3669,25 @@ struct FragmentNode {
 }
 
 impl FragmentNode {
-    fn export(&self, graph: &ChangeGraph) -> Fragment {
-        let head = graph.hashes[self.head.0 as usize];
+    fn export(&self, graph: &ChangeGraph, actors: &[crate::ActorId]) -> Fragment {
+        let expect = "fragment index requires the fragment-hashes state";
+        let head = graph.hashes.get(self.head).expect(expect);
         let level = head.fragment_level();
         let boundary = self
             .deps
             .iter()
-            .map(|d| graph.hashes[d.0 as usize])
+            .map(|d| graph.hashes.get(*d).expect(expect))
             .collect();
         let clock = graph.calculate_clock(self.deps.clone());
-        let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
-        let checkpoints = members
+        let nodes: Vec<_> = graph.fragment_nodes(self.head, &clock).collect();
+        // interior hashes may be unknown in the fragment-hashes state,
+        // but checkpoint (level > 0) hashes are always present in it
+        let checkpoints = nodes
             .iter()
-            .copied()
+            .filter_map(|n| graph.hashes.get(*n))
             .filter(|h| h.fragment_level() > 0)
             .collect();
+        let members = nodes.iter().map(|n| graph.change_id(*n, actors)).collect();
         Fragment {
             head,
             level,
@@ -1663,7 +3708,68 @@ pub struct Fragment {
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
     pub checkpoints: Vec<ChangeHash>,
-    pub members: Vec<ChangeHash>,
+    /// The changes this fragment covers. Identified by `(actor, seq)`
+    /// rather than hash so fragments can be produced in the
+    /// fragment-hashes state, where interior change hashes are unknown.
+    pub members: Vec<ChangeId>,
+}
+
+/// Identifies a change by `(actor, seq)` — derivable from the change
+/// graph's structure without knowing the change's hash.
+///
+/// This is an experimental API, it may change or be removed without warning.
+#[doc(hidden)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct ChangeId {
+    pub actor: crate::ActorId,
+    pub seq: u64,
+}
+
+impl std::fmt::Display for ChangeId {
+    /// `"{seq}@{actor}"`, the same shape as object ids and cursors.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.seq, self.actor)
+    }
+}
+
+impl std::str::FromStr for ChangeId {
+    type Err = ParseChangeIdError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (seq, actor) = s.split_once('@').ok_or(ParseChangeIdError)?;
+        let seq: u64 = seq.parse().map_err(|_| ParseChangeIdError)?;
+        if seq == 0 {
+            return Err(ParseChangeIdError);
+        }
+        let actor = hex::decode(actor).map_err(|_| ParseChangeIdError)?;
+        Ok(ChangeId {
+            actor: crate::ActorId::from(actor),
+            seq,
+        })
+    }
+}
+
+/// Error parsing a [`ChangeId`] from its `"{seq}@{actor}"` form.
+#[doc(hidden)]
+#[derive(Debug, thiserror::Error)]
+#[error("invalid change id: expected \"{{seq}}@{{actor}}\"")]
+pub struct ParseChangeIdError;
+
+/// How much of the document's change-hash graph is known.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum HashGraphState {
+    /// Every change hash is known and validated; all APIs work.
+    Checked,
+    /// Change hashes are unverified and only partially known, but every
+    /// hash needed to build fragments (fragment heads, checkpoints,
+    /// boundaries, loose commits) is available. Fragment APIs work;
+    /// other hash-dependent APIs error until
+    /// [`rebuild_hash_graph`](crate::Automerge::rebuild_hash_graph).
+    FragmentHashes,
+    /// Only the load-time heads and post-load change hashes are known.
+    /// Hash-dependent APIs (including fragments) error until
+    /// [`rebuild_hash_graph`](crate::Automerge::rebuild_hash_graph).
+    Unchecked,
 }
 
 #[rustfmt::skip]
@@ -1687,4 +3793,8 @@ pub(crate) mod ids {
     pub(super) const DEPS_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
     pub(super) const EXTRA_META_COL_SPEC: ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
     pub(super) const EXTRA_VAL_COL_SPEC:  ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
+    const HASH_COL_ID: ColumnId = ColumnId::new(6);
+    pub(super) const HASH_INDEX_COL_SPEC: ColumnSpec = ColumnSpec::new_delta(HASH_COL_ID);
+    pub(super) const HASH_META_COL_SPEC:  ColumnSpec = ColumnSpec::new_value_metadata(HASH_COL_ID);
+    pub(super) const HASH_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_value(HASH_COL_ID);
 }

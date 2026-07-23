@@ -50,58 +50,11 @@ impl AsBuilder for &TxOp {
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
     pub(crate) succ: Vec<(OpId, Option<i64>)>,
-    pub(crate) pos: Option<usize>,
-    pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
 impl ChangeOp {
-    pub(crate) fn prop_static(&self) -> Option<PropRef<'static>> {
-        match &self.bld.key {
-            KeyRef::Map(s) => Some(PropRef::Map(Cow::Owned(String::from(s.as_ref())))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn prop(&self) -> Option<PropRef<'_>> {
-        match &self.bld.key {
-            KeyRef::Map(Cow::Owned(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
-            KeyRef::Map(Cow::Borrowed(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn mark_data(&self) -> Option<MarkData<'static>> {
-        let name = self.bld.mark_name.as_ref()?.clone();
-        let value = self.bld.value.clone();
-        Some(MarkData { name, value })
-    }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        self.bld.hydrate_value(text_encoding)
-    }
-
-    pub(crate) fn hydrate_value_and_fix_counters(
-        &self,
-        text_encoding: TextEncoding,
-    ) -> hydrate::Value {
-        if self.bld.action == Action::Set {
-            if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self.succ.iter().filter_map(|(_, inc)| *inc).sum();
-                hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
-            } else {
-                hydrate::Value::Scalar(self.bld.value.to_owned())
-            }
-        } else {
-            self.bld.hydrate_value(text_encoding)
-        }
-    }
-
-    pub(crate) fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
-        self.bld.width(seq_type, text_encoding)
-    }
-
     pub(crate) fn visible(&self) -> bool {
         !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
@@ -114,26 +67,8 @@ impl ChangeOp {
         self.bld.insert
     }
 
-    pub(crate) fn is_set_or_make(&self) -> bool {
-        matches!(
-            self.bld.action,
-            Action::Set | Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
-        )
-    }
-
-    pub(crate) fn action(&self) -> Action {
-        self.bld.action
-    }
-    pub(crate) fn value(&self) -> &ScalarValue<'static> {
-        &self.bld.value
-    }
-
     pub(crate) fn key(&self) -> &KeyRef<'static> {
         &self.bld.key
-    }
-
-    pub(crate) fn pred(&self) -> &[OpId] {
-        &self.bld.pred
     }
 
     pub(crate) fn id(&self) -> OpId {
@@ -846,7 +781,7 @@ pub(crate) struct Op<'a> {
 #[derive(Clone, Default)]
 pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
-    pub(super) succ_actor: hexane::Iter<'a, super::types::ActorIdx>,
+    pub(super) succ_actor: super::op_set::MappedIter<'a, super::types::ActorIdx>,
     pub(super) succ_counter: hexane::DeltaIter<'a, u32>,
     pub(super) inc_values: hexane::Iter<'a, Option<i64>>,
 }
@@ -857,6 +792,24 @@ impl<'a> SuccCursors<'a> {
     }
     pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
         SuccIncCursors(self)
+    }
+
+    pub(crate) fn add_succ(mut self, pos: usize, id: OpId, inc: Option<i64>) -> SuccInsert {
+        let len = self.len() as u64;
+        let mut sub_pos = self.pos();
+        while let Some(i) = self.next() {
+            if i > id {
+                break;
+            }
+            sub_pos = self.pos();
+        }
+        SuccInsert {
+            id,
+            pos,
+            inc,
+            len,
+            sub_pos,
+        }
     }
 }
 
@@ -939,6 +892,61 @@ pub(crate) struct SuccInsert {
     pub(crate) sub_pos: usize,
 }
 
+/// Batched document succ additions, accumulated in stream order: the
+/// three sub-column value streams plus the multi-point [`hexane::Splice`]s
+/// that place them, and the row-level count updates and visibility
+/// clears that ride along. Consumed whole by `OpSet::add_succ` — one
+/// `copy_ranges` per column instead of point splices per entry.
+#[derive(Debug, Default)]
+pub(crate) struct DocSucc {
+    /// where each run of new sub entries lands (pre-splice sub
+    /// coordinates, ascending; same-position entries merged)
+    pub(crate) splices: Vec<hexane::Splice>,
+    pub(crate) actors: Vec<ActorIdx>,
+    pub(crate) ctrs: Vec<u32>,
+    pub(crate) incs: Vec<Option<i64>>,
+    /// (row, new succ count) — ascending, one per touched row
+    pub(crate) counts: Vec<(usize, u32)>,
+    /// rows whose visibility clears (an inc-None entry) — ascending
+    pub(crate) clears: Vec<usize>,
+}
+
+impl DocSucc {
+    pub(crate) fn len(&self) -> usize {
+        self.actors.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.actors.is_empty()
+    }
+
+    pub(crate) fn push(&mut self, s: SuccInsert) {
+        debug_assert!(
+            self.splices.last().is_none_or(|sp| sp.pos <= s.sub_pos),
+            "succ entries must arrive in ascending sub order"
+        );
+        let k = self.actors.len();
+        self.actors.push(s.id.actoridx());
+        self.ctrs.push(s.id.counter() as u32);
+        self.incs.push(s.inc);
+        match self.splices.last_mut() {
+            Some(sp) if sp.pos == s.sub_pos => sp.range.end = k + 1,
+            _ => self.splices.push(hexane::Splice {
+                pos: s.sub_pos,
+                delete: 0,
+                range: k..k + 1,
+            }),
+        }
+        match self.counts.last_mut() {
+            Some((p, c)) if *p == s.pos => *c += 1,
+            _ => self.counts.push((s.pos, s.len as u32 + 1)),
+        }
+        if s.inc.is_none() && self.clears.last() != Some(&s.pos) {
+            self.clears.push(s.pos);
+        }
+    }
+}
+
 impl<'a> Op<'a> {
     pub(crate) fn mark_index(&self) -> Option<MarkIndexBuilder> {
         match (&self.action, &self.mark_name) {
@@ -953,27 +961,11 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
-        let pos = self.pos;
-        let mut succ = self.succ_cursors.clone();
-        if inc.is_some() && !self.is_counter() {
-            inc = None;
-        }
-        let len = succ.len() as u64;
-        let mut sub_pos = succ.pos();
-        while let Some(i) = succ.next() {
-            if i > id {
-                break;
-            }
-            sub_pos = succ.pos();
-        }
-        SuccInsert {
-            id,
-            pos,
-            inc,
-            len,
-            sub_pos,
-        }
+    /// `inc` is trusted as given: callers own increment/counter
+    /// normalization (an increment acts as an ordinary overwrite —
+    /// `inc = None` — on a non-counter target).
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
+        self.succ_cursors.clone().add_succ(self.pos, id, inc)
     }
 
     pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
@@ -1085,6 +1077,7 @@ impl<'a> Op<'a> {
         (self.value().into_value(), self.exid(op_set))
     }
 
+    #[cfg(test)]
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
         match (self.action, &self.value) {
             (Action::Increment, ScalarValue::Int(i)) => Some(*i),
@@ -1124,7 +1117,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn is_counter(&self) -> bool {
-        matches!(&self.value, ScalarValue::Counter(_))
+        self.value.is_counter()
     }
 
     pub(crate) fn is_mark(&self) -> bool {
@@ -1145,16 +1138,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() {
-            false
-        } else if self.is_counter() {
-            !self.succ_inc().any(|(_, inc)| inc.is_none())
-        } else {
-            self.succ_cursors.len() == 0
-        }
-    }
-
     pub(crate) fn del(id: OpId, obj: ObjId, key: KeyRef<'a>) -> Self {
         Op {
             pos: 0,
@@ -1169,11 +1152,6 @@ impl<'a> Op<'a> {
             mark_name: None,
             succ_cursors: SuccCursors::default(),
         }
-    }
-
-    pub(crate) fn prop(&self) -> Option<PropRef<'a>> {
-        let key_str = self.key.key_str()?;
-        Some(PropRef::Map(key_str))
     }
 }
 

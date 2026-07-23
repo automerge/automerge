@@ -24,7 +24,9 @@ fn commit_transaction(
     let historical_heads = tx.get_scope().as_ref().map(|_| tx.get_deps());
     let hash = tx.commit(doc, options.message, options.time);
     if let Some(heads) = historical_heads {
-        patch_log.heads = Some(hash.map_or(heads, |hash| vec![hash]));
+        let heads = hash.map_or(heads, |hash| vec![hash]);
+        // a freshly committed transaction's heads are always known
+        patch_log.heads_clock = Some(doc.change_graph.clock_for_heads_lossy(&heads));
     }
     patch_log.finish_transaction(&doc.ops().actors);
     hash
@@ -292,11 +294,17 @@ macro_rules! impl_read_doc_for_tx {
                     .parents_for(obj.as_ref(), self.get_scope(Some(heads)))
             }
 
-            fn get_missing_deps(&self, heads: &[crate::ChangeHash]) -> Vec<crate::ChangeHash> {
+            fn get_missing_deps(
+                &self,
+                heads: &[crate::ChangeHash],
+            ) -> Result<Vec<crate::ChangeHash>, crate::AutomergeError> {
                 self.doc.get_missing_deps(heads)
             }
 
-            fn get_change_by_hash(&self, hash: &crate::ChangeHash) -> Option<crate::Change> {
+            fn get_change_by_hash(
+                &self,
+                hash: &crate::ChangeHash,
+            ) -> Result<Option<crate::Change>, crate::AutomergeError> {
                 self.doc.get_change_by_hash(hash)
             }
 

@@ -22,7 +22,7 @@ fn mark_patches_at_end_of_text() {
 
     // Pop the patches
     doc2.diff_incremental();
-    let changes_after_mark = doc1.save_after(&heads_before_mark);
+    let changes_after_mark = doc1.save_after(&heads_before_mark).unwrap();
     doc2.dump();
     doc2.load_incremental(&changes_after_mark).unwrap();
 

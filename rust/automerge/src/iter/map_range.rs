@@ -113,6 +113,21 @@ struct MapIter<'a> {
 }
 
 impl Shiftable for MapIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.id.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.id.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.id.set_max(pos);
+        self.key_str.set_max(pos);
+        self.action.set_max(pos);
+        self.value.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let id = self.id.shift_next(range.clone());
         let key = self.key_str.shift_next(range.clone());

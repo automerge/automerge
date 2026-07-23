@@ -255,14 +255,6 @@ impl<'a> MarkStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process(&mut self, opid: OpId, action: OpType<'a>) -> bool {
-        match action {
-            OpType::MarkBegin(_, data) => self.mark_begin(opid, data),
-            OpType::MarkEnd(_) => self.mark_end(opid),
-            _ => false,
-        }
-    }
-
     pub(crate) fn mark_begin(&mut self, id: OpId, mark: MarkData<'a>) -> bool {
         let mut result = false;
 

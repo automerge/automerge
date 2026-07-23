@@ -258,6 +258,22 @@ impl MarkIndexColumn {
             .collect();
     }
 
+    /// Map every actor index through `map` — the batched-actor-insert
+    /// analog of [`Self::rewrite_with_new_actor`].
+    pub(crate) fn remap_actor_indexes(&mut self, map: &[u32]) {
+        let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
+        let remap_idx = |m: MarkIdx| match m {
+            MarkIdx::Start(id) => MarkIdx::Start(remap_id(&id)),
+            MarkIdx::End(id) => MarkIdx::End(remap_id(&id)),
+        };
+        self.remap_values(remap_idx);
+        self.cache = self
+            .cache
+            .iter()
+            .map(|(key, val)| (remap_id(key), val.clone()))
+            .collect();
+    }
+
     /// Rebuild the data column with `f` applied to every mark idx —
     /// run at a time, so an unmarked document (all-null runs) costs a
     /// handful of run headers rather than a per-row materialize.
@@ -274,18 +290,54 @@ impl MarkIndexColumn {
         self.data = new_data;
     }
 
+    /// Splice a range of another mark column's rows in at `at` — the
+    /// mark half of a fragment merge. The cache travels separately (see
+    /// [`Self::absorb_cache`]) since one union covers every run.
+    /// Splice ranges of another mark column's rows in at the given
+    /// insertion points — the mark half of a fragment merge. Consumes
+    /// `other`: the data column moves into the copy and the cache
+    /// entries move across (mark ids are globally unique ops, so
+    /// collisions can only be identical entries).
+    pub(crate) fn merge_from<R>(&mut self, other: Self, splices: R)
+    where
+        R: IntoIterator<Item = hexane::Splice>,
+    {
+        self.data.copy_ranges(other.data, splices);
+        self.cache.extend(other.cache);
+    }
+
+    /// Assemble from a pre-built column and cache (the streaming index
+    /// builder encodes the column directly).
+    pub(crate) fn from_parts(
+        data: PrefixColumn<Option<MarkIdx>>,
+        cache: HashMap<OpId, MarkData<'static>>,
+    ) -> Self {
+        Self { data, cache }
+    }
+
+    /// Test-only drift guard companion to `Indexes::assert_same`.
+    #[cfg(test)]
+    pub(crate) fn assert_same(&self, other: &Self) {
+        assert_eq!(
+            self.data.save(),
+            other.data.save(),
+            "index drift: mark column"
+        );
+        assert_eq!(self.cache, other.cache, "index drift: mark cache");
+    }
+
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let mark_values: Vec<Option<MarkIdx>> = values
-            .into_iter()
-            .map(|v| match v? {
-                MarkIndexBuilder::Start(id, mark) => {
-                    self.cache.insert(id, mark);
-                    Some(MarkIdx::Start(id))
-                }
-                MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
-            })
-            .collect();
-        self.data.splice(index, 0, mark_values);
+        let cache = &mut self.cache;
+        let mark_values = values.into_iter().map(|v| match v? {
+            MarkIndexBuilder::Start(id, mark) => {
+                cache.insert(id, mark);
+                Some(MarkIdx::Start(id))
+            }
+            MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
+        });
+        // marks are sparse: encode the (mostly None) runs in bulk
+        self.data
+            .splice_runs(index, 0, super::index::runs(mark_values));
     }
 
     pub(crate) fn undo(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {

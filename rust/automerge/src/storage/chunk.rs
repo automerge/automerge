@@ -107,6 +107,25 @@ impl<'a> Chunk<'a> {
                 }
                 Chunk::Bundle(bundle)
             }
+            ChunkType::BundleV2 => {
+                // for the generic load path a bundle v2 is just its
+                // embedded v1 bundle — the metadata prefix only matters
+                // to apply_fragment, which parses the chunk itself
+                let (i, _prefix) = crate::storage::bundle_v2::BundleV2::parse_prefix(chunk_input)
+                    .map_err(|e| e.lift())?;
+                let (i, inner_header) = Header::parse::<error::Chunk>(i)?;
+                let parse::Split {
+                    first: inner_input,
+                    remaining: after_inner,
+                } = i.split(inner_header.data_bytes().len());
+                let (remaining, bundle) =
+                    BundleStorage::parse_following_header(inner_input, inner_header)
+                        .map_err(|e| e.lift())?;
+                if !remaining.is_empty() || !after_inner.is_empty() {
+                    return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
+                }
+                Chunk::Bundle(bundle)
+            }
         };
         Ok((remaining, chunk))
     }
@@ -129,6 +148,7 @@ pub(crate) enum ChunkType {
     Change,
     Compressed,
     Bundle,
+    BundleV2,
 }
 
 impl TryFrom<u8> for ChunkType {
@@ -140,6 +160,7 @@ impl TryFrom<u8> for ChunkType {
             1 => Ok(Self::Change),
             2 => Ok(Self::Compressed),
             3 => Ok(Self::Bundle),
+            4 => Ok(Self::BundleV2),
             other => Err(other),
         }
     }
@@ -152,6 +173,7 @@ impl From<ChunkType> for u8 {
             ChunkType::Change => 1,
             ChunkType::Compressed => 2,
             ChunkType::Bundle => 3,
+            ChunkType::BundleV2 => 4,
         }
     }
 }
@@ -227,6 +249,10 @@ impl Header {
 
     pub(crate) fn len(&self) -> usize {
         self.header_size
+    }
+
+    pub(crate) fn chunk_type(&self) -> ChunkType {
+        self.chunk_type
     }
 
     pub(crate) fn write(&self, out: &mut Vec<u8>) {

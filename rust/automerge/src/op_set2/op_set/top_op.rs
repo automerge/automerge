@@ -190,10 +190,7 @@ impl<'a> TopIter<'a> {
                 op_set, clock, &range,
             ))))
         } else {
-            TopIterInner::Current(BoolColumnSkipper::new(
-                op_set.top_index_range(&range),
-                range.clone(),
-            ))
+            TopIterInner::Current(BoolColumnSkipper::new(op_set.top_index_range(&range)))
         };
         Self {
             range,
@@ -207,6 +204,35 @@ impl<'a> TopIter<'a> {
 impl Skipper for TopIter<'_> {}
 
 impl Shiftable for TopIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.cursor
+    }
+
+    fn get_max(&self) -> usize {
+        self.range.end
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.range.end = pos;
+        match &mut self.inner {
+            TopIterInner::Empty => {}
+            TopIterInner::Current(iter) => iter.set_max(pos),
+            TopIterInner::Scan(iter) => iter.set_max(pos),
+        }
+    }
+
+    // yields skip counts — reposition the state, don't consume
+    fn shift(&mut self, range: Range<usize>) {
+        self.cursor = range.start;
+        self.range = range.clone();
+        self.exhausted = false;
+        match &mut self.inner {
+            TopIterInner::Empty => {}
+            TopIterInner::Current(iter) => iter.shift(range),
+            TopIterInner::Scan(iter) => iter.shift(range),
+        }
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.cursor = range.start;
         self.range = range.clone();
@@ -310,6 +336,31 @@ impl<'a> ScanTopIter<'a> {
 }
 
 impl<'a> Shiftable for ScanTopIter<'a> {
+    fn get_pos(&self) -> usize {
+        self.pos
+    }
+
+    fn get_max(&self) -> usize {
+        self.key_str.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.key_str.set_max(pos);
+        self.id.set_max(pos);
+        self.insert.set_max(pos);
+        self.action.set_max(pos);
+        self.succ.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.pos = range.start;
+        self.key_str.shift(range.clone());
+        self.id.shift(range.clone());
+        self.insert.shift(range.clone());
+        self.action.shift(range.clone());
+        self.succ.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<ScanTopRow<'a>> {
         let pos = range.start;
         self.pos = pos + 1;

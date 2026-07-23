@@ -18,6 +18,11 @@ use std::ops::RangeBounds;
 /// takes an additional argument of `&[ChangeHash]`. This allows you to retrieve
 /// the value at a particular point in the document history identified by the
 /// given change hashes.
+///
+/// Hashes which are not present in the document are silently skipped when
+/// resolving `heads`. In particular this means that heads obtained from a
+/// different document which contains changes this document has not seen
+/// behave the same as if those entries had been omitted from the slice.
 pub trait ReadDoc {
     /// Get the parents of an object in the document tree.
     ///
@@ -295,10 +300,15 @@ pub trait ReadDoc {
 
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the
     /// given `heads`.
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash>;
+    ///
+    /// The return type is [`ChangeHash`] because the
+    /// missing changes are, by definition, not in this document — there is no
+    /// (actor, seq) information for them, only the hashes their dependents
+    /// recorded.
+    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError>;
 
     /// Get a change by its hash.
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change>;
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError>;
 
     /// Return some statistics about the document
     fn stats(&self) -> Stats;

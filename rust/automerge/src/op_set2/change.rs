@@ -14,7 +14,10 @@ use std::ops::Range;
 
 pub(crate) mod batch;
 pub(crate) mod collector;
+pub(crate) mod fragment;
 
+#[cfg(test)]
+pub(crate) use collector::IndexedChangeCollector;
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges, OutOfMemory};
 
 pub(crate) trait GetHash {
@@ -29,7 +32,7 @@ impl GetHash for Vec<crate::Change> {
 
 impl GetHash for ChangeGraph {
     fn get_hash(&self, index: usize) -> Option<ChangeHash> {
-        self.index_to_hash(index).copied()
+        self.index_to_hash(index)
     }
 }
 

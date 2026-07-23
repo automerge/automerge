@@ -1,7 +1,7 @@
 use super::types::ScalarValue;
 use hexane::{lebsize, ulebsize, PackError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ValueType {
     Null,
     False,

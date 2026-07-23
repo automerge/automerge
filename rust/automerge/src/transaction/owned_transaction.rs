@@ -1,7 +1,7 @@
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
-use crate::{ChangeHash, PatchLogMismatch};
+use crate::{AutomergeError, ChangeHash, PatchLogMismatch};
 
 use super::{CommitOptions, TransactionInner};
 
@@ -51,11 +51,11 @@ impl OwnedTransaction {
 
     /// Get the hash of the change that contains the given opid.
     ///
-    /// Returns none if the opid:
+    /// Returns `Ok(None)` if the opid:
     /// - is the root object id
     /// - does not exist in this document
     /// - is for an operation in this transaction
-    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+    pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
         self.doc.hash_for_opid(opid)
     }
 
@@ -105,10 +105,10 @@ impl OwnedTransaction {
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
         if let Some(h) = heads {
-            // a transaction is in flight: its pending ops are in the op set
-            // but not under the graph's heads, so the current-heads
-            // shortcut in `scope_at` would wrongly expose them
-            Some(self.doc.change_graph.clock_at(h))
+            // a transaction is in flight: its pending ops are in the op
+            // set but not under the graph's heads, so the current-heads
+            // shortcut in `Automerge::clock_at` must not be used here
+            Some(self.doc.change_graph.clock_for_heads_lossy(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }
@@ -164,9 +164,10 @@ mod tests {
         let doc = Automerge::new();
         let mut tx = doc.into_transaction(None, None).unwrap();
         tx.put(ROOT, "x", 42).unwrap();
-        let (doc, hash, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
-        assert!(hash.is_some());
-        let change = doc.get_change_by_hash(&hash.unwrap()).unwrap();
+        let (doc, id, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
+        assert!(id.is_some());
+        let hash = id.unwrap();
+        let change = doc.get_change_by_hash(&hash).unwrap().unwrap();
         assert_eq!(change.message(), Some("test commit"));
     }
 

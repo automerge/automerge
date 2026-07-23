@@ -15,9 +15,12 @@ mod storage;
 
 pub use builder::BundleChangeIter;
 
-pub(crate) use builder::{BundleBuilder, BundleChangeIterUnverified, OpIter, OpIterUnverified};
+pub(crate) use builder::{
+    frag_prepass, BundleBuilder, BundleChangeIterUnverified, BundleOp, BundleOpWriter, FragMeta,
+    FragOp, FragOps, OpIter, OpIterUnverified,
+};
 pub(crate) use error::ParseError;
-pub(crate) use meta::BundleMetadata;
+pub(crate) use meta::{BundleMetadata, DepRef};
 pub(crate) use storage::BundleStorage;
 
 /// EXPERIMENTAL: A set of changes compressed into a bundle
@@ -48,10 +51,30 @@ impl Bundle {
         let changes = change_graph
             .get_bundle_metadata(hashes)
             .collect::<Result<_, _>>()?;
-        Ok(Self::from_meta(op_set, changes))
+        // v1 bundles carry no hint column
+        Ok(Self::from_meta(op_set, changes, None))
     }
 
-    fn from_meta(op_set: &OpSet, changes: Vec<BundleMetadata<'_>>) -> Bundle {
+    /// Build a bundle from member nodes directly — only the boundary
+    /// (external dep) hashes need to be known, so this works in the
+    /// fragment-hashes state. `nodes` must be sorted ascending.
+    pub(crate) fn for_nodes(
+        op_set: &OpSet,
+        change_graph: &ChangeGraph,
+        nodes: Vec<crate::change_graph::NodeIdx>,
+    ) -> Result<Bundle, AutomergeError> {
+        let clock = change_graph.clock_for_nodes(nodes.clone());
+        let changes = change_graph
+            .bundle_metadata_for_nodes(nodes)
+            .collect::<Result<_, _>>()?;
+        Ok(Self::from_meta(op_set, changes, Some(&clock)))
+    }
+
+    fn from_meta(
+        op_set: &OpSet,
+        changes: Vec<BundleMetadata<'_>>,
+        clock: Option<&crate::clock::Clock>,
+    ) -> Bundle {
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)
@@ -65,15 +88,45 @@ impl Bundle {
 
         for op in op_set.iter_ctr_range(min..max) {
             let op_id = op.id;
-            let op_succ = op.succ();
-            collector.process_op(op);
+            let op_succ: Vec<_> = op.succ().collect();
+            collector.process_op(op, &op_succ);
 
             for id in op_succ {
                 collector.process_succ(op_id, id);
             }
         }
 
-        collector.finish()
+        // the hint ranks: for every covered seq target the member ops
+        // reference, its rank among the dep-covered rows (in document
+        // order) — a receiver-independent position floor. One id-column
+        // walk with early exit; members do not count (a receiver about
+        // to apply the fragment does not have them yet)
+        let mut ranks = std::collections::HashMap::new();
+        if let Some(clock) = clock {
+            let needed = collector.hint_targets();
+            if !needed.is_empty() {
+                let mut remaining = needed.len();
+                let mut rank = 0u64;
+                for id in op_set.id_iter() {
+                    if collector.is_member(id) {
+                        continue;
+                    }
+                    if needed.contains(&id) {
+                        ranks.insert(id, rank);
+                        remaining -= 1;
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
+                    if clock.covers(&id) {
+                        rank += 1;
+                    }
+                }
+                debug_assert_eq!(remaining, 0, "hint target missing from doc");
+            }
+        }
+
+        collector.finish_with_ranks(&ranks)
     }
 
     pub(crate) fn new_from_unverified(
@@ -181,17 +234,20 @@ mod test {
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "aaa", "aaa").unwrap();
-        let (Some(h0), _) = tx.commit() else { panic!() };
+        let (Some(c0), _) = tx.commit() else { panic!() };
+        let h0 = c0;
 
         let mut d2 = doc.fork();
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "bbb", "bbb").unwrap();
-        let (Some(h1), _) = tx.commit() else { panic!() };
+        let (Some(c1), _) = tx.commit() else { panic!() };
+        let h1 = c1;
 
         let mut tx = doc.transaction();
         tx.put(&ROOT, "ccc", "ccc").unwrap();
-        let (Some(h2), _) = tx.commit() else { panic!() };
+        let (Some(c2), _) = tx.commit() else { panic!() };
+        let h2 = c2;
 
         let bundle = doc.bundle([h0, h1, h2]).unwrap();
         let changes = bundle.to_changes().unwrap();

@@ -138,7 +138,9 @@ impl ChangeQueue {
 
         for (i, c) in self.changes.iter().enumerate() {
             for dep in c.deps() {
-                if !change_graph.has_change(dep) {
+                // an unchecked graph can't tell whether it has this dep, so
+                // treat it as unsatisfied and leave the change in the queue
+                if !change_graph.has_change(dep).unwrap_or(false) {
                     unsatisfied[i] += 1;
                     waiting_on.entry(*dep).or_default().push(i);
                 }
