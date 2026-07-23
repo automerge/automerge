@@ -1,3 +1,5 @@
+#![allow(clippy::single_range_in_vec_init)]
+
 use crate::column::{Slab, DEFAULT_MAX_SEG};
 use crate::rle::{compute_rle_tail, rle_validate_encoding, RleDecoder, RleEncoding, RleTail};
 use crate::{Column, ColumnValueRef, DeltaColumn, LoadOpts, PrefixColumn};
@@ -491,6 +493,61 @@ fn iter_range_pos_starts_at_range_start() {
     assert_eq!(iter.pos(), 4);
     assert_eq!(iter.next(), None);
     assert_eq!(iter.pos(), 4);
+}
+
+#[test]
+fn scan_to_value_on_rle_columns() {
+    // bool: scan_to_value(true/false) is "scan to next"
+    let mut vals = vec![false; 4];
+    vals.extend([true; 3]);
+    vals.extend([false; 2]);
+    vals.push(true);
+    let col: Column<bool> = Column::from_values(vals);
+
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(true), Some(4));
+    // inside the run: each call takes the next true, no pending state
+    assert_eq!(it.scan_to_value(true), Some(5));
+    assert_eq!(it.scan_to_value(true), Some(6));
+    assert_eq!(it.scan_to_value(true), Some(9));
+    assert_eq!(it.scan_to_value(true), None);
+    assert_eq!(it.next(), None, "miss parks at the window end");
+
+    let mut it = col.iter();
+    it.shift(5..9);
+    assert_eq!(it.scan_to_value(false), Some(7));
+
+    // strings work too
+    let col: Column<Option<String>> = Column::from_values(vec![
+        Some("a".to_owned()),
+        Some("a".to_owned()),
+        None,
+        Some("b".to_owned()),
+    ]);
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(Some("b")), Some(3));
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_value(None), Some(2));
+    assert_eq!(it.scan_to_value(Some("a")), None);
+}
+
+#[test]
+fn scan_to_pos_consumes_through() {
+    use crate::Shiftable;
+    let col = Column::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(10), Some(10));
+    assert_eq!(it.next(), Some(11));
+    assert_eq!(it.scan_to_pos(50), Some(50));
+
+    let col = DeltaColumn::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(7), Some(7));
+    assert_eq!(it.next(), Some(8));
+
+    let col = PrefixColumn::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    assert_eq!(it.scan_to_pos(5).map(|pv| pv.value), Some(5));
 }
 
 #[test]
@@ -1084,6 +1141,436 @@ fn splice_nullable() {
     assert_col(&col, &[Some(1), None, Some(2)]);
     col.splice(1, 1, [Some(10), Some(20)]);
     assert_col(&col, &[Some(1), Some(10), Some(20), Some(2)]);
+}
+
+/// splice_runs consumes another column's `iter_range(..).runs()` directly.
+#[test]
+fn splice_runs_from_another_columns_iter() {
+    let mut col1 = v1_build(&[1, 2, 3]);
+    let col2 = v1_build(&[7, 7, 7, 8, 9, 9]);
+    // range clips the first run (7 x2 of 3) and takes 8, 9 whole
+    col1.splice_runs(1, 0, col2.iter_range(1..5).runs());
+    assert_col(&col1, &[1, 7, 7, 8, 9, 2, 3]);
+}
+
+/// runs()-based splice is equivalent to per-item splice, including
+/// replacement and null runs.
+#[test]
+fn splice_runs_matches_per_item_splice() {
+    let src: Vec<Option<u64>> = vec![None, None, Some(5), Some(5), Some(5), None, Some(9)];
+    let base: Vec<Option<u64>> = vec![Some(1), Some(2), Some(3), Some(4)];
+    let src_col: Column<Option<u64>> = src.iter().cloned().collect();
+    for (at, del) in [(0, 0), (2, 1), (1, 3), (4, 0)] {
+        let mut a: Column<Option<u64>> = base.iter().cloned().collect();
+        let mut b = a.clone();
+        a.splice_runs(at, del, src_col.iter_range(1..6).runs());
+        b.splice(at, del, src_col.iter_range(1..6));
+        assert_eq!(
+            a.iter().collect::<Vec<_>>(),
+            b.iter().collect::<Vec<_>>(),
+            "at={at} del={del}"
+        );
+    }
+}
+
+/// runs() works for borrowed value types (`&str`) and bool columns.
+#[test]
+fn splice_runs_str_and_bool() {
+    let src: Column<String> = ["a", "a", "b", "b", "b"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut dst: Column<String> = ["x", "y"].iter().map(|s| s.to_string()).collect();
+    dst.splice_runs(1, 0, src.iter_range(1..4).runs());
+    assert_eq!(dst.iter().collect::<Vec<_>>(), ["x", "a", "b", "b", "y"]);
+
+    let src: Column<bool> = [true, true, false, true].iter().copied().collect();
+    let mut dst: Column<bool> = [false, false].iter().copied().collect();
+    dst.splice_runs(2, 0, src.iter_range(0..3).runs());
+    assert_eq!(
+        dst.iter().collect::<Vec<_>>(),
+        [false, false, true, true, false]
+    );
+}
+
+/// PrefixIter::runs() drops the prefix accumulation and feeds
+/// PrefixColumn::splice_runs.
+#[test]
+fn prefix_iter_runs_splices() {
+    use crate::PrefixColumn;
+    let src: PrefixColumn<u64> = [3u64, 3, 3, 10].iter().copied().collect();
+    let mut dst: PrefixColumn<u64> = [1u64, 1].iter().copied().collect();
+    dst.splice_runs(1, 0, src.iter_range(1..4).runs());
+    assert_eq!(dst.values().iter().collect::<Vec<_>>(), [1, 3, 3, 10, 1]);
+    // prefix sums reflect the spliced values
+    assert_eq!(dst.get_prefix(4), 1 + 3 + 3 + 10);
+}
+
+/// ranges() chains windows on value iterators — basic and range-born —
+/// skipping empty ranges.
+#[test]
+fn ranges_chains_windows() {
+    use crate::Shiftable;
+    let values: Vec<u64> = (0..60).map(|i| i / 7).collect();
+    let col: Column<u64> = values.iter().copied().collect();
+
+    let want: Vec<u64> = [2..5, 10..15, 31..50]
+        .into_iter()
+        .flat_map(|r| values[r].to_vec())
+        .collect();
+    let got: Vec<u64> = col.iter().ranges([2..5, 7..7, 10..15, 31..50]).collect();
+    assert_eq!(got, want);
+
+    // works on an iterator born from iter_range too
+    let got: Vec<u64> = col
+        .iter_range(1..60)
+        .ranges([2..5, 10..15, 31..50])
+        .collect();
+    assert_eq!(got, want);
+}
+
+/// Touching ranges are equivalent to their union: ranges([10..15, 15..20])
+/// yields the same items as ranges([10..20]).
+#[test]
+fn ranges_touching_equals_union() {
+    use crate::Shiftable;
+    let values: Vec<u64> = (0..30).map(|i| i / 4).collect();
+    let col: Column<u64> = values.iter().copied().collect();
+
+    let split: Vec<u64> = col.iter().ranges([10..15, 15..20]).collect();
+    let union: Vec<u64> = col.iter().ranges([10..20]).collect();
+    assert_eq!(split, union);
+
+    // through runs() + splice_runs the results are identical too — a run
+    // clipped at the boundary re-merges in the splice encoder
+    let mut a = v1_build(&[100, 200]);
+    let mut b = v1_build(&[100, 200]);
+    a.splice_runs(1, 0, col.iter().runs().ranges([10..15, 15..20]));
+    b.splice_runs(1, 0, col.iter().runs().ranges([10..20]));
+    assert_eq!(a.iter().collect::<Vec<_>>(), b.iter().collect::<Vec<_>>());
+    assert_eq!(a.save(), b.save());
+}
+
+/// The requested pipeline: splice scattered ranges of one column into
+/// another via runs().ranges().
+#[test]
+fn splice_runs_with_ranges() {
+    use crate::Shiftable;
+    let values: Vec<u64> = (0..60).map(|i| i / 7).collect();
+    let col2: Column<u64> = values.iter().copied().collect();
+    let mut col1 = v1_build(&[100, 200]);
+    col1.splice_runs(1, 0, col2.iter().runs().ranges([2..5, 10..15, 31..50]));
+
+    let mut want = vec![100u64];
+    want.extend(
+        [2..5, 10..15, 31..50]
+            .into_iter()
+            .flat_map(|r| values[r].to_vec()),
+    );
+    want.push(200);
+    assert_col(&col1, &want);
+}
+
+/// copy_ranges: both strategies produce identical values and identical
+/// canonical save() bytes, across positions, deletions, and range
+/// shapes (touching, clamped, empty).
+#[test]
+fn copy_ranges_strategies_agree() {
+    use crate::column::{normalize_ranges, CopyStrategy};
+    use std::ops::Range;
+
+    let src_vals: Vec<u64> = (0..3000).map(|i| i / 40).collect();
+    let dest_vals: Vec<u64> = vec![500, 501, 502, 503];
+    let src: Column<u64> = src_vals.iter().copied().collect();
+
+    let cases: Vec<(usize, usize, Vec<Range<usize>>)> = vec![
+        (0, 0, vec![0..3000]),
+        (2, 0, vec![0..1500, 1500..3000]), // touching
+        (4, 0, vec![10..900, 950..2900]),
+        (1, 2, vec![0..40, 100..2000, 2500..3000]),
+        (2, 2, vec![]),
+        (0, 4, vec![5..6]),
+        (3, 0, vec![2990..3100]), // clamped past end
+    ];
+
+    for (index, del, ranges) in cases {
+        let norm = normalize_ranges(ranges.iter().cloned(), src.len());
+        let mut direct: Column<u64> = dest_vals.iter().copied().collect();
+        let mut invert: Column<u64> = dest_vals.iter().copied().collect();
+        direct.copy_ranges_with(index, del, src.clone(), norm.clone(), CopyStrategy::Direct);
+        invert.copy_ranges_with(index, del, src.clone(), norm.clone(), CopyStrategy::Invert);
+
+        let mut want = dest_vals[..index].to_vec();
+        for r in &norm {
+            want.extend_from_slice(&src_vals[r.clone()]);
+        }
+        want.extend_from_slice(&dest_vals[index + del..]);
+
+        assert_eq!(
+            direct.iter().collect::<Vec<_>>(),
+            want,
+            "direct idx={index} del={del}"
+        );
+        assert_eq!(
+            invert.iter().collect::<Vec<_>>(),
+            want,
+            "invert idx={index} del={del}"
+        );
+        assert_eq!(direct.save(), invert.save(), "bytes idx={index} del={del}");
+    }
+}
+
+/// Multi-point copy_ranges: several splice points — inserts, replaces
+/// (delete + insert), pure deletes, and contiguous neighbours that
+/// normalize into one — agree across strategies, match a per-item
+/// reference interleave, and produce identical save() bytes.
+#[test]
+fn copy_ranges_multi_point_strategies_agree() {
+    use crate::column::{normalize_splices, CopyStrategy};
+    use crate::Splice;
+
+    let sp =
+        |pos: usize, delete: usize, range: std::ops::Range<usize>| Splice { pos, delete, range };
+    let src_vals: Vec<u64> = (0..3000).map(|i| (i * 7) / 40).collect();
+    let dest_vals: Vec<u64> = (0..200).map(|i| 9000 + i / 3).collect();
+    let src: Column<u64> = src_vals.iter().copied().collect();
+
+    let cases: Vec<Vec<Splice>> = vec![
+        vec![sp(0, 0, 0..100), sp(50, 0, 200..300), sp(199, 0, 400..500)],
+        // repeated insertion point with a gap between src ranges
+        vec![sp(10, 0, 0..40), sp(10, 0, 100..140), sp(90, 0, 200..2900)],
+        // append-heavy: everything lands at the end
+        vec![sp(200, 0, 0..1500), sp(200, 0, 1500..3000)],
+        // single mid-point bulk (the invert sweet spot)
+        vec![sp(1, 0, 5..2995)],
+        // replaces and pure deletes
+        vec![sp(0, 3, 0..3), sp(10, 5, 100..102), sp(60, 20, 300..300)],
+        // contiguous replaces that normalize into one splice
+        vec![
+            sp(5, 1, 0..1),
+            sp(6, 1, 1..2),
+            sp(7, 1, 2..3),
+            sp(30, 2, 50..60),
+        ],
+        // empty and clamped ranges drop out
+        vec![sp(0, 0, 3..3), sp(7, 0, 2990..3100)],
+    ];
+
+    for splices in cases {
+        let norm = normalize_splices(splices.iter().cloned(), src.len(), dest_vals.len());
+        let mut direct: Column<u64> = dest_vals.iter().copied().collect();
+        let mut invert: Column<u64> = dest_vals.iter().copied().collect();
+        direct.copy_splices_with(src.clone(), &norm, CopyStrategy::Direct);
+        invert.copy_splices_with(src.clone(), &norm, CopyStrategy::Invert);
+
+        let mut want = Vec::new();
+        let mut prev = 0usize;
+        for sp in &norm {
+            want.extend_from_slice(&dest_vals[prev..sp.pos]);
+            want.extend_from_slice(&src_vals[sp.range.clone()]);
+            prev = sp.pos + sp.delete;
+        }
+        want.extend_from_slice(&dest_vals[prev..]);
+
+        assert_eq!(
+            direct.iter().collect::<Vec<_>>(),
+            want,
+            "direct {splices:?}"
+        );
+        assert_eq!(
+            invert.iter().collect::<Vec<_>>(),
+            want,
+            "invert {splices:?}"
+        );
+        assert_eq!(direct.save(), invert.save(), "bytes {splices:?}");
+
+        // the public API (heuristic strategy) matches too
+        let mut auto: Column<u64> = dest_vals.iter().copied().collect();
+        auto.copy_ranges(src.clone(), splices.iter().cloned());
+        assert_eq!(auto.iter().collect::<Vec<_>>(), want, "auto {splices:?}");
+    }
+}
+
+/// copy_ranges strategy equivalence with null runs in the source.
+#[test]
+fn copy_ranges_strategies_agree_nullable() {
+    use crate::column::{normalize_ranges, CopyStrategy};
+    let src_vals: Vec<Option<u64>> = (0..2000)
+        .map(|i| if i % 7 == 0 { None } else { Some(i / 30) })
+        .collect();
+    let src: Column<Option<u64>> = src_vals.iter().cloned().collect();
+    let dest_vals: Vec<Option<u64>> = vec![Some(9), None, Some(11)];
+
+    let norm = normalize_ranges([3..1200, 1300..1999], src.len());
+    let mut direct: Column<Option<u64>> = dest_vals.iter().cloned().collect();
+    let mut invert = direct.clone();
+    direct.copy_ranges_with(1, 1, src.clone(), norm.clone(), CopyStrategy::Direct);
+    invert.copy_ranges_with(1, 1, src.clone(), norm.clone(), CopyStrategy::Invert);
+
+    let mut want = dest_vals[..1].to_vec();
+    for r in &norm {
+        want.extend_from_slice(&src_vals[r.clone()]);
+    }
+    want.extend_from_slice(&dest_vals[2..]);
+    assert_eq!(direct.iter().collect::<Vec<_>>(), want);
+    assert_eq!(invert.iter().collect::<Vec<_>>(), want);
+    assert_eq!(direct.save(), invert.save());
+}
+
+/// The heuristic inverts for the motivating case (tiny destination,
+/// ranges covering nearly all of a large source) and stays direct for
+/// small scattered copies and mismatched slab budgets.
+#[test]
+fn copy_ranges_heuristic() {
+    use crate::column::{normalize_ranges, CopyStrategy};
+    let src: Column<u64> = (0..100_000u64).map(|i| i / 3).collect();
+    let dest: Column<u64> = [1u64, 2].iter().copied().collect();
+
+    let all = normalize_ranges([0..100_000], src.len());
+    assert_eq!(dest.copy_strategy(&src, &all, 1), CopyStrategy::Invert);
+
+    let scattered = normalize_ranges([50..60, 1000..1010], src.len());
+    assert_eq!(
+        dest.copy_strategy(&src, &scattered, 1),
+        CopyStrategy::Direct
+    );
+
+    // mismatched segment budgets force direct
+    let small_budget: Column<u64> = Column::with_max_segments(8);
+    assert_eq!(
+        small_budget.copy_strategy(&src, &all, 1),
+        CopyStrategy::Direct
+    );
+
+    // end-to-end through the public API (this picks Invert internally)
+    let mut dest2 = dest.clone();
+    dest2.copy_ranges(
+        src.clone(),
+        [crate::Splice {
+            pos: 1,
+            delete: 0,
+            range: 0..100_000,
+        }],
+    );
+    assert_eq!(dest2.len(), 100_002);
+    assert_eq!(dest2.get(0), Some(1));
+    assert_eq!(dest2.get(1), Some(0));
+    assert_eq!(dest2.get(100_001), Some(2));
+}
+
+/// Both strategies handle an empty destination.
+#[test]
+fn copy_ranges_into_empty_column() {
+    use crate::column::{normalize_ranges, CopyStrategy};
+    let src_vals: Vec<u64> = (0..500).map(|i| i / 9).collect();
+    let src: Column<u64> = src_vals.iter().copied().collect();
+    let norm = normalize_ranges([5..100, 200..450], src.len());
+    let want: Vec<u64> = norm
+        .iter()
+        .flat_map(|r| src_vals[r.clone()].to_vec())
+        .collect();
+    for strategy in [CopyStrategy::Direct, CopyStrategy::Invert] {
+        let mut dest = Column::<u64>::new();
+        dest.copy_ranges_with(0, 0, src.clone(), norm.clone(), strategy);
+        assert_eq!(dest.iter().collect::<Vec<_>>(), want, "{strategy:?}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "ascending")]
+fn copy_ranges_rejects_overlap() {
+    let src: Column<u64> = (0..100u64).collect();
+    let mut dest = Column::<u64>::new();
+    dest.copy_ranges(
+        src,
+        [
+            crate::Splice {
+                pos: 0,
+                delete: 0,
+                range: 10..30,
+            },
+            crate::Splice {
+                pos: 0,
+                delete: 0,
+                range: 20..40,
+            },
+        ],
+    );
+}
+
+/// PrefixIter::ranges() keeps absolute prefix totals across window jumps.
+#[test]
+fn prefix_iter_ranges_totals() {
+    use crate::Shiftable;
+    let col: PrefixColumn<u64> = (1..=20u64).collect();
+    let got: Vec<(u64, u128)> = col
+        .iter()
+        .ranges([2..4, 10..12])
+        .map(|pv| (pv.value, pv.total()))
+        .collect();
+    let want: Vec<(u64, u128)> = [2usize, 3, 10, 11]
+        .iter()
+        .map(|&i| ((i + 1) as u64, ((i + 1) * (i + 2) / 2) as u128))
+        .collect();
+    assert_eq!(got, want);
+}
+
+/// PrefixColumn::copy_ranges keeps prefix sums correct through the
+/// inverted path.
+#[test]
+fn copy_ranges_prefix_column() {
+    let src: PrefixColumn<u64> = (0..50_000u64).map(|i| 1 + i % 3).collect();
+    let expected_total: u64 = src.iter().map(|pv| pv.value).sum();
+    let mut dest: PrefixColumn<u64> = [7u64, 7].iter().copied().collect();
+    dest.copy_ranges(
+        src,
+        [crate::Splice {
+            pos: 1,
+            delete: 0,
+            range: 0..50_000,
+        }],
+    );
+    assert_eq!(dest.len(), 50_002);
+    assert_eq!(dest.get_prefix(50_002), u128::from(14 + expected_total));
+}
+
+/// Manual benchmark for the strategy cutoff:
+/// `cargo test --release copy_ranges_bench -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn copy_ranges_bench() {
+    use crate::column::{normalize_ranges, CopyStrategy};
+    use std::time::Instant;
+    let n = 1_000_000usize;
+    let src: Column<u64> = (0..n as u64).map(|i| i / 5).collect();
+    let norm = normalize_ranges([0..n], n);
+    for strategy in [CopyStrategy::Direct, CopyStrategy::Invert] {
+        let s = src.clone();
+        let mut dest: Column<u64> = [1u64, 2].iter().copied().collect();
+        let t = Instant::now();
+        dest.copy_ranges_with(1, 0, s, norm.clone(), strategy);
+        println!(
+            "full-copy {strategy:?}: {:?} (len={})",
+            t.elapsed(),
+            dest.len()
+        );
+    }
+    // scattered: 100 ranges of 1000 rows each
+    let scattered: Vec<std::ops::Range<usize>> = (0..100)
+        .map(|i| (i * 10_000)..(i * 10_000 + 1000))
+        .collect();
+    let norm = normalize_ranges(scattered, n);
+    for strategy in [CopyStrategy::Direct, CopyStrategy::Invert] {
+        let s = src.clone();
+        let mut dest: Column<u64> = [1u64, 2].iter().copied().collect();
+        let t = Instant::now();
+        dest.copy_ranges_with(1, 0, s, norm.clone(), strategy);
+        println!(
+            "scattered {strategy:?}: {:?} (len={})",
+            t.elapsed(),
+            dest.len()
+        );
+    }
 }
 
 /// [lit-1: 1][repeat-2: 1] should be [repeat-3: 1].
@@ -2067,13 +2554,13 @@ fn load_with_empty_data_and_fill_gives_filled_nullable() {
 
 #[test]
 fn load_with_empty_data_length_without_fill_errors() {
-    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5).into());
+    let err = Column::<bool>::load_with(&[], LoadOpts::new().with_length(5));
     assert!(matches!(err, Err(crate::PackError::InvalidLength(0, 5))));
 }
 
 #[test]
 fn load_with_empty_data_and_zero_length() {
-    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0).into()).unwrap();
+    let col = Column::<bool>::load_with(&[], LoadOpts::new().with_length(0)).unwrap();
     assert_eq!(col.len(), 0);
 }
 
@@ -2081,7 +2568,7 @@ fn load_with_empty_data_and_zero_length() {
 fn load_with_length_mismatch_errors() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2)]);
     let data = col.save();
-    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5).into());
+    let err = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(5));
     assert!(matches!(err, Err(crate::PackError::InvalidLength(2, 5))));
 }
 
@@ -2089,27 +2576,11 @@ fn load_with_length_mismatch_errors() {
 fn load_with_length_match_succeeds() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), None, Some(3)]);
     let data = col.save();
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(1)));
     assert_eq!(loaded.get(1), Some(None));
     assert_eq!(loaded.get(2), Some(Some(3)));
-}
-
-#[test]
-fn load_with_validation_rejects_bad_values() {
-    let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(999), None]);
-    let data = col.save();
-    fn reject_large(v: Option<u64>) -> Option<String> {
-        match v {
-            Some(n) if n > 100 => Some(format!("too large: {}", n)),
-            _ => None,
-        }
-    }
-    let err =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_validation(reject_large));
-    assert!(matches!(err, Err(crate::PackError::InvalidValue(_))));
 }
 
 #[test]
@@ -2124,14 +2595,13 @@ fn load_with_no_validation_accepts_all() {
 fn load_with_length() {
     let col = Column::<Option<u64>>::from_values(vec![Some(1), Some(2), Some(3)]);
     let data = col.save();
-    let loaded =
-        Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = Column::<Option<u64>>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.len(), 3);
 }
 
 #[test]
 fn load_with_opts_is_copy() {
-    let opts = LoadOpts::new().with_length(5).with_fill::<bool>(false);
+    let opts = LoadOpts::new().with_length(5).with_fill(false);
     let opts2 = opts; // copy
     let _ = opts; // still usable
     let _ = opts2;
@@ -2149,8 +2619,7 @@ fn prefix_column_load_with_empty_and_fill() {
 fn prefix_column_load_with_roundtrip() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false, true]);
     let data = col.save();
-    let loaded =
-        PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3).into()).unwrap();
+    let loaded = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(3)).unwrap();
     assert_eq!(loaded.save(), data);
 }
 
@@ -2158,7 +2627,7 @@ fn prefix_column_load_with_roundtrip() {
 fn prefix_column_load_with_length_mismatch() {
     let col = PrefixColumn::<bool>::from_values(vec![true, false]);
     let data = col.save();
-    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10).into());
+    let err = PrefixColumn::<bool>::load_with(&data, LoadOpts::new().with_length(10));
     assert!(err.is_err());
 }
 
@@ -2166,7 +2635,7 @@ fn prefix_column_load_with_length_mismatch() {
 fn delta_column_load_with_roundtrip() {
     let col = DeltaColumn::<Option<u64>>::from_values(vec![Some(10), None, Some(30)]);
     let data = col.save();
-    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new().into()).unwrap();
+    let loaded = DeltaColumn::<Option<u64>>::load_with(&data, LoadOpts::new()).unwrap();
     assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.get(0), Some(Some(10)));
     assert_eq!(loaded.get(1), Some(None));
@@ -2347,7 +2816,7 @@ where
             "slab {i}: segments={} exceeds max_segments={max_segments}",
             slab.segments
         );
-        let info = T::Encoding::validate_encoding(&slab.data)
+        let info = T::Encoding::<crate::Leb128>::validate_encoding(&slab.data)
             .unwrap_or_else(|e| panic!("slab {i} encoding invalid: {e}"));
         assert_eq!(slab.len, info.len, "slab {i}: len mismatch");
         assert_eq!(slab.segments, info.segments, "slab {i}: segments mismatch");
@@ -2360,12 +2829,12 @@ where
 
 fn validate_rle_column<T>(col: &Column<T>)
 where
-    T: crate::RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
+    T: crate::RleValue + crate::ColumnValueRef<Encoding<crate::Leb128> = RleEncoding<T>>,
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
     validate_column(col);
     for (i, slab) in col.slabs.iter().enumerate() {
-        let expected = compute_rle_tail::<T>(&slab.data);
+        let expected = compute_rle_tail::<T, crate::Leb128>(&slab.data);
         assert_eq!(
             slab.tail.lit_tail, expected.lit_tail,
             "slab {i}: tail.lit_tail mismatch"
@@ -2928,14 +3397,14 @@ fn merge_slab_string_literal_boundary() {
 /// Validate a single RLE slab (encoding + tail).
 fn validate_rle_column_slab<T>(slab: &Slab<RleTail>)
 where
-    T: crate::RleValue + crate::ColumnValueRef<Encoding = RleEncoding<T>>,
+    T: crate::RleValue + crate::ColumnValueRef<Encoding<crate::Leb128> = RleEncoding<T>>,
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
-    let info = rle_validate_encoding::<T>(&slab.data)
+    let info = rle_validate_encoding::<T, crate::Leb128>(&slab.data)
         .unwrap_or_else(|e| panic!("slab encoding invalid: {e}"));
     assert_eq!(slab.len, info.len, "len mismatch");
     assert_eq!(slab.segments, info.segments, "segments mismatch");
-    let expected_tail = compute_rle_tail::<T>(&slab.data);
+    let expected_tail = compute_rle_tail::<T, crate::Leb128>(&slab.data);
     assert_eq!(slab.tail.bytes, expected_tail.bytes, "tail.bytes mismatch");
     assert_eq!(
         slab.tail.lit_tail, expected_tail.lit_tail,
@@ -3027,9 +3496,7 @@ fn scope_to_value_range_truncation() {
 #[test]
 fn scope_to_value_multi_slab() {
     // Force multiple slabs with small max_segments
-    let data: Vec<u64> = (0..100)
-        .flat_map(|i| std::iter::repeat(i).take(3))
-        .collect();
+    let data: Vec<u64> = (0..100).flat_map(|i| std::iter::repeat_n(i, 3)).collect();
     let col = Column::<u64>::from_values_with_max_segments(data, 4);
     assert!(col.slab_count() > 1);
 
@@ -3054,7 +3521,7 @@ fn scope_to_value_fuzz_vs_linear() {
 
     // Build sorted data: each value i appears STEP times
     let data: Vec<u64> = (0..N)
-        .flat_map(|i| std::iter::repeat(i as u64 * 2 + 1).take(STEP as usize))
+        .flat_map(|i| std::iter::repeat_n(i as u64 * 2 + 1, STEP as usize))
         .collect();
     let col = Column::<u64>::from_values_with_max_segments(data.clone(), 8);
     assert!(col.slab_count() > 1);
@@ -3125,7 +3592,7 @@ fn remap_u64_basic() {
 #[test]
 fn remap_runs_preserved() {
     // Long runs should still be runs after remap.
-    let vals: Vec<u64> = std::iter::repeat(7).take(100).collect();
+    let vals: Vec<u64> = std::iter::repeat_n(7, 100).collect();
     let mut col = Column::<u64>::from_values(vals);
     col.remap(|v| v + 1);
     assert_eq!(col.len(), 100);
@@ -3617,7 +4084,7 @@ fn fuzz_delta_column() {
         for i in 0..300 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 4 != 0 {
+            if len == 0 || !r.is_multiple_of(4) {
                 let pos = if len == 0 {
                     0
                 } else {
@@ -3706,7 +4173,7 @@ fn fuzz_delta_column_nullable() {
             } else {
                 (xorshift(&mut rng) as usize) % (len + 1)
             };
-            let val = if xorshift(&mut rng) % 5 == 0 {
+            let val = if xorshift(&mut rng).is_multiple_of(5) {
                 None
             } else {
                 Some((xorshift(&mut rng) % 500) as u32)
@@ -3733,7 +4200,7 @@ fn fuzz_prefix_column() {
         for i in 0..300 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 4 != 0 {
+            if len == 0 || !r.is_multiple_of(4) {
                 let pos = if len == 0 {
                     0
                 } else {
@@ -3876,13 +4343,13 @@ fn fuzz_prefix_column_bool() {
         for i in 0..300 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 3 != 0 {
+            if len == 0 || !r.is_multiple_of(3) {
                 let pos = if len == 0 {
                     0
                 } else {
                     (xorshift(&mut rng) as usize) % (len + 1)
                 };
-                let val = xorshift(&mut rng) % 2 == 0;
+                let val = xorshift(&mut rng).is_multiple_of(2);
                 col.insert(pos, val);
                 mirror.insert(pos, val);
             } else {
@@ -4013,13 +4480,13 @@ fn fuzz_column_save_load_after_mutations() {
         for _ in 0..200 {
             let len = col.len();
             let r = xorshift(&mut rng);
-            if len == 0 || r % 3 != 0 {
+            if len == 0 || !r.is_multiple_of(3) {
                 let pos = if len == 0 {
                     0
                 } else {
                     (xorshift(&mut rng) as usize) % (len + 1)
                 };
-                let val = if xorshift(&mut rng) % 5 == 0 {
+                let val = if xorshift(&mut rng).is_multiple_of(5) {
                     None
                 } else {
                     Some(xorshift(&mut rng) % 100)
@@ -4142,7 +4609,7 @@ fn index_items_before_parity() {
 
     let vals: Vec<u64> = (0..500u64).collect();
     let btree = Column::<u64>::from_values_with_max_segments(vals.clone(), 4);
-    let bit: Column<u64, LenWeight, BitIndex<usize>> =
+    let bit: Column<u64, crate::Leb128, LenWeight, BitIndex<usize>> =
         Column::from_values_with_max_segments(vals, 4);
     assert!(btree.slab_count() > 1);
 
@@ -4176,7 +4643,7 @@ fn bool_into_slab_tail_multibyte_leb() {
     let mut vals = vec![false; 200];
     vals.extend(vec![true; 200]);
     let slab = Encoder::<bool>::encode_slab(vals);
-    let info = BoolEncoding::validate_encoding(&slab.data).unwrap();
+    let info = BoolEncoding::<crate::Leb128>::validate_encoding(&slab.data).unwrap();
     assert_eq!(slab.tail, info.tail, "into_slab tail vs validated tail");
 }
 
@@ -4204,7 +4671,7 @@ fn max_segments_one_rejected() {
 #[should_panic(expected = "max_segments must be at least 2")]
 fn max_segments_one_rejected_at_load() {
     let bytes = Column::<u64>::from_values((0..50).collect()).save();
-    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1).into());
+    let _ = Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(1));
 }
 
 #[test]
@@ -4218,7 +4685,7 @@ fn max_segments_two_full_cycle() {
     col.insert(10, 999u64);
     let bytes = col.save();
     let mut loaded =
-        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2).into()).unwrap();
+        Column::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(2)).unwrap();
     loaded.remove(0);
     loaded.push(7);
     assert_eq!(loaded.len(), 100);
@@ -4363,4 +4830,880 @@ fn golden_format_delta_opt_i64() {
     );
     let loaded = DeltaColumn::<Option<i64>>::load(fixture).unwrap();
     assert_eq!(loaded.to_vec(), values);
+}
+
+#[test]
+fn next_run_merges_across_slabs_strings_and_prefix() {
+    // Slab cuts land on run boundaries, so adjacent slabs holding equal
+    // values arise from edits: here replacing the value just before a slab
+    // boundary with the value just after it. next_run must merge the two
+    // physical runs — a caller should never observe slab boundaries.
+    let vals: Vec<Option<String>> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|s| Some(s.to_string()))
+        .collect();
+    let mut col = Column::<Option<String>>::from_values_with_max_segments(vals, 2);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+    // replace "b" (end of slab 1) with "c" (start of slab 2)
+    col.splice(1, 1, vec![Some("c".to_string())]);
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+    assert!(
+        !col.slab_lens().contains(&0),
+        "splices must never leave empty slabs behind"
+    );
+    let mut iter = col.iter();
+    let runs: Vec<(usize, Option<String>)> = std::iter::from_fn(|| {
+        iter.next_run()
+            .map(|r| (r.count, r.value.map(|s| s.to_string())))
+    })
+    .collect();
+    assert_eq!(
+        runs,
+        vec![
+            (1, Some("a".to_string())),
+            (2, Some("c".to_string())),
+            (1, Some("d".to_string())),
+        ],
+        "equal-valued runs must merge across slab boundaries"
+    );
+
+    // Same shape for the bool prefix column (the automerge insert column):
+    // deleting the `true` at the start of slab 2 leaves false|false at the
+    // boundary.
+    let mut col = PrefixColumn::<bool>::with_max_segments(2);
+    col.splice(0, 0, vec![true, false, true, false]);
+    assert!(col.slab_count() > 1, "need multiple slabs for this test");
+    col.splice(2, 1, Vec::<bool>::new());
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+    assert!(
+        !col.values().slab_lens().contains(&0),
+        "splices must never leave empty slabs behind"
+    );
+    let mut iter = col.iter();
+    let runs: Vec<(usize, bool)> =
+        std::iter::from_fn(|| iter.next_run().map(|r| (r.count, r.value.value))).collect();
+    assert_eq!(
+        runs,
+        vec![(1, true), (2, false)],
+        "prefix iter runs must merge across slab boundaries"
+    );
+}
+
+#[test]
+fn next_run_never_yields_adjacent_equal_runs_at_default_config() {
+    // ~150 runs at the default max_segments so slabs split naturally, then
+    // an edit makes the values on both sides of the first slab boundary
+    // equal. The contract: next_run coalesces runs regardless of slab
+    // layout, so consecutive runs never carry equal values.
+    let vals: Vec<Option<String>> = (0..300).map(|i| Some(format!("k{}", i / 2))).collect();
+    let mut col = Column::<Option<String>>::from_values(vals);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    let boundary = col.slab_lens()[0];
+    let after: Option<String> = col.get(boundary).flatten().map(|v| v.to_string());
+    col.splice(boundary - 1, 1, vec![after]);
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+
+    let mut iter = col.iter();
+    let mut total = 0;
+    let mut prev: Option<Option<String>> = None;
+    while let Some(run) = iter.next_run() {
+        let value = run.value.map(|s| s.to_string());
+        if let Some(prev) = &prev {
+            assert_ne!(prev, &value, "adjacent runs must never be equal");
+        }
+        total += run.count;
+        prev = Some(value);
+    }
+    assert_eq!(total, 300);
+
+    // same contract for the bool prefix column: delete the `true` at (or
+    // just before) the first slab boundary, leaving false|false across it
+    let vals: Vec<bool> = (0..300).map(|i| i % 2 == 0).collect();
+    let mut col = PrefixColumn::<bool>::new();
+    col.splice(0, 0, vals);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    let boundary = col.values().slab_lens()[0];
+    let at_boundary = col.get(boundary).map(|pv| pv.value).unwrap_or(false);
+    let del = if at_boundary { boundary } else { boundary - 1 };
+    col.splice(del, 1, Vec::<bool>::new());
+    assert!(
+        col.slab_count() > 1,
+        "edit should not have merged the slabs"
+    );
+
+    let mut iter = col.iter();
+    let mut total = 0;
+    let mut prev: Option<bool> = None;
+    while let Some(run) = iter.next_run() {
+        let value = run.value.value;
+        if let Some(prev) = prev {
+            assert_ne!(prev, value, "adjacent runs must never be equal");
+        }
+        total += run.count;
+        prev = Some(value);
+    }
+    assert_eq!(total, 299);
+}
+
+// ── streaming load (load_iter-backed load_with) ─────────────────────────────
+
+fn assert_load_roundtrip_bytes<T>(saved: &[u8], expected_len: usize)
+where
+    T: crate::RleValue
+        + crate::ColumnValueRef<Encoding<crate::Leb128> = crate::RleEncoding<T>>
+        + for<'a> crate::ColumnValueRef<Get<'a> = T>
+        + Clone
+        + PartialEq
+        + std::fmt::Debug
+        + 'static,
+{
+    for max_seg in [2usize, 4, 8, 64] {
+        let col =
+            Column::<T>::load_with(saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        assert_eq!(col.len(), expected_len, "len, max_seg={max_seg}");
+        assert_eq!(col.save(), saved, "save roundtrip, max_seg={max_seg}");
+    }
+}
+
+#[test]
+fn load_roundtrips_across_shapes() {
+    // long literal run (forces literal splitting), repeats, mixed
+    for vals in [
+        (0..300).collect::<Vec<u64>>(),
+        (0..300).map(|i| i / 50).collect(),
+        (0..300).map(|i| if i % 7 == 0 { i } else { 9 }).collect(),
+    ] {
+        let saved = Column::<u64>::from_values(vals.clone()).save();
+        assert_load_roundtrip_bytes::<u64>(&saved, vals.len());
+    }
+
+    let nullable: Vec<Option<u64>> = (0..200)
+        .map(|i| if i % 5 == 0 { None } else { Some(i / 3) })
+        .collect();
+    let saved = Column::<Option<u64>>::from_values(nullable.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col =
+            Column::<Option<u64>>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg))
+                .unwrap();
+        assert_eq!(col.to_vec(), nullable);
+        assert_eq!(col.save(), saved);
+    }
+
+    let strings: Vec<String> = (0..100)
+        .map(|i| {
+            if i % 4 == 0 {
+                "repeated".to_string()
+            } else {
+                format!("item_{i}")
+            }
+        })
+        .collect();
+    let saved = Column::<String>::from_values(strings.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col = Column::<String>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg))
+            .unwrap();
+        assert_eq!(col.to_vec(), strings);
+        assert_eq!(col.save(), saved);
+    }
+
+    let bools: Vec<bool> = (0..500).map(|i| (i / 13) % 2 == 0).collect();
+    let saved = Column::<bool>::from_values(bools.clone()).save();
+    for max_seg in [2usize, 8, 64] {
+        let col =
+            Column::<bool>::load_with(&saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        assert_eq!(col.to_vec(), bools);
+        assert_eq!(col.save(), saved);
+    }
+
+    // prefix column: weights must come out right for prefix queries
+    let counts: Vec<u32> = (0..400).map(|i| (i % 5) as u32).collect();
+    let saved = PrefixColumn::<u32>::from_values(counts.clone()).save();
+    let col = PrefixColumn::<u32>::load_with(&saved, LoadOpts::new()).unwrap();
+    let mut total = 0u64;
+    for (pos, c) in counts.iter().enumerate() {
+        assert_eq!(col.get_prefix(pos), total, "prefix at {pos}");
+        total += *c as u64;
+    }
+    assert_eq!(col.get_prefix(counts.len()), total);
+}
+
+#[test]
+fn load_empty_and_fill_and_length() {
+    let col =
+        Column::<u64>::load_with(&[], LoadOpts::new().with_length(5).with_fill(7u64)).unwrap();
+    assert_eq!(col.to_vec(), vec![7u64; 5]);
+    assert!(Column::<u64>::load_with(&[], LoadOpts::new().with_length(5)).is_err());
+
+    // length mismatch caught
+    let saved = Column::<u64>::from_values((0..10).collect()).save();
+    assert!(Column::<u64>::load_with(&saved, LoadOpts::new().with_length(11)).is_err());
+}
+
+#[test]
+fn load_rejects_non_canonical_input() {
+    // Non-canonical run structure — anything a canonical encoder would
+    // have merged or never emitted — is a load error, both when draining
+    // (`load_with`) and when pulling the run stream.
+    let cases: &[&[u8]] = &[
+        &[0x01, 0x05],             // repeat with count 1
+        &[0x02, 0x05, 0x02, 0x05], // adjacent equal repeats
+        &[0x02, 0x05, 0x7f, 0x05], // repeat then equal literal
+        &[0x7f, 0x05, 0x7f, 0x05], // adjacent literal runs
+        &[0x7e, 0x05, 0x05],       // literal with consecutive equal values
+        &[0x7f, 0x05, 0x02, 0x05], // literal then equal repeat
+        &[0x00, 0x00],             // null run with count 0 (nullable col below)
+    ];
+    for bytes in cases {
+        assert!(
+            Column::<u64>::load_with(bytes, LoadOpts::new()).is_err(),
+            "load should reject {bytes:?}"
+        );
+        let mut it = crate::RleEncoding::<u64>::load_iter(bytes, 64);
+        let mut errored = false;
+        loop {
+            match crate::LoadIterApi::try_next_run(&mut it) {
+                Err(_) => {
+                    errored = true;
+                    break;
+                }
+                Ok(None) => break,
+                Ok(Some(_)) => {}
+            }
+        }
+        assert!(errored, "run stream should reject {bytes:?}");
+    }
+    // adjacent null runs (needs a nullable column)
+    let adjacent_nulls: &[u8] = &[0x00, 0x01, 0x00, 0x01];
+    assert!(Column::<Option<u64>>::load_with(adjacent_nulls, LoadOpts::new()).is_err());
+    // count-0 null run
+    let zero_null: &[u8] = &[0x00, 0x00];
+    assert!(Column::<Option<u64>>::load_with(zero_null, LoadOpts::new()).is_err());
+}
+
+#[test]
+fn load_rejects_bad_contents() {
+    // null in non-nullable
+    assert!(Column::<u64>::load_with(&[0x00, 0x01], LoadOpts::new()).is_err());
+    // truncated value bytes
+    assert!(Column::<u64>::load_with(&[0x02], LoadOpts::new()).is_err());
+    // invalid utf8 in a string column: repeat count 2, len 1, 0xff
+    assert!(Column::<String>::load_with(&[0x02, 0x01, 0xff], LoadOpts::new()).is_err());
+}
+
+#[test]
+fn load_iter_partial_consume_then_error() {
+    use crate::encoding::LoadIterApi;
+    // one valid run followed by a malformed tail: the error surfaces when
+    // the iterator reaches it, not before
+    let mut bytes = Column::<u64>::from_values(vec![5, 5, 5]).save();
+    bytes.extend_from_slice(&[0x03]); // repeat header with missing value
+    let mut iter = crate::RleEncoding::<u64>::load_iter(&bytes, 64);
+    let first = LoadIterApi::try_next_run(&mut iter);
+    match first {
+        Err(_) => {}
+        Ok(_) => assert!(LoadIterApi::try_next_run(&mut iter).is_err()),
+    }
+
+    // run iteration over valid bytes
+    let good = Column::<u64>::from_values(vec![5, 5, 5]).save();
+    let mut it = crate::RleEncoding::<u64>::load_iter(&good, 64);
+    let run = LoadIterApi::try_next_run(&mut it).unwrap().unwrap();
+    assert_eq!((run.count, run.value), (3, 5));
+    assert!(LoadIterApi::try_next_run(&mut it).unwrap().is_none());
+}
+
+proptest! {
+    #[test]
+    fn load_roundtrip_proptest_streaming(
+        values in prop::collection::vec(prop::option::of(0u64..50), 0..600),
+        max_seg in 2usize..32,
+    ) {
+        let saved = Column::<Option<u64>>::from_values(values.clone()).save();
+        let col = Column::<Option<u64>>::load_with(
+            &saved, LoadOpts::new().with_max_segments(max_seg)).unwrap();
+        prop_assert_eq!(col.to_vec(), values);
+        prop_assert_eq!(col.save(), saved);
+    }
+}
+
+// ── Incremental weight accumulation during load ─────────────────────────────
+//
+// `WF::ACCUMULATES` weights (prefix sums, delta aggregates) are built as
+// runs stream past the loader instead of a `WF::compute` re-decode at
+// `finalize`. Every query below descends the index through the
+// accumulated weights, so a mismatch with `compute` semantics fails.
+
+#[test]
+fn load_accumulates_prefix_weights() {
+    let mut seed = 0x5EEDu64;
+    let vals: Vec<u64> = (0..5_000).map(|_| xorshift(&mut seed) % 7).collect();
+    let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
+    // small max_segments → many slabs → many boundary attributions
+    let col = PrefixColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+
+    let mut running = 0u128;
+    for (i, &v) in vals.iter().enumerate() {
+        let pv = col.get(i).unwrap();
+        assert_eq!(pv.value, v, "value at {i}");
+        assert_eq!(pv.prefix(), running, "prefix at {i}");
+        running += v as u128;
+        assert_eq!(pv.total(), running, "total at {i}");
+    }
+}
+
+#[test]
+fn load_accumulates_prefix_weights_partial_consume() {
+    // consumer pulls some runs before finalize; the weights must come
+    // out the same as an untouched load
+    let mut seed = 0xACC0u64;
+    let vals: Vec<u64> = (0..2_000).map(|_| xorshift(&mut seed) % 5).collect();
+    let saved = PrefixColumn::<u64>::from_values(vals.clone()).save();
+
+    let mut iter = PrefixColumn::<u64>::load_iter(&saved, LoadOpts::new().with_max_segments(4));
+    for _ in 0..25 {
+        iter.try_next_run().unwrap().unwrap();
+    }
+    let col = iter.finalize().unwrap();
+
+    let mut running = 0u128;
+    for (i, &v) in vals.iter().enumerate() {
+        let pv = col.get(i).unwrap();
+        assert_eq!((pv.value, pv.total()), (v, running + v as u128), "at {i}");
+        running += v as u128;
+    }
+}
+
+#[test]
+fn prefix_load_rejects_non_canonical_input() {
+    // Adjacent equal repeat runs are a load error for accumulating
+    // (prefix/delta) columns too — the canonicality check runs at the
+    // wire level, beneath the weight machinery.
+    let bytes: Vec<u8> = [0x02, 0x05].repeat(200);
+    assert!(PrefixColumn::<u64>::load_with(&bytes, LoadOpts::new().with_max_segments(4)).is_err());
+}
+
+#[test]
+fn load_accumulates_delta_agg_weights() {
+    let mut seed = 0xDE17Au64;
+    let vals: Vec<u64> = (0..3_000).map(|_| xorshift(&mut seed) % 100).collect();
+    let saved = DeltaColumn::<u64>::from_values(vals.clone()).save();
+    let col = DeltaColumn::<u64>::load_with(&saved, LoadOpts::new().with_max_segments(4)).unwrap();
+
+    assert_eq!(col.iter().collect::<Vec<_>>(), vals);
+    // find_by_value prunes slabs via the accumulated min/max aggregates
+    // and realizes values from the accumulated totals
+    for target in 0..100 {
+        let got: Vec<usize> = col.find_by_value(target).collect();
+        let want: Vec<usize> = vals
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v == target)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(got, want, "find_by_value({target})");
+    }
+}
+
+#[test]
+fn load_accumulates_delta_agg_weights_nullable() {
+    let mut seed = 0x0511u64;
+    let vals: Vec<Option<i64>> = (0..3_000)
+        .map(|_| {
+            let r = xorshift(&mut seed);
+            if r.is_multiple_of(10) {
+                None
+            } else {
+                Some((r % 200) as i64 - 100)
+            }
+        })
+        .collect();
+    let saved = DeltaColumn::<Option<i64>>::from_values(vals.clone()).save();
+    let col = DeltaColumn::<Option<i64>>::load_with(&saved, LoadOpts::new().with_max_segments(4))
+        .unwrap();
+
+    assert_eq!(col.iter().collect::<Vec<_>>(), vals);
+    for target in -100i64..100 {
+        let got: Vec<usize> = col.find_by_value(Some(target)).collect();
+        let want: Vec<usize> = vals
+            .iter()
+            .enumerate()
+            .filter(|(_, &v)| v == Some(target))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(got, want, "find_by_value({target})");
+    }
+}
+
+/// An iterator born over an empty range must still be *positioned* at
+/// its start: windows get re-extended (`set_max`/`shift`) and then
+/// advanced, and an unpositioned iterator either yields nothing
+/// (`next`) or trips `advance_to_slab`'s `pos >= self.pos` invariant
+/// (`nth`) when the start sits mid-slab.
+#[test]
+fn empty_born_iter_extends_with_next() {
+    let mut c: Column<u64> = Column::default();
+    for i in 0..40u64 {
+        c.push(i);
+    }
+    let mut it = c.iter_range(5..5);
+    assert_eq!(it.pos(), 5);
+    assert_eq!(it.next(), None);
+    it.set_max(8);
+    assert_eq!(it.next(), Some(5), "extended empty-born iter yields at pos");
+    assert_eq!(it.next(), Some(6));
+    assert_eq!(it.pos(), 7);
+}
+
+#[test]
+fn empty_born_iter_extends_with_shift() {
+    // mirrors automerge's batch apply: a scope narrows to p..p, the
+    // next object switch shifts the same iterator forward
+    let mut c: Column<u64> = Column::default();
+    for i in 0..40u64 {
+        c.push(i);
+    }
+    let mut it = c.iter_range(5..5);
+    it.shift(6..6);
+    assert_eq!(it.pos(), 6);
+    it.set_max(10);
+    assert_eq!(it.next(), Some(6));
+}
+
+#[test]
+fn empty_born_iter_multi_slab_nth() {
+    let mut c: Column<u64> = Column::default();
+    for i in 0..2000u64 {
+        c.push(i);
+    }
+    assert!(c.slab_count() > 1, "need multiple slabs");
+    let mut it = c.iter_range(1000..1000);
+    it.set_max(c.len());
+    // far nth exercises the slab-jump slow path
+    assert_eq!(it.nth(500), Some(1500));
+    assert_eq!(it.pos(), 1501);
+    // empty-born at/past the data end stays a clean end iterator
+    let mut end_it = c.iter_range(2000..2000);
+    end_it.set_max(3000);
+    assert_eq!(end_it.next(), None);
+}
+
+#[test]
+fn delta_scope_to_value_basic() {
+    // same shape as scope_to_value_basic, delta-encoded
+    let data: Vec<u64> = vec![
+        2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 8, 9, 9,
+    ];
+    let col = DeltaColumn::<u64>::from_values(data);
+
+    assert_eq!(col.scope_to_value(4, ..), 7..15);
+    assert_eq!(col.scope_to_value(4, ..11), 7..11);
+    assert_eq!(col.scope_to_value(4, ..8), 7..8);
+    assert_eq!(col.scope_to_value(4, 0..1), 1..1);
+    assert_eq!(col.scope_to_value(4, 8..9), 8..9);
+    assert_eq!(col.scope_to_value(4, 9..), 9..15);
+    assert_eq!(col.scope_to_value(4, 14..16), 14..15);
+
+    assert_eq!(col.scope_to_value(2, ..), 0..3);
+    assert_eq!(col.scope_to_value(7, ..), 22..22);
+    assert_eq!(col.scope_to_value(8, ..), 22..23);
+    assert_eq!(col.scope_to_value(9, ..), 23..25);
+    // insertion points at the extremes
+    assert_eq!(col.scope_to_value(1, ..), 0..0);
+    assert_eq!(col.scope_to_value(10, ..), 25..25);
+}
+
+#[test]
+fn delta_scope_to_value_nullable() {
+    // nulls sort first
+    let data: Vec<Option<i64>> = vec![
+        None,
+        None,
+        Some(-5),
+        Some(-5),
+        Some(0),
+        Some(3),
+        Some(3),
+        Some(3),
+        Some(7),
+    ];
+    let col = DeltaColumn::<Option<i64>>::from_values(data);
+
+    assert_eq!(col.scope_to_value(None, ..), 0..2);
+    assert_eq!(col.scope_to_value(Some(-5), ..), 2..4);
+    assert_eq!(col.scope_to_value(Some(3), ..), 5..8);
+    assert_eq!(col.scope_to_value(Some(1), ..), 5..5);
+    assert_eq!(col.scope_to_value(Some(7), 6..), 8..9);
+}
+
+#[test]
+fn delta_scope_to_value_matches_plain_column() {
+    // multi-slab sorted data: the delta version's tree descent must
+    // agree with the plain column's scan on every target and window
+    use rand::RngExt;
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(31415);
+    for _ in 0..20 {
+        let mut vals: Vec<u64> = (0..2000).map(|_| rng.random_range(0..300u64)).collect();
+        vals.sort();
+        let plain = Column::<u64>::from_values(vals.clone());
+        let delta = DeltaColumn::<u64>::from_values(vals.clone());
+        assert!(delta.slab_count() > 1, "need multiple slabs");
+        for _ in 0..200 {
+            let target = rng.random_range(0..310u64);
+            let a = rng.random_range(0..=vals.len());
+            let b = rng.random_range(0..=vals.len());
+            let (lo, hi) = (a.min(b), a.max(b));
+            assert_eq!(
+                delta.scope_to_value(target, lo..hi),
+                plain.scope_to_value(target, lo..hi),
+                "target {target} window {lo}..{hi}"
+            );
+        }
+    }
+}
+
+// ── Alternate-codec plumbing ─────────────────────────────────────────────────
+//
+// End-to-end proof that the codec parameter reaches every path: a toy
+// length-prefixed big-endian codec, wire-incompatible with LEB128, driven
+// through column build / splice / save / load / bool / delta / string.
+mod alt_codec {
+    use crate::codec::{Codec, VarBuf};
+    use crate::{Column, DeltaColumn, Leb128, PackError};
+
+    /// Test codec: one length byte (0–8), then that many big-endian bytes
+    /// of the value (minimal — no leading zero bytes).  Signed via zigzag.
+    /// Deliberately nothing like LEB128, so any path that misses the codec
+    /// parameter produces garbage and fails the roundtrip.
+    #[derive(Debug)]
+    struct BeLen;
+
+    fn zigzag(n: i64) -> u64 {
+        ((n << 1) ^ (n >> 63)) as u64
+    }
+    fn unzigzag(z: u64) -> i64 {
+        ((z >> 1) as i64) ^ -((z & 1) as i64)
+    }
+
+    impl Codec for BeLen {
+        fn encode_unsigned(n: u64) -> VarBuf {
+            let mut out = VarBuf::new();
+            let len = (8 - n.leading_zeros() as usize / 8).min(8);
+            out.push(len as u8);
+            for i in (0..len).rev() {
+                out.push((n >> (i * 8)) as u8);
+            }
+            out
+        }
+        fn encode_signed(n: i64) -> VarBuf {
+            Self::encode_unsigned(zigzag(n))
+        }
+        fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
+            let len = *data.first()? as usize;
+            if len > 8 || data.len() < 1 + len {
+                return None;
+            }
+            let mut v = 0u64;
+            for &b in &data[1..1 + len] {
+                v = (v << 8) | b as u64;
+            }
+            Some((1 + len, v))
+        }
+        fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
+            let (n, z) = Self::read_unsigned(data)?;
+            Some((n, unzigzag(z)))
+        }
+        fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
+            Self::read_unsigned(data).ok_or(PackError::BadFormat)
+        }
+        fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
+            Self::read_signed(data).ok_or(PackError::BadFormat)
+        }
+        /// Length from the first byte — no decode, like bijou64.
+        fn unsigned_len(data: &[u8]) -> Option<usize> {
+            let len = *data.first()? as usize;
+            (len <= 8 && data.len() > len).then_some(1 + len)
+        }
+        fn signed_len(data: &[u8]) -> Option<usize> {
+            Self::unsigned_len(data)
+        }
+    }
+
+    #[test]
+    fn prefix_column() {
+        use crate::PrefixColumn;
+        let values: Vec<u64> = (1..100u64).collect();
+        let mut col: PrefixColumn<u64, BeLen> = PrefixColumn::default();
+        col.splice(0, 0usize, values.clone());
+        assert_eq!(col.values().to_vec(), values);
+        // prefix sums: seek to the position where the running total crosses
+        let leb: PrefixColumn<u64> = {
+            let mut c = PrefixColumn::default();
+            c.splice(0, 0usize, values.clone());
+            c
+        };
+        assert_ne!(col.values().save(), leb.values().save());
+    }
+
+    #[test]
+    fn u64_column_roundtrip_and_wire_divergence() {
+        let values: Vec<u64> = (0..500u64).map(|i| i * 37 % 1000).collect();
+        let leb: Column<u64> = Column::from_values(values.clone());
+        let alt: Column<u64, BeLen> = Column::from_values(values.clone());
+        assert_eq!(alt.to_vec(), values);
+        assert_ne!(
+            leb.save(),
+            alt.save(),
+            "codecs must produce different bytes"
+        );
+        // save → load in the same codec
+        let loaded = Column::<u64, BeLen>::load(&alt.save()).unwrap();
+        assert_eq!(loaded.to_vec(), values);
+        // loading alt bytes as LEB128 must not silently succeed with the
+        // same values
+        let cross = Column::<u64>::load(&alt.save());
+        assert!(cross.is_err() || cross.unwrap().to_vec() != values);
+    }
+
+    #[test]
+    fn splice_and_nullable() {
+        let mut col: Column<Option<u64>, BeLen> = Column::new();
+        col.splice(0, 0, vec![Some(1u64), None, None, Some(300), Some(300)]);
+        col.splice(2, 1, vec![Some(70000u64)]);
+        assert_eq!(
+            col.to_vec(),
+            vec![Some(1), None, Some(70000), Some(300), Some(300)]
+        );
+        let loaded = Column::<Option<u64>, BeLen>::load(&col.save()).unwrap();
+        assert_eq!(loaded.to_vec(), col.to_vec());
+    }
+
+    #[test]
+    fn string_and_bool_columns() {
+        let strings = vec!["alpha", "alpha", "beta", "gamma"];
+        let mut scol: Column<String, BeLen> = Column::new();
+        scol.splice(0, 0, strings.clone());
+        let sloaded = Column::<String, BeLen>::load(&scol.save()).unwrap();
+        assert_eq!(sloaded.iter().collect::<Vec<_>>(), strings);
+
+        let bools = vec![true, true, false, true, false, false, false, true];
+        let mut bcol: Column<bool, BeLen> = Column::new();
+        bcol.splice(0, 0, bools.clone());
+        let bloaded = Column::<bool, BeLen>::load(&bcol.save()).unwrap();
+        assert_eq!(bloaded.to_vec(), bools);
+    }
+
+    #[test]
+    fn delta_column() {
+        let values: Vec<u64> = (0..200u64).map(|i| i * 3).collect();
+        let col: DeltaColumn<u64, BeLen> = values.iter().copied().collect();
+        assert_eq!(col.iter().collect::<Vec<_>>(), values);
+        let leb_col: DeltaColumn<u64, Leb128> = values.iter().copied().collect();
+        assert_ne!(col.save(), leb_col.save());
+        let loaded = DeltaColumn::<u64, BeLen>::load(&col.save()).unwrap();
+        assert_eq!(loaded.iter().collect::<Vec<_>>(), values);
+    }
+}
+
+// ── Bijou64 codec (feature-gated) ───────────────────────────────────────────
+#[cfg(feature = "bijou64")]
+mod bijou64_codec {
+    use crate::codec::Codec;
+    use crate::{Bijou64, Column, DeltaColumn, Leb128, PrefixColumn};
+
+    /// Tier boundaries from the bijou64 spec, plus extremes.
+    const UNSIGNED_EDGES: &[u64] = &[
+        0,
+        1,
+        247,
+        248,
+        503,
+        504,
+        66_039,
+        66_040,
+        16_843_255,
+        16_843_256,
+        4_311_810_551,
+        4_311_810_552,
+        u64::MAX - 1,
+        u64::MAX,
+    ];
+
+    const SIGNED_EDGES: &[i64] = &[0, 1, -1, 123, 124, -124, -125, i64::MAX, i64::MIN];
+
+    #[test]
+    fn codec_roundtrip_boundaries() {
+        for &v in UNSIGNED_EDGES {
+            let enc = Bijou64::encode_unsigned(v);
+            assert_eq!(enc.len() as u64, Bijou64::unsigned_size(v), "size {v}");
+            assert_eq!(
+                Bijou64::unsigned_len(&enc),
+                Some(enc.len()),
+                "len-from-first-byte {v}"
+            );
+            assert_eq!(Bijou64::read_unsigned(&enc), Some((enc.len(), v)));
+        }
+        for &v in SIGNED_EDGES {
+            let enc = Bijou64::encode_signed(v);
+            assert_eq!(enc.len() as u64, Bijou64::signed_size(v), "size {v}");
+            assert_eq!(Bijou64::read_signed(&enc), Some((enc.len(), v)));
+        }
+        // zigzag keeps small signed values in one byte, wider than LEB128
+        assert_eq!(Bijou64::signed_size(123), 1);
+        assert_eq!(Bijou64::signed_size(-124), 1);
+        assert_eq!(Leb128::signed_size(123), 2);
+    }
+
+    #[test]
+    fn truncated_input_errors() {
+        let enc = Bijou64::encode_unsigned(70_000);
+        assert!(enc.len() > 1);
+        for cut in 0..enc.len() {
+            assert!(Bijou64::read_unsigned(&enc[..cut]).is_none(), "cut {cut}");
+            assert!(
+                Bijou64::try_read_unsigned(&enc[..cut]).is_err(),
+                "cut {cut}"
+            );
+        }
+    }
+
+    /// Tier-8 payloads whose offset+payload exceeds u64::MAX are the one
+    /// non-canonical byte pattern the format admits — must be rejected.
+    #[test]
+    fn tier8_overflow_rejected() {
+        let bytes = [0xFFu8; 9]; // offset[8] + (2^64 - 1) overflows
+        assert!(Bijou64::read_unsigned(&bytes).is_none());
+        assert!(Bijou64::try_read_unsigned(&bytes).is_err());
+        // u64::MAX itself decodes fine
+        let enc = Bijou64::encode_unsigned(u64::MAX);
+        assert_eq!(Bijou64::read_unsigned(&enc), Some((9, u64::MAX)));
+    }
+
+    /// Spec wire-format check: exact bytes for the documented tier table,
+    /// matching the reference `bijou64` crate.
+    #[test]
+    fn wire_format_matches_spec() {
+        assert_eq!(&*Bijou64::encode_unsigned(0), &[0x00]);
+        assert_eq!(&*Bijou64::encode_unsigned(247), &[0xF7]);
+        assert_eq!(&*Bijou64::encode_unsigned(248), &[0xF8, 0x00]);
+        assert_eq!(&*Bijou64::encode_unsigned(503), &[0xF8, 0xFF]);
+        assert_eq!(&*Bijou64::encode_unsigned(504), &[0xF9, 0x00, 0x00]);
+        assert_eq!(&*Bijou64::encode_unsigned(66_039), &[0xF9, 0xFF, 0xFF]);
+        assert_eq!(
+            &*Bijou64::encode_unsigned(66_040),
+            &[0xFA, 0x00, 0x00, 0x00]
+        );
+        // big-endian payload: lexicographic byte order == numeric order
+        assert!(
+            Bijou64::encode_unsigned(1000).as_bytes() < Bijou64::encode_unsigned(2000).as_bytes()
+        );
+    }
+
+    #[test]
+    fn u64_column_roundtrip_and_wire_divergence() {
+        let values: Vec<u64> = (0..500u64)
+            .map(|i| i * 37 % 1000)
+            .chain(UNSIGNED_EDGES.iter().copied())
+            .collect();
+        let leb: Column<u64> = Column::from_values(values.clone());
+        let alt: Column<u64, Bijou64> = Column::from_values(values.clone());
+        assert_eq!(alt.to_vec(), values);
+        assert_ne!(
+            leb.save(),
+            alt.save(),
+            "codecs must produce different bytes"
+        );
+        let loaded = Column::<u64, Bijou64>::load(&alt.save()).unwrap();
+        assert_eq!(loaded.to_vec(), values);
+    }
+
+    #[test]
+    fn splice_and_nullable() {
+        let mut col: Column<Option<u64>, Bijou64> = Column::new();
+        col.splice(0, 0, vec![Some(1u64), None, None, Some(300), Some(300)]);
+        col.splice(2, 1, vec![Some(70000u64)]);
+        assert_eq!(
+            col.to_vec(),
+            vec![Some(1), None, Some(70000), Some(300), Some(300)]
+        );
+        let loaded = Column::<Option<u64>, Bijou64>::load(&col.save()).unwrap();
+        assert_eq!(loaded.to_vec(), col.to_vec());
+    }
+
+    #[test]
+    fn string_bool_delta_prefix_columns() {
+        let strings = vec!["alpha", "alpha", "beta", "gamma"];
+        let mut scol: Column<String, Bijou64> = Column::new();
+        scol.splice(0, 0, strings.clone());
+        let sloaded = Column::<String, Bijou64>::load(&scol.save()).unwrap();
+        assert_eq!(sloaded.iter().collect::<Vec<_>>(), strings);
+
+        let bools = vec![true, true, false, true, false, false, false, true];
+        let mut bcol: Column<bool, Bijou64> = Column::new();
+        bcol.splice(0, 0, bools.clone());
+        let bloaded = Column::<bool, Bijou64>::load(&bcol.save()).unwrap();
+        assert_eq!(bloaded.to_vec(), bools);
+
+        let values: Vec<u64> = (0..200u64).map(|i| i * 3).collect();
+        let dcol: DeltaColumn<u64, Bijou64> = values.iter().copied().collect();
+        assert_eq!(dcol.iter().collect::<Vec<_>>(), values);
+        let dloaded = DeltaColumn::<u64, Bijou64>::load(&dcol.save()).unwrap();
+        assert_eq!(dloaded.iter().collect::<Vec<_>>(), values);
+
+        let mut pcol: PrefixColumn<u64, Bijou64> = PrefixColumn::default();
+        pcol.splice(0, 0usize, values.clone());
+        assert_eq!(pcol.values().to_vec(), values);
+    }
+
+    /// The canonicality argument: bytes that round-trip re-encode to the
+    /// same bytes, for every column save.
+    #[test]
+    fn save_load_save_is_identity() {
+        let values: Vec<u64> = (0..2000u64)
+            .map(|i| i.wrapping_mul(0x9E37) % 100_000)
+            .collect();
+        let col: Column<u64, Bijou64> = Column::from_values(values);
+        let bytes = col.save();
+        let re = Column::<u64, Bijou64>::load(&bytes).unwrap().save();
+        assert_eq!(bytes, re);
+    }
+}
+
+#[cfg(feature = "bijou64")]
+mod codec_modules {
+    #[test]
+    fn module_aliases_pick_the_codec() {
+        let vals: Vec<u64> = (0..300u64).collect();
+
+        let leb = {
+            use crate::leb128::Column;
+            let mut c = Column::<u64>::new();
+            c.splice(0, 0, vals.clone());
+            c.save()
+        };
+        let bij = {
+            use crate::bijou::Column;
+            let mut c = Column::<u64>::new();
+            c.splice(0, 0, vals.clone());
+            c.save()
+        };
+        assert_ne!(leb, bij);
+        assert_eq!(
+            crate::leb128::decoder::<u64>(&leb).collect::<Vec<_>>(),
+            vals
+        );
+        assert_eq!(crate::bijou::decoder::<u64>(&bij).collect::<Vec<_>>(), vals);
+        // the alias is the same type as the explicit spelling
+        let _: crate::Column<u64, crate::Bijou64> =
+            crate::bijou::Column::<u64>::load(&bij).unwrap();
+    }
 }

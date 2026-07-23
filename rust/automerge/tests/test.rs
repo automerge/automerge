@@ -574,7 +574,7 @@ fn rollback_after_save_load_of_deep_hydrated_root_map_from_fuzz_trace() {
             "multi\nline",
             "abcdefghijklmnopqrstuvwxyz",
         ];
-        if slot % 8 == 0 {
+        if slot.is_multiple_of(8) {
             "the quick brown fox jumps over the lazy dog".to_string()
         } else {
             STRINGS[usize::from(slot) % STRINGS.len()].to_string()
@@ -4075,6 +4075,72 @@ fn incremental_sibling_text_diffs_survive_isolate_integrate_roundtrip() {
         .unwrap();
 
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn incremental_patches_survive_nested_edit_and_list_shift_across_isolation() {
+    let mut doc = AutoCommit::new();
+    let items = doc.put_object(ROOT, "items", ObjType::List).unwrap();
+    let a = doc.insert_object(&items, 0, ObjType::Map).unwrap();
+    doc.put(&a, "id", "a").unwrap();
+    doc.put(&a, "n", 1).unwrap();
+    let b = doc.insert_object(&items, 1, ObjType::Map).unwrap();
+    doc.put(&b, "id", "b").unwrap();
+    doc.put(&b, "n", 2).unwrap();
+    doc.commit();
+    let beginning = doc.get_heads();
+
+    let z = doc.insert_object(&items, 0, ObjType::Map).unwrap();
+    doc.put(&z, "id", "z").unwrap();
+    doc.put(&z, "n", 0).unwrap();
+    doc.commit();
+    doc.update_diff_cursor();
+    let mut actual = doc.hydrate(&ROOT, None).unwrap();
+
+    doc.isolate(&beginning);
+    doc.put(&a, "n", 99).unwrap();
+    doc.commit();
+    doc.integrate();
+
+    let patches = doc.diff_incremental();
+    actual.apply_patches(doc.text_encoding(), patches).unwrap();
+    assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
+}
+
+#[test]
+fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
+    let encoding = TextEncoding::Utf16CodeUnit;
+    let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    // Make the change large enough for Change::bytes() to compress it.
+    doc.put(ROOT, "padding", ScalarValue::Bytes(vec![0; 300]))
+        .unwrap();
+    doc.commit();
+
+    let expected_heads = doc.get_heads();
+    let expected = doc.hydrate(&ROOT, None).unwrap();
+    let mut change = doc.get_last_local_change().unwrap().clone();
+    let uncompressed_change = change.raw_bytes().to_vec();
+    let compressed_change = change.bytes().to_vec();
+    assert_ne!(compressed_change, uncompressed_change);
+    let bundle = doc.bundle(expected_heads.clone()).unwrap().bytes().to_vec();
+
+    for (chunk_type, bytes) in [
+        ("change", uncompressed_change),
+        ("compressed change", compressed_change),
+        ("bundle", bundle),
+    ] {
+        let mut reconstructed = AutoCommit::new_with_encoding(encoding);
+        reconstructed.load_incremental(&bytes).unwrap();
+
+        assert_eq!(
+            reconstructed.text_encoding(),
+            encoding,
+            "loading a {chunk_type} changed the text encoding"
+        );
+        assert_eq!(reconstructed.get_heads(), expected_heads);
+        assert_eq!(reconstructed.hydrate(&ROOT, None).unwrap(), expected);
+    }
 }
 
 #[test]

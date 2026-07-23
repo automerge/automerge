@@ -6,7 +6,8 @@ use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 use crate::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::PackError;
-use crate::{ColumnValueRef, RleValue, Run, TypedLoadOpts};
+use crate::{Codec, Leb128};
+use crate::{ColumnValueRef, RleValue, Run};
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
 
@@ -81,8 +82,8 @@ pub trait PrefixValue: ColumnValueRef {
 
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
-    fn slab_sum(slab: &Slab<TailOf<Self>>) -> Self::Prefix {
-        let mut decoder = Self::Encoding::decoder(&slab.data);
+    fn slab_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>) -> Self::Prefix {
+        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         while let Some(run) = decoder.next_run() {
             Self::accumulate_run(&mut acc, &run);
@@ -91,8 +92,8 @@ pub trait PrefixValue: ColumnValueRef {
     }
 
     /// Compute the partial prefix sum of the first `count` items in a slab.
-    fn partial_sum(slab: &Slab<TailOf<Self>>, count: usize) -> Self::Prefix {
-        let mut decoder = Self::Encoding::decoder(&slab.data);
+    fn partial_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>, count: usize) -> Self::Prefix {
+        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         let mut items = 0;
         while let Some(mut run) = decoder.next_run() {
@@ -112,13 +113,16 @@ pub trait PrefixValue: ColumnValueRef {
 ///
 /// Only correct for unsigned prefix types where sums are monotonically
 /// increasing.  Callers are gated by `T::Prefix: UnsignedPrefix`.
-fn find_prefix_in_slab<T: PrefixValue>(slab: &Slab<TailOf<T>>, target: T::Prefix) -> usize
+fn find_prefix_in_slab<T: PrefixValue, C: Codec>(
+    slab: &Slab<TailOf<T, C>>,
+    target: T::Prefix,
+) -> usize
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
     let zero = T::Prefix::default();
     let one_p = T::Prefix::try_from(1).unwrap_or_default();
-    let mut decoder = T::Encoding::decoder(&slab.data);
+    let mut decoder = T::Encoding::<C>::decoder(&slab.data);
     let mut acc = zero;
     let mut items = 0;
     while let Some(run) = decoder.next_run() {
@@ -203,15 +207,30 @@ pub struct PrefixWeightFn<T>(PhantomData<fn() -> T>);
 
 impl<T> Sealed for PrefixWeightFn<T> {}
 
-impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
+impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
 
     #[inline]
-    fn compute(slab: &Slab<TailOf<T>>) -> PrefixSlabWeight<T::Prefix> {
+    fn compute(slab: &Slab<TailOf<T, C>>) -> PrefixSlabWeight<T::Prefix> {
         PrefixSlabWeight {
             len: slab.len,
-            prefix: T::slab_sum(slab),
+            prefix: T::slab_sum::<C>(slab),
         }
+    }
+
+    // `compute` re-decodes the slab (`slab_sum`); let the streaming
+    // loader accumulate weights as the runs go past instead.
+    const ACCUMULATES: bool = true;
+
+    #[inline]
+    fn accumulate_run(
+        weight: &mut Self::Weight,
+        count: usize,
+        value: T::Get<'_>,
+    ) -> Result<(), crate::PackError> {
+        weight.len += count;
+        T::accumulate_run(&mut weight.prefix, &Run { count, value });
+        Ok(())
     }
 }
 
@@ -307,10 +326,27 @@ impl PrefixValue for bool {
 
 // ── Load / save with options ────────────────────────────────────────────────
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// Deserialize with options. See [`LoadOpts`](crate::LoadOpts).
-    pub fn load_with(data: &[u8], opts: TypedLoadOpts<T>) -> Result<Self, crate::PackError> {
-        let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
+    /// Streaming load — the [`Column::load_iter`] of prefix columns:
+    /// pull the canonical runs during the decode pass, then
+    /// [`finalize`](PrefixColumnLoadIter::finalize) into the finished
+    /// `PrefixColumn` (per-slab prefix weights included).
+    pub fn load_iter<'a, F>(data: &'a [u8], opts: crate::LoadOpts<F>) -> PrefixColumnLoadIter<'a, T>
+    where
+        F: crate::MaybeFill<T::Get<'a>>,
+    {
+        PrefixColumnLoadIter(Column::load_iter(data, opts))
+    }
+
+    pub fn load_with<'a, F>(
+        data: &'a [u8],
+        opts: crate::LoadOpts<F>,
+    ) -> Result<Self, crate::PackError>
+    where
+        F: crate::MaybeFill<T::Get<'a>>,
+    {
+        let col = Column::<T, C, PrefixWeightFn<T>>::load_with(data, opts)?;
         Ok(Self { col })
     }
 
@@ -371,15 +407,15 @@ where
 }
 // ── PrefixColumn (B-tree backed — one aggregate for len+prefix queries) ────
 //
-// Wraps a `Column<T, PrefixWeightFn<T>>`; the inner B-tree carries
+// Wraps a `Column<T, C, PrefixWeightFn<T>>`; the inner B-tree carries
 // `PrefixSlabWeight<T::Prefix>` per slab, answering both positional and
 // prefix-sum queries without a sidecar.
 
-pub struct PrefixColumn<T: PrefixValue> {
-    col: Column<T, PrefixWeightFn<T>>,
+pub struct PrefixColumn<T: PrefixValue, C: Codec = Leb128> {
+    col: Column<T, C, PrefixWeightFn<T>>,
 }
 
-impl<T: PrefixValue> Clone for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> Clone for PrefixColumn<T, C> {
     fn clone(&self) -> Self {
         Self {
             col: self.col.clone(),
@@ -387,7 +423,7 @@ impl<T: PrefixValue> Clone for PrefixColumn<T> {
     }
 }
 
-impl<T: PrefixValue> std::fmt::Debug for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> std::fmt::Debug for PrefixColumn<T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrefixColumn")
             .field("len", &self.col.len())
@@ -396,13 +432,13 @@ impl<T: PrefixValue> std::fmt::Debug for PrefixColumn<T> {
     }
 }
 
-impl<T: PrefixValue> Default for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> Default for PrefixColumn<T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     pub fn new() -> Self {
         Self { col: Column::new() }
     }
@@ -480,6 +516,26 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.splice(index, del, values);
     }
 
+    /// Splice [`crate::Run`]s in — the run-aware fast path for bulk uniform
+    /// data.  Accepts `Run<T::Get<'_>>` straight from a column iterator, or
+    /// runs of any other insertable form.
+    pub fn splice_runs<V, I>(&mut self, index: usize, del: usize, runs: I)
+    where
+        V: crate::AsColumnRef<T>,
+        I: IntoIterator<Item = crate::Run<V>>,
+    {
+        self.col.splice_runs(index, del, runs);
+    }
+
+    /// See [`Column::copy_ranges`](crate::Column::copy_ranges).
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
+    where
+        I: IntoIterator<Item = crate::Splice>,
+        for<'b> T::Get<'b>: crate::AsColumnRef<T>,
+    {
+        self.col.copy_ranges(src.col, splices);
+    }
+
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────
 
     /// **Exclusive** prefix sum at `index` — the sum of values at
@@ -527,7 +583,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
 // ── Unsigned-prefix-only methods ────────────────────────────────────────────
 
-impl<T: PrefixValue> PrefixColumn<T>
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C>
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
@@ -560,14 +616,14 @@ where
 
         let remaining = target - prefix_before;
         let slab = &self.col.slabs[si];
-        let idx_in_slab = find_prefix_in_slab::<T>(slab, remaining);
+        let idx_in_slab = find_prefix_in_slab::<T, C>(slab, remaining);
         items_before + idx_in_slab
     }
 }
 
 // ── More PrefixColumn methods (port from old BIT-backed variant) ───────────
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     pub fn save_to(&self, out: &mut Vec<u8>) -> std::ops::Range<usize> {
         self.col.save_to(out)
     }
@@ -583,12 +639,12 @@ impl<T: PrefixValue> PrefixColumn<T> {
     /// * `col.values().iter()` / `.iter_range(a..b)` — plain value iteration
     ///
     /// (`PrefixColumn::get` / `iter` return [`PrefixedValue`]s.)
-    pub fn values(&self) -> &Column<T, PrefixWeightFn<T>> {
+    pub fn values(&self) -> &Column<T, C, PrefixWeightFn<T>> {
         &self.col
     }
 
     /// Wrap an existing [`Column`] that already tracks `PrefixWeightFn<T>`.
-    pub fn from_column(col: Column<T, PrefixWeightFn<T>>) -> Self {
+    pub fn from_column(col: Column<T, C, PrefixWeightFn<T>>) -> Self {
         Self { col }
     }
 
@@ -598,16 +654,17 @@ impl<T: PrefixValue> PrefixColumn<T> {
     }
 
     /// Iterator yielding a [`PrefixedValue`] per item.
-    pub fn iter(&self) -> PrefixIter<'_, T> {
+    pub fn iter(&self) -> PrefixIter<'_, T, C> {
         PrefixIter {
             col: Some(self),
             inner: self.col.iter(),
             total: T::Prefix::default(),
+            base: T::Prefix::default(),
         }
     }
 
     /// Iterator over `range` yielding `(inclusive_prefix, value)`.
-    pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T> {
+    pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T, C> {
         let start = range.start.min(self.col.len());
         let end = range.end.min(self.col.len());
         let mut iter = self.iter();
@@ -694,33 +751,39 @@ where
 ///
 /// `next()` is O(1) — it accumulates the running total from each value.
 /// `nth(n)` is O(log S) via the B-tree.
-pub struct PrefixIter<'a, T: PrefixValue> {
-    col: Option<&'a PrefixColumn<T>>,
-    inner: Iter<'a, T>,
+pub struct PrefixIter<'a, T: PrefixValue, C: Codec = Leb128> {
+    col: Option<&'a PrefixColumn<T, C>>,
+    inner: Iter<'a, T, C>,
     total: T::Prefix,
+    /// Offset subtracted from the column's absolute prefixes; see
+    /// [`reset_prefix`](Self::reset_prefix). Invariant:
+    /// `total == absolute_prefix_at_pos - base`.
+    base: T::Prefix,
 }
 
-impl<T: PrefixValue> Default for PrefixIter<'_, T> {
+impl<T: PrefixValue, C: Codec> Default for PrefixIter<'_, T, C> {
     fn default() -> Self {
         Self {
             col: None,
             inner: Iter::default(),
             total: T::Prefix::default(),
+            base: T::Prefix::default(),
         }
     }
 }
 
-impl<T: PrefixValue> Clone for PrefixIter<'_, T> {
+impl<T: PrefixValue, C: Codec> Clone for PrefixIter<'_, T, C> {
     fn clone(&self) -> Self {
         Self {
             col: self.col,
             inner: self.inner.clone(),
             total: self.total.clone(),
+            base: self.base.clone(),
         }
     }
 }
 
-impl<T: PrefixValue> std::fmt::Debug for PrefixIter<'_, T> {
+impl<T: PrefixValue, C: Codec> std::fmt::Debug for PrefixIter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrefixIter")
             .field("total", &self.total)
@@ -729,7 +792,7 @@ impl<T: PrefixValue> std::fmt::Debug for PrefixIter<'_, T> {
     }
 }
 
-impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
+impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
     type Item = PrefixedValue<'a, T>;
 
     #[inline]
@@ -763,7 +826,9 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
             return None;
         }
 
-        self.total = found.prefix;
+        // the tree hands back the absolute prefix at the slab start;
+        // carry any reset_prefix offset across the jump
+        self.total = found.prefix - self.base.clone();
 
         Some(self.same_slab_nth(target_pos - found.pos))
     }
@@ -774,9 +839,9 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
     }
 }
 
-impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
+impl<T: PrefixValue, C: Codec> ExactSizeIterator for PrefixIter<'_, T, C> {}
 
-impl<'a, T: PrefixValue> PrefixIter<'a, T> {
+impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     fn same_slab_nth(&mut self, mut n: usize) -> PrefixedValue<'a, T> {
         while let Some(run) = self.inner.next_run_max(n + 1) {
             T::accumulate_run(&mut self.total, &run);
@@ -794,6 +859,29 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     #[inline]
     pub fn pos(&self) -> usize {
         self.inner.pos
+    }
+
+    /// The running sum of everything consumed so far — equivalently, the
+    /// **exclusive** prefix of the next item to be yielded. Immediately
+    /// after [`PrefixColumn::iter_range`] this is the prefix at the
+    /// range's start, already paid for by the construction's tree descent.
+    #[inline]
+    pub fn total(&self) -> T::Prefix {
+        self.total.clone()
+    }
+
+    /// Zero the running total at the current position without moving
+    /// the iterator: subsequent [`total()`](Self::total)s and yielded
+    /// [`PrefixedValue`]s are relative to here. Useful when the iterator
+    /// tracks running totals over a sub-portion of the column.
+    ///
+    /// Only the accumulator is affected — position, window and seek
+    /// behaviour are unchanged ([`advance_prefix`](Self::advance_prefix)
+    /// still interprets its argument as units past the current
+    /// position, and slab jumps in `nth` carry the offset).
+    pub fn reset_prefix(&mut self) {
+        self.base += &self.total;
+        self.total = T::Prefix::default();
     }
 
     #[inline]
@@ -820,6 +908,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         PrefixIterState {
             inner: self.inner.suspend(),
             total: self.total.clone(),
+            base: self.base.clone(),
         }
     }
 
@@ -833,6 +922,12 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         assert!(range.start >= self.pos());
         self.set_max(range.end);
         self.nth(range.start - self.pos())
+    }
+
+    /// Adapt into an iterator of plain value [`Run`]s, discarding the
+    /// running prefix; use [`next_run`](Self::next_run) for prefixed runs.
+    pub fn runs(self) -> crate::column::Runs<'a, T, C> {
+        crate::column::Runs(self.inner)
     }
 
     /// Next run of identical values as a [`PrefixedValue`] describing the
@@ -857,6 +952,22 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         }
     }
 
+    /// Reposition the iterator window to `range`.
+    ///
+    /// After this call the iterator yields the items in `range` and then
+    /// returns `None`. Equivalent to `set_max(range.end)` followed by
+    /// `advance_to(range.start)`.
+    pub fn shift(&mut self, range: std::ops::Range<usize>) {
+        self.set_max(range.end);
+        self.advance_to(range.start);
+    }
+
+    /// The accumulated prefix over all items before the current position —
+    /// i.e. the exclusive prefix of the item that `next()` would yield.
+    pub fn prefix(&self) -> T::Prefix {
+        self.total.clone()
+    }
+
     pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<'a, T>> {
         let base = self.total.clone();
         let pv = self.nth(n)?;
@@ -869,7 +980,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     }
 }
 
-impl<'a, T: PrefixValue> PrefixIter<'a, T>
+impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C>
 where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
@@ -888,7 +999,9 @@ where
         // unless we had an Iterator<Item=(slab,prefix)> instead of doing a slab_index +=1
         // currently this isnt a bottleneck anywhere so not a big deal
         let col = self.col.expect("advance_prefix on default PrefixIter");
-        let target = self.total + n;
+        // get_index_for_total works in absolute prefixes: undo any
+        // reset_prefix offset before seeking the tree
+        let target = self.total + self.base + n;
         let one = T::Prefix::try_from(1).unwrap_or_default();
         let seek_target = target + one;
         let target_pos = col.get_index_for_total(seek_target);
@@ -909,31 +1022,33 @@ where
 pub struct PrefixIterState<T: PrefixValue> {
     inner: IterState,
     total: T::Prefix,
+    base: T::Prefix,
 }
 
 impl<T: PrefixValue> PrefixIterState<T> {
-    pub fn try_resume<'a>(
+    pub fn try_resume<'a, C: Codec>(
         &self,
-        column: &'a PrefixColumn<T>,
-    ) -> Result<PrefixIter<'a, T>, crate::PackError> {
+        column: &'a PrefixColumn<T, C>,
+    ) -> Result<PrefixIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(column.values())?;
         Ok(PrefixIter {
             col: Some(column),
             inner,
             total: self.total.clone(),
+            base: self.base.clone(),
         })
     }
 }
 
 // ── Trait impls ─────────────────────────────────────────────────────────────
 
-impl<T: PrefixValue> FromIterator<T> for PrefixColumn<T> {
+impl<T: PrefixValue, C: Codec> FromIterator<T> for PrefixColumn<T, C> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
     }
 }
 
-impl<V, T: PrefixValue> Extend<V> for PrefixColumn<T>
+impl<V, T: PrefixValue, C: Codec> Extend<V> for PrefixColumn<T, C>
 where
     V: crate::AsColumnRef<T>,
 {
@@ -943,20 +1058,141 @@ where
     }
 }
 
-impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
+impl<'a, T: PrefixValue, C: Codec> IntoIterator for &'a PrefixColumn<T, C> {
     type Item = PrefixedValue<'a, T>;
-    type IntoIter = PrefixIter<'a, T>;
+    type IntoIter = PrefixIter<'a, T, C>;
 
-    fn into_iter(self) -> PrefixIter<'a, T> {
+    fn into_iter(self) -> PrefixIter<'a, T, C> {
         self.iter()
     }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
+/// Streaming prefix-column load — see [`PrefixColumn::load_iter`].
+pub struct PrefixColumnLoadIter<'a, T: PrefixValue, C: Codec = Leb128>(
+    crate::column::ColumnLoadIter<'a, T, C, PrefixWeightFn<T>>,
+);
+
+impl<'a, T: PrefixValue, C: Codec> PrefixColumnLoadIter<'a, T, C> {
+    /// The next canonical run, or `None` at end of input.
+    pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
+        self.0.try_next_run()
+    }
+
+    /// Drain and validate whatever was not pulled, apply the length check
+    /// from the load options, and return the finished column.
+    pub fn finalize(self) -> Result<PrefixColumn<T, C>, crate::PackError> {
+        Ok(PrefixColumn::from_column(self.0.finalize()?))
+    }
+}
+
+impl<'a, T: PrefixValue, C: Codec> crate::encoding::RunSrc<'a, T>
+    for PrefixColumnLoadIter<'a, T, C>
+{
+    fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, crate::PackError> {
+        PrefixColumnLoadIter::try_next_run(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::prefix::PrefixColumn;
+
+    #[test]
+    fn reset_prefix_tracks_subportion_totals() {
+        // enough values for several slabs so nth's slab jumps are hit
+        let values: Vec<u64> = (0..2000).map(|i| (i % 13) + 1).collect();
+        let col = PrefixColumn::<u64>::from_values(values.clone());
+
+        // reset mid-column: totals become relative to the reset point
+        let mut it = col.iter();
+        it.advance_by(100);
+        assert_eq!(it.total(), col.get_prefix(100));
+        it.reset_prefix();
+        assert_eq!(it.total(), 0);
+        assert_eq!(it.pos(), 100, "reset must not move the iterator");
+
+        // sequential next(): running totals of values[100..]
+        let mut expect = 0u128;
+        for (i, pv) in (&mut it).take(50).enumerate() {
+            expect += values[100 + i] as u128;
+            assert_eq!(pv.total(), expect, "at offset {i}");
+        }
+
+        // a far nth crosses slab boundaries: the tree's absolute prefix
+        // must be re-based, not clobber the relative total
+        let hop = 1500;
+        let pv = it.nth(hop - 1).unwrap();
+        let expect: u128 = values[100..100 + 50 + hop].iter().map(|v| *v as u128).sum();
+        assert_eq!(pv.total(), expect, "relative total lost across slab jump");
+        assert_eq!(it.total(), expect);
+
+        // double reset composes
+        it.reset_prefix();
+        assert_eq!(it.total(), 0);
+        let pv = it.next().unwrap();
+        assert_eq!(pv.total(), values[it.pos() - 1] as u128);
+    }
+
+    #[test]
+    fn reset_prefix_advance_prefix_still_absolute_safe() {
+        let values: Vec<u64> = vec![1; 1000];
+        let col = PrefixColumn::<u64>::from_values(values);
+
+        // reference: no reset
+        let mut a = col.iter();
+        a.advance_by(200);
+        let ra = a.advance_prefix(300).unwrap();
+
+        // with reset: advance_prefix must land on the same item
+        let mut b = col.iter();
+        b.advance_by(200);
+        b.reset_prefix();
+        let rb = b.advance_prefix(300).unwrap();
+
+        assert_eq!(ra.pos, rb.pos);
+        assert_eq!(ra.delta, rb.delta, "delta is relative either way");
+        assert_eq!(a.pos(), b.pos());
+        // totals differ by exactly the prefix at the reset point
+        assert_eq!(
+            ra.pv.total() - rb.pv.total(),
+            col.get_prefix(200),
+            "reset offset"
+        );
+    }
+
+    #[test]
+    fn reset_prefix_survives_suspend_resume() {
+        let values: Vec<u64> = (0..600).map(|i| i + 1).collect();
+        let col = PrefixColumn::<u64>::from_values(values.clone());
+
+        let mut it = col.iter();
+        it.advance_by(50);
+        it.reset_prefix();
+        it.advance_by(10);
+        let expect = it.total();
+
+        let mut resumed = it.suspend().try_resume(&col).unwrap();
+        assert_eq!(resumed.total(), expect);
+        // and the offset still applies across a post-resume slab jump
+        let pv = resumed.nth(400).unwrap();
+        let want: u128 = values[50..50 + 10 + 401].iter().map(|v| *v as u128).sum();
+        assert_eq!(pv.total(), want);
+    }
+
+    #[test]
+    fn iter_total_is_prefix_at_range_start() {
+        let values: Vec<u64> = (0..500).map(|i| i % 7).collect();
+        let col = PrefixColumn::<u64>::from_values(values);
+        for i in 0..=col.len() {
+            assert_eq!(
+                col.iter_range(i..col.len()).total(),
+                col.get_prefix(i),
+                "iter_range({i}..).total() != get_prefix({i})",
+            );
+        }
+    }
 
     fn parity_check(values: Vec<u64>) {
         let col = PrefixColumn::<u64>::from_values(values.clone());

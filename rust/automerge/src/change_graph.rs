@@ -127,6 +127,17 @@ impl ChangeGraph {
         self.heads.iter().cloned()
     }
 
+    /// Whether `heads` is exactly the set of current heads (order and
+    /// duplicates ignored).
+    pub(crate) fn heads_are_current(&self, heads: &[ChangeHash]) -> bool {
+        // duplicates can only shrink the set, so fewer entries than heads
+        // can never match
+        if heads.len() < self.heads.len() {
+            return false;
+        }
+        heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
+    }
+
     pub(crate) fn head_indexes(&self) -> impl Iterator<Item = u64> + '_ {
         self.heads
             .iter()
@@ -556,7 +567,7 @@ impl ChangeGraph {
                 self.add_parent(node_idx, parent_hash);
             }
 
-            if (node_idx + 1).0 % CACHE_STEP == 0 {
+            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
                 self.cache_clock(node_idx);
             }
 
@@ -767,7 +778,7 @@ impl ChangeGraph {
             .collect()
     }
 
-    pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes)
             .iter()
@@ -928,12 +939,11 @@ impl ChangeGraphCols {
         let len = actors.len();
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let timestamps =
-            hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(Some(0i64)))?;
+        let timestamps = hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
         let messages =
             hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
         let extra_bytes_meta =
-            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts.into())?;
+            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts)?;
 
         if max_ops.len() != len {
             return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));

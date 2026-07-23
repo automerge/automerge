@@ -748,13 +748,21 @@ impl AutoCommit {
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
         // heads arg takes priority
         if let Some(h) = heads {
-            return Some(self.doc.clock_at(h));
+            // the heads == current-heads shortcut (an unscoped read) is only
+            // sound with no transaction in flight: pending ops are already in
+            // the op set but not yet under the graph's heads
+            return if self.transaction.is_none() {
+                self.doc.clock_at(h)
+            } else {
+                Some(self.doc.change_graph.clock_at(h))
+            };
         }
         match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
             (Some(_), Some((_, t))) => t.get_scope().clone(),
-            // then look at clock for isolation
-            (Some(i), None) => Some(self.doc.clock_at(i)),
+            // then look at clock for isolation (no transaction is open, so
+            // isolation at the current heads can read unscoped)
+            (Some(i), None) => self.doc.clock_at(i),
             _ => None,
         }
     }
@@ -763,7 +771,7 @@ impl AutoCommit {
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {
-            self.patch_log.begin_epoch();
+            self.patch_log.finish_current_view(&self.doc, &before);
             let clock = self.doc.clock_range(&before, after);
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
         }

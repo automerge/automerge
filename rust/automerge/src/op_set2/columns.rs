@@ -261,8 +261,7 @@ impl Columns {
 
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let id_ctr =
-            hexane::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts.into())?;
+        let id_ctr = hexane::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts)?;
 
         let obj_actor = hexane::Column::<Option<ActorIdx>>::load_with(
             data_for(OBJ_ID_ACTOR_COL_SPEC),
@@ -286,29 +285,25 @@ impl Columns {
         let key_str = hexane::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
         let insert =
             hexane::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
-        let action = hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts.into())?;
+        let action = hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts)?;
         let mark_name =
             hexane::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
 
         let expand = hexane::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
 
         let succ_count =
-            hexane::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts.into())?;
+            hexane::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts)?;
 
         let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
         let succ_opts = hexane::LoadOpts::new().with_length(succ_len);
         let succ_actor =
-            hexane::Column::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts.into())?;
+            hexane::Column::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts)?;
 
-        let succ_ctr = hexane::DeltaColumn::<u32>::load_with(
-            data_for(SUCC_COUNTER_COL_SPEC),
-            succ_opts.into(),
-        )?;
+        let succ_ctr =
+            hexane::DeltaColumn::<u32>::load_with(data_for(SUCC_COUNTER_COL_SPEC), succ_opts)?;
 
-        let value_meta = hexane::PrefixColumn::<ValueMeta>::load_with(
-            data_for(VALUE_META_COL_SPEC),
-            opts.into(),
-        )?;
+        let value_meta =
+            hexane::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts)?;
         let value = hexane::RawColumn::load(data_for(VALUE_COL_SPEC))?;
 
         let index = Indexes::default();

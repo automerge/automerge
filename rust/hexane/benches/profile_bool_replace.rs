@@ -3,7 +3,7 @@ use rand::{rng, Rng};
 use std::time::Instant;
 
 fn rand_bool() -> bool {
-    rng().next_u64() % 2 == 0
+    rng().next_u64().is_multiple_of(2)
 }
 fn rand_u64() -> u64 {
     rng().next_u64() % 1000

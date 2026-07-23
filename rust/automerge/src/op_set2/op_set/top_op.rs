@@ -1,13 +1,15 @@
 use crate::clock::Clock;
-use crate::iter::tools::{BoolColumnSkipper, Shiftable, SkipIter, Skipper};
+use crate::iter::tools::{BoolColumnSkipper, PeekShift, Shiftable, SkipIter, Skipper};
 use crate::marks::MarkSet;
 use crate::op_set2::op::SuccCursors;
-use crate::op_set2::types::{Action, KeyRef};
-use crate::types::{ElemId, ObjId, OpId};
+use crate::op_set2::types::Action;
+#[cfg(feature = "slow_path_assertions")]
+use crate::types::ObjId;
+use crate::types::OpId;
 
 use super::{
-    ActionIter, FixCounters, InsertIter, KeyIter, ObjIdIter, OpIdIter, OpIter, OpQueryTerm, OpSet,
-    SuccIterIter, VisIter,
+    ActionIter, FixCounters, InsertIter, OpIdIter, OpIter, OpQueryTerm, OpSet, SuccIterIter,
+    VisIter,
 };
 
 use std::ops::Range;
@@ -15,7 +17,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct TopOps<'a> {
-    inner: FixCounters<'a, SkipIter<OpIter<'a>, SkipToTopIter<'a>>>,
+    inner: FixCounters<'a, SkipIter<OpIter<'a>, TopIter<'a>>>,
     visible: VisIter<'a>,
     visible_pos: usize,
 }
@@ -26,7 +28,7 @@ impl<'a> TopOps<'a> {
         let visible = VisIter::new(op_set, clock.as_ref(), range.clone());
         let iter = SkipIter::new(
             op_set.iter_range(&range),
-            SkipToTopIter::new(op_set, clock.clone(), range),
+            TopIter::new(op_set, clock.clone(), range),
         );
         let inner = FixCounters::new(iter, clock);
         Self {
@@ -141,56 +143,60 @@ impl<'a, I: Iterator<Item = super::Op<'a>>> Iterator for SlowTopOpIter<'a, I> {
     }
 }
 
-/// An iterator which returns runs of non-top ops, this can be used with a
-/// SkipIter to skip to the next top op
+/// The `top` twin of [`VisIter`]: a [`Skipper`] which yields runs of
+/// non-top ops so a `SkipIter` can jump from one top op (each element's
+/// winning, visible op) to the next.
+///
+/// Like [`VisIter`] it comes in two flavors: `Current` reads the `top`
+/// index column directly, `Scan` recomputes topness under a historical
+/// [`Clock`] from the cheap columns only.
+///
+/// The range must be scoped to a single object: the scan flavor detects
+/// group boundaries from inserts and `key_str` changes alone, which cannot
+/// distinguish equal map keys across an object boundary.
 #[derive(Clone, Debug)]
-pub(crate) struct SkipToTopIter<'a> {
+pub(crate) struct TopIter<'a> {
     range: Range<usize>,
-    clock: Option<Clock>,
     cursor: usize,
     exhausted: bool,
-    inner: SkipToTopIterInner<'a>,
+    inner: TopIterInner<'a>,
 }
 
 #[derive(Clone, Debug)]
-enum SkipToTopIterInner<'a> {
+enum TopIterInner<'a> {
     Empty,
     Current(BoolColumnSkipper<'a>),
-    Scan {
-        iter: Box<TopScanIter<'a>>,
-        buffered: Option<Box<TopScanRow<'a>>>,
-    },
+    // peekable because the row which terminates one group is the first
+    // row of the next
+    Scan(Box<PeekShift<ScanTopIter<'a>>>),
 }
 
-impl Default for SkipToTopIter<'_> {
+impl Default for TopIter<'_> {
     fn default() -> Self {
         Self {
             range: 0..0,
-            clock: None,
             cursor: 0,
             exhausted: true,
-            inner: SkipToTopIterInner::Empty,
+            inner: TopIterInner::Empty,
         }
     }
 }
 
-impl<'a> SkipToTopIter<'a> {
+impl<'a> TopIter<'a> {
     pub(crate) fn new(op_set: &'a OpSet, clock: Option<Clock>, range: Range<usize>) -> Self {
         let cursor = range.start;
-        let inner = if clock.is_some() {
-            SkipToTopIterInner::Scan {
-                iter: Box::new(TopScanIter::new(op_set, &range)),
-                buffered: None,
-            }
+        let inner = if let Some(clock) = clock {
+            TopIterInner::Scan(Box::new(PeekShift::new(ScanTopIter::new(
+                op_set, clock, &range,
+            ))))
         } else {
-            SkipToTopIterInner::Current(BoolColumnSkipper::new(
+            TopIterInner::Current(BoolColumnSkipper::new(
                 op_set.top_index_range(&range),
                 range.clone(),
             ))
         };
         Self {
             range,
-            clock,
             cursor,
             exhausted: false,
             inner,
@@ -198,20 +204,19 @@ impl<'a> SkipToTopIter<'a> {
     }
 }
 
-impl Skipper for SkipToTopIter<'_> {}
+impl Skipper for TopIter<'_> {}
 
-impl Shiftable for SkipToTopIter<'_> {
+impl Shiftable for TopIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.cursor = range.start;
         self.range = range.clone();
         self.exhausted = false;
         match &mut self.inner {
-            SkipToTopIterInner::Empty => None,
-            SkipToTopIterInner::Current(iter) => iter.shift_next(range),
-            SkipToTopIterInner::Scan { iter, buffered } => {
-                *buffered = None;
-                if let Some(first) = iter.shift_next(range.clone()) {
-                    *buffered = Some(Box::new(first));
+            TopIterInner::Empty => None,
+            TopIterInner::Current(iter) => iter.shift_next(range),
+            TopIterInner::Scan(iter) => {
+                iter.shift(range.clone());
+                if iter.peek().is_some() {
                     self.next()
                 } else {
                     self.exhausted = true;
@@ -222,7 +227,7 @@ impl Shiftable for SkipToTopIter<'_> {
     }
 }
 
-impl Iterator for SkipToTopIter<'_> {
+impl Iterator for TopIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -230,63 +235,54 @@ impl Iterator for SkipToTopIter<'_> {
             return None;
         }
         match &mut self.inner {
-            SkipToTopIterInner::Empty => None,
-            SkipToTopIterInner::Current(iter) => iter.next(),
-            SkipToTopIterInner::Scan { iter, buffered } => {
-                let clock = self.clock.as_ref();
-                loop {
-                    let Some(first) = buffered.take().or_else(|| iter.next().map(Box::new)) else {
-                        self.exhausted = true;
-                        let skip = self.range.end.saturating_sub(self.cursor);
-                        self.cursor = self.range.end.saturating_add(1);
-                        return Some(skip);
-                    };
-                    let obj = first.obj;
-                    let key = first.key.clone();
-                    let mut top = if first.is_visible(clock) {
-                        Some(first.pos)
-                    } else {
-                        None
-                    };
-
-                    for row in iter.by_ref() {
-                        if row.obj != obj || row.key != key {
-                            *buffered = Some(Box::new(row));
-                            break;
-                        }
-                        if row.is_visible(clock) {
-                            top = Some(row.pos);
-                        }
-                    }
-
-                    if let Some(pos) = top {
-                        let skip = pos.checked_sub(self.cursor)?;
-                        self.cursor = pos + 1;
-                        return Some(skip);
+            TopIterInner::Empty => None,
+            TopIterInner::Current(iter) => iter.next(),
+            TopIterInner::Scan(iter) => loop {
+                let Some(first) = iter.next() else {
+                    self.exhausted = true;
+                    let skip = self.range.end.saturating_sub(self.cursor);
+                    self.cursor = self.range.end.saturating_add(1);
+                    return Some(skip);
+                };
+                // a group is one map key or one list element; its ops are
+                // contiguous, and the next group starts at the next insert
+                // op (list element or mark) or `key_str` change (map key)
+                let group_key = first.key_str;
+                let mut top = first.visible.then_some(first.pos);
+                while let Some(row) = iter.next_if(|r| !r.insert && r.key_str == group_key) {
+                    if row.visible {
+                        top = Some(row.pos);
                     }
                 }
-            }
+                if let Some(pos) = top {
+                    let skip = pos.checked_sub(self.cursor)?;
+                    self.cursor = pos + 1;
+                    return Some(skip);
+                }
+            },
         }
     }
 }
 
+/// The columns [`TopIter`]'s scan flavor needs: `insert` and `key_str` for
+/// group boundaries, `id`/`action`/`succ` for visibility under the clock.
 #[derive(Clone, Debug)]
-struct TopScanIter<'a> {
+struct ScanTopIter<'a> {
     pos: usize,
-    obj: ObjIdIter<'a>,
-    key: KeyIter<'a>,
+    clock: Clock,
+    key_str: hexane::Iter<'a, Option<String>>,
     id: OpIdIter<'a>,
     insert: InsertIter<'a>,
     action: ActionIter<'a>,
     succ: SuccIterIter<'a>,
 }
 
-impl<'a> TopScanIter<'a> {
-    fn new(op_set: &'a OpSet, range: &Range<usize>) -> Self {
+impl<'a> ScanTopIter<'a> {
+    fn new(op_set: &'a OpSet, clock: Clock, range: &Range<usize>) -> Self {
         Self {
             pos: range.start,
-            obj: op_set.obj_id_iter_range(range),
-            key: op_set.key_iter_range(range),
+            clock,
+            key_str: op_set.key_str_iter_range(range),
             id: op_set.id_iter_range(range),
             insert: op_set.insert_iter_range(range),
             action: op_set.action_iter_range(range),
@@ -294,75 +290,71 @@ impl<'a> TopScanIter<'a> {
         }
     }
 
-    fn row_at(&mut self, pos: usize) -> Option<TopScanRow<'a>> {
-        let id = self.id.next()?;
-        let key = self.key.next()?;
-        let key = if self.insert.next()? {
-            KeyRef::Seq(ElemId(id))
-        } else {
-            key
-        };
-        Some(TopScanRow {
+    fn row(
+        &mut self,
+        pos: usize,
+        id: OpId,
+        key_str: Option<&'a str>,
+        insert: bool,
+        action: Action,
+        succ: SuccCursors<'a>,
+    ) -> ScanTopRow<'a> {
+        let visible = is_visible(id, action, succ, &self.clock);
+        ScanTopRow {
             pos,
-            obj: self.obj.next()?,
-            key,
-            id,
-            action: self.action.next()?,
-            succ: self.succ.next()?,
-        })
-    }
-
-    fn shift_next(&mut self, range: Range<usize>) -> Option<TopScanRow<'a>> {
-        let pos = range.start;
-        self.pos = pos + 1;
-        let id = self.id.shift_next(range.clone())?;
-        let key = self.key.shift_next(range.clone())?;
-        let key = if self.insert.shift_next(range.clone())? {
-            KeyRef::Seq(ElemId(id))
-        } else {
-            key
-        };
-        Some(TopScanRow {
-            pos,
-            obj: self.obj.shift_next(range.clone())?,
-            key,
-            id,
-            action: self.action.shift_next(range.clone())?,
-            succ: self.succ.shift_next(range)?,
-        })
+            insert,
+            key_str,
+            visible,
+        }
     }
 }
 
-impl<'a> Iterator for TopScanIter<'a> {
-    type Item = TopScanRow<'a>;
+impl<'a> Shiftable for ScanTopIter<'a> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<ScanTopRow<'a>> {
+        let pos = range.start;
+        self.pos = pos + 1;
+        let id = self.id.shift_next(range.clone())?;
+        let key_str = self.key_str.shift_next(range.clone())?;
+        let insert = self.insert.shift_next(range.clone())?;
+        let action = self.action.shift_next(range.clone())?;
+        let succ = self.succ.shift_next(range)?;
+        Some(self.row(pos, id, key_str, insert, action, succ))
+    }
+}
+
+impl<'a> Iterator for ScanTopIter<'a> {
+    type Item = ScanTopRow<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let pos = self.pos;
         self.pos += 1;
-        self.row_at(pos)
+        let id = self.id.next()?;
+        let key_str = self.key_str.next()?;
+        let insert = self.insert.next()?;
+        let action = self.action.next()?;
+        let succ = self.succ.next()?;
+        Some(self.row(pos, id, key_str, insert, action, succ))
     }
 }
 
+/// One op reduced to what topness needs: where its group starts and
+/// whether it is visible.
 #[derive(Clone, Debug)]
-struct TopScanRow<'a> {
+struct ScanTopRow<'a> {
     pos: usize,
-    obj: ObjId,
-    key: KeyRef<'a>,
-    id: OpId,
-    action: Action,
-    succ: SuccCursors<'a>,
+    insert: bool,
+    key_str: Option<&'a str>,
+    visible: bool,
 }
 
-impl TopScanRow<'_> {
-    fn is_visible(&self, clock: Option<&Clock>) -> bool {
-        if self.action == Action::Increment || clock.is_some_and(|clock| !clock.covers(&self.id)) {
+fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
+    if action == Action::Increment || !clock.covers(&id) {
+        return false;
+    }
+    for (id, inc) in succ.with_inc() {
+        if inc.is_none() && clock.covers(&id) {
             return false;
         }
-        for (id, inc) in self.succ.clone().with_inc() {
-            if inc.is_none() && clock.map(|clock| clock.covers(&id)).unwrap_or(true) {
-                return false;
-            }
-        }
-        true
     }
+    true
 }

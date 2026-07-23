@@ -2,7 +2,7 @@ use crate::clock::{Clock, ClockRange};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
-use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, SkipToTopIter};
+use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, TopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
 use crate::patches::PatchLog;
 use crate::types::{ObjId, OpId, TextEncoding};
@@ -45,17 +45,17 @@ impl SpanDiff {
     }
 }
 
-// The DiffIter/SkipToTopIter iterators use the top index to jump  from one top
+// The DiffIter/TopIter iterators use the top index to jump  from one top
 // op to the next while generating a diff. In many cases this is unnecessary
 // overhead as every op in the range being iterated is already top. In this
-// case we avoid the overhead of SkipToTopIter and stream action/value columns
+// case we avoid the overhead of TopIter and stream action/value columns
 // directly.
 #[derive(Debug, Clone)]
 // Boxing the variants leads to losing a few milliseconds on some iteration benchmarks
 #[expect(clippy::large_enum_variant)]
 enum SpansActionValue<'a> {
     Current(Unshift<ActionValueIter<'a>>),
-    Diff(Unshift<DiffIter<'a, ActionValueIter<'a>, SkipToTopIter<'a>>>),
+    Diff(Unshift<DiffIter<'a, ActionValueIter<'a>, TopIter<'a>>>),
 }
 
 impl Default for SpansActionValue<'_> {
