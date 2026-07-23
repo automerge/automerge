@@ -40,7 +40,7 @@ fn mixed_values() -> Vec<u64> {
     let mut idx = 0usize;
     while out.len() < N {
         let len = BLOCK.min(N - out.len());
-        if idx % 2 == 0 {
+        if idx.is_multiple_of(2) {
             for i in 0..len {
                 out.push(base + i as u64);
             }
@@ -105,7 +105,7 @@ fn opt_u64_actors_100k(bencher: Bencher) {
         } else {
             Some(rng.random_range(0..6u64))
         };
-        vals.extend(std::iter::repeat(v).take(run));
+        vals.extend(std::iter::repeat_n(v, run));
     }
     let col = Column::<Option<u64>>::from_values(vals);
     bencher

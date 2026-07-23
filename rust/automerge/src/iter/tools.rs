@@ -1,6 +1,6 @@
 use crate::clock::ClockRange;
 use crate::exid::ExId;
-use crate::op_set2::op_set::{SkipToTopIter, VisIter};
+use crate::op_set2::op_set::{TopIter, VisIter};
 use crate::op_set2::OpSet;
 use crate::types::OpId;
 
@@ -61,6 +61,55 @@ pub(crate) trait Skipper: Iterator<Item = usize> {}
 
 pub(crate) trait Shiftable: Iterator + Debug {
     fn shift_next(&mut self, _range: Range<usize>) -> Option<<Self as Iterator>::Item>;
+}
+
+/// A peekable iterator that also supports repositioning.
+///
+/// Unlike [`std::iter::Peekable`] the lookahead can be discarded: [`Self::shift`]
+/// repositions the inner iterator to a new range and stores the first item
+/// of that range as the new lookahead.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PeekShift<I: Iterator> {
+    iter: I,
+    peeked: Option<I::Item>,
+}
+
+impl<I: Iterator> PeekShift<I> {
+    pub(crate) fn new(iter: I) -> Self {
+        Self { iter, peeked: None }
+    }
+
+    pub(crate) fn peek(&mut self) -> Option<&I::Item> {
+        if self.peeked.is_none() {
+            self.peeked = self.iter.next();
+        }
+        self.peeked.as_ref()
+    }
+
+    /// The next item if it satisfies `f`, leaving it as the lookahead
+    /// otherwise.
+    pub(crate) fn next_if(&mut self, f: impl FnOnce(&I::Item) -> bool) -> Option<I::Item> {
+        match self.peek() {
+            Some(item) if f(item) => self.peeked.take(),
+            _ => None,
+        }
+    }
+}
+
+impl<I: Iterator + Shiftable> PeekShift<I> {
+    /// Reposition to `range`, discarding the current lookahead; the first
+    /// item of the new range (if any) becomes the lookahead.
+    pub(crate) fn shift(&mut self, range: Range<usize>) {
+        self.peeked = self.iter.shift_next(range);
+    }
+}
+
+impl<I: Iterator> Iterator for PeekShift<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.peeked.take().or_else(|| self.iter.next())
+    }
 }
 
 #[derive(Debug)]
@@ -367,15 +416,13 @@ impl<'a> DiffSkipper<VisIter<'a>> {
     }
 }
 
-impl<'a> DiffSkipper<SkipToTopIter<'a>> {
+impl<'a> DiffSkipper<TopIter<'a>> {
     fn new_top(op_set: &'a OpSet, clock: ClockRange, range: Range<usize>) -> Self {
         match clock {
-            ClockRange::Current(clock) => {
-                DiffSkipper::Current(SkipToTopIter::new(op_set, clock, range))
-            }
+            ClockRange::Current(clock) => DiffSkipper::Current(TopIter::new(op_set, clock, range)),
             ClockRange::Diff(before, after) => {
-                let before = SkipToTopIter::new(op_set, Some(before), range.clone());
-                let after = SkipToTopIter::new(op_set, Some(after), range);
+                let before = TopIter::new(op_set, Some(before), range.clone());
+                let after = TopIter::new(op_set, Some(after), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
             }
         }
@@ -513,7 +560,7 @@ impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I, VisIter<'a>> {
     }
 }
 
-impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I, SkipToTopIter<'a>> {
+impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I, TopIter<'a>> {
     pub(crate) fn new_top(
         op_set: &'a OpSet,
         iter: I,

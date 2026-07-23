@@ -1,10 +1,10 @@
 [package]
 name = "hexane"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
-rust-version = "1.80.0"
+rust-version = "1.90.0"
 description = "A columnar compression library used by automerge"
 readme = "./README.md"
 
@@ -15,11 +15,13 @@ bench = false
 [features]
 wasm = ["web-sys"]
 slow_path_assertions = []
+bijou64 = ["dep:bijou64"]
 
 
 [dependencies]
 leb128 = "^0.2.5"
 thiserror = "^2.0.12"
+bijou64 = { version = "^0.2.1", optional = true }
 
 [dev-dependencies]
 proptest = { version = "^1.7", default-features = false, features = ["std"] }
@@ -31,6 +33,10 @@ debug = true
 
 [[bench]]
 name = "column_ops"
+harness = false
+
+[[bench]]
+name = "load"
 harness = false
 
 [[bench]]
@@ -51,6 +57,10 @@ harness = false
 
 [[bench]]
 name = "remap"
+harness = false
+
+[[bench]]
+name = "seek_to_value"
 harness = false
 
 [dependencies.web-sys]

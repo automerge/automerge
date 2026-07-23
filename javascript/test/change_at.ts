@@ -71,5 +71,48 @@ describe("Automerge", () => {
       const actualHeads = new Set(Automerge.getHeads(doc1))
       assert.deepEqual(actualHeads, expectedHeads)
     })
+
+    describe("materialization", () => {
+      it("materializes a historical nested edit after a concurrent list insertion", () => {
+        let doc = Automerge.from({
+          items: [
+            { id: "a", n: 1 },
+            { id: "b", n: 2 },
+          ],
+        })
+
+        const oldHeads = Automerge.getHeads(doc)
+
+        // Shift "a" from index 0 to index 1 in the live document.
+        doc = Automerge.change(doc, d => {
+          d.items.unshift({ id: "z", n: 0 })
+        })
+
+        // Make a concurrent change based on the historical state, where "a"
+        // was still at index 0.
+        const result = Automerge.changeAt(doc, oldHeads, d => {
+          d.items[0].n = 99
+        })
+
+        // The CRDT history contains the correct merged value.
+        const rematerialized = Automerge.view(
+          result.newDoc,
+          Automerge.getHeads(result.newDoc),
+        )
+
+        assert.deepStrictEqual(rematerialized.items, [
+          { id: "z", n: 0 },
+          { id: "a", n: 99 },
+          { id: "b", n: 2 },
+        ])
+
+        // The snapshot returned by changeAt should contain the same value.
+        assert.deepStrictEqual(result.newDoc.items, [
+          { id: "z", n: 0 },
+          { id: "a", n: 99 },
+          { id: "b", n: 2 },
+        ])
+      })
+    })
   })
 })

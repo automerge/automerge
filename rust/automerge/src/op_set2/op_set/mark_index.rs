@@ -62,19 +62,17 @@ impl MarkIdx {
 // ── v1 hexane column-value traits ────────────────────────────────────────────
 
 impl ColumnValue for MarkIdx {
-    type Encoding = RleEncoding<MarkIdx>;
+    type Encoding<C: hexane::Codec> = RleEncoding<MarkIdx, C>;
 }
 
 impl RleValue for MarkIdx {
-    fn try_unpack(data: &[u8]) -> Result<(usize, MarkIdx), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::signed(&mut buf)?;
-        Ok((start - buf.len(), MarkIdx::load(v)))
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, MarkIdx), PackError> {
+        let (n, v) = C::try_read_signed(data)?;
+        Ok((n, MarkIdx::load(v)))
     }
 
-    fn pack(value: MarkIdx, out: &mut Vec<u8>) -> bool {
-        leb128::write::signed(out, value.as_i64()).unwrap();
+    fn pack<C: hexane::Codec>(value: MarkIdx, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_signed(value.as_i64()));
         true
     }
 }
@@ -234,20 +232,46 @@ impl MarkIndexColumn {
         self.data.values().iter()
     }
 
+    pub(crate) fn iter_range(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> hexane::Iter<'_, Option<MarkIdx>> {
+        self.data.values().iter_range(range)
+    }
+
+    /// Whether any mark exists anywhere in the document: the cache holds
+    /// the [`MarkData`] of every live mark-begin op.
+    pub(crate) fn has_any_marks(&self) -> bool {
+        !self.cache.is_empty()
+    }
+
+    pub(crate) fn mark_data(&self, id: &OpId) -> Option<&MarkData<'static>> {
+        self.cache.get(id)
+    }
+
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        let new_values: Vec<Option<MarkIdx>> = self
-            .data
-            .values()
-            .iter()
-            .map(|v| v.map(|m| m.with_new_actor(idx)))
-            .collect();
-        let new_cache = self
+        self.remap_values(|m| m.with_new_actor(idx));
+        self.cache = self
             .cache
             .iter()
             .map(|(key, val)| (key.with_new_actor(idx), val.clone()))
             .collect();
-        self.data = PrefixColumn::from_values(new_values);
-        self.cache = new_cache;
+    }
+
+    /// Rebuild the data column with `f` applied to every mark idx —
+    /// run at a time, so an unmarked document (all-null runs) costs a
+    /// handful of run headers rather than a per-row materialize.
+    fn remap_values(&mut self, f: impl Fn(MarkIdx) -> MarkIdx) {
+        let mut new_data = PrefixColumn::new();
+        new_data.splice_runs(
+            0,
+            0,
+            self.data.values().iter().runs().map(|r| hexane::Run {
+                count: r.count,
+                value: r.value.map(&f),
+            }),
+        );
+        self.data = new_data;
     }
 
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
