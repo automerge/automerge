@@ -44,18 +44,9 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     // weights as the runs go past instead.
     const ACCUMULATES: bool = true;
 
-    /// Incremental twin of [`compute_slab_agg`] — same endpoint math, with
-    /// `len == 0` standing in for the "no runs yet" min/max sentinels (an
-    /// empty weight stays `SlabAgg::default()`, matching `compute`).
+    /// Incremental twin of [`compute_slab_agg`] to allow agg to be built
+    /// on slab load instead of on a second pass.
     ///
-    /// Checked arithmetic: this runs on untrusted bytes during load, and
-    /// a within-slab partial overflowing `i64` is provably invalid — the
-    /// [`DeltaValue`](crate::delta::DeltaValue) domain contract bounds
-    /// all realized values to a 2^63-wide window, so offsets between
-    /// values in one slab always fit. Erroring here (instead of wrapping,
-    /// which hostile bytes can steer back into plausible-looking ranges)
-    /// is what lets [`DeltaColumn`] validate the finished aggregates per
-    /// *slab* rather than per run.
     #[inline]
     fn accumulate_run(w: &mut SlabAgg, count: usize, value: I::Get<'_>) -> Result<(), PackError> {
         let Some(v) = I::to_opt(value) else {

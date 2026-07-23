@@ -63,11 +63,6 @@ harness = false
 name = "seek_to_value"
 harness = false
 
-[[bench]]
-name = "codec_compare"
-harness = false
-required-features = ["bijou64"]
-
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]

@@ -921,13 +921,9 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         )
     }
 
-    /// Splice [`DeltaRun`]s in — the run-aware fast path for bulk data.
-    /// A run whose `prefix` matches the running value copies through as
-    /// one inner run; a mismatch costs one peeled fix-up delta.
-    ///
-    /// Each run's realized values must lie in `T`'s value domain (a
-    /// writer-side contract, like [`DeltaValue::to_i64`]); null runs
-    /// panic on non-nullable columns.
+    /// Splice [`DeltaRun`]s instead of indiviaul values allowing for
+    /// Run at a time copying.  Will identify mismatched delta runs and
+    /// break them up as needed.
     pub fn splice_runs(
         &mut self,
         index: usize,

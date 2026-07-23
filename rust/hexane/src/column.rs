@@ -637,17 +637,14 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 
 // ── copy_ranges support ─────────────────────────────────────────────────────
 
-/// Execution strategy for `copy_ranges`.
+/// Copy strategy - if you try to copy 1,000,000 items into a column with 10 items
+/// it will mem-swap the two columns, invert the ranges, and copy the 10 items in to
+/// the 1,000,000 instead
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CopyStrategy {
     Direct,
     Invert,
 }
-
-/// Safety factor favouring Direct in [`Column::copy_strategy`].  The
-/// seam term is already a gross upper bound, so 1 is not aggressive;
-/// see `copy_ranges_bench`.
-pub(crate) const COPY_INVERT_FACTOR: usize = 1;
 
 /// Clamp `ranges` to `len`, drop empties, merge touching neighbours,
 /// and assert ascending/non-overlapping.
@@ -1478,10 +1475,6 @@ where
                 }
             }
             CopyStrategy::Invert => {
-                // keep src's slabs: swap, drop the gaps (interior slabs
-                // undecoded), then splice the old column's kept
-                // segments in between the retained groups (deleted old
-                // rows simply never come back)
                 let old_len = self.len();
                 self.swap_contents(&mut src);
                 let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
@@ -1552,7 +1545,7 @@ where
         let seam_segs = (ranges.len() + points) * 2 * self.max_segments;
         let invert_cost = dest_segs + seam_segs + src.slabs.len();
 
-        if direct_cost > COPY_INVERT_FACTOR * invert_cost {
+        if direct_cost > invert_cost {
             CopyStrategy::Invert
         } else {
             CopyStrategy::Direct
@@ -1889,49 +1882,8 @@ where
 
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
-    pub fn finalize(mut self) -> Result<Column<T, C, WF, Idx>, PackError> {
-        use crate::encoding::LoadIterApi;
-        if let Some((value, len)) = self.fill {
-            if len == 0 {
-                return Ok(Column::with_max_segments(self.max_segments));
-            }
-            return Ok(Column::fill(len, value));
-        }
-        if WF::ACCUMULATES {
-            // `iter.finalize()` below drains and validates whatever is
-            // left, but its fast discard loop never materializes runs —
-            // accumulating weights need every run to pass through
-            // `attribute`, so eat the tail here first (the finalize
-            // below then only flushes the last slab)
-            while self.try_next_run()?.is_some() {}
-        }
-        let slabs = self.iter.finalize()?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        if let Some(expected) = self.length {
-            if total_len != expected {
-                return Err(PackError::InvalidLength(total_len, expected));
-            }
-        }
-        let index = if WF::ACCUMULATES {
-            let mut weights = self.weights;
-            // the final slab is only cut by `finalize` itself; whatever is
-            // not yet attributed to a closed slab belongs to it
-            if weights.len() < slabs.len() {
-                weights.push(self.cur_weight);
-            }
-            debug_assert_eq!(weights.len(), slabs.len());
-            Idx::from_weights(weights)
-        } else {
-            Idx::from_weights(slabs.iter().map(WF::compute))
-        };
-        Ok(Column {
-            slabs,
-            index,
-            total_len,
-            max_segments: self.max_segments,
-            counter: 0,
-            _phantom: PhantomData,
-        })
+    pub fn finalize(self) -> Result<Column<T, C, WF, Idx>, PackError> {
+        self.finalize_with(|_| Ok(()))
     }
 
     /// Like [`finalize`](Self::finalize), but runs `check` over every
