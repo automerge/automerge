@@ -333,8 +333,8 @@ fn leb_bytes(bits: u64) -> u64 {
 // ── Bijou64 ─────────────────────────────────────────────────────────────────
 
 /// The [bijou64](https://github.com/inkandswitch/bijou) tag-byte codec
-/// (feature `bijou64`) — a thin [`Codec`] adapter over the `bijou64`
-/// crate, plus a zigzag mapping for signed values.
+/// (feature `bijou64`) — a thin [`Codec`] adapter over the `bijoux`
+/// crate's `u64`/`i64` formats.
 ///
 /// Unsigned values 0–247 encode as a single byte equal to the value;
 /// larger values use a tag byte `0xF8`–`0xFF` followed by 1–8 big-endian
@@ -349,10 +349,10 @@ fn leb_bytes(bits: u64) -> u64 {
 ///   bytes cannot be scanned backwards, which [`Codec`] already forbids
 ///   relying on.
 ///
-/// Signed values are zigzag-mapped (`(n << 1) ^ (n >> 63)`) onto the
-/// unsigned encoding.  Zigzag is itself a bijection, so canonicality is
-/// preserved; the 1-byte signed range is −124..=123 (vs LEB128's
-/// −64..=63).
+/// Signed values use the bijou64s format ([`bijoux::i64`]): zigzag
+/// (`(n << 1) ^ (n >> 63)`) composed with the unsigned encoding.  Zigzag
+/// is itself a bijection, so canonicality is preserved; the 1-byte
+/// signed range is −124..=123 (vs LEB128's −64..=63).
 ///
 /// [`unsigned_len`]: Codec::unsigned_len
 #[cfg(feature = "bijou64")]
@@ -364,33 +364,24 @@ mod bijou64_impl {
     use super::{Bijou64, Codec, VarBuf};
     use crate::PackError;
 
-    #[inline]
-    fn zigzag(n: i64) -> u64 {
-        ((n << 1) ^ (n >> 63)) as u64
-    }
-
-    #[inline]
-    fn unzigzag(z: u64) -> i64 {
-        ((z >> 1) as i64) ^ -((z & 1) as i64)
-    }
-
     impl Codec for Bijou64 {
         #[inline]
         fn encode_unsigned(n: u64) -> VarBuf {
-            let (bytes, len) = bijou64::encode_array(n);
             let mut out = VarBuf::new();
-            out.extend_from_slice(&bytes[..len]);
+            out.extend_from_slice(&bijoux::u64::encoded_bytes(n));
             out
         }
 
         #[inline]
         fn encode_signed(n: i64) -> VarBuf {
-            Self::encode_unsigned(zigzag(n))
+            let mut out = VarBuf::new();
+            out.extend_from_slice(&bijoux::i64::encoded_bytes(n));
+            out
         }
 
         #[inline]
         fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
-            match bijou64::decode(data) {
+            match bijoux::u64::decode(data) {
                 Ok((v, n)) => Some((n, v)),
                 Err(_) => None,
             }
@@ -398,20 +389,24 @@ mod bijou64_impl {
 
         #[inline]
         fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
-            let (n, z) = Self::read_unsigned(data)?;
-            Some((n, unzigzag(z)))
+            match bijoux::i64::decode(data) {
+                Ok((v, n)) => Some((n, v)),
+                Err(_) => None,
+            }
         }
 
         fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
-            match bijou64::decode(data) {
+            match bijoux::u64::decode(data) {
                 Ok((v, n)) => Ok((n, v)),
                 Err(e) => Err(PackError::InvalidValue(format!("bijou64: {e}"))),
             }
         }
 
         fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
-            let (n, z) = Self::try_read_unsigned(data)?;
-            Ok((n, unzigzag(z)))
+            match bijoux::i64::decode(data) {
+                Ok((v, n)) => Ok((n, v)),
+                Err(e) => Err(PackError::InvalidValue(format!("bijou64s: {e}"))),
+            }
         }
 
         /// Total length from the tag byte alone — no decode, no scan.
@@ -435,12 +430,12 @@ mod bijou64_impl {
 
         #[inline]
         fn unsigned_size(n: u64) -> u64 {
-            bijou64::encoded_len(n) as u64
+            bijoux::u64::encoded_len(n) as u64
         }
 
         #[inline]
         fn signed_size(n: i64) -> u64 {
-            bijou64::encoded_len(zigzag(n)) as u64
+            bijoux::i64::encoded_len(n) as u64
         }
     }
 }
