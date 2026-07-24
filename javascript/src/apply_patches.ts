@@ -18,7 +18,7 @@ import {
   UnmarkPatch,
 } from "./wasm_types.js"
 
-export function applyPatch(doc: unknown, patch: Patch) {
+export function applyPatch<T>(doc: Doc<T>, patch: Patch) {
   let path = resolvePath(doc, patch.path)
   if (patch.action === "put") {
     applyPutPatch(doc, path, patch)
@@ -185,7 +185,7 @@ function applyUnmarkPatch(
   )
 }
 
-export function applyPatches(doc: unknown, patches: Patch[]) {
+export function applyPatches<T>(doc: Doc<T>, patches: Patch[]) {
   for (const patch of patches) {
     applyPatch(doc, patch)
   }
