@@ -21,6 +21,7 @@ fn markset(values: Vec<(&'static str, ScalarValue)>) -> Option<Arc<automerge::ma
 #[test]
 fn update_blocks_change_block_properties() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let block1 = doc.split_block(&text, 0).unwrap();
     doc.update_object(
@@ -106,6 +107,7 @@ fn update_blocks_change_block_properties() {
 #[test]
 fn update_blocks_updates_text() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let _block1 = doc.split_block(&text, 0).unwrap();
     doc.splice_text(&text, 1, 0, "first thing").unwrap();
@@ -170,6 +172,7 @@ fn update_blocks_updates_text() {
 #[test]
 fn update_blocks_updates_marks() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "onetwo").unwrap();
     let _block2 = doc.split_block(&text, 6).unwrap();
@@ -233,6 +236,7 @@ fn update_blocks_updates_marks() {
 #[test]
 fn update_blocks_noop() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let block1 = doc.split_block(&text, 0).unwrap();
     doc.update_object(
@@ -273,6 +277,7 @@ fn update_blocks_noop() {
 #[test]
 fn update_blocks_updates_text_and_blocks_at_once() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     //let block1 = doc.split_block(&text, 0, NewBlock::new("paragraph"))
     let block1 = doc.split_block(&text, 0).unwrap();
@@ -325,6 +330,7 @@ fn update_blocks_updates_text_and_blocks_at_once() {
 #[test]
 fn text_complex_block_properties() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     //let block = doc.split_block(&text, 0, NewBlock::new("ordered-list-item"))
     //.unwrap();
@@ -357,6 +363,7 @@ fn text_complex_block_properties() {
 #[test]
 fn update_spans_delete_attribute() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     //let block = doc.split_block(&text, 0, NewBlock::new("ordered-list-item"))
     //.unwrap();
@@ -394,6 +401,7 @@ fn update_spans_delete_attribute() {
 #[test]
 fn marks_on_spans_respect_heads() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
 
@@ -432,6 +440,7 @@ fn marks_on_spans_respect_heads() {
 #[test]
 fn marks_in_spans_cross_block_markers() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "lix").unwrap();
@@ -463,6 +472,7 @@ fn marks_in_spans_cross_block_markers() {
 #[test]
 fn test_mark_behavior_on_delete_insert() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Insert text with a bold mark
@@ -495,6 +505,7 @@ fn test_mark_behavior_on_delete_insert() {
 #[test]
 fn spans_consolidates_marks_which_are_empty_due_to_deleted_marks() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Insert text with a bold mark
@@ -554,6 +565,7 @@ fn spans_consolidates_marks_which_are_empty_due_to_deleted_marks() {
 #[test]
 fn spans_consolidates_marks_with_deleted_marks_followed_by_empty_marks() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
@@ -587,6 +599,7 @@ fn spans_consolidates_marks_with_deleted_marks_followed_by_empty_marks() {
 #[test]
 fn spans_consolidates_marks_with_empty_marks_followed_by_deleted_marks() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
@@ -620,6 +633,7 @@ fn spans_consolidates_marks_with_empty_marks_followed_by_deleted_marks() {
 #[test]
 fn update_spans_diffs_marks() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Initial text with some marks
@@ -675,6 +689,7 @@ fn update_spans_diffs_marks() {
 #[test]
 fn update_spans_uses_expand_config() {
     let mut doc = automerge::AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Create custom config with different expand behaviors
@@ -728,6 +743,7 @@ fn update_spans_uses_expand_config() {
 #[test]
 fn diff_emits_block_updates() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     // Disable patch log to make sure we are testing the diff not the patch log
     doc.reset_diff_cursor();
@@ -784,6 +800,7 @@ fn diff_emits_block_updates() {
 #[test]
 fn merge_produces_block_insertion_diffs() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     let mut doc2 = doc.fork();
@@ -833,6 +850,7 @@ fn test_splice_with_mark() {
         2,
     );
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let txt = doc
         .put_object(&automerge::ROOT, "txt", ObjType::Text)
         .unwrap();

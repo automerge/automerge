@@ -8,6 +8,7 @@ use test_log::test;
 #[test]
 fn mark_patches_at_end_of_text() {
     let mut doc1 = automerge::AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let text = doc1.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc1.splice_text(&text, 0, 0, "sample").unwrap();
     let heads_before_mark = doc1.get_heads();

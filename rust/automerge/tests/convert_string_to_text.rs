@@ -7,6 +7,7 @@ use test_log::test;
 #[test]
 fn test_strings_in_maps_are_converted_to_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(ROOT, "somestring", "hello").unwrap();
     let saved = doc.save();
 
@@ -33,6 +34,7 @@ fn test_strings_in_maps_are_converted_to_text() {
 #[test]
 fn test_strings_in_lists_are_converted_to_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, "hello").unwrap();
     let saved = doc.save();

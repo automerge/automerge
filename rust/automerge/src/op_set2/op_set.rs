@@ -1586,7 +1586,7 @@ impl OpSet {
     }
 
     /// Structural validation of the op columns for loads that skip the
-    /// full per-op scan (`HashGraphRebuild::None`).
+    /// full per-op scan (a hash-column-trusting load).
     ///
     /// The checked path materializes every op via `try_next()`, which
     /// validates cross-column invariants as a side effect; the column-walk

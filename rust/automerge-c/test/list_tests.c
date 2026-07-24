@@ -238,19 +238,19 @@ static void test_get_range_values(void** state) {
     AMstackItem(NULL, AMlistPutStr(doc1, list, 0, true, AMstr("Sixth")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMlistPutStr(doc1, list, 0, true, AMstr("Seventh")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMlistPutStr(doc1, list, 0, true, AMstr("Eighth")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
-    AMitems const v1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const v1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     AMdoc* doc2;
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMfork(doc1, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2));
 
     AMstackItem(NULL, AMlistPutStr(doc1, list, 2, false, AMstr("Third V2")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     AMstackItem(NULL, AMlistPutStr(doc2, list, 2, false, AMstr("Third V3")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc2, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc2, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
-    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     /* Forward vs. reverse: complete current list range. */
     AMitems range =

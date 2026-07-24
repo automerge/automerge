@@ -84,6 +84,8 @@ describe("cursors", () => {
     let callbacks: Array<Automerge.PatchSource> = []
     let patchCallback = (_p, meta) => callbacks.push(meta.source)
     let doc1 = Automerge.from<DocShape>({ hello: "world" }, { patchCallback })
+    // this test drives the sync protocol below, which needs audit mode
+    Automerge.enableAuditMode(doc1)
     let heads1 = Automerge.getHeads(doc1)
     let doc2 = Automerge.clone(doc1, { patchCallback })
     doc2 = Automerge.change(doc2, d => (d.a = "b"))

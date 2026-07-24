@@ -3,7 +3,7 @@ use crate::interop::{ExternalTypeConstructor, SAFE_INT, SAFE_UINT};
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
-use automerge::ChangeHash;
+use automerge::ChangeId;
 use js_sys::{Array, BigInt, JsString, Object, Reflect, Symbol, Uint8Array};
 use rustc_hash::FxBuildHasher;
 use std::borrow::{Borrow, Cow};
@@ -126,7 +126,7 @@ impl<'a> ExportCache<'a> {
         &mut self,
         obj: ObjId,
         datatype: Datatype,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
         if datatype == Datatype::Text {
@@ -140,7 +140,7 @@ impl<'a> ExportCache<'a> {
         let mut buffer = String::new();
         let mut parent_prop = JsValue::null();
         let result = JsValue::from(&o);
-        let iter = self.doc.doc.iter_at(obj, heads);
+        let iter = self.doc.doc.iter_at(obj, heads)?;
         for DocObjItem { obj, item } in iter {
             if obj != current_obj_id {
                 if !buffer.is_empty() {

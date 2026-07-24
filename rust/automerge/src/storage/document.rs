@@ -10,7 +10,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, HashGraphRebuild, TextEncoding};
+use crate::{ActorId, AuditMode, Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -339,32 +339,25 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
-        hash_graph: HashGraphRebuild,
+        audit: AuditMode,
     ) -> Result<Automerge, ReconstructError> {
         // the op indexes are built during column load, in the same
         // decode pass (obj id validation happens inside the walk)
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
 
-        let build_hash_graph = match hash_graph {
-            HashGraphRebuild::Full => true,
-            HashGraphRebuild::None => false,
-            // use the stored fragment hashes when the document has them;
-            // otherwise fall back to a full rebuild
-            HashGraphRebuild::Fragments => {
-                !change_cols.has_saved_hashes() || self.head_indexes().is_none()
-            }
-        };
+        // audit mode always recomputes and verifies every hash; outside
+        // it the stored hash columns are trusted when present, and old
+        // documents without them (or without a head index suffix to
+        // pair heads with nodes) fall back to computing once
+        let compute_hashes = audit == AuditMode::Enabled
+            || !change_cols.has_saved_hashes()
+            || self.head_indexes().is_none();
 
-        // an unchecked load pairs the heads with their nodes via the head
-        // index suffix, so refuse to skip if it is absent
-        let head_indexes = if build_hash_graph {
+        let head_indexes = if compute_hashes {
             None
         } else {
-            Some(
-                self.head_indexes()
-                    .ok_or(ReconstructError::MissingHeadIndexes)?,
-            )
+            Some(self.head_indexes().expect("checked above"))
         };
 
         // structural checks the op scan doesn't cover (actor index
@@ -372,7 +365,7 @@ impl<'a> Document<'a> {
         // paths now that neither materializes every op for the index
         op_set.column_validation()?;
 
-        let changes = if build_hash_graph {
+        let changes = if compute_hashes {
             let mut collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
             collector.process_all_ops(&op_set)?;
             let changes = collector.collect(&op_set)?;
@@ -385,7 +378,7 @@ impl<'a> Document<'a> {
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
-        let change_graph = match &changes {
+        let mut change_graph = match &changes {
             Some(changes) => change_cols
                 .finalize(&changes.changes)
                 .map_err(|_| ReconstructError::InvalidHashColumns)?,
@@ -396,6 +389,12 @@ impl<'a> Document<'a> {
                     .map_err(|_| ReconstructError::BadHeadIndexes)?
             }
         };
+
+        // the compute path builds a full hash set; outside audit mode
+        // only the retained set is kept
+        if audit == AuditMode::Disabled && compute_hashes {
+            change_graph.retain_hashes_only();
+        }
 
         if let Some(changes) = &changes {
             debug_assert_eq!(changes.changes.len(), change_graph.len());
@@ -445,8 +444,6 @@ pub(crate) enum ReconstructError {
     InvalidChanges(#[from] crate::storage::load::change_collector::Error),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
-    #[error("cannot skip building the hash graph: the document has no head index suffix")]
-    MissingHeadIndexes,
     #[error("the document's head indexes are invalid")]
     BadHeadIndexes,
     // FIXME - i need to do this check

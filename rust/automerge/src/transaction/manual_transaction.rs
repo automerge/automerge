@@ -55,14 +55,17 @@ impl<'a> Transaction<'a> {
 
 impl Transaction<'_> {
     /// Get the heads of the document before this transaction was started.
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    pub fn get_heads(&self) -> Vec<crate::ChangeId> {
         self.doc.get_heads()
     }
 
-    /// Commit the operations performed in this transaction, returning the hashes corresponding to
-    /// the new heads.
-    pub fn commit(mut self) -> Option<ChangeHash> {
-        self.inner.take().unwrap().commit(self.doc, None, None)
+    /// Commit the operations performed in this transaction, returning the
+    /// [`crate::ChangeId`] of the change it created (if any).
+    pub fn commit(mut self) -> Option<crate::ChangeId> {
+        let hash = self.inner.take().unwrap().commit(self.doc, None, None)?;
+        self.doc
+            .hash_to_change_id(&hash)
+            .expect("hash of a newly committed change is always known")
     }
 
     /// Commit the operations in this transaction with some options.
@@ -81,11 +84,15 @@ impl Transaction<'_> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> Option<ChangeHash> {
-        self.inner
+    pub fn commit_with(mut self, options: CommitOptions) -> Option<crate::ChangeId> {
+        let hash = self
+            .inner
             .take()
             .unwrap()
-            .commit(self.doc, options.message, options.time)
+            .commit(self.doc, options.message, options.time)?;
+        self.doc
+            .hash_to_change_id(&hash)
+            .expect("hash of a newly committed change is always known")
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -102,11 +109,17 @@ impl Transaction<'_> {
         f(tx, self.doc)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
+    fn get_scope(
+        &self,
+        heads: Option<&[crate::ChangeId]>,
+    ) -> Result<Option<crate::types::Clock>, AutomergeError> {
         if let Some(h) = heads {
-            Some(self.doc.change_graph.clock_for_heads_lossy(h))
+            // a transaction is in flight, so the current-heads shortcut is
+            // never sound here: always resolve a concrete clock
+            let nodes = self.doc.nodes_for_change_ids(h)?;
+            Ok(Some(self.doc.change_graph.clock_for_nodes(nodes)))
         } else {
-            self.inner.as_ref().and_then(|i| i.get_scope().clone())
+            Ok(self.inner.as_ref().and_then(|i| i.get_scope().clone()))
         }
     }
 

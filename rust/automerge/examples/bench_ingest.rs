@@ -2,7 +2,7 @@
 // concatenated raw changes (comparable to automerge main), concatenated
 // v1 bundles through the walk, and the same bundles through the batch
 // manifold (BATCH_MANIFOLD). Plus a plain full-doc load for context.
-use automerge::Automerge;
+use automerge::{Automerge, LoadOptions};
 use std::time::Instant;
 
 fn best_of<F: Fn() -> Automerge>(f: F, expect: &Automerge) -> f64 {
@@ -26,7 +26,11 @@ fn main() {
             println!("{name}: missing");
             continue;
         };
-        let doc = Automerge::load(&bytes).unwrap();
+        // the source doc enumerates its full history below (changes and
+        // bundle emission), which needs audit mode; the measured ingest
+        // paths run on default (non-audit) documents
+        let doc =
+            Automerge::load_with_options(&bytes, LoadOptions::new().with_audit_mode()).unwrap();
         // measured FIRST (best of 3): a clean-heap baseline, before
         // the ingest paths churn the allocator
         let full = best_of(|| Automerge::load(&bytes).unwrap(), &doc);

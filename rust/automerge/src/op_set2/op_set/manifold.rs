@@ -1103,7 +1103,7 @@ mod tests {
         d.doc.validate_document();
     }
 
-    fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeHash]) -> Vec<Change> {
+    fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeId]) -> Vec<Change> {
         src.get_changes(heads).unwrap()
     }
 
@@ -1111,6 +1111,7 @@ mod tests {
     fn manifold_double_increment_same_pred() {
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "c", ScalarValue::counter(10)).unwrap();
         let heads = doc.get_heads();
 
@@ -1132,6 +1133,7 @@ mod tests {
         // inserts must not split them
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, "a").unwrap();
         doc.insert(&list, 1, "b").unwrap();
@@ -1156,6 +1158,7 @@ mod tests {
     fn manifold_memo_resets_across_objects() {
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         let l1 = doc.put_object(&ROOT, "l1", ObjType::List).unwrap();
         let l2 = doc.put_object(&ROOT, "l2", ObjType::List).unwrap();
         doc.insert(&l1, 0, 1).unwrap();
@@ -1177,6 +1180,7 @@ mod tests {
         // typing runs: every insert anchors at the previous pending one
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "base").unwrap();
         let heads = doc.get_heads();
@@ -1205,6 +1209,7 @@ mod tests {
     fn manifold_head_insert_after_update_groups() {
         let actor = |b: u8| crate::ActorId::from(vec![b]);
         let mut doc = AutoCommit::new().with_actor(actor(1)).unwrap();
+        doc.enable_audit_mode().unwrap();
         let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "ab").unwrap();
 
@@ -1241,6 +1246,7 @@ mod tests {
         let mut rng = make_rng();
         for _ in 0..20 {
             let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+            doc.enable_audit_mode().unwrap();
             let map = doc.put_object(&ROOT, "map", ObjType::Map).unwrap();
             let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
             doc.put(&map, "c", ScalarValue::counter(0)).unwrap();
@@ -1309,6 +1315,7 @@ mod tests {
         // later object then sizes groups/hops against nothing
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         let l1 = doc.put_object(&ROOT, "a", ObjType::List).unwrap();
         let l2 = doc.put_object(&ROOT, "b", ObjType::List).unwrap();
         for i in 0..4 {
@@ -1337,6 +1344,7 @@ mod tests {
         // (doc order) and must resolve it through the memo
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         for i in 0..5 {
             doc.insert(&list, i, i as i64).unwrap();
@@ -1365,6 +1373,7 @@ mod tests {
         let mut doc = AutoCommit::new()
             .with_actor("aa".try_into().unwrap())
             .unwrap();
+        doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "old").unwrap();
         doc.commit();
         let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
@@ -1384,6 +1393,7 @@ mod tests {
         let mut doc = AutoCommit::new()
             .with_actor("aa".try_into().unwrap())
             .unwrap();
+        doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "old").unwrap();
         doc.commit();
         let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
@@ -1406,6 +1416,7 @@ mod tests {
             let mut doc = AutoCommit::new()
                 .with_actor("aa".try_into().unwrap())
                 .unwrap();
+            doc.enable_audit_mode().unwrap();
             doc.put(&ROOT, "k", "old").unwrap();
             doc.commit();
             let mut fa = doc.fork().with_actor(other.try_into().unwrap()).unwrap();
@@ -1427,6 +1438,7 @@ mod tests {
         // pending in the batch: one update wins, the other is flagged
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, 1i64).unwrap();
         let heads = doc.get_heads();
@@ -1451,6 +1463,7 @@ mod tests {
         let mut doc = AutoCommit::new()
             .with_actor("aa".try_into().unwrap())
             .unwrap();
+        doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "c", ScalarValue::counter(5)).unwrap();
         let heads = doc.get_heads();
         let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
@@ -1469,6 +1482,7 @@ mod tests {
         // memo's (pred, succ) ordering
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "seed").unwrap();
         let heads = doc.get_heads();
 
@@ -1504,6 +1518,7 @@ mod tests {
         // same shape but the counters are already IN the doc when the
         // multi-pred increments arrive (covered preds -> flush memo)
         let mut doc2 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc2.enable_audit_mode().unwrap();
         doc2.put(&ROOT, "k", "seed").unwrap();
         let mut ga = doc2.fork().with_actor(rng.random()).unwrap();
         ga.put(&ROOT, "k", ScalarValue::counter(0)).unwrap();
@@ -1529,6 +1544,7 @@ mod tests {
         let mut rng = make_rng();
         for _ in 0..50 {
             let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+            doc.enable_audit_mode().unwrap();
             let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
             for i in 0..4 {
                 doc.insert(&list, i, i as i64).unwrap();

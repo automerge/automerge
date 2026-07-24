@@ -257,6 +257,7 @@ pub(crate) mod automerge;
 mod autoserde;
 mod change;
 pub(crate) mod change_graph;
+mod change_id;
 mod change_queue;
 mod clock;
 mod columnar;
@@ -284,13 +285,14 @@ mod types;
 mod value;
 
 pub use crate::automerge::{
-    Automerge, HashGraphRebuild, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
+    AuditMode, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
 };
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
-pub use change_graph::{ChangeId, Fragment, HashGraphState, ParseChangeIdError};
+pub use change_graph::Fragment;
+pub use change_id::{ChangeId, ParseChangeIdError};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;

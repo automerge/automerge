@@ -86,6 +86,15 @@ impl ClockRange {
         Self::Diff(before, None)
     }
 
+    /// The owned after-side clock, when the range targets a historical
+    /// view (`None` = the current document).
+    pub(crate) fn after_clock(&self) -> Option<Clock> {
+        match self {
+            Self::Current(c) => c.clone(),
+            Self::Diff(_, a) => a.clone(),
+        }
+    }
+
     pub(crate) fn after(&self) -> Option<&Clock> {
         match self {
             Self::Diff(_, after) => after.as_ref(),

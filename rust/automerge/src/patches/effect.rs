@@ -10,9 +10,7 @@ use crate::op_set2::{Op, OpQuery, OpQueryTerm, OpType};
 use crate::text_value::ConcreteTextValue;
 use crate::types::{Clock, ObjId as InternalObjId, SequenceType};
 use crate::value::{ScalarValue, Value as PublicValue};
-use crate::{
-    Automerge, AutomergeError, ChangeHash, ObjType, Patch, PatchAction, Prop, TextEncoding,
-};
+use crate::{Automerge, AutomergeError, ChangeId, ObjType, Patch, PatchAction, Prop, TextEncoding};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectValue {
@@ -94,8 +92,8 @@ impl std::error::Error for PatchEffectError {}
 #[track_caller]
 pub(crate) fn assert_patches_have_same_effect(
     doc: &Automerge,
-    before: &[ChangeHash],
-    after: &[ChangeHash],
+    before: &[ChangeId],
+    after: &[ChangeId],
     left_label: &str,
     left: &[Patch],
     right_label: &str,
@@ -124,8 +122,8 @@ pub(crate) fn assert_patches_have_same_effect(
 pub(crate) fn assert_patches_have_same_effect_for_obj(
     doc: &Automerge,
     obj: &ExId,
-    before: &[ChangeHash],
-    after: &[ChangeHash],
+    before: &[ChangeId],
+    after: &[ChangeId],
     left_label: &str,
     left: &[Patch],
     right_label: &str,
@@ -179,18 +177,24 @@ fn apply_patch_effects_for_obj(
 }
 
 impl EffectValue {
-    pub(crate) fn from_doc(doc: &Automerge, heads: Option<&[ChangeHash]>) -> Self {
-        let clock = heads.and_then(|heads| doc.clock_at(heads));
+    pub(crate) fn from_doc(doc: &Automerge, heads: Option<&[ChangeId]>) -> Self {
+        let clock = heads.and_then(|heads| {
+            doc.clock_for_ids(heads)
+                .expect("effect heads must be change ids in the document")
+        });
         EffectMaterializer::new(doc).hydrate_map(&InternalObjId::root(), clock.as_ref())
     }
 
     pub(crate) fn from_doc_obj(
         doc: &Automerge,
         obj: &ExId,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<Self, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let clock = heads.and_then(|heads| doc.clock_at(heads));
+        let clock = heads.and_then(|heads| {
+            doc.clock_for_ids(heads)
+                .expect("effect heads must be change ids in the document")
+        });
         Ok(EffectMaterializer::new(doc).hydrate_obj(&obj.id, clock.as_ref()))
     }
 
@@ -1051,8 +1055,8 @@ mod tests {
 
     fn assert_diff_patches_have_effect(
         doc: &mut AutoCommit,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: &[ChangeId],
+        after: &[ChangeId],
     ) {
         let mut materialized = EffectValue::from_doc(&doc.doc, Some(before));
         let expected = EffectValue::from_doc(&doc.doc, Some(after));
@@ -1066,8 +1070,8 @@ mod tests {
     fn assert_obj_diff_patches_have_effect(
         doc: &mut AutoCommit,
         obj: &ExId,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: &[ChangeId],
+        after: &[ChangeId],
         recursive: bool,
     ) {
         let mut materialized = EffectValue::from_doc_obj(&doc.doc, obj, Some(before)).unwrap();

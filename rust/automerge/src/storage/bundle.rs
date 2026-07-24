@@ -246,26 +246,30 @@ mod test {
         tx.put(&ROOT, "ccc", "ccc").unwrap();
         let Some(h2) = tx.commit() else { panic!() };
 
-        let bundle = doc.bundle([h0, h1, h2]).unwrap();
+        let hashes = doc
+            .change_ids_to_hashes(&[h0.clone(), h1.clone(), h2.clone()])
+            .unwrap();
+        let bundle = doc.bundle(hashes).unwrap();
         let changes = bundle.to_changes().unwrap();
         assert_eq!(changes.len(), 3);
         assert_eq!(changes[0].max_op(), 1);
-        assert_eq!(changes[0].hash(), h0);
+        assert_eq!(changes[0].id(), h0);
         assert_eq!(changes[1].max_op(), 2);
-        assert_eq!(changes[1].hash(), h1);
+        assert_eq!(changes[1].id(), h1);
         assert_eq!(changes[2].max_op(), 3);
-        assert_eq!(changes[2].hash(), h2);
+        assert_eq!(changes[2].id(), h2);
 
         d2.load_incremental(bundle.bytes()).unwrap();
 
         assert_eq!(doc.save(), d2.save());
 
-        let bundle = doc.bundle([h0, h2]).unwrap();
+        let hashes = doc.change_ids_to_hashes(&[h0.clone(), h2.clone()]).unwrap();
+        let bundle = doc.bundle(hashes).unwrap();
         let changes = bundle.to_changes().unwrap();
         assert_eq!(changes.len(), 2);
         assert_eq!(changes[0].max_op(), 1);
-        assert_eq!(changes[0].hash(), h0);
+        assert_eq!(changes[0].id(), h0);
         assert_eq!(changes[1].max_op(), 3);
-        assert_eq!(changes[1].hash(), h2);
+        assert_eq!(changes[1].id(), h2);
     }
 }

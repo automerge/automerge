@@ -30,7 +30,7 @@ static void test_make_cursor_from_position_and_use_it(void** state) {
     AMstackItem(NULL, AMspliceText(doc1, text, 0, 0, AMstr("the sly fox jumped over the lazy dog")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     /* let heads1 = doc1.getHeads();                                                                                  */
-    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     /*
        // get a cursor at a position
        let cursor = doc1.getCursor("/text", 12);                                                                      */

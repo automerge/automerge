@@ -8,6 +8,7 @@ struct Orphans {
 /// Create a document with an orphan change
 fn doc_with_orphans() -> Orphans {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     doc1.put(&ROOT, "key", "value").unwrap();
 
     // Create two changes remotely
@@ -71,6 +72,7 @@ fn discard_orphans() {
 #[test]
 fn load_incremental_change_without_deps_throws() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(&ROOT, "key", "value").unwrap();
     let _ = doc.save_incremental();
 

@@ -16,6 +16,7 @@ fn vnull() -> Value<'static> {
 #[test]
 fn batch_insert_flat_map() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "a" => "hello",
         "b" => 42_i64,
@@ -40,6 +41,7 @@ fn batch_insert_flat_map() {
 #[test]
 fn batch_insert_nested_maps() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "outer" => hydrate_map! {
             "inner_a" => "deep",
@@ -70,6 +72,7 @@ fn batch_insert_nested_maps() {
 #[test]
 fn batch_insert_map_overwrites_existing_key() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(ROOT, "key", "old_value").unwrap();
     assert_eq!(
         doc.get(ROOT, "key").unwrap().unwrap().0,
@@ -88,6 +91,7 @@ fn batch_insert_map_overwrites_existing_key() {
 #[test]
 fn batch_insert_flat_list() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::List(hydrate_list![1_i64, 2_i64, 3_i64]);
     let obj_id = doc
         .batch_create_object(ROOT, "nums", &value, false)
@@ -102,6 +106,7 @@ fn batch_insert_flat_list() {
 #[test]
 fn batch_insert_list_with_nested_objects() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::List(hydrate_list![
         hydrate_map! { "name" => "alice" },
         hydrate_map! { "name" => "bob" },
@@ -129,6 +134,7 @@ fn batch_insert_list_with_nested_objects() {
 #[test]
 fn batch_insert_scalar_fails() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let Err(_) = doc.batch_create_object(ROOT, "foo", &hydrate::Value::Scalar(1.into()), false)
     else {
         panic!("batch creating a scalar should throw an error");
@@ -138,6 +144,7 @@ fn batch_insert_scalar_fails() {
 #[test]
 fn batch_insert_into_list_at_end() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "items", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "first").unwrap();
     doc.insert(&list_id, 1, "second").unwrap();
@@ -166,6 +173,7 @@ fn batch_insert_into_list_at_end() {
 #[test]
 fn batch_insert_into_list_at_middle() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "items", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "a").unwrap();
     doc.insert(&list_id, 1, "c").unwrap();
@@ -187,6 +195,7 @@ fn batch_insert_into_list_at_middle() {
 #[test]
 fn batch_put_overwrites_existing_list_element() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "items", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "old_a").unwrap();
     doc.insert(&list_id, 1, "old_b").unwrap();
@@ -218,6 +227,7 @@ fn batch_put_overwrites_existing_list_element() {
 #[test]
 fn batch_insert_with_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "greeting" => hydrate_text!{"hello world"},
     });
@@ -233,6 +243,7 @@ fn batch_insert_with_text() {
 #[test]
 fn batch_insert_text_in_list() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::List(hydrate_list![hydrate_text! {"one"}, hydrate_text! {"two"},]);
     let list_id = doc
         .batch_create_object(ROOT, "texts", &value, false)
@@ -248,6 +259,7 @@ fn batch_insert_text_in_list() {
 #[test]
 fn batch_insert_deeply_nested() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "level1" => hydrate_map! {
             "level2" => hydrate_map! {
@@ -273,6 +285,7 @@ fn batch_insert_deeply_nested() {
 #[test]
 fn batch_insert_mixed_nesting() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "users" => hydrate_list![
             hydrate_map! {
@@ -323,6 +336,7 @@ fn batch_insert_mixed_nesting() {
 #[test]
 fn batch_insert_survives_save_load() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "name" => "test",
         "items" => hydrate_list![1_i64, 2_i64, 3_i64],
@@ -353,6 +367,7 @@ fn batch_insert_survives_save_load() {
 #[test]
 fn batch_insert_merges_correctly() {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let mut doc2 = doc1.fork();
 
     let v1 = hydrate::Value::Map(hydrate_map! { "from" => "doc1" });
@@ -378,6 +393,7 @@ fn batch_insert_merges_correctly() {
 #[test]
 fn multiple_batch_inserts() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
 
     let v1 = hydrate::Value::Map(hydrate_map! { "a" => 1_i64 });
     doc.batch_create_object(ROOT, "first", &v1, false).unwrap();
@@ -399,6 +415,7 @@ fn multiple_batch_inserts() {
 #[test]
 fn batch_insert_into_existing_map() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let parent = doc.put_object(ROOT, "parent", ObjType::Map).unwrap();
     doc.put(&parent, "existing", "value").unwrap();
 
@@ -417,6 +434,7 @@ fn batch_insert_into_existing_map() {
 #[test]
 fn batch_insert_into_existing_list() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "existing").unwrap();
 
@@ -439,6 +457,7 @@ fn batch_insert_into_existing_list() {
 #[test]
 fn batch_insert_matches_hydrate_output() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let input = hydrate::Value::Map(hydrate_map! {
         "name" => "test",
         "count" => 42_i64,
@@ -466,6 +485,7 @@ fn batch_insert_matches_hydrate_output() {
 #[test]
 fn batch_insert_with_transaction() {
     let mut doc = automerge::Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
 
     let value = hydrate::Value::Map(hydrate_map! { "key" => "from_tx" });
@@ -486,6 +506,7 @@ fn batch_insert_with_transaction() {
 #[test]
 fn batch_insert_transaction_rollback() {
     let mut doc = automerge::Automerge::new();
+    doc.enable_audit_mode().unwrap();
     {
         let mut tx = doc.transaction();
         let value = hydrate::Value::Map(hydrate_map! { "key" => "should_be_gone" });
@@ -499,6 +520,7 @@ fn batch_insert_transaction_rollback() {
 #[test]
 fn batch_insert_empty_map() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {});
     let obj_id = doc
         .batch_create_object(ROOT, "empty", &value, false)
@@ -514,6 +536,7 @@ fn batch_insert_empty_map() {
 #[test]
 fn batch_insert_empty_list() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::List(hydrate_list![]);
     let obj_id = doc
         .batch_create_object(ROOT, "empty", &value, false)
@@ -529,6 +552,7 @@ fn batch_insert_empty_list() {
 #[test]
 fn batch_insert_empty_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Text(hydrate::Text::new(TextEncoding::UnicodeCodePoint, ""));
     let obj_id = doc
         .batch_create_object(ROOT, "empty", &value, false)
@@ -544,6 +568,7 @@ fn batch_insert_empty_text() {
 #[test]
 fn batch_insert_various_scalar_types() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "str_val" => "hello",
         "int_val" => 42_i64,
@@ -587,6 +612,7 @@ fn batch_insert_various_scalar_types() {
 #[test]
 fn batch_insert_equivalent_to_individual_ops() {
     let mut doc_batch = AutoCommit::new();
+    doc_batch.enable_audit_mode().unwrap();
     let value = hydrate::Value::Map(hydrate_map! {
         "name" => "test",
         "count" => 5_i64,
@@ -597,6 +623,7 @@ fn batch_insert_equivalent_to_individual_ops() {
         .unwrap();
 
     let mut doc_individual = AutoCommit::new();
+    doc_individual.enable_audit_mode().unwrap();
     let data = doc_individual
         .put_object(ROOT, "data", ObjType::Map)
         .unwrap();
@@ -617,6 +644,7 @@ fn batch_insert_equivalent_to_individual_ops() {
 #[test]
 fn batch_insert_generates_patches() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.update_diff_cursor();
 
     let value = hydrate::Value::Map(hydrate_map! {
@@ -638,6 +666,7 @@ fn batch_insert_generates_patches() {
 #[test]
 fn batch_insert_text_generates_splice_patch() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.update_diff_cursor();
 
     let value = hydrate::Value::Map(hydrate_map! {
@@ -660,6 +689,7 @@ fn batch_insert_text_generates_splice_patch() {
 #[test]
 fn batch_insert_list_of_lists() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let value = hydrate::Value::List(hydrate_list![
         hydrate_list![1_i64, 2_i64],
         hydrate_list![3_i64, 4_i64],
@@ -682,6 +712,7 @@ fn batch_insert_list_of_lists() {
 #[test]
 fn batch_put_overwrite_with_nested_structure() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "items", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "placeholder").unwrap();
     doc.insert(&list_id, 1, "keep").unwrap();
@@ -717,6 +748,7 @@ fn batch_init_map_flat() {
         "count" => 42_i64,
     };
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.init_root_from_hydrate(&map).unwrap();
 
     assert_eq!(
@@ -738,6 +770,7 @@ fn batch_init_map_nested() {
         },
     };
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.init_root_from_hydrate(&map).unwrap();
 
     let (_, users_id) = doc.get(ROOT, "users").unwrap().unwrap();
@@ -762,6 +795,7 @@ fn batch_init_map_with_text() {
         "greeting" => hydrate_text!{"hello world"},
     };
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.init_root_from_hydrate(&map).unwrap();
 
     let (val, text_id) = doc.get(ROOT, "greeting").unwrap().unwrap();
@@ -776,6 +810,7 @@ fn batch_init_map_survives_save_load() {
         "items" => hydrate_list![1_i64, 2_i64, 3_i64],
     };
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.init_root_from_hydrate(&map).unwrap();
 
     let saved = doc.save();
@@ -797,9 +832,11 @@ fn batch_init_map_equivalent_to_individual_ops() {
         "items" => hydrate_list!["a", "b", "c"],
     };
     let mut doc_batch = AutoCommit::new();
+    doc_batch.enable_audit_mode().unwrap();
     doc_batch.init_root_from_hydrate(&map).unwrap();
 
     let mut doc_individual = AutoCommit::new();
+    doc_individual.enable_audit_mode().unwrap();
     doc_individual.put(ROOT, "name", "test").unwrap();
     doc_individual.put(ROOT, "count", 5_i64).unwrap();
     let items = doc_individual
@@ -821,6 +858,7 @@ fn batch_init_map_generates_patches() {
         "items" => hydrate_list![1_i64, 2_i64],
     };
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.init_root_from_hydrate(&map).unwrap();
 
     let heads = doc.get_heads();
@@ -839,6 +877,7 @@ fn batch_init_map_generates_patches() {
 #[test]
 fn splice_insert_scalars() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "a").unwrap();
     doc.insert(&list_id, 1, "d").unwrap();
@@ -859,6 +898,7 @@ fn splice_insert_scalars() {
 #[test]
 fn splice_insert_objects() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
 
     let values = vec![
@@ -883,6 +923,7 @@ fn splice_insert_objects() {
 #[test]
 fn splice_insert_mixed() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
 
     let values = vec![
@@ -906,6 +947,7 @@ fn splice_insert_mixed() {
 #[test]
 fn splice_delete_and_insert() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "a").unwrap();
     doc.insert(&list_id, 1, "b").unwrap();
@@ -928,6 +970,7 @@ fn splice_delete_and_insert() {
 #[test]
 fn splice_delete_only() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list_id, 0, "a").unwrap();
     doc.insert(&list_id, 1, "b").unwrap();
@@ -944,6 +987,7 @@ fn splice_delete_only() {
 #[test]
 fn splice_with_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
 
     let values = vec![
@@ -962,6 +1006,7 @@ fn splice_with_text() {
 #[test]
 fn splice_deeply_nested() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
 
     let values = vec![hydrate::Value::Map(hydrate_map! {
@@ -989,6 +1034,7 @@ fn splice_deeply_nested() {
 #[test]
 fn splice_survives_save_load() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list_id = doc.put_object(ROOT, "list", ObjType::List).unwrap();
 
     let values = vec![
@@ -1013,6 +1059,7 @@ fn splice_survives_save_load() {
 #[test]
 fn splice_merges_correctly() {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let list_id = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list_id, 0, "shared").unwrap();
 
@@ -1037,6 +1084,7 @@ fn splice_merges_correctly() {
 #[test]
 fn batch_create_object_rejects_map_key_in_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "k0", ObjType::Text).unwrap();
     doc.commit();
 

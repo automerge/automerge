@@ -19,6 +19,7 @@ fn markset(values: Vec<(&'static str, ScalarValue)>) -> Option<Arc<automerge::ma
 #[test]
 fn overlapping_marks_remove_one_keep_other() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Create overlapping marks: "hello world" with "world" being both bold and italic
@@ -72,6 +73,7 @@ fn overlapping_marks_remove_one_keep_other() {
 #[test]
 fn overlapping_marks_change_boundaries() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "hello beautiful world")
@@ -133,6 +135,7 @@ fn overlapping_marks_change_boundaries() {
 #[test]
 fn overlapping_marks_add_third_mark() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
@@ -196,6 +199,7 @@ fn overlapping_marks_add_third_mark() {
 #[test]
 fn mark_expands() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text").unwrap();
@@ -230,6 +234,7 @@ fn mark_expands() {
 #[test]
 fn mark_contracts() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text").unwrap();
@@ -276,6 +281,7 @@ fn mark_contracts() {
 #[test]
 fn mark_shifts_position() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text").unwrap();
@@ -322,6 +328,7 @@ fn mark_shifts_position() {
 #[test]
 fn mark_splits() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text here").unwrap();
@@ -376,6 +383,7 @@ fn mark_splits() {
 #[test]
 fn adjacent_marks_merge() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text").unwrap();
@@ -416,6 +424,7 @@ fn adjacent_marks_merge() {
 #[test]
 fn adjacent_marks_stay_separate() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text").unwrap();
@@ -485,6 +494,7 @@ fn adjacent_marks_stay_separate() {
 #[test]
 fn different_adjacent_marks() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bolditalic").unwrap();
@@ -524,6 +534,7 @@ fn different_adjacent_marks() {
 #[test]
 fn mark_on_empty_string() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // This should work but produce no visible marks since there's no text
@@ -544,6 +555,7 @@ fn mark_on_empty_string() {
 #[test]
 fn mark_on_whitespace() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.update_spans(
@@ -581,6 +593,7 @@ fn mark_on_whitespace() {
 #[test]
 fn removing_all_text_from_marked_span() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
@@ -615,6 +628,7 @@ fn removing_all_text_from_marked_span() {
 #[test]
 fn mark_spans_across_block() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold").unwrap();
@@ -660,6 +674,7 @@ fn mark_spans_across_block() {
 #[test]
 fn mark_ends_at_block_boundary() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold").unwrap();
@@ -690,6 +705,7 @@ fn mark_ends_at_block_boundary() {
 #[test]
 fn nested_marks() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "italic bold and italic just italic")
@@ -722,6 +738,7 @@ fn nested_marks() {
 #[test]
 fn many_marks_on_same_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "formatted").unwrap();
@@ -755,6 +772,7 @@ fn many_marks_on_same_text() {
 #[test]
 fn mark_value_changes_link_url() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "click here").unwrap();
@@ -793,6 +811,7 @@ fn mark_value_changes_link_url() {
 #[test]
 fn mark_value_changes_color() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "colored").unwrap();
@@ -828,6 +847,7 @@ fn mark_value_changes_color() {
 #[test]
 fn mark_value_type_changes() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "text").unwrap();
@@ -863,6 +883,7 @@ fn mark_value_type_changes() {
 #[test]
 fn multiple_marks_different_expand_behaviors() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     let mut config = UpdateSpansConfig::default();
@@ -905,6 +926,7 @@ fn multiple_marks_different_expand_behaviors() {
 #[test]
 fn marks_with_expand_none_at_boundaries() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     let config = UpdateSpansConfig::default().with_default_expand(ExpandMark::None);
@@ -946,6 +968,7 @@ fn marks_with_expand_none_at_boundaries() {
 #[test]
 fn marks_on_emoji() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "Hello 👨‍👩‍👧‍👦 world").unwrap();
@@ -977,6 +1000,7 @@ fn marks_on_emoji() {
 #[test]
 fn marks_on_combining_characters() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Use a simple string with combining character
@@ -1006,6 +1030,7 @@ fn marks_on_combining_characters() {
 #[test]
 fn unmark_part_of_range() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "bold text here").unwrap();
@@ -1044,6 +1069,7 @@ fn unmark_part_of_range() {
 #[test]
 fn unmark_creates_gaps() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "a b c d e").unwrap();
@@ -1090,6 +1116,7 @@ fn unmark_creates_gaps() {
 #[test]
 fn block_properties_change_with_marks() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.split_block(&text, 0).unwrap();
@@ -1129,6 +1156,7 @@ fn block_properties_change_with_marks() {
 #[test]
 fn idempotent_update_spans() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     let spans = vec![
@@ -1163,6 +1191,7 @@ fn idempotent_update_spans() {
 #[test]
 fn alternating_mark_changes() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "text").unwrap();
@@ -1211,6 +1240,7 @@ fn alternating_mark_changes() {
 #[test]
 fn complex_unicode_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Mix of ASCII, emoji, and other Unicode
@@ -1249,6 +1279,7 @@ fn complex_unicode_text() {
 #[test]
 fn block_with_marked_content() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Create blocks with marked text content
@@ -1294,6 +1325,7 @@ fn block_with_marked_content() {
 #[test]
 fn empty_spans_between_marks() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Test handling of empty spans
@@ -1331,6 +1363,7 @@ fn empty_spans_between_marks() {
 #[test]
 fn marks_with_different_values_same_name() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "red blue green").unwrap();
@@ -1397,6 +1430,7 @@ fn marks_with_different_values_same_name() {
 #[test]
 fn update_spans_with_only_blocks() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Start with text
@@ -1423,6 +1457,7 @@ fn update_spans_with_only_blocks() {
 #[test]
 fn marks_survive_block_updates() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // Create initial structure with marks
@@ -1476,6 +1511,7 @@ fn update_spans_which_inserts_at_the_end_of_expand_mark_doesnt_generate_mark_cha
     // because the existing mark should expand to include the new text.
 
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
     doc.mark(
@@ -1503,6 +1539,7 @@ fn update_spans_which_inserts_at_the_end_of_expand_mark_doesnt_generate_mark_cha
     .unwrap();
 
     let change_hash = doc.commit().expect("a change should be produced");
+    let change_hash = doc.change_id_to_hash(&change_hash).unwrap().unwrap();
     let change = doc.get_change_by_hash(&change_hash).unwrap().unwrap();
     assert_eq!(change.decode().operations.len(), 2); // There should be two insertion ops
 }

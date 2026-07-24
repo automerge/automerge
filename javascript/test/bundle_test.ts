@@ -56,6 +56,7 @@ describe("the bundle format", () => {
   it("should show the dependencies of a bundle", () => {
     let doc = Automerge.from({ foo: "bar" })
     const startHeads = Automerge.getHeads(doc)
+    const startHashes = Automerge.getHeadHashes(doc)
     doc = Automerge.change(doc, d => {
       d.foo = "baz"
     })
@@ -66,6 +67,6 @@ describe("the bundle format", () => {
     const bundle = Automerge.saveBundle(doc, changeHashes)
     const { deps } = Automerge.readBundle(bundle)
 
-    assert.deepStrictEqual(deps, startHeads)
+    assert.deepStrictEqual(deps, startHashes)
   })
 })

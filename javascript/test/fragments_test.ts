@@ -5,6 +5,9 @@ type CounterDoc = { counter: number }
 
 function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
   let doc = Automerge.from<CounterDoc>({ counter: 0 })
+  // the tests cross-check fragment metadata against per-change lookups
+  // (getChangeMetaByHash), which needs the hashes audit mode keeps
+  Automerge.enableAuditMode(doc)
   for (let i = 1; i <= numChanges; i++) {
     doc = Automerge.change(doc, d => {
       d.counter = i

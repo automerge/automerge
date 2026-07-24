@@ -1,12 +1,12 @@
-use crate::ChangeHash;
+use crate::ChangeId;
 
 /// The result of a successful, and committed, transaction.
 #[derive(Debug)]
 pub struct Success<O> {
     /// The result of the transaction.
     pub result: O,
-    /// The hash of the change, will be `None` if the transaction did not create any operations
-    pub hash: Option<ChangeHash>,
+    /// The id of the change, will be `None` if the transaction did not create any operations
+    pub change_id: Option<ChangeId>,
 }
 
 /// The result of a failed, and rolled back, transaction.

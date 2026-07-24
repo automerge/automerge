@@ -25,8 +25,10 @@
 //! ```
 //! use automerge::{transaction::Transactable, sync::{self, SyncDoc}, ReadDoc};
 //! # fn main() -> Result<(), automerge::AutomergeError> {
-//! // Create a document on peer1
+//! // Create a document on peer1. The sync protocol is hash-based
+//! // throughout, so syncing requires audit mode.
 //! let mut peer1 = automerge::AutoCommit::new();
+//! peer1.enable_audit_mode()?;
 //! peer1.put(automerge::ROOT, "key", "value")?;
 //!
 //! // Create a state to track our sync with peer2
@@ -37,6 +39,7 @@
 //! // We receive the message on peer2. We don't have a document at all yet
 //! // so we create one
 //! let mut peer2 = automerge::AutoCommit::new();
+//! peer2.enable_audit_mode()?;
 //! // We don't have a state for peer1 (it's a new connection), so we create one
 //! let mut peer2_state = sync::State::new();
 //! // Now receive the message from peer 1
@@ -103,14 +106,18 @@ pub trait SyncDoc {
     /// * `sync_state` - The [`State`] for this document and the remote peer
     /// * `message` - The [`Message`] to receive
     ///
-    /// Returns [`AutomergeError::UncheckedHashGraph`] if the document's hash
-    /// graph has not been built — the sync protocol is hash-based throughout.
+    /// Returns [`AutomergeError::AuditModeRequired`] unless the document
+    /// is in [`AuditMode::Enabled`](crate::AuditMode) — the sync protocol
+    /// is hash-based throughout, so it needs every change hash kept.
     fn generate_sync_message(
         &self,
         sync_state: &mut State,
     ) -> Result<Option<Message>, AutomergeError>;
 
     /// Apply a received sync message to this document and `sync_state`
+    ///
+    /// Returns [`AutomergeError::AuditModeRequired`] unless the document
+    /// is in [`AuditMode::Enabled`](crate::AuditMode).
     fn receive_sync_message(
         &mut self,
         sync_state: &mut State,
@@ -153,7 +160,13 @@ impl SyncDoc for Automerge {
         &self,
         sync_state: &mut State,
     ) -> Result<Option<Message>, AutomergeError> {
-        let our_heads = self.get_heads();
+        // deliberately deterministic: even a small document whose
+        // retained hashes would happen to suffice refuses, so syncing
+        // never works "sometimes" outside audit mode
+        if self.audit_mode() != crate::AuditMode::Enabled {
+            return Err(AutomergeError::AuditModeRequired);
+        }
+        let our_heads = self.get_head_hashes();
 
         let our_need = if sync_state.read_only {
             vec![]
@@ -280,6 +293,9 @@ impl SyncDoc for Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
+        if self.audit_mode() != crate::AuditMode::Enabled {
+            return Err(AutomergeError::AuditModeRequired);
+        }
         self.receive_sync_message_inner(sync_state, message)
     }
 }
@@ -367,7 +383,7 @@ impl Automerge {
         message: Message,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_heads();
+        let before_heads = self.get_head_hashes();
 
         let Message {
             heads: message_heads,
@@ -399,7 +415,7 @@ impl Automerge {
             self.load_incremental(&message_changes.join())?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
+                &self.get_head_hashes().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }
@@ -948,6 +964,7 @@ mod tests {
     #[test]
     fn generate_sync_message_twice_does_nothing() {
         let mut doc = crate::AutoCommit::new();
+        doc.enable_audit_mode().unwrap();
         doc.put(crate::ROOT, "key", "value").unwrap();
         let mut sync_state = State::new();
 
@@ -969,6 +986,7 @@ mod tests {
         // response so that they know what our heads are, even if we are at the same heads as them
 
         let mut doc1 = crate::AutoCommit::new();
+        doc1.enable_audit_mode().unwrap();
         doc1.put(crate::ROOT, "key", "value").unwrap();
         let mut doc2 = doc1.fork();
 
@@ -993,7 +1011,9 @@ mod tests {
     #[test]
     fn should_not_reply_if_we_have_no_data_after_first_round() {
         let mut doc1 = crate::AutoCommit::new();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new();
+        doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
         let m1 = doc1
@@ -1022,9 +1042,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
 
@@ -1035,8 +1057,8 @@ mod tests {
             doc2.commit();
         }
 
-        let head1 = doc1.get_heads()[0];
-        let head2 = doc2.get_heads()[0];
+        let head1 = doc1.get_head_hashes()[0];
+        let head2 = doc2.get_head_hashes()[0];
 
         //// both sides report what they have but have no shared peer state
         let msg1to2 = doc1
@@ -1163,9 +1185,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
 
@@ -1195,24 +1219,24 @@ mod tests {
             doc2copy.put(crate::ROOT, "x", val2).unwrap();
             doc2copy.commit();
 
-            let n1_bloom = BloomFilter::from_hashes(doc1copy.get_heads().into_iter());
-            if n1_bloom.contains_hash(&doc2copy.get_heads()[0]) {
+            let n1_bloom = BloomFilter::from_hashes(doc1copy.get_head_hashes().into_iter());
+            if n1_bloom.contains_hash(&doc2copy.get_head_hashes()[0]) {
                 break (doc1copy, doc2copy);
             }
             i += 1;
         };
 
-        let mut all_heads = doc1.get_heads();
-        all_heads.extend(doc2.get_heads());
+        let mut all_heads = doc1.get_head_hashes();
+        all_heads.extend(doc2.get_head_hashes());
         all_heads.sort();
 
         // reset sync states
         let (_, mut s1) = State::parse(Input::new(s1.encode().as_slice())).unwrap();
         let (_, mut s2) = State::parse(Input::new(s2.encode().as_slice())).unwrap();
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
-        let mut doc1_heads = doc1.get_heads();
+        let mut doc1_heads = doc1.get_head_hashes();
         doc1_heads.sort();
-        let mut doc2_heads = doc2.get_heads();
+        let mut doc2_heads = doc2.get_head_hashes();
         doc2_heads.sort();
         assert_eq!(doc1_heads, all_heads);
         assert_eq!(doc2_heads, all_heads);
@@ -1228,9 +1252,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
 
@@ -1243,7 +1269,7 @@ mod tests {
 
         doc1.put(crate::ROOT, "x", 5).unwrap();
         doc1.commit();
-        let bloom = BloomFilter::from_hashes(doc1.get_heads().into_iter());
+        let bloom = BloomFilter::from_hashes(doc1.get_head_hashes().into_iter());
 
         // search for false positive; see comment above
         let mut i = 0;
@@ -1255,7 +1281,7 @@ mod tests {
             doc.put(crate::ROOT, "x", format!("{} at 89abdef", i))
                 .unwrap();
             doc.commit();
-            if bloom.contains_hash(&doc.get_heads()[0]) {
+            if bloom.contains_hash(&doc.get_head_hashes()[0]) {
                 break doc;
             }
             i += 1;
@@ -1270,7 +1296,7 @@ mod tests {
                 .unwrap();
             doc.put(crate::ROOT, "x", format!("{} again", i)).unwrap();
             doc.commit();
-            if bloom.contains_hash(&doc.get_heads()[0]) {
+            if bloom.contains_hash(&doc.get_head_hashes()[0]) {
                 break doc;
             }
             i += 1;
@@ -1278,16 +1304,16 @@ mod tests {
 
         doc2.put(crate::ROOT, "x", "final @ 89abcdef").unwrap();
 
-        let mut all_heads = doc1.get_heads();
-        all_heads.extend(doc2.get_heads());
+        let mut all_heads = doc1.get_head_hashes();
+        all_heads.extend(doc2.get_head_hashes());
         all_heads.sort();
 
         let (_, mut s1) = State::parse(Input::new(s1.encode().as_slice())).unwrap();
         let (_, mut s2) = State::parse(Input::new(s2.encode().as_slice())).unwrap();
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
-        let mut doc1_heads = doc1.get_heads();
+        let mut doc1_heads = doc1.get_head_hashes();
         doc1_heads.sort();
-        let mut doc2_heads = doc2.get_heads();
+        let mut doc2_heads = doc2.get_head_hashes();
         doc2_heads.sort();
         assert_eq!(doc1_heads, all_heads);
         assert_eq!(doc2_heads, all_heads);
@@ -1298,12 +1324,15 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("01234567").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("89abcdef").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
         let mut doc3 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("fedcba98").unwrap())
             .unwrap();
+        doc3.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
 
@@ -1341,7 +1370,7 @@ mod tests {
 
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
-        assert_eq!(doc1.get_heads(), doc2.get_heads());
+        assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
     }
 
     #[test]
@@ -1358,7 +1387,9 @@ mod tests {
         for _ in 0..300 {
             // create two documents
             let mut doc1 = crate::AutoCommit::new();
+            doc1.enable_audit_mode().unwrap();
             let mut doc2 = crate::AutoCommit::new();
+            doc2.enable_audit_mode().unwrap();
             let mut s1 = State::new();
             let mut s2 = State::new();
 
@@ -1382,7 +1413,7 @@ mod tests {
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // At this point both documents should be equal
-            assert_eq!(doc1.get_heads(), doc2.get_heads());
+            assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
         }
     }
 
@@ -1393,6 +1424,10 @@ mod tests {
         b_sync_state: &mut State,
     ) {
         //function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
+        // syncing requires audit mode; forked/loaded docs may not have
+        // inherited it
+        a.enable_audit_mode().unwrap();
+        b.enable_audit_mode().unwrap();
         const MAX_ITER: usize = 10;
         let mut iterations = 0;
 
@@ -1418,7 +1453,9 @@ mod tests {
     #[test]
     fn if_first_message_has_no_heads_and_supports_v2_message_send_whole_doc() {
         let mut doc1 = crate::AutoCommit::new();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new();
+        doc2.enable_audit_mode().unwrap();
         doc2.put(crate::ROOT, "foo", "bar").unwrap();
 
         let mut s1 = State::new();
@@ -1449,17 +1486,19 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
         doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
         doc2.commit();
 
-        let doc1_heads_before = doc1.get_heads();
-        let doc2_heads_before = doc2.get_heads();
+        let doc1_heads_before = doc1.get_head_hashes();
+        let doc2_heads_before = doc2.get_head_hashes();
 
         // doc1 is read-only: it should send its changes but not accept doc2's
         let mut s1 = State::new_read_only();
@@ -1476,10 +1515,10 @@ mod tests {
         assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
 
         // doc1's heads should be unchanged
-        assert_eq!(doc1.get_heads(), doc1_heads_before);
+        assert_eq!(doc1.get_head_hashes(), doc1_heads_before);
 
         // doc2's heads should have advanced
-        assert_ne!(doc2.get_heads(), doc2_heads_before);
+        assert_ne!(doc2.get_head_hashes(), doc2_heads_before);
     }
 
     #[test]
@@ -1488,7 +1527,9 @@ mod tests {
         // This exercises the V2 "send full document" path on the non-read-only side.
         // The read-only peer should ignore the document and the protocol should converge.
         let mut doc1 = crate::AutoCommit::new();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new();
+        doc2.enable_audit_mode().unwrap();
         doc2.put(crate::ROOT, "key", "value").unwrap();
         doc2.commit();
 
@@ -1499,7 +1540,7 @@ mod tests {
 
         // doc1 should still be empty
         assert!(doc1.get(crate::ROOT, "key").unwrap().is_none());
-        assert!(doc1.get_heads().is_empty());
+        assert!(doc1.get_head_hashes().is_empty());
 
         // doc2 should be unchanged
         assert!(doc2.get(crate::ROOT, "key").unwrap().is_some());
@@ -1512,17 +1553,19 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
         doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
         doc2.commit();
 
-        let doc1_heads = doc1.get_heads();
-        let doc2_heads = doc2.get_heads();
+        let doc1_heads = doc1.get_head_hashes();
+        let doc2_heads = doc2.get_head_hashes();
 
         let mut s1 = State::new_read_only();
         let mut s2 = State::new_read_only();
@@ -1534,8 +1577,8 @@ mod tests {
         assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_none());
 
         // Both heads unchanged
-        assert_eq!(doc1.get_heads(), doc1_heads);
-        assert_eq!(doc2.get_heads(), doc2_heads);
+        assert_eq!(doc1.get_head_hashes(), doc1_heads);
+        assert_eq!(doc2.get_head_hashes(), doc2_heads);
     }
 
     #[test]
@@ -1545,9 +1588,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
@@ -1584,9 +1629,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         let mut s1 = State::new_read_only();
         let mut s2 = State::new_read_only();
@@ -1597,7 +1644,7 @@ mod tests {
         // doc1 makes local changes
         doc1.put(crate::ROOT, "key", "value1").unwrap();
         doc1.commit();
-        let doc1_heads_after = doc1.get_heads();
+        let doc1_heads_after = doc1.get_head_hashes();
 
         // Sync again — should converge, doc1's new heads communicated
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
@@ -1609,7 +1656,7 @@ mod tests {
         // doc1 makes more changes
         doc1.put(crate::ROOT, "key", "value2").unwrap();
         doc1.commit();
-        let doc1_heads_after2 = doc1.get_heads();
+        let doc1_heads_after2 = doc1.get_head_hashes();
 
         // Sync again
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
@@ -1639,9 +1686,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         let mut s1 = State::new_read_only();
         let mut s2 = State::new_read_only();
@@ -1652,8 +1701,8 @@ mod tests {
             doc2.put(crate::ROOT, "doc2_counter", round as i64).unwrap();
             doc2.commit();
 
-            let doc1_heads = doc1.get_heads();
-            let doc2_heads = doc2.get_heads();
+            let doc1_heads = doc1.get_head_hashes();
+            let doc2_heads = doc2.get_head_hashes();
 
             // Must converge each round (sync helper panics after 10 iterations)
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
@@ -1706,9 +1755,11 @@ mod tests {
             let mut doc1 = crate::AutoCommit::new()
                 .with_actor(ActorId::try_from("abc123").unwrap())
                 .unwrap();
+            doc1.enable_audit_mode().unwrap();
             let mut doc2 = crate::AutoCommit::new()
                 .with_actor(ActorId::try_from("def456").unwrap())
                 .unwrap();
+            doc2.enable_audit_mode().unwrap();
 
             let mut s1 = State::new_read_only();
             let mut s2 = State::new_read_only();
@@ -1756,9 +1807,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         doc1.put(crate::ROOT, "round1", "from_doc1").unwrap();
         doc1.commit();
@@ -1823,9 +1876,11 @@ mod tests {
             let mut doc1 = crate::AutoCommit::new()
                 .with_actor(ActorId::try_from("abc123").unwrap())
                 .unwrap();
+            doc1.enable_audit_mode().unwrap();
             let mut doc2 = crate::AutoCommit::new()
                 .with_actor(ActorId::try_from("def456").unwrap())
                 .unwrap();
+            doc2.enable_audit_mode().unwrap();
             let mut s1 = State::new_read_only();
             let mut s2 = State::new();
 
@@ -1860,12 +1915,15 @@ mod tests {
         let mut r = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
+        r.enable_audit_mode().unwrap();
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         r.put(crate::ROOT, "from_r", "hello").unwrap();
         r.commit();
@@ -1904,12 +1962,15 @@ mod tests {
         let mut r = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
+        r.enable_audit_mode().unwrap();
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         r.put(crate::ROOT, "from_r", "hello").unwrap();
         r.commit();
@@ -1955,12 +2016,15 @@ mod tests {
         let mut r = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
+        r.enable_audit_mode().unwrap();
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         r.put(crate::ROOT, "from_r", "r_val").unwrap();
         r.commit();
@@ -1969,7 +2033,7 @@ mod tests {
         b.put(crate::ROOT, "from_b", "b_val").unwrap();
         b.commit();
 
-        let r_heads = r.get_heads();
+        let r_heads = r.get_head_hashes();
 
         // R syncs with A (read-only)
         let mut sr_a = State::new_read_only();
@@ -1999,10 +2063,10 @@ mod tests {
         assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
 
         // A and B should have the same heads
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
 
         // R should only have its own changes
-        assert_eq!(r.get_heads(), r_heads);
+        assert_eq!(r.get_head_hashes(), r_heads);
         assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
         assert!(r.get(crate::ROOT, "from_b").unwrap().is_none());
     }
@@ -2016,12 +2080,15 @@ mod tests {
         let mut r = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
+        r.enable_audit_mode().unwrap();
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         // R has several changes to make bloom filter interaction interesting
         for i in 0..10 {
@@ -2069,12 +2136,15 @@ mod tests {
         let mut r = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
+        r.enable_audit_mode().unwrap();
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         r.put(crate::ROOT, "from_r", "r_val").unwrap();
         r.commit();
@@ -2087,16 +2157,16 @@ mod tests {
         let mut sa_b = State::new();
         let mut sb_a = State::new();
         sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
 
-        let r_heads = r.get_heads();
+        let r_heads = r.get_head_hashes();
 
         // A syncs with R (read-only) — R ignores A's+B's changes, A gets R's
         let mut sr_a = State::new_read_only();
         let mut sa_r = State::new();
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
         assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
-        assert_eq!(r.get_heads(), r_heads);
+        assert_eq!(r.get_head_hashes(), r_heads);
 
         // B syncs with R (read-only) — R ignores the same changes again, B gets R's
         let mut sr_b = State::new_read_only();
@@ -2105,7 +2175,7 @@ mod tests {
         assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
 
         // R should still only have its own changes
-        assert_eq!(r.get_heads(), r_heads);
+        assert_eq!(r.get_head_hashes(), r_heads);
         assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
         assert!(r.get(crate::ROOT, "from_b").unwrap().is_none());
 
@@ -2131,9 +2201,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "hello").unwrap();
         a.commit();
@@ -2156,7 +2228,7 @@ mod tests {
         assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
 
         // Both should have the same heads now
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 
     #[test]
@@ -2166,9 +2238,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "hello").unwrap();
         a.commit();
@@ -2180,7 +2254,7 @@ mod tests {
 
         // First sync: both read-write
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
 
         // Switch A to read-only
         sa.set_read_only(true);
@@ -2210,9 +2284,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "initial").unwrap();
         a.commit();
@@ -2247,7 +2323,7 @@ mod tests {
         assert!(a.get(crate::ROOT, "round2").unwrap().is_some());
         assert!(a.get(crate::ROOT, "round3").unwrap().is_some());
 
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 
     #[test]
@@ -2256,9 +2332,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         let mut sa = State::new_read_only();
         let mut sb = State::new();
@@ -2297,7 +2375,7 @@ mod tests {
         sa.set_read_only(false);
         sync(&mut a, &mut b, &mut sa, &mut sb);
         assert!(a.get(crate::ROOT, "b3").unwrap().is_some());
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 
     #[test]
@@ -2306,9 +2384,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "hello").unwrap();
         a.commit();
@@ -2348,9 +2428,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         b.put(crate::ROOT, "from_b", "world").unwrap();
         b.commit();
@@ -2380,7 +2462,7 @@ mod tests {
 
         // A should now have B's changes
         assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 
     #[test]
@@ -2391,9 +2473,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "hello").unwrap();
         a.commit();
@@ -2438,9 +2522,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "hello").unwrap();
         a.commit();
@@ -2485,9 +2571,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
@@ -2511,7 +2599,7 @@ mod tests {
 
         assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_some());
         assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_some());
-        assert_eq!(doc1.get_heads(), doc2.get_heads());
+        assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
     }
 
     #[test]
@@ -2521,9 +2609,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         doc1.put(crate::ROOT, "original_1", "v1").unwrap();
         doc1.commit();
@@ -2553,7 +2643,7 @@ mod tests {
         assert!(doc1.get(crate::ROOT, "new_2").unwrap().is_some());
         assert!(doc2.get(crate::ROOT, "original_1").unwrap().is_some());
         assert!(doc2.get(crate::ROOT, "new_1").unwrap().is_some());
-        assert_eq!(doc1.get_heads(), doc2.get_heads());
+        assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
     }
 
     #[test]
@@ -2564,9 +2654,11 @@ mod tests {
         let mut doc1 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        doc2.enable_audit_mode().unwrap();
 
         let mut s1 = State::new_read_only();
         let mut s2 = State::new_read_only();
@@ -2615,7 +2707,7 @@ mod tests {
                 "doc2 missing doc1_r{i}"
             );
         }
-        assert_eq!(doc1.get_heads(), doc2.get_heads());
+        assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
     }
 
     #[test]
@@ -2627,9 +2719,11 @@ mod tests {
         let mut a = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
+        a.enable_audit_mode().unwrap();
         let mut b = crate::AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
+        b.enable_audit_mode().unwrap();
 
         a.put(crate::ROOT, "from_a", "hello").unwrap();
         a.commit();
@@ -2663,6 +2757,6 @@ mod tests {
 
         // A should now have B's changes
         assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
-        assert_eq!(a.get_heads(), b.get_heads());
+        assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 }

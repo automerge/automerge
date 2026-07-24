@@ -18,7 +18,7 @@ fn range(doc: &Automerge) {
 }
 
 fn range_at(doc: &Automerge) {
-    let range = doc.values_at(ROOT, &doc.get_heads());
+    let range = doc.values_at(ROOT, &doc.get_heads()).unwrap();
     range.for_each(drop);
 }
 

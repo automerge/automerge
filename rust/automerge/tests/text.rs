@@ -16,6 +16,7 @@ use test_log::test;
 #[test]
 fn simple_update_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "Hello, world!").unwrap();
 
@@ -34,6 +35,7 @@ fn update_text_big_ole_graphemes() {
     let actor1 = ActorId::from_str("aaaaaa").unwrap();
     let actor2 = ActorId::from_str("bbbbbb").unwrap();
     let mut doc = AutoCommit::new().with_actor(actor1).unwrap();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     // <200d> is a "zero-width joiner" which is used to combine multiple graphemes into one.
@@ -87,6 +89,7 @@ fn incremental_splice_patches_include_marks() {
     // failing to include marks in the incremental splice patch
 
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "12345").unwrap();
 
@@ -143,6 +146,7 @@ fn incremental_splice_patches_include_marks() {
 #[test]
 fn mark_created_after_insertion() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "12345").unwrap();
 
@@ -163,6 +167,7 @@ fn mark_created_after_insertion() {
 #[test]
 fn local_patches_created_for_marks() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc
         .put_object(automerge::ROOT, "text", ObjType::Text)
         .unwrap();
@@ -297,6 +302,7 @@ fn local_patches_created_for_marks() {
 #[test]
 fn spans_are_consolidated_in_the_presence_of_zero_length_spans() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "1234").unwrap();
 
@@ -321,6 +327,7 @@ fn spans_are_consolidated_in_the_presence_of_zero_length_spans() {
 #[test]
 fn empty_marks_before_block_marker_dont_repeat_text() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.split_block(&text, 0).unwrap();
     doc.split_block(&text, 0).unwrap();
@@ -350,6 +357,7 @@ fn empty_marks_before_block_marker_dont_repeat_text() {
 #[test]
 fn insertions_after_noexpand_spans_are_not_marked() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let block1 = doc.split_block(&text, 0).unwrap();
     doc.update_object(
@@ -456,6 +464,7 @@ fn marks_which_cross_optree_boundaries_are_not_double_counted_in_splice_patches(
     //        marks.remove(&id.prev());
     //    }
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     // insert enough text that we cover two pages of the op tree
     let one_page = "a".repeat(B * 2);
@@ -504,6 +513,7 @@ fn marks_which_cross_optree_boundaries_are_not_double_counted_in_splice_patches(
 #[test]
 fn noexpand_marks_at_the_end_of_text_should_not_emit_marked_patches_on_following_insertions() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, doc.length(&text), 0, "Hello world")
         .unwrap();
@@ -542,6 +552,7 @@ fn noexpand_marks_at_the_end_of_text_should_not_emit_marked_patches_on_following
 #[test]
 fn expand_marks_are_reported_in_patches() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "aaabbbccc").unwrap();
     doc.mark(
@@ -614,6 +625,7 @@ fn expand_marks_are_reported_in_patches() {
 #[test]
 fn test_remote_patches_for_marks_with_expand_after() {
     let mut doc_a = AutoCommit::new();
+    doc_a.enable_audit_mode().unwrap();
     let text = doc_a.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc_a.splice_text(&text, 0, 0, "fox").unwrap();
     doc_a
@@ -644,6 +656,7 @@ fn test_remote_patches_for_marks_with_expand_after() {
 #[test]
 fn update_text_change_at() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.update_text(&text, "a\n").unwrap();
     let initial_heads = doc.get_heads();
@@ -659,6 +672,7 @@ proptest::proptest! {
     #[test]
     fn marks_are_okay(scenario in arb_scenario()) {
         let mut doc = AutoCommit::new();
+        doc.enable_audit_mode().unwrap();
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
         let mut expected_chars = String::new();
         for action in &scenario {
@@ -839,6 +853,7 @@ fn removed_marks_should_not_appear_in_get_marks() {
     // removed by setting their value to null appear as marks in the `get_marks`
     // call with null values
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
 
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "abcdefg").unwrap();
@@ -925,6 +940,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
 #[test]
 fn deleting_in_middle_of_multibyte_char_moves_the_cursor_to_after_the_character() {
     let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "🐻🐻🐻🐻🐻🐻").unwrap();
 
@@ -952,11 +968,12 @@ fn splicing_into_multibyte_characters() {
     // behavior of splicing into and around multibyte characters.
 
     let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let actor = doc.get_actor().clone();
     doc.splice_text(&text, 0, 0, "A").unwrap();
     let parent_id = doc.commit().unwrap();
-    let parent_hash = parent_id;
+    let parent_hash_hash = doc.change_id_to_hash(&parent_id).unwrap().unwrap();
 
     // We have to construct this change using the legacy API because we intentionally make it
     // impossible to create these kind of changes. The notable thing here is that there is
@@ -998,7 +1015,7 @@ fn splicing_into_multibyte_characters() {
         start_op: std::num::NonZero::new(3).unwrap(),
         time: 0,
         message: None,
-        deps: vec![parent_hash],
+        deps: vec![parent_hash_hash],
         extra_bytes: Vec::new(),
     };
     doc.apply_changes(vec![weird_change.into()]).unwrap();

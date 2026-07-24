@@ -1,3 +1,4 @@
+use crate::change_graph::ApplyLookup;
 use crate::change_queue::ChangeBatch;
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
@@ -410,13 +411,16 @@ impl Automerge {
         let mut batch = ChangeBatch::new();
         for c in changes {
             let hash = c.hash();
-            if self.change_graph.has_change(&hash)? {
+            let lookup =
+                self.change_graph
+                    .lookup_change_for_apply(&hash, &c.id(), &self.ops.actors);
+            if lookup == ApplyLookup::Present {
                 continue;
             }
-            if self.queue.has_hash(&c.hash()) {
+            if self.queue.has_hash(&hash) {
                 continue;
             }
-            if self.has_actor_seq(&c) {
+            if lookup == ApplyLookup::Equivocation {
                 self.queue
                     .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
                 return Err(AutomergeError::DuplicateSeqNumber(
@@ -445,6 +449,21 @@ impl Automerge {
         }
 
         chap.apply(self);
+
+        // A change still queued because a dep hash lookup was AMBIGUOUS
+        // (outside audit mode the dep may name a change we have whose
+        // hash was freed) can never become ready — fail loudly rather
+        // than silently dropping it. Genuinely absent deps (decidable
+        // in audit mode, or while the retained map is still complete)
+        // keep queueing as before.
+        for queued in self.queue.iter() {
+            for dep in queued.deps() {
+                // a dep that is itself queued is not ambiguous
+                if !self.queue.has_hash(dep) && self.change_graph.has_change(dep).is_err() {
+                    return Err(AutomergeError::AuditModeRequired);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -531,6 +550,7 @@ mod tests {
         let mut doc = AutoCommit::new()
             .with_actor("aa".try_into().unwrap())
             .unwrap();
+        doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, ScalarValue::counter(5)).unwrap();
         let heads = doc.get_heads();
@@ -549,6 +569,7 @@ mod tests {
         let mut rng = make_rng();
         for _ in 0..10 {
             let mut base = AutoCommit::new().with_actor(rng.random()).unwrap();
+            base.enable_audit_mode().unwrap();
             let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
             let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
             base.put(&map, "c", ScalarValue::counter(0)).unwrap();
@@ -609,6 +630,7 @@ mod tests {
         let mut rng = make_rng();
         for _ in 0..20 {
             let mut base = AutoCommit::new().with_actor(rng.random()).unwrap();
+            base.enable_audit_mode().unwrap();
             let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
             let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
             base.put(&map, "c", ScalarValue::counter(0)).unwrap();
@@ -664,7 +686,7 @@ mod tests {
         }
     }
 
-    fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeHash]) -> Vec<Change> {
+    fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeId]) -> Vec<Change> {
         src.get_changes(heads).unwrap()
     }
 
@@ -675,6 +697,7 @@ mod tests {
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
         let mut doc1 = AutoCommit::new().with_actor(actor1).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let map1 = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", "val1").unwrap();
         doc1.put(&map1, "key2", "val2").unwrap();
@@ -720,6 +743,7 @@ mod tests {
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
         let mut doc1 = AutoCommit::new().with_actor(actor1).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "val1").unwrap();
         doc1.insert(&list, 1, "val2").unwrap();
@@ -767,6 +791,7 @@ mod tests {
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
         let mut doc1 = AutoCommit::new().with_actor(actor1).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc1.splice_text(&text, 0, 0, "the quick fox jumped over the lazy dog")
             .unwrap();
@@ -799,6 +824,7 @@ mod tests {
     fn multi_put_batch_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -821,6 +847,7 @@ mod tests {
     fn multi_insert_batch_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -846,6 +873,7 @@ mod tests {
     fn multi_update_batch_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -870,6 +898,7 @@ mod tests {
     fn fuzz_batch_list_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -920,6 +949,7 @@ mod tests {
     fn fuzz_batch_map1_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -964,6 +994,7 @@ mod tests {
     fn fuzz_batch_map2_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1034,6 +1065,7 @@ mod tests {
     fn fuzz_batch_map_counter_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", ScalarValue::counter(10)).unwrap();
         doc1.increment(&map1, "key1", 15).unwrap();
@@ -1130,6 +1162,7 @@ mod tests {
             value
         };
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, ScalarValue::counter(val())).unwrap();
         doc1.insert(&list1, 1, ScalarValue::counter(val())).unwrap();
@@ -1184,6 +1217,7 @@ mod tests {
             value
         };
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, val()).unwrap();
         doc1.insert(&list1, 1, val()).unwrap();
@@ -1232,6 +1266,7 @@ mod tests {
             value
         };
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "--------").unwrap();
 
@@ -1273,6 +1308,7 @@ mod tests {
             value
         };
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc1.enable_audit_mode().unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "---------------------")
             .unwrap();
@@ -1359,6 +1395,7 @@ mod tests {
     fn map_key_conflict() {
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
 
         doc.put(&ROOT, "key1", "value1").unwrap();
 
@@ -1399,6 +1436,7 @@ mod tests {
     fn list_element_conflict() {
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
 
@@ -1439,6 +1477,7 @@ mod tests {
     fn conflicts_with_isolate() {
         let mut rng = make_rng();
         let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        doc.enable_audit_mode().unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         let map = doc.put_object(&ROOT, "map", ObjType::Map).unwrap();
@@ -1457,6 +1496,9 @@ mod tests {
 
         for _ in 0..CYCLES {
             for d in &mut docs {
+                // ids must name changes d contains: pull the central doc's
+                // changes before isolating at one of its historical heads
+                d.merge(&mut doc).unwrap();
                 let head = rng.random::<u32>() % (heads.len() as u32);
                 d.isolate(&heads[head as usize]).unwrap();
                 for _ in 0..3 {

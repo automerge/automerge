@@ -25,7 +25,7 @@ const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identif
 
 impl Automerge {
     fn generate_sync_message_v1(&self, sync_state: &mut State) -> Option<Message> {
-        let our_heads = self.get_heads();
+        let our_heads = self.get_head_hashes();
 
         let our_need = self
             .get_missing_deps_hashes(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
@@ -125,7 +125,8 @@ impl Automerge {
     }
 
     fn make_bloom_filter_v1(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self.get_changes(&last_sync).unwrap();
+        let last_sync_ids = self.hashes_to_change_ids(&last_sync).unwrap();
+        let new_changes = self.get_changes(&last_sync_ids).unwrap();
         let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
@@ -154,7 +155,8 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes).unwrap();
+            let last_sync_ids = self.hashes_to_change_ids(&last_sync_hashes).unwrap();
+            let changes = self.get_changes(&last_sync_ids).unwrap();
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -210,7 +212,7 @@ impl Automerge {
         message: Message,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_heads();
+        let before_heads = self.get_head_hashes();
 
         let Message {
             heads: message_heads,
@@ -224,7 +226,7 @@ impl Automerge {
             self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
+                &self.get_head_hashes().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }
@@ -474,7 +476,9 @@ fn advance_heads(
 #[test]
 fn sync_from_v1_to_v2() {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let mut doc2 = AutoCommit::new();
+    doc2.enable_audit_mode().unwrap();
 
     doc1.put(ROOT, "foo", "bar").unwrap();
     doc2.put(ROOT, "baz", "quux").unwrap();
@@ -491,13 +495,15 @@ fn sync_from_v1_to_v2() {
         &mut sync_state2,
     );
 
-    assert_eq!(doc1.get_heads(), doc2.get_heads());
+    assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
 }
 
 #[test]
 fn sync_from_v2_to_v1() {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let mut doc2 = AutoCommit::new();
+    doc2.enable_audit_mode().unwrap();
 
     doc1.put(ROOT, "foo", "bar").unwrap();
     doc2.put(ROOT, "baz", "quux").unwrap();
@@ -514,7 +520,7 @@ fn sync_from_v2_to_v1() {
         &mut sync_state2,
     );
 
-    assert_eq!(doc1.get_heads(), doc2.get_heads());
+    assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
 }
 
 #[test]
@@ -522,6 +528,7 @@ fn sync_v1_to_v2_with_compressed_change() {
     // Reproduce an issue where the v2 peer was sending changes as compressed bytes rather than
     // uncompressed, which the old implementation couldn't handle.
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let list = doc1.put_object(ROOT, "list", crate::ObjType::List).unwrap();
     for index in 0..1000 {
         doc1.insert(&list, index, index as i64).unwrap();
@@ -529,6 +536,7 @@ fn sync_v1_to_v2_with_compressed_change() {
     doc1.commit().unwrap();
 
     let mut doc2 = AutoCommit::new();
+    doc2.enable_audit_mode().unwrap();
 
     let mut sync_state2 = crate::sync::State::new();
     let mut sync_state1 = State::new();
@@ -540,7 +548,7 @@ fn sync_v1_to_v2_with_compressed_change() {
         &mut sync_state2,
     );
 
-    assert_eq!(doc1.get_heads(), doc2.get_heads());
+    assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
 
     doc1.put(ROOT, "foo", "bar").unwrap();
     doc2.put(ROOT, "baz", "quux").unwrap();

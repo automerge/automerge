@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
 
+use crate::change_id::ChangeId;
 use crate::storage::{BundleMetadata, DepRef};
 use crate::{
     clock::{Clock, SeqClock},
@@ -71,86 +72,54 @@ const CACHE_STEP: u32 = 16;
 /// known.
 #[derive(Debug, Clone)]
 pub(crate) enum Hashes {
-    /// Every node's hash is known and validated.
-    Checked(Vec<ChangeHash>),
-    /// Only hashes learned at or after load are known.
-    Unchecked {
-        /// The number of nodes in the graph at load time. Nodes at or beyond
-        /// this index were added after load and always have known hashes.
-        watermark: u32,
-        /// `tail[i]` is the hash of node `watermark + i`
-        tail: Vec<ChangeHash>,
-        /// Pre-load nodes with known hashes: the load-time heads, paired
-        /// with their nodes via the document's head index suffix, plus —
-        /// when `fragment_hashes` is set — the hashes imported from the
-        /// document's hash columns. The pairing is as claimed by the
-        /// (unverified) document; `rebuild_hash_graph` confirms it.
-        pre: HashMap<NodeIdx, ChangeHash>,
-        /// `pre` additionally contains the hash of every history node
-        /// with `fragment_level() > 0` plus every loose commit and
-        /// anchor (imported from the document's hash columns), which is
-        /// enough to build fragments — the "fragment hashes" state.
-        fragment_hashes: bool,
+    /// Audit mode: every node's hash is known and validated.
+    Full(Vec<ChangeHash>),
+    /// Outside audit mode only the *retained set* is kept: the heads,
+    /// loose commits (level-0 changes above the fragment frontier),
+    /// fragment heads and checkpoints, and the deps/anchors needed to
+    /// reconstruct them. When a new fragment usurps prior fragments the
+    /// hashes it covers are freed (see
+    /// [`ChangeGraph::gc_retained_hashes`]).
+    Retained {
+        map: HashMap<NodeIdx, ChangeHash>,
+        /// the graph's node count, kept so `len()` stays O(1)
+        len: usize,
     },
 }
 
 impl Default for Hashes {
     fn default() -> Self {
-        Hashes::Checked(Vec::new())
+        // fresh documents default to AuditMode::Disabled
+        Hashes::Retained {
+            map: HashMap::new(),
+            len: 0,
+        }
     }
 }
 
 impl Hashes {
     fn len(&self) -> usize {
         match self {
-            Self::Checked(v) => v.len(),
-            Self::Unchecked {
-                watermark, tail, ..
-            } => *watermark as usize + tail.len(),
+            Self::Full(v) => v.len(),
+            Self::Retained { len, .. } => *len,
         }
     }
 
-    fn is_checked(&self) -> bool {
-        matches!(self, Self::Checked(_))
+    fn is_full(&self) -> bool {
+        matches!(self, Self::Full(_))
     }
 
-    /// Whether every hash a fragment needs (fragment heads, checkpoints,
-    /// boundaries, loose commits) is known.
-    fn has_fragment_hashes(&self) -> bool {
+    fn audit_mode(&self) -> crate::AuditMode {
         match self {
-            Self::Checked(_) => true,
-            Self::Unchecked {
-                fragment_hashes, ..
-            } => *fragment_hashes,
-        }
-    }
-
-    fn state(&self) -> crate::HashGraphState {
-        match self {
-            Self::Checked(_) => crate::HashGraphState::Checked,
-            Self::Unchecked {
-                fragment_hashes: true,
-                ..
-            } => crate::HashGraphState::FragmentHashes,
-            Self::Unchecked { .. } => crate::HashGraphState::Unchecked,
+            Self::Full(_) => crate::AuditMode::Enabled,
+            Self::Retained { .. } => crate::AuditMode::Disabled,
         }
     }
 
     fn get(&self, idx: NodeIdx) -> Option<ChangeHash> {
         match self {
-            Self::Checked(v) => v.get(idx.0 as usize).copied(),
-            Self::Unchecked {
-                watermark,
-                tail,
-                pre,
-                ..
-            } => {
-                if idx.0 >= *watermark {
-                    tail.get((idx.0 - watermark) as usize).copied()
-                } else {
-                    pre.get(&idx).copied()
-                }
-            }
+            Self::Full(v) => v.get(idx.0 as usize).copied(),
+            Self::Retained { map, .. } => map.get(&idx).copied(),
         }
     }
 
@@ -160,51 +129,44 @@ impl Hashes {
 
     fn push(&mut self, hash: ChangeHash) {
         match self {
-            Self::Checked(v) => v.push(hash),
-            Self::Unchecked { tail, .. } => tail.push(hash),
+            Self::Full(v) => v.push(hash),
+            Self::Retained { map, len } => {
+                // a new change is loose until a fragment covers it, so
+                // its hash is retained
+                map.insert(NodeIdx(*len as u32), hash);
+                *len += 1;
+            }
         }
     }
 
-    /// Record that `n` nodes with unknown hashes are being appended.
+    /// Record that `n` nodes with unknown hashes are being appended
+    /// (fragment members applied without reconstructing their changes).
     ///
-    /// A checked graph downgrades to the fragment-hashes state — every
-    /// hash known so far moves to `pre`, so anything a fragment needs
-    /// is still available. An unchecked graph folds its (always-known)
-    /// tail into `pre`. Either way the watermark moves past the new
-    /// nodes, preserving the invariant that nodes at or beyond it have
-    /// known hashes.
-    fn extend_unknown(&mut self, n: usize) {
+    /// Never legal in audit mode: there the fragment fast path is not
+    /// taken — fragments convert to changes and every hash is computed.
+    fn extend_without_hashes(&mut self, n: usize) {
         if n == 0 {
             return;
         }
-        let new_watermark = (self.len() + n) as u32;
         match self {
-            Self::Checked(v) => {
-                let pre = v
-                    .iter()
-                    .enumerate()
-                    .map(|(i, h)| (NodeIdx(i as u32), *h))
-                    .collect();
-                *self = Self::Unchecked {
-                    watermark: new_watermark,
-                    tail: Vec::new(),
-                    pre,
-                    fragment_hashes: true,
-                };
+            Self::Full(_) => {
+                unreachable!("the fragment fast path never runs in audit mode")
             }
-            Self::Unchecked {
-                watermark,
-                tail,
-                pre,
-                ..
-            } => {
-                for (i, h) in tail.drain(..).enumerate() {
-                    pre.insert(NodeIdx(*watermark + i as u32), h);
-                }
-                *watermark = new_watermark;
-            }
+            Self::Retained { len, .. } => *len += n,
         }
     }
+}
+
+/// Resolution of an incoming change against a [`ChangeGraph`], for the
+/// apply path — see [`ChangeGraph::lookup_change_for_apply`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApplyLookup {
+    /// The change is already in the graph
+    Present,
+    /// The change is not in the graph
+    Absent,
+    /// A different change already occupies the change's `(actor, seq)`
+    Equivocation,
 }
 
 /// The result of looking a hash up in a [`ChangeGraph`]
@@ -226,10 +188,10 @@ struct ResolvedHashes {
     missing: Vec<ChangeHash>,
 }
 
-/// The hash graph is unchecked and the requested operation needs hashes we
-/// do not have
+/// The requested operation needs hashes outside the retained set, which
+/// are only kept in audit mode
 #[derive(Debug, thiserror::Error)]
-#[error("the hash graph has not been built, call rebuild_hash_graph() first")]
+#[error("this operation needs change hashes that are not retained, call enable_audit_mode() first")]
 pub(crate) struct UncheckedHashes;
 
 /// The document's stored hash columns are malformed or disagree with the
@@ -246,7 +208,7 @@ pub(crate) struct BadHeadIndexes;
 
 impl From<UncheckedHashes> for AutomergeError {
     fn from(_: UncheckedHashes) -> Self {
-        AutomergeError::UncheckedHashGraph
+        AutomergeError::AuditModeRequired
     }
 }
 
@@ -351,17 +313,6 @@ impl ChangeGraph {
         self.heads.iter().cloned()
     }
 
-    /// Whether `heads` is exactly the set of current heads (order and
-    /// duplicates ignored).
-    pub(crate) fn heads_are_current(&self, heads: &[ChangeHash]) -> bool {
-        // duplicates can only shrink the set, so fewer entries than heads
-        // can never match
-        if heads.len() < self.heads.len() {
-            return false;
-        }
-        heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
-    }
-
     /// The node index of each head, in the same order as [`Self::heads`].
     ///
     /// The document format writes heads and head indices as positionally
@@ -436,12 +387,12 @@ impl ChangeGraph {
         self.hashes.try_get(NodeIdx(index as u32))
     }
 
-    pub(crate) fn is_checked(&self) -> bool {
-        self.hashes.is_checked()
+    pub(crate) fn is_audit_enabled(&self) -> bool {
+        self.hashes.is_full()
     }
 
-    pub(crate) fn state(&self) -> crate::HashGraphState {
-        self.hashes.state()
+    pub(crate) fn audit_mode(&self) -> crate::AuditMode {
+        self.hashes.audit_mode()
     }
 
     pub(crate) fn max_op(&self) -> u64 {
@@ -498,10 +449,13 @@ impl ChangeGraph {
 
     /// The `(node index, hash)` pairs the hash columns persist — see
     /// `encode`. Empty on a plain unchecked graph.
-    fn stored_hashes(&self) -> Vec<(u32, ChangeHash)> {
-        if !self.hashes.has_fragment_hashes() {
-            return Vec::new();
-        }
+    /// The retention rule: which known-hash nodes must keep their hashes
+    /// outside audit mode. Fragment heads and checkpoints (any node with
+    /// `fragment_level() > 0`), loose commits (level-0 nodes above the
+    /// fragment frontier) plus their covered level-0 parents (anchors —
+    /// their fragment boundaries need them). Heads are not included; add
+    /// them when the caller needs the full retained set.
+    fn retained_node_bitmap(&self) -> Vec<bool> {
         let n = self.len();
         let covered = |i: usize| {
             let actor = usize::from(self.actors[i]);
@@ -531,7 +485,12 @@ impl ChangeGraph {
                 }
             }
         }
-        (0..n)
+        store
+    }
+
+    fn stored_hashes(&self) -> Vec<(u32, ChangeHash)> {
+        let store = self.retained_node_bitmap();
+        (0..self.len())
             .filter(|i| store[*i])
             .filter_map(|i| {
                 let hash = self.hashes.get(NodeIdx(i as u32))?;
@@ -542,6 +501,31 @@ impl ChangeGraph {
                 Some((i as u32, hash))
             })
             .collect()
+    }
+
+    /// Drop every hash outside the retained set and switch to (or stay
+    /// in) the [`Hashes::Retained`] representation — the disable-audit
+    /// transition, also the GC run when fragments usurp prior coverage.
+    pub(crate) fn retain_hashes_only(&mut self) {
+        let store = self.retained_node_bitmap();
+        // the hash count, NOT the graph's node count: during
+        // `add_changes` the nodes are all added up front while hashes
+        // are pushed one at a time, and a GC firing mid-loop (a new
+        // change formed a fragment) must leave the push cursor where
+        // it was
+        let len = self.hashes.len();
+        let mut map = HashMap::new();
+        for (i, keep) in store.iter().enumerate() {
+            let n = NodeIdx(i as u32);
+            let Some(hash) = self.hashes.get(n) else {
+                continue;
+            };
+            if *keep || self.heads.contains(&hash) {
+                map.insert(n, hash);
+            }
+        }
+        self.nodes_by_hash.retain(|_, n| map.contains_key(n));
+        self.hashes = Hashes::Retained { map, len };
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
@@ -659,15 +643,6 @@ impl ChangeGraph {
         Some(actor_indices[index])
     }
 
-    /// The (actor index, seq) of the change containing the given op.
-    ///
-    /// This never needs hashes so it works on unchecked graphs.
-    pub(crate) fn opid_to_actor_seq(&self, id: OpId) -> Option<(usize, u64)> {
-        let node = self.opid_to_node(id)?;
-        let i = node.0 as usize;
-        Some((usize::from(self.actors[i]), self.seq[i] as u64))
-    }
-
     pub(crate) fn deps_for_hash(
         &self,
         hash: &ChangeHash,
@@ -687,8 +662,43 @@ impl ChangeGraph {
             return HashLookup::Found(*n);
         }
         match &self.hashes {
-            Hashes::Checked(_) => HashLookup::Absent,
-            Hashes::Unchecked { .. } => HashLookup::Unknown,
+            // audit mode knows every hash: not found means not here
+            Hashes::Full(_) => HashLookup::Absent,
+            // while the retained map is still complete (nothing freed
+            // yet — fresh documents stay complete until a fragment is
+            // cached) a miss is just as definitive
+            Hashes::Retained { map, len } if map.len() == *len => HashLookup::Absent,
+            // otherwise an unknown hash may merely be freed
+            Hashes::Retained { .. } => HashLookup::Unknown,
+        }
+    }
+
+    /// [`Self::has_change`] for the apply path, where an unknown hash
+    /// must not error: an incoming change is resolved through its
+    /// `(actor, seq)` instead.
+    ///
+    /// Outside audit mode a change whose `(actor, seq)` the graph covers
+    /// but whose hash was freed is trusted to *be* the covered change —
+    /// the same identify-by-`(actor, seq)` rule the fragment apply path
+    /// uses. When the covered slot's hash IS retained and differs, the
+    /// change is an equivocation.
+    pub(crate) fn lookup_change_for_apply(
+        &self,
+        hash: &ChangeHash,
+        id: &ChangeId,
+        actors: &[crate::ActorId],
+    ) -> ApplyLookup {
+        if self.nodes_by_hash.contains_key(hash) {
+            return ApplyLookup::Present;
+        }
+        let Some(node) = self.node_for_change_id(id, actors) else {
+            return ApplyLookup::Absent;
+        };
+        match self.hashes.get(node) {
+            // the slot's hash is known and it is not this change's
+            Some(_) => ApplyLookup::Equivocation,
+            // the slot's hash was freed: trust the (actor, seq) identity
+            None => ApplyLookup::Present,
         }
     }
 
@@ -813,7 +823,7 @@ impl ChangeGraph {
                 // from a not-yet-computed one — refuse rather than guess
                 HashLookup::Found(n) => Ok(n),
                 HashLookup::Absent => Err(crate::AutomergeError::from(MissingDep(hash))),
-                HashLookup::Unknown => Err(crate::AutomergeError::UncheckedHashGraph),
+                HashLookup::Unknown => Err(crate::AutomergeError::AuditModeRequired),
             })
             .collect::<Result<_, _>>()?;
 
@@ -897,8 +907,8 @@ impl ChangeGraph {
         have_deps: &[ChangeHash],
     ) -> Result<Cow<'_, [ChangeHash]>, UncheckedHashes> {
         match (&self.hashes, have_deps.is_empty()) {
-            (Hashes::Checked(all), true) => Ok(Cow::Borrowed(all)),
-            (Hashes::Unchecked { .. }, true) => Err(UncheckedHashes),
+            (Hashes::Full(all), true) => Ok(Cow::Borrowed(all)),
+            (Hashes::Retained { .. }, true) => Err(UncheckedHashes),
             _ => {
                 let clock = self.seq_clock_for_heads(have_deps)?;
                 Ok(Cow::Owned(
@@ -925,21 +935,6 @@ impl ChangeGraph {
     ) -> Vec<BuildChangeMetadata<'_>> {
         let change_indexes = self.get_build_indexes(clock);
         self.get_build_metadata_for_indexes(change_indexes)
-    }
-
-    pub(crate) fn get_hash_for_actor_seq(
-        &self,
-        actor: usize,
-        seq: u64,
-    ) -> Result<ChangeHash, AutomergeError> {
-        let node = self
-            .seq_index
-            .get(actor)
-            .and_then(|v| v.get(seq as usize - 1))
-            .ok_or(AutomergeError::InvalidSeq(seq))?;
-        self.hashes
-            .try_get(*node)
-            .map_err(|_| AutomergeError::UncheckedHashGraph)
     }
 
     fn update_heads(&mut self, change: &Change) {
@@ -982,6 +977,7 @@ impl ChangeGraph {
         iter: I,
     ) -> Result<(), AddChangeError> {
         let node = NodeIdx(self.len() as u32);
+        let mut new_fragment = false;
 
         self.add_nodes(iter.clone());
 
@@ -1011,7 +1007,12 @@ impl ChangeGraph {
                 self.cache_clock(node_idx);
             }
 
-            self.cache_fragment(node_idx);
+            // GC deferred to the end of the batch: later changes in
+            // this batch may still resolve their deps by hash
+            new_fragment |= self.cache_fragment_inner(node_idx);
+        }
+        if new_fragment {
+            self.gc_retained_hashes();
         }
         Ok(())
     }
@@ -1037,26 +1038,107 @@ impl ChangeGraph {
     /// graph state notwithstanding.
     pub(crate) fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
         let i = n.0 as usize;
-        ChangeId {
-            actor: actors[usize::from(self.actors[i])].clone(),
-            seq: self.seq[i] as u64,
-        }
+        let actor_idx = usize::from(self.actors[i]);
+        ChangeId::new(self.seq[i] as u64, actors[actor_idx].clone(), actor_idx)
     }
 
-    /// Resolve a [`ChangeId`] back to its node.
+    /// Resolve a [`ChangeId`] back to its node, verifying the id's
+    /// actor index hint. Hash-free.
     pub(crate) fn node_for_change_id(
         &self,
         id: &ChangeId,
         actors: &[crate::ActorId],
     ) -> Option<NodeIdx> {
-        let actor_idx = actors.iter().position(|a| a == &id.actor)?;
-        if id.seq == 0 {
-            return None;
-        }
+        let hint = id.actor_idx_hint();
+        let actor_idx = if actors.get(hint) == Some(id.actor()) {
+            hint
+        } else {
+            actors.binary_search(id.actor()).ok()?
+        };
         self.seq_index
             .get(actor_idx)?
-            .get(id.seq as usize - 1)
+            .get(id.seq() as usize - 1)
             .copied()
+    }
+
+    /// The retained hash of the change named by `id`, if any.
+    pub(crate) fn hash_for_change_id(
+        &self,
+        id: &ChangeId,
+        actors: &[crate::ActorId],
+    ) -> Option<ChangeHash> {
+        self.hashes.get(self.node_for_change_id(id, actors)?)
+    }
+
+    /// Like [`Self::hash_for_change_id`] but distinguishes "no such
+    /// change" ([`AutomergeError::InvalidSeq`]) from "the hash was
+    /// freed" ([`AutomergeError::AuditModeRequired`]).
+    pub(crate) fn get_hash_for_change_id(
+        &self,
+        id: &ChangeId,
+        actors: &[crate::ActorId],
+    ) -> Result<ChangeHash, AutomergeError> {
+        let node = self
+            .node_for_change_id(id, actors)
+            .ok_or(AutomergeError::InvalidSeq(id.seq()))?;
+        self.hashes
+            .try_get(node)
+            .map_err(|_| AutomergeError::AuditModeRequired)
+    }
+
+    /// The [`ChangeId`] of the op's containing change — hash-free.
+    pub(crate) fn opid_to_change_id(
+        &self,
+        id: OpId,
+        actors: &[crate::ActorId],
+    ) -> Option<ChangeId> {
+        let node = self.opid_to_node(id)?;
+        Some(self.change_id(node, actors))
+    }
+
+    /// The [`ChangeId`] for a hash: `Ok(None)` when the hash is
+    /// definitively absent, error when retained hashes cannot tell.
+    pub(crate) fn change_id_for_hash(
+        &self,
+        hash: &ChangeHash,
+        actors: &[crate::ActorId],
+    ) -> Result<Option<ChangeId>, UncheckedHashes> {
+        let node = match self.lookup_hash(hash) {
+            HashLookup::Found(n) => n,
+            HashLookup::Absent => return Ok(None),
+            HashLookup::Unknown => return Err(UncheckedHashes),
+        };
+        Ok(Some(self.change_id(node, actors)))
+    }
+
+    pub(crate) fn seq_clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> SeqClock {
+        self.calculate_clock(nodes)
+    }
+
+    /// The current heads as sorted change ids — canonical, so two
+    /// documents with equal heads report identical lists.
+    pub(crate) fn head_change_ids(&self, actors: &[crate::ActorId]) -> Vec<ChangeId> {
+        let mut ids: Vec<ChangeId> = self
+            .heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h))
+            .map(|n| self.change_id(*n, actors))
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Whether `nodes` is exactly the current head set (order and
+    /// duplicates ignored). Head hashes are always known.
+    pub(crate) fn nodes_are_heads(&self, nodes: &[NodeIdx]) -> bool {
+        let head_nodes: std::collections::BTreeSet<NodeIdx> = self
+            .heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h))
+            .copied()
+            .collect();
+        let given: std::collections::BTreeSet<NodeIdx> = nodes.iter().copied().collect();
+        head_nodes == given
     }
 
     fn loose_commit(&self, n: NodeIdx, actors: &[crate::ActorId]) -> Option<Fragment> {
@@ -1222,27 +1304,43 @@ impl ChangeGraph {
     }
 
     pub(crate) fn cache_fragments(&mut self) {
-        // idempotent: rebuild_hash_graph re-runs this after upgrading the
-        // graph, so start from scratch
+        // idempotent: enable_audit_mode re-runs this after upgrading the
+        // graph, so start from scratch. Hash GC is skipped during the
+        // bulk rebuild — a fresh load imports exactly the retained set.
         self.fragments.clear();
         self.fragment_top = SeqClock::new(self.num_actors());
         for n in 0..self.hashes.len() {
-            self.cache_fragment(NodeIdx(n as u32))
+            self.cache_fragment_inner(NodeIdx(n as u32));
         }
     }
 
     fn cache_fragment(&mut self, head: NodeIdx) {
-        // the fragment index needs the fragment-level hashes; on a plain
-        // unchecked graph it would be silently incomplete
-        if !self.hashes.has_fragment_hashes() {
-            return;
+        if self.cache_fragment_inner(head) {
+            self.gc_retained_hashes();
         }
+    }
+
+    /// Outside audit mode, a new fragment frees the hashes it now covers
+    /// (its members become interior history; only heads, checkpoints,
+    /// loose commits and anchors stay retained). Callers batching many
+    /// [`Self::cache_fragment_inner`] calls run this once at the end —
+    /// a GC firing mid-batch would free dep hashes that later changes
+    /// in the same batch still resolve by hash.
+    fn gc_retained_hashes(&mut self) {
+        if !self.hashes.is_full() {
+            self.retain_hashes_only();
+        }
+    }
+
+    /// Returns whether a fragment was cached (the caller owes a
+    /// [`Self::gc_retained_hashes`] once its batch completes).
+    fn cache_fragment_inner(&mut self, head: NodeIdx) -> bool {
         let Some(hash) = self.hashes.get(head) else {
-            return;
+            return false;
         };
         let level = hash.fragment_level();
         if level == 0 {
-            return;
+            return false;
         }
         let mut deps = vec![];
         let mut supercede = vec![];
@@ -1264,17 +1362,11 @@ impl ChangeGraph {
         }
         SeqClock::merge(&mut self.fragment_top, &clock);
         self.fragments.push(FragmentNode { head, deps, clock });
+        true
     }
 
     pub(crate) fn node_by_hash(&self, hash: &ChangeHash) -> Option<NodeIdx> {
         self.nodes_by_hash.get(hash).copied()
-    }
-
-    pub(crate) fn node_for_actor_seq(&self, actor: usize, seq: u64) -> Option<NodeIdx> {
-        if seq == 0 {
-            return None;
-        }
-        self.seq_index.get(actor)?.get(seq as usize - 1).copied()
     }
 
     pub(crate) fn hash_for_node(&self, node: NodeIdx) -> Option<ChangeHash> {
@@ -1285,15 +1377,14 @@ impl ChangeGraph {
     /// hashes.
     ///
     /// The members must be in topological order and each member's seq
-    /// must extend its actor's chain — callers validate both. A checked
-    /// graph downgrades to the fragment-hashes state (see
-    /// [`Hashes::extend_unknown`]); the new nodes have no hash until
-    /// `rebuild_hash_graph` recomputes them, so they cannot appear in
-    /// `nodes_by_hash`, `heads` or the fragment index yet.
+    /// must extend its actor's chain — callers validate both. Only legal
+    /// outside audit mode (audit-mode fragment application converts to
+    /// changes instead); the new nodes have no hash, so they cannot
+    /// appear in `nodes_by_hash`, `heads` or the fragment index yet.
     pub(crate) fn add_fragment_members(&mut self, members: Vec<FragmentMember<'_>>) {
         let base = NodeIdx(self.len() as u32);
 
-        self.hashes.extend_unknown(members.len());
+        self.hashes.extend_without_hashes(members.len());
 
         self.actors
             .extend(members.iter().map(|m| ActorIdx::from(m.actor)));
@@ -1340,7 +1431,7 @@ impl ChangeGraph {
         }
     }
 
-    /// Record the (unverified, until `rebuild_hash_graph`) hash of a
+    /// Record the (unverified, until `enable_audit_mode`) hash of a
     /// node whose hash was unknown — a fragment head, checkpoint or
     /// boundary/dep pairing learned from an applied bundle. Makes the
     /// hash resolvable; maintains the fragment index for fragment-level
@@ -1356,13 +1447,10 @@ impl ChangeGraph {
             return;
         }
         match &mut self.hashes {
-            Hashes::Checked(_) => return,
-            Hashes::Unchecked { watermark, pre, .. } => {
-                if node.0 >= *watermark {
-                    // tail nodes always have known hashes
-                    return;
-                }
-                pre.insert(node, hash);
+            // audit mode already knows every hash
+            Hashes::Full(_) => return,
+            Hashes::Retained { map, .. } => {
+                map.insert(node, hash);
             }
         }
         self.nodes_by_hash.insert(hash, node);
@@ -1462,20 +1550,6 @@ impl ChangeGraph {
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, UncheckedHashes> {
         let nodes = self.heads_to_nodes(heads)?;
         Ok(self.clock_for_nodes(nodes))
-    }
-
-    /// Clock for `heads`, silently skipping hashes not in this document —
-    /// the pre-unchecked-load semantics of every `*_at` read.
-    ///
-    /// Hashes known on an unchecked graph (the load heads and any change
-    /// added since) resolve normally, so historical reads at the load heads
-    /// work without the hash graph.
-    pub(crate) fn clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> Clock {
-        let nodes = heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h).copied())
-            .collect();
-        self.clock_for_nodes(nodes)
     }
 
     /// Like [`Self::clock_for_heads_lossy`] but returning the seq clock.
@@ -1618,7 +1692,7 @@ impl ChangeGraph {
             .enumerate()
             .map(|(i, h)| (*h, NodeIdx(i as u32)))
             .collect();
-        self.hashes = Hashes::Checked(hashes);
+        self.hashes = Hashes::Full(hashes);
         Ok(())
     }
 
@@ -1778,7 +1852,9 @@ impl ChangeGraphCols {
     pub(crate) fn finalize(self, changes: &[Change]) -> Result<ChangeGraph, InvalidHashColumn> {
         let mut graph = self.graph;
         debug_assert_eq!(changes.len(), graph.len());
-        debug_assert!(graph.hashes.is_checked() && graph.hashes.len() == 0);
+        debug_assert!(graph.hashes.len() == 0);
+        // a full (audit) load: every hash is known
+        graph.hashes = Hashes::Full(Vec::with_capacity(changes.len()));
 
         // The encoded change columns only contain each change's maximum op.
         // `load()` estimates op counts from dependencies, but that is ambiguous
@@ -1827,14 +1903,14 @@ impl ChangeGraphCols {
     /// nodes via the document's head index suffix (`heads[i]` names node
     /// `head_indexes[i]`). The pairing is validated structurally (indexes
     /// in range, distinct, childless nodes) but the hashes themselves are
-    /// unverified until `rebuild_hash_graph`.
+    /// unverified until `enable_audit_mode`.
     pub(crate) fn finalize_unchecked(
         self,
         heads: &[ChangeHash],
         head_indexes: &[u64],
     ) -> Result<ChangeGraph, BadHeadIndexes> {
         let mut graph = self.graph;
-        debug_assert!(graph.hashes.is_checked() && graph.hashes.len() == 0);
+        debug_assert!(graph.hashes.len() == 0);
 
         if heads.len() != head_indexes.len() {
             return Err(BadHeadIndexes);
@@ -1866,8 +1942,7 @@ impl ChangeGraphCols {
 
         // import the hash columns (fragment-level hashes, loose commits
         // and anchors) — trusted like the head pairing until
-        // `rebuild_hash_graph` verifies them
-        let fragment_hashes = !self.saved_hashes.is_empty();
+        // `enable_audit_mode` verifies them
         for (i, hash) in self.saved_hashes {
             if i as usize >= graph.len() {
                 return Err(BadHeadIndexes);
@@ -1881,17 +1956,13 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(hash, node);
         }
 
-        graph.hashes = Hashes::Unchecked {
-            watermark: graph.len() as u32,
-            tail: Vec::new(),
-            pre,
-            fragment_hashes,
-        };
+        let len = graph.len();
+        graph.hashes = Hashes::Retained { map: pre, len };
 
         graph.cache_clocks();
 
-        // in the fragment-hashes state the fragment index is usable —
-        // build it now (no-op on a plain unchecked graph)
+        // the retained set is fragment-sufficient by construction —
+        // build the fragment index now
         graph.cache_fragments();
 
         Ok(graph)
@@ -2198,10 +2269,14 @@ mod tests {
 
     impl TestGraphBuilder {
         fn new() -> Self {
+            let mut graph = ChangeGraph::new(0);
+            // audit mode: the tests resolve hashes freely, and random
+            // change hashes can otherwise form fragments and free them
+            graph.hashes = Hashes::Full(Vec::new());
             TestGraphBuilder {
                 actors: Vec::new(),
                 changes: Vec::new(),
-                graph: ChangeGraph::new(0),
+                graph,
                 seqs_by_actor: BTreeMap::new(),
             }
         }
@@ -2299,10 +2374,7 @@ mod tests {
         fn all_change_ids(&self) -> Vec<ChangeId> {
             self.changes
                 .iter()
-                .map(|c| ChangeId {
-                    actor: c.actor_id().clone(),
-                    seq: c.seq(),
-                })
+                .map(|c| ChangeId::new(c.seq(), c.actor_id().clone(), 0))
                 .collect()
         }
 
@@ -2316,7 +2388,7 @@ mod tests {
     }
 
     fn member_hash(hash_of: &BTreeMap<(ActorId, u64), ChangeHash>, id: &ChangeId) -> ChangeHash {
-        hash_of[&(id.actor.clone(), id.seq)]
+        hash_of[&(id.actor().clone(), id.seq())]
     }
 
     #[test]
@@ -2334,7 +2406,7 @@ mod tests {
         let all_ids: BTreeSet<_> = builder
             .all_change_ids()
             .into_iter()
-            .map(|id| (id.actor, id.seq))
+            .map(|id| (id.actor().clone(), id.seq()))
             .collect();
         let heads: Vec<_> = graph.heads().collect();
 
@@ -2345,7 +2417,7 @@ mod tests {
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
             for m in &f.members {
-                covered.insert((m.actor.clone(), m.seq));
+                covered.insert((m.actor().clone(), m.seq()));
             }
         }
 
@@ -2445,7 +2517,7 @@ mod tests {
         let all_ids: BTreeSet<_> = builder
             .all_change_ids()
             .into_iter()
-            .map(|id| (id.actor, id.seq))
+            .map(|id| (id.actor().clone(), id.seq()))
             .collect();
         let heads: Vec<_> = graph.heads().collect();
         let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
@@ -2453,7 +2525,7 @@ mod tests {
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
             for m in &f.members {
-                covered.insert((m.actor.clone(), m.seq));
+                covered.insert((m.actor().clone(), m.seq()));
             }
         }
 
@@ -2787,11 +2859,11 @@ mod tests {
         use std::time::Instant;
         let bytes = std::fs::read("/Users/orion/automerge-blog/data/S3.am").unwrap();
         let doc = Automerge::load(&bytes).unwrap();
-        let heads = doc.get_heads();
+        let heads = doc.get_head_hashes();
         assert_eq!(heads.len(), 1);
         let fragments = doc.fragments(..).unwrap();
         let whole = Fragment {
-            head: heads[0],
+            head: doc.get_head_hashes()[0],
             level: 1,
             boundary: vec![],
             checkpoints: vec![],
@@ -2810,24 +2882,20 @@ mod tests {
                 t.elapsed(),
                 d.ops.len()
             );
-            assert_eq!(d.get_heads(), heads);
+            assert_eq!(d.get_head_hashes(), heads);
             assert_eq!(d.ops.len(), doc.ops.len());
         }
 
         let saved = doc.save();
         for _ in 0..3 {
             let t = Instant::now();
-            let d = Automerge::load_with_options(
-                &saved,
-                crate::LoadOptions::new().hash_graph(crate::HashGraphRebuild::None),
-            )
-            .unwrap();
+            let d = Automerge::load_with_options(&saved, crate::LoadOptions::new()).unwrap();
             eprintln!(
                 "speed of light (no hash rebuild): {:.2?}  ops {}",
                 t.elapsed(),
                 d.ops.len()
             );
-            assert_eq!(d.get_heads(), heads);
+            assert_eq!(d.get_head_hashes(), heads);
         }
     }
 
@@ -2947,7 +3015,9 @@ mod tests {
         }
 
         // the same content both ways: the doc as of the big fragment's head
-        let light = doc.fork_at(&[fragments[big].head]).unwrap();
+        let light = doc
+            .fork_at(&doc.hashes_to_change_ids(&[fragments[big].head]).unwrap())
+            .unwrap();
         let heads = light.get_heads();
         let saved = light.save();
 
@@ -2976,11 +3046,7 @@ mod tests {
 
         for _ in 0..3 {
             let t = Instant::now();
-            let d = Automerge::load_with_options(
-                &saved,
-                crate::LoadOptions::new().hash_graph(crate::HashGraphRebuild::None),
-            )
-            .unwrap();
+            let d = Automerge::load_with_options(&saved, crate::LoadOptions::new()).unwrap();
             eprintln!(
                 "speed of light (no hash rebuild): {:>10.3}ms  ops {}",
                 t.elapsed().as_secs_f64() * 1e3,
@@ -3192,7 +3258,7 @@ mod tests {
             doc.get_changes(&[]).unwrap().len()
         );
         let whole = Fragment {
-            head: heads[0],
+            head: doc.get_head_hashes()[0],
             level: 1,
             boundary: vec![],
             checkpoints: vec![],
@@ -3336,7 +3402,7 @@ mod tests {
         assert_eq!(d.get_heads(), doc.get_heads());
         // the fragments cover the whole history: after verifying every
         // member hash the docs must serialize identically
-        d.rebuild_hash_graph().unwrap();
+        d.enable_audit_mode().unwrap();
         // op sets must match exactly; the save bytes may not — the
         // change graph serializes in insertion order, and fragment
         // topo order is a different (equally valid) order than the
@@ -3414,7 +3480,7 @@ mod tests {
                 .collect();
             // v2 concat: one whole-history bundle applied in a single
             // FragmentApply pass — the true analog of v1 concat
-            let doc_heads = doc.get_heads();
+            let doc_heads = doc.get_head_hashes();
             assert_eq!(doc_heads.len(), 1, "{name}: expected single head");
             let whole = Fragment {
                 head: doc_heads[0],
@@ -3483,6 +3549,8 @@ mod tests {
         use crate::ROOT;
 
         let mut doc = Automerge::new();
+        // the test enumerates every change hash below
+        doc.enable_audit_mode().unwrap();
         doc.set_actor(crate::ActorId::from(b"alice" as &[u8]))
             .unwrap();
         let mut tx = doc.transaction();
@@ -3670,68 +3738,10 @@ pub struct Fragment {
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
     pub checkpoints: Vec<ChangeHash>,
-    /// The changes this fragment covers. Identified by `(actor, seq)`
-    /// rather than hash so fragments can be produced in the
-    /// fragment-hashes state, where interior change hashes are unknown.
+    /// The changes this fragment covers. Identified by [`ChangeId`]
+    /// rather than hash so fragments can be produced outside audit
+    /// mode, where interior change hashes may be freed.
     pub members: Vec<ChangeId>,
-}
-
-/// Identifies a change by `(actor, seq)` — derivable from the change
-/// graph's structure without knowing the change's hash.
-///
-/// This is an experimental API, it may change or be removed without warning.
-#[doc(hidden)]
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct ChangeId {
-    pub actor: crate::ActorId,
-    pub seq: u64,
-}
-
-impl std::fmt::Display for ChangeId {
-    /// `"{seq}@{actor}"`, the same shape as object ids and cursors.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}", self.seq, self.actor)
-    }
-}
-
-impl std::str::FromStr for ChangeId {
-    type Err = ParseChangeIdError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (seq, actor) = s.split_once('@').ok_or(ParseChangeIdError)?;
-        let seq: u64 = seq.parse().map_err(|_| ParseChangeIdError)?;
-        if seq == 0 {
-            return Err(ParseChangeIdError);
-        }
-        let actor = hex::decode(actor).map_err(|_| ParseChangeIdError)?;
-        Ok(ChangeId {
-            actor: crate::ActorId::from(actor),
-            seq,
-        })
-    }
-}
-
-/// Error parsing a [`ChangeId`] from its `"{seq}@{actor}"` form.
-#[doc(hidden)]
-#[derive(Debug, thiserror::Error)]
-#[error("invalid change id: expected \"{{seq}}@{{actor}}\"")]
-pub struct ParseChangeIdError;
-
-/// How much of the document's change-hash graph is known.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum HashGraphState {
-    /// Every change hash is known and validated; all APIs work.
-    Checked,
-    /// Change hashes are unverified and only partially known, but every
-    /// hash needed to build fragments (fragment heads, checkpoints,
-    /// boundaries, loose commits) is available. Fragment APIs work;
-    /// other hash-dependent APIs error until
-    /// [`rebuild_hash_graph`](crate::Automerge::rebuild_hash_graph).
-    FragmentHashes,
-    /// Only the load-time heads and post-load change hashes are known.
-    /// Hash-dependent APIs (including fragments) error until
-    /// [`rebuild_hash_graph`](crate::Automerge::rebuild_hash_graph).
-    Unchecked,
 }
 
 #[rustfmt::skip]

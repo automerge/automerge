@@ -402,8 +402,8 @@ mod tests {
     use crate::transaction::Transactable;
     use crate::types::ChangeHash;
     use crate::{
-        make_rng, AutoCommit, Automerge, AutomergeError, BundleV2, Change, ChangeId, Fragment,
-        HashGraphState, ObjType, ScalarValue, ROOT,
+        make_rng, AuditMode, AutoCommit, Automerge, AutomergeError, BundleV2, Change, ChangeId,
+        Fragment, ObjType, ScalarValue, ROOT,
     };
     use rand::prelude::*;
     use std::collections::HashSet;
@@ -424,10 +424,7 @@ mod tests {
             .collect();
         assert_eq!(heads.len(), 1, "test fragments must have a single head");
         let head = heads[0];
-        let id = |c: &Change| ChangeId {
-            actor: c.actor_id().clone(),
-            seq: c.seq(),
-        };
+        let id = |c: &Change| ChangeId::new(c.seq(), c.actor_id().clone(), 0);
         // members lead with the head, matching Fragment::export
         let mut members = vec![id(head)];
         members.extend(changes.iter().filter(|c| c.hash() != head.hash()).map(&id));
@@ -450,7 +447,7 @@ mod tests {
     /// with `apply_fragment`; apply the same changes to a fork of `dst`
     /// with the batch path; the results must agree — including the
     /// heads, both before and after rebuilding the hash graph.
-    fn apply_and_compare(src: &mut AutoCommit, dst: &mut AutoCommit, heads: &[ChangeHash]) {
+    fn apply_and_compare(src: &mut AutoCommit, dst: &mut AutoCommit, heads: &[crate::ChangeId]) {
         let changes = src.get_changes(heads).unwrap();
         let frag = fragment_for(&changes);
         let v2 = src.doc.bundle_fragment_v2(&frag).unwrap();
@@ -462,14 +459,14 @@ mod tests {
         dst.doc.apply_fragment(&v2).unwrap();
         dst.validate_top_index();
 
-        assert_eq!(dst.doc.hash_graph_state(), HashGraphState::FragmentHashes);
+        assert_eq!(dst.doc.audit_mode(), AuditMode::Disabled);
         assert_eq!(dst.get_heads(), dst_ref.get_heads());
 
         dst.doc.debug_cmp(&dst_ref.doc);
 
         // hashing every member verifies the head hash taken on trust
-        dst.doc.rebuild_hash_graph().unwrap();
-        assert_eq!(dst.doc.hash_graph_state(), HashGraphState::Checked);
+        dst.doc.enable_audit_mode().unwrap();
+        assert_eq!(dst.doc.audit_mode(), AuditMode::Enabled);
         assert_eq!(dst.doc.save(), dst_ref.doc.save());
     }
 
@@ -483,8 +480,12 @@ mod tests {
         let heads = doc1.get_heads();
 
         let mut src = doc1.fork().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
         for i in 0..5 {
             let mut tmp = doc1.fork().with_actor(rng.random()).unwrap();
+            // merging FROM tmp enumerates its changes, which needs its
+            // hashes — kept only in audit mode
+            tmp.enable_audit_mode().unwrap();
             tmp.put(&map1, "key1", format!("conflict{}", i)).unwrap();
             tmp.delete(&map1, "key2").unwrap();
             let m = tmp
@@ -515,6 +516,7 @@ mod tests {
         let heads = doc1.get_heads();
 
         let mut src = doc1.fork().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
 
         for _ in 0..3 {
             for _ in 0..20 {
@@ -561,6 +563,7 @@ mod tests {
         let heads = doc1.get_heads();
 
         let mut src = doc1.fork().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
 
         for _ in 0..5 {
             for _ in 0..10 {
@@ -618,6 +621,7 @@ mod tests {
         let heads = doc1.get_heads();
 
         let mut src = doc1.fork().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
 
         for _ in 0..30 {
             let mut tmp = src.fork().with_actor(rng.random()).unwrap();
@@ -650,6 +654,7 @@ mod tests {
     fn fragment_sequential_bundles() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
         let text = src.put_object(&ROOT, "text", ObjType::Text).unwrap();
         for i in 0..40 {
             let len = src.length(&text);
@@ -678,8 +683,8 @@ mod tests {
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);
 
-        dst.rebuild_hash_graph().unwrap();
-        assert_eq!(dst.hash_graph_state(), HashGraphState::Checked);
+        dst.enable_audit_mode().unwrap();
+        assert_eq!(dst.audit_mode(), AuditMode::Enabled);
         assert_eq!(dst.save(), src.doc.save());
     }
 
@@ -687,6 +692,7 @@ mod tests {
     fn fragment_apply_errors() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
         for i in 0..9 {
             src.put(&ROOT, "key", i).unwrap();
             src.commit();
@@ -718,7 +724,7 @@ mod tests {
         dst.apply_fragment(&bundles[2]).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
-        dst.rebuild_hash_graph().unwrap();
+        dst.enable_audit_mode().unwrap();
         assert_eq!(dst.save(), src.doc.save());
     }
 
@@ -729,6 +735,7 @@ mod tests {
         // skipped
         let mut rng = make_rng();
         let mut src = AutoCommit::new().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
         let text = src.put_object(&ROOT, "text", ObjType::Text).unwrap();
         for i in 0..9 {
             src.splice_text(&text, 0, 0, &format!("{}", i)).unwrap();
@@ -746,7 +753,7 @@ mod tests {
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);
-        dst.rebuild_hash_graph().unwrap();
+        dst.enable_audit_mode().unwrap();
         assert_eq!(dst.save(), src.doc.save());
     }
 }

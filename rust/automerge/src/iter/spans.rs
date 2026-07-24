@@ -52,7 +52,8 @@ impl SpanDiff {
 // directly.
 #[derive(Debug, Clone)]
 // Boxing the variants loses a few milliseconds on some iteration benchmarks
-#[expect(clippy::large_enum_variant)]
+// (allow, not expect: on wasm32 the variants aren't large enough to fire)
+#[allow(clippy::large_enum_variant)]
 enum SpansActionValue<'a> {
     Current(Unshift<ActionValueIter<'a>>),
     Diff(Unshift<DiffIter<'a, ActionValueIter<'a>, TopIter<'a>>>),

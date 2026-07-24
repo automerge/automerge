@@ -34,7 +34,7 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, ChangeId, Cursor, Fragment, HashGraphState, ObjType, Prop};
+use crate::{AutomergeError, Change, ChangeId, Cursor, Fragment, ObjType, Prop};
 use std::borrow::Cow;
 
 pub(crate) mod current_state;
@@ -82,28 +82,29 @@ pub enum OnPartialLoad {
     Error,
 }
 
-/// How much of the change hash graph to rebuild when loading a document
+/// Whether a document keeps the hash of every change.
+///
+/// In [`AuditMode::Disabled`] (the default) the change graph retains
+/// only the hashes it needs — the heads, loose commits, fragment heads
+/// and checkpoints, and their deps — and frees the rest as fragments
+/// cover them. Everything id-based works (reads, transactions, forks,
+/// diffs, fragment/bundle exchange); operations that need arbitrary
+/// interior hashes (the hash-based sync protocol, exporting the full
+/// change history) return [`AutomergeError::AuditModeRequired`].
+///
+/// In [`AuditMode::Enabled`] every change hash is computed, verified
+/// and kept. Loading in audit mode does a full hash-graph rebuild, and
+/// fragments apply by converting to changes so every hash is verified.
+///
+/// Switch modes at runtime with [`Automerge::enable_audit_mode`] and
+/// [`Automerge::disable_audit_mode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum HashGraphRebuild {
-    /// Don't rebuild the hash graph at all.
-    ///
-    /// This is the fastest option: no change is re-serialized and hashed, and
-    /// the head hashes are not verified. The document is left with an
-    /// unchecked hash graph (see [`LoadOptions::hash_graph`]).
-    None,
-    /// Use the fragment hashes stored in the document if they are present,
-    /// falling back to a full rebuild (as in [`HashGraphRebuild::Full`]) if they
-    /// are not.
-    ///
-    /// When the stored hashes are used the load is as fast as
-    /// [`HashGraphRebuild::None`] and the document comes up in the
-    /// [`HashGraphState::FragmentHashes`] state, where fragment generation
-    /// works without a rebuild.
-    Fragments,
-    /// Rebuild the full hash graph from the loaded changes, verifying the
-    /// document's recorded heads. This is the default.
+pub enum AuditMode {
+    /// Every change hash is computed, verified and kept.
+    Enabled,
+    /// Only the retained hash set is kept. The default.
     #[default]
-    Full,
+    Disabled,
 }
 
 /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
@@ -121,7 +122,7 @@ pub struct LoadOptions {
     verification_mode: VerificationMode,
     string_migration: StringMigration,
     text_encoding: TextEncoding,
-    hash_graph: HashGraphRebuild,
+    audit: AuditMode,
 }
 
 impl LoadOptions {
@@ -163,27 +164,24 @@ impl LoadOptions {
         }
     }
 
-    /// How to handle the change hash graph while loading.
+    /// The [`AuditMode`] to load the document in.
     ///
-    /// [`HashGraphRebuild::None`] makes loading faster (no change is re-serialized
-    /// and hashed, and the head hashes are not verified) at the cost of
-    /// leaving the document with an unchecked hash graph: any operation which
-    /// needs the hash of a pre-load change (exporting changes, syncing,
-    /// isolating at pre-load heads, ...) will return
-    /// [`AutomergeError::UncheckedHashGraph`] until
-    /// [`Automerge::rebuild_hash_graph`] is called.
+    /// The default, [`AuditMode::Disabled`], is the fast path: when the
+    /// document carries its stored hash columns the load skips the
+    /// hash-graph rebuild entirely and imports the retained set. (A
+    /// document without stored hash columns computes hashes once during
+    /// load and then retains only the set.)
     ///
-    /// Reading — current state, or historical state at the load heads — as
-    /// well as making new transactions and saving all work on an unchecked
-    /// document.
-    ///
-    /// [`HashGraphRebuild::Fragments`] loads like [`HashGraphRebuild::None`] when the
-    /// document carries stored fragment hashes (fragment generation works
-    /// immediately), and falls back to a full rebuild when it doesn't.
-    ///
-    /// The default is [`HashGraphRebuild::Full`].
-    pub fn hash_graph(self, hash_graph: HashGraphRebuild) -> Self {
-        Self { hash_graph, ..self }
+    /// [`AuditMode::Enabled`] does a full hash-graph rebuild, verifying
+    /// every change hash and the document's recorded heads, and keeps
+    /// them all.
+    pub fn audit(self, audit: AuditMode) -> Self {
+        Self { audit, ..self }
+    }
+
+    /// Load in [`AuditMode::Enabled`] — see [`Self::audit`].
+    pub fn with_audit_mode(self) -> Self {
+        self.audit(AuditMode::Enabled)
     }
 }
 
@@ -194,7 +192,7 @@ impl std::default::Default for LoadOptions {
             verification_mode: VerificationMode::Check,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
-            hash_graph: HashGraphRebuild::Full,
+            audit: AuditMode::default(),
         }
     }
 }
@@ -204,7 +202,7 @@ impl std::default::Default for LoadOptions {
 /// ## Creating, loading, merging and forking documents
 ///
 /// A new document can be created with [`Self::new()`], which will create a document with a random
-/// [`ActorId`]. Existing documents can be loaded with [`Self::load()`], or [`Self::load_with()`].
+/// [`ActorId`]. Existing documents can be loaded with [`Self::load()`], or [`Self::load_with_options()`].
 ///
 /// If you have two documents and you want to merge the changes from one into the other you can use
 /// [`Self::merge()`].
@@ -240,7 +238,7 @@ pub struct Automerge {
     /// The current actor.
     actor: Actor,
     /// Cursor for dirty-bit incremental diffs.
-    diff_cursor: Vec<ChangeHash>,
+    diff_cursor: Vec<ChangeId>,
 }
 
 impl Automerge {
@@ -322,7 +320,7 @@ impl Automerge {
 
     /// Set the actor id for this document.
     ///
-    /// Returns [`AutomergeError::UncheckedHashGraph`] if the actor has made
+    /// Returns [`AutomergeError::AuditModeRequired`] if the actor has made
     /// changes to this document, the hash of its latest change is unknown
     /// (because the hash graph has not been built) and that change is not one
     /// of the current heads — committing as this actor would require the
@@ -354,7 +352,9 @@ impl Automerge {
         if seq == 0 {
             return Ok(());
         }
-        self.change_graph.get_hash_for_actor_seq(actor_idx, seq)?;
+        let id = self.change_id_at(actor_idx, seq);
+        self.change_graph
+            .get_hash_for_change_id(&id, &self.ops.actors)?;
         Ok(())
     }
 
@@ -420,24 +420,38 @@ impl Automerge {
     }
 
     /// Start a transaction isolated at the given heads.
-    pub fn transaction_at(&mut self, heads: &[ChangeHash]) -> Transaction<'_> {
+    pub fn transaction_at(
+        &mut self,
+        heads: &[ChangeId],
+    ) -> Result<Transaction<'_>, AutomergeError> {
+        // fail fast: an isolated transaction commits with these heads as
+        // its deps, which the wire format records as hashes
+        self.resolve_heads(heads)?;
         let args = self.transaction_args(Some(heads));
-        Transaction::new(self, args)
+        Ok(Transaction::new(self, args))
     }
 
     /// Start a transaction that owns the document, consuming `self`.
-    pub fn into_transaction(self, heads: Option<&[ChangeHash]>) -> OwnedTransaction {
+    pub fn into_transaction(
+        self,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<OwnedTransaction, AutomergeError> {
         OwnedTransaction::new(self, heads)
     }
 
-    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
+    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeId]>) -> TransactionArgs {
         let actor_index;
         let seq;
         let mut deps;
         let scope;
         match heads {
             Some(heads) => {
-                deps = heads.to_vec();
+                // the isolation heads become the change's deps, which the
+                // wire format records as hashes; callers validated
+                // resolvability when the isolation was created
+                deps = self
+                    .resolve_heads(heads)
+                    .expect("isolation ids were validated when isolating");
                 let isolation = self.isolate_actor(heads);
                 actor_index = isolation.actor_index;
                 seq = isolation.seq;
@@ -446,13 +460,13 @@ impl Automerge {
             None => {
                 actor_index = self.get_or_create_actor_index();
                 seq = self.change_graph.seq_for_actor(actor_index) + 1;
-                deps = self.get_heads();
+                deps = self.get_head_hashes();
                 scope = None;
                 if seq > 1 {
                     // set_actor refuses actors whose latest change hash is
                     // missing, so the hash is always available here
                     let last_hash = self
-                        .get_hash(actor_index, seq - 1)
+                        .get_hash(&self.change_id_at(actor_index, seq - 1))
                         .expect("hash of the current actor's last change is always known");
                     if !deps.contains(&last_hash) {
                         deps.push(last_hash);
@@ -512,13 +526,13 @@ impl Automerge {
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let hash = if let Some(c) = c {
+                let change_id = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
                     tx.commit()
                 };
-                Ok(Success { result, hash })
+                Ok(Success { result, change_id })
             }
             Err(error) => Err(Failure {
                 error,
@@ -534,9 +548,13 @@ impl Automerge {
     ///
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
-    pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
+    pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeId {
         let args = self.transaction_args(None);
-        Transaction::empty(self, args, opts)
+        let hash = Transaction::empty(self, args, opts);
+        // the change was just added, so it always resolves
+        self.hash_to_change_id(&hash)
+            .expect("hash of a newly created change is always known")
+            .expect("newly created change must be in the document")
     }
 
     /// Fork this document at the current point for use by a different actor.
@@ -556,7 +574,8 @@ impl Automerge {
     /// Unlike the `*_at` query methods (which silently skip unknown hashes),
     /// this returns [`AutomergeError::InvalidHash`] if any of `heads` is not
     /// a change in this document.
-    pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+    pub fn fork_at(&self, heads: &[ChangeId]) -> Result<Self, AutomergeError> {
+        let heads = self.resolve_heads(heads)?;
         let mut seen = HashSet::new();
         let mut heads = heads
             .iter()
@@ -716,12 +735,12 @@ impl Automerge {
     ///
     /// This returns only the current hydrated value and does not preserve the original change graph.
     pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
-        Ok(Self::load_with_options_and_mark_validation(
+        Self::load_with_options_and_mark_validation(
             data,
             Default::default(),
             load::MarkOrderValidation::AllowInvalid,
         )?
-        .hydrate(None))
+        .hydrate(None)
     }
 
     fn load_with_options_and_mark_validation(
@@ -749,7 +768,7 @@ impl Automerge {
                 match d.reconstruct(
                     options.verification_mode,
                     options.text_encoding,
-                    options.hash_graph,
+                    options.audit,
                 ) {
                     Ok(doc) => doc,
                     Err(ReconstructError::InvalidMarkOrderDoc {
@@ -826,6 +845,7 @@ impl Automerge {
     /// [diff]: Self::diff()
     pub fn current_state(&self) -> Vec<Patch> {
         self.diff(&[], &self.get_heads())
+            .expect("diffing to the current heads never fails")
     }
 
     /// Load an incremental save of a document.
@@ -842,7 +862,9 @@ impl Automerge {
                 LoadOptions::new()
                     .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
-                    .verification_mode(VerificationMode::Check),
+                    .verification_mode(VerificationMode::Check)
+                    // replacing self must not change the audit mode
+                    .audit(self.audit_mode()),
             )?;
             doc = doc.with_actor(self.actor_id().clone())?;
             doc.ops_mut().mark_all_dirty();
@@ -877,17 +899,6 @@ impl Automerge {
         patch_accumulator.path_hint(path_map);
     }
 
-    fn seq_for_actor(&self, actor: &ActorId) -> u64 {
-        self.ops
-            .lookup_actor(actor)
-            .map(|idx| self.change_graph.seq_for_actor(idx))
-            .unwrap_or(0)
-    }
-
-    pub(crate) fn has_actor_seq(&self, change: &Change) -> bool {
-        self.seq_for_actor(change.actor_id()) >= change.seq()
-    }
-
     /// Apply changes to this document.
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
@@ -900,7 +911,7 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeId>, AutomergeError> {
         let changes = self.get_changes_added(other)?;
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes(changes)?;
@@ -960,8 +971,23 @@ impl Automerge {
     /// changes. This is useful if you know you have only made a small change since the last
     /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
     /// single character in a text object).
-    pub fn save_after(&self, heads: &[ChangeHash]) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save_after(&self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
         let changes = self.get_changes(heads)?;
+        let mut bytes = vec![];
+        for c in changes {
+            bytes.extend(c.raw_bytes());
+        }
+        Ok(bytes)
+    }
+
+    /// Hash-keyed version of [`Self::save_after`], for the save cursor
+    /// (which stores hashes — the currency of storage).
+    pub(crate) fn save_after_hashes(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<u8>, AutomergeError> {
+        let clock = self.change_graph.seq_clock_for_heads_lossy(heads);
+        let changes = ChangeCollector::exclude_seq_clock(&self.ops, &self.change_graph, clock)?;
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
@@ -997,40 +1023,26 @@ impl Automerge {
         if seq == 0 {
             return Ok(None);
         }
-        let hash = self.change_graph.get_hash_for_actor_seq(actor, seq)?;
+        let id = self.change_id_at(actor, seq);
+        let hash = self
+            .change_graph
+            .get_hash_for_change_id(&id, &self.ops.actors)?;
         self.get_change_by_hash(&hash)
     }
 
     /// Clock range for diffing between two head sets, resolved with the
     /// lossy (`*_at`-read) semantics.
-    pub(crate) fn clock_range(&self, before: &[ChangeHash], after: &[ChangeHash]) -> ClockRange {
-        let before = self.change_graph.clock_for_heads_lossy(before);
-        let after = self.change_graph.clock_for_heads_lossy(after);
-        ClockRange::Diff(before, Some(after))
-    }
-
-    /// Clock for reading the document as at `heads`.
-    ///
-    /// Returns `None` — an unscoped read of the present document — when
-    /// `heads` is exactly the current heads, so `*_at(doc.get_heads())`
-    /// takes the same indexed fast paths as the un-suffixed methods.
-    /// Otherwise resolves `heads` silently skipping unknown hashes: the
-    /// pre-unchecked-load semantics of every `*_at` read (hashes known on
-    /// an unchecked graph — the load heads and any change added since —
-    /// resolve normally).
-    ///
-    /// The shortcut is sound here because pending transaction ops enter
-    /// the op set before the graph's heads advance, and an `Automerge`
-    /// cannot be read through `&self` while a transaction holds it
-    /// mutably. Anything reading *around* an in-flight transaction
-    /// (`AutoCommit`, the transaction types) — or needing a concrete
-    /// clock — must use the [`ChangeGraph`] resolvers instead.
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Option<Clock> {
-        if self.change_graph.heads_are_current(heads) {
-            None
-        } else {
-            Some(self.change_graph.clock_for_heads_lossy(heads))
-        }
+    pub(crate) fn clock_range(
+        &self,
+        before: &[ChangeId],
+        after: &[ChangeId],
+    ) -> Result<ClockRange, AutomergeError> {
+        let before = self.nodes_for_change_ids(before)?;
+        let after = self.nodes_for_change_ids(after)?;
+        Ok(ClockRange::Diff(
+            self.change_graph.clock_for_nodes(before),
+            Some(self.change_graph.clock_for_nodes(after)),
+        ))
     }
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
@@ -1043,11 +1055,14 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
-        // callers resolve heads before isolating, so the clock is always
+    pub(crate) fn isolate_actor(&mut self, heads: &[ChangeId]) -> Isolation {
+        // callers validate heads before isolating, so the clock is always
         // computable
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.change_graph.clock_for_heads_lossy(heads);
+        let mut clock = self
+            .nodes_for_change_ids(heads)
+            .map(|n| self.change_graph.clock_for_nodes(n))
+            .expect("validated ids always have clocks");
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
@@ -1057,7 +1072,10 @@ impl Automerge {
             }
             actor_index = self.get_isolated_actor_index(i);
             // need to recompute the clock b/c the actor indexes may have changed
-            clock = self.change_graph.clock_for_heads_lossy(heads);
+            clock = self
+                .nodes_for_change_ids(heads)
+                .map(|n| self.change_graph.clock_for_nodes(n))
+                .expect("validated ids always have clocks");
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
@@ -1069,8 +1087,9 @@ impl Automerge {
         }
     }
 
-    fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
-        self.change_graph.get_hash_for_actor_seq(actor, seq)
+    fn get_hash(&self, id: &ChangeId) -> Result<ChangeHash, AutomergeError> {
+        self.change_graph
+            .get_hash_for_change_id(id, &self.ops.actors)
     }
 
     pub(crate) fn update_history_batch(&mut self, changes: &[Change]) {
@@ -1257,12 +1276,17 @@ impl Automerge {
     /// Create patches representing the change in the current state of the document between the
     /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
-    pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
-        let clock = self.clock_range(before_heads, after_heads);
+    pub fn diff(
+        &self,
+        before_heads: &[ChangeId],
+        after_heads: &[ChangeId],
+    ) -> Result<Vec<Patch>, AutomergeError> {
+        let clock = self.clock_range(before_heads, after_heads)?;
+        let after_clock = clock.after_clock();
         let mut patch_accumulator = PatchAccumulator::event_log();
         DiffIter::log(self, ObjMeta::root(), clock, &mut patch_accumulator, true);
-        patch_accumulator.heads = Some(after_heads.to_vec());
-        patch_accumulator.make_patches(self)
+        patch_accumulator.heads_clock = after_clock;
+        Ok(patch_accumulator.make_patches(self))
     }
 
     /// Generate an incremental diff from the last incremental cursor to the current heads.
@@ -1298,22 +1322,22 @@ impl Automerge {
     pub fn diff_obj(
         &self,
         obj: &ExId,
-        before_heads: &[ChangeHash],
-        after_heads: &[ChangeHash],
+        before_heads: &[ChangeId],
+        after_heads: &[ChangeId],
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_range(before_heads, after_heads);
+        let clock = self.clock_range(before_heads, after_heads)?;
+        let after_clock = clock.after_clock();
         let mut patch_accumulator = PatchAccumulator::event_log();
         DiffIter::log(self, obj, clock, &mut patch_accumulator, recursive);
-        patch_accumulator.heads = Some(after_heads.to_vec());
+        patch_accumulator.heads_clock = after_clock;
         Ok(patch_accumulator.make_patches(self))
     }
 
-    /// How much of the change-hash graph is known — see
-    /// [`HashGraphState`].
-    pub fn hash_graph_state(&self) -> HashGraphState {
-        self.change_graph.state()
+    /// This document's [`AuditMode`].
+    pub fn audit_mode(&self) -> AuditMode {
+        self.change_graph.audit_mode()
     }
 
     /// EXPERIMENTAL: Return the fragments covering the document history at
@@ -1321,20 +1345,14 @@ impl Automerge {
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
-    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
-    /// loaded with [`LoadOptions::hash_graph`] — fragments need the
-    /// whole hash graph.
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(
         &self,
         levels: R,
     ) -> Result<Vec<Fragment>, AutomergeError> {
-        if self.hash_graph_state() == HashGraphState::Unchecked {
-            return Err(AutomergeError::UncheckedHashGraph);
-        }
         let mut fragments: Vec<_> = self
             .change_graph
-            .fragments(&self.get_heads(), levels, &self.ops.actors)
+            .fragments(&self.get_head_hashes(), levels, &self.ops.actors)
             .collect();
         // return them oldest to newest, in causal order — the order
         // apply_fragment needs them in
@@ -1347,13 +1365,8 @@ impl Automerge {
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
-    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
-    /// loaded with [`LoadOptions::hash_graph`].
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
-        if self.hash_graph_state() == HashGraphState::Unchecked {
-            return Err(AutomergeError::UncheckedHashGraph);
-        }
         Ok(self.change_graph.get_fragment(head, &self.ops.actors))
     }
 
@@ -1361,16 +1374,11 @@ impl Automerge {
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
-    /// Errors with [`AutomergeError::UncheckedHashGraph`] on a document
-    /// loaded with [`LoadOptions::hash_graph`].
     #[doc(hidden)]
     pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        if self.hash_graph_state() == HashGraphState::Unchecked {
-            return Err(AutomergeError::UncheckedHashGraph);
-        }
         Ok(fragments
             .into_iter()
             .filter_map(|f| {
@@ -1436,13 +1444,13 @@ impl Automerge {
         let boundary = f
             .boundary
             .iter()
-            .map(|h| change_id(h).map(|id| (*h, id.actor, id.seq)))
+            .map(|h| change_id(h).map(|id| (*h, id.actor().clone(), id.seq())))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
         let dep_ids = bundle
             .deps()
             .iter()
-            .map(|h| change_id(h).map(|id| (id.actor, id.seq)))
+            .map(|h| change_id(h).map(|id| (id.actor().clone(), id.seq())))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
 
@@ -1492,16 +1500,30 @@ impl Automerge {
     /// are skipped, along with their ops — applying a fully present
     /// fragment is a no-op.
     ///
-    /// The interior member changes are never reconstructed, so their
-    /// hashes stay unknown: a checked hash graph downgrades to
-    /// [`HashGraphState::FragmentHashes`]. APIs needing interior hashes
-    /// error until [`Self::rebuild_hash_graph`] — which also verifies
-    /// every hash this call took on trust.
+    /// Outside audit mode the interior member changes are never
+    /// reconstructed, so their hashes stay unknown. In audit mode the
+    /// bundle is converted back to changes and applied through
+    /// [`Self::apply_changes`], computing and keeping every hash.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
     pub fn apply_fragment(&mut self, v2: &BundleV2) -> Result<(), AutomergeError> {
+        if self.audit_mode() == AuditMode::Enabled {
+            // audit mode keeps and verifies every hash: reconstruct the
+            // member changes and apply them individually, computing each
+            // hash instead of taking the bundle's metadata on trust
+            self.apply_changes(v2.bundle().to_changes()?)?;
+            // the members applied (rather than queued) exactly when the
+            // computed head hash names a change — this both enforces the
+            // manifold path's no-missing-deps contract and verifies the
+            // bundle's claimed head against the computed hashes
+            if self.change_graph.hash_to_index(&v2.head()).is_none() {
+                return Err(AutomergeError::MissingDeps);
+            }
+            return Ok(());
+        }
+
         let bundle = v2.bundle();
 
         // member changes are in topological order
@@ -1579,10 +1601,10 @@ impl Automerge {
         // record the boundary pairings — every boundary head is an
         // ancestor of the members, so it must already be a node here
         for (hash, actor, seq) in &v2.boundary {
+            let id = ChangeId::new(*seq, actor.clone(), 0);
             let node = self
-                .ops
-                .lookup_actor(actor)
-                .and_then(|a| self.change_graph.node_for_actor_seq(a, *seq))
+                .change_graph
+                .node_for_change_id(&id, &self.ops.actors)
                 .ok_or(AutomergeError::MissingDeps)?;
             self.change_graph.record_node_hash(node, *hash);
         }
@@ -1592,7 +1614,13 @@ impl Automerge {
         // external deps via their (actor, seq) ids from the metadata
         // prefix — whose hash pairings we record for later fragments.
         // Skipped members' deps are not consulted at all.
-        let member_ids: Vec<(usize, u64)> = members.iter().map(|m| (m.actor, m.seq)).collect();
+        let member_ids: Vec<ChangeId> = members
+            .iter()
+            .map(|m| {
+                let doc_actor = actor_map[m.actor];
+                ChangeId::new(m.seq, self.ops.actors[doc_actor].clone(), doc_actor)
+            })
+            .collect();
         let mut graph_members = Vec::with_capacity(num_kept);
         for (i, m) in members.into_iter().enumerate() {
             if !keep[i] {
@@ -1605,10 +1633,9 @@ impl Automerge {
                     if keep[d] {
                         deps.push(FragmentDep::Member(kept_index[d]));
                     } else {
-                        let (dep_actor, dep_seq) = member_ids[d];
                         let node = self
                             .change_graph
-                            .node_for_actor_seq(actor_map[dep_actor], dep_seq);
+                            .node_for_change_id(&member_ids[d], &self.ops.actors);
                         deps.push(FragmentDep::Node(node.ok_or(AutomergeError::MissingDeps)?));
                     }
                 } else {
@@ -1616,10 +1643,10 @@ impl Automerge {
                         .dep_ids
                         .get(d - num_members)
                         .ok_or(AutomergeError::InvalidFragment("bad dep index"))?;
+                    let dep_id = ChangeId::new(*dep_seq, dep_actor.clone(), 0);
                     let node = self
-                        .ops
-                        .lookup_actor(dep_actor)
-                        .and_then(|a| self.change_graph.node_for_actor_seq(a, *dep_seq))
+                        .change_graph
+                        .node_for_change_id(&dep_id, &self.ops.actors)
                         .ok_or(AutomergeError::MissingDeps)?;
                     // learn the dep's hash pairing — an anchor for
                     // later fragments that reference it by hash
@@ -1659,17 +1686,18 @@ impl Automerge {
         // so it can serve as a head of the document and an anchor for
         // the next fragment, the checkpoints so nested fragments stay
         // exportable
-        let (head_actor, head_seq) = member_ids[v2.head_index];
         let head_node = self
             .change_graph
-            .node_for_actor_seq(actor_map[head_actor], head_seq)
+            .node_for_change_id(&member_ids[v2.head_index], &self.ops.actors)
             .ok_or(AutomergeError::InvalidFragment(
                 "fragment head is not a member of the bundle",
             ))?;
         self.change_graph.record_fragment_head(head_node, v2.head);
         for (i, hash) in &v2.checkpoints {
-            let (actor, seq) = member_ids[*i];
-            if let Some(node) = self.change_graph.node_for_actor_seq(actor_map[actor], seq) {
+            if let Some(node) = self
+                .change_graph
+                .node_for_change_id(&member_ids[*i], &self.ops.actors)
+            {
                 self.change_graph.record_node_hash(node, *hash);
             }
         }
@@ -1709,26 +1737,17 @@ impl Automerge {
         );
     }
 
-    /// Whether this document's hash graph has been built and validated.
+    /// Switch this document to [`AuditMode::Enabled`].
     ///
-    /// This is `true` for every document except those loaded with
-    /// [`LoadOptions::hash_graph`] which have not yet had
-    /// [`Self::rebuild_hash_graph`] called on them.
-    pub fn hash_graph_is_checked(&self) -> bool {
-        self.change_graph.is_checked()
-    }
-
-    /// Build and validate the hash graph of a document loaded with
-    /// [`LoadOptions::hash_graph`].
+    /// Every change is reconstructed and hashed; the hashes retained so
+    /// far (the head pairing from load time, the stored hash columns
+    /// and everything added since) are verified against the recomputed
+    /// ones, erroring with [`AutomergeError::InvalidHash`] on any
+    /// mismatch. Afterwards all hash-based APIs (including sync) work.
     ///
-    /// This performs the work the load skipped: every change is
-    /// reconstructed and hashed and the heads are verified against the
-    /// hashes recorded when the document was saved. Afterwards all
-    /// hash-based APIs work again.
-    ///
-    /// This is a no-op on a document whose hash graph is already built.
-    pub fn rebuild_hash_graph(&mut self) -> Result<(), AutomergeError> {
-        if self.change_graph.is_checked() {
+    /// This is a no-op on a document already in audit mode.
+    pub fn enable_audit_mode(&mut self) -> Result<(), AutomergeError> {
+        if self.change_graph.is_audit_enabled() {
             return Ok(());
         }
 
@@ -1760,38 +1779,216 @@ impl Automerge {
             .install_checked_hashes(collected.changes.iter().map(|c| c.hash()).collect())
             .map_err(AutomergeError::InvalidHash)?;
 
-        // the fragment index is only maintained on checked graphs — now
-        // that every hash is known, regenerate it
+        // regenerate the fragment index now that every hash is known
         self.change_graph.cache_fragments();
         Ok(())
     }
 
+    /// Switch this document to [`AuditMode::Disabled`], freeing every
+    /// hash outside the retained set (heads, loose commits, fragment
+    /// heads and checkpoints, and their deps).
+    ///
+    /// This is a no-op on a document already outside audit mode (beyond
+    /// a garbage-collection pass over the retained set).
+    pub fn disable_audit_mode(&mut self) {
+        self.change_graph.retain_hashes_only();
+    }
+
     /// Get the heads of this document.
     ///
-    /// The heads are the hashes of the changes which have no successors in
-    /// this document — collectively they identify the current state. The
-    /// heads are always known, even on a document loaded with
-    /// [`crate::LoadOptions::hash_graph`].
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    /// The heads are the [`ChangeId`]s of the changes which have no
+    /// successors in this document — collectively they identify the
+    /// current state. Pass them to the `*_at` methods of
+    /// [`crate::ReadDoc`] to read historical values, or convert them to
+    /// hashes with [`Self::change_ids_to_hashes`].
+    pub fn get_heads(&self) -> Vec<ChangeId> {
+        self.change_graph.head_change_ids(&self.ops.actors)
+    }
+
+    /// The heads of this document as [`ChangeHash`]es.
+    ///
+    /// The head hashes are always known, whatever the audit mode. Hashes
+    /// are the currency of the sync protocol and storage; for everything
+    /// else prefer the [`ChangeId`]s from [`Self::get_heads`].
+    pub fn get_head_hashes(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<Change>, AutomergeError> {
-        // resolve the exclusion set to a seq clock (silently skipping
-        // unknown hashes, like the old hash traversal did) so that the load
-        // heads work on unchecked graphs; building the emitted changes is
-        // still fallible if their deps are unknown
-        let clock = self.change_graph.seq_clock_for_heads_lossy(have_deps);
+    /// Returns `Ok(None)` — an unscoped read of the present document —
+    /// when `heads` is exactly the current heads, so
+    /// `*_at(doc.get_heads())` takes the same indexed fast paths as the
+    /// un-suffixed methods.
+    ///
+    /// The shortcut is sound here because pending transaction ops enter
+    /// the op set before the graph's heads advance, and an `Automerge`
+    /// cannot be read through `&self` while a transaction holds it
+    /// mutably. Anything reading *around* an in-flight transaction
+    /// (`AutoCommit`, the transaction types) — or needing a concrete
+    /// clock — must resolve nodes and use the [`ChangeGraph`] resolvers
+    /// instead.
+    ///
+    /// This never needs hashes so it works in any audit mode.
+    pub(crate) fn clock_for_ids(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Option<Clock>, AutomergeError> {
+        let nodes = self.nodes_for_change_ids(heads)?;
+        if self.change_graph.nodes_are_heads(&nodes) {
+            Ok(None)
+        } else {
+            Ok(Some(self.change_graph.clock_for_nodes(nodes)))
+        }
+    }
+
+    /// Resolve a [`ChangeId`] to its node, verifying the id's actor index
+    /// hint. Hash-free.
+    pub(crate) fn node_for_change_id(&self, id: &ChangeId) -> Option<crate::change_graph::NodeIdx> {
+        self.change_graph.node_for_change_id(id, &self.ops.actors)
+    }
+
+    /// The [`ChangeId`] naming the change at (actor index, seq) — the
+    /// index is stamped as the id's hint.
+    pub(crate) fn change_id_at(&self, actor_idx: usize, seq: u64) -> ChangeId {
+        ChangeId::new(seq, self.ops.actors[actor_idx].clone(), actor_idx)
+    }
+
+    /// Resolve each id to its node, erroring on ids not in this document.
+    pub(crate) fn nodes_for_change_ids(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<crate::change_graph::NodeIdx>, AutomergeError> {
+        ids.iter()
+            .map(|id| {
+                self.node_for_change_id(id)
+                    .ok_or_else(|| AutomergeError::InvalidChangeId(id.to_string()))
+            })
+            .collect()
+    }
+
+    /// Get the [`ChangeId`] of the change that contains the given `opid`.
+    ///
+    /// Returns [`None`] if the `opid` is the root object id or does not
+    /// exist in this document. Never needs hashes.
+    pub fn change_id_for_opid(&self, exid: &ExId) -> Option<ChangeId> {
+        match exid {
+            ExId::Root => None,
+            ExId::Id(..) => {
+                let opid = self.exid_to_opid(exid).ok()?;
+                self.change_graph.opid_to_change_id(opid, &self.ops.actors)
+            }
+        }
+    }
+
+    /// Get the hash of the change identified by `id`.
+    ///
+    /// Returns `Ok(None)` if no change by that `(actor, seq)` is in this
+    /// document, and [`AutomergeError::AuditModeRequired`] if the change
+    /// is present but its hash is not retained outside audit mode.
+    pub fn change_id_to_hash(&self, id: &ChangeId) -> Result<Option<ChangeHash>, AutomergeError> {
+        let Some(node) = self.node_for_change_id(id) else {
+            return Ok(None);
+        };
+        self.change_graph
+            .hash_for_node(node)
+            .ok_or(AutomergeError::AuditModeRequired)
+            .map(Some)
+    }
+
+    /// Get the [`ChangeId`] of the change with the given hash.
+    ///
+    /// Returns `Ok(None)` if the change is definitively not in this
+    /// document, and [`AutomergeError::AuditModeRequired`] if the hash is
+    /// not retained and so we cannot tell.
+    pub fn hash_to_change_id(&self, hash: &ChangeHash) -> Result<Option<ChangeId>, AutomergeError> {
+        self.change_graph
+            .change_id_for_hash(hash, &self.ops.actors)
+            .map_err(|_| AutomergeError::AuditModeRequired)
+    }
+
+    /// Convert a slice of hashes into [`ChangeId`]s.
+    ///
+    /// Errors with [`AutomergeError::MissingHash`] if a hash is not
+    /// present in this document, and with
+    /// [`AutomergeError::AuditModeRequired`] if a hash is not retained.
+    pub fn hashes_to_change_ids(
+        &self,
+        hashes: &[ChangeHash],
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        hashes
+            .iter()
+            .map(|h| {
+                self.hash_to_change_id(h)?
+                    .ok_or(AutomergeError::MissingHash(*h))
+            })
+            .collect()
+    }
+
+    /// Convert a slice of [`ChangeId`]s into hashes.
+    ///
+    /// Errors with [`AutomergeError::InvalidChangeId`] if an id is not
+    /// present in this document, and with
+    /// [`AutomergeError::AuditModeRequired`] if a change's hash is not
+    /// retained outside audit mode.
+    pub fn change_ids_to_hashes(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        ids.iter()
+            .map(|id| {
+                self.change_id_to_hash(id)?
+                    .ok_or_else(|| AutomergeError::InvalidChangeId(id.to_string()))
+            })
+            .collect()
+    }
+
+    /// Whether this document contains the change identified by `id`.
+    ///
+    /// This never needs hashes so it works in any audit mode.
+    pub fn has_change_id(&self, id: &ChangeId) -> bool {
+        self.node_for_change_id(id).is_some()
+    }
+
+    /// Resolve heads to hashes, erroring on ids not in this document.
+    pub(crate) fn resolve_heads(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.change_ids_to_hashes(heads)
+    }
+
+    pub fn get_changes(&self, have_deps: &[ChangeId]) -> Result<Vec<Change>, AutomergeError> {
+        // `have_deps` describes what the caller already has — ids this
+        // document doesn't know contribute nothing to the exclusion set
+        // and are skipped (a peer may know changes we don't). Building
+        // the emitted changes is still fallible if their deps' hashes
+        // are unknown.
+        let clock = self.seq_clock_for_ids_lossy(have_deps);
         ChangeCollector::exclude_seq_clock(&self.ops, &self.change_graph, clock)
     }
 
     pub fn get_changes_meta(
         &self,
-        have_deps: &[ChangeHash],
+        have_deps: &[ChangeId],
     ) -> Result<Vec<ChangeMetadata<'_>>, AutomergeError> {
-        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
+        // like `get_changes`, unknown ids in the exclusion set are skipped
+        let have_deps: Vec<ChangeHash> = have_deps
+            .iter()
+            .filter_map(|id| self.change_id_to_hash(id).ok().flatten())
+            .collect();
+        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, &have_deps)
+    }
+
+    /// The seq clock for a set of [`ChangeId`]s, silently skipping ids
+    /// not in this document (they contribute nothing to the exclusion
+    /// set). Hash-free.
+    fn seq_clock_for_ids_lossy(&self, ids: &[ChangeId]) -> crate::clock::SeqClock {
+        let nodes = ids
+            .iter()
+            .filter_map(|id| self.node_for_change_id(id))
+            .collect();
+        self.change_graph.seq_clock_for_nodes(nodes)
     }
 
     pub fn get_change_meta_by_hash(
@@ -1800,33 +1997,62 @@ impl Automerge {
     ) -> Result<Option<ChangeMetadata<'_>>, AutomergeError> {
         match ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash]) {
             Ok(mut metas) => Ok(metas.pop()),
-            Err(AutomergeError::UncheckedHashGraph) => Err(AutomergeError::UncheckedHashGraph),
+            Err(AutomergeError::AuditModeRequired) => Err(AutomergeError::AuditModeRequired),
             Err(_) => Ok(None),
         }
     }
 
     /// Get changes in `other` that are not in `self`
     pub fn get_changes_added(&self, other: &Self) -> Result<Vec<Change>, AutomergeError> {
-        // Depth-first traversal from the heads through the dependency graph,
-        // until we reach a change that is already present in other
-        let mut stack: Vec<_> = other.get_heads();
-        tracing::trace!(their_heads=?stack, "finding changes to merge");
-        let mut seen_hashes = HashSet::new();
-        let mut added_change_hashes = Vec::new();
-        while let Some(hash) = stack.pop() {
-            if !seen_hashes.contains(&hash) && !self.has_change(&hash)? {
-                seen_hashes.insert(hash);
-                added_change_hashes.push(hash);
-                for dep in other.change_graph.deps_for_hash(&hash) {
-                    stack.push(dep?);
+        // hash-free: per-actor change sequences are linear, so a change
+        // in `other` is new to us exactly when our seq clock does not
+        // cover its (actor, seq) — the same identify-by-(actor, seq)
+        // rule the apply paths use. Building the returned changes is
+        // still fallible if their deps' hashes were freed in `other`.
+        let ours = self.change_graph.current_seq_clock();
+        let theirs = other.change_graph.current_seq_clock();
+        let mut exclude = crate::clock::SeqClock::new(other.change_graph.num_actors());
+        for (actor_idx, seq) in ours.iter() {
+            let Some(seq) = seq else { continue };
+            if let Some(other_idx) = other.ops.lookup_actor(&self.ops.actors[actor_idx]) {
+                // we may be ahead of `other` for this actor — cap at
+                // their chain so nothing is sliced out of range
+                let Some(cap) = theirs.get_for_actor(&other_idx) else {
+                    continue;
+                };
+                let shared = seq.get().min(cap.get());
+                // (actor, seq) identity assumes the two documents agree
+                // on this actor's chain. Where both sides still retain
+                // the hashes, verify it: a divergent hash at a shared
+                // seq is an equivocation, exactly what the hash-based
+                // traversal used to surface as DuplicateSeqNumber.
+                let hash_at = |seq: u64| -> Option<(ChangeHash, ChangeHash)> {
+                    let id = self.change_id_at(actor_idx, seq);
+                    Some((
+                        self.change_graph
+                            .hash_for_change_id(&id, &self.ops.actors)?,
+                        other
+                            .change_graph
+                            .hash_for_change_id(&id, &other.ops.actors)?,
+                    ))
+                };
+                if let Some((a, b)) = hash_at(shared as u64) {
+                    if a != b {
+                        // find the first divergent shared seq (only on
+                        // the error path)
+                        let seq = (1..=shared as u64)
+                            .find(|s| matches!(hash_at(*s), Some((a, b)) if a != b))
+                            .unwrap_or(shared as u64);
+                        return Err(AutomergeError::DuplicateSeqNumber(
+                            seq,
+                            self.ops.actors[actor_idx].clone(),
+                        ));
+                    }
                 }
+                exclude.include(other_idx, Some(shared));
             }
         }
-        // Return those changes in the reverse of the order in which the depth-first search
-        // found them. This is not necessarily a topological sort, but should usually be close.
-        added_change_hashes.reverse();
-
-        other.get_changes_by_hashes(added_change_hashes)
+        ChangeCollector::exclude_seq_clock(&other.ops, &other.change_graph, exclude)
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -1835,7 +2061,7 @@ impl Automerge {
     /// - is the root object id
     /// - does not exist in this document
     ///
-    /// Returns [`AutomergeError::UncheckedHashGraph`] if the change is in
+    /// Returns [`AutomergeError::AuditModeRequired`] if the change is in
     /// this document but the hash graph has not been built.
     pub fn hash_for_opid(&self, exid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
         match exid {
@@ -1844,11 +2070,12 @@ impl Automerge {
                 let Ok(opid) = self.exid_to_opid(exid) else {
                     return Ok(None);
                 };
-                let Some((actor_idx, seq)) = self.change_graph.opid_to_actor_seq(opid) else {
+                let Some(id) = self.change_graph.opid_to_change_id(opid, &self.ops.actors) else {
                     return Ok(None);
                 };
                 Ok(Some(
-                    self.change_graph.get_hash_for_actor_seq(actor_idx, seq)?,
+                    self.change_graph
+                        .get_hash_for_change_id(&id, &self.ops.actors)?,
                 ))
             }
         }
@@ -1918,18 +2145,18 @@ impl Automerge {
         acc.into_iter_no_unmark().collect()
     }
 
-    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        let clock = heads.and_then(|heads| self.clock_at(heads));
-        self.hydrate_map(&ObjId::root(), clock.as_ref())
+    pub fn hydrate(&self, heads: Option<&[ChangeId]>) -> Result<hydrate::Value, AutomergeError> {
+        let clock = heads.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
+        Ok(self.hydrate_map(&ObjId::root(), clock.as_ref()))
     }
 
     pub(crate) fn hydrate_obj(
         &self,
         obj: &crate::ObjId,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let clock = heads.and_then(|heads| self.clock_at(heads));
+        let clock = heads.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         Ok(match obj.typ {
             ObjType::Map | ObjType::Table => self.hydrate_map(&obj.id, clock.as_ref()),
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
@@ -2284,7 +2511,7 @@ impl Automerge {
 
     /// Whether the peer represented by `other` has all the changes we have
     pub fn has_our_changes(&self, other: &crate::sync::State) -> bool {
-        other.shared_heads == self.get_heads()
+        other.shared_heads == self.get_head_hashes()
     }
 
     pub(crate) fn has_change(&self, head: &ChangeHash) -> Result<bool, AutomergeError> {
@@ -2347,9 +2574,9 @@ impl ReadDoc for Automerge {
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Parents<'_>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.parents_for(obj.as_ref(), clock)
     }
 
@@ -2357,15 +2584,22 @@ impl ReadDoc for Automerge {
         self.keys_for(obj.as_ref(), None)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        let clock = self.clock_at(heads);
-        self.keys_for(obj.as_ref(), clock)
+    fn keys_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Keys<'_>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.keys_for(obj.as_ref(), clock))
     }
 
-    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
-        //let obj = self.exid_to_obj(obj.as_ref()).unwrap();
-        let clock = heads.and_then(|heads| self.clock_at(heads));
-        self.iter_for(obj.as_ref(), clock)
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<DocIter<'_>, AutomergeError> {
+        let clock = heads.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
+        Ok(self.iter_for(obj.as_ref(), clock))
     }
 
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
@@ -2380,10 +2614,10 @@ impl ReadDoc for Automerge {
         &'a self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a> {
-        let clock = self.clock_at(heads);
-        self.map_range_for(obj.as_ref(), range, clock)
+        heads: &[ChangeId],
+    ) -> Result<MapRange<'a>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.map_range_for(obj.as_ref(), range, clock))
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
@@ -2394,28 +2628,36 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_> {
-        let clock = self.clock_at(heads);
-        self.list_range_for(obj.as_ref(), range, clock)
+        heads: &[ChangeId],
+    ) -> Result<ListRange<'_>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.list_range_for(obj.as_ref(), range, clock))
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.values_for(obj.as_ref(), None)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        let clock = self.clock_at(heads);
-        self.values_for(obj.as_ref(), clock)
+    fn values_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Values<'_>, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.values_for(obj.as_ref(), clock))
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.length_for(obj.as_ref(), None)
     }
 
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        let clock = self.clock_at(heads);
-        self.length_for(obj.as_ref(), clock)
+    fn length_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<usize, AutomergeError> {
+        let clock = self.clock_for_ids(heads)?;
+        Ok(self.length_for(obj.as_ref(), clock))
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -2429,9 +2671,9 @@ impl ReadDoc for Automerge {
     fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Spans<'_>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.spans_for(obj.as_ref(), clock)
     }
 
@@ -2439,9 +2681,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.and_then(|heads| self.clock_at(heads));
+        let clock = at.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         self.get_cursor_for(obj.as_ref(), position.into(), clock, MoveCursor::After)
     }
 
@@ -2449,10 +2691,10 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.and_then(|heads| self.clock_at(heads));
+        let clock = at.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         self.get_cursor_for(obj.as_ref(), position.into(), clock, move_cursor)
     }
 
@@ -2460,18 +2702,18 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<usize, AutomergeError> {
-        let clock = at.and_then(|heads| self.clock_at(heads));
+        let clock = at.map_or(Ok(None), |heads| self.clock_for_ids(heads))?;
         self.get_cursor_position_for(obj.as_ref(), cursor, clock)
     }
 
     fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<String, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.text_for(obj.as_ref(), clock)
     }
 
@@ -2482,19 +2724,19 @@ impl ReadDoc for Automerge {
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<Mark>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.marks_for(obj.as_ref(), clock)
     }
 
     fn hydrate<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = heads.and_then(|h| self.clock_at(h));
+        let clock = heads.map_or(Ok(None), |h| self.clock_for_ids(h))?;
         Ok(match obj.typ {
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
             ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
@@ -2506,9 +2748,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         index: usize,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<MarkSet, AutomergeError> {
-        let clock = heads.and_then(|h| self.clock_at(h));
+        let clock = heads.map_or(Ok(None), |h| self.clock_for_ids(h))?;
         self.get_marks_for(obj.as_ref(), index, clock)
     }
 
@@ -2524,9 +2766,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.get_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -2542,9 +2784,9 @@ impl ReadDoc for Automerge {
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = self.clock_at(heads);
+        let clock = self.clock_for_ids(heads)?;
         self.get_all_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -2555,14 +2797,14 @@ impl ReadDoc for Automerge {
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.get_missing_deps_hashes(heads)
+    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.get_missing_deps_hashes(&self.resolve_heads(heads)?)
     }
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
         match ChangeCollector::for_hashes(&self.ops, &self.change_graph, [*hash]) {
             Ok(mut changes) => Ok(changes.pop()),
-            Err(AutomergeError::UncheckedHashGraph) => Err(AutomergeError::UncheckedHashGraph),
+            Err(AutomergeError::AuditModeRequired) => Err(AutomergeError::AuditModeRequired),
             Err(_) => Ok(None),
         }
     }
@@ -2655,8 +2897,8 @@ mod dirty_diff_tests {
 
     fn assert_patch_effects_match(
         doc: &Automerge,
-        before: &[crate::ChangeHash],
-        after: &[crate::ChangeHash],
+        before: &[crate::ChangeId],
+        after: &[crate::ChangeId],
         left_label: &str,
         left: &[crate::Patch],
         right_label: &str,
@@ -2675,20 +2917,20 @@ mod dirty_diff_tests {
 
     fn assert_dirty_diff_matches_full(
         doc: &Automerge,
-        before: &[crate::ChangeHash],
-        after: &[crate::ChangeHash],
+        before: &[crate::ChangeId],
+        after: &[crate::ChangeId],
     ) {
-        let full = doc.diff(before, after);
+        let full = doc.diff(before, after).unwrap();
         let dirty = doc.dirty_diff_patches(before, after).unwrap();
         assert_patch_effects_match(doc, before, after, "dirty diff", &dirty, "full diff", &full);
     }
 
     fn assert_incremental_effect_matches_full(
         doc: &mut Automerge,
-        before: &[crate::ChangeHash],
-        after: &[crate::ChangeHash],
+        before: &[crate::ChangeId],
+        after: &[crate::ChangeId],
     ) {
-        let full = doc.diff(before, after);
+        let full = doc.diff(before, after).unwrap();
         let incremental = doc.diff_incremental();
         assert_patch_effects_match(
             doc,
@@ -2703,10 +2945,10 @@ mod dirty_diff_tests {
 
     fn assert_autocommit_incremental_effect_matches_full(
         doc: &mut AutoCommit,
-        before: &[crate::ChangeHash],
-        after: &[crate::ChangeHash],
+        before: &[crate::ChangeId],
+        after: &[crate::ChangeId],
     ) {
-        let full = doc.document().diff(before, after);
+        let full = doc.document().diff(before, after).unwrap();
         let incremental = doc.diff_incremental();
         assert_patch_effects_match(
             doc.document(),
@@ -2722,6 +2964,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_map_put() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         doc.ops_mut().clear_dirty();
         let before = doc.get_heads();
 
@@ -2736,6 +2979,7 @@ mod dirty_diff_tests {
     #[test]
     fn automerge_diff_incremental_clears_dirty_and_advances_cursor() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "key", 1).unwrap();
         tx.commit();
@@ -2756,6 +3000,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_expands_partial_register_marks() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -2772,7 +3017,7 @@ mod dirty_diff_tests {
         doc.ops_mut().clear_dirty();
         doc.ops_mut().mark_dirty(1);
         let patches = doc.dirty_diff_patches_and_clear(&before, &after).unwrap();
-        let expected = doc.diff(&before, &after);
+        let expected = doc.diff(&before, &after).unwrap();
         assert_eq!(patches, expected);
         assert!(doc.ops().dirty_runs().next().is_none());
     }
@@ -2780,6 +3025,7 @@ mod dirty_diff_tests {
     #[test]
     fn automerge_diff_incremental_empty_doc_and_repeated_calls_are_empty() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
 
         assert!(doc.diff_incremental().is_empty());
         assert!(doc.ops().dirty_runs().next().is_none());
@@ -2796,6 +3042,7 @@ mod dirty_diff_tests {
     #[test]
     fn automerge_diff_incremental_materializes_loaded_document() {
         let mut source = Automerge::new();
+        source.enable_audit_mode().unwrap();
         let mut tx = source.transaction();
         let list = tx.put_object(ROOT, "todos", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -2814,6 +3061,7 @@ mod dirty_diff_tests {
     #[test]
     fn automerge_diff_incremental_after_load_incremental_uses_saved_cursor() {
         let mut source = Automerge::new();
+        source.enable_audit_mode().unwrap();
         let mut tx = source.transaction();
         tx.put(ROOT, "base", 1).unwrap();
         tx.commit();
@@ -2821,6 +3069,7 @@ mod dirty_diff_tests {
         let base_data = source.save();
 
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         doc.load_incremental(&base_data).unwrap();
         assert_incremental_effect_matches_full(&mut doc, &[], &base_heads);
 
@@ -2839,11 +3088,13 @@ mod dirty_diff_tests {
     #[test]
     fn automerge_diff_incremental_after_apply_merge_and_sync_receive() {
         let mut source = Automerge::new();
+        source.enable_audit_mode().unwrap();
         let mut tx = source.transaction();
         tx.put(ROOT, "key", 1).unwrap();
         tx.commit();
 
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let before = doc.get_heads();
         doc.apply_changes(source.get_changes(&[]).unwrap()).unwrap();
         let after = doc.get_heads();
@@ -2851,11 +3102,13 @@ mod dirty_diff_tests {
         assert!(doc.ops().dirty_runs().next().is_none());
 
         let mut source = Automerge::new();
+        source.enable_audit_mode().unwrap();
         let mut tx = source.transaction();
         tx.put(ROOT, "merged", 2).unwrap();
         tx.commit();
 
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let before = doc.get_heads();
         doc.merge(&mut source).unwrap();
         let after = doc.get_heads();
@@ -2863,6 +3116,7 @@ mod dirty_diff_tests {
         assert!(doc.ops().dirty_runs().next().is_none());
 
         let mut source = Automerge::new();
+        source.enable_audit_mode().unwrap();
         let mut tx = source.transaction();
         tx.put(ROOT, "synced", 3).unwrap();
         tx.commit();
@@ -2870,6 +3124,7 @@ mod dirty_diff_tests {
         let message = source.generate_sync_message(&mut sync_state).unwrap();
 
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let before = doc.get_heads();
         doc.receive_sync_message(&mut SyncState::new(), message.unwrap())
             .unwrap();
@@ -2881,6 +3136,7 @@ mod dirty_diff_tests {
     #[test]
     fn automerge_diff_incremental_fork_inherits_cursor() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "base", 1).unwrap();
         tx.commit();
@@ -2900,6 +3156,7 @@ mod dirty_diff_tests {
     #[test]
     fn autocommit_diff_incremental_repeated_empty_and_rollback_lifecycle() {
         let mut doc = AutoCommit::new();
+        doc.enable_audit_mode().unwrap();
 
         assert!(doc.diff_incremental().is_empty());
 
@@ -2927,6 +3184,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_map_update() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "key", 1).unwrap();
         tx.commit();
@@ -2944,6 +3202,7 @@ mod dirty_diff_tests {
     #[test]
     fn adjacent_map_updates_dirty_contiguous_key_ranges() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", 1).unwrap();
         tx.put(ROOT, "b", 2).unwrap();
@@ -2967,6 +3226,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_map_update_and_adjacent_insert_dirty_contiguous_key_ranges() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         tx.put(ROOT, "a", 1).unwrap();
         tx.put(ROOT, "c", 3).unwrap();
@@ -2994,6 +3254,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_map_delete() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "key", 1).unwrap();
         tx.commit();
@@ -3011,6 +3272,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_map_increment() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
         tx.commit();
@@ -3028,6 +3290,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_list_insert() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.commit();
@@ -3045,6 +3308,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_list_update() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3065,6 +3329,7 @@ mod dirty_diff_tests {
     #[test]
     fn adjacent_list_updates_dirty_contiguous_register_ranges() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3093,6 +3358,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_adjacent_list_updates_dirty_contiguous_register_ranges() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3161,6 +3427,7 @@ mod dirty_diff_tests {
     #[test]
     fn batch_remote_list_update_plus_nearby_insert_dirty_register_ranges() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3192,6 +3459,7 @@ mod dirty_diff_tests {
     #[test]
     fn batch_remote_insert_before_updated_list_element_matches_full_diff() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3260,6 +3528,7 @@ mod dirty_diff_tests {
     #[test]
     fn batch_remote_dependent_insert_and_update_list_changes_match_full_diff() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3299,6 +3568,7 @@ mod dirty_diff_tests {
 
     fn assert_batch_random_list_changes_match_full_diff(mut seed: u64, split_changes: bool) {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         for index in 0..8 {
@@ -3379,6 +3649,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_list_delete() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3399,6 +3670,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_object_creation_with_child_mutations() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         doc.ops_mut().clear_dirty();
         let before = doc.get_heads();
 
@@ -3415,6 +3687,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_object_creation_with_child_mutations_dirties_parent_and_child_ranges() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = doc1.fork();
 
         let mut tx = doc2.transaction();
@@ -3443,6 +3716,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_nested_object_creation_in_complex_layout_dirties_subtree_ranges() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         tx.put(ROOT, "a", 1).unwrap();
         tx.put(ROOT, "z", 26).unwrap();
@@ -3484,6 +3758,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_child_mutation_followed_by_parent_delete() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let map = tx.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
         tx.put(&map, "key", 1).unwrap();
@@ -3534,6 +3809,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_map_conflict() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         tx.put(ROOT, "key", 1).unwrap();
         tx.commit();
@@ -3559,6 +3835,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_map_conflict_dirties_whole_key_register() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         tx.put(ROOT, "key", 1).unwrap();
         tx.commit();
@@ -3586,6 +3863,7 @@ mod dirty_diff_tests {
     #[test]
     fn batched_remote_map_conflict_dirties_whole_new_key_register() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
         let mut doc3 = doc1.fork().with_actor(ActorId::from([3])).unwrap();
 
@@ -3612,6 +3890,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_list_conflict() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3638,6 +3917,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_list_conflict_dirties_whole_element_register() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
@@ -3672,6 +3952,7 @@ mod dirty_diff_tests {
     #[test]
     fn remote_insert_then_update_same_list_element_dirties_new_register() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.commit();
@@ -3764,6 +4045,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_counter_increment() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         tx.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
         tx.commit();
@@ -3785,6 +4067,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_text_insert() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -3807,6 +4090,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_mark() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -3834,6 +4118,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_middle_mark() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -3864,6 +4149,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_text_insert_without_marks() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -3882,6 +4168,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_text_delete() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -3900,6 +4187,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_text_insert_inside_mark() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -3925,6 +4213,7 @@ mod dirty_diff_tests {
     fn text_insert_at_mark_boundaries_stays_localized() {
         for index in [1, 3] {
             let mut doc = Automerge::new();
+            doc.enable_audit_mode().unwrap();
             let mut tx = doc.transaction();
             let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
             tx.splice_text(&text, 0, 0, "abcd").unwrap();
@@ -3956,6 +4245,7 @@ mod dirty_diff_tests {
 
     fn assert_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -4004,6 +4294,7 @@ mod dirty_diff_tests {
 
     fn assert_text_splice_around_nested_marks_matches_full(index: usize, del: isize, value: &str) {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdefghij").unwrap();
@@ -4051,6 +4342,7 @@ mod dirty_diff_tests {
 
     fn assert_remote_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -4103,6 +4395,7 @@ mod dirty_diff_tests {
 
     fn assert_batch_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -4159,6 +4452,7 @@ mod dirty_diff_tests {
         value: &str,
     ) {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdefghij").unwrap();
@@ -4211,6 +4505,7 @@ mod dirty_diff_tests {
     #[test]
     fn batch_text_edit_plus_mark_in_same_change_matches_full_diff() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -4248,6 +4543,7 @@ mod dirty_diff_tests {
     #[test]
     fn batch_multiple_text_edits_around_same_mark_match_full_diff() {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -4276,6 +4572,7 @@ mod dirty_diff_tests {
 
     fn assert_sync_text_splice_around_mark_matches_full(index: usize, del: isize, value: &str) {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdef").unwrap();
@@ -4322,6 +4619,7 @@ mod dirty_diff_tests {
         value: &str,
     ) {
         let mut doc1 = Automerge::new();
+        doc1.enable_audit_mode().unwrap();
         let mut tx = doc1.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abcdefghij").unwrap();
@@ -4377,6 +4675,7 @@ mod dirty_diff_tests {
     #[test]
     fn dirty_diff_matches_full_diff_for_mark() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -4400,6 +4699,7 @@ mod dirty_diff_tests {
     #[test]
     fn partial_text_mark_dirty_range_expands_to_whole_object() {
         let mut doc = Automerge::new();
+        doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -4427,7 +4727,7 @@ mod dirty_diff_tests {
         doc.ops_mut().clear_dirty();
         doc.ops_mut().mark_dirty(mark_pos);
 
-        let full = doc.diff(&before, &after);
+        let full = doc.diff(&before, &after).unwrap();
         let dirty = doc.dirty_diff_patches_and_clear(&before, &after).unwrap();
         assert_patch_effects_match(
             &doc,

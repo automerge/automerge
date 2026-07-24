@@ -4,16 +4,18 @@ use crate::clock::ClockRange;
 use crate::iter::{Diff, ListDiff, MapDiff, RichTextDiff, SpansDiff};
 use crate::op_set2::types::{Action, MarkData};
 use crate::patches::{Patch, PatchAccumulator};
-use crate::types::{ChangeHash, ObjId, ObjMeta, ObjType};
+use crate::types::{ObjId, ObjMeta, ObjType};
 
 use super::Automerge;
+use crate::ChangeId;
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum DirtyDiffError {
     MissingObject(usize),
     UnknownObject(ObjId),
     UnsupportedObjectType(ObjType),
+    InvalidHeads(crate::AutomergeError),
 }
 
 #[derive(Debug, Clone)]
@@ -170,24 +172,28 @@ impl Automerge {
     #[allow(dead_code)]
     pub(crate) fn dirty_diff_patches(
         &self,
-        before_heads: &[ChangeHash],
-        after_heads: &[ChangeHash],
+        before_heads: &[ChangeId],
+        after_heads: &[ChangeId],
     ) -> Result<Vec<Patch>, DirtyDiffError> {
         if before_heads.is_empty() && after_heads == self.get_heads() {
             let mut patch_accumulator = PatchAccumulator::event_log();
-            patch_accumulator.heads = None;
+            patch_accumulator.heads_clock = None;
             self.log_current_state(ObjMeta::root(), &mut patch_accumulator, true);
             return Ok(patch_accumulator.make_patches(self));
         }
 
         let current_heads = self.get_heads();
         let clock = if after_heads == current_heads.as_slice() {
-            ClockRange::diff_to_current(self.change_graph.clock_for_heads_lossy(before_heads))
+            let before = self
+                .nodes_for_change_ids(before_heads)
+                .map_err(DirtyDiffError::InvalidHeads)?;
+            ClockRange::diff_to_current(self.change_graph.clock_for_nodes(before))
         } else {
             self.clock_range(before_heads, after_heads)
+                .map_err(DirtyDiffError::InvalidHeads)?
         };
         let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads = Some(after_heads.to_vec());
+        patch_accumulator.heads_clock = clock.after_clock();
         self.log_dirty_diff(clock, &mut patch_accumulator)?;
         Ok(patch_accumulator.make_patches(self))
     }
@@ -195,8 +201,8 @@ impl Automerge {
     #[allow(dead_code)]
     pub(crate) fn dirty_diff_patches_and_clear(
         &mut self,
-        before_heads: &[ChangeHash],
-        after_heads: &[ChangeHash],
+        before_heads: &[ChangeId],
+        after_heads: &[ChangeId],
     ) -> Result<Vec<Patch>, DirtyDiffError> {
         let current_heads = self.get_heads();
         debug_assert_eq!(

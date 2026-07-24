@@ -704,7 +704,7 @@ impl<'a> ChangeCollector<'a> {
                         .map(|n| {
                             change_graph
                                 .index_to_hash(*n as usize)
-                                .ok_or(AutomergeError::UncheckedHashGraph)
+                                .ok_or(AutomergeError::AuditModeRequired)
                         })
                         .collect::<Result<_, _>>()?,
                     hash: change_graph
@@ -741,7 +741,7 @@ impl<'a> ChangeCollector<'a> {
                         .map(|n| {
                             change_graph
                                 .index_to_hash(*n as usize)
-                                .ok_or(AutomergeError::UncheckedHashGraph)
+                                .ok_or(AutomergeError::AuditModeRequired)
                         })
                         .collect::<Result<_, _>>()?,
                     hash: change_graph
@@ -774,7 +774,7 @@ impl<'a> ChangeCollector<'a> {
         for c in &changes {
             for dep in &c.deps {
                 if change_graph.index_to_hash(*dep as usize).is_none() {
-                    return Err(AutomergeError::UncheckedHashGraph);
+                    return Err(AutomergeError::AuditModeRequired);
                 }
             }
         }

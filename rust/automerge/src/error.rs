@@ -27,8 +27,8 @@ pub enum AutomergeError {
     InvalidCharacter(usize),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
-    #[error("the hash graph has not been built, call rebuild_hash_graph() first")]
-    UncheckedHashGraph,
+    #[error("this operation needs change hashes that are only kept in audit mode, call enable_audit_mode() first")]
+    AuditModeRequired,
     #[error("index {0} is out of bounds")]
     InvalidIndex(usize),
     #[error("invalid obj id `{0}`")]
@@ -58,6 +58,8 @@ pub enum AutomergeError {
     MissingCounter,
     #[error("hash {0} does not correspond to a change in this document")]
     MissingHash(ChangeHash),
+    #[error("change id {0} does not correspond to a change in this document")]
+    InvalidChangeId(String),
     #[error("change's deps should already be in the document")]
     MissingDeps,
     #[error("compressed chunk was not a change")]

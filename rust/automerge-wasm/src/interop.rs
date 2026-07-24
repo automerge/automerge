@@ -982,18 +982,21 @@ pub(crate) fn import_obj(
     }
 }
 
-pub(crate) fn get_heads(heads: JsValue) -> Result<Option<Vec<ChangeHash>>, error::BadChangeHashes> {
+/// Parse a JS array of `"seq@actor"` strings as heads ([`am::ChangeId`]s).
+pub(crate) fn get_heads(heads: JsValue) -> Result<Option<Vec<am::ChangeId>>, error::BadChangeIds> {
     if heads.is_undefined() || heads.is_null() {
         return Ok(None);
     }
     let Ok(heads) = heads.dyn_into::<js_sys::Array>() else {
-        return Err(error::BadChangeHashes::NotArray);
+        return Err(error::BadChangeIds::NotArray);
     };
     heads
         .iter()
         .enumerate()
         .map(|(i, v)| {
-            ChangeHash::try_from(JS(v)).map_err(|e| error::BadChangeHashes::BadElem(i, e))
+            let s = v.as_string().ok_or(error::BadChangeIds::NotAString(i))?;
+            s.parse::<am::ChangeId>()
+                .map_err(|e| error::BadChangeIds::BadElem(i, e))
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
@@ -1991,6 +1994,22 @@ pub(crate) mod error {
 
     impl From<BadChangeHashes> for JsValue {
         fn from(e: BadChangeHashes) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadChangeIds {
+        #[error("the heads were not an array of change id strings")]
+        NotArray,
+        #[error("head {0} was not a string")]
+        NotAString(usize),
+        #[error("could not parse change id {0}: {1}")]
+        BadElem(usize, automerge::ParseChangeIdError),
+    }
+
+    impl From<BadChangeIds> for JsValue {
+        fn from(e: BadChangeIds) -> Self {
             JsValue::from(e.to_string())
         }
     }

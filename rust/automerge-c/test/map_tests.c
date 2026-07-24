@@ -253,12 +253,12 @@ static void test_range_iter_map(void** state) {
     AMstackItem(NULL, AMmapPutUint(doc, AM_ROOT, AMstr("b"), 4), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutUint(doc, AM_ROOT, AMstr("c"), 5), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutUint(doc, AM_ROOT, AMstr("d"), 6), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     AMstackItem(NULL, AMmapPutUint(doc, AM_ROOT, AMstr("a"), 7), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     AMstackItem(NULL, AMmapPutUint(doc, AM_ROOT, AMstr("a"), 8), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutUint(doc, AM_ROOT, AMstr("d"), 9), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     AMactorId const* actor_id;
     assert_true(AMitemToActorId(AMstackItem(stack_ptr, AMgetActorId(doc), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
                                 &actor_id));
@@ -703,7 +703,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     AMstackItem(NULL, AMmapPutStr(doc2, AM_ROOT, AMstr("2"), AMstr("bb")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutStr(doc2, AM_ROOT, AMstr("3"), AMstr("cc")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
 
-    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     /* Forward, back, back. */
     AMitems range_all = AMstackItems(stack_ptr, AMmapRange(doc1, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
@@ -922,7 +922,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     AMstackItem(NULL, AMmapPutStr(doc, AM_ROOT, AMstr("2"), AMstr("b")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutStr(doc, AM_ROOT, AMstr("3"), AMstr("c")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
 
-    AMitems const heads = AMstackItems(stack_ptr, AMgetHeads(doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const heads = AMstackItems(stack_ptr, AMgetHeads(doc), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     /* Forward, back, back. */
     AMitems range_all = AMstackItems(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads), cmocka_cb,
@@ -1153,8 +1153,8 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     AMstackItem(NULL, AMmapPutStr(doc2, AM_ROOT, AMstr("2"), AMstr("bb")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutStr(doc2, AM_ROOT, AMstr("3"), AMstr("cc")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
 
-    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    AMitems const heads = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems const heads = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     /* Forward, back, back. */
     AMitems range_all = AMstackItems(stack_ptr, AMmapRange(doc1, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads), cmocka_cb,
@@ -1369,19 +1369,19 @@ static void test_get_range_values(void** state) {
     AMstackItem(NULL, AMmapPutStr(doc1, AM_ROOT, AMstr("bb"), AMstr("bbb")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutStr(doc1, AM_ROOT, AMstr("cc"), AMstr("ccc")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutStr(doc1, AM_ROOT, AMstr("dd"), AMstr("ddd")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
-    AMitems const v1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems const v1 = AMstackItems(stack_ptr, AMgetHeads(doc1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
     AMdoc* doc2;
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMfork(doc1, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2));
 
     AMstackItem(NULL, AMmapPutStr(doc1, AM_ROOT, AMstr("cc"), AMstr("ccc V2")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc1, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     AMstackItem(NULL, AMmapPutStr(doc2, AM_ROOT, AMstr("cc"), AMstr("ccc V3")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(doc2, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMcommit(doc2, AMstr(NULL), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
-    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMstackItem(NULL, AMmerge(doc1, doc2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
 
     /* Forward vs. reverse: complete current map range. */
     AMitems range = AMstackItems(stack_ptr, AMmapRange(doc1, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,

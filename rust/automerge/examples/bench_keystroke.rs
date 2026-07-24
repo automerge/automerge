@@ -49,6 +49,9 @@ fn main() {
         // a new peer" case, which pays the actor-column rewrite.
         // Applying the second is steady-state typing.
         let mut src = base.fork();
+        // src emits the changes/bundles, which needs its full hash set;
+        // the measured targets (base clones) stay in the default mode
+        src.enable_audit_mode().unwrap();
         for ch in ["x", "y"] {
             let mut tx = src.transaction();
             tx.splice_text(&text, pos, 0, ch).unwrap();
@@ -66,10 +69,10 @@ fn main() {
                     level: change.hash().fragment_level(),
                     boundary,
                     checkpoints: vec![],
-                    members: vec![ChangeId {
-                        actor: change.actor_id().clone(),
-                        seq: change.seq(),
-                    }],
+                    members: vec![ChangeId::from_parts(
+                        change.actor_id().clone(),
+                        std::num::NonZeroU64::new(change.seq()).unwrap(),
+                    )],
                 };
                 src.bundle_fragment_v2(&frag).unwrap().bytes()
             })

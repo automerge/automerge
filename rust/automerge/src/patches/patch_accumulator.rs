@@ -3,7 +3,7 @@ use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::types::{Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
-use crate::{ChangeHash, Patch};
+use crate::Patch;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
@@ -17,7 +17,9 @@ pub(crate) struct PatchAccumulator {
     record_events: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
-    pub(crate) heads: Option<Vec<ChangeHash>>,
+    /// The clock of the after-side view the events describe (`None` =
+    /// the current document).
+    pub(crate) heads_clock: Option<crate::clock::Clock>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -79,7 +81,7 @@ impl PatchAccumulator {
             record_events: false,
             expose: HashSet::default(),
             events: vec![],
-            heads: None,
+            heads_clock: None,
             path_map: Default::default(),
             path_hint: 0,
         }
@@ -274,7 +276,7 @@ impl PatchAccumulator {
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
         self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
-        let clock = self.heads.as_ref().and_then(|h| doc.clock_at(h));
+        let clock = self.heads_clock.clone();
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
         Self::make_patches_inner(&self.events, expose, path_map, doc, clock, text_encoding)

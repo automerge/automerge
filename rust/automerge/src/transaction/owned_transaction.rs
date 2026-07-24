@@ -32,12 +32,20 @@ const _: () = {
 
 impl OwnedTransaction {
     /// Create a new transaction, consuming the document.
-    pub(crate) fn new(mut doc: Automerge, heads: Option<&[ChangeHash]>) -> Self {
+    pub(crate) fn new(
+        mut doc: Automerge,
+        heads: Option<&[crate::ChangeId]>,
+    ) -> Result<Self, AutomergeError> {
+        if let Some(h) = heads {
+            // fail fast: an isolated transaction commits with these heads
+            // as its deps, which the wire format records as hashes
+            doc.resolve_heads(h)?;
+        }
         let args = doc.transaction_args(heads);
-        Self {
+        Ok(Self {
             inner: Some(TransactionInner::new(args)),
             doc,
-        }
+        })
     }
 
     /// Get the hash of the change that contains the given opid.
@@ -51,24 +59,37 @@ impl OwnedTransaction {
     }
 
     /// Get the heads of the document before this transaction was started.
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    pub fn get_heads(&self) -> Vec<crate::ChangeId> {
         self.doc.get_heads()
     }
 
-    /// Commit the transaction, returning the document and commit hash.
-    pub fn commit(mut self) -> (Automerge, Option<ChangeHash>) {
+    /// Commit the transaction, returning the document and the id of the
+    /// change it created (if any).
+    pub fn commit(mut self) -> (Automerge, Option<crate::ChangeId>) {
         let hash = self.inner.take().unwrap().commit(&mut self.doc, None, None);
-        (self.doc, hash)
+        let id = hash.map(|h| {
+            self.doc
+                .hash_to_change_id(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
+        (self.doc, id)
     }
 
     /// Commit with options.
-    pub fn commit_with(mut self, options: CommitOptions) -> (Automerge, Option<ChangeHash>) {
+    pub fn commit_with(mut self, options: CommitOptions) -> (Automerge, Option<crate::ChangeId>) {
         let hash = self
             .inner
             .take()
             .unwrap()
             .commit(&mut self.doc, options.message, options.time);
-        (self.doc, hash)
+        let id = hash.map(|h| {
+            self.doc
+                .hash_to_change_id(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
+        (self.doc, id)
     }
 
     /// Rollback the transaction, returning the document and number of cancelled ops.
@@ -85,11 +106,17 @@ impl OwnedTransaction {
         f(tx, &mut self.doc)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
+    fn get_scope(
+        &self,
+        heads: Option<&[crate::ChangeId]>,
+    ) -> Result<Option<crate::types::Clock>, AutomergeError> {
         if let Some(h) = heads {
-            Some(self.doc.change_graph.clock_for_heads_lossy(h))
+            // a transaction is in flight, so the current-heads shortcut is
+            // never sound here: always resolve a concrete clock
+            let nodes = self.doc.nodes_for_change_ids(h)?;
+            Ok(Some(self.doc.change_graph.clock_for_nodes(nodes)))
         } else {
-            self.inner.as_ref().and_then(|i| i.get_scope().clone())
+            Ok(self.inner.as_ref().and_then(|i| i.get_scope().clone()))
         }
     }
 }
@@ -105,7 +132,7 @@ mod tests {
     #[test]
     fn put_and_get_roundtrip() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None);
+        let mut tx = doc.into_transaction(None).unwrap();
         tx.put(ROOT, "key", "value").unwrap();
         let (doc, hash) = tx.commit();
         assert!(hash.is_some());
@@ -118,7 +145,7 @@ mod tests {
     #[test]
     fn read_during_transaction() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None);
+        let mut tx = doc.into_transaction(None).unwrap();
         tx.put(ROOT, "a", "1").unwrap();
         // ReadDoc works on the transaction itself
         let (val, _) = tx.get(ROOT, "a").unwrap().unwrap();
@@ -129,7 +156,7 @@ mod tests {
     #[test]
     fn nested_objects() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None);
+        let mut tx = doc.into_transaction(None).unwrap();
         let list = tx.put_object(ROOT, "items", ObjType::List).unwrap();
         tx.insert(&list, 0, "first").unwrap();
         tx.insert(&list, 1, "second").unwrap();
@@ -141,11 +168,15 @@ mod tests {
     #[test]
     fn commit_with_options() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None);
+        let mut tx = doc.into_transaction(None).unwrap();
         tx.put(ROOT, "x", 42).unwrap();
-        let (doc, hash) = tx.commit_with(CommitOptions::default().with_message("test commit"));
-        assert!(hash.is_some());
-        let change = doc.get_change_by_hash(&hash.unwrap()).unwrap();
+        let (doc, id) = tx.commit_with(CommitOptions::default().with_message("test commit"));
+        assert!(id.is_some());
+        let hash = doc
+            .change_id_to_hash(&id.unwrap())
+            .unwrap()
+            .expect("committed change resolves");
+        let change = doc.get_change_by_hash(&hash).unwrap();
         assert_eq!(change.unwrap().message(), Some("test commit"));
     }
 
@@ -157,7 +188,7 @@ mod tests {
             tx.put(ROOT, "keep", "yes").unwrap();
             tx.commit();
         }
-        let doc = doc.into_transaction(None);
+        let doc = doc.into_transaction(None).unwrap();
         // Haven't written anything, just rollback
         let (doc, cancelled) = doc.rollback();
         assert_eq!(cancelled, 0);
@@ -170,7 +201,7 @@ mod tests {
     #[test]
     fn rollback_undoes_writes() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None);
+        let mut tx = doc.into_transaction(None).unwrap();
         tx.put(ROOT, "gone", "soon").unwrap();
         let (doc, cancelled) = tx.rollback();
         assert_eq!(cancelled, 1);
@@ -226,7 +257,7 @@ mod tests {
         tx.commit();
 
         // Start an owned transaction isolated at v1 heads
-        let mut tx = doc.into_transaction(Some(&heads_v1));
+        let mut tx = doc.into_transaction(Some(&heads_v1)).unwrap();
         // Should see v=1, not v=2
         let (val, _) = tx.get(ROOT, "v").unwrap().unwrap();
         assert_eq!(val.to_i64().unwrap(), 1);
@@ -245,7 +276,7 @@ mod tests {
         tx.commit();
         let heads = doc.get_heads();
 
-        let tx = doc.into_transaction(None);
+        let tx = doc.into_transaction(None).unwrap();
         assert_eq!(tx.get_heads(), heads);
         tx.commit();
     }
@@ -253,7 +284,7 @@ mod tests {
     #[test]
     fn pending_ops() {
         let doc = Automerge::new();
-        let mut tx = doc.into_transaction(None);
+        let mut tx = doc.into_transaction(None).unwrap();
         assert_eq!(tx.pending_ops(), 0);
         tx.put(ROOT, "a", 1).unwrap();
         assert_eq!(tx.pending_ops(), 1);
@@ -265,7 +296,7 @@ mod tests {
     #[test]
     fn empty_commit_returns_none_hash() {
         let doc = Automerge::new();
-        let tx = doc.into_transaction(None);
+        let tx = doc.into_transaction(None).unwrap();
         let (_, hash) = tx.commit();
         assert!(hash.is_none());
     }

@@ -1,6 +1,7 @@
 mod actor_id;
 mod byte_span;
 mod change;
+mod change_id;
 mod cursor;
 mod doc;
 mod index;

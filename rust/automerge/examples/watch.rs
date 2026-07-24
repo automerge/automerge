@@ -8,7 +8,7 @@ fn main() {
     let map = tx.put_object(ROOT, "my new map", ObjType::Map).unwrap();
     tx.put(&map, "hello", "world").unwrap();
     tx.commit();
-    for patch in doc.diff(&before, &doc.get_heads()) {
+    for patch in doc.diff(&before, &doc.get_heads()).unwrap() {
         println!("{patch:?}");
     }
 }

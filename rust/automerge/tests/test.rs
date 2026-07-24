@@ -28,6 +28,7 @@ fn merge_patches_clear_conflict_after_losing_list_value_is_deleted_from_fuzz_tra
     // list register leaves the winning value unchanged, but must emit a PutSeq
     // patch to clear the materialized conflict flag.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![2])).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, ScalarValue::Null).unwrap();
@@ -49,11 +50,11 @@ fn merge_patches_clear_conflict_after_losing_list_value_is_deleted_from_fuzz_tra
 
     let mut doc = doc.document().clone();
     let mut right = right.document().clone();
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let before_heads = doc.get_heads();
     doc.merge(&mut right).unwrap();
-    let expected = doc.hydrate(None);
-    let patches = doc.diff(&before_heads, &doc.get_heads());
+    let expected = doc.hydrate(None).unwrap();
+    let patches = doc.diff(&before_heads, &doc.get_heads()).unwrap();
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -66,6 +67,7 @@ fn bundle_with_mark_columns_decodes_from_fuzz_trace() {
     // Minimized from a fuzz crash. A mark populates both the expand and mark-name
     // operation columns; the bundle must write their metadata in normalized order.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "a").unwrap();
     doc.mark(
@@ -90,6 +92,7 @@ fn fork_at_rejects_edit_to_object_outside_isolation_from_fuzz_trace() {
     // The list was created after the empty heads, so editing it while isolated at those heads must
     // be rejected rather than creating a change which references an actor absent from its history.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.commit();
     doc.isolate(&[]).unwrap();
@@ -108,19 +111,20 @@ fn historical_owned_transaction_omits_patches_for_unreachable_object_from_fuzz_t
     // historical heads, so the edit must be rejected and must not emit a patch
     // with a path through the hidden object.
     let mut source = AutoCommit::new();
+    source.enable_audit_mode().unwrap();
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.commit();
     let doc = source.document().clone();
-    let mut actual = doc.hydrate(Some(&[]));
+    let mut actual = doc.hydrate(Some(&[])).unwrap();
 
     let before_heads = doc.get_heads();
-    let mut tx = doc.into_transaction(Some(&[]));
+    let mut tx = doc.into_transaction(Some(&[])).unwrap();
     let result = tx.insert(&text, 0, ScalarValue::counter(-104));
     assert!(matches!(result, Err(AutomergeError::InvalidObjId(_))));
     let (doc, hash) = tx.commit();
     let branch_heads = hash.into_iter().collect::<Vec<_>>();
-    let expected = doc.hydrate(Some(&branch_heads));
-    let patches = doc.diff(&before_heads, &doc.get_heads());
+    let expected = doc.hydrate(Some(&branch_heads)).unwrap();
+    let patches = doc.diff(&before_heads, &doc.get_heads()).unwrap();
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -133,6 +137,7 @@ fn diff_incremental_respects_isolated_heads_from_fuzz_trace() {
     //  Once the document is isolated at its empty heads, both ends of the incremental diff are
     //  empty and it must not emit patches for changes hidden by the isolation scope.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put_object(ROOT, "map", ObjType::Map).unwrap();
     doc.commit();
     doc.isolate(&[]).unwrap();
@@ -153,12 +158,15 @@ fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_t
     // Rebuilding that history in fork_at must produce the same top value as rebuilding it during
     // load.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let mut counter = AutoCommit::new();
+    counter.enable_audit_mode().unwrap();
     counter.set_actor(ActorId::from(vec![1])).unwrap();
     counter.put(ROOT, "key", ScalarValue::counter(34)).unwrap();
     counter.commit();
     let mut scalar = AutoCommit::new();
+    scalar.enable_audit_mode().unwrap();
     scalar.set_actor(ActorId::from(vec![2])).unwrap();
     scalar.put(ROOT, "key", ScalarValue::Null).unwrap();
     scalar.commit();
@@ -183,18 +191,19 @@ fn transaction_patches_replace_multi_character_string_in_text_from_fuzz_trace() 
     // A string scalar is one text sequence element even when it renders as multiple characters.
     // Transaction patches must replace its entire rendered width, not just the first character.
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     tx.insert(&text, 0, "ab").unwrap();
     tx.commit();
 
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let before_heads = doc.get_heads();
     let mut tx = doc.transaction();
     tx.put(&text, 1, f64::MAX).unwrap();
     tx.commit();
-    let expected = doc.hydrate(None);
-    let patches = doc.diff(&before_heads, &doc.get_heads());
+    let expected = doc.hydrate(None).unwrap();
+    let patches = doc.diff(&before_heads, &doc.get_heads()).unwrap();
     assert!(matches!(
         patches.as_slice(),
         [
@@ -223,6 +232,7 @@ fn merge_patches_replace_multi_character_string_in_text_from_fuzz_trace() {
     // A string scalar is one text sequence element even when it renders as multiple characters.
     // Replacing it must remove its entire rendered width from an existing hydrated value.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.insert(&text, 0, "ab").unwrap();
     doc.commit();
@@ -233,11 +243,11 @@ fn merge_patches_replace_multi_character_string_in_text_from_fuzz_trace() {
 
     let mut doc = doc.document().clone();
     let mut branch = branch.document().clone();
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let before_heads = doc.get_heads();
     doc.merge(&mut branch).unwrap();
-    let expected = doc.hydrate(None);
-    let patches = doc.diff(&before_heads, &doc.get_heads());
+    let expected = doc.hydrate(None).unwrap();
+    let patches = doc.diff(&before_heads, &doc.get_heads()).unwrap();
     assert!(matches!(
         patches.as_slice(),
         [
@@ -266,6 +276,7 @@ fn merge_patches_include_text_element_update_from_fuzz_trace() {
     // A remote branch replaces a character in a text object with a scalar. Merging with patch
     // logging must emit the deletion and splice needed to update an existing hydrated view.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "a").unwrap();
     doc.commit();
@@ -276,11 +287,11 @@ fn merge_patches_include_text_element_update_from_fuzz_trace() {
 
     let mut doc = doc.document().clone();
     let mut branch = branch.document().clone();
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let before_heads = doc.get_heads();
     doc.merge(&mut branch).unwrap();
-    let expected = doc.hydrate(None);
-    let patches = doc.diff(&before_heads, &doc.get_heads());
+    let expected = doc.hydrate(None).unwrap();
+    let patches = doc.diff(&before_heads, &doc.get_heads()).unwrap();
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -293,6 +304,7 @@ fn diff_preserves_conflict_after_winning_value_is_deleted_from_fuzz_trace() {
     // Three actors concurrently assign a map property. Deleting the winning value reveals another
     // value, but the property remains conflicted because two concurrent values still exist.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let mut second = doc.fork();
     second.set_actor(ActorId::from(vec![1])).unwrap();
@@ -329,6 +341,7 @@ fn incremental_put_seq_in_text_applies_to_hydrated_value_from_fuzz_trace() {
     //  Updating a text element with a scalar produces a PutSeq patch, which must update the
     //  rendered hydrated text.
     let mut doc = AutoCommit::new_with_encoding(TextEncoding::GraphemeCluster);
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "a").unwrap();
     doc.commit();
@@ -355,6 +368,7 @@ fn current_state_diff_with_block_applies_to_hydrated_value_from_fuzz_trace() {
     // as an object-replacement character, so applying its current-state
     // patches must handle the block insertion and ignore its nested contents.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.update_spans(
         &text,
@@ -383,6 +397,7 @@ fn reverse_diff_of_replaced_lists_applies_to_hydrated_value_from_fuzz_trace() {
     // second list is changed while hidden. A reverse diff must not emit a
     // deletion against the empty replacement list in the hydrated value.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put_object(ROOT, "first", ObjType::List).unwrap();
     let old_second = doc.put_object(ROOT, "second", ObjType::List).unwrap();
     doc.commit();
@@ -410,6 +425,7 @@ fn unmark_at_end_of_remotely_inserted_conflicted_scalar_in_text_from_fuzz_trace(
     // by two actors, then merged. Unmarking at the document's reported length must not
     // trip the op-set insert-index consistency assertion.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.commit();
@@ -444,6 +460,7 @@ fn insert_into_replaced_text_run_with_trailing_zero_width_unmark_from_fuzz_trace
     // text run has an invisible conflicted sibling after it, inserting into the run must
     // choose the same op-set position in the fast text-index query and the slow query.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.commit();
@@ -478,6 +495,7 @@ fn update_text_after_marking_text_with_hidden_scalar() {
     // an invisible empty-string scalar, and a mark over the visible character.
     // Updating the text must not trip the op-set insert-index consistency check.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.splice_text(&text, 0, 0, "a").unwrap();
@@ -548,18 +566,19 @@ fn rollback_after_save_load_of_deep_hydrated_root_map_from_fuzz_trace() {
     // replaced with a deep hydrated map, start a transaction, roll it back,
     // then hydrate the rolled-back document.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.update_object(ROOT, &fuzz_hydrated_map(0, 42)).unwrap();
     doc.commit();
 
     let mut loaded = AutoCommit::load(&doc.save()).unwrap();
     let mut plain = loaded.document().clone();
-    let before = plain.hydrate(None);
+    let before = plain.hydrate(None).unwrap();
 
     let mut tx = plain.transaction();
     tx.put(ROOT, "k0", "a").unwrap();
     tx.rollback();
 
-    assert_eq!(plain.hydrate(None), before);
+    assert_eq!(plain.hydrate(None).unwrap(), before);
 }
 
 #[test]
@@ -568,6 +587,7 @@ fn fork_at_preserves_text_encoding() {
     // cluster encoding, forked at the document's current heads, hydrates
     // differently after save/load.
     let mut doc = AutoCommit::new_with_encoding(TextEncoding::GraphemeCluster);
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.commit();
@@ -594,11 +614,13 @@ fn load_incremental_into_empty_doc_preserves_utf8_text_encoding() {
     // same empty-document load_incremental fast path. That path must preserve
     // the receiver's text encoding.
     let mut source = AutoCommit::new_with_encoding(TextEncoding::Utf8CodeUnit);
+    source.enable_audit_mode().unwrap();
     source.set_actor(ActorId::from(vec![1])).unwrap();
     source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.commit();
 
     let mut receiver = AutoCommit::new_with_encoding(TextEncoding::Utf8CodeUnit);
+    receiver.enable_audit_mode().unwrap();
     receiver.set_actor(ActorId::from(vec![0])).unwrap();
     receiver.load_incremental(&source.save()).unwrap();
 
@@ -620,6 +642,7 @@ fn spans_match_text_after_merge_of_conflicting_text_overwrites_from_fuzz_trace()
     // text reconstructed from spans() should match text(), i.e. spans() should
     // not emit the losing side of the conflict.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.insert(&text, 0, "base").unwrap();
@@ -656,6 +679,7 @@ fn doc_iter_spans_skip_losing_conflicting_text_overwrites_after_object_shift() {
     // all-top path for the root object must not be reused for a conflicted text
     // object reached later.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.insert(&text, 0, "base").unwrap();
@@ -690,6 +714,7 @@ fn diff_spans_preserve_marks_on_inserted_text() {
     // Historical top scanning must group inserted ops by elemid_or_key(), not
     // raw key, so mark ops sharing an insertion key with text ops are retained.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.commit();
     let before = doc.get_heads();
@@ -724,6 +749,7 @@ fn diff_spans_skip_losing_conflicting_text_overwrites() {
     // The diff path uses SpansDiff rather than SpansInternal. It should apply
     // the same top-op filtering and avoid emitting the losing text value.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![0])).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.insert(&text, 0, "base").unwrap();
@@ -758,6 +784,7 @@ fn diff_spans_skip_losing_conflicting_text_overwrites() {
 #[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(&automerge::ROOT, "foo", 1).unwrap();
     doc.put(&automerge::ROOT, "foo", 2).unwrap();
     assert_doc!(
@@ -1596,6 +1623,7 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
 #[test]
 fn save_restore_complex_transactional() {
     let mut doc1 = Automerge::new();
+    doc1.enable_audit_mode().unwrap();
     let first_todo = doc1
         .transact::<_, _, automerge::AutomergeError>(|d| {
             let todos = d.put_object(&automerge::ROOT, "todos", ObjType::List)?;
@@ -1608,6 +1636,7 @@ fn save_restore_complex_transactional() {
         .result;
 
     let mut doc2 = Automerge::new();
+    doc2.enable_audit_mode().unwrap();
     doc2.merge(&mut doc1).unwrap();
     doc2.transact::<_, _, automerge::AutomergeError>(|tx| {
         tx.put(&first_todo, "title", "weed plants")?;
@@ -1742,18 +1771,21 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 #[test]
 fn observe_counter_change_application() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
     let changes = doc.get_changes(&[]).unwrap().into_iter();
 
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.apply_changes(changes).unwrap();
 }
 
 #[test]
 fn increment_non_counter_map() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     // can't increment nothing
     assert!(matches!(
         doc.increment(ROOT, "nothing", 2),
@@ -1773,8 +1805,10 @@ fn increment_non_counter_map() {
 
     // can increment a counter that is part of a conflict
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     doc1.set_actor(ActorId::from([1])).unwrap();
     let mut doc2 = AutoCommit::new();
+    doc2.enable_audit_mode().unwrap();
     doc2.set_actor(ActorId::from([2])).unwrap();
 
     doc1.put(ROOT, "key", ScalarValue::counter(1)).unwrap();
@@ -1787,6 +1821,7 @@ fn increment_non_counter_map() {
 #[test]
 fn increment_non_counter_list() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
 
     // can't increment a non-counter
@@ -1802,6 +1837,7 @@ fn increment_non_counter_list() {
 
     // can increment a counter that is part of a conflict
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     doc1.set_actor(ActorId::from([1])).unwrap();
     let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list, 0, ()).unwrap();
@@ -1906,6 +1942,7 @@ fn delete_only_change() {
     let mut doc1 = automerge::Automerge::new()
         .with_actor(actor.clone())
         .unwrap();
+    doc1.enable_audit_mode().unwrap();
     let list = doc1
         .transact::<_, _, automerge::AutomergeError>(|d| {
             let l = d.put_object(&automerge::ROOT, "list", ObjType::List)?;
@@ -1945,6 +1982,7 @@ fn delete_only_change() {
 fn save_and_reload_create_object() {
     let actor = automerge::ActorId::random();
     let mut doc = automerge::Automerge::new().with_actor(actor).unwrap();
+    doc.enable_audit_mode().unwrap();
 
     // Create a change containing an object but no other operations
     let list = doc
@@ -2037,6 +2075,7 @@ fn test_change_encoding_expanded_change_round_trip() {
 #[test]
 fn save_and_load_incremented_counter() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.commit();
     doc.increment(ROOT, "counter", 1).unwrap();
@@ -2057,12 +2096,14 @@ fn save_and_load_incremented_counter() {
 #[test]
 fn load_incremental_with_corrupted_tail() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(ROOT, "key", ScalarValue::Str("value".into()))
         .unwrap();
     doc.commit();
     let mut bytes = doc.save();
     bytes.extend_from_slice(&[1, 2, 3, 4]);
     let mut loaded = Automerge::new();
+    loaded.enable_audit_mode().unwrap();
     let loaded_len = loaded.load_incremental(&bytes).unwrap();
     assert_eq!(loaded_len, 1);
     assert_doc!(
@@ -2077,6 +2118,7 @@ fn load_incremental_with_corrupted_tail() {
 fn load_doc_with_deleted_objects() {
     // Reproduces an issue where a document with deleted objects failed to load
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.put_object(ROOT, "map", ObjType::Map).unwrap();
@@ -2092,6 +2134,7 @@ fn load_doc_with_deleted_objects() {
 #[test]
 fn insert_after_many_deletes() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let obj = doc.put_object(&ROOT, "object", ObjType::Map).unwrap();
     for i in 0..100 {
         doc.put(&obj, i.to_string(), i).unwrap();
@@ -2102,6 +2145,7 @@ fn insert_after_many_deletes() {
 #[test]
 fn simple_bad_saveload() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     doc.transact::<_, _, AutomergeError>(|d| {
         d.put(ROOT, "count", 0)?;
         Ok(())
@@ -2123,6 +2167,7 @@ fn simple_bad_saveload() {
 #[test]
 fn ops_on_wrong_objets() -> Result<(), AutomergeError> {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list = doc.put_object(&automerge::ROOT, "list", ObjType::List)?;
     doc.insert(&list, 0, "a")?;
     doc.insert(&list, 1, "b")?;
@@ -2189,6 +2234,7 @@ fn load() {
 #[test]
 fn negative_64() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     assert!(doc.transact(|d| { d.put(ROOT, "a", -64_i64) }).is_ok())
 }
 
@@ -2211,6 +2257,7 @@ fn obj_id_64bits() {
 #[test]
 fn bad_change_on_optree_node_boundary() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     doc.transact::<_, _, AutomergeError>(|d| {
         d.put(ROOT, "a", "z")?;
         d.put(ROOT, "b", 0)?;
@@ -2248,6 +2295,7 @@ fn bad_change_on_optree_node_boundary() {
 #[test]
 fn regression_nth_miscount() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     doc.transact::<_, _, AutomergeError>(|d| {
         let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
         for i in 0..30 {
@@ -2277,6 +2325,7 @@ fn regression_nth_miscount() {
 #[test]
 fn regression_nth_miscount_smaller() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     doc.transact::<_, _, AutomergeError>(|d| {
         let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
         for i in 0..B * 4 {
@@ -2303,6 +2352,7 @@ fn regression_nth_miscount_smaller() {
 #[test]
 fn regression_insert_opid() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
     let list_id = tx
         .put_object(&automerge::ROOT, "list", ObjType::List)
@@ -2321,6 +2371,7 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().unwrap().clone();
     let mut new_doc = Automerge::new();
+    new_doc.enable_audit_mode().unwrap();
     let before = new_doc.get_heads();
     new_doc.apply_changes(vec![change1]).unwrap();
     new_doc.apply_changes(vec![change2]).unwrap();
@@ -2339,7 +2390,7 @@ fn regression_insert_opid() {
         );
     }
 
-    let patches = new_doc.diff(&before, &new_doc.get_heads());
+    let patches = new_doc.diff(&before, &new_doc.get_heads()).unwrap();
     let mut values = SequenceTree::new();
     for i in 0..=N {
         values.push((
@@ -2373,6 +2424,7 @@ fn regression_insert_opid() {
 #[test]
 fn big_list() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
     let list_id = tx.put_object(&ROOT, "list", ObjType::List).unwrap();
     tx.commit();
@@ -2391,11 +2443,12 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().unwrap().clone();
     let mut new_doc = Automerge::new();
+    new_doc.enable_audit_mode().unwrap();
     let before = new_doc.get_heads();
     new_doc.apply_changes(vec![change1]).unwrap();
     new_doc.apply_changes(vec![change2]).unwrap();
 
-    let patches = new_doc.diff(&before, &new_doc.get_heads());
+    let patches = new_doc.diff(&before, &new_doc.get_heads()).unwrap();
     println!("PATCH = {:?}", patches.last());
     let matches = match &patches.last().unwrap().action {
         PatchAction::PutSeq { index: N, .. } => true,
@@ -2408,6 +2461,7 @@ fn big_list() {
 #[test]
 fn marks() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
 
     let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
@@ -2438,6 +2492,7 @@ fn marks() {
 #[test]
 fn can_transaction_at() -> Result<(), AutomergeError> {
     let mut doc1 = Automerge::new();
+    doc1.enable_audit_mode().unwrap();
     let mut tx = doc1.transaction();
     let txt = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
     tx.put(&ROOT, "size", 100).unwrap();
@@ -2453,7 +2508,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
     tx.commit();
 
-    let mut tx = doc1.transaction_at(&heads1);
+    let mut tx = doc1.transaction_at(&heads1).unwrap();
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "ZZZ")?;
@@ -2464,7 +2519,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
 
-    let mut tx = doc1.transaction_at(&heads1);
+    let mut tx = doc1.transaction_at(&heads1).unwrap();
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "TTT")?;
@@ -2480,6 +2535,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
 #[test]
 fn can_isolate() -> Result<(), AutomergeError> {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let txt = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
     doc1.put(&ROOT, "size", 100).unwrap();
     doc1.splice_text(&txt, 0, 0, "aaabbbccc")?;
@@ -2550,6 +2606,7 @@ fn can_isolate() -> Result<(), AutomergeError> {
 #[test]
 fn inserting_text_near_deleted_marks() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
     let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
     tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
@@ -2569,6 +2626,7 @@ fn inserting_text_near_deleted_marks() {
 #[test]
 fn test_load_incremental_partial_load() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
 
     let mut tx = doc.transaction();
     tx.put(&ROOT, "a", 1).unwrap();
@@ -2587,12 +2645,14 @@ fn test_load_incremental_partial_load() {
     });
 
     let mut doc2 = Automerge::new();
+    doc2.enable_audit_mode().unwrap();
     doc2.load_incremental(&encoded).unwrap();
 }
 
 #[test]
 fn test_get_change_meta() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
 
     let mut tx = doc.transaction();
     tx.put(&ROOT, "a", 1).unwrap();
@@ -2613,6 +2673,7 @@ fn test_get_change_meta() {
 #[test]
 fn get_marks_at_heads() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let mut tx = doc.transaction();
     let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
     tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
@@ -2648,6 +2709,7 @@ fn get_marks_at_heads() {
 #[test]
 fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let txt = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
     doc1.splice_text(&txt, 0, 0, "abc")?;
 
@@ -2678,6 +2740,7 @@ fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError
 #[test]
 fn rollback_with_no_ops() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
 
     doc.transact::<_, _, AutomergeError>(|tx| {
         tx.put(ROOT, "a", 1)?;
@@ -2708,6 +2771,7 @@ fn rollback_with_several_actors() {
     let mut doc1 = AutoCommit::new()
         .with_actor("aaaaaa".try_into().unwrap())
         .unwrap();
+    doc1.enable_audit_mode().unwrap();
     let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
     doc1.splice_text(&text, 0, 0, "the sly fox jumped over the lazy dog")
         .unwrap();
@@ -2743,6 +2807,7 @@ fn rollback_with_several_actors() {
 #[test]
 fn save_with_ops_which_reference_actors_only_via_delete() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
 
     doc.transact::<_, _, AutomergeError>(|tx| {
         tx.put(ROOT, "a", 1)?;
@@ -2774,6 +2839,7 @@ fn save_with_ops_which_reference_actors_only_via_delete() {
 #[test]
 fn save_with_empty_commits() {
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
 
     doc.transact::<_, _, AutomergeError>(|tx| {
         tx.put(ROOT, "a", 1)?;
@@ -2804,6 +2870,7 @@ fn large_patches_in_lists_are_correct() {
     // which kicks in when there are > 100 patches to render.
 
     let mut doc = Automerge::new();
+    doc.enable_audit_mode().unwrap();
     let heads_before = doc.get_heads();
     let list = doc
         .transact::<_, _, AutomergeError>(|tx| {
@@ -2819,7 +2886,7 @@ fn large_patches_in_lists_are_correct() {
         .unwrap()
         .result;
     let heads_after = doc.get_heads();
-    let patches = doc.diff(&heads_before, &heads_after);
+    let patches = doc.diff(&heads_before, &heads_after).unwrap();
     let final_patch = patches.last().unwrap();
     assert_eq!(
         final_patch.path,
@@ -2837,6 +2904,7 @@ fn large_patches_in_lists_are_correct() {
 #[test]
 fn diff_should_reverse_deletion_of_object_in_list_correctly() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, "a").unwrap();
     let text = doc
@@ -2873,6 +2941,7 @@ fn diff_should_reverse_deletion_of_object_in_list_correctly() {
 #[test]
 fn diff_should_reverse_deletion_of_object_in_map_correctly() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
 
     let map = doc.put_object(ROOT, "map", ObjType::Map).unwrap();
     doc.put_object(&map, "text", ObjType::Text).unwrap();
@@ -2908,6 +2977,7 @@ fn diff_should_reverse_deletion_of_object_in_map_correctly() {
 #[test]
 fn diff_should_reverse_deletion_of_block_in_text_correctly() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "a").unwrap();
     let block = doc.split_block(&text, 1).unwrap();
@@ -2977,6 +3047,7 @@ fn missing_actors_when_docs_are_forked() {
     let actor2 = ActorId::from(&[2]);
 
     let mut doc0 = AutoCommit::new().with_actor(actor0).unwrap();
+    doc0.enable_audit_mode().unwrap();
     doc0.put(ROOT, "a", 1).unwrap();
 
     // swap these actors and no error occurs
@@ -3002,6 +3073,7 @@ fn missing_actors_when_docs_are_forked() {
 #[test]
 fn allows_empty_keys_in_mappings() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(&automerge::ROOT, "", 1).unwrap();
     assert_doc!(
         &doc,
@@ -3014,9 +3086,11 @@ fn allows_empty_keys_in_mappings() {
 #[test]
 fn has_our_changes() {
     let mut left = AutoCommit::new();
+    left.enable_audit_mode().unwrap();
     left.put(&automerge::ROOT, "a", 1).unwrap();
 
     let mut right = AutoCommit::new();
+    right.enable_audit_mode().unwrap();
     right.put(&automerge::ROOT, "b", 2).unwrap();
 
     let mut left_to_right = automerge::sync::State::new();
@@ -3058,6 +3132,7 @@ fn has_our_changes() {
 #[test]
 fn stats_smoke_test() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(&automerge::ROOT, "a", 1).unwrap();
     doc.commit();
     doc.put(&automerge::ROOT, "b", 2).unwrap();
@@ -3070,6 +3145,7 @@ fn stats_smoke_test() {
 #[test]
 fn invalid_index() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let obj = doc
         .put_object(&automerge::ROOT, "a", ObjType::List)
         .unwrap();
@@ -3091,6 +3167,7 @@ fn invalid_index() {
 #[test]
 fn zero_length_data() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(&ROOT, "string", "").unwrap();
     doc.put(&ROOT, "bytes", vec![]).unwrap();
     doc.commit();
@@ -3107,6 +3184,7 @@ fn zero_length_data() {
 #[test]
 fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     doc1.put(&ROOT, "string", "hello").unwrap();
     let mut doc2 = doc1.fork();
     let mut doc3 = doc1.fork();
@@ -3115,17 +3193,17 @@ fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
 
     doc1.put(&ROOT, "concurrent1", "123").unwrap();
     assert!(doc1.get_heads().len() == 1);
-    let hash_b = doc1.get_heads()[0];
+    let hash_b = doc1.get_heads()[0].clone();
 
     doc3.load_incremental(&doc1.save()).unwrap();
     assert!(doc3.get_heads().len() == 1);
-    let hash_c = doc3.get_heads()[0];
+    let hash_c = doc3.get_heads()[0].clone();
 
     assert_eq!(hash_b, hash_c);
 
     doc2.put(&ROOT, "concurrent2", "abc").unwrap();
     assert!(doc2.get_heads().len() == 1);
-    let hash_d = doc2.get_heads()[0];
+    let hash_d = doc2.get_heads()[0].clone();
 
     doc2.merge(&mut doc1).unwrap();
     let heads = doc2.get_heads();
@@ -3142,6 +3220,7 @@ fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
 #[test]
 fn test_get_last_local_change_generation() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
     confirm_last_change(&mut doc);
@@ -3157,12 +3236,13 @@ fn test_get_last_local_change_generation() {
 fn confirm_last_change(doc: &mut AutoCommit) {
     let heads = doc.get_heads();
     let change = doc.get_last_local_change().unwrap().unwrap();
-    assert_eq!(vec![change.hash()], heads);
+    assert_eq!(vec![change.id()], heads);
 }
 
 #[test]
 fn test_overwriting_a_conflict() {
     let mut doc1 = AutoCommit::new();
+    doc1.enable_audit_mode().unwrap();
     let mut doc2 = doc1.fork();
 
     // put the same values
@@ -3197,6 +3277,7 @@ fn get_changes_with_hash_of_empty_change_produces_correct_result() {
     // number of the empty change. This meant that the clock did not include the
     // empty change seq and so the empty change was not filtered out.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let head = doc.empty_change(CommitOptions::default());
     let changes = doc.get_changes(&[head]).unwrap();
     assert!(changes.is_empty());
@@ -3306,6 +3387,7 @@ fn reproduce_clock_cache_bug() {
     // `get_changes(&heads)` will be non empty.
 
     let mut base = AutoCommit::new();
+    base.enable_audit_mode().unwrap();
 
     // Add some number of initial commits
     for i in 0..100 {
@@ -3360,6 +3442,7 @@ fn merge_panic_after_putting_value_equal_to_initial_value() {
     let mut base = AutoCommit::new()
         .with_actor(ActorId::from(b"base".as_slice()))
         .unwrap();
+    base.enable_audit_mode().unwrap();
     base.put(ROOT, "a", 1i64).unwrap();
 
     let mut left = base
@@ -3395,6 +3478,7 @@ fn merge_after_noop_then_real_put() {
     let mut base = AutoCommit::new()
         .with_actor(ActorId::from(b"base".as_slice()))
         .unwrap();
+    base.enable_audit_mode().unwrap();
     base.put(ROOT, "a", 1i64).unwrap();
 
     let mut left = base
@@ -3431,6 +3515,7 @@ fn should_reload_document_containing_deflated_columns() {
     for trial in 0..100u64 {
         let seed = base_seed.wrapping_add(trial);
         let mut doc = AutoCommit::new_with_encoding(automerge::TextEncoding::Utf16CodeUnit);
+        doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
 
         let mut rng_state: u64 = seed;
@@ -3464,6 +3549,7 @@ fn failed_merge_with_duplicate_sequence_number_does_not_corrupt_save_load() {
     let mut left = AutoCommit::new()
         .with_actor(ActorId::from(vec![0]))
         .unwrap();
+    left.enable_audit_mode().unwrap();
     let mut right = left.fork().with_actor(ActorId::from(vec![1])).unwrap();
 
     right.put_object(ROOT, "k", ObjType::Map).unwrap();
@@ -3491,6 +3577,7 @@ fn failed_merge_with_duplicate_sequence_number_does_not_corrupt_save_load() {
 #[test]
 fn duplicate_seq_number_in_batch_change_aborts_whole_batch() {
     let mut base = AutoCommit::new();
+    base.enable_audit_mode().unwrap();
     base.put(&ROOT, "foo", "bar").unwrap();
 
     let mut middle = base.fork();
@@ -3541,6 +3628,7 @@ fn duplicate_seq_number_in_batch_change_aborts_whole_batch() {
 #[test]
 fn duplicate_seq_number_within_incoming_batch_is_rejected() {
     let mut base = AutoCommit::new();
+    base.enable_audit_mode().unwrap();
     base.put(&ROOT, "foo", "bar").unwrap();
     let base_heads = base.get_heads();
 
@@ -3578,6 +3666,7 @@ fn duplicate_seq_number_within_incoming_batch_is_rejected() {
 #[test]
 fn duplicate_seq_number_changes_are_rejected() {
     let mut base = AutoCommit::new();
+    base.enable_audit_mode().unwrap();
     base.put(&ROOT, "foo", "bar").unwrap();
 
     let mut left = base
@@ -3618,6 +3707,7 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
     let branch_actor = ActorId::try_from("bbbbbbbb").unwrap();
 
     let mut base_doc = AutoCommit::new().with_actor(base_actor.clone()).unwrap();
+    base_doc.enable_audit_mode().unwrap();
     base_doc.put(ROOT, "base", ScalarValue::Uint(0)).unwrap();
     base_doc.commit();
     let base_heads = base_doc.get_heads();
@@ -3636,12 +3726,13 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
         .put(ROOT, "stale_missing", ScalarValue::Uint(1))
         .unwrap();
     stale_branch.commit();
-    let stale_missing = stale_branch.get_heads()[0];
+    let stale_missing_id = stale_branch.get_heads()[0].clone();
+    let stale_missing = stale_branch.get_head_hashes()[0];
     stale_branch
         .put(ROOT, "stale_orphan", ScalarValue::Uint(2))
         .unwrap();
     stale_branch.commit();
-    let stale_orphan = stale_branch.get_changes(&[stale_missing]).unwrap();
+    let stale_orphan = stale_branch.get_changes(&[stale_missing_id]).unwrap();
     assert_eq!(stale_orphan.len(), 1);
 
     receiver.apply_changes_batch(stale_orphan).unwrap();
@@ -3680,6 +3771,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
     let mut left = AutoCommit::new()
         .with_actor(ActorId::from(vec![0]))
         .unwrap();
+    left.enable_audit_mode().unwrap();
     left.put(ROOT, "base", ScalarValue::Uint(0)).unwrap();
     left.commit();
     let base = left.save();
@@ -3689,14 +3781,15 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         .put(ROOT, "missing", ScalarValue::Uint(1))
         .unwrap();
     orphan_source.commit();
-    let missing = orphan_source.get_heads()[0];
+    let missing_id = orphan_source.get_heads()[0].clone();
+    let missing = orphan_source.get_head_hashes()[0];
 
     orphan_source
         .put(ROOT, "orphan", ScalarValue::Uint(2))
         .unwrap();
     orphan_source.commit();
-    let orphan_head = orphan_source.get_heads()[0];
-    let orphan_change = orphan_source.get_changes(&[missing]).unwrap();
+    let orphan_head = orphan_source.get_head_hashes()[0];
+    let orphan_change = orphan_source.get_changes(&[missing_id]).unwrap();
     assert_eq!(orphan_change.len(), 1);
 
     // Queue a change whose dependency is not present in `left`. This is a
@@ -3723,11 +3816,12 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         .unwrap()
         .with_actor(ActorId::from(vec![2]))
         .unwrap();
+    right.enable_audit_mode().unwrap();
     right.put(ROOT, "right", ScalarValue::Uint(3)).unwrap();
     right.commit();
 
     let mut right_state = State::new();
-    let left_heads = left.get_heads();
+    let left_heads = left.get_head_hashes();
     right_state.their_heads = Some(left_heads.clone());
     right_state.their_need = Some(vec![missing]);
     right_state.their_have = Some(vec![]);
@@ -3739,7 +3833,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
     assert_eq!(
         message.map(|message| message.heads),
         Some({
-            let right_heads = right.get_heads();
+            let right_heads = right.get_head_hashes();
             right_heads.clone()
         }),
         "right should still advertise its heads even though it cannot satisfy the orphan dep"
@@ -3754,10 +3848,11 @@ fn round_trip_change_with_extra_bytes() {
     // change_graph.rs — so this test insists on non-empty, distinct blobs
     // across adjacent changes.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.put(ROOT, "a", 1).unwrap();
     doc.commit();
     let actor = doc.get_actor().clone();
-    let h1 = doc.get_heads();
+    let h1 = doc.get_head_hashes();
 
     let make = |seq: u64, key: &str, deps: Vec<automerge::ChangeHash>, extra: Vec<u8>| {
         automerge::Change::from(automerge::ExpandedChange {
@@ -3823,6 +3918,7 @@ fn fork_at_current_heads_after_interleaved_actor_changes() {
     // Sensitive to the actor ids involved: [2,0,2], [0,1,0], and [2,1,2]
     // panic, while [1,0,1] and [0,2,0] do not.
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::from(vec![2])).unwrap();
     doc.put_object(ROOT, "a", ObjType::Map).unwrap();
     doc.commit();
@@ -3841,11 +3937,13 @@ fn fork_at_current_heads_after_interleaved_actor_changes() {
 #[test]
 fn fork_at_foreign_heads_errors_instead_of_panicking() {
     let mut a = AutoCommit::new();
+    a.enable_audit_mode().unwrap();
     a.put(ROOT, "k", 1).unwrap();
     a.commit();
     let heads_a = a.get_heads();
 
     let mut b = AutoCommit::new();
+    b.enable_audit_mode().unwrap();
     b.put(ROOT, "x", 2).unwrap();
     b.commit();
     assert!(b.fork_at(&heads_a).is_err());
@@ -3856,11 +3954,13 @@ fn increment_patch_clears_resolved_map_conflict() {
     let encoding = TextEncoding::UnicodeCodePoint;
 
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::try_from("01").unwrap()).unwrap();
     doc.put(ROOT, "key", ScalarValue::Null).unwrap();
     doc.commit();
 
     let mut concurrent = AutoCommit::new_with_encoding(encoding);
+    concurrent.enable_audit_mode().unwrap();
     concurrent
         .set_actor(ActorId::try_from("02").unwrap())
         .unwrap();
@@ -3875,13 +3975,13 @@ fn increment_patch_clears_resolved_map_conflict() {
     // conflicted register entry, not merely apply an Increment action to it.
     let mut plain = doc.document().clone();
     plain.set_actor(ActorId::try_from("03").unwrap()).unwrap();
-    let before = plain.hydrate(None);
+    let before = plain.hydrate(None).unwrap();
     let before_heads = plain.get_heads();
     let mut tx = plain.transaction();
     tx.increment(ROOT, "key", 28).unwrap();
     tx.commit();
-    let expected = plain.hydrate(None);
-    let patches = plain.diff(&before_heads, &plain.get_heads());
+    let expected = plain.hydrate(None).unwrap();
+    let patches = plain.diff(&before_heads, &plain.get_heads()).unwrap();
     let mut actual = before;
     actual.apply_patches(encoding, patches).unwrap();
     assert_eq!(actual, expected);
@@ -3891,6 +3991,7 @@ fn increment_patch_clears_resolved_map_conflict() {
 fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::try_from("7f").unwrap()).unwrap();
     doc.put_object(ROOT, "k8", ObjType::Map).unwrap();
     doc.commit();
@@ -3914,6 +4015,7 @@ fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
 fn incremental_diff_survives_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::try_from("7f").unwrap()).unwrap();
     let list = doc.put_object(ROOT, "k6", ObjType::List).unwrap();
     doc.commit();
@@ -3946,6 +4048,7 @@ fn incremental_diff_survives_isolate_integrate_roundtrip() {
 fn incremental_text_diff_survives_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.commit();
 
@@ -3971,6 +4074,7 @@ fn incremental_text_diff_survives_isolate_integrate_roundtrip() {
 fn incremental_diff_discards_edits_inside_deleted_map() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     let map = doc.put_object(ROOT, "container", ObjType::Map).unwrap();
     let text = doc.put_object(&map, "text", ObjType::Text).unwrap();
     doc.commit();
@@ -4004,6 +4108,7 @@ fn incremental_diff_discards_edits_inside_deleted_map() {
 fn incremental_counter_diff_survives_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     let map = doc.put_object(ROOT, "container", ObjType::Map).unwrap();
     doc.put(&map, "count", ScalarValue::counter(0)).unwrap();
     doc.commit();
@@ -4030,6 +4135,7 @@ fn incremental_counter_diff_survives_isolate_integrate_roundtrip() {
 fn incremental_deep_text_diff_survives_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     let outer = doc.put_object(ROOT, "outer", ObjType::Map).unwrap();
     let inner = doc.put_object(&outer, "inner", ObjType::Map).unwrap();
     let text = doc.put_object(&inner, "text", ObjType::Text).unwrap();
@@ -4057,6 +4163,7 @@ fn incremental_deep_text_diff_survives_isolate_integrate_roundtrip() {
 fn incremental_sibling_text_diffs_survive_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     let left = doc.put_object(ROOT, "left", ObjType::Text).unwrap();
     let right = doc.put_object(ROOT, "right", ObjType::Text).unwrap();
     doc.commit();
@@ -4083,6 +4190,7 @@ fn incremental_sibling_text_diffs_survive_isolate_integrate_roundtrip() {
 #[test]
 fn incremental_patches_survive_nested_edit_and_list_shift_across_isolation() {
     let mut doc = AutoCommit::new();
+    doc.enable_audit_mode().unwrap();
     let items = doc.put_object(ROOT, "items", ObjType::List).unwrap();
     let a = doc.insert_object(&items, 0, ObjType::Map).unwrap();
     doc.put(&a, "id", "a").unwrap();
@@ -4114,6 +4222,7 @@ fn incremental_patches_survive_nested_edit_and_list_shift_across_isolation() {
 fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
     let encoding = TextEncoding::Utf16CodeUnit;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     // Make the change large enough for Change::bytes() to compress it.
     doc.put(ROOT, "padding", ScalarValue::Bytes(vec![0; 300]))
@@ -4126,7 +4235,11 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
     let uncompressed_change = change.raw_bytes().to_vec();
     let compressed_change = change.bytes().to_vec();
     assert_ne!(compressed_change, uncompressed_change);
-    let bundle = doc.bundle(expected_heads.clone()).unwrap().bytes().to_vec();
+    let bundle = doc
+        .bundle(doc.change_ids_to_hashes(&expected_heads).unwrap())
+        .unwrap()
+        .bytes()
+        .to_vec();
 
     for (chunk_type, bytes) in [
         ("change", uncompressed_change),
@@ -4134,6 +4247,7 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
         ("bundle", bundle),
     ] {
         let mut reconstructed = AutoCommit::new_with_encoding(encoding);
+        reconstructed.enable_audit_mode().unwrap();
         reconstructed.load_incremental(&bytes).unwrap();
 
         assert_eq!(
@@ -4150,6 +4264,7 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
 fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
     let encoding = TextEncoding::UnicodeCodePoint;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, "base").unwrap();
     doc.commit();
@@ -4191,6 +4306,7 @@ fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace
     let mut doc = AutoCommit::new_with_encoding(encoding)
         .with_actor(actor.clone())
         .unwrap();
+    doc.enable_audit_mode().unwrap();
     let mut peer = doc
         .fork()
         .with_actor(ActorId::try_from("7f00000000000000").unwrap())
@@ -4271,6 +4387,7 @@ fn diff_exposes_list_object_when_conflict_winner_is_removed() {
 fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
     let encoding = TextEncoding::Utf8CodeUnit;
     let mut doc = AutoCommit::new_with_encoding(encoding);
+    doc.enable_audit_mode().unwrap();
     doc.set_actor(ActorId::try_from("fe004faf").unwrap())
         .unwrap();
     let text = doc
@@ -4284,15 +4401,15 @@ fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
     doc.commit();
 
     let mut plain = doc.document().clone();
-    let mut actual = plain.hydrate(None);
+    let mut actual = plain.hydrate(None).unwrap();
     let before_heads = plain.get_heads();
     let mut tx = plain.transaction();
     let index = 195 % (tx.length(&text) + 1);
     tx.insert(&text, index, ScalarValue::Uint(150)).unwrap();
     tx.commit();
 
-    let expected = plain.hydrate(None);
-    let patches = plain.diff(&before_heads, &plain.get_heads());
+    let expected = plain.hydrate(None).unwrap();
+    let patches = plain.diff(&before_heads, &plain.get_heads()).unwrap();
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, expected);
@@ -4302,19 +4419,20 @@ fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
 fn transaction_patches_split_block_at_normalized_utf8_index() {
     let encoding = TextEncoding::Utf8CodeUnit;
     let mut source = AutoCommit::new_with_encoding(encoding);
+    source.enable_audit_mode().unwrap();
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.splice_text(&text, 0, 0, "👩🏿‍🚒").unwrap();
     source.commit();
     let mut doc = source.document().clone();
 
-    let mut actual = doc.hydrate(None);
+    let mut actual = doc.hydrate(None).unwrap();
     let before_heads = doc.get_heads();
     let mut tx = doc.transaction();
     tx.split_block(&text, 3).unwrap();
     tx.commit();
-    let expected = doc.hydrate(None);
+    let expected = doc.hydrate(None).unwrap();
     actual
-        .apply_patches(encoding, doc.diff(&before_heads, &doc.get_heads()))
+        .apply_patches(encoding, doc.diff(&before_heads, &doc.get_heads()).unwrap())
         .unwrap();
 
     assert_eq!(actual, expected);
@@ -4324,6 +4442,7 @@ fn transaction_patches_split_block_at_normalized_utf8_index() {
 fn transaction_patches_mark_at_normalized_utf8_indexes() {
     let encoding = TextEncoding::Utf8CodeUnit;
     let mut source = AutoCommit::new_with_encoding(encoding);
+    source.enable_audit_mode().unwrap();
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.splice_text(&text, 0, 0, "👩🏿‍🚒").unwrap();
     source.commit();
@@ -4338,7 +4457,7 @@ fn transaction_patches_mark_at_normalized_utf8_indexes() {
     )
     .unwrap();
     tx.commit();
-    let patches = doc.diff(&before_heads, &doc.get_heads());
+    let patches = doc.diff(&before_heads, &doc.get_heads()).unwrap();
     let PatchAction::Mark { marks } = &patches[0].action else {
         panic!("expected a mark patch, got {:?}", patches[0]);
     };
@@ -4350,6 +4469,7 @@ fn transaction_patches_mark_at_normalized_utf8_indexes() {
 fn queued_change_does_not_collide_with_later_local_change() {
     let actor = ActorId::try_from("7f00000000000000").unwrap();
     let mut local = AutoCommit::new().with_actor(actor.clone()).unwrap();
+    local.enable_audit_mode().unwrap();
     local.put(ROOT, "base", 0).unwrap();
     local.commit();
     let base = local.get_heads();
@@ -4426,14 +4546,16 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
 
     let mut logged_target = target.document().clone();
     let mut logged_right = right.document().clone();
-    let mut actual = logged_target.hydrate(None);
+    let mut actual = logged_target.hydrate(None).unwrap();
     let before_heads = logged_target.get_heads();
     logged_target.merge(&mut logged_right).unwrap();
-    let expected = logged_target.hydrate(None);
+    let expected = logged_target.hydrate(None).unwrap();
     actual
         .apply_patches(
             encoding,
-            logged_target.diff(&before_heads, &logged_target.get_heads()),
+            logged_target
+                .diff(&before_heads, &logged_target.get_heads())
+                .unwrap(),
         )
         .unwrap();
     assert_eq!(actual, expected);
