@@ -264,6 +264,30 @@ describe("patches", () => {
         assert.deepStrictEqual(doc.foo.bar, "qux")
       })
 
+      it("should apply a map deletion patch", () => {
+        let doc = Automerge.from<{ foo: { bar?: string } }>({
+          foo: { bar: "baz" },
+        })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", "bar"],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo.bar, undefined)
+      })
+
+      it("should apply a map deletion patch with numeric key", () => {
+        let doc = Automerge.from<{ foo: { 1?: string } }>({
+          foo: { 1: "baz" },
+        })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", "1"],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo[1], undefined)
+      })
+
       it("should apply a list update patch", () => {
         let doc = Automerge.from<{ foo: string[] }>({ foo: ["bar"] })
         const patch: Patch = {
