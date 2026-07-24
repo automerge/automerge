@@ -939,14 +939,14 @@ export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getObjectId(doc: unknown, prop?: Prop): ObjID | null {
   if (prop) {
-    const state = _state(doc, false)
-    const objectId = _obj(doc)
+    const state = _state(doc as Doc<unknown>, false)
+    const objectId = _obj(doc as Doc<unknown>)
     if (!state || !objectId) {
       return null
     }
     return state.handle.get(objectId, prop) as ObjID
   } else {
-    return _obj(doc)
+    return _obj(doc as Doc<unknown>)
   }
 }
 
