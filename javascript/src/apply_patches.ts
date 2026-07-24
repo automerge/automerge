@@ -73,19 +73,19 @@ function applyDelPatch(
 ) {
   let { obj: parent, prop, parentPath } = pathElemAt(path, -1)
 
-  if (!(typeof prop === "number")) {
-    throw new RangeError(`index is not a number for patch`)
-  }
   if (Array.isArray(parent)) {
+    if (typeof prop !== "number") {
+      throw new RangeError(`index is not a number for patch`)
+    }
     parent.splice(prop, patch.length || 1)
   } else if (typeof parent === "string") {
+    if (typeof prop !== "number") {
+      throw new RangeError(`index is not a number for patch`)
+    }
     if (isAutomerge(doc)) {
       splice(doc as Doc<unknown>, parentPath, prop, patch.length || 1)
     } else {
       let { obj: grandParent, prop: grandParentProp } = pathElemAt(path, -2)
-      if (typeof prop !== "number") {
-        throw new RangeError(`index is not a number for patch`)
-      }
       let target = grandParent[grandParentProp]
       if (target == null || typeof target !== "string") {
         throw new RangeError(`target is not a string for patch`)
@@ -94,8 +94,10 @@ function applyDelPatch(
         target.slice(0, prop) + target.slice(prop + (patch.length || 1))
       grandParent[grandParentProp] = newString
     }
+  } else if (typeof parent === "object" && parent !== null) {
+    delete parent[prop]
   } else {
-    throw new RangeError(`target is not an array or string for patch`)
+    throw new RangeError(`target is not an array, string, or object for patch`)
   }
 }
 
