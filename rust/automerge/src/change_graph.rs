@@ -2360,6 +2360,10 @@ mod tests {
 
         fn build(&self) -> ChangeGraph {
             let mut graph = ChangeGraph::new(self.actors.len());
+            // audit mode, like the builder's own graph: the tests
+            // resolve hashes freely, and random change hashes can
+            // otherwise form fragments and free them
+            graph.hashes = Hashes::Full(Vec::new());
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
                 graph.add_change(change, actor_idx).unwrap();
