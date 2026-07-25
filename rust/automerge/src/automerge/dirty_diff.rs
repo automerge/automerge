@@ -2,14 +2,13 @@ use std::ops::Range;
 
 use crate::clock::ClockRange;
 use crate::iter::{Diff, ListDiff, MapDiff, RichTextDiff, SpansDiff};
-use crate::op_set2::types::{Action, MarkData};
+use crate::op_set2::op_set::MarkIdx;
 use crate::patches::{Patch, PatchAccumulator};
 use crate::types::{ObjId, ObjMeta, ObjType};
 
 use super::Automerge;
 use crate::ChangeId;
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub(crate) enum DirtyDiffError {
     MissingObject(usize),
@@ -140,36 +139,37 @@ impl DirtyObjectContext {
     }
 
     fn advance_text_marks(&mut self, doc: &Automerge, range: Range<usize>, clock: &ClockRange) {
-        // marks are sparse: jump between mark rows via the mark index
-        // instead of decoding every op in the gap
-        for pos in doc.ops().mark_op_positions(range) {
-            let Some(op) = doc.ops().get(pos) else {
-                continue;
-            };
-            if op.action != Action::Mark {
-                continue;
-            }
-            let diff = match (clock.visible_before(&op.id), clock.visible_after(&op.id)) {
+        // marks are sparse, and the mark index already holds everything a
+        // mark op contributes — the id, which end it is, and (via the
+        // cache) its name and value. So this walks the index's runs and
+        // never decodes an op.
+        for idx in doc.ops().mark_index_entries(range) {
+            // both ends are keyed on the op that actually occupies the
+            // row: the clock decides visibility per op, and `mark_end`
+            // derives the begin id from the end op itself
+            let id = idx.op_id();
+            let diff = match (clock.visible_before(&id), clock.visible_after(&id)) {
                 (true, true) => Diff::Same,
                 (true, false) => Diff::Del,
                 (false, true) => Diff::Add,
                 (false, false) => continue,
             };
-            if let Some(name) = op.mark_name {
-                let data = MarkData {
-                    name: name.to_owned().into(),
-                    value: op.value.into_owned(),
-                };
-                self.text_marks.mark_begin_diff(diff, op.id, data);
-            } else {
-                self.text_marks.mark_end_diff(diff, op.id);
+            match idx {
+                MarkIdx::Start(_) => {
+                    let Some(data) = doc.ops().mark_data(&id) else {
+                        continue;
+                    };
+                    self.text_marks.mark_begin_diff(diff, id, data.clone());
+                }
+                MarkIdx::End(_) => {
+                    self.text_marks.mark_end_diff(diff, id);
+                }
             }
         }
     }
 }
 
 impl Automerge {
-    #[allow(dead_code)]
     pub(crate) fn dirty_diff_patches(
         &self,
         before_heads: &[ChangeId],
@@ -198,7 +198,6 @@ impl Automerge {
         Ok(patch_accumulator.make_patches(self))
     }
 
-    #[allow(dead_code)]
     pub(crate) fn dirty_diff_patches_and_clear(
         &mut self,
         before_heads: &[ChangeId],
@@ -215,7 +214,6 @@ impl Automerge {
         Ok(patches)
     }
 
-    #[allow(dead_code)]
     fn log_dirty_diff(
         &self,
         clock: ClockRange,
@@ -227,7 +225,12 @@ impl Automerge {
         for (object, range) in ranges {
             match object.typ {
                 ObjType::Map | ObjType::Table => {
-                    if !self.ops().map_range_is_on_key_boundaries(&range) {
+                    if !self
+                        .ops()
+                        .map_range_is_on_key_boundaries(&range, object.range.clone())
+                    {
+                        // CLAUDE - I dont understand the point of this
+                        // how could it be reached
                         return Err(DirtyDiffError::UnsupportedObjectType(object.typ));
                     }
                     let iter = MapDiff::new(self.ops(), range, clock.clone());
@@ -240,6 +243,8 @@ impl Automerge {
                         .ops()
                         .list_range_is_on_register_boundaries(&range, object.range.clone())
                     {
+                        // CLAUDE - I dont understand the point of this
+                        // how could it be reached
                         return Err(DirtyDiffError::UnsupportedObjectType(object.typ));
                     }
                     let base_index = context.list_index_at(self, &object, range.start);

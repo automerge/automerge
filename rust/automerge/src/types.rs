@@ -477,7 +477,6 @@ impl OpId {
     }
 
     #[inline]
-    #[expect(dead_code)]
     pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
     }

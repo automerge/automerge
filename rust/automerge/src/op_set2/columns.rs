@@ -518,7 +518,6 @@ impl Columns {
         // CopyRange (stamped by the manifold while streaming); only
         // this column set's own positions are resolved here
         let frag_len = frag.len();
-        let frag_value = frag.value.save();
         let subs: Vec<hexane::Splice> = runs
             .iter()
             .map(|cr| hexane::Splice {
@@ -527,15 +526,17 @@ impl Columns {
                 range: cr.sub_range.clone(),
             })
             .collect();
-        {
-            let mut shift = 0usize;
-            for cr in runs {
-                let at = self.value_meta.get_prefix(cr.pos) as usize + shift;
-                self.value
-                    .splice_slice(at, 0, &frag_value[cr.val_range.clone()]);
-                shift += cr.val_range.len();
-            }
-        }
+        // the raw value arena merges like every other column: the byte
+        // offsets come from the (pre-merge) value meta prefix sums, and
+        // the fragment's slabs move across whole. Slab boundaries there
+        // only ever fall on value boundaries, so the merged arena keeps
+        // that invariant and `RawColumn::get` stays a single slice
+        let vals = runs.iter().map(|cr| hexane::Splice {
+            pos: self.value_meta.get_prefix(cr.pos) as usize,
+            delete: 0,
+            range: cr.val_range.clone(),
+        });
+        self.value.copy_ranges(frag.value, vals);
 
         // one multi-point copy per column, each consuming the
         // fragment's column — slab adoption engages whenever the

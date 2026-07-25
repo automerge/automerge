@@ -23,37 +23,6 @@ use hexane::Shiftable;
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-
-/// MANIFOLD_STATS diagnostics: (calls, rows scanned) per scan site.
-pub(crate) static STAT_UPD_SCAN: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_SLOT_WALK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_SLOT_EDGE: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_INS_LESSER: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_MAP_SEEK: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_ADD_SUCC: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_RESET: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-pub(crate) static STAT_JUMP: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-
-pub fn dump_manifold_stats() {
-    let d = |s: &[AtomicU64; 2]| (s[0].swap(0, Relaxed), s[1].swap(0, Relaxed));
-    let (c1, r1) = d(&STAT_UPD_SCAN);
-    let (c2, r2) = d(&STAT_SLOT_WALK);
-    let (c3, r3) = d(&STAT_SLOT_EDGE);
-    let (c4, r4) = d(&STAT_INS_LESSER);
-    let (c5, r5) = d(&STAT_MAP_SEEK);
-    let (c6, r6) = d(&STAT_ADD_SUCC);
-    let (c7, r7) = d(&STAT_RESET);
-    let (c8, r8) = d(&STAT_JUMP);
-    eprintln!("MSTATS upd-elem-scan   calls {:>9} rows {:>12}", c1, r1);
-    eprintln!("MSTATS ins-anchor-scan calls {:>9} rows {:>12}", c2, r2);
-    eprintln!("MSTATS ins-anchor-MISS calls {:>9} rows {:>12}", c3, r3);
-    eprintln!("MSTATS ins-lesser-scan calls {:>9} rows {:>12}", c4, r4);
-    eprintln!("MSTATS map-key-seek    calls {:>9} rows {:>12}", c5, r5);
-    eprintln!("MSTATS add-succ      applies {:>9} entries {:>9}", c6, r6);
-    eprintln!("MSTATS reset-mixed    groups {:>9} rows {:>12}", c7, r7);
-    eprintln!("MSTATS hint-jump       jumps {:>9} dist {:>12}", c8, r8);
-}
 
 /// What a batch resolves to.
 pub(crate) struct ManifoldResult {
@@ -279,20 +248,6 @@ impl<'a> ApplyManifold<'a> {
         self.top.finalize();
     }
 
-    /// Whether MANIFOLD_TRACE=<start>-<end> covers the current op index.
-    fn traced(&self) -> bool {
-        match std::env::var("MANIFOLD_TRACE") {
-            Ok(v) => {
-                let mut it = v.split('-').filter_map(|s| s.parse::<usize>().ok());
-                match (it.next(), it.next()) {
-                    (Some(a), Some(b)) => (a..=b).contains(&self.op_index),
-                    _ => true,
-                }
-            }
-            Err(_) => false,
-        }
-    }
-
     /// Drive the manifold from a fragment's columns: ops stream out of
     /// [`FragOps`] minimally decoded and in document order. When every
     /// remaining op of the current object is fragment-internal (no doc
@@ -462,31 +417,6 @@ impl<'a> ApplyManifold<'a> {
     /// Process one fragment op. Ops must arrive in document order (see
     /// the type-level contract).
     fn apply_frag_op(&mut self, op: &FragOp<'_>) {
-        if std::env::var("BATCH_DEBUG").is_ok() {
-            eprintln!(
-                "mop {:?} key {:?} ins {} del {} obj {:?}",
-                op.id,
-                op.key,
-                op.insert,
-                (op.action == Action::Delete),
-                op.obj
-            );
-        }
-        if self.traced() {
-            eprintln!(
-                "TRACE[{}] IN  op {:?} key {:?} ins {} del {} | pos {} lesser {:?} elem {:?} elem_scope {:?} last_insert {:?}",
-                self.op_index,
-                op.id,
-                op.key,
-                op.insert,
-                (op.action == Action::Delete),
-                self.id_iter.pos(),
-                self.lesser,
-                self.elem,
-                self.elem_scope,
-                self.last_insert,
-            );
-        }
         if let Ok(obj_type) = ObjType::try_from(op.action) {
             self.obj_info.insert(
                 op.id,
@@ -520,16 +450,6 @@ impl<'a> ApplyManifold<'a> {
             if self.key.as_deref() != op.key.key_str() {
                 self.key = op.key.key_str().map(str::to_owned);
                 let key_scope = self.key_iter.seek_to_value(self.key.as_deref(), ..);
-                if self.traced() {
-                    eprintln!(
-                        "TRACE[{}]   key {:?} scope {:?} id_iter (a_pos, a_max, c_pos, c_max) {:?}",
-                        self.op_index,
-                        self.key,
-                        key_scope,
-                        self.id_iter.debug_state()
-                    );
-                }
-
                 self.flush();
                 self.top.open(key_scope.clone());
 
@@ -545,13 +465,7 @@ impl<'a> ApplyManifold<'a> {
                 }
             }
             if !(op.action == Action::Delete) {
-                if std::env::var("BATCH_DEBUG").is_ok() {
-                    eprintln!("  map-seek {:?} id_iter pos {}", op.id, self.id_iter.pos());
-                }
-                let before = self.id_iter.pos();
                 let r = self.id_iter.seek_to_value(&op.id);
-                STAT_MAP_SEEK[0].fetch_add(1, Relaxed);
-                STAT_MAP_SEEK[1].fetch_add((r.start.saturating_sub(before)) as u64, Relaxed);
                 assert!(r.is_empty());
                 self.push_slot(r.start, op.sub_len, op.val_len);
                 self.top.candidate(op, self.op_index, self.last_ins_row);
@@ -598,8 +512,6 @@ impl<'a> ApplyManifold<'a> {
                         let h = h as usize;
                         if h > start && h < self.obj_scope.end {
                             self.id_iter.advance_to(h);
-                            STAT_JUMP[0].fetch_add(1, Relaxed);
-                            STAT_JUMP[1].fetch_add((h - start) as u64, Relaxed);
                             jumped = true;
                         }
                     }
@@ -613,8 +525,6 @@ impl<'a> ApplyManifold<'a> {
                         found = self.id_iter.scan_to_value(&e.0).is_some();
                     }
                     if found {
-                        STAT_SLOT_WALK[0].fetch_add(1, Relaxed);
-                        STAT_SLOT_WALK[1].fetch_add((self.id_iter.pos() - start) as u64, Relaxed);
                         self.consumed.insert(e.0);
                         // the anchor sits past the memo slot, so the
                         // memo cannot apply any more
@@ -624,8 +534,6 @@ impl<'a> ApplyManifold<'a> {
                         // streamed past mid-scan): the memo/hop below
                         // still resolves the slot, this was just the
                         // expensive way to learn "behind"
-                        STAT_SLOT_EDGE[0].fetch_add(1, Relaxed);
-                        STAT_SLOT_EDGE[1].fetch_add((self.obj_scope.end - start) as u64, Relaxed);
                         self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
                     }
                 }
@@ -654,14 +562,7 @@ impl<'a> ApplyManifold<'a> {
                 self.ins.shift(cur..self.obj_scope.end);
                 let epos = self.ins.scan_to_value(true).unwrap_or(self.obj_scope.end);
                 self.id_iter.advance_to(epos);
-                STAT_INS_LESSER[0].fetch_add(1, Relaxed);
-                let lesser_from = self.id_iter.pos();
-                let hit = self.id_iter.scan_to_lesser(op.id);
-                STAT_INS_LESSER[1].fetch_add(
-                    (self.id_iter.pos().saturating_sub(lesser_from)) as u64,
-                    Relaxed,
-                );
-                if let Some((found, row_id)) = hit {
+                if let Some((found, row_id)) = self.id_iter.scan_to_lesser(op.id) {
                     self.push_slot(found, op.sub_len, op.val_len);
                     self.lesser = Some((row_id, found));
                     // the scan stopped on (and consumed) this row — a
@@ -716,8 +617,6 @@ impl<'a> ApplyManifold<'a> {
                                 let h = h as usize;
                                 if h > start && h < self.obj_scope.end {
                                     self.id_iter.advance_to(h);
-                                    STAT_JUMP[0].fetch_add(1, Relaxed);
-                                    STAT_JUMP[1].fetch_add((h - start) as u64, Relaxed);
                                     jumped = true;
                                 }
                             }
@@ -728,11 +627,6 @@ impl<'a> ApplyManifold<'a> {
                                     self.op_set.id_iter_range(&(start..self.obj_scope.end));
                                 found = self.id_iter.scan_to_value(&e.0);
                             }
-                            STAT_UPD_SCAN[0].fetch_add(1, Relaxed);
-                            STAT_UPD_SCAN[1].fetch_add(
-                                (self.id_iter.pos().saturating_sub(start)) as u64,
-                                Relaxed,
-                            );
                             match found {
                                 Some(p) => p,
                                 None => panic!(
@@ -786,16 +680,6 @@ impl<'a> ApplyManifold<'a> {
                 self.top.note_del(self.op_index, self.last_ins_row);
             }
         }
-        if self.traced() {
-            eprintln!(
-                "TRACE[{}] OUT slot {:?} | pos {} lesser {:?} elem_scope {:?}",
-                self.op_index,
-                self.insert_runs.last(),
-                self.id_iter.pos(),
-                self.lesser,
-                self.elem_scope,
-            );
-        }
         self.op_index += 1;
     }
 
@@ -829,7 +713,6 @@ impl<'a> ApplyManifold<'a> {
 /// index bits are straight copies (fragment-standalone or untouched
 /// doc).
 struct TopCalc {
-    enabled: bool,
     // current scope: doc row range (empty for insert/pending scopes)
     doc_scope: Range<usize>,
     // visible batch ops in arrival (= ascending id) order
@@ -859,7 +742,6 @@ struct BatchTop {
 impl TopCalc {
     fn new() -> Self {
         TopCalc {
-            enabled: std::env::var("MANIFOLD_NO_TOP").is_err(),
             doc_scope: 0..0,
             batch: vec![],
             rows: None,
@@ -880,10 +762,6 @@ impl TopCalc {
     /// row and can never be in the batch list, so the common case
     /// never walks it.
     fn kill(&mut self, pred: &OpId, inc: Option<i64>) {
-        if !self.enabled {
-            return;
-        }
-
         if let Some(b) = self.batch.iter_mut().find(|b| b.id == *pred) {
             // same normalization flush applies to doc targets: an
             // increment only preserves a counter
@@ -910,9 +788,6 @@ impl TopCalc {
     /// row): it still occupies a fragment row, and the fragment's
     /// standalone index can fuse it into the preceding register.
     fn note_del(&mut self, index: usize, head: Option<usize>) {
-        if !self.enabled {
-            return;
-        }
         if self.first_row.is_none() {
             self.head_hint = head.filter(|&h| h < index);
         }
@@ -932,9 +807,6 @@ impl TopCalc {
         is_counter: bool,
         alive: bool,
     ) {
-        if !self.enabled {
-            return;
-        }
         self.note_row(index, head);
         self.batch.push(BatchTop {
             id,
@@ -947,10 +819,6 @@ impl TopCalc {
     /// merged range, and — unless it is an increment — it competes for
     /// top with aliveness from its own (normalized) in-fragment succ.
     fn candidate(&mut self, op: &FragOp<'_>, index: usize, head: Option<usize>) {
-        if !self.enabled {
-            return;
-        }
-
         self.note_row(index, head);
         if op.action != Action::Increment {
             self.batch.push(BatchTop {
@@ -964,10 +832,6 @@ impl TopCalc {
     /// Called by the succ flush for every covered pred resolved with
     /// `inc = None` — the rows `add_succ` will clear.
     fn note_deleted(&mut self, _pos: usize) {
-        if !self.enabled {
-            return;
-        }
-
         self.saw_delete = true;
     }
 
@@ -992,10 +856,6 @@ impl TopCalc {
     /// there are no doc rows to target); untouched doc groups keep
     /// theirs.
     fn finalize(&mut self) {
-        if !self.enabled {
-            return;
-        }
-
         let alive = self.batch.iter().any(|b| b.alive);
         if !self.doc_scope.is_empty() && (alive || self.saw_delete) {
             self.mixed_groups.push(MixedGroup {
@@ -1053,9 +913,6 @@ impl SuccCache {
         let mut counter_memo: Option<(OpId, bool)> = None;
         for (pred, succ, mut inc) in self.preds.drain(..) {
             if self.clock.covers(&pred) {
-                if std::env::var("BATCH_DEBUG").is_ok() {
-                    eprintln!("  flush-seek {:?} pred_iter pos {}", pred, pred_iter.pos());
-                }
                 let r = pred_iter.seek_to_value(&pred);
                 assert!(r.len() == 1, "covered pred must be present");
                 if inc.is_some() {

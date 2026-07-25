@@ -22,6 +22,20 @@ pub(crate) enum MarkIndexBuilder {
 }
 
 impl MarkIdx {
+    /// The id of the op occupying this row.
+    ///
+    /// Both variants store the *mark-begin* op's id — that shared key is
+    /// what lets [`MarkAcc`] cancel a `Start` against its `End`. The
+    /// mark-end op's own id is one past it (`Op::mark_index` builds the
+    /// `End` with `self.id.prev()`), so reading the row's op back out
+    /// has to undo that.
+    pub(crate) fn op_id(&self) -> OpId {
+        match self {
+            MarkIdx::Start(id) => *id,
+            MarkIdx::End(id) => id.next(),
+        }
+    }
+
     pub(super) fn as_i64(&self) -> i64 {
         match self {
             MarkIdx::Start(id) => {
@@ -226,10 +240,6 @@ impl MarkIndexColumn {
 
     pub(crate) fn len(&self) -> usize {
         self.data.len()
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.data.is_empty()
     }
 
     pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>> {

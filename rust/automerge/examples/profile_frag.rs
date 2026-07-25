@@ -1,8 +1,7 @@
-// Apply each doc's whole history as a v2 fragment chain, once. Run
-// with FRAG_TIMING=1 and aggregate the per-fragment TIMING laps to see
-// where chain time goes:
+// Apply each doc's whole history as a v2 fragment chain, once — with
+// and without an active patch log:
 //
-//   FRAG_TIMING=1 cargo run --release -p automerge --example profile_frag C1 A1 A2 2>prof.log
+//   cargo run --release -p automerge --example profile_frag C1 A1 A2
 use automerge::Automerge;
 
 fn main() {
@@ -29,7 +28,6 @@ fn main() {
             t.elapsed().as_secs_f64(),
             v2.len()
         );
-        automerge::dump_manifold_stats();
         assert_eq!(d.get_heads(), doc.get_heads());
 
         // same chain with an active patch log — the JS-facing path
@@ -44,6 +42,5 @@ fn main() {
             name,
             t.elapsed().as_secs_f64()
         );
-        automerge::dump_manifold_stats();
     }
 }

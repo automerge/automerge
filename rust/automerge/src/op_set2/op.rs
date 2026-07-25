@@ -860,10 +860,6 @@ pub(crate) struct DocSucc {
 }
 
 impl DocSucc {
-    pub(crate) fn len(&self) -> usize {
-        self.actors.len()
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         self.actors.is_empty()
     }

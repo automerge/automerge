@@ -329,6 +329,13 @@ impl Shiftable for BoolColumnSkipper<'_> {
     // the tail as `pending`; a shift landing inside the owed span trims
     // it and leaves the iter alone (it is already past). Only when
     // nothing is owed does the iter really move.
+    //
+    // FIXME: forward-only. With `pending > 0` and `range.start` *behind*
+    // the cursor the subtraction saturates to zero, so the owed trues are
+    // kept and the inner iterator is never rewound — the skipper silently
+    // reports the window it was already in. Every caller shifts forward
+    // today, but nothing states or checks that; either assert it or make
+    // the backwards case rebuild from the column.
     fn shift(&mut self, range: Range<usize>) {
         self.pending = self
             .pending

@@ -88,7 +88,7 @@ impl Change {
 
     /// The `(actor, seq)` identity of this change.
     pub fn id(&self) -> crate::ChangeId {
-        crate::ChangeId::new(self.seq(), self.actor_id().clone(), 0)
+        crate::ChangeId::from_doc_seq(self.seq(), self.actor_id().clone(), 0)
     }
 
     pub fn seq(&self) -> u64 {

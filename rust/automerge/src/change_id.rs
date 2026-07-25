@@ -51,12 +51,27 @@ pub struct ChangeId {
 }
 
 impl ChangeId {
-    pub(crate) fn new(seq: u64, actor: ActorId, actor_idx_hint: usize) -> Self {
+    /// Takes the sequence number already proven non-zero: sequence
+    /// numbers coming off the wire have to be validated by whoever parses
+    /// them, so that a malformed message is a parse error rather than a
+    /// panic in here.
+    pub(crate) fn new(seq: NonZeroU64, actor: ActorId, actor_idx_hint: usize) -> Self {
         ChangeId {
-            seq: NonZeroU64::new(seq).expect("change sequence numbers are 1-based"),
+            seq,
             actor,
             actor_idx_hint,
         }
+    }
+
+    /// [`Self::new`] for sequence numbers the caller knows are in-range
+    /// because the document minted them (they are 1-based by
+    /// construction). Panics on zero.
+    pub(crate) fn from_doc_seq(seq: u64, actor: ActorId, actor_idx_hint: usize) -> Self {
+        Self::new(
+            NonZeroU64::new(seq).expect("document change sequence numbers are 1-based"),
+            actor,
+            actor_idx_hint,
+        )
     }
 
     /// Construct a change id from its components.
@@ -80,6 +95,12 @@ impl ChangeId {
     /// The 1-based sequence number of the change in the actor's history
     pub fn seq(&self) -> u64 {
         self.seq.get()
+    }
+
+    /// [`Self::seq`] keeping the non-zero proof, for callers building
+    /// another [`ChangeId`] (or wire metadata) out of this one.
+    pub(crate) fn seq_nonzero(&self) -> NonZeroU64 {
+        self.seq
     }
 
     pub(crate) fn actor_idx_hint(&self) -> usize {
@@ -168,7 +189,7 @@ mod tests {
     #[test]
     fn display_and_parse_roundtrip() {
         let actor = ActorId::from(&[0xaa, 0xbb, 0xcc][..]);
-        let id = ChangeId::new(7, actor.clone(), 3);
+        let id = ChangeId::from_doc_seq(7, actor.clone(), 3);
         assert_eq!(id.to_string(), "7@aabbcc");
         let parsed: ChangeId = "7@aabbcc".parse().unwrap();
         // hint differs (0 vs 3) but is non-semantic
@@ -189,7 +210,7 @@ mod tests {
     fn ordering_ignores_hint() {
         let a = ActorId::from(&[0x01][..]);
         let b = ActorId::from(&[0x02][..]);
-        assert!(ChangeId::new(1, b.clone(), 9) < ChangeId::new(2, a.clone(), 0));
-        assert!(ChangeId::new(2, a, 5) < ChangeId::new(2, b, 1));
+        assert!(ChangeId::from_doc_seq(1, b.clone(), 9) < ChangeId::from_doc_seq(2, a.clone(), 0));
+        assert!(ChangeId::from_doc_seq(2, a, 5) < ChangeId::from_doc_seq(2, b, 1));
     }
 }

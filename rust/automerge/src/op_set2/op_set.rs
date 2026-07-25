@@ -31,9 +31,6 @@ use std::sync::Arc;
 mod found_op;
 pub(crate) mod index;
 mod insert;
-// dead_code: the manifold is only consumed by its tests until the
-// batch apply switches over to it
-#[allow(dead_code)]
 pub(crate) mod manifold;
 pub(crate) mod mapped_column;
 mod mark_index;
@@ -49,13 +46,12 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
-#[allow(unused_imports)]
-pub(crate) use mapped_column::{ActorMap, MapActor, MappedColumn, MappedIter};
+pub(crate) use mapped_column::{ActorMap, MappedColumn, MappedIter};
 pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, ActionValueIter, CtrWalker, ElemIter, InsertIter, KeyIter, MarkInfoIter, ObjIdIter,
-    OpIdIter, OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
+    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
 pub(crate) use top_op::{TopIter, TopOps};
@@ -120,29 +116,6 @@ impl OpSet {
         let mut builder = IndexBuilder::new(self.text_encoding);
         builder.process_op_set(self).unwrap();
         let (fresh, _) = builder.finish();
-        if std::env::var("INDEX_DIFF").is_ok() {
-            let a: Vec<_> = self.cols.index.text.values().iter().collect();
-            let b: Vec<_> = fresh.text.values().iter().collect();
-            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
-                if x != y {
-                    eprintln!("text[{}]: have {:?} want {:?}", i, x, y);
-                }
-            }
-            let a: Vec<_> = self.cols.index.top.values().iter().collect();
-            let b: Vec<_> = fresh.top.values().iter().collect();
-            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
-                if x != y {
-                    eprintln!("top[{}]: have {:?} want {:?}", i, x, y);
-                }
-            }
-            let a: Vec<_> = self.cols.index.visible.iter().collect();
-            let b: Vec<_> = fresh.visible.iter().collect();
-            for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
-                if x != y {
-                    eprintln!("vis[{}]: have {:?} want {:?}", i, x, y);
-                }
-            }
-        }
         assert!(
             self.cols
                 .index
@@ -272,54 +245,6 @@ impl OpSet {
 
     /// Re-elect the single register starting at `pos`: it extends to
     /// the next insert row (or the op set's end).
-    /// Diagnostic: positions where the incremental top/text/visible
-    /// columns differ from a fresh rebuild.
-    pub(crate) fn index_diff_positions(&self) -> Vec<(&'static str, usize)> {
-        let mut builder = IndexBuilder::new(self.text_encoding);
-        builder.process_op_set(self).unwrap();
-        let (fresh, _) = builder.finish();
-        let mut out = vec![];
-        for (i, (a, b)) in self
-            .cols
-            .index
-            .top
-            .values()
-            .iter()
-            .zip(fresh.top.values().iter())
-            .enumerate()
-        {
-            if a != b {
-                out.push(("top", i));
-            }
-        }
-        for (i, (a, b)) in self
-            .cols
-            .index
-            .text
-            .values()
-            .iter()
-            .zip(fresh.text.values().iter())
-            .enumerate()
-        {
-            if a != b {
-                out.push(("text", i));
-            }
-        }
-        for (i, (a, b)) in self
-            .cols
-            .index
-            .visible
-            .iter()
-            .zip(fresh.visible.iter())
-            .enumerate()
-        {
-            if a != b {
-                out.push(("vis", i));
-            }
-        }
-        out
-    }
-
     pub(crate) fn reset_register_at(&mut self, pos: usize) {
         let len = self.len();
         let mut end = pos + 1;
@@ -333,17 +258,6 @@ impl OpSet {
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
-        if std::env::var("RESET_DEBUG").is_ok() {
-            let vis: Vec<bool> = self.cols.index.visible.iter_range(range.clone()).collect();
-            let top: Vec<bool> = self
-                .cols
-                .index
-                .top
-                .values()
-                .iter_range(range.clone())
-                .collect();
-            eprintln!("RESET {:?} vis {:?} top {:?}", range, vis, top);
-        }
         let top = self.cols.index.top.values().iter_range(range.clone());
         let vis = self.cols.index.visible.iter_range(range.clone());
 
@@ -552,36 +466,19 @@ impl OpSet {
 
     /// The contiguous run of ops sharing the map key of the op at `pos`,
     /// clamped to `obj_range`.
+    ///
+    /// A map object's ops are ordered by key, so the register is the
+    /// key column's equal-range: one point read plus a binary search,
+    /// rather than materializing the neighbouring ops to compare them.
     pub(crate) fn map_key_register_at_pos(
         &self,
         pos: usize,
         obj_range: Range<usize>,
     ) -> Range<usize> {
-        let Some(op) = self.get(pos) else {
+        let Some(key) = self.cols.key_str.get(pos) else {
             return pos..pos;
         };
-        let key = op.elemid_or_key();
-        let mut start = pos;
-        while start > obj_range.start {
-            let Some(prev) = self.get(start - 1) else {
-                break;
-            };
-            if prev.elemid_or_key() != key {
-                break;
-            }
-            start -= 1;
-        }
-        let mut end = pos + 1;
-        while end < obj_range.end {
-            let Some(next) = self.get(end) else {
-                break;
-            };
-            if next.elemid_or_key() != key {
-                break;
-            }
-            end += 1;
-        }
-        start..end
+        self.cols.key_str.scope_to_value(key, obj_range)
     }
 
     /// Expand `range` (within `obj_range`) outwards to sequence register
@@ -602,31 +499,31 @@ impl OpSet {
         start..end.max(range.end)
     }
 
-    pub(crate) fn map_range_is_on_key_boundaries(&self, range: &Range<usize>) -> bool {
+    /// Whether `range` starts and ends on key-register boundaries — the
+    /// twin of [`Self::list_range_is_on_register_boundaries`], and read
+    /// off the key column the same way [`Self::map_key_register_at_pos`]
+    /// is. `obj_range` bounds the object, so a range ending at the
+    /// object's last row is on a boundary by construction.
+    pub(crate) fn map_range_is_on_key_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+    ) -> bool {
         if range.is_empty() {
             return true;
         }
-        let Some(first) = self.get(range.start) else {
+        if self
+            .map_key_register_at_pos(range.start, obj_range.clone())
+            .start
+            != range.start
+        {
             return false;
-        };
-        if range.start > 0 {
-            if let Some(prev) = self.get(range.start - 1) {
-                if prev.obj == first.obj && prev.elemid_or_key() == first.elemid_or_key() {
-                    return false;
-                }
-            }
         }
-        if range.end < self.len() {
-            let Some(last) = self.get(range.end - 1) else {
-                return false;
-            };
-            if let Some(next) = self.get(range.end) {
-                if next.obj == last.obj && next.elemid_or_key() == last.elemid_or_key() {
-                    return false;
-                }
-            }
+        if range.end < obj_range.end {
+            self.map_key_register_at_pos(range.end, obj_range).start == range.end
+        } else {
+            true
         }
-        true
     }
 
     pub(crate) fn list_range_is_on_register_boundaries(
@@ -670,31 +567,48 @@ impl OpSet {
         self.cols.index.text.sum_range(start..end) as usize
     }
 
+    /// Whether the document contains any marks at all.
+    ///
+    /// This asks the mark cache, which holds one entry per live mark —
+    /// *not* the mark index column, whose length is the document's row
+    /// count and so is non-empty for any document with ops.
     pub(crate) fn has_marks(&self) -> bool {
-        !self.cols.index.mark.is_empty()
+        self.cols.index.mark.has_any_marks()
     }
 
-    /// Positions of mark ops inside `range`, found by walking the sparse
-    /// mark index run-by-run — O(runs), not O(rows), so long mark-free
-    /// stretches cost one run step.
-    pub(crate) fn mark_op_positions(&self, range: Range<usize>) -> Vec<usize> {
-        let mut out = vec![];
-        let mut pos = range.start;
+    /// The mark index entries inside `range`, in document order, walked
+    /// run-by-run — O(runs), not O(rows), so long mark-free stretches
+    /// cost one run step.
+    ///
+    /// The entry carries everything a mark op contributes (its id, and
+    /// whether it begins or ends the mark); pair it with
+    /// [`Self::mark_data`] for the name and value. Nothing here decodes
+    /// an op.
+    pub(crate) fn mark_index_entries(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = MarkIdx> + '_ {
         let mut iter = self.cols.index.mark.iter_range(range);
-        while let Some(run) = iter.next_run() {
-            if run.value.is_some() {
-                out.extend(pos..pos + run.count);
+        std::iter::from_fn(move || loop {
+            let run = iter.next_run()?;
+            if let Some(idx) = run.value {
+                // op ids are unique, so a `Some` run is a single row
+                debug_assert_eq!(run.count, 1);
+                return Some(idx);
             }
-            pos += run.count;
-        }
-        out
+        })
     }
 
+    /// The name and value of the mark begun by `id`.
+    pub(crate) fn mark_data(&self, id: &OpId) -> Option<&MarkData<'static>> {
+        self.cols.index.mark.mark_data(id)
+    }
+
+    /// Whether `range` contains a mark op. Reads the (sparse) mark
+    /// index rather than scanning the action column, so mark-free
+    /// stretches cost one run step.
     pub(crate) fn range_has_mark(&self, range: Range<usize>) -> bool {
-        self.cols
-            .action
-            .iter_range(range)
-            .any(|value| value == Action::Mark)
+        self.mark_index_entries(range).next().is_some()
     }
 
     pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
@@ -1448,12 +1362,6 @@ impl OpSet {
                 .is_some_and(|delta| delta.delta == range.len())
     }
 
-    // dead_code: seek-mode surface awaiting the batch-apply wiring
-    #[allow(dead_code)]
-    pub(crate) fn elem_iter(&self) -> ElemIter<'_> {
-        ElemIter::new(self.cols.key_actor.iter(), self.cols.key_ctr.iter())
-    }
-
     pub(crate) fn key_str_iter(&self) -> hexane::Iter<'_, Option<String>> {
         self.cols.key_str.iter()
     }
@@ -1919,18 +1827,6 @@ impl OpSet {
     pub(crate) fn merge(&mut self, frag: OpSet, runs: &[manifold::CopyRange]) {
         self.obj_info.0.extend(frag.obj_info.0);
         self.cols.merge(frag.cols, runs);
-    }
-
-    /// Rebuild every index column (and obj_info) from scratch with the
-    /// load path's [`IndexBuilder`]. The stopgap companion to
-    /// [`Self::merge`] while the incremental index merge is being
-    /// debugged — correct by construction, O(document).
-    pub(crate) fn rebuild_indexes(&mut self) -> Result<(), ReadOpError> {
-        let mut builder = IndexBuilder::new(self.text_encoding);
-        builder.process_op_set(self)?;
-        let (indexes, _mark_order) = builder.finish();
-        self.set_indexes(indexes);
-        Ok(())
     }
 
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {

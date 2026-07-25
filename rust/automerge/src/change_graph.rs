@@ -1039,7 +1039,7 @@ impl ChangeGraph {
     pub(crate) fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
         let i = n.0 as usize;
         let actor_idx = usize::from(self.actors[i]);
-        ChangeId::new(self.seq[i] as u64, actors[actor_idx].clone(), actor_idx)
+        ChangeId::from_doc_seq(self.seq[i] as u64, actors[actor_idx].clone(), actor_idx)
     }
 
     /// Resolve a [`ChangeId`] back to its node, verifying the id's
@@ -1239,11 +1239,17 @@ impl ChangeGraph {
     /// fragment covering its parents. So this is a proper topological
     /// sort of the fragment DAG, using head node index to break ties
     /// deterministically.
+    ///
+    /// A change DAG is acyclic, so Kahn's algorithm always drains — but
+    /// it drains against the *graph as recorded*, and a graph that lies
+    /// would otherwise leave fragments unranked and silently emit them in
+    /// an order that is not an apply order. That is reported rather than
+    /// papered over.
     pub(crate) fn sort_fragments_for_apply(
         &self,
         fragments: &mut Vec<Fragment>,
         actors: &[crate::ActorId],
-    ) {
+    ) -> Result<(), AutomergeError> {
         let n = fragments.len();
 
         // which fragment owns each member node
@@ -1291,7 +1297,13 @@ impl ChangeGraph {
                 }
             }
         }
-        debug_assert_eq!(order.len(), n, "fragment dependencies form a cycle");
+        if order.len() != n {
+            // every unranked fragment still has an unsatisfied dep, so no
+            // ordering of this set is an apply order
+            return Err(AutomergeError::InvalidFragment(
+                "fragment dependencies form a cycle",
+            ));
+        }
 
         let mut pos = vec![0usize; n];
         for (rank, i) in order.iter().enumerate() {
@@ -1301,6 +1313,7 @@ impl ChangeGraph {
             std::mem::take(fragments).into_iter().enumerate().collect();
         indexed.sort_by_key(|(i, _)| pos[*i]);
         *fragments = indexed.into_iter().map(|(_, f)| f).collect();
+        Ok(())
     }
 
     pub(crate) fn cache_fragments(&mut self) {
@@ -2378,7 +2391,7 @@ mod tests {
         fn all_change_ids(&self) -> Vec<ChangeId> {
             self.changes
                 .iter()
-                .map(|c| ChangeId::new(c.seq(), c.actor_id().clone(), 0))
+                .map(|c| ChangeId::from_doc_seq(c.seq(), c.actor_id().clone(), 0))
                 .collect()
         }
 

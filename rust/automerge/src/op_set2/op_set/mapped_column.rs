@@ -246,7 +246,7 @@ where
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn to_vec(&self) -> Vec<T> {
         self.iter().collect()
     }
@@ -267,15 +267,19 @@ where
         }
     }
 
-    /// Multi-point copy. Same map version: slab-adopting
-    /// [`hexane::Column::copy_ranges`]. Different versions (all
-    /// producers share the doc map, so this should never fire): a
-    /// translate-per-value fallback — correct, never adopting.
+    /// Multi-point copy. Adopting the source's slabs is only sound when
+    /// both sides read their stored codes through the *same* map, so the
+    /// test is `Arc::ptr_eq` — the identity the invariant actually needs.
+    /// (Equal `version()`s are not enough: versions count edits to one
+    /// lineage, so two maps built independently can share a version and
+    /// disagree on every code.) All producers share the document's map,
+    /// so the fallback should never fire; when it does it translates
+    /// per value — correct, never adopting.
     pub(crate) fn copy_ranges<I>(&mut self, src: MappedColumn<T>, splices: I)
     where
         I: IntoIterator<Item = hexane::Splice>,
     {
-        if self.map.version() == src.map.version() {
+        if Arc::ptr_eq(&self.map, &src.map) {
             self.col.copy_ranges(src.col, splices);
         } else {
             let mut shift = 0isize;
@@ -458,12 +462,6 @@ where
         self.iter.advance_by(amount)
     }
 
-    #[allow(dead_code)]
-    #[inline]
-    pub(crate) fn shift(&mut self, range: std::ops::Range<usize>) {
-        self.iter.shift(range)
-    }
-
     #[inline]
     pub(crate) fn shift_next(&mut self, range: std::ops::Range<usize>) -> Option<T> {
         self.iter.set_max(range.end);
@@ -484,18 +482,6 @@ where
             count: run.count,
             value: self.log_val(run.value),
         })
-    }
-
-    /// Equality scan: translate the target once, delegate raw.
-    #[allow(dead_code)]
-    pub(crate) fn scan_to_value(&mut self, target: T) -> Option<usize> {
-        if self.map.is_identity() {
-            self.iter.scan_to_value(target)
-        } else {
-            let map = &self.map;
-            let t = target.map_actor(|a| map.sto(a));
-            self.iter.scan_to_value(t)
-        }
     }
 
     /// Order search within a (small, counter-narrowed) window: walk
@@ -665,6 +651,51 @@ mod tests {
         for l in 0..3u32 {
             assert_eq!(m.log(m.sto(ActorIdx(l))), ActorIdx(l));
         }
+    }
+
+    /// Two maps built independently from the same starting point end up
+    /// with the same `version` but disagree on every code — the reason
+    /// [`MappedColumn::copy_ranges`] tests identity with `Arc::ptr_eq`
+    /// and not version equality.
+    #[test]
+    fn same_version_maps_are_not_interchangeable() {
+        let a = ActorMap::identity().insert(0, 2);
+        let b = ActorMap::identity().insert(1, 2);
+        assert_eq!(a.version(), b.version(), "versions collide");
+        assert!(!Arc::ptr_eq(&a, &b));
+        // ...and they really are different bijections
+        assert_ne!(a.log(ActorIdx(0)), b.log(ActorIdx(0)));
+    }
+
+    /// A copy between columns on different maps must translate rather
+    /// than adopt slabs: the destination's logical values are what the
+    /// caller wrote on either side, never the raw stored codes.
+    #[test]
+    fn copy_ranges_translates_across_distinct_maps() {
+        let dst_map = ActorMap::identity().insert(0, 2);
+        let src_map = ActorMap::identity().insert(1, 2);
+        assert_eq!(dst_map.version(), src_map.version());
+
+        let logical = |v: &[u32]| -> Vec<ActorIdx> { v.iter().map(|&x| ActorIdx(x)).collect() };
+
+        let mut dst = MappedColumn::from_logical_values(logical(&[0, 1]), dst_map.clone());
+        let src = MappedColumn::from_logical_values(logical(&[2, 1, 0]), src_map);
+
+        // append src's rows 1..3 to the end of dst
+        dst.copy_ranges(
+            src,
+            [hexane::Splice {
+                pos: 2,
+                delete: 0,
+                range: 1..3,
+            }],
+        );
+
+        // the values that went in are the values that come out — a
+        // version-equality check here would have adopted src's slabs and
+        // reinterpreted its stored codes through dst's map
+        assert_eq!(dst.to_vec(), logical(&[0, 1, 1, 0]));
+        assert!(Arc::ptr_eq(dst.actor_map(), &dst_map), "map unchanged");
     }
 
     /// A column written pre-insert, read post-insert: the stored slabs

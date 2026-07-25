@@ -388,16 +388,6 @@ impl<'a> OpIdIter<'a> {
 }
 
 impl OpIdIter<'_> {
-    /// Debug: (actor pos, actor max, ctr pos, ctr max).
-    pub(crate) fn debug_state(&self) -> (usize, usize, usize, usize) {
-        (
-            self.actor.pos(),
-            self.actor.end_pos(),
-            self.ctr.pos(),
-            self.ctr.end_pos(),
-        )
-    }
-
     // FIXME this needs test
     // this is only valid on a range of sorted op ids
     pub(crate) fn seek_to_value(&mut self, target: &OpId) -> Range<usize> {
@@ -550,81 +540,6 @@ impl Shiftable for InsertIter<'_> {
 
 impl Iterator for InsertIter<'_> {
     type Item = bool;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().ok()
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.try_nth(n).ok()
-    }
-}
-
-// dead_code: seek-mode surface awaiting the batch-apply wiring
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub(crate) struct ElemIter<'a> {
-    key_actor: MappedIter<'a, Option<ActorIdx>>,
-    key_ctr: hexane::DeltaIter<'a, Option<u32>>,
-}
-
-#[allow(dead_code)]
-impl<'a> ElemIter<'a> {
-    pub(crate) fn new(
-        key_actor: MappedIter<'a, Option<ActorIdx>>,
-        key_ctr: hexane::DeltaIter<'a, Option<u32>>,
-    ) -> Self {
-        Self { key_actor, key_ctr }
-    }
-
-    pub(crate) fn try_next(&mut self) -> Result<Option<ElemId>, ReadOpError> {
-        let key_actor = self
-            .key_actor
-            .next()
-            .ok_or(ReadOpError::MissingValue("key_actor"))?;
-        let key_ctr = self
-            .key_ctr
-            .next()
-            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        ElemId::try_load(key_actor, key_ctr.map(i64::from))
-    }
-
-    pub(crate) fn try_nth(&mut self, n: usize) -> Result<Option<ElemId>, ReadOpError> {
-        let key_actor = self
-            .key_actor
-            .nth(n)
-            .ok_or(ReadOpError::MissingValue("key_actor"))?;
-        let key_ctr = self
-            .key_ctr
-            .nth(n)
-            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        ElemId::try_load(key_actor, key_ctr.map(i64::from))
-    }
-}
-
-impl<'a> Shiftable for ElemIter<'a> {
-    fn get_pos(&self) -> usize {
-        self.key_actor.pos()
-    }
-
-    fn get_max(&self) -> usize {
-        self.key_actor.end_pos()
-    }
-
-    fn set_max(&mut self, pos: usize) {
-        self.key_actor.set_max(pos);
-        self.key_ctr.set_max(pos);
-    }
-
-    fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
-        let key_actor = self.key_actor.shift_next(range.clone())?;
-        let key_ctr = self.key_ctr.shift_next(range)?;
-        ElemId::try_load(key_actor, key_ctr.map(i64::from)).ok()
-    }
-}
-
-impl<'a> Iterator for ElemIter<'a> {
-    type Item = Option<ElemId>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().ok()

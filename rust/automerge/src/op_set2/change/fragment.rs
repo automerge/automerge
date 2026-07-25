@@ -124,12 +124,8 @@ fn load_frag_set(
     doc_ops: &crate::op_set2::op_set::OpSet,
 ) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
     let (raw, data, id_ctr) = src.parts();
-    crate::op_set2::op_set::OpSet::load_frag(raw, data, id_ctr, actor_map, doc_ops).map_err(|e| {
-        if std::env::var("FRAG_DEBUG").is_ok() {
-            eprintln!("fragment column load failed: {}", e);
-        }
-        AutomergeError::InvalidFragment("invalid fragment op columns")
-    })
+    crate::op_set2::op_set::OpSet::load_frag(raw, data, id_ctr, actor_map, doc_ops)
+        .map_err(|_| AutomergeError::InvalidFragment("invalid fragment op columns"))
 }
 
 /// Decode a doc-ordered succ-format op stream into splice-ready
@@ -246,22 +242,9 @@ impl<'a> FragmentApply<'a> {
         // defer to the batch side
         debug_assert!(r.change_succ.is_empty(), "fragment op had a batch pred");
 
-        if std::env::var("MERGE_DEBUG").is_ok() {
-            eprintln!("== merge: runs {:?}", r.insert_runs);
-            eprintln!("   mixed groups {:?}", r.mixed_groups);
-            eprintln!("== frag opset ==");
-            self.frag.dump();
-        }
-
         // write the doc succ while positions are still pre-merge —
         // add_succ also clears vis/top/text on rows it deletes, so the
         // visible column is final before the elections below read it
-        crate::op_set2::op_set::manifold::STAT_ADD_SUCC[0]
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        crate::op_set2::op_set::manifold::STAT_ADD_SUCC[1].fetch_add(
-            r.doc_succ.len() as u64,
-            std::sync::atomic::Ordering::Relaxed,
-        );
         doc.ops.add_succ(std::mem::take(&mut r.doc_succ));
 
         // the merge: copy the fragment's columns and indexes in at the
@@ -270,46 +253,8 @@ impl<'a> FragmentApply<'a> {
 
         // top/text are the only index bits that aren't a straight copy,
         // and only in groups shared between the doc and the fragment —
-        // re-run the last-visible election over each such group.
-        // INDEX_REBUILD=1 rebuilds everything from scratch instead (A/B
-        // debugging fallback)
-        if std::env::var("INDEX_REBUILD").is_ok() {
-            doc.ops
-                .rebuild_indexes()
-                .map_err(|_| AutomergeError::InvalidFragment("index rebuild failed"))?;
-        } else {
-            reset_mixed_groups(doc, &r);
-            if std::env::var("MERGE_VALIDATE").is_ok() {
-                let diffs = doc.ops.index_diff_positions();
-                if !diffs.is_empty() {
-                    let runs = &r.insert_runs;
-                    let mut shifts = Vec::with_capacity(runs.len());
-                    let mut acc = 0usize;
-                    for cr in runs.iter() {
-                        shifts.push(acc);
-                        acc += cr.range.len();
-                    }
-                    for (col, pos) in &diffs {
-                        // provenance: which frag run (or doc row) owns pos
-                        let mut src = "past all runs".to_string();
-                        for (k, cr) in runs.iter().enumerate() {
-                            let base = cr.pos + shifts[k];
-                            if *pos >= base && *pos < base + cr.range.len() {
-                                src = format!("frag row {}", cr.range.start + (pos - base));
-                                break;
-                            } else if *pos < base {
-                                src = format!("doc row {}", pos - shifts[k]);
-                                break;
-                            }
-                        }
-                        eprintln!("IDXDIFF {} at {} ({})", col, pos, src);
-                    }
-                    eprintln!("  runs {:?}", r.insert_runs);
-                    eprintln!("  mixed {:?}", r.mixed_groups);
-                    panic!("index diverges after mixed-group reset");
-                }
-            }
-        }
+        // re-run the last-visible election over each such group
+        reset_mixed_groups(doc, &r);
 
         #[cfg(debug_assertions)]
         if !doc.ops.validate_op_order() {
@@ -387,10 +332,6 @@ fn reset_mixed_groups(doc: &mut Automerge, r: &crate::op_set2::op_set::manifold:
             start = start.min(row_pos(lo));
             end = end.max(row_pos(hi) + 1);
         }
-        crate::op_set2::op_set::manifold::STAT_RESET[0]
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        crate::op_set2::op_set::manifold::STAT_RESET[1]
-            .fetch_add((end - start) as u64, std::sync::atomic::Ordering::Relaxed);
         doc.ops.reset_top_range(start..end);
     }
 }
@@ -424,7 +365,7 @@ mod tests {
             .collect();
         assert_eq!(heads.len(), 1, "test fragments must have a single head");
         let head = heads[0];
-        let id = |c: &Change| ChangeId::new(c.seq(), c.actor_id().clone(), 0);
+        let id = |c: &Change| ChangeId::from_doc_seq(c.seq(), c.actor_id().clone(), 0);
         // members lead with the head, matching Fragment::export
         let mut members = vec![id(head)];
         members.extend(changes.iter().filter(|c| c.hash() != head.hash()).map(&id));

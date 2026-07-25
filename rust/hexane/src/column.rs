@@ -1889,49 +1889,8 @@ where
 
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
-    pub fn finalize(mut self) -> Result<Column<T, C, WF, Idx>, PackError> {
-        use crate::encoding::LoadIterApi;
-        if let Some((value, len)) = self.fill {
-            if len == 0 {
-                return Ok(Column::with_max_segments(self.max_segments));
-            }
-            return Ok(Column::fill(len, value));
-        }
-        if WF::ACCUMULATES {
-            // `iter.finalize()` below drains and validates whatever is
-            // left, but its fast discard loop never materializes runs —
-            // accumulating weights need every run to pass through
-            // `attribute`, so eat the tail here first (the finalize
-            // below then only flushes the last slab)
-            while self.try_next_run()?.is_some() {}
-        }
-        let slabs = self.iter.finalize()?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        if let Some(expected) = self.length {
-            if total_len != expected {
-                return Err(PackError::InvalidLength(total_len, expected));
-            }
-        }
-        let index = if WF::ACCUMULATES {
-            let mut weights = self.weights;
-            // the final slab is only cut by `finalize` itself; whatever is
-            // not yet attributed to a closed slab belongs to it
-            if weights.len() < slabs.len() {
-                weights.push(self.cur_weight);
-            }
-            debug_assert_eq!(weights.len(), slabs.len());
-            Idx::from_weights(weights)
-        } else {
-            Idx::from_weights(slabs.iter().map(WF::compute))
-        };
-        Ok(Column {
-            slabs,
-            index,
-            total_len,
-            max_segments: self.max_segments,
-            counter: 0,
-            _phantom: PhantomData,
-        })
+    pub fn finalize(self) -> Result<Column<T, C, WF, Idx>, PackError> {
+        self.finalize_with(|_| Ok(()))
     }
 
     /// Like [`finalize`](Self::finalize), but runs `check` over every

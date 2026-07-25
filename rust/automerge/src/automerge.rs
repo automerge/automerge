@@ -1357,7 +1357,7 @@ impl Automerge {
         // return them oldest to newest, in causal order — the order
         // apply_fragment needs them in
         self.change_graph
-            .sort_fragments_for_apply(&mut fragments, &self.ops.actors);
+            .sort_fragments_for_apply(&mut fragments, &self.ops.actors)?;
         Ok(fragments)
     }
 
@@ -1444,13 +1444,19 @@ impl Automerge {
         let boundary = f
             .boundary
             .iter()
-            .map(|h| change_id(h).map(|id| (*h, id.actor().clone(), id.seq())))
+            .map(|h| change_id(h).map(|id| (*h, id.actor().clone(), id.seq_nonzero())))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
         let dep_ids = bundle
             .deps()
             .iter()
-            .map(|h| change_id(h).map(|id| (id.actor().clone(), id.seq())))
+            .map(|h| change_id(h).map(|id| (id.actor().clone(), id.seq_nonzero())))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(unknown)?;
+        // mirrors what `BundleV2::try_from` validates on the way back in
+        let member_seqs = bundle
+            .iter_changes()
+            .map(|c| std::num::NonZeroU64::new(c.seq))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
 
@@ -1460,6 +1466,7 @@ impl Automerge {
             checkpoints,
             boundary,
             dep_ids,
+            member_seqs,
             bundle,
         ))
     }
@@ -1564,15 +1571,9 @@ impl Automerge {
             let next = next_seq[m.actor].unwrap_or(have + 1);
             match m.seq.cmp(&next) {
                 Ordering::Less => continue, // already have this change
-                Ordering::Greater => {
-                    if std::env::var("FRAG_DEBUG").is_ok() {
-                        eprintln!(
-                            "member {} of {}: actor {} seq {} but expected {}",
-                            i, num_members, m.actor, m.seq, next
-                        );
-                    }
-                    return Err(AutomergeError::MissingDeps);
-                }
+                // a gap in this actor's chain: the fragment is not
+                // applicable to this document yet
+                Ordering::Greater => return Err(AutomergeError::MissingDeps),
                 Ordering::Equal => {}
             }
             next_seq[m.actor] = Some(next + 1);
@@ -1600,6 +1601,17 @@ impl Automerge {
 
         // record the boundary pairings — every boundary head is an
         // ancestor of the members, so it must already be a node here
+        //
+        // FIXME: this loop, and the dep loop below, record hashes into
+        // the change graph *before* a later entry can return
+        // `MissingDeps` — so a rejected bundle can still leave hash ->
+        // node pairings (and the fragment-index entries `cache_fragment`
+        // derives from them) behind, contradicting this method's "nothing
+        // is applied on error" contract. The pairings are unverified
+        // bundle metadata, and `has_change` consults them, so a bad
+        // bundle can teach the document a hash it does not have. Resolve
+        // and drain the pairings first, then commit them only once every
+        // member has resolved.
         for (hash, actor, seq) in &v2.boundary {
             let id = ChangeId::new(*seq, actor.clone(), 0);
             let node = self
@@ -1616,9 +1628,10 @@ impl Automerge {
         // Skipped members' deps are not consulted at all.
         let member_ids: Vec<ChangeId> = members
             .iter()
-            .map(|m| {
+            .zip(&v2.member_seqs)
+            .map(|(m, seq)| {
                 let doc_actor = actor_map[m.actor];
-                ChangeId::new(m.seq, self.ops.actors[doc_actor].clone(), doc_actor)
+                ChangeId::new(*seq, self.ops.actors[doc_actor].clone(), doc_actor)
             })
             .collect();
         let mut graph_members = Vec::with_capacity(num_kept);
@@ -1851,7 +1864,7 @@ impl Automerge {
     /// The [`ChangeId`] naming the change at (actor index, seq) — the
     /// index is stamped as the id's hint.
     pub(crate) fn change_id_at(&self, actor_idx: usize, seq: u64) -> ChangeId {
-        ChangeId::new(seq, self.ops.actors[actor_idx].clone(), actor_idx)
+        ChangeId::from_doc_seq(seq, self.ops.actors[actor_idx].clone(), actor_idx)
     }
 
     /// Resolve each id to its node, erroring on ids not in this document.

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
@@ -10,7 +8,9 @@ use crate::op_set2::{Op, OpQuery, OpQueryTerm, OpType};
 use crate::text_value::ConcreteTextValue;
 use crate::types::{Clock, ObjId as InternalObjId, SequenceType};
 use crate::value::{ScalarValue, Value as PublicValue};
-use crate::{Automerge, AutomergeError, ChangeId, ObjType, Patch, PatchAction, Prop, TextEncoding};
+#[cfg(test)]
+use crate::AutomergeError;
+use crate::{Automerge, ChangeId, ObjType, Patch, PatchAction, Prop, TextEncoding};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectValue {
@@ -118,38 +118,6 @@ pub(crate) fn assert_patches_have_same_effect(
 }
 
 #[track_caller]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn assert_patches_have_same_effect_for_obj(
-    doc: &Automerge,
-    obj: &ExId,
-    before: &[ChangeId],
-    after: &[ChangeId],
-    left_label: &str,
-    left: &[Patch],
-    right_label: &str,
-    right: &[Patch],
-) {
-    let before_value = EffectValue::from_doc_obj(doc, obj, Some(before))
-        .expect("object should materialize at before heads");
-    let expected = EffectValue::from_doc_obj(doc, obj, Some(after))
-        .expect("object should materialize at after heads");
-    let left_value = apply_patch_effects_for_obj(doc, obj, before_value.clone(), left_label, left);
-    let right_value = apply_patch_effects_for_obj(doc, obj, before_value, right_label, right);
-    assert_eq!(
-        left_value, expected,
-        "{left_label} patches did not produce the expected object after-state"
-    );
-    assert_eq!(
-        right_value, expected,
-        "{right_label} patches did not produce the expected object after-state"
-    );
-    assert_eq!(
-        left_value, right_value,
-        "{left_label} and {right_label} patches have different object effects"
-    );
-}
-
-#[track_caller]
 fn apply_patch_effects(
     doc: &Automerge,
     mut value: EffectValue,
@@ -162,20 +130,6 @@ fn apply_patch_effects(
     value
 }
 
-#[track_caller]
-fn apply_patch_effects_for_obj(
-    doc: &Automerge,
-    obj: &ExId,
-    mut value: EffectValue,
-    label: &str,
-    patches: &[Patch],
-) -> EffectValue {
-    value
-        .apply_patches_for_obj(obj, doc.text_encoding(), patches.iter().cloned())
-        .unwrap_or_else(|err| panic!("{label} object patches failed to apply: {err}"));
-    value
-}
-
 impl EffectValue {
     pub(crate) fn from_doc(doc: &Automerge, heads: Option<&[ChangeId]>) -> Self {
         let clock = heads.and_then(|heads| {
@@ -185,6 +139,7 @@ impl EffectValue {
         EffectMaterializer::new(doc).hydrate_map(&InternalObjId::root(), clock.as_ref())
     }
 
+    #[cfg(test)]
     pub(crate) fn from_doc_obj(
         doc: &Automerge,
         obj: &ExId,
@@ -216,6 +171,7 @@ impl EffectValue {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_patches_for_obj<I>(
         &mut self,
         obj: &ExId,
@@ -353,20 +309,6 @@ impl EffectMap {
     }
 }
 
-impl EffectMapValue {
-    fn apply<'a, I>(
-        &mut self,
-        path: I,
-        encoding: TextEncoding,
-        action: PatchAction,
-    ) -> Result<(), PatchEffectError>
-    where
-        I: Iterator<Item = &'a Prop>,
-    {
-        self.value.apply(path, encoding, action)
-    }
-}
-
 impl EffectList {
     fn push(&mut self, value: EffectValue, marks: EffectMarks, conflict: bool) {
         self.0.push(EffectListValue {
@@ -462,20 +404,6 @@ impl EffectList {
             value.marks.apply_mark(&mark);
         }
         Ok(())
-    }
-}
-
-impl EffectListValue {
-    fn apply<'a, I>(
-        &mut self,
-        path: I,
-        encoding: TextEncoding,
-        action: PatchAction,
-    ) -> Result<(), PatchEffectError>
-    where
-        I: Iterator<Item = &'a Prop>,
-    {
-        self.value.apply(path, encoding, action)
     }
 }
 
@@ -1005,6 +933,7 @@ impl<'a> EffectMaterializer<'a> {
     }
 }
 
+#[cfg(test)]
 fn scoped_props(obj: &ExId, patch: &Patch) -> Result<Vec<Prop>, PatchEffectError> {
     if obj == &ExId::Root {
         return Ok(patch.path.iter().map(|(_, prop)| prop.clone()).collect());
