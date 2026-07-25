@@ -1,11 +1,12 @@
 use automerge::iter::Span;
 use automerge::marks::{ExpandMark, Mark};
-use automerge::sync::{self, SyncDoc};
 use automerge::transaction::Transactable;
 use automerge::{
     hydrate, hydrate_map, hydrate_text, ActorId, AutoCommit, Automerge, ObjType, ReadDoc,
     ScalarValue, ROOT,
 };
+use automerge_sync as sync;
+use automerge_sync::Sync;
 
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
     doc.set_actor(ActorId::from(actor.to_vec())).unwrap();
@@ -80,23 +81,14 @@ fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
 
     let mut left_state = sync::State::new();
     let mut right_state = sync::State::new();
-    let message = left
-        .sync()
-        .generate_sync_message(&mut left_state)
+    let message = Sync::generate_sync_message(left.document(), &mut left_state)
         .unwrap()
         .unwrap();
-    right
-        .sync()
-        .receive_sync_message(&mut right_state, message)
-        .unwrap();
-    let message = right
-        .sync()
-        .generate_sync_message(&mut right_state)
+    Sync::receive_sync_message(right.document_mut(), &mut right_state, message).unwrap();
+    let message = Sync::generate_sync_message(right.document(), &mut right_state)
         .unwrap()
         .unwrap();
-    left.sync()
-        .receive_sync_message(&mut left_state, message)
-        .unwrap();
+    Sync::receive_sync_message(left.document_mut(), &mut left_state, message).unwrap();
 }
 
 #[test]

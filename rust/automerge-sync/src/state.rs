@@ -1,10 +1,8 @@
 use std::collections::BTreeSet;
 
-#[cfg(doc)]
-use super::SyncDoc;
 use super::{encode_hashes, BloomFilter, Capability};
-use crate::storage::parse;
-use crate::ChangeHash;
+use crate::parse;
+use automerge::ChangeHash;
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 

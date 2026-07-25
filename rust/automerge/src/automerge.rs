@@ -2393,13 +2393,76 @@ impl Automerge {
         Ok(())
     }
 
-    /// Whether the peer represented by `other` has all the changes we have
-    pub fn has_our_changes(&self, other: &crate::sync::State) -> bool {
-        other.shared_heads == self.get_head_hashes()
+    // ── Replication ─────────────────────────────────────────────────
+    //
+    // The surface a replication protocol needs — see
+    // [`automerge-sync`](https://docs.rs/automerge-sync), which is built
+    // on exactly these. They are hash-keyed rather than
+    // [`ChangeId`]-keyed because a peer talks about changes this
+    // document does not have, which a `ChangeId` could not name.
+    //
+    // Prefer a protocol crate over calling these directly; they are
+    // public so one can be written outside automerge, not because they
+    // are a convenient way to read a document.
+
+    /// Whether the document contains `hash`.
+    pub fn has_change(&self, hash: &ChangeHash) -> Result<bool, AutomergeError> {
+        Ok(self.change_graph.has_change(hash)?)
     }
 
-    pub(crate) fn has_change(&self, head: &ChangeHash) -> Result<bool, AutomergeError> {
-        Ok(self.change_graph.has_change(head)?)
+    /// Every change hash reachable from `have`, in topological order;
+    /// with `have` empty, the whole document.
+    pub fn change_hashes(
+        &self,
+        have: &[ChangeHash],
+    ) -> Result<std::borrow::Cow<'_, [ChangeHash]>, AutomergeError> {
+        Ok(self.change_graph.get_hashes(have)?)
+    }
+
+    /// The number of changes in the document.
+    pub fn num_changes(&self) -> usize {
+        self.change_graph.len()
+    }
+
+    /// The hashes `hash` directly depends on.
+    pub fn change_deps(&self, hash: &ChangeHash) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.change_graph
+            .deps(hash)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// The changes named by `hashes`, in topological order.
+    pub fn changes_by_hash(&self, hashes: &[ChangeHash]) -> Result<Vec<Change>, AutomergeError> {
+        self.get_changes_by_hashes(hashes.iter().copied())
+    }
+
+    /// Remove from `of` every hash which is an ancestor of `heads`
+    /// (`heads` this document does not have are ignored).
+    pub fn remove_ancestors(
+        &self,
+        heads: &[ChangeHash],
+        of: &mut BTreeSet<ChangeHash>,
+    ) -> Result<(), AutomergeError> {
+        self.filter_changes(heads, of)
+    }
+
+    /// The hashes reachable from `from` which this document is missing.
+    ///
+    /// Unlike [`ReadDoc::get_missing_deps`] the starting points need not
+    /// be present here — they are typically another peer's heads.
+    pub fn missing_deps(&self, from: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.missing_deps_from(from.iter().copied())
+    }
+
+    /// [`Self::missing_deps`] but also starting from everything already
+    /// queued — "what do I need to unblock what I am holding?" rather
+    /// than "what do I need to reach these heads?".
+    pub fn missing_deps_with_queued(
+        &self,
+        from: &[ChangeHash],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.get_missing_deps_hashes(from)
     }
 
     /// Hash-based version of [`ReadDoc::get_missing_deps`], for callers (like the
@@ -2763,7 +2826,6 @@ mod dirty_diff_tests {
     use crate::{
         marks::{ExpandMark, Mark},
         op_set2::types::Action,
-        sync::{State as SyncState, SyncDoc},
         transaction::Transactable,
         types::ObjId,
         ActorId, AutoCommit, Automerge, ScalarValue, ROOT,
@@ -3004,14 +3066,13 @@ mod dirty_diff_tests {
         let mut tx = source.transaction();
         tx.put(ROOT, "synced", 3).unwrap();
         tx.commit();
-        let mut sync_state = SyncState::new();
-        let message = source.generate_sync_message(&mut sync_state).unwrap();
-
+        // a v2 sync message carries the whole saved document, and
+        // receiving one is exactly this `load_incremental` — so the leg
+        // is tested here without depending on the sync protocol
         let mut doc = Automerge::new();
         doc.enable_audit_mode().unwrap();
         let before = doc.get_heads();
-        doc.receive_sync_message(&mut SyncState::new(), message.unwrap())
-            .unwrap();
+        doc.load_incremental(&source.save()).unwrap();
         let after = doc.get_heads();
         assert_incremental_effect_matches_full(&mut doc, &before, &after);
         assert!(doc.ops().dirty_runs().next().is_none());
@@ -4473,13 +4534,11 @@ mod dirty_diff_tests {
         tx.splice_text(&text, index, del, value).unwrap();
         tx.commit();
 
-        let mut sync_state = SyncState::new();
-        let message = doc2.generate_sync_message(&mut sync_state).unwrap();
-
+        // stands in for receiving a v2 sync message, which is exactly
+        // this `load_incremental` of the peer's saved document
         doc1.ops_mut().clear_dirty();
         let before = doc1.get_heads();
-        doc1.receive_sync_message(&mut SyncState::new(), message.unwrap())
-            .unwrap();
+        doc1.load_incremental(&doc2.save()).unwrap();
         let after = doc1.get_heads();
 
         assert_dirty_diff_matches_full(&doc1, &before, &after);
@@ -4532,13 +4591,11 @@ mod dirty_diff_tests {
         tx.splice_text(&text, index, del, value).unwrap();
         tx.commit();
 
-        let mut sync_state = SyncState::new();
-        let message = doc2.generate_sync_message(&mut sync_state).unwrap();
-
+        // stands in for receiving a v2 sync message, which is exactly
+        // this `load_incremental` of the peer's saved document
         doc1.ops_mut().clear_dirty();
         let before = doc1.get_heads();
-        doc1.receive_sync_message(&mut SyncState::new(), message.unwrap())
-            .unwrap();
+        doc1.load_incremental(&doc2.save()).unwrap();
         let after = doc1.get_heads();
 
         assert_dirty_diff_matches_full(&doc1, &before, &after);

@@ -6,16 +6,19 @@
 //!
 //! Each peer maintains a [`State`] for each peer they are synchronizing with.
 //! This state tracks things like what the heads of the other peer are and
-//! whether there are in-flight messages. Anything which implements [`SyncDoc`]
-//! can take part in the sync protocol. The flow goes something like this:
+//! whether there are in-flight messages. Anything which implements
+//! The protocol works on an [`automerge::Automerge`]; an
+//! [`automerge::AutoCommit`] hands one over with `document()` /
+//! `document_mut()`, which settle its open transaction first. The flow
+//! goes something like this:
 //!
 //! * The initiating peer creates an empty [`State`] and then calls
-//!   [`SyncDoc::generate_sync_message()`] to generate new sync message and sends
+//!   [`Sync::generate_sync_message()`] to generate new sync message and sends
 //!   it to the receiving peer.
 //! * The receiving peer receives a message from the initiator, creates a new
-//!   [`State`], and calls [`SyncDoc::receive_sync_message()`] on it's view of the
+//!   [`State`], and calls [`Sync::receive_sync_message()`] on it's view of the
 //!   document
-//! * The receiving peer then calls [`SyncDoc::generate_sync_message()`] to generate
+//! * The receiving peer then calls [`Sync::generate_sync_message()`] to generate
 //!   a new sync message and send it back to the initiator
 //! * From this point on each peer operates in a loop, receiving a sync message
 //!   from the other peer and then generating a new message to send back.
@@ -23,66 +26,62 @@
 //! ## Example
 //!
 //! ```
-//! use automerge::{transaction::Transactable, sync::{self, SyncDoc}, ReadDoc};
+//! use automerge::{transaction::Transactable, ReadDoc, ROOT};
+//! use automerge_sync::{State, Sync};
 //! # fn main() -> Result<(), automerge::AutomergeError> {
 //! // Create a document on peer1. The sync protocol is hash-based
 //! // throughout, so syncing requires audit mode.
 //! let mut peer1 = automerge::AutoCommit::new();
 //! peer1.enable_audit_mode()?;
-//! peer1.put(automerge::ROOT, "key", "value")?;
+//! peer1.put(ROOT, "key", "value")?;
 //!
 //! // Create a state to track our sync with peer2
-//! let mut peer1_state = sync::State::new();
-//! // Generate the initial message to send to peer2, unwrap for brevity
-//! let message1to2 = peer1.sync().generate_sync_message(&mut peer1_state).unwrap().unwrap();
+//! let mut peer1_state = State::new();
+//! // Generate the initial message to send to peer2, unwrap for brevity.
+//! // `document()` settles peer1's open transaction first.
+//! let message1to2 = Sync::generate_sync_message(peer1.document(), &mut peer1_state)?.unwrap();
 //!
 //! // We receive the message on peer2. We don't have a document at all yet
 //! // so we create one
 //! let mut peer2 = automerge::AutoCommit::new();
 //! peer2.enable_audit_mode()?;
 //! // We don't have a state for peer1 (it's a new connection), so we create one
-//! let mut peer2_state = sync::State::new();
+//! let mut peer2_state = State::new();
 //! // Now receive the message from peer 1
-//! peer2.sync().receive_sync_message(&mut peer2_state, message1to2)?;
+//! Sync::receive_sync_message(peer2.document_mut(), &mut peer2_state, message1to2)?;
 //!
 //! // Now we loop, sending messages from one to two and two to one until
 //! // neither has anything new to send
 //!
 //! loop {
-//!     let two_to_one = peer2.sync().generate_sync_message(&mut peer2_state).unwrap();
+//!     let two_to_one = Sync::generate_sync_message(peer2.document(), &mut peer2_state)?;
 //!     if let Some(message) = two_to_one.as_ref() {
 //!         println!("two to one");
-//!         peer1.sync().receive_sync_message(&mut peer1_state, message.clone())?;
+//!         Sync::receive_sync_message(peer1.document_mut(), &mut peer1_state, message.clone())?;
 //!     }
-//!     let one_to_two = peer1.sync().generate_sync_message(&mut peer1_state).unwrap();
+//!     let one_to_two = Sync::generate_sync_message(peer1.document(), &mut peer1_state)?;
 //!     if let Some(message) = one_to_two.as_ref() {
 //!         println!("one to two");
-//!         peer2.sync().receive_sync_message(&mut peer2_state, message.clone())?;
+//!         Sync::receive_sync_message(peer2.document_mut(), &mut peer2_state, message.clone())?;
 //!     }
 //!     if two_to_one.is_none() && one_to_two.is_none() {
 //!         break;
 //!     }
 //! }
 //!
-//! assert_eq!(peer2.get(automerge::ROOT, "key")?.unwrap().0.to_str(), Some("value"));
-//!
+//! assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.to_str(), Some("value"));
 //! # Ok(())
 //! # }
 //! ```
 
 use itertools::Itertools;
-use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(test)]
-use crate::ReadDoc;
-use crate::{
-    storage::{parse, ReadChangeOpError},
-    Automerge, AutomergeError, ChangeHash,
-};
+use automerge::{AuditMode, Automerge, AutomergeError, ChangeHash};
 
 mod bloom;
 mod message_builder;
+mod parse;
 mod state;
 use message_builder::MessageBuilder;
 
@@ -93,37 +92,11 @@ pub use bloom::{BloomFilter, DecodeError as DecodeBloomError};
 pub use state::DecodeError as DecodeStateError;
 pub use state::{Have, State};
 
-/// A document which can take part in the sync protocol
+/// The sync protocol's entry points.
 ///
-/// See the [module level documentation](crate::sync) for more details.
-pub trait SyncDoc {
-    /// Generate a sync message for the remote peer represented by `sync_state`
-    ///
-    /// If this returns [`None`] then there are no new messages to send, either because we are
-    /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
-    /// date.
-    ///
-    /// * `sync_state` - The [`State`] for this document and the remote peer
-    /// * `message` - The [`Message`] to receive
-    ///
-    /// Returns [`AutomergeError::AuditModeRequired`] unless the document
-    /// is in [`AuditMode::Enabled`](crate::AuditMode) — the sync protocol
-    /// is hash-based throughout, so it needs every change hash kept.
-    fn generate_sync_message(
-        &self,
-        sync_state: &mut State,
-    ) -> Result<Option<Message>, AutomergeError>;
-
-    /// Apply a received sync message to this document and `sync_state`
-    ///
-    /// Returns [`AutomergeError::AuditModeRequired`] unless the document
-    /// is in [`AuditMode::Enabled`](crate::AuditMode).
-    fn receive_sync_message(
-        &mut self,
-        sync_state: &mut State,
-        message: Message,
-    ) -> Result<(), AutomergeError>;
-}
+/// Free functions rather than methods on a document, so the protocol
+/// lives outside automerge and can be versioned separately.
+pub struct Sync;
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 const MESSAGE_TYPE_SYNC_V2: u8 = 0x43; // first byte of a sync message, for identification
@@ -155,18 +128,25 @@ impl MessageVersion {
     }
 }
 
-impl SyncDoc for Automerge {
-    fn generate_sync_message(
-        &self,
+impl Sync {
+    /// Generate a sync message for the remote peer represented by `sync_state`
+    ///
+    /// If this returns [`None`] then there are no new messages to send, either because we are
+    /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
+    /// date.
+    ///
+    /// * `doc` - the document to replicate
+    /// * `sync_state` - The [`State`] for this document and the remote peer
+    ///
+    /// Fails with [`AutomergeError::AuditModeRequired`] unless the
+    /// document is in audit mode — the protocol is hash-based
+    /// throughout, so it needs every change hash retained.
+    pub fn generate_sync_message(
+        doc: &Automerge,
         sync_state: &mut State,
     ) -> Result<Option<Message>, AutomergeError> {
-        // deliberately deterministic: even a small document whose
-        // retained hashes would happen to suffice refuses, so syncing
-        // never works "sometimes" outside audit mode
-        if self.audit_mode() != crate::AuditMode::Enabled {
-            return Err(AutomergeError::AuditModeRequired);
-        }
-        let our_heads = self.get_head_hashes();
+        Self::check_ready(doc)?;
+        let our_heads = doc.get_head_hashes();
 
         let our_need = if sync_state.read_only {
             vec![]
@@ -180,7 +160,7 @@ impl SyncDoc for Automerge {
             // the peer never sends us the unrelated changes it _does_ have. We still pick the
             // orphans' dependencies back up if we later sync with a peer whose heads depend on
             // them.
-            self.missing_deps_from(sync_state.their_heads.iter().flatten().copied())?
+            doc.missing_deps(&sync_state.their_heads.clone().unwrap_or_default())?
         };
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
@@ -189,7 +169,10 @@ impl SyncDoc for Automerge {
             HashSet::new()
         };
         let our_have = if our_need.iter().all(|hash| their_heads_set.contains(hash)) {
-            vec![self.make_bloom_filter(sync_state.shared_heads.clone())?]
+            vec![Self::make_bloom_filter(
+                doc,
+                sync_state.shared_heads.clone(),
+            )?]
         } else {
             Vec::new()
         };
@@ -197,7 +180,7 @@ impl SyncDoc for Automerge {
         if let Some(ref their_have) = sync_state.their_have {
             if let Some(first_have) = their_have.first().as_ref() {
                 for hash in first_have.last_sync.iter() {
-                    if !self.has_change(hash)? {
+                    if !doc.has_change(hash)? {
                         return Ok(Some(Message::reset(our_heads)));
                     }
                 }
@@ -210,23 +193,22 @@ impl SyncDoc for Automerge {
             MessageBuilder::new(vec![], sync_state)
         } else if let Some((their_have, their_need)) = sync_state.their() {
             if sync_state.send_doc() {
-                let hashes = self.change_graph.get_hashes(&[])?;
-                MessageBuilder::new_v2(self.save(), hashes)
+                let hashes = doc.change_hashes(&[])?;
+                MessageBuilder::new_v2(doc.save(), hashes)
             } else {
-                let all_hashes = self
-                    .get_hashes_to_send(their_have, their_need)
+                let all_hashes = Self::get_hashes_to_send(doc, their_have, their_need)
                     .expect("Should have only used hashes that are in the document");
                 // deduplicate the changes to send with those we have already sent and clone it now
                 let hashes: Vec<_> = all_hashes
                     .into_iter()
                     .filter(|hash| !sync_state.sent_hashes.contains(hash))
                     .collect();
-                if hashes.len() > self.change_graph.len() / 3 && sync_state.supports_v2_messages() {
+                if hashes.len() > doc.num_changes() / 3 && sync_state.supports_v2_messages() {
                     // sending more than a 1/3 of the document?  send everything
-                    let all_hashes = self.change_graph.get_hashes(&[])?;
-                    MessageBuilder::new_v2(self.save(), all_hashes)
+                    let all_hashes = doc.change_hashes(&[])?;
+                    MessageBuilder::new_v2(doc.save(), all_hashes)
                 } else {
-                    let Ok(changes) = self.get_changes_by_hashes(hashes.iter().copied()) else {
+                    let Ok(changes) = doc.changes_by_hash(&hashes) else {
                         return Ok(None);
                     };
                     MessageBuilder::new(changes, sync_state)
@@ -288,21 +270,43 @@ impl SyncDoc for Automerge {
         Ok(Some(sync_message))
     }
 
-    fn receive_sync_message(
-        &mut self,
+    /// Apply a received sync message to `doc` and `sync_state`
+    ///
+    /// Fails with [`AutomergeError::AuditModeRequired`] outside audit
+    /// mode, as [`Self::generate_sync_message`] does.
+    pub fn receive_sync_message(
+        doc: &mut Automerge,
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        if self.audit_mode() != crate::AuditMode::Enabled {
+        Self::check_ready(doc)?;
+        Self::receive_sync_message_inner(doc, sync_state, message)
+    }
+
+    /// Whether the peer represented by `sync_state` has every change
+    /// `doc` has.
+    pub fn peer_has_our_changes(doc: &Automerge, sync_state: &State) -> bool {
+        sync_state.shared_heads == doc.get_head_hashes()
+    }
+
+    /// The protocol is hash-based throughout, so it needs a document
+    /// which retains every change hash.
+    ///
+    /// Deliberately deterministic: even a small document whose retained
+    /// hashes would happen to suffice refuses, so syncing never works
+    /// "sometimes" outside audit mode.
+    fn check_ready(doc: &Automerge) -> Result<(), AutomergeError> {
+        if doc.audit_mode() != AuditMode::Enabled {
             return Err(AutomergeError::AuditModeRequired);
         }
-        self.receive_sync_message_inner(sync_state, message)
+        Ok(())
     }
-}
 
-impl Automerge {
-    fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Result<Have, AutomergeError> {
-        let hashes = self.change_graph.get_hashes(&last_sync)?;
+    fn make_bloom_filter(
+        doc: &Automerge,
+        last_sync: Vec<ChangeHash>,
+    ) -> Result<Have, AutomergeError> {
+        let hashes = doc.change_hashes(&last_sync)?;
         Ok(Have {
             bloom: BloomFilter::from_hashes(hashes.iter()),
             last_sync,
@@ -310,13 +314,13 @@ impl Automerge {
     }
 
     fn get_hashes_to_send(
-        &self,
+        doc: &Automerge,
         have: &[Have],
         need: &[ChangeHash],
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         let need = need
             .iter()
-            .map(|hash| Ok(self.has_change(hash)?.then_some(*hash)))
+            .map(|hash| Ok(doc.has_change(hash)?.then_some(*hash)))
             .filter_map(|r: Result<_, AutomergeError>| r.transpose())
             .collect::<Result<Vec<_>, _>>()?;
         if have.is_empty() {
@@ -332,7 +336,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let hashes = self.change_graph.get_hashes(&last_sync_hashes)?;
+            let hashes = doc.change_hashes(&last_sync_hashes)?;
 
             let mut change_hashes = HashSet::with_capacity(hashes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -341,8 +345,8 @@ impl Automerge {
             for hash in &*hashes {
                 change_hashes.insert(*hash);
 
-                for dep in self.change_graph.deps(hash) {
-                    dependents.entry(dep?).or_default().push(*hash);
+                for dep in doc.change_deps(hash)? {
+                    dependents.entry(dep).or_default().push(*hash);
                 }
 
                 if bloom_filters.iter().all(|bloom| !bloom.contains_hash(hash)) {
@@ -378,12 +382,12 @@ impl Automerge {
     }
 
     pub(crate) fn receive_sync_message_inner(
-        &mut self,
+        doc: &mut Automerge,
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_head_hashes();
+        let before_heads = doc.get_head_hashes();
 
         let Message {
             heads: message_heads,
@@ -412,16 +416,16 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty && !sync_state.read_only {
-            self.load_incremental(&message_changes.join())?;
+            doc.load_incremental(&message_changes.join())?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_head_hashes().into_iter().collect(),
+                &doc.get_head_hashes().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }
 
         // trim down the sent hashes to those that we know they haven't seen
-        self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
+        doc.remove_ancestors(&message_heads, &mut sync_state.sent_hashes)?;
 
         if changes_is_empty && message_heads == before_heads {
             sync_state.last_sent_heads.clone_from(&message_heads);
@@ -429,7 +433,7 @@ impl Automerge {
 
         let known_heads = message_heads
             .iter()
-            .map(|head| Ok(self.has_change(head)?.then_some(head)))
+            .map(|head| Ok(doc.has_change(head)?.then_some(head)))
             .filter_map(|r: Result<_, AutomergeError>| r.transpose())
             .collect::<Result<Vec<_>, _>>()?;
         if known_heads.len() == message_heads.len() {
@@ -464,8 +468,6 @@ pub enum ReadMessageError {
     WrongType { expected_one_of: Vec<u8>, found: u8 },
     #[error("{0}")]
     Parse(String),
-    #[error(transparent)]
-    ReadChangeOps(#[from] ReadChangeOpError),
     #[error("not enough input")]
     NotEnoughInput,
 }
@@ -479,12 +481,6 @@ impl From<parse::leb128::Error> for ReadMessageError {
 impl From<bloom::ParseError> for ReadMessageError {
     fn from(e: bloom::ParseError) -> Self {
         ReadMessageError::Parse(e.to_string())
-    }
-}
-
-impl From<crate::storage::change::ParseError> for ReadMessageError {
-    fn from(e: crate::storage::change::ParseError) -> Self {
-        ReadMessageError::Parse(format!("error parsing changes: {}", e))
     }
 }
 
@@ -599,6 +595,7 @@ impl serde::Serialize for Message {
     where
         S: serde::Serializer,
     {
+        use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(4))?;
         map.serialize_entry("heads", &self.heads)?;
         map.serialize_entry("need", &self.need)?;
@@ -847,12 +844,9 @@ fn advance_heads(
 #[cfg(test)]
 mod tests {
     use super::*;
-    //use crate::change::gen::gen_change;
-    use crate::storage::parse::Input;
-    use crate::storage::Chunk;
-    use crate::transaction::Transactable;
-    //use crate::types::gen::gen_hash;
-    use crate::ActorId;
+    use crate::parse::Input;
+    use automerge::transaction::Transactable;
+    use automerge::{ActorId, AutoCommit, ReadDoc, ROOT};
     //use proptest::prelude::*;
 
     /*
@@ -963,19 +957,15 @@ mod tests {
 
     #[test]
     fn generate_sync_message_twice_does_nothing() {
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = AutoCommit::new();
         doc.enable_audit_mode().unwrap();
-        doc.put(crate::ROOT, "key", "value").unwrap();
+        doc.put(ROOT, "key", "value").unwrap();
         let mut sync_state = State::new();
 
-        assert!(doc
-            .sync()
-            .generate_sync_message(&mut sync_state)
+        assert!(Sync::generate_sync_message(doc.document(), &mut sync_state)
             .unwrap()
             .is_some());
-        assert!(doc
-            .sync()
-            .generate_sync_message(&mut sync_state)
+        assert!(Sync::generate_sync_message(doc.document(), &mut sync_state)
             .unwrap()
             .is_none());
     }
@@ -985,65 +975,57 @@ mod tests {
         // The first time we generate a sync message for a given peer we should always send a
         // response so that they know what our heads are, even if we are at the same heads as them
 
-        let mut doc1 = crate::AutoCommit::new();
+        let mut doc1 = AutoCommit::new();
         doc1.enable_audit_mode().unwrap();
-        doc1.put(crate::ROOT, "key", "value").unwrap();
+        doc1.put(ROOT, "key", "value").unwrap();
         let mut doc2 = doc1.fork();
 
         let mut s1 = State::new();
         let mut s2 = State::new();
 
-        let m1 = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let m1 = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("message was none");
 
-        doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
+        Sync::receive_sync_message(doc2.document_mut(), &mut s2, m1).unwrap();
 
-        let _m2 = doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        let _m2 = Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .expect("response was none");
     }
 
     #[test]
     fn should_not_reply_if_we_have_no_data_after_first_round() {
-        let mut doc1 = crate::AutoCommit::new();
+        let mut doc1 = AutoCommit::new();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new();
+        let mut doc2 = AutoCommit::new();
         doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
-        let m1 = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let m1 = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("message was none");
 
-        doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
-        let _m2 = doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        Sync::receive_sync_message(doc2.document_mut(), &mut s2, m1).unwrap();
+        let _m2 = Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .expect("first round message was none");
 
-        let m1 = doc1.sync().generate_sync_message(&mut s1).unwrap();
+        let m1 = Sync::generate_sync_message(doc1.document(), &mut s1).unwrap();
         assert!(m1.is_none());
 
-        let m2 = doc2.sync().generate_sync_message(&mut s2).unwrap();
+        let m2 = Sync::generate_sync_message(doc2.document(), &mut s2).unwrap();
         assert!(m2.is_none());
     }
 
     #[test]
     fn should_allow_simultaneous_messages_during_synchronisation() {
         // create & synchronize two nodes
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
@@ -1051,9 +1033,9 @@ mod tests {
         let mut s2 = State::new();
 
         for i in 0..5 {
-            doc1.put(&crate::ROOT, "x", i).unwrap();
+            doc1.put(&ROOT, "x", i).unwrap();
             doc1.commit();
-            doc2.put(&crate::ROOT, "y", i).unwrap();
+            doc2.put(&ROOT, "y", i).unwrap();
             doc2.commit();
         }
 
@@ -1061,14 +1043,10 @@ mod tests {
         let head2 = doc2.get_head_hashes()[0];
 
         //// both sides report what they have but have no shared peer state
-        let msg1to2 = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let msg1to2 = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("initial sync from 1 to 2 was None");
-        let msg2to1 = doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        let msg2to1 = Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .expect("initial sync message from 2 to 1 was None");
         let Message {
@@ -1085,14 +1063,12 @@ mod tests {
         assert_eq!(msg2to1.have[0].last_sync.len(), 0);
 
         //// doc1 and doc2 receive that message and update sync state
-        doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
-        doc2.sync().receive_sync_message(&mut s2, msg1to2).unwrap();
+        Sync::receive_sync_message(doc1.document_mut(), &mut s1, msg2to1).unwrap();
+        Sync::receive_sync_message(doc2.document_mut(), &mut s2, msg1to2).unwrap();
 
         //// now both reply with their local changes the other lacks
         //// (standard warning that 1% of the time this will result in a "need" message)
-        let msg1to2 = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let msg1to2 = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("first reply from 1 to 2 was None");
         let Message {
@@ -1101,9 +1077,7 @@ mod tests {
         } = &msg1to2;
         assert!(!changes1to2.is_empty());
 
-        let msg2to1 = doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        let msg2to1 = Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .expect("first reply from 2 to 1 was None");
         let Message {
@@ -1113,16 +1087,14 @@ mod tests {
         assert!(!changes2to1.is_empty());
 
         //// both should now apply the changes
-        doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
+        Sync::receive_sync_message(doc1.document_mut(), &mut s1, msg2to1).unwrap();
         assert_eq!(doc1.get_missing_deps(&[]).unwrap(), Vec::new());
 
-        doc2.sync().receive_sync_message(&mut s2, msg1to2).unwrap();
+        Sync::receive_sync_message(doc2.document_mut(), &mut s2, msg1to2).unwrap();
         assert_eq!(doc2.get_missing_deps(&[]).unwrap(), Vec::new());
 
         //// The response acknowledges the changes received and sends no further changes
-        let msg1to2 = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let msg1to2 = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("second reply from 1 to 2 was None");
         let Message {
@@ -1130,9 +1102,7 @@ mod tests {
             ..
         } = &msg1to2;
         assert_eq!(changes1to2.len(), 0);
-        let msg2to1 = doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        let msg2to1 = Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .expect("second reply from 2 to 1 was None");
         let Message {
@@ -1142,29 +1112,23 @@ mod tests {
         assert_eq!(changes2to1.len(), 0);
 
         //// After receiving acknowledgements, their shared heads should be equal
-        doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
-        doc2.sync().receive_sync_message(&mut s2, msg1to2).unwrap();
+        Sync::receive_sync_message(doc1.document_mut(), &mut s1, msg2to1).unwrap();
+        Sync::receive_sync_message(doc2.document_mut(), &mut s2, msg1to2).unwrap();
 
         assert_eq!(s1.shared_heads, s2.shared_heads);
 
         //// We're in sync, no more messages required
-        assert!(doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        assert!(Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .is_none());
-        assert!(doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        assert!(Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .is_none());
 
         //// If we make one more change and start another sync then its lastSync should be updated
-        doc1.put(crate::ROOT, "x", 5).unwrap();
+        doc1.put(ROOT, "x", 5).unwrap();
         doc1.commit();
-        let msg1to2 = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let msg1to2 = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("third reply from 1 to 2 was None");
         let mut expected_heads = vec![head1, head2];
@@ -1182,11 +1146,11 @@ mod tests {
         // where n2 is a false positive in the Bloom filter containing {n1}.
         // lastSync is c9.
 
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
@@ -1194,7 +1158,7 @@ mod tests {
         let mut s2 = State::new();
 
         for i in 0..10 {
-            doc1.put(crate::ROOT, "x", i).unwrap();
+            doc1.put(ROOT, "x", i).unwrap();
             doc1.commit();
         }
 
@@ -1208,7 +1172,7 @@ mod tests {
                 .with_actor(ActorId::try_from("01234567").unwrap())
                 .unwrap();
             let val1 = format!("{} @ n1", i);
-            doc1copy.put(crate::ROOT, "x", val1).unwrap();
+            doc1copy.put(ROOT, "x", val1).unwrap();
             doc1copy.commit();
 
             let mut doc2copy = doc1
@@ -1216,7 +1180,7 @@ mod tests {
                 .with_actor(ActorId::try_from("89abcdef").unwrap())
                 .unwrap();
             let val2 = format!("{} @ n2", i);
-            doc2copy.put(crate::ROOT, "x", val2).unwrap();
+            doc2copy.put(ROOT, "x", val2).unwrap();
             doc2copy.commit();
 
             let n1_bloom = BloomFilter::from_hashes(doc1copy.get_head_hashes().into_iter());
@@ -1249,11 +1213,11 @@ mod tests {
         ////                                   `-- n2c1 <-- n2c2 <-- n2c3
         //// where n2c1 and n2c2 are both false positives in the Bloom filter containing {c5}.
         //// lastSync is c4.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
@@ -1261,13 +1225,13 @@ mod tests {
         let mut s2 = State::new();
 
         for i in 0..10 {
-            doc1.put(crate::ROOT, "x", i).unwrap();
+            doc1.put(ROOT, "x", i).unwrap();
             doc1.commit();
         }
 
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
-        doc1.put(crate::ROOT, "x", 5).unwrap();
+        doc1.put(ROOT, "x", 5).unwrap();
         doc1.commit();
         let bloom = BloomFilter::from_hashes(doc1.get_head_hashes().into_iter());
 
@@ -1278,8 +1242,7 @@ mod tests {
                 .fork()
                 .with_actor(ActorId::try_from("89abcdef").unwrap())
                 .unwrap();
-            doc.put(crate::ROOT, "x", format!("{} at 89abdef", i))
-                .unwrap();
+            doc.put(ROOT, "x", format!("{} at 89abdef", i)).unwrap();
             doc.commit();
             if bloom.contains_hash(&doc.get_head_hashes()[0]) {
                 break doc;
@@ -1294,7 +1257,7 @@ mod tests {
                 .fork()
                 .with_actor(ActorId::try_from("89abcdef").unwrap())
                 .unwrap();
-            doc.put(crate::ROOT, "x", format!("{} again", i)).unwrap();
+            doc.put(ROOT, "x", format!("{} again", i)).unwrap();
             doc.commit();
             if bloom.contains_hash(&doc.get_head_hashes()[0]) {
                 break doc;
@@ -1302,7 +1265,7 @@ mod tests {
             i += 1;
         };
 
-        doc2.put(crate::ROOT, "x", "final @ 89abcdef").unwrap();
+        doc2.put(ROOT, "x", "final @ 89abcdef").unwrap();
 
         let mut all_heads = doc1.get_head_hashes();
         all_heads.extend(doc2.get_head_hashes());
@@ -1321,28 +1284,28 @@ mod tests {
 
     #[test]
     fn should_handle_lots_of_branching_and_merging() {
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("01234567").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("89abcdef").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
-        let mut doc3 = crate::AutoCommit::new()
+        let mut doc3 = AutoCommit::new()
             .with_actor(ActorId::try_from("fedcba98").unwrap())
             .unwrap();
         doc3.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
 
-        doc1.put(crate::ROOT, "x", 0).unwrap();
+        doc1.put(ROOT, "x", 0).unwrap();
         let change1 = doc1.get_last_local_change().unwrap().unwrap().clone();
 
         doc2.apply_changes([change1.clone()]).unwrap();
         doc3.apply_changes([change1]).unwrap();
 
-        doc3.put(crate::ROOT, "x", 1).unwrap();
+        doc3.put(ROOT, "x", 1).unwrap();
 
         ////        - n1c1 <------ n1c2 <------ n1c3 <-- etc. <-- n1c20 <------ n1c21
         ////       /          \/           \/                              \/
@@ -1351,8 +1314,8 @@ mod tests {
         ////      \                                                          /
         ////       ---------------------------------------------- n3c1 <-----
         for i in 1..20 {
-            doc1.put(crate::ROOT, "n1", i).unwrap();
-            doc2.put(crate::ROOT, "n2", i).unwrap();
+            doc1.put(ROOT, "n1", i).unwrap();
+            doc2.put(ROOT, "n2", i).unwrap();
             let change1 = doc1.get_last_local_change().unwrap().unwrap().clone();
             let change2 = doc2.get_last_local_change().unwrap().unwrap().clone();
             doc1.apply_changes([change2.clone()]).unwrap();
@@ -1365,8 +1328,8 @@ mod tests {
         let change3 = doc3.get_last_local_change().unwrap().unwrap().clone();
         doc2.apply_changes([change3]).unwrap();
 
-        doc1.put(crate::ROOT, "n1", "final").unwrap();
-        doc2.put(crate::ROOT, "n1", "final").unwrap();
+        doc1.put(ROOT, "n1", "final").unwrap();
+        doc2.put(ROOT, "n1", "final").unwrap();
 
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
@@ -1386,9 +1349,9 @@ mod tests {
         // run the test many times, hence this loop
         for _ in 0..300 {
             // create two documents
-            let mut doc1 = crate::AutoCommit::new();
+            let mut doc1 = AutoCommit::new();
             doc1.enable_audit_mode().unwrap();
-            let mut doc2 = crate::AutoCommit::new();
+            let mut doc2 = AutoCommit::new();
             doc2.enable_audit_mode().unwrap();
             let mut s1 = State::new();
             let mut s2 = State::new();
@@ -1397,17 +1360,19 @@ mod tests {
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // make a change on doc2
-            doc2.put(crate::ROOT, "x", 0).unwrap();
+            doc2.put(ROOT, "x", 0).unwrap();
 
             // generate a sync message containing the change (this should
             // alwasy be Some because we have generated new local changes)
-            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap().unwrap();
+            let msg = Sync::generate_sync_message(doc2.document(), &mut s2)
+                .unwrap()
+                .unwrap();
             // Receive that sync message on doc1
-            doc1.sync().receive_sync_message(&mut s1, msg).unwrap();
+            Sync::receive_sync_message(doc1.document_mut(), &mut s1, msg).unwrap();
 
             // now before sending any messages back to doc2, make a change on
             // doc1
-            doc1.put(crate::ROOT, "x", 1).unwrap();
+            doc1.put(ROOT, "x", 1).unwrap();
 
             // now synchronize
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
@@ -1418,8 +1383,8 @@ mod tests {
     }
 
     fn sync(
-        a: &mut crate::AutoCommit,
-        b: &mut crate::AutoCommit,
+        a: &mut AutoCommit,
+        b: &mut AutoCommit,
         a_sync_state: &mut State,
         b_sync_state: &mut State,
     ) {
@@ -1432,8 +1397,8 @@ mod tests {
         let mut iterations = 0;
 
         loop {
-            let a_to_b = a.sync().generate_sync_message(a_sync_state).unwrap();
-            let b_to_a = b.sync().generate_sync_message(b_sync_state).unwrap();
+            let a_to_b = Sync::generate_sync_message(a.document(), a_sync_state).unwrap();
+            let b_to_a = Sync::generate_sync_message(b.document(), b_sync_state).unwrap();
             if a_to_b.is_none() && b_to_a.is_none() {
                 break;
             }
@@ -1441,10 +1406,10 @@ mod tests {
                 panic!("failed to sync in {} iterations", MAX_ITER);
             }
             if let Some(msg) = a_to_b {
-                b.sync().receive_sync_message(b_sync_state, msg).unwrap()
+                Sync::receive_sync_message(b.document_mut(), b_sync_state, msg).unwrap()
             }
             if let Some(msg) = b_to_a {
-                a.sync().receive_sync_message(a_sync_state, msg).unwrap()
+                Sync::receive_sync_message(a.document_mut(), a_sync_state, msg).unwrap()
             }
             iterations += 1;
         }
@@ -1452,49 +1417,48 @@ mod tests {
 
     #[test]
     fn if_first_message_has_no_heads_and_supports_v2_message_send_whole_doc() {
-        let mut doc1 = crate::AutoCommit::new();
+        let mut doc1 = AutoCommit::new();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new();
+        let mut doc2 = AutoCommit::new();
         doc2.enable_audit_mode().unwrap();
-        doc2.put(crate::ROOT, "foo", "bar").unwrap();
+        doc2.put(ROOT, "foo", "bar").unwrap();
 
         let mut s1 = State::new();
         let mut s2 = State::new();
 
-        let outgoing = doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        let outgoing = Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .expect("message was none");
 
-        doc2.sync().receive_sync_message(&mut s2, outgoing).unwrap();
+        Sync::receive_sync_message(doc2.document_mut(), &mut s2, outgoing).unwrap();
 
-        let response = doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        let response = Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .expect("response was none");
 
         let Message { changes, .. } = response;
 
-        let (_, chunk) = Chunk::parse(Input::new(&changes.0[0])).unwrap();
-        assert!(matches!(chunk, Chunk::Document(_)));
+        // a v2 message carries one whole-document chunk: 4 magic bytes,
+        // a 4-byte checksum, then the chunk type (0 = document)
+        let chunk = &changes.0[0];
+        assert_eq!(&chunk[..4], &[0x85, 0x6f, 0x4a, 0x83]);
+        assert_eq!(chunk[8], 0, "expected a document chunk");
     }
 
     #[test]
     fn read_only_sync_does_not_apply_incoming_changes() {
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
 
-        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.put(ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.put(ROOT, "from_doc2", "world").unwrap();
         doc2.commit();
 
         let doc1_heads_before = doc1.get_head_hashes();
@@ -1507,12 +1471,12 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         // doc2 should have received doc1's changes
-        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_some());
-        assert!(doc2.get(crate::ROOT, "from_doc2").unwrap().is_some());
+        assert!(doc2.get(ROOT, "from_doc1").unwrap().is_some());
+        assert!(doc2.get(ROOT, "from_doc2").unwrap().is_some());
 
         // doc1 should NOT have received doc2's changes
-        assert!(doc1.get(crate::ROOT, "from_doc1").unwrap().is_some());
-        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
+        assert!(doc1.get(ROOT, "from_doc1").unwrap().is_some());
+        assert!(doc1.get(ROOT, "from_doc2").unwrap().is_none());
 
         // doc1's heads should be unchanged
         assert_eq!(doc1.get_head_hashes(), doc1_heads_before);
@@ -1526,11 +1490,11 @@ mod tests {
         // An empty read-only peer syncs with a peer that has data.
         // This exercises the V2 "send full document" path on the non-read-only side.
         // The read-only peer should ignore the document and the protocol should converge.
-        let mut doc1 = crate::AutoCommit::new();
+        let mut doc1 = AutoCommit::new();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new();
+        let mut doc2 = AutoCommit::new();
         doc2.enable_audit_mode().unwrap();
-        doc2.put(crate::ROOT, "key", "value").unwrap();
+        doc2.put(ROOT, "key", "value").unwrap();
         doc2.commit();
 
         let mut s1 = State::new_read_only();
@@ -1539,29 +1503,29 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         // doc1 should still be empty
-        assert!(doc1.get(crate::ROOT, "key").unwrap().is_none());
+        assert!(doc1.get(ROOT, "key").unwrap().is_none());
         assert!(doc1.get_head_hashes().is_empty());
 
         // doc2 should be unchanged
-        assert!(doc2.get(crate::ROOT, "key").unwrap().is_some());
+        assert!(doc2.get(ROOT, "key").unwrap().is_some());
     }
 
     #[test]
     fn both_peers_read_only() {
         // When both peers are read-only, neither applies the other's changes.
         // The protocol should still converge.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
 
-        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.put(ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.put(ROOT, "from_doc2", "world").unwrap();
         doc2.commit();
 
         let doc1_heads = doc1.get_head_hashes();
@@ -1573,8 +1537,8 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         // Neither peer should have the other's changes
-        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
-        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_none());
+        assert!(doc1.get(ROOT, "from_doc2").unwrap().is_none());
+        assert!(doc2.get(ROOT, "from_doc1").unwrap().is_none());
 
         // Both heads unchanged
         assert_eq!(doc1.get_head_hashes(), doc1_heads);
@@ -1585,18 +1549,18 @@ mod tests {
     fn both_peers_read_only_converges_to_none() {
         // Explicitly verify that generate_sync_message returns None on both
         // sides after the initial exchange between two read-only peers.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
 
-        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.put(ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.put(ROOT, "from_doc2", "world").unwrap();
         doc2.commit();
 
         let mut s1 = State::new_read_only();
@@ -1605,14 +1569,10 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         // After sync, both must return None — no infinite loop
-        assert!(doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        assert!(Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .is_none());
-        assert!(doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        assert!(Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .is_none());
 
@@ -1626,11 +1586,11 @@ mod tests {
         // Both peers are read-only. One makes local changes between sync
         // rounds. The updated heads should be communicated (no changes sent),
         // and the protocol should converge.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
@@ -1642,7 +1602,7 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         // doc1 makes local changes
-        doc1.put(crate::ROOT, "key", "value1").unwrap();
+        doc1.put(ROOT, "key", "value1").unwrap();
         doc1.commit();
         let doc1_heads_after = doc1.get_head_hashes();
 
@@ -1651,10 +1611,10 @@ mod tests {
 
         // doc2 should know about doc1's heads but not have the changes
         assert_eq!(s2.their_heads.as_ref().unwrap(), &doc1_heads_after);
-        assert!(doc2.get(crate::ROOT, "key").unwrap().is_none());
+        assert!(doc2.get(ROOT, "key").unwrap().is_none());
 
         // doc1 makes more changes
-        doc1.put(crate::ROOT, "key", "value2").unwrap();
+        doc1.put(ROOT, "key", "value2").unwrap();
         doc1.commit();
         let doc1_heads_after2 = doc1.get_head_hashes();
 
@@ -1663,17 +1623,13 @@ mod tests {
 
         // doc2 should see the updated heads
         assert_eq!(s2.their_heads.as_ref().unwrap(), &doc1_heads_after2);
-        assert!(doc2.get(crate::ROOT, "key").unwrap().is_none());
+        assert!(doc2.get(ROOT, "key").unwrap().is_none());
 
         // Must converge
-        assert!(doc1
-            .sync()
-            .generate_sync_message(&mut s1)
+        assert!(Sync::generate_sync_message(doc1.document(), &mut s1)
             .unwrap()
             .is_none());
-        assert!(doc2
-            .sync()
-            .generate_sync_message(&mut s2)
+        assert!(Sync::generate_sync_message(doc2.document(), &mut s2)
             .unwrap()
             .is_none());
     }
@@ -1683,11 +1639,11 @@ mod tests {
         // Both peers are read-only and both make local changes between sync
         // rounds. Both should learn the other's updated heads, neither should
         // receive actual changes, and the protocol should converge each round.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
@@ -1696,9 +1652,9 @@ mod tests {
         let mut s2 = State::new_read_only();
 
         for round in 0..5 {
-            doc1.put(crate::ROOT, "doc1_counter", round as i64).unwrap();
+            doc1.put(ROOT, "doc1_counter", round as i64).unwrap();
             doc1.commit();
-            doc2.put(crate::ROOT, "doc2_counter", round as i64).unwrap();
+            doc2.put(ROOT, "doc2_counter", round as i64).unwrap();
             doc2.commit();
 
             let doc1_heads = doc1.get_head_hashes();
@@ -1721,25 +1677,23 @@ mod tests {
 
             // Neither should have the other's data
             assert!(
-                doc1.get(crate::ROOT, "doc2_counter").unwrap().is_none(),
+                doc1.get(ROOT, "doc2_counter").unwrap().is_none(),
                 "round {round}: doc1 should not have doc2's changes"
             );
             assert!(
-                doc2.get(crate::ROOT, "doc1_counter").unwrap().is_none(),
+                doc2.get(ROOT, "doc1_counter").unwrap().is_none(),
                 "round {round}: doc2 should not have doc1's changes"
             );
 
             // Must be fully converged
             assert!(
-                doc1.sync()
-                    .generate_sync_message(&mut s1)
+                Sync::generate_sync_message(doc1.document(), &mut s1)
                     .unwrap()
                     .is_none(),
                 "round {round}: doc1 should have nothing more to send"
             );
             assert!(
-                doc2.sync()
-                    .generate_sync_message(&mut s2)
+                Sync::generate_sync_message(doc2.document(), &mut s2)
                     .unwrap()
                     .is_none(),
                 "round {round}: doc2 should have nothing more to send"
@@ -1752,11 +1706,11 @@ mod tests {
         // Both peers are read-only. Both make changes, then exchange messages
         // simultaneously (like the simultaneous sync test). Must converge.
         for _ in 0..100 {
-            let mut doc1 = crate::AutoCommit::new()
+            let mut doc1 = AutoCommit::new()
                 .with_actor(ActorId::try_from("abc123").unwrap())
                 .unwrap();
             doc1.enable_audit_mode().unwrap();
-            let mut doc2 = crate::AutoCommit::new()
+            let mut doc2 = AutoCommit::new()
                 .with_actor(ActorId::try_from("def456").unwrap())
                 .unwrap();
             doc2.enable_audit_mode().unwrap();
@@ -1765,38 +1719,34 @@ mod tests {
             let mut s2 = State::new_read_only();
 
             // Both make changes
-            doc1.put(crate::ROOT, "x", 1).unwrap();
+            doc1.put(ROOT, "x", 1).unwrap();
             doc1.commit();
-            doc2.put(crate::ROOT, "y", 2).unwrap();
+            doc2.put(ROOT, "y", 2).unwrap();
             doc2.commit();
 
             // Sync (uses the helper which panics on non-convergence)
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // Now both make MORE changes
-            doc1.put(crate::ROOT, "x", 3).unwrap();
+            doc1.put(ROOT, "x", 3).unwrap();
             doc1.commit();
-            doc2.put(crate::ROOT, "y", 4).unwrap();
+            doc2.put(ROOT, "y", 4).unwrap();
             doc2.commit();
 
             // Sync again
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // Must be fully converged
-            assert!(doc1
-                .sync()
-                .generate_sync_message(&mut s1)
+            assert!(Sync::generate_sync_message(doc1.document(), &mut s1)
                 .unwrap()
                 .is_none());
-            assert!(doc2
-                .sync()
-                .generate_sync_message(&mut s2)
+            assert!(Sync::generate_sync_message(doc2.document(), &mut s2)
                 .unwrap()
                 .is_none());
 
             // Neither has the other's data
-            assert!(doc1.get(crate::ROOT, "y").unwrap().is_none());
-            assert!(doc2.get(crate::ROOT, "x").unwrap().is_none());
+            assert!(doc1.get(ROOT, "y").unwrap().is_none());
+            assert!(doc2.get(ROOT, "x").unwrap().is_none());
         }
     }
 
@@ -1804,18 +1754,18 @@ mod tests {
     fn read_only_peer_new_changes_between_sync_rounds() {
         // After an initial sync converges, the read-only peer makes new local
         // changes and syncs again. The new changes should flow to the other peer.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
 
-        doc1.put(crate::ROOT, "round1", "from_doc1").unwrap();
+        doc1.put(ROOT, "round1", "from_doc1").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "round1", "from_doc2").unwrap();
+        doc2.put(ROOT, "round1", "from_doc2").unwrap();
         doc2.commit();
 
         let mut s1 = State::new_read_only();
@@ -1823,14 +1773,14 @@ mod tests {
 
         // First sync round
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
-        assert!(doc2.get(crate::ROOT, "round1").unwrap().is_some());
+        assert!(doc2.get(ROOT, "round1").unwrap().is_some());
 
         // doc1 makes new changes
-        doc1.put(crate::ROOT, "round2", "new_from_doc1").unwrap();
+        doc1.put(ROOT, "round2", "new_from_doc1").unwrap();
         doc1.commit();
 
         // doc2 also makes new changes
-        doc2.put(crate::ROOT, "round2", "new_from_doc2").unwrap();
+        doc2.put(ROOT, "round2", "new_from_doc2").unwrap();
         doc2.commit();
 
         // Second sync round
@@ -1838,14 +1788,14 @@ mod tests {
 
         // doc2 should have doc1's new changes
         assert_eq!(
-            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            doc2.get(ROOT, "round2").unwrap().unwrap().0.to_str(),
             // doc2 has both values as a conflict, but the winning value depends on actor ordering;
             // just check the key exists
-            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            doc2.get(ROOT, "round2").unwrap().unwrap().0.to_str(),
         );
         // Verify doc2 has received "new_from_doc1" somewhere in the conflicts
         let all_values: Vec<_> = doc2
-            .get_all(crate::ROOT, "round2")
+            .get_all(ROOT, "round2")
             .unwrap()
             .into_iter()
             .map(|(v, _)| v.into_string().unwrap())
@@ -1855,11 +1805,10 @@ mod tests {
 
         // doc1 should still NOT have doc2's changes
         assert!(
-            doc1.get(crate::ROOT, "from_doc2").is_err()
-                || doc1.get(crate::ROOT, "from_doc2").unwrap().is_none()
+            doc1.get(ROOT, "from_doc2").is_err() || doc1.get(ROOT, "from_doc2").unwrap().is_none()
         );
         let doc1_round2_values: Vec<_> = doc1
-            .get_all(crate::ROOT, "round2")
+            .get_all(ROOT, "round2")
             .unwrap()
             .into_iter()
             .map(|(v, _)| v.into_string().unwrap())
@@ -1873,11 +1822,11 @@ mod tests {
         // a read-only peer. The read-only peer makes a change after receiving a
         // message but before the sync loop completes.
         for _ in 0..300 {
-            let mut doc1 = crate::AutoCommit::new()
+            let mut doc1 = AutoCommit::new()
                 .with_actor(ActorId::try_from("abc123").unwrap())
                 .unwrap();
             doc1.enable_audit_mode().unwrap();
-            let mut doc2 = crate::AutoCommit::new()
+            let mut doc2 = AutoCommit::new()
                 .with_actor(ActorId::try_from("def456").unwrap())
                 .unwrap();
             doc2.enable_audit_mode().unwrap();
@@ -1888,22 +1837,24 @@ mod tests {
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // doc2 makes a change
-            doc2.put(crate::ROOT, "x", 0).unwrap();
+            doc2.put(ROOT, "x", 0).unwrap();
 
             // generate + receive one message from doc2 to doc1
-            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap().unwrap();
-            doc1.sync().receive_sync_message(&mut s1, msg).unwrap();
+            let msg = Sync::generate_sync_message(doc2.document(), &mut s2)
+                .unwrap()
+                .unwrap();
+            Sync::receive_sync_message(doc1.document_mut(), &mut s1, msg).unwrap();
 
             // before sending anything back, doc1 (read-only) makes a local change
-            doc1.put(crate::ROOT, "y", 1).unwrap();
+            doc1.put(ROOT, "y", 1).unwrap();
 
             // now synchronize the rest
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // doc2 should have doc1's change
-            assert!(doc2.get(crate::ROOT, "y").unwrap().is_some());
+            assert!(doc2.get(ROOT, "y").unwrap().is_some());
             // doc1 should NOT have doc2's change
-            assert!(doc1.get(crate::ROOT, "x").unwrap().is_none());
+            assert!(doc1.get(ROOT, "x").unwrap().is_none());
         }
     }
 
@@ -1912,35 +1863,35 @@ mod tests {
         // R (read-only) publishes to A and B separately.
         // A makes its own changes. Then B syncs with R again.
         // B should NOT get A's changes through R (R never accepted them).
-        let mut r = crate::AutoCommit::new()
+        let mut r = AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
         r.enable_audit_mode().unwrap();
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        r.put(crate::ROOT, "from_r", "hello").unwrap();
+        r.put(ROOT, "from_r", "hello").unwrap();
         r.commit();
 
         // R syncs with A (read-only: A gets R's changes, R ignores A's)
         let mut sr_a = State::new_read_only();
         let mut sa_r = State::new();
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
-        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(a.get(ROOT, "from_r").unwrap().is_some());
 
         // A makes its own changes
-        a.put(crate::ROOT, "from_a", "world").unwrap();
+        a.put(ROOT, "from_a", "world").unwrap();
         a.commit();
 
         // A syncs with R — R should ignore A's changes
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
-        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(ROOT, "from_a").unwrap().is_none());
 
         // R syncs with B (read-only: B gets R's changes, R ignores B's)
         let mut sr_b = State::new_read_only();
@@ -1948,8 +1899,8 @@ mod tests {
         sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
 
         // B should have R's changes but NOT A's
-        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_none());
+        assert!(b.get(ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(ROOT, "from_a").unwrap().is_none());
     }
 
     #[test]
@@ -1959,22 +1910,22 @@ mod tests {
         // Now B syncs with R directly. R should recognize B already has its
         // changes (via bloom filter) and not redundantly send them.
         // The protocol should converge.
-        let mut r = crate::AutoCommit::new()
+        let mut r = AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
         r.enable_audit_mode().unwrap();
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        r.put(crate::ROOT, "from_r", "hello").unwrap();
+        r.put(ROOT, "from_r", "hello").unwrap();
         r.commit();
-        a.put(crate::ROOT, "from_a", "world").unwrap();
+        a.put(ROOT, "from_a", "world").unwrap();
         a.commit();
 
         // R syncs with A (read-only)
@@ -1983,7 +1934,7 @@ mod tests {
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
 
         // A now has R's changes
-        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(a.get(ROOT, "from_r").unwrap().is_some());
 
         // A syncs with B (both read-write)
         let mut sa_b = State::new();
@@ -1991,8 +1942,8 @@ mod tests {
         sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
 
         // B now has R's changes (received via A)
-        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(b.get(ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
 
         // Now B syncs with R directly
         let mut sr_b = State::new_read_only();
@@ -2000,11 +1951,11 @@ mod tests {
         sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
 
         // R should still only have its own changes
-        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(ROOT, "from_a").unwrap().is_none());
 
         // B should still have everything (R's changes aren't duplicated, just confirmed)
-        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(b.get(ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
     }
 
     #[test]
@@ -2013,24 +1964,24 @@ mod tests {
         // All three have their own changes. Each pair syncs.
         // A and B should converge to having A's + B's + R's changes.
         // R should only have its own changes.
-        let mut r = crate::AutoCommit::new()
+        let mut r = AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
         r.enable_audit_mode().unwrap();
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        r.put(crate::ROOT, "from_r", "r_val").unwrap();
+        r.put(ROOT, "from_r", "r_val").unwrap();
         r.commit();
-        a.put(crate::ROOT, "from_a", "a_val").unwrap();
+        a.put(ROOT, "from_a", "a_val").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "b_val").unwrap();
+        b.put(ROOT, "from_b", "b_val").unwrap();
         b.commit();
 
         let r_heads = r.get_head_hashes();
@@ -2046,8 +1997,8 @@ mod tests {
         sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
 
         // A and B each have R's changes via separate sync sessions
-        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(a.get(ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(ROOT, "from_r").unwrap().is_some());
 
         // A syncs with B (read-write) — both already have R's changes
         let mut sa_b = State::new();
@@ -2055,20 +2006,20 @@ mod tests {
         sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
 
         // A and B should have all three sets of changes
-        assert!(a.get(crate::ROOT, "from_a").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_b").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(a.get(ROOT, "from_a").unwrap().is_some());
+        assert!(a.get(ROOT, "from_b").unwrap().is_some());
+        assert!(a.get(ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
+        assert!(b.get(ROOT, "from_b").unwrap().is_some());
+        assert!(b.get(ROOT, "from_r").unwrap().is_some());
 
         // A and B should have the same heads
         assert_eq!(a.get_head_hashes(), b.get_head_hashes());
 
         // R should only have its own changes
         assert_eq!(r.get_head_hashes(), r_heads);
-        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
-        assert!(r.get(crate::ROOT, "from_b").unwrap().is_none());
+        assert!(r.get(ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(ROOT, "from_b").unwrap().is_none());
     }
 
     #[test]
@@ -2077,25 +2028,25 @@ mod tests {
         // Now B syncs with R using a fresh State. R tries to send its changes
         // to B, but B already has them (received via A). The bloom filter
         // should prevent redundant sending and the protocol should converge.
-        let mut r = crate::AutoCommit::new()
+        let mut r = AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
         r.enable_audit_mode().unwrap();
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
         // R has several changes to make bloom filter interaction interesting
         for i in 0..10 {
-            r.put(crate::ROOT, "counter", i as i64).unwrap();
+            r.put(ROOT, "counter", i as i64).unwrap();
             r.commit();
         }
-        a.put(crate::ROOT, "from_a", "a_val").unwrap();
+        a.put(ROOT, "from_a", "a_val").unwrap();
         a.commit();
 
         // R syncs with A (read-only)
@@ -2104,15 +2055,15 @@ mod tests {
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
 
         // A now has R's 10 changes
-        assert!(a.get(crate::ROOT, "counter").unwrap().is_some());
+        assert!(a.get(ROOT, "counter").unwrap().is_some());
 
         // A syncs with B — B gets everything (R's changes + A's changes)
         let mut sa_b = State::new();
         let mut sb_a = State::new();
         sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
 
-        assert!(b.get(crate::ROOT, "counter").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(b.get(ROOT, "counter").unwrap().is_some());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
 
         // Now B syncs directly with R (fresh sync state)
         let mut sr_b = State::new_read_only();
@@ -2120,11 +2071,11 @@ mod tests {
         sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
 
         // R should not have B's or A's changes
-        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(ROOT, "from_a").unwrap().is_none());
 
         // B should still have everything
-        assert!(b.get(crate::ROOT, "counter").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(b.get(ROOT, "counter").unwrap().is_some());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
     }
 
     #[test]
@@ -2133,24 +2084,24 @@ mod tests {
         // Then A syncs with R (read-only), then B syncs with R (read-only).
         // R ignores changes both times. R's sync state must handle receiving
         // announcements about the same changes from two different peers.
-        let mut r = crate::AutoCommit::new()
+        let mut r = AutoCommit::new()
             .with_actor(ActorId::try_from("aaaaaa").unwrap())
             .unwrap();
         r.enable_audit_mode().unwrap();
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("bbbbbb").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("cccccc").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        r.put(crate::ROOT, "from_r", "r_val").unwrap();
+        r.put(ROOT, "from_r", "r_val").unwrap();
         r.commit();
-        a.put(crate::ROOT, "from_a", "a_val").unwrap();
+        a.put(ROOT, "from_a", "a_val").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "b_val").unwrap();
+        b.put(ROOT, "from_b", "b_val").unwrap();
         b.commit();
 
         // A and B sync — they now share A's + B's changes
@@ -2165,31 +2116,31 @@ mod tests {
         let mut sr_a = State::new_read_only();
         let mut sa_r = State::new();
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
-        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(a.get(ROOT, "from_r").unwrap().is_some());
         assert_eq!(r.get_head_hashes(), r_heads);
 
         // B syncs with R (read-only) — R ignores the same changes again, B gets R's
         let mut sr_b = State::new_read_only();
         let mut sb_r = State::new();
         sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
-        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(ROOT, "from_r").unwrap().is_some());
 
         // R should still only have its own changes
         assert_eq!(r.get_head_hashes(), r_heads);
-        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
-        assert!(r.get(crate::ROOT, "from_b").unwrap().is_none());
+        assert!(r.get(ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(ROOT, "from_b").unwrap().is_none());
 
         // R makes a new change
-        r.put(crate::ROOT, "from_r_2", "new").unwrap();
+        r.put(ROOT, "from_r_2", "new").unwrap();
         r.commit();
 
         // Sync R with A again — A should get the new change
         sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
-        assert!(a.get(crate::ROOT, "from_r_2").unwrap().is_some());
+        assert!(a.get(ROOT, "from_r_2").unwrap().is_some());
 
         // Sync R with B again — B should also get the new change
         sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
-        assert!(b.get(crate::ROOT, "from_r_2").unwrap().is_some());
+        assert!(b.get(ROOT, "from_r_2").unwrap().is_some());
     }
 
     #[test]
@@ -2198,18 +2149,18 @@ mod tests {
         // Then A switches to read-write and syncs again.
         // A should now receive B's changes despite B having previously sent
         // them (the sent_hashes problem).
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.put(ROOT, "from_a", "hello").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         let mut sa = State::new_read_only();
@@ -2217,15 +2168,15 @@ mod tests {
 
         // First sync: A is read-only
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_none());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
+        assert!(a.get(ROOT, "from_b").unwrap().is_none());
 
         // Switch A to read-write
         sa.set_read_only(false);
 
         // Second sync: A should now receive B's changes
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert!(a.get(ROOT, "from_b").unwrap().is_some());
 
         // Both should have the same heads now
         assert_eq!(a.get_head_hashes(), b.get_head_hashes());
@@ -2235,18 +2186,18 @@ mod tests {
     fn switch_read_write_to_read_only_mid_session() {
         // A and B sync normally (both read-write). Then A switches to
         // read-only. B makes new changes. A should not receive them.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.put(ROOT, "from_a", "hello").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         let mut sa = State::new();
@@ -2260,20 +2211,20 @@ mod tests {
         sa.set_read_only(true);
 
         // B makes new changes
-        b.put(crate::ROOT, "new_from_b", "secret").unwrap();
+        b.put(ROOT, "new_from_b", "secret").unwrap();
         b.commit();
 
         // A also makes a new change
-        a.put(crate::ROOT, "new_from_a", "published").unwrap();
+        a.put(ROOT, "new_from_a", "published").unwrap();
         a.commit();
 
         // Second sync: A is now read-only
         sync(&mut a, &mut b, &mut sa, &mut sb);
 
         // B should have A's new change
-        assert!(b.get(crate::ROOT, "new_from_a").unwrap().is_some());
+        assert!(b.get(ROOT, "new_from_a").unwrap().is_some());
         // A should NOT have B's new change
-        assert!(a.get(crate::ROOT, "new_from_b").unwrap().is_none());
+        assert!(a.get(ROOT, "new_from_b").unwrap().is_none());
     }
 
     #[test]
@@ -2281,47 +2232,47 @@ mod tests {
         // A starts read-only, syncs multiple rounds with B (B makes changes
         // each round). A switches to read-write. A should receive ALL of B's
         // accumulated changes.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "initial").unwrap();
+        a.put(ROOT, "from_a", "initial").unwrap();
         a.commit();
 
         let mut sa = State::new_read_only();
         let mut sb = State::new();
 
         // Round 1: B has changes, A is read-only
-        b.put(crate::ROOT, "round1", "from_b").unwrap();
+        b.put(ROOT, "round1", "from_b").unwrap();
         b.commit();
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "round1").unwrap().is_none());
+        assert!(a.get(ROOT, "round1").unwrap().is_none());
 
         // Round 2: B has more changes, A still read-only
-        b.put(crate::ROOT, "round2", "from_b").unwrap();
+        b.put(ROOT, "round2", "from_b").unwrap();
         b.commit();
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "round2").unwrap().is_none());
+        assert!(a.get(ROOT, "round2").unwrap().is_none());
 
         // Round 3: B has even more changes, A still read-only
-        b.put(crate::ROOT, "round3", "from_b").unwrap();
+        b.put(ROOT, "round3", "from_b").unwrap();
         b.commit();
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "round3").unwrap().is_none());
+        assert!(a.get(ROOT, "round3").unwrap().is_none());
 
         // Switch A to read-write
         sa.set_read_only(false);
 
         // Sync again — A should receive ALL of B's changes from all rounds
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "round1").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "round2").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "round3").unwrap().is_some());
+        assert!(a.get(ROOT, "round1").unwrap().is_some());
+        assert!(a.get(ROOT, "round2").unwrap().is_some());
+        assert!(a.get(ROOT, "round3").unwrap().is_some());
 
         assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
@@ -2329,11 +2280,11 @@ mod tests {
     #[test]
     fn toggle_read_only_multiple_times() {
         // Rapidly toggle read-only on and off, making changes between each toggle.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
@@ -2342,57 +2293,57 @@ mod tests {
         let mut sb = State::new();
 
         // Round 1: A read-only, B makes changes
-        b.put(crate::ROOT, "b1", "val").unwrap();
+        b.put(ROOT, "b1", "val").unwrap();
         b.commit();
-        a.put(crate::ROOT, "a1", "val").unwrap();
+        a.put(ROOT, "a1", "val").unwrap();
         a.commit();
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(b.get(crate::ROOT, "a1").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "b1").unwrap().is_none());
+        assert!(b.get(ROOT, "a1").unwrap().is_some());
+        assert!(a.get(ROOT, "b1").unwrap().is_none());
 
         // Round 2: switch to read-write
         sa.set_read_only(false);
-        b.put(crate::ROOT, "b2", "val").unwrap();
+        b.put(ROOT, "b2", "val").unwrap();
         b.commit();
-        a.put(crate::ROOT, "a2", "val").unwrap();
+        a.put(ROOT, "a2", "val").unwrap();
         a.commit();
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "b1").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "b2").unwrap().is_some());
-        assert!(b.get(crate::ROOT, "a2").unwrap().is_some());
+        assert!(a.get(ROOT, "b1").unwrap().is_some());
+        assert!(a.get(ROOT, "b2").unwrap().is_some());
+        assert!(b.get(ROOT, "a2").unwrap().is_some());
 
         // Round 3: switch back to read-only
         sa.set_read_only(true);
-        b.put(crate::ROOT, "b3", "val").unwrap();
+        b.put(ROOT, "b3", "val").unwrap();
         b.commit();
-        a.put(crate::ROOT, "a3", "val").unwrap();
+        a.put(ROOT, "a3", "val").unwrap();
         a.commit();
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(b.get(crate::ROOT, "a3").unwrap().is_some());
-        assert!(a.get(crate::ROOT, "b3").unwrap().is_none());
+        assert!(b.get(ROOT, "a3").unwrap().is_some());
+        assert!(a.get(ROOT, "b3").unwrap().is_none());
 
         // Round 4: switch to read-write again
         sa.set_read_only(false);
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "b3").unwrap().is_some());
+        assert!(a.get(ROOT, "b3").unwrap().is_some());
         assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 
     #[test]
     fn peer_discovers_remote_read_only_status() {
         // After exchanging messages, B should discover that A is read-only.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.put(ROOT, "from_a", "hello").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         let mut sa = State::new_read_only();
@@ -2402,10 +2353,12 @@ mod tests {
         assert!(!sb.is_peer_read_only());
 
         // A generates a message (includes ReadOnly capability)
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
+        let msg = Sync::generate_sync_message(a.document(), &mut sa)
+            .unwrap()
+            .unwrap();
 
         // B receives it and discovers A is read-only
-        b.sync().receive_sync_message(&mut sb, msg).unwrap();
+        Sync::receive_sync_message(b.document_mut(), &mut sb, msg).unwrap();
         assert!(sb.is_peer_read_only());
 
         // Complete the sync
@@ -2416,8 +2369,10 @@ mod tests {
         sa.set_read_only(false);
 
         // After exchanging messages, B discovers A is no longer read-only
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
-        b.sync().receive_sync_message(&mut sb, msg).unwrap();
+        let msg = Sync::generate_sync_message(a.document(), &mut sa)
+            .unwrap()
+            .unwrap();
+        Sync::receive_sync_message(b.document_mut(), &mut sb, msg).unwrap();
         assert!(!sb.is_peer_read_only());
     }
 
@@ -2425,43 +2380,47 @@ mod tests {
     fn changes_not_sent_to_read_only_peer() {
         // B should not send changes to A when B knows A is read-only.
         // This saves bandwidth.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         let mut sa = State::new_read_only();
         let mut sb = State::new();
 
         // Exchange initial messages so B discovers A is read-only
-        let msg_a = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
-        b.sync().receive_sync_message(&mut sb, msg_a).unwrap();
+        let msg_a = Sync::generate_sync_message(a.document(), &mut sa)
+            .unwrap()
+            .unwrap();
+        Sync::receive_sync_message(b.document_mut(), &mut sb, msg_a).unwrap();
         assert!(sb.is_peer_read_only());
 
         // B generates a response — should have no changes since A is read-only
-        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap().unwrap();
+        let msg_b = Sync::generate_sync_message(b.document(), &mut sb)
+            .unwrap()
+            .unwrap();
         assert!(msg_b.changes.is_empty());
 
         // Complete the sync
-        a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
+        Sync::receive_sync_message(a.document_mut(), &mut sa, msg_b).unwrap();
         sync(&mut a, &mut b, &mut sa, &mut sb);
 
         // A still doesn't have B's changes (read-only + B didn't even send them)
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_none());
+        assert!(a.get(ROOT, "from_b").unwrap().is_none());
 
         // Now A switches to read-write
         sa.set_read_only(false);
         sync(&mut a, &mut b, &mut sa, &mut sb);
 
         // A should now have B's changes
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert!(a.get(ROOT, "from_b").unwrap().is_some());
         assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 
@@ -2470,18 +2429,18 @@ mod tests {
         // After calling generate_sync_message (setting in_flight=true),
         // then set_read_only, the next generate_sync_message must still
         // produce a message so the peer learns about the mode change.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.put(ROOT, "from_a", "hello").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         let mut sa = State::new();
@@ -2491,13 +2450,15 @@ mod tests {
         sync(&mut a, &mut b, &mut sa, &mut sb);
 
         // B makes a new change and sends it to A
-        b.put(crate::ROOT, "new_from_b", "secret").unwrap();
+        b.put(ROOT, "new_from_b", "secret").unwrap();
         b.commit();
-        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap().unwrap();
-        a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
+        let msg_b = Sync::generate_sync_message(b.document(), &mut sb)
+            .unwrap()
+            .unwrap();
+        Sync::receive_sync_message(a.document_mut(), &mut sa, msg_b).unwrap();
 
         // A generates a response (sets in_flight=true)
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg = Sync::generate_sync_message(a.document(), &mut sa).unwrap();
         assert!(msg.is_some());
         assert!(sa.in_flight);
 
@@ -2505,7 +2466,7 @@ mod tests {
         sa.set_read_only(true);
 
         // A must be able to generate another message to advertise ReadOnly
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg = Sync::generate_sync_message(a.document(), &mut sa).unwrap();
         assert!(
             msg.is_some(),
             "should generate message after set_read_only even with prior in_flight"
@@ -2519,16 +2480,16 @@ mod tests {
     #[test]
     fn generate_message_after_set_read_only_false_even_with_in_flight() {
         // Same as above but switching from read-only to read-write.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.put(ROOT, "from_a", "hello").unwrap();
         a.commit();
 
         let mut sa = State::new_read_only();
@@ -2538,21 +2499,23 @@ mod tests {
         sync(&mut a, &mut b, &mut sa, &mut sb);
 
         // B makes a change
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         // A generates (sets in_flight)
-        let _msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let _msg = Sync::generate_sync_message(a.document(), &mut sa).unwrap();
         // Force some state by receiving a message
-        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap().unwrap();
-        a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
-        let _ = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg_b = Sync::generate_sync_message(b.document(), &mut sb)
+            .unwrap()
+            .unwrap();
+        Sync::receive_sync_message(a.document_mut(), &mut sa, msg_b).unwrap();
+        let _ = Sync::generate_sync_message(a.document(), &mut sa).unwrap();
 
         // Now switch to read-write
         sa.set_read_only(false);
 
         // Must generate a message with SyncReset
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg = Sync::generate_sync_message(a.document(), &mut sa).unwrap();
         assert!(
             msg.is_some(),
             "should generate message after switching to read-write"
@@ -2568,18 +2531,18 @@ mod tests {
         // Both peers start read-only with their own changes, sync (exchanging
         // heads but not changes), then both switch to read-write simultaneously.
         // After syncing again, both should have each other's changes.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
 
-        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.put(ROOT, "from_doc1", "hello").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.put(ROOT, "from_doc2", "world").unwrap();
         doc2.commit();
 
         let mut s1 = State::new_read_only();
@@ -2587,8 +2550,8 @@ mod tests {
 
         // Sync while both read-only — neither gets the other's changes
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
-        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
-        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_none());
+        assert!(doc1.get(ROOT, "from_doc2").unwrap().is_none());
+        assert!(doc2.get(ROOT, "from_doc1").unwrap().is_none());
 
         // Both switch to read-write simultaneously
         s1.set_read_only(false);
@@ -2597,8 +2560,8 @@ mod tests {
         // Sync again — both should exchange and apply changes
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
-        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_some());
-        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_some());
+        assert!(doc1.get(ROOT, "from_doc2").unwrap().is_some());
+        assert!(doc2.get(ROOT, "from_doc1").unwrap().is_some());
         assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
     }
 
@@ -2606,18 +2569,18 @@ mod tests {
     fn both_toggle_read_only_to_read_write_with_new_changes() {
         // Both peers start read-only, sync, then both switch to read-write
         // and make additional changes before syncing.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
 
-        doc1.put(crate::ROOT, "original_1", "v1").unwrap();
+        doc1.put(ROOT, "original_1", "v1").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "original_2", "v2").unwrap();
+        doc2.put(ROOT, "original_2", "v2").unwrap();
         doc2.commit();
 
         let mut s1 = State::new_read_only();
@@ -2631,18 +2594,18 @@ mod tests {
         s2.set_read_only(false);
 
         // Both make NEW changes after switching
-        doc1.put(crate::ROOT, "new_1", "after_switch").unwrap();
+        doc1.put(ROOT, "new_1", "after_switch").unwrap();
         doc1.commit();
-        doc2.put(crate::ROOT, "new_2", "after_switch").unwrap();
+        doc2.put(ROOT, "new_2", "after_switch").unwrap();
         doc2.commit();
 
         // Sync — should get both original AND new changes from each other
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
-        assert!(doc1.get(crate::ROOT, "original_2").unwrap().is_some());
-        assert!(doc1.get(crate::ROOT, "new_2").unwrap().is_some());
-        assert!(doc2.get(crate::ROOT, "original_1").unwrap().is_some());
-        assert!(doc2.get(crate::ROOT, "new_1").unwrap().is_some());
+        assert!(doc1.get(ROOT, "original_2").unwrap().is_some());
+        assert!(doc1.get(ROOT, "new_2").unwrap().is_some());
+        assert!(doc2.get(ROOT, "original_1").unwrap().is_some());
+        assert!(doc2.get(ROOT, "new_1").unwrap().is_some());
         assert_eq!(doc1.get_head_hashes(), doc2.get_head_hashes());
     }
 
@@ -2651,11 +2614,11 @@ mod tests {
         // Both peers are read-only for several rounds, making changes each
         // round. Then both switch to read-write. All accumulated changes
         // from all rounds should be exchanged.
-        let mut doc1 = crate::AutoCommit::new()
+        let mut doc1 = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = crate::AutoCommit::new()
+        let mut doc2 = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         doc2.enable_audit_mode().unwrap();
@@ -2665,25 +2628,17 @@ mod tests {
 
         // Several rounds of read-only sync with changes each round
         for i in 0..5 {
-            doc1.put(crate::ROOT, format!("doc1_r{i}"), i as i64)
-                .unwrap();
+            doc1.put(ROOT, format!("doc1_r{i}"), i as i64).unwrap();
             doc1.commit();
-            doc2.put(crate::ROOT, format!("doc2_r{i}"), i as i64)
-                .unwrap();
+            doc2.put(ROOT, format!("doc2_r{i}"), i as i64).unwrap();
             doc2.commit();
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
         }
 
         // Neither has the other's changes from any round
         for i in 0..5 {
-            assert!(doc1
-                .get(crate::ROOT, format!("doc2_r{i}"))
-                .unwrap()
-                .is_none());
-            assert!(doc2
-                .get(crate::ROOT, format!("doc1_r{i}"))
-                .unwrap()
-                .is_none());
+            assert!(doc1.get(ROOT, format!("doc2_r{i}")).unwrap().is_none());
+            assert!(doc2.get(ROOT, format!("doc1_r{i}")).unwrap().is_none());
         }
 
         // Both switch to read-write
@@ -2695,15 +2650,11 @@ mod tests {
 
         for i in 0..5 {
             assert!(
-                doc1.get(crate::ROOT, format!("doc2_r{i}"))
-                    .unwrap()
-                    .is_some(),
+                doc1.get(ROOT, format!("doc2_r{i}")).unwrap().is_some(),
                 "doc1 missing doc2_r{i}"
             );
             assert!(
-                doc2.get(crate::ROOT, format!("doc1_r{i}"))
-                    .unwrap()
-                    .is_some(),
+                doc2.get(ROOT, format!("doc1_r{i}")).unwrap().is_some(),
                 "doc2 missing doc1_r{i}"
             );
         }
@@ -2716,18 +2667,18 @@ mod tests {
         // peer is an old implementation that doesn't understand SyncReset.
         // Old peers have their_capabilities = None. The fallback sends empty
         // heads, which triggers the old "peer lost all data" reset path.
-        let mut a = crate::AutoCommit::new()
+        let mut a = AutoCommit::new()
             .with_actor(ActorId::try_from("abc123").unwrap())
             .unwrap();
         a.enable_audit_mode().unwrap();
-        let mut b = crate::AutoCommit::new()
+        let mut b = AutoCommit::new()
             .with_actor(ActorId::try_from("def456").unwrap())
             .unwrap();
         b.enable_audit_mode().unwrap();
 
-        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.put(ROOT, "from_a", "hello").unwrap();
         a.commit();
-        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.put(ROOT, "from_b", "world").unwrap();
         b.commit();
 
         let mut sa = State::new_read_only();
@@ -2735,8 +2686,8 @@ mod tests {
 
         // Sync while read-only
         sync(&mut a, &mut b, &mut sa, &mut sb);
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_none());
-        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(a.get(ROOT, "from_b").unwrap().is_none());
+        assert!(b.get(ROOT, "from_a").unwrap().is_some());
 
         // Simulate an old peer by clearing their_capabilities before switching.
         // set_read_only preserves their_capabilities, so we clear after.
@@ -2744,7 +2695,9 @@ mod tests {
         sa.their_capabilities = None;
 
         // The first message should have empty heads (old peer fallback)
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
+        let msg = Sync::generate_sync_message(a.document(), &mut sa)
+            .unwrap()
+            .unwrap();
         assert!(msg.heads.is_empty(), "should send empty heads for old peer");
         assert!(
             !msg.flags.unwrap().contains(MessageFlags::SYNC_RESET),
@@ -2752,11 +2705,11 @@ mod tests {
         );
 
         // Complete the sync — old peer sees empty heads, clears sent_hashes
-        b.sync().receive_sync_message(&mut sb, msg).unwrap();
+        Sync::receive_sync_message(b.document_mut(), &mut sb, msg).unwrap();
         sync(&mut a, &mut b, &mut sa, &mut sb);
 
         // A should now have B's changes
-        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert!(a.get(ROOT, "from_b").unwrap().is_some());
         assert_eq!(a.get_head_hashes(), b.get_head_hashes());
     }
 }

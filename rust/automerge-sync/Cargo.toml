@@ -1,0 +1,23 @@
+[package]
+name = "automerge-sync"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/automerge/automerge"
+rust-version = "1.90.0"
+description = "The automerge sync protocol: efficient replication of an automerge document between two peers"
+readme = "./README.md"
+
+[dependencies]
+automerge = { version = "0.10.0", path = "../automerge" }
+itertools = "0.14.0"
+leb128 = "^0.2.5"
+serde = { version = "^1.0", features = ["derive"] }
+thiserror = "^2.0.12"
+
+[dev-dependencies]
+automerge-test = { path = "../automerge-test" }
+rand = "^0.10"
+tracing = "^0.1.29"
+test-log = { version = "0.2.10", features = ["trace"], default-features = false }
+tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }

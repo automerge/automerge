@@ -648,7 +648,9 @@ pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 pub struct ChangeHash(pub [u8; HASH_SIZE]);
 
 impl ChangeHash {
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    /// The raw 32 bytes. The counterpart to `TryFrom<&[u8]>`, for
+    /// protocols which put hashes on the wire.
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 

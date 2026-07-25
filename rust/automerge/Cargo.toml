@@ -50,6 +50,10 @@ features = ["console"]
 optional = true
 
 [dev-dependencies]
+# a dev-dependency cycle: the sync crate depends on automerge, and
+# automerge's own tests and benches drive it. Cargo allows this because
+# dev-dependencies are not used to build the library itself.
+automerge-sync = { path = "../automerge-sync" }
 pretty_assertions = "1.0.0"
 sha2 = "0.11.0"
 proptest = { version = "^1.7.0", default-features = false, features = ["std"] }

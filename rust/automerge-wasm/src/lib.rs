@@ -33,7 +33,7 @@ use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
 use automerge::TextEncoding;
-use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
+use automerge::{AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use interop::import_scalar;
 use js_sys::Reflect;
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -47,10 +47,12 @@ use wasm_bindgen::JsCast;
 
 mod export_cache;
 mod interop;
+#[cfg(feature = "sync")]
 mod sync;
 mod value;
 
 use interop::{alloc, get_heads, import_obj, js_get, js_set, to_js_err, to_prop, AR, JS};
+#[cfg(feature = "sync")]
 use sync::SyncState;
 use value::Datatype;
 
@@ -1624,6 +1626,7 @@ impl Automerge {
         Ok(deps)
     }
 
+    #[cfg(feature = "sync")]
     #[wasm_bindgen(js_name = receiveSyncMessage)]
     pub fn receive_sync_message(
         &mut self,
@@ -1632,19 +1635,19 @@ impl Automerge {
     ) -> Result<(), error::ReceiveSyncMessage> {
         let message = message.to_vec();
         //am::log!("receive sync message: {:?}", message.as_slice());
-        let message = am::sync::Message::decode(message.as_slice())?;
-        self.doc
-            .sync()
-            .receive_sync_message(&mut state.0, message)?;
+        let message = automerge_sync::Message::decode(message.as_slice())?;
+        automerge_sync::Sync::receive_sync_message(self.doc.document_mut(), &mut state.0, message)?;
         Ok(())
     }
 
+    #[cfg(feature = "sync")]
     #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
     pub fn generate_sync_message(
         &mut self,
         state: &mut SyncState,
     ) -> Result<JsValue, error::Merge> {
-        let message = self.doc.sync().generate_sync_message(&mut state.0)?;
+        let message =
+            automerge_sync::Sync::generate_sync_message(self.doc.document(), &mut state.0)?;
         if let Some(message) = message {
             let message = message.encode();
             //am::log!("generate sync message: {:?}", message.as_slice());
@@ -1858,9 +1861,10 @@ impl Automerge {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[wasm_bindgen(js_name = hasOurChanges)]
     pub fn has_our_changes(&mut self, state: &mut SyncState) -> bool {
-        self.doc.has_our_changes(&state.0)
+        automerge_sync::Sync::peer_has_our_changes(self.doc.document(), &state.0)
     }
 
     #[wasm_bindgen(js_name = topoHistoryTraversal, unchecked_return_type="Hash[]")]
@@ -2017,33 +2021,38 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, error::DecodeChange>
     Ok(change.serialize(&serializer)?)
 }
 
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = initSyncState, unchecked_return_type="SyncState")]
 pub fn init_sync_state() -> SyncState {
-    SyncState(am::sync::State::new())
+    SyncState(automerge_sync::State::new())
 }
 
 // this is needed to be compatible with the automerge-js api
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = importSyncState)]
 pub fn import_sync_state(state: JsValue) -> Result<SyncState, interop::error::BadSyncState> {
     Ok(SyncState(JS(state).try_into()?))
 }
 
 // this is needed to be compatible with the automerge-js api
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = exportSyncState, unchecked_return_type="JsSyncState")]
 pub fn export_sync_state(state: &SyncState) -> JsValue {
     JS::from(state.0.clone()).into()
 }
 
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = encodeSyncMessage, unchecked_return_type="SyncMessage")]
 pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, interop::error::BadSyncMessage> {
-    let message: am::sync::Message = JS(message).try_into()?;
+    let message: automerge_sync::Message = JS(message).try_into()?;
     Ok(Uint8Array::from(message.encode().as_slice()))
 }
 
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = decodeSyncMessage, unchecked_return_type="DecodedSyncMessage")]
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMessage> {
     let data = msg.to_vec();
-    let msg = am::sync::Message::decode(&data)?;
+    let msg = automerge_sync::Message::decode(&data)?;
     let heads = AR::from(msg.heads.as_slice());
     let need = AR::from(msg.need.as_slice());
     let changes = AR::from(&msg.changes);
@@ -2056,10 +2065,10 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMes
     js_set(&obj, "changes", changes).unwrap();
 
     match msg.version {
-        am::sync::MessageVersion::V1 => {
+        automerge_sync::MessageVersion::V1 => {
             js_set(&obj, "type", JsValue::from_str("v1")).unwrap();
         }
-        am::sync::MessageVersion::V2 => {
+        automerge_sync::MessageVersion::V2 => {
             js_set(&obj, "type", JsValue::from_str("v2")).unwrap();
         }
     };
@@ -2072,11 +2081,13 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMes
     Ok(obj)
 }
 
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = encodeSyncState)]
 pub fn encode_sync_state(state: &SyncState) -> Uint8Array {
     Uint8Array::from(state.0.encode().as_slice())
 }
 
+#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = decodeSyncState, unchecked_return_type="SyncState")]
 pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSyncStateErr> {
     SyncState::decode(data)
@@ -2760,12 +2771,14 @@ pub mod error {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadSyncMessage {
         #[error("could not decode sync message: {0}")]
-        ReadMessage(#[from] automerge::sync::ReadMessageError),
+        ReadMessage(#[from] automerge_sync::ReadMessageError),
     }
 
+    #[cfg(feature = "sync")]
     impl From<BadSyncMessage> for JsValue {
         fn from(e: BadSyncMessage) -> Self {
             RangeError::new(&e.to_string()).into()
@@ -2878,14 +2891,16 @@ pub mod error {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum ReceiveSyncMessage {
         #[error(transparent)]
-        Decode(#[from] automerge::sync::ReadMessageError),
+        Decode(#[from] automerge_sync::ReadMessageError),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
     }
 
+    #[cfg(feature = "sync")]
     impl From<ReceiveSyncMessage> for JsValue {
         fn from(e: ReceiveSyncMessage) -> Self {
             RangeError::new(&e.to_string()).into()

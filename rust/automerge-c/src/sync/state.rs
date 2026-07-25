@@ -22,12 +22,12 @@ pub(crate) use to_sync_state;
 /// \brief The state of synchronization with a peer.
 #[derive(Eq, PartialEq)]
 pub struct AMsyncState {
-    body: am::sync::State,
+    body: automerge_sync::State,
     their_haves_storage: RefCell<BTreeMap<usize, AMsyncHave>>,
 }
 
 impl AMsyncState {
-    pub fn new(state: am::sync::State) -> Self {
+    pub fn new(state: automerge_sync::State) -> Self {
         Self {
             body: state,
             their_haves_storage: RefCell::new(BTreeMap::new()),
@@ -35,14 +35,14 @@ impl AMsyncState {
     }
 }
 
-impl AsMut<am::sync::State> for AMsyncState {
-    fn as_mut(&mut self) -> &mut am::sync::State {
+impl AsMut<automerge_sync::State> for AMsyncState {
+    fn as_mut(&mut self) -> &mut automerge_sync::State {
         &mut self.body
     }
 }
 
-impl AsRef<am::sync::State> for AMsyncState {
-    fn as_ref(&self) -> &am::sync::State {
+impl AsRef<automerge_sync::State> for AMsyncState {
+    fn as_ref(&self) -> &automerge_sync::State {
         &self.body
     }
 }
@@ -72,7 +72,7 @@ impl From<AMsyncState> for *mut AMsyncState {
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
-    to_result(am::sync::State::decode(data))
+    to_result(automerge_sync::State::decode(data))
 }
 
 /// \memberof AMsyncState
@@ -127,7 +127,7 @@ pub unsafe extern "C" fn AMsyncStateEqual(
 ///          `AMresultFree()` in order to avoid a memory leak.
 #[no_mangle]
 pub extern "C" fn AMsyncStateInit() -> *mut AMresult {
-    to_result(am::sync::State::new())
+    to_result(automerge_sync::State::new())
 }
 
 /// \memberof AMsyncState
@@ -194,7 +194,7 @@ pub unsafe extern "C" fn AMsyncStateTheirHaves(
         }
     };
     *has_value = false;
-    to_result(Vec::<am::sync::Have>::new())
+    to_result(Vec::<automerge_sync::Have>::new())
 }
 
 /// \memberof AMsyncState

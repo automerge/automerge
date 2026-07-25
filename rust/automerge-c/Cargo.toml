@@ -14,6 +14,7 @@ doc = false
 
 [dependencies]
 automerge = { path = "../automerge" }
+automerge-sync = { path = "../automerge-sync" }
 hex = "^0.4.3"
 libc = "^0.2"
 smol_str = "0.3"

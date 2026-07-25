@@ -1,4 +1,4 @@
-use crate::{Change, ChangeHash};
+use automerge::{Change, ChangeHash};
 
 use super::{Have, Message, MessageFlags, MessageVersion, State};
 

@@ -182,20 +182,20 @@ impl From<&am::ScalarValue> for Value {
     }
 }
 
-impl From<am::sync::Have> for Value {
-    fn from(have: am::sync::Have) -> Self {
+impl From<automerge_sync::Have> for Value {
+    fn from(have: automerge_sync::Have) -> Self {
         Self::SyncHave(AMsyncHave::new(have))
     }
 }
 
-impl From<am::sync::Message> for Value {
-    fn from(message: am::sync::Message) -> Self {
+impl From<automerge_sync::Message> for Value {
+    fn from(message: automerge_sync::Message) -> Self {
         Self::SyncMessage(AMsyncMessage::new(message))
     }
 }
 
-impl From<am::sync::State> for Value {
-    fn from(state: am::sync::State) -> Self {
+impl From<automerge_sync::State> for Value {
+    fn from(state: automerge_sync::State) -> Self {
         Self::SyncState(RefCell::new(AMsyncState::new(state)))
     }
 }
@@ -695,20 +695,20 @@ impl From<&am::ScalarValue> for Item {
     }
 }
 
-impl From<am::sync::Have> for Item {
-    fn from(have: am::sync::Have) -> Self {
+impl From<automerge_sync::Have> for Item {
+    fn from(have: automerge_sync::Have) -> Self {
         Value::from(have).into()
     }
 }
 
-impl From<am::sync::Message> for Item {
-    fn from(message: am::sync::Message) -> Self {
+impl From<automerge_sync::Message> for Item {
+    fn from(message: automerge_sync::Message) -> Self {
         Value::from(message).into()
     }
 }
 
-impl From<am::sync::State> for Item {
-    fn from(state: am::sync::State) -> Self {
+impl From<automerge_sync::State> for Item {
+    fn from(state: automerge_sync::State) -> Self {
         Value::from(state).into()
     }
 }
@@ -1194,20 +1194,20 @@ impl From<&am::ScalarValue> for AMitem {
     }
 }
 
-impl From<am::sync::Have> for AMitem {
-    fn from(have: am::sync::Have) -> Self {
+impl From<automerge_sync::Have> for AMitem {
+    fn from(have: automerge_sync::Have) -> Self {
         Value::from(have).into()
     }
 }
 
-impl From<am::sync::Message> for AMitem {
-    fn from(message: am::sync::Message) -> Self {
+impl From<automerge_sync::Message> for AMitem {
+    fn from(message: automerge_sync::Message) -> Self {
         Value::from(message).into()
     }
 }
 
-impl From<am::sync::State> for AMitem {
-    fn from(state: am::sync::State) -> Self {
+impl From<automerge_sync::State> for AMitem {
+    fn from(state: automerge_sync::State) -> Self {
         Value::from(state).into()
     }
 }

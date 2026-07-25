@@ -223,37 +223,38 @@ fn disabled_save_after_narrow_failure() {
 
 #[test]
 fn sync_requires_audit_mode() {
-    use automerge::sync::SyncDoc;
+    use automerge_sync::Sync;
 
     // the gate is deterministic: even a fresh one-change doc, whose
     // retained hashes would suffice, refuses outside audit mode
     let mut doc = AutoCommit::new();
     doc.put(ROOT, "k", 1).unwrap();
     doc.commit();
-    let mut state = automerge::sync::State::new();
+    let mut state = automerge_sync::State::new();
     assert!(matches!(
-        doc.sync().generate_sync_message(&mut state),
+        Sync::generate_sync_message(doc.document(), &mut state),
         Err(AutomergeError::AuditModeRequired)
     ));
 
+    // receiving refuses too
     let mut other = AutoCommit::new();
     other.enable_audit_mode().unwrap();
-    let mut other_state = automerge::sync::State::new();
-    let msg = other
-        .sync()
-        .generate_sync_message(&mut other_state)
+    other.put(ROOT, "k", 2).unwrap();
+    other.commit();
+    let mut other_state = automerge_sync::State::new();
+    let msg = Sync::generate_sync_message(other.document(), &mut other_state)
         .unwrap()
         .unwrap();
     assert!(matches!(
-        doc.sync().receive_sync_message(&mut state, msg),
+        Sync::receive_sync_message(doc.document_mut(), &mut state, msg.clone()),
         Err(AutomergeError::AuditModeRequired)
     ));
 
-    // enabling audit mode unlocks both directions
+    // enabling audit mode unlocks both directions — the same message
+    // the receive above refused now applies
     doc.enable_audit_mode().unwrap();
-    assert!(doc
-        .sync()
-        .generate_sync_message(&mut state)
+    Sync::receive_sync_message(doc.document_mut(), &mut state, msg).unwrap();
+    assert!(Sync::generate_sync_message(doc.document(), &mut state)
         .unwrap()
         .is_some());
 }
@@ -533,7 +534,7 @@ fn disabled_diff_works() {
 /// mode and verify everything works.
 #[test]
 fn disabled_lifecycle_all_fallible_functions() {
-    use automerge::sync::SyncDoc;
+    use automerge_sync::Sync;
 
     let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load(&bytes).unwrap();
@@ -558,8 +559,8 @@ fn disabled_lifecycle_all_fallible_functions() {
     err(doc.get_change_by_hash(&unknown).map(|_| ()));
     err(doc.get_change_meta_by_hash(&unknown).map(|_| ()));
 
-    let mut state = automerge::sync::State::new();
-    err(doc.sync().generate_sync_message(&mut state).map(|_| ()));
+    let mut state = automerge_sync::State::new();
+    err(Sync::generate_sync_message(doc.document(), &mut state).map(|_| ()));
 
     // merge and get_changes_added are hash-free (they identify changes
     // by (actor, seq)) and work outside audit mode — check on a fork so
@@ -624,9 +625,8 @@ fn disabled_lifecycle_all_fallible_functions() {
         .is_empty());
     assert!(doc.get_change_by_hash(&unknown).unwrap().is_some());
     assert!(!doc.save_after(&[unknown_id]).unwrap().is_empty());
-    assert!(doc
-        .sync()
-        .generate_sync_message(&mut state)
+    let mut state = automerge_sync::State::new();
+    assert!(Sync::generate_sync_message(doc.document(), &mut state)
         .unwrap()
         .is_some());
     assert!(!doc.get_changes_added(&mut other).unwrap().is_empty());

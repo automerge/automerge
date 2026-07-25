@@ -1,12 +1,13 @@
 use automerge::marks::{ExpandMark, Mark};
-use automerge::sync::{Message, MessageVersion, State};
+use automerge_sync::{Message, MessageVersion, State};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
-    LoadOptions, ObjId, ObjType, Patch, PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree,
-    TextEncoding, Value, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, LoadOptions, ObjId,
+    ObjType, Patch, PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, TextEncoding, Value,
+    ROOT,
 };
+use automerge_sync::Sync;
 
 const B: usize = 16;
 
@@ -3069,40 +3070,35 @@ fn has_our_changes() {
     right.enable_audit_mode().unwrap();
     right.put(&automerge::ROOT, "b", 2).unwrap();
 
-    let mut left_to_right = automerge::sync::State::new();
-    let mut right_to_left = automerge::sync::State::new();
+    let mut left_to_right = automerge_sync::State::new();
+    let mut right_to_left = automerge_sync::State::new();
 
-    assert!(!left.has_our_changes(&left_to_right));
-    assert!(!right.has_our_changes(&right_to_left));
+    assert!(!Sync::peer_has_our_changes(left.document(), &left_to_right));
+    assert!(!Sync::peer_has_our_changes(
+        right.document(),
+        &right_to_left
+    ));
 
-    while !left.has_our_changes(&left_to_right) || !right.has_our_changes(&right_to_left) {
+    while !Sync::peer_has_our_changes(left.document(), &left_to_right)
+        || !Sync::peer_has_our_changes(right.document(), &right_to_left)
+    {
         let mut quiet = true;
-        if let Some(msg) = left
-            .sync()
-            .generate_sync_message(&mut left_to_right)
-            .unwrap()
+        if let Some(msg) = Sync::generate_sync_message(left.document(), &mut left_to_right).unwrap()
         {
             quiet = false;
-            right
-                .sync()
-                .receive_sync_message(&mut right_to_left, msg)
-                .unwrap();
+            Sync::receive_sync_message(right.document_mut(), &mut right_to_left, msg).unwrap();
         }
-        if let Some(msg) = right
-            .sync()
-            .generate_sync_message(&mut right_to_left)
-            .unwrap()
+        if let Some(msg) =
+            Sync::generate_sync_message(right.document(), &mut right_to_left).unwrap()
         {
             quiet = false;
-            left.sync()
-                .receive_sync_message(&mut left_to_right, msg)
-                .unwrap();
+            Sync::receive_sync_message(left.document_mut(), &mut left_to_right, msg).unwrap();
         }
         if quiet {
             panic!("no messages sent but the sync state says we're not in sync");
         }
     }
-    assert!(right.has_our_changes(&right_to_left));
+    assert!(Sync::peer_has_our_changes(right.document(), &right_to_left));
 }
 
 #[test]
@@ -3783,9 +3779,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
         flags: None,
         version: MessageVersion::V1,
     };
-    left.sync()
-        .receive_sync_message(&mut State::new(), orphan_message)
-        .unwrap();
+    Sync::receive_sync_message(left.document_mut(), &mut State::new(), orphan_message).unwrap();
     assert_eq!(left.get_missing_deps(&[]).unwrap(), vec![missing]);
 
     let mut right = AutoCommit::load(&base)
@@ -3802,10 +3796,7 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
     right_state.their_need = Some(vec![missing]);
     right_state.their_have = Some(vec![]);
 
-    let message = right
-        .sync()
-        .generate_sync_message(&mut right_state)
-        .unwrap();
+    let message = Sync::generate_sync_message(right.document(), &mut right_state).unwrap();
     assert_eq!(
         message.map(|message| message.heads),
         Some({
@@ -4288,15 +4279,13 @@ fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace
     let mut local_sync = State::new();
     let mut peer_sync = State::new();
     for _ in 0..7 {
-        if let Some(message) = doc.sync().generate_sync_message(&mut local_sync).unwrap() {
-            peer.sync()
-                .receive_sync_message(&mut peer_sync, message)
-                .unwrap();
+        if let Some(message) = Sync::generate_sync_message(doc.document(), &mut local_sync).unwrap()
+        {
+            Sync::receive_sync_message(peer.document_mut(), &mut peer_sync, message).unwrap();
         }
-        if let Some(message) = peer.sync().generate_sync_message(&mut peer_sync).unwrap() {
-            doc.sync()
-                .receive_sync_message(&mut local_sync, message)
-                .unwrap();
+        if let Some(message) = Sync::generate_sync_message(peer.document(), &mut peer_sync).unwrap()
+        {
+            Sync::receive_sync_message(doc.document_mut(), &mut local_sync, message).unwrap();
         }
     }
 

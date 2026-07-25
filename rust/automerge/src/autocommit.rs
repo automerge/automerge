@@ -9,17 +9,16 @@ use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchAccumulator;
-use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
 use crate::Fragment;
 use crate::{hydrate, OnPartialLoad, TextEncoding};
-use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash,
     ChangeId, Cursor, Prop, Value,
 };
 use crate::{LoadOptions, VerificationMode};
+use crate::{ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 
 /// An automerge document that automatically manages transactions.
 ///
@@ -45,7 +44,9 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// ## Synchronization
 ///
-/// To synchronise call [`Self::sync()`] which returns an implementation of [`SyncDoc`]
+/// To synchronise, hand [`Self::document()`] or [`Self::document_mut()`]
+/// to a replication protocol such as `automerge-sync`; both settle any
+/// open transaction first
 ///
 /// ## Patches, maintaining materialized views
 ///
@@ -385,6 +386,17 @@ impl AutoCommit {
     pub fn document(&mut self) -> &Automerge {
         self.ensure_transaction_closed();
         &self.doc
+    }
+
+    /// [`Self::document`] for callers which need to mutate — a
+    /// replication protocol receiving changes, say.
+    ///
+    /// Settles the open transaction first, so the returned document has
+    /// every local op under its heads.
+    #[doc(hidden)]
+    pub fn document_mut(&mut self) -> &mut Automerge {
+        self.ensure_transaction_closed();
+        &mut self.doc
     }
 
     /// Set the actor id for this document.
@@ -793,15 +805,6 @@ impl AutoCommit {
             .expect("newly created change must be in the document")
     }
 
-    /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
-    ///
-    /// This ensures that any outstanding transactions for this document are committed before
-    /// taking part in the sync protocol
-    pub fn sync(&mut self) -> impl SyncDoc + '_ {
-        self.ensure_transaction_closed();
-        SyncWrapper { inner: self }
-    }
-
     /// See [`Automerge::hash_for_opid`]
     ///
     /// Note this also returns `Ok(None)` for operations in the current
@@ -849,12 +852,6 @@ impl AutoCommit {
             // transition can touch anything, so mark everything
             self.doc.ops_mut().mark_all_dirty();
         }
-    }
-
-    /// Whether the peer represented by `other` has all the changes we have
-    pub fn has_our_changes(&mut self, state: &crate::sync::State) -> bool {
-        self.ensure_transaction_closed();
-        self.doc.has_our_changes(state)
     }
 }
 
@@ -1329,30 +1326,6 @@ impl Transactable for AutoCommit {
     }
 }
 
-// A wrapper we return from [`AutoCommit::sync()`] to ensure that transactions are closed before we
-// start syncing
-struct SyncWrapper<'a> {
-    inner: &'a mut AutoCommit,
-}
-
-impl SyncDoc for SyncWrapper<'_> {
-    fn generate_sync_message(
-        &self,
-        sync_state: &mut sync::State,
-    ) -> Result<Option<sync::Message>, AutomergeError> {
-        self.inner.doc.generate_sync_message(sync_state)
-    }
-
-    fn receive_sync_message(
-        &mut self,
-        sync_state: &mut sync::State,
-        message: sync::Message,
-    ) -> Result<(), AutomergeError> {
-        self.inner.ensure_transaction_closed();
-        self.inner.doc.receive_sync_message(sync_state, message)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct OpRange {
     before_len: usize,
@@ -1384,11 +1357,7 @@ impl OpRange {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        sync::{State as SyncState, SyncDoc},
-        transaction::Transactable,
-        ObjType, ROOT,
-    };
+    use crate::{transaction::Transactable, ObjType, ROOT};
 
     use super::AutoCommit;
 
@@ -1529,17 +1498,13 @@ mod tests {
         let mut source = AutoCommit::new();
         source.enable_audit_mode().unwrap();
         source.put(ROOT, "key", 1).unwrap();
-        let mut sync_state = SyncState::new();
-        let message = source
-            .sync()
-            .generate_sync_message(&mut sync_state)
-            .unwrap();
 
+        // receiving a v2 sync message is exactly this `load_incremental`
+        // of the peer's saved document; the protocol itself is covered
+        // in automerge-sync
         let mut doc = AutoCommit::new();
         doc.enable_audit_mode().unwrap();
-        doc.sync()
-            .receive_sync_message(&mut SyncState::new(), message.unwrap())
-            .unwrap();
+        doc.load_incremental(&source.save()).unwrap();
         assert_incremental_matches_diff(&mut doc);
     }
 

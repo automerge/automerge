@@ -277,7 +277,6 @@ pub mod patches;
 mod read;
 mod sequence_tree;
 mod storage;
-pub mod sync;
 mod text_diff;
 mod text_value;
 pub mod transaction;

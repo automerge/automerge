@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "automerge-sync",
     "automerge",
     "automerge-c",
     "automerge-cli",

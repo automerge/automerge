@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
-use crate::storage::parse;
-use crate::ChangeHash;
+use crate::parse;
+use automerge::ChangeHash;
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
@@ -10,11 +10,11 @@ const BITS_PER_ENTRY: u32 = 10;
 const NUM_PROBES: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
-pub(crate) struct BloomFilter {
-    pub(crate) num_entries: u32,
-    pub(crate) num_bits_per_entry: u32,
-    pub(crate) num_probes: u32,
-    pub(crate) bits: Vec<u8>,
+pub struct BloomFilter {
+    num_entries: u32,
+    num_bits_per_entry: u32,
+    num_probes: u32,
+    bits: Vec<u8>,
 }
 
 impl Default for BloomFilter {
@@ -35,7 +35,7 @@ pub(crate) enum ParseError {
 }
 
 impl BloomFilter {
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         if self.num_entries != 0 {
             leb128::write::unsigned(&mut buf, self.num_entries as u64).unwrap();
@@ -107,7 +107,7 @@ impl BloomFilter {
             .map(|byte| byte & (1 << (probe & 7)))
     }
 
-    pub(crate) fn contains_hash(&self, hash: &ChangeHash) -> bool {
+    pub fn contains_hash(&self, hash: &ChangeHash) -> bool {
         if self.num_entries == 0 {
             false
         } else {
@@ -122,9 +122,7 @@ impl BloomFilter {
         }
     }
 
-    pub(crate) fn from_hashes<H: Borrow<ChangeHash>>(
-        hashes: impl ExactSizeIterator<Item = H>,
-    ) -> Self {
+    pub fn from_hashes<H: Borrow<ChangeHash>>(hashes: impl ExactSizeIterator<Item = H>) -> Self {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
@@ -149,7 +147,7 @@ fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
 
 #[derive(thiserror::Error, Debug)]
 #[error("{0}")]
-pub(crate) struct DecodeError(String);
+pub struct DecodeError(String);
 
 impl TryFrom<&[u8]> for BloomFilter {
     type Error = DecodeError;

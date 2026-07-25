@@ -5,12 +5,11 @@ use itertools::Itertools;
 use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-    storage::parse::Input,
-    storage::{parse, Change as StoredChange, ReadChangeOpError},
-    sync::SyncDoc,
-    transaction::Transactable,
-    AutoCommit, Automerge, AutomergeError, Change, ChangeHash, ReadDoc, ROOT,
+use crate::parse::{self, Input};
+use crate::{State as V2State, Sync};
+use automerge::{
+    transaction::Transactable, AutoCommit, Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
+    ROOT,
 };
 
 mod bloom;
@@ -23,12 +22,16 @@ use test_log::test;
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
-impl Automerge {
-    fn generate_sync_message_v1(&self, sync_state: &mut State) -> Option<Message> {
-        let our_heads = self.get_head_hashes();
+/// The pre-v2 protocol, frozen so the wire format can be tested
+/// against the current implementation.
+struct SyncV1;
 
-        let our_need = self
-            .get_missing_deps_hashes(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
+impl SyncV1 {
+    fn generate_sync_message_v1(doc: &Automerge, sync_state: &mut State) -> Option<Message> {
+        let our_heads = doc.get_head_hashes();
+
+        let our_need = doc
+            .missing_deps_with_queued(sync_state.their_heads.as_deref().unwrap_or(&[]))
             .unwrap();
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
@@ -37,7 +40,10 @@ impl Automerge {
             HashSet::new()
         };
         let our_have = if our_need.iter().all(|hash| their_heads_set.contains(hash)) {
-            vec![self.make_bloom_filter_v1(sync_state.shared_heads.clone())]
+            vec![Self::make_bloom_filter_v1(
+                doc,
+                sync_state.shared_heads.clone(),
+            )]
         } else {
             Vec::new()
         };
@@ -47,7 +53,7 @@ impl Automerge {
                 if !first_have
                     .last_sync
                     .iter()
-                    .all(|hash| self.get_change_by_hash(hash).unwrap().is_some())
+                    .all(|hash| doc.get_change_by_hash(hash).unwrap().is_some())
                 {
                     let reset_msg = Message {
                         heads: our_heads,
@@ -64,7 +70,7 @@ impl Automerge {
             sync_state.their_have.as_ref(),
             sync_state.their_need.as_ref(),
         ) {
-            self.get_changes_to_send_v1(their_have, their_need)
+            Self::get_changes_to_send_v1(doc, their_have, their_need)
                 .expect("Should have only used hashes that are in the document")
         } else {
             Vec::new()
@@ -117,16 +123,16 @@ impl Automerge {
     }
 
     fn receive_sync_message_v1(
-        &mut self,
+        doc: &mut Automerge,
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        self.receive_sync_message_inner_v1(sync_state, message)
+        Self::receive_sync_message_inner_v1(doc, sync_state, message)
     }
 
-    fn make_bloom_filter_v1(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let last_sync_ids = self.hashes_to_change_ids(&last_sync).unwrap();
-        let new_changes = self.get_changes(&last_sync_ids).unwrap();
+    fn make_bloom_filter_v1(doc: &Automerge, last_sync: Vec<ChangeHash>) -> Have {
+        let last_sync_ids = doc.hashes_to_change_ids(&last_sync).unwrap();
+        let new_changes = doc.get_changes(&last_sync_ids).unwrap();
         let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
@@ -135,14 +141,14 @@ impl Automerge {
     }
 
     fn get_changes_to_send_v1(
-        &self,
+        doc: &Automerge,
         have: &[Have],
         need: &[ChangeHash],
     ) -> Result<Vec<Change>, AutomergeError> {
         if have.is_empty() {
             Ok(need
                 .iter()
-                .filter_map(|hash| self.get_change_by_hash(hash).unwrap())
+                .filter_map(|hash| doc.get_change_by_hash(hash).unwrap())
                 .collect())
         } else {
             let mut last_sync_hashes = HashSet::new();
@@ -155,8 +161,8 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let last_sync_ids = self.hashes_to_change_ids(&last_sync_hashes).unwrap();
-            let changes = self.get_changes(&last_sync_ids).unwrap();
+            let last_sync_ids = doc.hashes_to_change_ids(&last_sync_hashes).unwrap();
+            let changes = doc.get_changes(&last_sync_ids).unwrap();
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -191,7 +197,7 @@ impl Automerge {
             let mut changes_to_send = Vec::new();
             for hash in need {
                 if !hashes_to_send.contains(hash) {
-                    if let Some(change) = self.get_change_by_hash(hash).unwrap() {
+                    if let Some(change) = doc.get_change_by_hash(hash).unwrap() {
                         changes_to_send.push(change);
                     }
                 }
@@ -207,12 +213,12 @@ impl Automerge {
     }
 
     fn receive_sync_message_inner_v1(
-        &mut self,
+        doc: &mut Automerge,
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
-        let before_heads = self.get_head_hashes();
+        let before_heads = doc.get_head_hashes();
 
         let Message {
             heads: message_heads,
@@ -223,16 +229,16 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes(message_changes)?;
+            doc.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
-                &self.get_head_hashes().into_iter().collect(),
+                &doc.get_head_hashes().into_iter().collect(),
                 &sync_state.shared_heads,
             );
         }
 
         // trim down the sent hashes to those that we know they haven't seen
-        self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
+        doc.remove_ancestors(&message_heads, &mut sync_state.sent_hashes)?;
 
         if changes_is_empty && message_heads == before_heads {
             sync_state.last_sent_heads.clone_from(&message_heads);
@@ -240,7 +246,7 @@ impl Automerge {
 
         let known_heads = message_heads
             .iter()
-            .filter(|head| self.get_change_by_hash(head).unwrap().is_some())
+            .filter(|head| doc.get_change_by_hash(head).unwrap().is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads.clone_from(&message_heads);
@@ -274,8 +280,6 @@ enum ReadMessageError {
     WrongType { expected_one_of: Vec<u8>, found: u8 },
     #[error("{0}")]
     Parse(String),
-    #[error(transparent)]
-    ReadChangeOps(#[from] ReadChangeOpError),
     #[error("not enough input")]
     NotEnoughInput,
 }
@@ -289,12 +293,6 @@ impl From<parse::leb128::Error> for ReadMessageError {
 impl From<bloom::ParseError> for ReadMessageError {
     fn from(e: bloom::ParseError) -> Self {
         ReadMessageError::Parse(e.to_string())
-    }
-}
-
-impl From<crate::storage::change::ParseError> for ReadMessageError {
-    fn from(e: crate::storage::change::ParseError) -> Self {
-        ReadMessageError::Parse(format!("error parsing changes: {}", e))
     }
 }
 
@@ -340,7 +338,7 @@ impl serde::Serialize for Message {
             &self
                 .changes
                 .iter()
-                .map(crate::ExpandedChange::from)
+                .map(automerge::ExpandedChange::from)
                 .collect::<Vec<_>>(),
         )?;
         map.end()
@@ -379,23 +377,11 @@ impl Message {
 
         let change_parser = |i| {
             let (i, bytes) = parse::length_prefixed_bytes(i)?;
-            let (_, change) =
-                StoredChange::parse(parse::Input::new(bytes)).map_err(|e| e.lift())?;
+            let change = Change::try_from(bytes)
+                .map_err(|e| parse::ParseError::Error(ReadMessageError::Parse(e.to_string())))?;
             Ok((i, change))
         };
-        let (i, stored_changes) = parse::length_prefixed(change_parser)(i)?;
-        let changes_len = stored_changes.len();
-        let changes: Vec<Change> = stored_changes
-            .into_iter()
-            .try_fold::<_, _, Result<_, ReadMessageError>>(
-                Vec::with_capacity(changes_len),
-                |mut acc, stored| {
-                    let change = Change::new_from_unverified(stored.into_owned(), None)
-                        .map_err(ReadMessageError::ReadChangeOps)?;
-                    acc.push(change);
-                    Ok(acc)
-                },
-            )?;
+        let (i, changes) = parse::length_prefixed(change_parser)(i)?;
 
         Ok((
             i,
@@ -486,11 +472,11 @@ fn sync_from_v1_to_v2() {
     doc2.commit().unwrap();
 
     let mut sync_state1 = State::new();
-    let mut sync_state2 = crate::sync::State::new();
+    let mut sync_state2 = V2State::new();
 
     sync_v1_to_v2(
-        &mut doc1.doc,
-        &mut doc2.doc,
+        doc1.document_mut(),
+        doc2.document_mut(),
         &mut sync_state1,
         &mut sync_state2,
     );
@@ -510,12 +496,12 @@ fn sync_from_v2_to_v1() {
     doc1.commit().unwrap();
     doc2.commit().unwrap();
 
-    let mut sync_state2 = crate::sync::State::new();
+    let mut sync_state2 = V2State::new();
     let mut sync_state1 = State::new();
 
     sync_v2_to_v1(
-        &mut doc1.doc,
-        &mut doc2.doc,
+        doc1.document_mut(),
+        doc2.document_mut(),
         &mut sync_state1,
         &mut sync_state2,
     );
@@ -529,7 +515,9 @@ fn sync_v1_to_v2_with_compressed_change() {
     // uncompressed, which the old implementation couldn't handle.
     let mut doc1 = AutoCommit::new();
     doc1.enable_audit_mode().unwrap();
-    let list = doc1.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+    let list = doc1
+        .put_object(ROOT, "list", automerge::ObjType::List)
+        .unwrap();
     for index in 0..1000 {
         doc1.insert(&list, index, index as i64).unwrap();
     }
@@ -538,12 +526,12 @@ fn sync_v1_to_v2_with_compressed_change() {
     let mut doc2 = AutoCommit::new();
     doc2.enable_audit_mode().unwrap();
 
-    let mut sync_state2 = crate::sync::State::new();
+    let mut sync_state2 = V2State::new();
     let mut sync_state1 = State::new();
 
     sync_v1_to_v2(
-        &mut doc2.doc,
-        &mut doc1.doc,
+        doc2.document_mut(),
+        doc1.document_mut(),
         &mut sync_state1,
         &mut sync_state2,
     );
@@ -558,16 +546,16 @@ fn sync_v1_to_v2_with_compressed_change() {
 
 /// Run the sync protocol with the v1 peer starting first
 fn sync_v1_to_v2(
-    v1: &mut crate::Automerge,
-    v2: &mut crate::Automerge,
+    v1: &mut Automerge,
+    v2: &mut Automerge,
     a_sync_state: &mut State,
-    b_sync_state: &mut crate::sync::State,
+    b_sync_state: &mut V2State,
 ) {
     const MAX_ITER: usize = 10;
     let mut iterations = 0;
 
     loop {
-        let a_to_b = v1.generate_sync_message_v1(a_sync_state);
+        let a_to_b = SyncV1::generate_sync_message_v1(v1, a_sync_state);
         let a_to_b_is_none = a_to_b.is_none();
         if iterations > MAX_ITER {
             panic!("failed to sync in {} iterations", MAX_ITER);
@@ -575,12 +563,12 @@ fn sync_v1_to_v2(
         if let Some(msg) = a_to_b {
             tracing::debug!(msg=?msg, "sending message from v1 to v2");
             let encoded = msg.encode();
-            let (_, decoded) = crate::sync::Message::parse(Input::new(&encoded))
+            let (_, decoded) = crate::Message::parse(Input::new(&encoded))
                 .expect("v1 message should decode as a v2 message");
             tracing::debug!(decoded=?decoded, "receiving decoded message on v2");
-            v2.receive_sync_message(b_sync_state, decoded).unwrap()
+            Sync::receive_sync_message(v2, b_sync_state, decoded).unwrap()
         }
-        let b_to_a = v2.generate_sync_message(b_sync_state).unwrap();
+        let b_to_a = Sync::generate_sync_message(v2, b_sync_state).unwrap();
         let b_to_a_is_none = b_to_a.is_none();
         if let Some(msg) = b_to_a {
             tracing::debug!(msg=?msg, "sending message from v2 to v1");
@@ -588,7 +576,7 @@ fn sync_v1_to_v2(
             let (_, decoded) = Message::parse(Input::new(&encoded))
                 .expect("v1 message should decode as a v2 message");
             tracing::debug!(decoded=?decoded, "receiving decoded message on v1");
-            v1.receive_sync_message_v1(a_sync_state, decoded).unwrap()
+            SyncV1::receive_sync_message_v1(v1, a_sync_state, decoded).unwrap()
         }
         if a_to_b_is_none && b_to_a_is_none {
             break;
@@ -599,16 +587,16 @@ fn sync_v1_to_v2(
 
 /// Run the sync protocol with the v2 peer starting first
 fn sync_v2_to_v1(
-    v1: &mut crate::Automerge,
-    v2: &mut crate::Automerge,
+    v1: &mut Automerge,
+    v2: &mut Automerge,
     v1_sync_state: &mut State,
-    v2_sync_state: &mut crate::sync::State,
+    v2_sync_state: &mut V2State,
 ) {
     const MAX_ITER: usize = 10;
     let mut iterations = 0;
 
     loop {
-        let a_to_b = v2.generate_sync_message(v2_sync_state).unwrap();
+        let a_to_b = Sync::generate_sync_message(v2, v2_sync_state).unwrap();
         let a_to_b_is_none = a_to_b.is_none();
         if iterations > MAX_ITER {
             panic!("failed to sync in {} iterations", MAX_ITER);
@@ -617,15 +605,15 @@ fn sync_v2_to_v1(
             let encoded = msg.encode();
             let decoded =
                 Message::decode(&encoded).expect("v1 message should decode as a v2 message");
-            v1.receive_sync_message_v1(v1_sync_state, decoded).unwrap()
+            SyncV1::receive_sync_message_v1(v1, v1_sync_state, decoded).unwrap()
         }
-        let b_to_a = v1.generate_sync_message_v1(v1_sync_state);
+        let b_to_a = SyncV1::generate_sync_message_v1(v1, v1_sync_state);
         let b_to_a_is_none = b_to_a.is_none();
         if let Some(msg) = b_to_a {
             let encoded = msg.encode();
-            let decoded = crate::sync::Message::decode(&encoded)
-                .expect("v1 message should decode as a v2 message");
-            v2.receive_sync_message(v2_sync_state, decoded).unwrap()
+            let decoded =
+                crate::Message::decode(&encoded).expect("v1 message should decode as a v2 message");
+            Sync::receive_sync_message(v2, v2_sync_state, decoded).unwrap()
         }
         if a_to_b_is_none && b_to_a_is_none {
             break;

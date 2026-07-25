@@ -1,4 +1,3 @@
-use automerge as am;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -23,13 +22,13 @@ pub(crate) use to_sync_message;
 /// \brief A synchronization message for a peer.
 #[derive(PartialEq)]
 pub struct AMsyncMessage {
-    body: am::sync::Message,
+    body: automerge_sync::Message,
     changes_storage: RefCell<BTreeMap<usize, AMchange>>,
     haves_storage: RefCell<BTreeMap<usize, AMsyncHave>>,
 }
 
 impl AMsyncMessage {
-    pub fn new(message: am::sync::Message) -> Self {
+    pub fn new(message: automerge_sync::Message) -> Self {
         Self {
             body: message,
             changes_storage: RefCell::new(BTreeMap::new()),
@@ -38,8 +37,8 @@ impl AMsyncMessage {
     }
 }
 
-impl AsRef<am::sync::Message> for AMsyncMessage {
-    fn as_ref(&self) -> &am::sync::Message {
+impl AsRef<automerge_sync::Message> for AMsyncMessage {
+    fn as_ref(&self) -> &automerge_sync::Message {
         &self.body
     }
 }
@@ -63,7 +62,7 @@ impl AsRef<am::sync::Message> for AMsyncMessage {
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
-    to_result(am::sync::Message::decode(data))
+    to_result(automerge_sync::Message::decode(data))
 }
 
 /// \memberof AMsyncMessage

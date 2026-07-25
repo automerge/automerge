@@ -2,13 +2,14 @@ use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
 use crate::{Automerge, UpdateSpansArgs};
-use am::sync::{ChunkList, MessageFlags, MessageVersion};
 use automerge as am;
 use automerge::iter::{Span, Spans};
 use automerge::marks::{MarkSet, UpdateSpansConfig};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
+#[cfg(feature = "sync")]
+use automerge_sync::{ChunkList, MessageFlags, MessageVersion};
 use js_sys::{Array, BigInt, Function, JsString, Number, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -78,8 +79,9 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
     }
 }
 
-impl From<am::sync::State> for JS {
-    fn from(state: am::sync::State) -> Self {
+#[cfg(feature = "sync")]
+impl From<automerge_sync::State> for JS {
+    fn from(state: automerge_sync::State) -> Self {
         let shared_heads: JS = state.shared_heads.into();
         let last_sent_heads: JS = state.last_sent_heads.into();
         let their_heads: JS = state.their_heads.into();
@@ -362,7 +364,8 @@ impl TryFrom<JS> for Vec<u8> {
     }
 }
 
-impl TryFrom<JS> for am::sync::State {
+#[cfg(feature = "sync")]
+impl TryFrom<JS> for automerge_sync::State {
     type Error = error::BadSyncState;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -403,9 +406,11 @@ impl TryFrom<JS> for am::sync::State {
                 for v in arr.iter() {
                     if let Some(s) = v.as_string() {
                         match s.as_str() {
-                            "message-v1" => caps.push(am::sync::Capability::MessageV1),
-                            "message-v2" => caps.push(am::sync::Capability::MessageV2),
-                            "supports-sync-reset" => caps.push(am::sync::Capability::SyncReset),
+                            "message-v1" => caps.push(automerge_sync::Capability::MessageV1),
+                            "message-v2" => caps.push(automerge_sync::Capability::MessageV2),
+                            "supports-sync-reset" => {
+                                caps.push(automerge_sync::Capability::SyncReset)
+                            }
                             _ => {}
                         }
                     }
@@ -417,7 +422,7 @@ impl TryFrom<JS> for am::sync::State {
         };
         let read_only = js_get(&value, "readOnly")?.0.as_bool().unwrap_or(false);
         let peer_read_only = js_get(&value, "peerReadOnly")?.0.as_bool().unwrap_or(false);
-        Ok(am::sync::State {
+        Ok(automerge_sync::State {
             shared_heads,
             last_sent_heads,
             their_heads,
@@ -434,7 +439,8 @@ impl TryFrom<JS> for am::sync::State {
     }
 }
 
-impl TryFrom<JS> for am::sync::Have {
+#[cfg(feature = "sync")]
+impl TryFrom<JS> for automerge_sync::Have {
     type Error = error::BadHave;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -444,11 +450,12 @@ impl TryFrom<JS> for am::sync::Have {
         let bloom = js_get(&value.0, "bloom")?
             .try_into()
             .map_err(error::BadHave::BadBloom)?;
-        Ok(am::sync::Have { last_sync, bloom })
+        Ok(automerge_sync::Have { last_sync, bloom })
     }
 }
 
-impl TryFrom<JS> for Option<Vec<am::sync::Have>> {
+#[cfg(feature = "sync")]
+impl TryFrom<JS> for Option<Vec<automerge_sync::Have>> {
     type Error = error::BadHaves;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -460,7 +467,8 @@ impl TryFrom<JS> for Option<Vec<am::sync::Have>> {
     }
 }
 
-impl TryFrom<JS> for Vec<am::sync::Have> {
+#[cfg(feature = "sync")]
+impl TryFrom<JS> for Vec<automerge_sync::Have> {
     type Error = error::BadHaves;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -477,7 +485,8 @@ impl TryFrom<JS> for Vec<am::sync::Have> {
     }
 }
 
-impl TryFrom<JS> for am::sync::BloomFilter {
+#[cfg(feature = "sync")]
+impl TryFrom<JS> for automerge_sync::BloomFilter {
     type Error = error::BadBloom;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -491,7 +500,8 @@ impl TryFrom<JS> for am::sync::BloomFilter {
     }
 }
 
-impl TryFrom<JS> for am::sync::Message {
+#[cfg(feature = "sync")]
+impl TryFrom<JS> for automerge_sync::Message {
     type Error = error::BadSyncMessage;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -532,7 +542,7 @@ impl TryFrom<JS> for am::sync::Message {
             .try_into()
             .map_err(error::BadSyncMessage::BadJSChanges)?;
 
-        Ok(am::sync::Message {
+        Ok(automerge_sync::Message {
             heads,
             need,
             have,
@@ -588,6 +598,7 @@ impl From<&[Change]> for AR {
     }
 }
 
+#[cfg(feature = "sync")]
 impl From<&ChunkList> for AR {
     fn from(value: &ChunkList) -> Self {
         let chunks: Array = value.iter().map(Uint8Array::from).collect();
@@ -595,8 +606,9 @@ impl From<&ChunkList> for AR {
     }
 }
 
-impl From<&[am::sync::Have]> for AR {
-    fn from(value: &[am::sync::Have]) -> Self {
+#[cfg(feature = "sync")]
+impl From<&[automerge_sync::Have]> for AR {
+    fn from(value: &[automerge_sync::Have]) -> Self {
         AR(value
             .iter()
             .map(|have| {
@@ -616,21 +628,23 @@ impl From<&[am::sync::Have]> for AR {
     }
 }
 
-impl From<&[am::sync::Capability]> for AR {
-    fn from(value: &[am::sync::Capability]) -> Self {
+#[cfg(feature = "sync")]
+impl From<&[automerge_sync::Capability]> for AR {
+    fn from(value: &[automerge_sync::Capability]) -> Self {
         AR(value
             .iter()
             .map(|c| match c {
-                automerge::sync::Capability::MessageV1 => JsValue::from_str("message-v1"),
-                automerge::sync::Capability::MessageV2 => JsValue::from_str("message-v2"),
-                automerge::sync::Capability::SyncReset => JsValue::from_str("sync-reset"),
+                automerge_sync::Capability::MessageV1 => JsValue::from_str("message-v1"),
+                automerge_sync::Capability::MessageV2 => JsValue::from_str("message-v2"),
+                automerge_sync::Capability::SyncReset => JsValue::from_str("sync-reset"),
             })
             .collect())
     }
 }
 
-impl From<am::sync::MessageFlags> for AR {
-    fn from(flags: am::sync::MessageFlags) -> Self {
+#[cfg(feature = "sync")]
+impl From<automerge_sync::MessageFlags> for AR {
+    fn from(flags: automerge_sync::MessageFlags) -> Self {
         let mut arr = Vec::new();
         if flags.contains(MessageFlags::SYNC_RESET) {
             arr.push(JsValue::from_str("sync-reset"));
@@ -645,6 +659,7 @@ impl From<am::sync::MessageFlags> for AR {
     }
 }
 
+#[cfg(feature = "sync")]
 impl TryFrom<JS> for ChunkList {
     type Error = error::BadChunkList;
 
@@ -667,6 +682,7 @@ impl TryFrom<JS> for ChunkList {
     }
 }
 
+#[cfg(feature = "sync")]
 impl TryFrom<JS> for Option<MessageFlags> {
     type Error = error::BadCapabilities;
 
@@ -679,6 +695,7 @@ impl TryFrom<JS> for Option<MessageFlags> {
     }
 }
 
+#[cfg(feature = "sync")]
 impl TryFrom<JS> for MessageFlags {
     type Error = error::BadCapabilities;
 
@@ -2040,6 +2057,7 @@ pub(crate) mod error {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadSyncState {
         #[error(transparent)]
@@ -2062,6 +2080,7 @@ pub(crate) mod error {
         BadTheirCapabilities(BadCapabilities),
     }
 
+    #[cfg(feature = "sync")]
     impl From<BadSyncState> for JsValue {
         fn from(e: BadSyncState) -> Self {
             JsValue::from(e.to_string())
@@ -2094,6 +2113,7 @@ pub(crate) mod error {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadHave {
         #[error("bad lastSync: {0}")]
@@ -2104,6 +2124,7 @@ pub(crate) mod error {
         GetHaveProp(#[from] GetProp),
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadHaves {
         #[error("value was not an array")]
@@ -2112,12 +2133,13 @@ pub(crate) mod error {
         BadElem(usize, BadHave),
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadBloom {
         #[error("the value was not a Uint8Array")]
         NotU8Array,
         #[error("unable to decode: {0}")]
-        Decode(#[from] automerge::sync::DecodeBloomError),
+        Decode(#[from] automerge_sync::DecodeBloomError),
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -2200,6 +2222,7 @@ pub(crate) mod error {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadSyncMessage {
         #[error(transparent)]
@@ -2222,6 +2245,7 @@ pub(crate) mod error {
         WholeDocInV1,
     }
 
+    #[cfg(feature = "sync")]
     impl From<BadSyncMessage> for JsValue {
         fn from(e: BadSyncMessage) -> Self {
             JsValue::from(e.to_string())
@@ -2285,6 +2309,7 @@ pub(crate) mod error {
     #[error("not a Uint8Array")]
     pub struct BadUint8Array;
 
+    #[cfg(feature = "sync")]
     #[derive(thiserror::Error, Debug)]
     pub enum BadCapabilities {
         #[error("capabilities was not an array")]
@@ -2295,6 +2320,7 @@ pub(crate) mod error {
         ElemNotValid(usize, String),
     }
 
+    #[cfg(feature = "sync")]
     #[derive(thiserror::Error, Debug)]
     pub enum BadChunkList {
         #[error("chunk list was not an array")]

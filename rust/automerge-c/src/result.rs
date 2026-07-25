@@ -76,8 +76,8 @@ impl From<&am::ScalarValue> for AMresult {
     }
 }
 
-impl From<am::sync::State> for AMresult {
-    fn from(state: am::sync::State) -> Self {
+impl From<automerge_sync::State> for AMresult {
+    fn from(state: automerge_sync::State) -> Self {
         Self::item(state.into())
     }
 }
@@ -135,8 +135,8 @@ impl From<Option<am::Change>> for AMresult {
     }
 }
 
-impl From<Option<am::sync::Message>> for AMresult {
-    fn from(maybe: Option<am::sync::Message>) -> Self {
+impl From<Option<automerge_sync::Message>> for AMresult {
+    fn from(maybe: Option<automerge_sync::Message>) -> Self {
         Self::item(match maybe {
             Some(message) => message.into(),
             None => Default::default(),
@@ -228,8 +228,8 @@ impl From<(Result<am::ObjId, am::AutomergeError>, usize, am::ObjType)> for AMres
     }
 }
 
-impl From<Result<am::sync::Message, am::sync::ReadMessageError>> for AMresult {
-    fn from(maybe: Result<am::sync::Message, am::sync::ReadMessageError>) -> Self {
+impl From<Result<automerge_sync::Message, automerge_sync::ReadMessageError>> for AMresult {
+    fn from(maybe: Result<automerge_sync::Message, automerge_sync::ReadMessageError>) -> Self {
         match maybe {
             Ok(message) => Self::item(message.into()),
             Err(e) => Self::error(&e.to_string()),
@@ -237,8 +237,8 @@ impl From<Result<am::sync::Message, am::sync::ReadMessageError>> for AMresult {
     }
 }
 
-impl From<Result<am::sync::State, am::sync::DecodeStateError>> for AMresult {
-    fn from(maybe: Result<am::sync::State, am::sync::DecodeStateError>) -> Self {
+impl From<Result<automerge_sync::State, automerge_sync::DecodeStateError>> for AMresult {
+    fn from(maybe: Result<automerge_sync::State, automerge_sync::DecodeStateError>) -> Self {
         match maybe {
             Ok(state) => Self::item(state.into()),
             Err(e) => Self::error(&e.to_string()),
@@ -466,8 +466,8 @@ impl From<&[am::ChangeHash]> for AMresult {
     }
 }
 
-impl From<&[am::sync::Have]> for AMresult {
-    fn from(haves: &[am::sync::Have]) -> Self {
+impl From<&[automerge_sync::Have]> for AMresult {
+    fn from(haves: &[automerge_sync::Have]) -> Self {
         Self::items(haves.iter().map(|have| have.clone().into()).collect())
     }
 }
@@ -483,8 +483,8 @@ impl From<Vec<am::ChangeHash>> for AMresult {
     }
 }
 
-impl From<Vec<am::sync::Have>> for AMresult {
-    fn from(haves: Vec<am::sync::Have>) -> Self {
+impl From<Vec<automerge_sync::Have>> for AMresult {
+    fn from(haves: Vec<automerge_sync::Have>) -> Self {
         Self::items(haves.into_iter().map(|have| have.into()).collect())
     }
 }

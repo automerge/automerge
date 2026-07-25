@@ -1,8 +1,5 @@
-use automerge::{
-    sync::{self, SyncDoc},
-    transaction::Transactable,
-    Automerge, ROOT,
-};
+use automerge::{transaction::Transactable, Automerge, ROOT};
+use automerge_sync::{self as sync, Sync};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[derive(Default)]
@@ -32,23 +29,14 @@ fn increasing_put(n: u64) -> Automerge {
 
 // keep syncing until doc1 no longer generates a sync message for doc2.
 fn sync(doc1: &mut DocWithSync, doc2: &mut DocWithSync) {
-    while let Some(message1) = doc1
-        .doc
-        .generate_sync_message(&mut doc1.peer_state)
-        .unwrap()
+    while let Some(message1) = Sync::generate_sync_message(&doc1.doc, &mut doc1.peer_state).unwrap()
     {
-        doc2.doc
-            .receive_sync_message(&mut doc2.peer_state, message1)
-            .unwrap();
+        Sync::receive_sync_message(&mut doc2.doc, &mut doc2.peer_state, message1).unwrap();
 
-        if let Some(message2) = doc2
-            .doc
-            .generate_sync_message(&mut doc2.peer_state)
-            .unwrap()
+        if let Some(message2) =
+            Sync::generate_sync_message(&doc2.doc, &mut doc2.peer_state).unwrap()
         {
-            doc1.doc
-                .receive_sync_message(&mut doc1.peer_state, message2)
-                .unwrap()
+            Sync::receive_sync_message(&mut doc1.doc, &mut doc1.peer_state, message2).unwrap()
         }
     }
 }
