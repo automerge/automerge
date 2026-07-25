@@ -1350,15 +1350,9 @@ impl Automerge {
         &self,
         levels: R,
     ) -> Result<Vec<Fragment>, AutomergeError> {
-        let mut fragments: Vec<_> = self
+        Ok(self
             .change_graph
-            .fragments(&self.get_head_hashes(), levels, &self.ops.actors)
-            .collect();
-        // return them oldest to newest, in causal order — the order
-        // apply_fragment needs them in
-        self.change_graph
-            .sort_fragments_for_apply(&mut fragments, &self.ops.actors)?;
-        Ok(fragments)
+            .fragments(&self.get_head_hashes(), levels, &self.ops.actors))
     }
 
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.

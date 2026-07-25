@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
@@ -1026,11 +1026,12 @@ impl ChangeGraph {
         if head.fragment_level() == 0 {
             self.loose_commit(n, actors)
         } else {
-            assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
+            debug_assert!(self.fragments.is_sorted_by_key(|f| f.sort_key()));
+            let key = (std::cmp::Reverse(head.fragment_level()), n);
             self.fragments
-                .binary_search_by_key(&n.0, |f| f.head.0)
+                .binary_search_by_key(&key, |f| f.sort_key())
                 .ok()
-                .map(|i| self.fragments[i].export(self, actors))
+                .map(|i| self.cached_fragment(&self.fragments[i], actors))
         }
     }
 
@@ -1141,6 +1142,7 @@ impl ChangeGraph {
         head_nodes == given
     }
 
+    /// A loose commit as its own single-member fragment.
     fn loose_commit(&self, n: NodeIdx, actors: &[crate::ActorId]) -> Option<Fragment> {
         let head = self.hashes.get(n)?;
         assert_eq!(head.fragment_level(), 0);
@@ -1150,61 +1152,113 @@ impl ChangeGraph {
             .parents(n)
             .map(|p| self.hashes.get(p))
             .collect::<Option<Vec<_>>>()?;
-        let members = vec![self.change_id(n, actors)];
-        let checkpoints = vec![];
-        let level = head.fragment_level();
-        Some(Fragment {
+        Some(self.export_fragment(head, 0, boundary, &[n], actors))
+    }
+
+    /// A cached fragment, resolved down to its member nodes and out.
+    fn cached_fragment(&self, f: &FragmentNode, actors: &[crate::ActorId]) -> Fragment {
+        let expect = "fragment index requires the fragment-hashes state";
+        let head = self.hashes.get(f.head).expect(expect);
+        let boundary = f
+            .deps
+            .iter()
+            .map(|d| self.hashes.get(*d).expect(expect))
+            .collect();
+        let clock = self.calculate_clock(f.deps.clone());
+        let nodes = self.fragment_nodes(f.head, &clock);
+        self.export_fragment(head, f.level, boundary, &nodes, actors)
+    }
+
+    fn export_fragment(
+        &self,
+        head: ChangeHash,
+        level: usize,
+        boundary: Vec<ChangeHash>,
+        nodes: &[NodeIdx],
+        actors: &[crate::ActorId],
+    ) -> Fragment {
+        // interior hashes may be unknown in the fragment-hashes state,
+        // but checkpoint (level > 0) hashes are always present in it
+        let checkpoints = nodes
+            .iter()
+            .filter_map(|n| self.hashes.get(*n))
+            .filter(|h| h.fragment_level() > 0)
+            .collect();
+        let members = nodes.iter().map(|n| self.change_id(*n, actors)).collect();
+        Fragment {
             head,
             level,
             boundary,
             checkpoints,
             members,
-        })
+        }
     }
 
-    pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
-        &'a self,
-        heads: &'a [ChangeHash],
+    /// The fragments covering `heads` at the given levels, in the order
+    /// `apply_fragment` needs them: coarsest first, and within a level
+    /// oldest first. Nothing here sorts — the index is maintained in
+    /// that order ([`FragmentNode::sort_key`]) and loose commits, all
+    /// level 0, follow it in causal order.
+    ///
+    /// That order — level descending, head node index ascending — is an
+    /// apply order because whoever supplies a fragment's external deps
+    /// always precedes it:
+    ///
+    /// * a fragment's deps are recorded only for fragments of level >=
+    ///   its own ([`Self::cache_fragment_inner`]), and a dep's head is
+    ///   an ancestor of the head, so it has a lower node index — a
+    ///   same-level supplier is always older;
+    /// * a fragment that usurps another has strictly greater level than
+    ///   the one it absorbs, so a survivor whose boundary was usurped
+    ///   finds its changes in a coarser fragment, which comes first —
+    ///   node index alone gets this wrong, since the usurper is
+    ///   concurrent with the survivor and can be much newer;
+    /// * loose commits are the nodes above `fragment_top`, so nothing
+    ///   cached depends on one; they come last, and among themselves
+    ///   node index is topological because a parent's node index is
+    ///   always lower than its child's.
+    pub(crate) fn fragments<R: RangeBounds<usize>>(
+        &self,
+        heads: &[ChangeHash],
         levels: R,
-        actors: &'a [crate::ActorId],
-    ) -> impl Iterator<Item = Fragment> + 'a {
-        let heads = if levels.contains(&0) { heads } else { &[] };
-        self.loose_fragments(heads, actors).chain(
-            self.fragments
-                .iter()
-                .rev()
-                .filter(move |f| {
-                    self.hashes
-                        .get(f.head)
-                        .is_some_and(|h| levels.contains(&h.fragment_level()))
-                })
-                .map(|f| f.export(self, actors)),
-        )
+        actors: &[crate::ActorId],
+    ) -> Vec<Fragment> {
+        let mut out: Vec<Fragment> = self
+            .fragments
+            .iter()
+            .filter(|f| levels.contains(&f.level))
+            .map(|f| self.cached_fragment(f, actors))
+            .collect();
+        if levels.contains(&0) {
+            out.extend(self.loose_commits(heads, actors));
+        }
+        debug_assert!(
+            out.is_sorted_by_key(|f| (std::cmp::Reverse(f.level), self.node_by_hash(&f.head))),
+            "fragments are not in apply order",
+        );
+        out
     }
 
-    fn loose_fragments<'a>(
-        &'a self,
-        heads: &'a [ChangeHash],
-        actors: &'a [crate::ActorId],
-    ) -> impl Iterator<Item = Fragment> + 'a {
+    /// The loose commits above the fragment index, oldest first.
+    fn loose_commits(&self, heads: &[ChangeHash], actors: &[crate::ActorId]) -> Vec<Fragment> {
         let nodes = heads
             .iter()
             .filter(|h| h.fragment_level() == 0)
             .filter_map(|h| self.nodes_by_hash.get(h).copied());
-        self.bfs_until_clock(nodes, &self.fragment_top)
-            .filter_map(move |n| self.loose_commit(n, actors))
+        self.ancestry_until_clock(nodes, &self.fragment_top)
+            .filter_map(|n| self.loose_commit(n, actors))
+            .collect()
     }
 
-    /// The member nodes of a fragment: `node`'s ancestry back to `clock`.
-    fn fragment_nodes<'a>(
-        &'a self,
-        node: NodeIdx,
-        clock: &'a SeqClock,
-    ) -> impl Iterator<Item = NodeIdx> + 'a {
-        self.bfs_until_clock([node], clock)
+    /// The member nodes of a fragment, oldest first: `node`'s ancestry
+    /// back to `clock`.
+    fn fragment_nodes(&self, node: NodeIdx, clock: &SeqClock) -> Vec<NodeIdx> {
+        self.ancestry_until_clock([node], clock).collect()
     }
 
-    fn bfs_until_clock<'a, I>(
+    /// [`Self::rev_ancestry_until_clock`] in causal order: parents
+    /// before children.
+    fn ancestry_until_clock<'a, I>(
         &'a self,
         seed: I,
         clock: &'a SeqClock,
@@ -1212,108 +1266,45 @@ impl ChangeGraph {
     where
         I: IntoIterator<Item = NodeIdx>,
     {
-        let mut to_visit: VecDeque<_> = seed.into_iter().collect();
-        let mut seen: HashSet<_> = to_visit.iter().copied().collect();
+        let mut nodes: Vec<_> = self.rev_ancestry_until_clock(seed, clock).collect();
+        nodes.reverse();
+        nodes.into_iter()
+    }
+
+    /// The ancestry of `seed` back to `clock`, newest node first.
+    ///
+    /// Not a breadth-first search: the frontier is a priority queue
+    /// popped largest-index-first, so this visits nodes in strictly
+    /// descending node index. Only parents are ever pushed, and a
+    /// parent's node index is always lower than its child's (see
+    /// [`Self::add_parent`]), so the popped index can only decrease and
+    /// the output is a reverse topological order — every node is
+    /// emitted before any of its parents. Reverse it for causal order.
+    ///
+    /// That also means a popped node can never be pushed again — anything
+    /// pushed afterwards is smaller — so the frontier alone dedupes and
+    /// no visited set is needed.
+    fn rev_ancestry_until_clock<'a, I>(
+        &'a self,
+        seed: I,
+        clock: &'a SeqClock,
+    ) -> impl Iterator<Item = NodeIdx> + 'a
+    where
+        I: IntoIterator<Item = NodeIdx>,
+    {
+        let mut to_visit: BTreeSet<_> = seed.into_iter().collect();
 
         std::iter::from_fn(move || {
-            let idx = to_visit.pop_front()?;
+            let idx = to_visit.pop_last()?;
             for p in self.parents(idx) {
-                if !seen.contains(&p) {
-                    let actor = self.actors[p.0 as usize].into();
-                    let seq = self.seq[p.0 as usize];
-                    if clock.get_for_actor(&actor) < NonZeroU32::new(seq) {
-                        seen.insert(p);
-                        to_visit.push_back(p);
-                    }
+                let actor = self.actors[p.0 as usize].into();
+                let seq = self.seq[p.0 as usize];
+                if clock.get_for_actor(&actor) < NonZeroU32::new(seq) {
+                    to_visit.insert(p);
                 }
             }
             Some(idx)
         })
-    }
-
-    /// Order fragments so every fragment's external member deps land in
-    /// earlier fragments — the order `apply_fragment` needs.
-    ///
-    /// Sorting by head node index is not enough: a loose commit on a
-    /// concurrent branch can predate (by node index) the head of the
-    /// fragment covering its parents. So this is a proper topological
-    /// sort of the fragment DAG, using head node index to break ties
-    /// deterministically.
-    ///
-    /// A change DAG is acyclic, so Kahn's algorithm always drains — but
-    /// it drains against the *graph as recorded*, and a graph that lies
-    /// would otherwise leave fragments unranked and silently emit them in
-    /// an order that is not an apply order. That is reported rather than
-    /// papered over.
-    pub(crate) fn sort_fragments_for_apply(
-        &self,
-        fragments: &mut Vec<Fragment>,
-        actors: &[crate::ActorId],
-    ) -> Result<(), AutomergeError> {
-        let n = fragments.len();
-
-        // which fragment owns each member node
-        let mut owner: HashMap<NodeIdx, usize> = HashMap::new();
-        for (i, f) in fragments.iter().enumerate() {
-            for m in &f.members {
-                if let Some(node) = self.node_for_change_id(m, actors) {
-                    owner.insert(node, i);
-                }
-            }
-        }
-
-        // fragment-level dependency edges from the members' parents
-        let mut indegree = vec![0usize; n];
-        let mut children: Vec<Vec<usize>> = vec![Vec::new(); n];
-        let mut seen: HashSet<(usize, usize)> = HashSet::new();
-        for (&node, &i) in &owner {
-            for p in self.parents(node) {
-                if let Some(&j) = owner.get(&p) {
-                    if j != i && seen.insert((j, i)) {
-                        children[j].push(i);
-                        indegree[i] += 1;
-                    }
-                }
-            }
-        }
-
-        // Kahn's algorithm, popping the ready fragment with the
-        // smallest head node index
-        let head_node = |f: &Fragment| self.node_by_hash(&f.head);
-        let mut ready: BTreeSet<(Option<NodeIdx>, usize)> = indegree
-            .iter()
-            .enumerate()
-            .filter(|(_, d)| **d == 0)
-            .map(|(i, _)| (head_node(&fragments[i]), i))
-            .collect();
-        let mut order = Vec::with_capacity(n);
-        while let Some(&(key, i)) = ready.iter().next() {
-            ready.remove(&(key, i));
-            order.push(i);
-            for &c in &children[i] {
-                indegree[c] -= 1;
-                if indegree[c] == 0 {
-                    ready.insert((head_node(&fragments[c]), c));
-                }
-            }
-        }
-        if order.len() != n {
-            // every unranked fragment still has an unsatisfied dep, so no
-            // ordering of this set is an apply order
-            return Err(AutomergeError::InvalidFragment(
-                "fragment dependencies form a cycle",
-            ));
-        }
-
-        let mut pos = vec![0usize; n];
-        for (rank, i) in order.iter().enumerate() {
-            pos[*i] = rank;
-        }
-        let mut indexed: Vec<(usize, Fragment)> =
-            std::mem::take(fragments).into_iter().enumerate().collect();
-        indexed.sort_by_key(|(i, _)| pos[*i]);
-        *fragments = indexed.into_iter().map(|(_, f)| f).collect();
-        Ok(())
     }
 
     pub(crate) fn cache_fragments(&mut self) {
@@ -1360,10 +1351,7 @@ impl ChangeGraph {
         let clock = self.calculate_clock(vec![head]);
         for (i, f) in self.fragments.iter().enumerate().rev() {
             if clock.covers(&f.clock) {
-                let Some(f_hash) = self.hashes.get(f.head) else {
-                    continue;
-                };
-                if f_hash.fragment_level() >= level {
+                if f.level >= level {
                     deps.push(f.head);
                 } else {
                     supercede.push(i);
@@ -1374,7 +1362,20 @@ impl ChangeGraph {
             self.fragments.remove(i);
         }
         SeqClock::merge(&mut self.fragment_top, &clock);
-        self.fragments.push(FragmentNode { head, deps, clock });
+        let node = FragmentNode {
+            head,
+            level,
+            deps,
+            clock,
+        };
+        // hold the index in apply order (see [`Self::fragments`]): a new
+        // fragment joins its level's run, not the end of the array. Its
+        // own level's fragments are all older, so it lands at that run's
+        // end — but a *finer* fragment cached earlier sorts after it.
+        let pos = self
+            .fragments
+            .partition_point(|f| f.sort_key() < node.sort_key());
+        self.fragments.insert(pos, node);
         true
     }
 
@@ -1514,6 +1515,10 @@ impl ChangeGraph {
     }
 
     fn add_parent(&mut self, child_idx: NodeIdx, parent_idx: NodeIdx) {
+        // a change is only ever added once its deps are in the graph, so
+        // a parent's node index is always lower — node index order is a
+        // topological order, which `rev_ancestry_until_clock` walks by
+        debug_assert!(parent_idx < child_idx, "parent added after its child");
         let new_edge_idx = EdgeIdx::new(self.edges.len());
         self.edges.push(Edge {
             target: parent_idx,
@@ -2168,7 +2173,7 @@ pub(crate) enum AddChangeError {
 #[cfg(test)]
 mod tests {
     use std::{
-        collections::BTreeMap,
+        collections::{BTreeMap, HashSet},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -2427,7 +2432,7 @@ mod tests {
             .collect();
         let heads: Vec<_> = graph.heads().collect();
 
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
 
         // Collect all member ids across all fragments
         // (members may appear in multiple fragments — this is expected)
@@ -2505,7 +2510,7 @@ mod tests {
         }
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
 
         assert_fragment_invariants(&fragments, &builder.hash_of());
     }
@@ -2537,7 +2542,7 @@ mod tests {
             .map(|id| (id.actor().clone(), id.seq()))
             .collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
 
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
@@ -2556,6 +2561,169 @@ mod tests {
         assert_fragment_invariants(&fragments, &builder.hash_of());
     }
 
+    /// Fragments come back in apply order: every fragment's boundary,
+    /// and every dep of its members, is covered by the fragment itself
+    /// or by an earlier one. Concurrent branches are what makes this
+    /// non-trivial — neither fragment-index order nor head node order
+    /// gets it right on its own.
+    #[test]
+    fn fragments_are_returned_in_apply_order() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+        let actor3 = builder.actor();
+
+        // long concurrent branches — long enough that a branch can grow
+        // its own cached fragments before the merge
+        let root = builder.change(&actor1, 1, &[]);
+        let mut tips = [root, root, root];
+        for i in 0..1_200 {
+            tips[0] = builder.change(&actor1, 1, &[tips[0]]);
+            tips[1] = builder.change(&actor2, 1, &[tips[1]]);
+            tips[2] = builder.change(&actor3, 1, &[tips[2]]);
+            if i % 400 == 399 {
+                let merge = builder.change(&actor1, 1, &tips);
+                tips = [merge, merge, merge];
+            }
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments = graph.fragments(&heads, .., &builder.actors);
+        let hash_of = builder.hash_of();
+
+        let mut applied: BTreeSet<ChangeHash> = BTreeSet::new();
+        for f in &fragments {
+            let members: BTreeSet<ChangeHash> =
+                f.members.iter().map(|m| member_hash(&hash_of, m)).collect();
+            for dep in &f.boundary {
+                assert!(
+                    applied.contains(dep) || members.contains(dep),
+                    "fragment {:?} applies before its boundary {:?}",
+                    f.head,
+                    dep,
+                );
+            }
+            for m in &members {
+                for d in graph.deps(m) {
+                    let d = d.unwrap();
+                    assert!(
+                        members.contains(&d) || applied.contains(&d),
+                        "fragment {:?} member {:?} applies before its dep {:?}",
+                        f.head,
+                        m,
+                        d,
+                    );
+                }
+            }
+            applied.extend(members);
+        }
+        assert_eq!(
+            applied,
+            builder.all_hashes().into_iter().collect::<BTreeSet<_>>(),
+            "fragments do not cover every change",
+        );
+    }
+
+    /// Probe: is the fragment index's own order (ascending head node
+    /// index) already a valid apply order for the cached fragments?
+    /// Needs a level-2 fragment (1 hash in 65536) on one branch while a
+    /// level-1 fragment survives on a concurrent one.
+    /// cargo test -p automerge --release --lib probe_fragment_index_order -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn probe_fragment_index_order() {
+        use crate::transaction::Transactable;
+        let n: u64 = std::env::var("PROBE_CHANGES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(200_000);
+
+        let mut base = AutoCommit::new();
+        for i in 0..2_000u64 {
+            base.put(ROOT, "k", i as i64).unwrap();
+            base.commit();
+        }
+        let saved = base.save();
+        let mut a = AutoCommit::load(&saved).unwrap();
+        let mut b = AutoCommit::load(&saved).unwrap();
+        a.set_actor(ActorId::random()).unwrap();
+        b.set_actor(ActorId::random()).unwrap();
+        // merge is a hash-level operation
+        a.enable_audit_mode().unwrap();
+        b.enable_audit_mode().unwrap();
+        for i in 0..2_000u64 {
+            a.put(ROOT, "a", i as i64).unwrap();
+            a.commit();
+        }
+        for i in 0..n {
+            b.put(ROOT, "b", i as i64).unwrap();
+            b.commit();
+        }
+        a.merge(&mut b).unwrap();
+
+        // rebuild the index the way a load does: in node order
+        let bytes = a.save();
+        let doc = Automerge::load(&bytes).unwrap();
+        let graph = &doc.change_graph;
+
+        // what `fragments` returns: level descending, node index ascending
+        let returned = doc.fragments(..).unwrap();
+        let cached: Vec<_> = returned.iter().filter(|f| f.level > 0).cloned().collect();
+        // the same fragments in node index order alone
+        let mut by_node = cached.clone();
+        by_node.sort_by_key(|f| graph.node_by_hash(&f.head).unwrap().0);
+
+        // the index is no longer keyed on node index alone: every cached
+        // fragment must still be findable
+        for f in &cached {
+            assert_eq!(
+                graph.get_fragment(f.head, &doc.ops.actors).as_ref(),
+                Some(f),
+                "get_fragment missed a level-{} fragment",
+                f.level,
+            );
+        }
+        let mut levels: BTreeMap<usize, usize> = BTreeMap::new();
+        for f in &returned {
+            *levels.entry(f.level).or_default() += 1;
+        }
+        println!("fragments: {} levels: {levels:?}", returned.len());
+        println!("index order == returned order: {}", by_node == cached);
+
+        // every boundary, and every dep of every member, must already be
+        // covered by this fragment or an earlier one
+        let check = |order: &[Fragment]| {
+            let mut applied: HashSet<NodeIdx> = HashSet::new();
+            let mut violations = 0;
+            for f in order {
+                let members: HashSet<NodeIdx> = f
+                    .members
+                    .iter()
+                    .map(|m| graph.node_for_change_id(m, &doc.ops.actors).unwrap())
+                    .collect();
+                let mut needs: Vec<NodeIdx> = f
+                    .boundary
+                    .iter()
+                    .map(|d| graph.node_by_hash(d).unwrap())
+                    .collect();
+                for m in &members {
+                    needs.extend(graph.parents(*m));
+                }
+                for n in needs {
+                    if !applied.contains(&n) && !members.contains(&n) {
+                        violations += 1;
+                    }
+                }
+                applied.extend(members);
+            }
+            violations
+        };
+        println!("violations, node index order:     {}", check(&by_node));
+        println!("violations, cached as returned:   {}", check(&cached));
+        println!("violations, all as returned:      {}", check(&returned));
+        assert_eq!(check(&returned), 0, "returned order is not an apply order");
+    }
+
     #[test]
     fn fragment_deps_reference_known_hashes() {
         let mut builder = TestGraphBuilder::new();
@@ -2568,7 +2736,7 @@ mod tests {
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
+        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
         let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
 
         for f in &fragments {
@@ -2607,9 +2775,9 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let all: Vec<_> = graph.fragments(&heads, .., &builder.actors).collect();
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors).collect();
-        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors).collect();
+        let all: Vec<_> = graph.fragments(&heads, .., &builder.actors);
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
+        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
 
         // loose + cached partition the full range
         assert_eq!(loose.len() + cached.len(), all.len());
@@ -2627,7 +2795,7 @@ mod tests {
         }
 
         // empty range yields nothing
-        assert_eq!(graph.fragments(&heads, 0..0, &builder.actors).count(), 0);
+        assert_eq!(graph.fragments(&heads, 0..0, &builder.actors).len(), 0);
     }
 
     #[test]
@@ -2642,8 +2810,8 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors).collect();
-        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors).collect();
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
+        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
         assert!(!loose.is_empty());
         assert!(!cached.is_empty(), "expected at least one cached fragment");
 
@@ -3711,37 +3879,16 @@ impl<'a> Iterator for ChangeIter<'a> {
 #[derive(Debug, PartialEq, Clone)]
 struct FragmentNode {
     head: NodeIdx,
+    level: usize,
     deps: Vec<NodeIdx>,
     clock: SeqClock,
 }
 
 impl FragmentNode {
-    fn export(&self, graph: &ChangeGraph, actors: &[crate::ActorId]) -> Fragment {
-        let expect = "fragment index requires the fragment-hashes state";
-        let head = graph.hashes.get(self.head).expect(expect);
-        let level = head.fragment_level();
-        let boundary = self
-            .deps
-            .iter()
-            .map(|d| graph.hashes.get(*d).expect(expect))
-            .collect();
-        let clock = graph.calculate_clock(self.deps.clone());
-        let nodes: Vec<_> = graph.fragment_nodes(self.head, &clock).collect();
-        // interior hashes may be unknown in the fragment-hashes state,
-        // but checkpoint (level > 0) hashes are always present in it
-        let checkpoints = nodes
-            .iter()
-            .filter_map(|n| graph.hashes.get(*n))
-            .filter(|h| h.fragment_level() > 0)
-            .collect();
-        let members = nodes.iter().map(|n| graph.change_id(*n, actors)).collect();
-        Fragment {
-            head,
-            level,
-            boundary,
-            checkpoints,
-            members,
-        }
+    /// The fragment index's order, which is also the apply order: level
+    /// descending, then head node index ascending.
+    fn sort_key(&self) -> (std::cmp::Reverse<usize>, NodeIdx) {
+        (std::cmp::Reverse(self.level), self.head)
     }
 }
 
