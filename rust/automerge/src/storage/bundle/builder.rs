@@ -14,7 +14,7 @@ use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{ChunkType, Header, RawColumn, RawColumns};
 use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
-use super::{Bundle, BundleChange, BundleMetadata, BundleStorage, ParseError};
+use super::{BundleChange, BundleMetadata, BundleStorage, ParseError};
 
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
@@ -190,7 +190,7 @@ impl<'a> BundleBuilder<'a> {
     pub(crate) fn finish_with_ranks(
         mut self,
         ranks: &std::collections::HashMap<OpId, u64>,
-    ) -> Bundle {
+    ) -> BundleStorage<'static, crate::storage::change::Verified> {
         self.flush_deletes();
 
         let mut mapper = self.mapper;
@@ -240,7 +240,7 @@ impl<'a> BundleBuilder<'a> {
         data_u.extend_from_slice(&ops_data_buf);
         let ops_data_end_u = data_u.len();
 
-        let header_u = Header::new(ChunkType::Bundle, &data_u);
+        let header_u = Header::new(ChunkType::BundleV0, &data_u);
         let mut bytes_u = Vec::with_capacity(header_u.len() + data_u.len());
         header_u.write(&mut bytes_u);
         bytes_u.extend(data_u);
@@ -266,7 +266,7 @@ impl<'a> BundleBuilder<'a> {
         ops_meta_c.write(&mut data_c);
         data_c.extend_from_slice(&compressed_ops_data);
 
-        let header_c = Header::new(ChunkType::Bundle, &data_c);
+        let header_c = Header::new(ChunkType::BundleV0, &data_c);
         let mut bytes_c = Vec::with_capacity(header_c.len() + data_c.len());
         header_c.write(&mut bytes_c);
         bytes_c.extend(data_c);
@@ -285,7 +285,7 @@ impl<'a> BundleBuilder<'a> {
             _phantom: PhantomData,
         };
 
-        Bundle { storage }
+        storage
     }
 
     fn builders_index(&self, id: OpId) -> Option<usize> {

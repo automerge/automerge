@@ -13,7 +13,7 @@ use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
-    Bundle(BundleStorage<'a, Unverified>),
+    BundleV0(BundleStorage<'a, Unverified>),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
@@ -28,7 +28,7 @@ pub(crate) mod error {
         #[error(transparent)]
         Leb128(#[from] parse::leb128::Error),
         #[error("failed to parse bundle: {0}")]
-        Bundle(#[from] bundle::ParseError),
+        BundleV0(#[from] bundle::ParseError),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
         #[error("bad change chunk: {0}")]
@@ -98,20 +98,20 @@ impl<'a> Chunk<'a> {
                     Compressed::new(header.checksum, Cow::Borrowed(chunk_input.bytes())),
                 )
             }
-            ChunkType::Bundle => {
+            ChunkType::BundleV0 => {
                 let (remaining, bundle) =
                     BundleStorage::parse_following_header(chunk_input, header)
                         .map_err(|e| e.lift())?;
                 if !remaining.is_empty() {
                     return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                Chunk::Bundle(bundle)
+                Chunk::BundleV0(bundle)
             }
-            ChunkType::BundleV2 => {
-                // for the generic load path a bundle v2 is just its
-                // embedded v1 bundle — the metadata prefix only matters
-                // to apply_fragment, which parses the chunk itself
-                let (i, _prefix) = crate::storage::bundle_v2::BundleV2::parse_prefix(chunk_input)
+            ChunkType::Bundle => {
+                // for the generic load path a bundle is just the changes
+                // it carries — the metadata prefix only matters to
+                // apply_fragment, which parses the chunk itself
+                let (i, _prefix) = crate::storage::bundle::Bundle::parse_prefix(chunk_input)
                     .map_err(|e| e.lift())?;
                 let (i, inner_header) = Header::parse::<error::Chunk>(i)?;
                 let parse::Split {
@@ -124,7 +124,7 @@ impl<'a> Chunk<'a> {
                 if !remaining.is_empty() || !after_inner.is_empty() {
                     return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                Chunk::Bundle(bundle)
+                Chunk::BundleV0(bundle)
             }
         };
         Ok((remaining, chunk))
@@ -137,7 +137,7 @@ impl<'a> Chunk<'a> {
             Self::CompressedChange(change, compressed) => {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
-            Self::Bundle(b) => b.checksum_valid(),
+            Self::BundleV0(b) => b.checksum_valid(),
         }
     }
 }
@@ -147,8 +147,8 @@ pub(crate) enum ChunkType {
     Document,
     Change,
     Compressed,
+    BundleV0,
     Bundle,
-    BundleV2,
 }
 
 impl TryFrom<u8> for ChunkType {
@@ -159,8 +159,8 @@ impl TryFrom<u8> for ChunkType {
             0 => Ok(Self::Document),
             1 => Ok(Self::Change),
             2 => Ok(Self::Compressed),
-            3 => Ok(Self::Bundle),
-            4 => Ok(Self::BundleV2),
+            3 => Ok(Self::BundleV0),
+            4 => Ok(Self::Bundle),
             other => Err(other),
         }
     }
@@ -172,8 +172,8 @@ impl From<ChunkType> for u8 {
             ChunkType::Document => 0,
             ChunkType::Change => 1,
             ChunkType::Compressed => 2,
-            ChunkType::Bundle => 3,
-            ChunkType::BundleV2 => 4,
+            ChunkType::BundleV0 => 3,
+            ChunkType::Bundle => 4,
         }
     }
 }

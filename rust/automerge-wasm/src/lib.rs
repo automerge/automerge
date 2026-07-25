@@ -1893,16 +1893,6 @@ impl Automerge {
         .unwrap();
         result.into()
     }
-
-    #[wasm_bindgen(js_name = "saveBundle")]
-    pub fn save_bundle(&mut self, hashes: JsValue) -> Result<Uint8Array, error::SaveBundle> {
-        let hashes: Vec<automerge::ChangeHash> = JS(hashes).try_into()?;
-        let bundle = self
-            .doc
-            .bundle(hashes.into_iter())
-            .map_err(error::SaveBundle::DoBundle)?;
-        Ok(Uint8Array::from(bundle.bytes()))
-    }
 }
 
 // skip_typescript as the definition requires an optional argument so we define

@@ -97,12 +97,6 @@ impl ChangeId {
         self.seq.get()
     }
 
-    /// [`Self::seq`] keeping the non-zero proof, for callers building
-    /// another [`ChangeId`] (or wire metadata) out of this one.
-    pub(crate) fn seq_nonzero(&self) -> NonZeroU64 {
-        self.seq
-    }
-
     pub(crate) fn actor_idx_hint(&self) -> usize {
         self.actor_idx_hint
     }

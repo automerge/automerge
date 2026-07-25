@@ -1,6 +1,6 @@
 use crate::clock::Clock;
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
-use crate::storage::bundle::Bundle;
+use crate::storage::Bundle;
 use crate::types::OpId;
 use crate::{Automerge, AutomergeError};
 
@@ -343,7 +343,7 @@ mod tests {
     use crate::transaction::Transactable;
     use crate::types::ChangeHash;
     use crate::{
-        make_rng, AuditMode, AutoCommit, Automerge, AutomergeError, BundleV2, Change, ChangeId,
+        make_rng, AuditMode, AutoCommit, Automerge, AutomergeError, Bundle, Change, ChangeId,
         Fragment, ObjType, ScalarValue, ROOT,
     };
     use rand::prelude::*;
@@ -391,13 +391,13 @@ mod tests {
     fn apply_and_compare(src: &mut AutoCommit, dst: &mut AutoCommit, heads: &[crate::ChangeId]) {
         let changes = src.get_changes(heads).unwrap();
         let frag = fragment_for(&changes);
-        let v2 = src.doc.bundle_fragment_v2(&frag).unwrap();
+        let bundle = src.doc.bundle_fragment(&frag).unwrap();
 
         let mut dst_ref = dst.fork();
         dst_ref.doc.apply_changes_batch(changes).unwrap();
         dst_ref.validate_top_index();
 
-        dst.doc.apply_fragment(&v2).unwrap();
+        dst.doc.apply_fragment(&bundle).unwrap();
         dst.validate_top_index();
 
         assert_eq!(dst.doc.audit_mode(), AuditMode::Disabled);
@@ -616,9 +616,9 @@ mod tests {
         for chunk in changes.chunks(7) {
             // round trip through the encoded chunk
             let frag = fragment_for(chunk);
-            let bytes = src.doc.bundle_fragment_v2(&frag).unwrap().bytes();
-            let v2 = BundleV2::try_from(&bytes[..]).unwrap();
-            dst.apply_fragment(&v2).unwrap();
+            let bytes = src.doc.bundle_fragment(&frag).unwrap().bytes();
+            let bundle = Bundle::try_from(&bytes[..]).unwrap();
+            dst.apply_fragment(&bundle).unwrap();
         }
 
         assert_eq!(dst.get_heads(), src.get_heads());
@@ -643,7 +643,7 @@ mod tests {
         let chunks: Vec<_> = changes.chunks(3).collect();
         let bundles: Vec<_> = chunks
             .iter()
-            .map(|c| src.doc.bundle_fragment_v2(&fragment_for(c)).unwrap())
+            .map(|c| src.doc.bundle_fragment(&fragment_for(c)).unwrap())
             .collect();
 
         let mut dst = Automerge::new();
@@ -684,7 +684,7 @@ mod tests {
         }
 
         let changes = src.get_changes(&[]).unwrap();
-        let make = |cs: &[Change]| src.doc.bundle_fragment_v2(&fragment_for(cs)).unwrap();
+        let make = |cs: &[Change]| src.doc.bundle_fragment(&fragment_for(cs)).unwrap();
         let first = make(&changes[..6]);
         let overlapping = make(&changes[3..]); // 3 present, 3 new
 

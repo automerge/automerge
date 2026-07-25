@@ -3,7 +3,7 @@ use tracing::instrument;
 use crate::{
     change::Change,
     change_graph::ChangeGraph,
-    storage::{self, document::ReconstructError, parse, Bundle},
+    storage::{self, document::ReconstructError, parse},
     types::TextEncoding,
 };
 
@@ -142,11 +142,11 @@ fn load_next_change<'a>(
             tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
             changes.push(change);
         }
-        storage::Chunk::Bundle(bundle) => {
+        storage::Chunk::BundleV0(bundle) => {
             tracing::trace!("loading bundle chunk");
-            let bundle = Bundle::new_from_unverified(bundle.into_owned())
+            let storage = storage::bundle::verify_inner(bundle.into_owned())
                 .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
-            let bundle_changes = bundle
+            let bundle_changes = storage
                 .to_changes()
                 .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
             changes.extend(bundle_changes);

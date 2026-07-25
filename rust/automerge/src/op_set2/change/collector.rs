@@ -781,11 +781,11 @@ impl<'a> ChangeCollector<'a> {
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
         #[cfg(debug_assertions)]
         {
-            // Bundle::from_meta sorts changes by (start_op, actor) before
-            // encoding columns, so the two paths produce the same set of
-            // changes but not necessarily in the same order. Compare as sets
-            // keyed by hash.
-            let bundle_changes = crate::storage::Bundle::for_hashes(
+            // the bundle encoder sorts changes by (start_op, actor)
+            // before encoding columns, so the two paths produce the same
+            // set of changes but not necessarily in the same order.
+            // Compare as sets keyed by hash.
+            let bundle_changes = crate::storage::Bundle::storage_for_hashes(
                 op_set,
                 change_graph,
                 r1.iter().map(|c| c.hash()),

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
-use tinyvec::{ArrayVec, TinyVec};
+use std::sync::Arc;
 
 use rustc_hash::FxBuildHasher;
 pub(crate) type SmallHasher = FxBuildHasher;
@@ -32,17 +32,19 @@ pub(crate) const ROOT: OpId = OpId(0, 0);
 const ROOT_STR: &str = "_root";
 const HEAD_STR: &str = "_head";
 
-/// An actor id is a sequence of bytes. By default we use a uuid which can be nicely stack
-/// allocated.
+/// An actor id is a sequence of bytes — by default a 16-byte uuid, though
+/// callers may use their own identifier of any length.
 ///
-/// In the event that users want to use their own type of identifier that is longer than a uuid
-/// then they will likely end up pushing it onto the heap which is still fine.
+/// The bytes live behind an [`Arc`], so cloning an `ActorId` is a refcount
+/// bump rather than a copy. That matters because actor ids are cloned
+/// constantly: every [`ChangeId`](crate::ChangeId) carries one, and the
+/// change graph hands them out per change.
 ///
 // Note that change encoding relies on the Ord implementation for the ActorId being implemented in
 // terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
 // changing the ActorId implementation in ways which might affect the Ord implementation
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
-pub struct ActorId(TinyVec<[u8; 16]>);
+pub struct ActorId(Arc<[u8]>);
 
 impl fmt::Debug for ActorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -56,7 +58,7 @@ impl Distribution<ActorId> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ActorId {
         let mut bytes = [0u8; 16];
         rng.fill(&mut bytes);
-        ActorId(TinyVec::from(bytes))
+        ActorId(Arc::from(&bytes[..]))
     }
 }
 
@@ -64,7 +66,7 @@ impl ActorId {
     pub fn random() -> ActorId {
         let mut buf = [0u8; 16];
         getrandom::fill(&mut buf).expect("random number generator failed");
-        ActorId(TinyVec::from(buf))
+        ActorId(Arc::from(&buf[..]))
     }
 
     pub fn to_bytes(&self) -> &[u8] {
@@ -80,8 +82,8 @@ impl ActorId {
         let mut bytes = Vec::with_capacity(self.0.len() + 4 + 16);
         bytes.extend(&CONCURRENCY_MAGIC_BYTES);
         leb128::write::unsigned(&mut bytes, level as u64).unwrap();
-        bytes.extend(&self.0);
-        ActorId(TinyVec::from(bytes.as_slice()))
+        bytes.extend(self.0.iter());
+        ActorId(Arc::from(bytes))
     }
 }
 
@@ -113,7 +115,7 @@ impl AsRef<[u8]> for ActorId {
 
 impl From<&[u8]> for ActorId {
     fn from(b: &[u8]) -> Self {
-        ActorId(TinyVec::from(b))
+        ActorId(Arc::from(b))
     }
 }
 
@@ -125,12 +127,7 @@ impl From<&Vec<u8>> for ActorId {
 
 impl From<Vec<u8>> for ActorId {
     fn from(b: Vec<u8>) -> Self {
-        let inner = if let Ok(arr) = ArrayVec::try_from(b.as_slice()) {
-            TinyVec::Inline(arr)
-        } else {
-            TinyVec::Heap(b)
-        };
-        ActorId(inner)
+        ActorId(Arc::from(b))
     }
 }
 
@@ -142,12 +139,7 @@ impl<const N: usize> From<[u8; N]> for ActorId {
 
 impl<const N: usize> From<&[u8; N]> for ActorId {
     fn from(slice: &[u8; N]) -> Self {
-        let inner = if let Ok(arr) = ArrayVec::try_from(slice.as_slice()) {
-            TinyVec::Inline(arr)
-        } else {
-            TinyVec::Heap(slice.to_vec())
-        };
-        ActorId(inner)
+        ActorId(Arc::from(&slice[..]))
     }
 }
 

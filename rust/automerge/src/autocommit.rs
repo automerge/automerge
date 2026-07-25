@@ -13,7 +13,7 @@ use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
 use crate::Fragment;
-use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
+use crate::{hydrate, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash,
@@ -515,21 +515,6 @@ impl AutoCommit {
         Ok(bytes)
     }
 
-    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
-    ///
-    /// A "bundle" is a compact representation of a set of changes which uses
-    /// the same compression tricks as the document encoding we use in
-    /// [`Automerge::save`].
-    ///
-    /// This is an experimental API, the bundle format is still subject to change
-    /// and so should not be used in production just yet.
-    pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
-    where
-        I: IntoIterator<Item = ChangeHash>,
-    {
-        self.doc.bundle(hashes)
-    }
-
     #[cfg(test)]
     pub fn debug_cmp(&self, other: &Self) {
         self.doc.debug_cmp(&other.doc);
@@ -647,12 +632,6 @@ impl AutoCommit {
         self.doc.audit_mode()
     }
 
-    /// EXPERIMENTAL: Return the fragments covering the document history at
-    /// the given levels, ordered oldest to newest.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(
         &self,
         levels: R,
@@ -660,21 +639,10 @@ impl AutoCommit {
         self.doc.fragments(levels)
     }
 
-    /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
         self.doc.get_fragment(head)
     }
 
-    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
-    /// (level-0 fragments with one member) or as a bundle.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
     pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,

@@ -784,7 +784,7 @@ fn default_load_computes_then_retains_without_columns() {
     assert!(doc.get_change_by_hash(&head).unwrap().is_some());
 }
 
-/// Applying the same BundleV2 chain in audit mode (to_changes +
+/// Applying the same Bundle chain in audit mode (to_changes +
 /// apply_changes, hashing everything) and outside it (the manifold fast
 /// path) produces identical documents — and the audit doc keeps every
 /// hash.
@@ -796,7 +796,7 @@ fn audit_and_manifold_fragment_apply_agree() {
     let fragments = src.fragments(..).unwrap();
     let bundles: Vec<_> = fragments
         .into_iter()
-        .map(|f| src.document().bundle_fragment_v2(&f).unwrap())
+        .map(|f| src.document().bundle_fragment(&f).unwrap())
         .collect();
     assert!(bundles.len() > 1);
 
@@ -834,7 +834,7 @@ fn audit_fragment_apply_missing_deps() {
     let fragments = src.fragments(..).unwrap();
     let bundles: Vec<_> = fragments
         .into_iter()
-        .map(|f| src.document().bundle_fragment_v2(&f).unwrap())
+        .map(|f| src.document().bundle_fragment(&f).unwrap())
         .collect();
     assert!(bundles.len() > 1);
 

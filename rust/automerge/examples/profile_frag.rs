@@ -10,11 +10,11 @@ fn main() {
         let bytes = std::fs::read(&path).unwrap();
         let doc = Automerge::load(&bytes).unwrap();
 
-        let v2: Vec<automerge::BundleV2> = doc
-            .bundle_fragments_v2(doc.fragments(..).unwrap())
+        let v2: Vec<automerge::Bundle> = doc
+            .bundle_fragments(doc.fragments(..).unwrap())
             .unwrap()
             .iter()
-            .map(|b| automerge::BundleV2::try_from(&b[..]).unwrap())
+            .map(|b| automerge::Bundle::try_from(&b[..]).unwrap())
             .collect();
 
         let t = std::time::Instant::now();

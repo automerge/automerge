@@ -6,9 +6,7 @@
 //
 //   cargo run --release -p automerge --example bench_keystroke [S1 S2 S3 ...]
 use automerge::transaction::Transactable;
-use automerge::{
-    Automerge, BundleV2, ChangeHash, ChangeId, Fragment, ObjType, ReadDoc, Value, ROOT,
-};
+use automerge::{Automerge, Bundle, ChangeHash, ChangeId, Fragment, ObjType, ReadDoc, Value, ROOT};
 use std::time::Instant;
 
 fn find_text(doc: &Automerge) -> automerge::ObjId {
@@ -74,7 +72,7 @@ fn main() {
                         std::num::NonZeroU64::new(change.seq()).unwrap(),
                     )],
                 };
-                src.bundle_fragment_v2(&frag).unwrap().bytes()
+                src.bundle_fragment(&frag).unwrap().bytes()
             })
             .collect();
 
@@ -95,7 +93,7 @@ fn main() {
         };
 
         let (frag_new, frag_steady) = bench(&|d: &mut Automerge, i: usize| {
-            let v2 = BundleV2::try_from(&v2_bytes[i][..]).unwrap();
+            let v2 = Bundle::try_from(&v2_bytes[i][..]).unwrap();
             d.apply_fragment(&v2).unwrap();
         });
         let (inc_new, inc_steady) = bench(&|d: &mut Automerge, i: usize| {

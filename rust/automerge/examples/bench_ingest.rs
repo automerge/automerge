@@ -68,11 +68,11 @@ fn main() {
 
         // the branch's own path: v2 fragment chain via apply_fragment
         // (parsed from bytes, so the wire round-trip is included)
-        let v2: Vec<automerge::BundleV2> = doc
-            .bundle_fragments_v2(doc.fragments(..).unwrap())
+        let v2: Vec<automerge::Bundle> = doc
+            .bundle_fragments(doc.fragments(..).unwrap())
             .unwrap()
             .iter()
-            .map(|b| automerge::BundleV2::try_from(&b[..]).unwrap())
+            .map(|b| automerge::Bundle::try_from(&b[..]).unwrap())
             .collect();
         let t_frag = best_of(
             || {
