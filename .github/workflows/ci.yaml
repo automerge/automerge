@@ -18,6 +18,8 @@ jobs:
           default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust"
       - run: ./scripts/ci/fmt
         shell: bash
 
@@ -32,6 +34,8 @@ jobs:
           default: true
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust"
       - run: ./scripts/ci/lint
         shell: bash
 
@@ -45,6 +49,8 @@ jobs:
           toolchain: "1.90"
           default: true
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust"
       - name: Build rust docs
         run: ./scripts/ci/rust-docs
         shell: bash
@@ -137,6 +143,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           default: true
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust"
       - run: ./scripts/ci/build-test
         shell: bash
 
@@ -150,6 +158,8 @@ jobs:
           toolchain: "1.90"
           default: true
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust"
       - run: ./scripts/ci/build-test
         shell: bash
 
@@ -163,5 +173,7 @@ jobs:
           toolchain: "1.90"
           default: true
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust"
       - run: ./scripts/ci/build-test
         shell: bash
