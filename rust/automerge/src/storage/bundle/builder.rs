@@ -165,15 +165,21 @@ impl<'a> BundleBuilder<'a> {
     pub(crate) fn flush_deletes(&mut self) {
         if let Some((obj, key)) = self.last.take() {
             let target = self.hint_target(&key);
-            for (id, pred) in &self.preds {
-                let op = Op::del(*id, obj, key.clone());
-                let op = op.build(pred.to_vec());
+            // `preds` is a HashMap, whose iteration order is seeded per
+            // instance — emitting in that order would make a bundle's
+            // bytes depend on which allocation it happened to get rather
+            // than on its content. Within a key group document order is
+            // by op id, so sort.
+            let mut pending: Vec<(OpId, Vec<OpId>)> = self.preds.drain().collect();
+            pending.sort_unstable_by_key(|(id, _)| *id);
+            for (id, pred) in pending {
+                let op = Op::del(id, obj, key.clone());
+                let op = op.build(pred);
                 if let Some(index) = self.builders_index(op.id) {
                     self.op_writer
                         .add_with_target(&op, &[], index, &mut self.mapper, target);
                 }
             }
-            self.preds.clear();
         }
     }
 

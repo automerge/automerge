@@ -1329,21 +1329,42 @@ impl Automerge {
         Ok(self.change_graph.get_fragment(head, &self.ops.actors))
     }
 
-    #[doc(hidden)]
-    pub fn bundle_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
-        let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
+    /// A fragment's member changes as sorted, deduped node indexes.
+    ///
+    /// Fragments can share members (a loose commit covered by more than
+    /// one fragment clock), so a member must appear once.
+    fn fragment_nodes(
+        &self,
+        f: &Fragment,
+    ) -> Result<Vec<crate::change_graph::NodeIdx>, AutomergeError> {
         let mut nodes = f
             .members
             .iter()
             .map(|id| self.change_graph.node_for_change_id(id, &self.ops.actors))
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(unknown)?;
+            .ok_or(AutomergeError::InvalidFragment(
+                "fragment references an unknown change",
+            ))?;
         nodes.sort_unstable();
-        // fragments can share members (a loose commit covered by more
-        // than one fragment clock) — a member must appear once
         nodes.dedup();
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        Ok(nodes)
+    }
 
+    #[doc(hidden)]
+    pub fn bundle_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
+        let nodes = self.fragment_nodes(f)?;
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        self.assemble_bundle(f, &nodes, storage)
+    }
+
+    /// Wrap collected change storage in its fragment metadata.
+    fn assemble_bundle(
+        &self,
+        f: &Fragment,
+        nodes: &[crate::change_graph::NodeIdx],
+        storage: crate::storage::BundleStorage<'static, crate::storage::change::Verified>,
+    ) -> Result<Bundle, AutomergeError> {
+        let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
         // member indexes are positions in the bundle's (topologically
         // ordered) change list, which is node order
         let member_index = |h: &ChangeHash| -> Option<usize> {
@@ -1396,9 +1417,19 @@ impl Automerge {
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        let fragments: Vec<Fragment> = fragments.into_iter().collect();
+        let nodes = fragments
+            .iter()
+            .map(|f| self.fragment_nodes(f))
+            .collect::<Result<Vec<_>, _>>()?;
+        // one shared pass resolves every bundle's hint ranks; bundling
+        // them separately would walk the document once each
+        let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, nodes.clone())?;
         fragments
-            .into_iter()
-            .map(|f| Ok(self.bundle_fragment(&f)?.bytes()))
+            .iter()
+            .zip(nodes.iter())
+            .zip(storages)
+            .map(|((f, n), storage)| Ok(self.assemble_bundle(f, n, storage)?.bytes()))
             .collect()
     }
 

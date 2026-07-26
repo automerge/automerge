@@ -144,7 +144,7 @@ impl Bundle {
         let changes = change_graph
             .get_bundle_metadata(hashes)
             .collect::<Result<_, _>>()?;
-        Ok(Self::storage_from_meta(op_set, changes, None))
+        Ok(Self::storage_from_meta(op_set, changes))
     }
 
     /// Build the carried-change storage from member nodes. Only the
@@ -155,18 +155,108 @@ impl Bundle {
         change_graph: &ChangeGraph,
         nodes: Vec<crate::change_graph::NodeIdx>,
     ) -> Result<BundleStorage<'static, Verified>, AutomergeError> {
-        let clock = change_graph.clock_for_nodes(nodes.clone());
-        let changes = change_graph
-            .bundle_metadata_for_nodes(nodes)
-            .collect::<Result<_, _>>()?;
-        Ok(Self::storage_from_meta(op_set, changes, Some(&clock)))
+        Ok(
+            Self::storage_for_node_sets(op_set, change_graph, vec![nodes])?
+                .pop()
+                .expect("one set in, one out"),
+        )
     }
 
-    fn storage_from_meta(
+    /// [`Self::storage_for_nodes`] for several bundles at once.
+    ///
+    /// Each bundle's own ops come from a counter-ranged walk, which is
+    /// already sparse — a one-change fragment reads a handful of rows.
+    /// The hint ranks are the part that does not scale: a rank is a
+    /// position among the rows the fragment's clock covers, so finding
+    /// one means walking the id column from the start of the document.
+    /// Done per bundle that is O(bundles x document); done here it is a
+    /// single walk with every bundle's counters advanced together, and
+    /// it stops as soon as the last outstanding target is found.
+    pub(crate) fn storage_for_node_sets(
         op_set: &OpSet,
-        changes: Vec<BundleMetadata<'_>>,
-        clock: Option<&crate::clock::Clock>,
-    ) -> BundleStorage<'static, Verified> {
+        change_graph: &ChangeGraph,
+        node_sets: Vec<Vec<crate::change_graph::NodeIdx>>,
+    ) -> Result<Vec<BundleStorage<'static, Verified>>, AutomergeError> {
+        let mut jobs = Vec::with_capacity(node_sets.len());
+        for nodes in node_sets {
+            let clock = change_graph.clock_for_nodes(nodes.clone());
+            let changes = change_graph
+                .bundle_metadata_for_nodes(nodes)
+                .collect::<Result<Vec<_>, _>>()?;
+            let collector = Self::collect_ops(op_set, changes);
+            let needed = collector.hint_targets();
+            jobs.push(HintJob {
+                remaining: needed.len(),
+                needed,
+                collector,
+                clock,
+                ranks: std::collections::HashMap::new(),
+                rank: 0,
+            });
+        }
+
+        Self::resolve_hint_ranks(op_set, &mut jobs);
+        Ok(jobs
+            .into_iter()
+            .map(|j| j.collector.finish_with_ranks(&j.ranks))
+            .collect())
+    }
+
+    /// One walk of the id column answering every job's outstanding hint
+    /// targets. Jobs drop out of `active` as they are satisfied, and the
+    /// walk ends with the last of them.
+    fn resolve_hint_ranks(op_set: &OpSet, jobs: &mut [HintJob<'_>]) {
+        let mut active: Vec<usize> = (0..jobs.len()).filter(|&i| jobs[i].remaining > 0).collect();
+        if active.is_empty() {
+            return;
+        }
+        for id in op_set.id_iter() {
+            let mut k = 0;
+            while k < active.len() {
+                let job = &mut jobs[active[k]];
+                // the cheap test first: a row which is neither covered
+                // nor a target cannot affect this job at all
+                let covered = job.clock.covers(&id);
+                let wanted = job.remaining > 0 && job.needed.contains(&id);
+                if !covered && !wanted {
+                    k += 1;
+                    continue;
+                }
+                // members do not count towards the rank — a receiver
+                // about to apply the bundle does not have them yet
+                if job.collector.is_member(id) {
+                    k += 1;
+                    continue;
+                }
+                if wanted {
+                    job.ranks.insert(id, job.rank);
+                    job.remaining -= 1;
+                }
+                if covered {
+                    job.rank += 1;
+                }
+                if job.remaining == 0 {
+                    active.swap_remove(k);
+                    continue;
+                }
+                k += 1;
+            }
+            if active.is_empty() {
+                break;
+            }
+        }
+        debug_assert!(
+            jobs.iter().all(|j| j.remaining == 0),
+            "hint target missing from doc"
+        );
+    }
+
+    /// Read the bundle's own ops out of the op set.
+    ///
+    /// The walk is counter-ranged, so it costs the rows the bundle
+    /// carries (plus whatever the skip iterator steps over between
+    /// them) rather than the document.
+    fn collect_ops<'a>(op_set: &'a OpSet, changes: Vec<BundleMetadata<'a>>) -> BundleBuilder<'a> {
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)
@@ -175,7 +265,6 @@ impl Bundle {
         let max = changes.iter().map(|c| c.max_op as usize).max().unwrap_or(0) + 1;
 
         let mapper = ActorMapper::new(&op_set.actors);
-
         let mut collector = BundleBuilder::from_change_meta(changes, mapper);
 
         for op in op_set.iter_ctr_range(min..max) {
@@ -187,38 +276,15 @@ impl Bundle {
                 collector.process_succ(op_id, id);
             }
         }
+        collector
+    }
 
-        // the hint ranks: for every covered seq target the member ops
-        // reference, its rank among the dep-covered rows (in document
-        // order) — a receiver-independent position floor. One id-column
-        // walk with early exit; members do not count (a receiver about
-        // to apply the fragment does not have them yet)
-        let mut ranks = std::collections::HashMap::new();
-        if let Some(clock) = clock {
-            let needed = collector.hint_targets();
-            if !needed.is_empty() {
-                let mut remaining = needed.len();
-                let mut rank = 0u64;
-                for id in op_set.id_iter() {
-                    if collector.is_member(id) {
-                        continue;
-                    }
-                    if needed.contains(&id) {
-                        ranks.insert(id, rank);
-                        remaining -= 1;
-                        if remaining == 0 {
-                            break;
-                        }
-                    }
-                    if clock.covers(&id) {
-                        rank += 1;
-                    }
-                }
-                debug_assert_eq!(remaining, 0, "hint target missing from doc");
-            }
-        }
-
-        collector.finish_with_ranks(&ranks)
+    /// The hash-keyed path, which has no clock and so writes no hints.
+    fn storage_from_meta(
+        op_set: &OpSet,
+        changes: Vec<BundleMetadata<'_>>,
+    ) -> BundleStorage<'static, Verified> {
+        Self::collect_ops(op_set, changes).finish_with_ranks(&std::collections::HashMap::new())
     }
 
     /// The inner chunk: the carried changes on their own, with per-column
@@ -351,6 +417,18 @@ impl Bundle {
             },
         ))
     }
+}
+
+/// One bundle's state during the shared hint walk: its collected ops,
+/// the targets it still needs a rank for, and the running count of
+/// clock-covered non-member rows seen so far.
+struct HintJob<'a> {
+    collector: BundleBuilder<'a>,
+    clock: crate::clock::Clock,
+    needed: rustc_hash::FxHashSet<crate::types::OpId>,
+    ranks: std::collections::HashMap<crate::types::OpId, u64>,
+    remaining: usize,
+    rank: u64,
 }
 
 /// How many entries it is safe to reserve for a wire-supplied `count`:
@@ -513,6 +591,76 @@ impl TryFrom<&[u8]> for Bundle {
 mod tests {
     use super::*;
     use crate::storage::MAGIC_BYTES;
+
+    /// A bundle's bytes must be a function of its content, and batched
+    /// bundling must agree with bundling one fragment at a time.
+    ///
+    /// Guards the fix for `flush_deletes` emitting a key group's
+    /// concurrent deletes in `HashMap` order, which is seeded per
+    /// instance — the same fragment bundled twice in one process gave
+    /// different bytes. NOTE: this fixture does not reproduce that
+    /// (it needs several concurrent deletes pending in one group at
+    /// once, which turned out to be rare — 1 fragment in 191 on the
+    /// A1 corpus document). It is kept as a property guard; the
+    /// reproduction lives in the corpus.
+    #[test]
+    fn bundling_is_deterministic() {
+        use crate::transaction::Transactable;
+        use crate::{AutoCommit, ObjType, ROOT};
+
+        // The pending-delete map is keyed by op id within one (obj, key)
+        // group, so it holds more than one entry only when several
+        // *concurrent* deletes land on the same element — that is the
+        // shape whose emission order was unstable. Concurrent text
+        // editing produces it naturally.
+        let mut doc = AutoCommit::new()
+            .with_actor(crate::ActorId::from(&[0u8][..]))
+            .unwrap();
+        doc.enable_audit_mode().unwrap();
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, &"abcdefghij".repeat(8))
+            .unwrap();
+        doc.commit();
+
+        for round in 0..6u8 {
+            for a in 1..=6u8 {
+                let mut fork = doc
+                    .fork()
+                    .with_actor(crate::ActorId::from(&[round * 16 + a][..]))
+                    .unwrap();
+                fork.enable_audit_mode().unwrap();
+                // every fork deletes the same span, concurrently
+                let _ = fork.splice_text(&text, 0, 4, "");
+                let _ = fork.splice_text(&text, 2, 3, "X");
+                fork.commit();
+                doc.merge(&mut fork).unwrap();
+            }
+        }
+        doc.put(ROOT, "done", true).unwrap();
+        doc.commit();
+
+        let fragments = doc.document().fragments(..).unwrap();
+        assert!(!fragments.is_empty());
+        for f in &fragments {
+            let first = doc.document().bundle_fragment(f).unwrap().bytes();
+            for _ in 0..4 {
+                assert_eq!(
+                    doc.document().bundle_fragment(f).unwrap().bytes(),
+                    first,
+                    "bundle bytes vary between identical calls"
+                );
+            }
+        }
+
+        // ...and bundling the whole set in one batch must agree with
+        // bundling each fragment on its own
+        let batched = doc.document().bundle_fragments(fragments.clone()).unwrap();
+        let singly: Vec<Vec<u8>> = fragments
+            .iter()
+            .map(|f| doc.document().bundle_fragment(f).unwrap().bytes())
+            .collect();
+        assert_eq!(batched, singly, "batched bundling diverges");
+    }
 
     fn leb(mut n: u64, out: &mut Vec<u8>) {
         loop {
