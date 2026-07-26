@@ -468,10 +468,6 @@ impl OpId {
         OpId(self.0 - n as u32, self.1)
     }
 
-    #[inline]
-    pub(crate) fn next(&self) -> OpId {
-        OpId(self.0 + 1, self.1)
-    }
 }
 
 impl AsRef<OpId> for OpId {

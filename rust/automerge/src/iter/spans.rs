@@ -2,13 +2,13 @@ use crate::clock::{Clock, ClockRange};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
-use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, TopIter};
+use crate::iter::MarkCursor;
+use crate::op_set2::op_set::{ActionValueIter, OpIdIter, OpSet, TopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
 use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, OpId, TextEncoding};
 use crate::value;
 
-use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -109,9 +109,8 @@ impl<'a> Iterator for SpansActionValue<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SpansDiff<'a> {
     action_value: SpansActionValue<'a>,
-    mark_info: MarkInfoIter<'a>,
     op_id: OpIdIter<'a>,
-    marks: RichTextDiff<'a>,
+    marks: MarkCursor<'a>,
     op_set: Option<&'a OpSet>,
     clock: ClockRange,
     state: SpanState,
@@ -139,7 +138,6 @@ impl<'a> SpansDiff<'a> {
     pub(crate) fn empty(encoding: TextEncoding) -> Self {
         Self {
             action_value: Default::default(),
-            mark_info: Default::default(),
             op_id: Default::default(),
             marks: Default::default(),
             op_set: Default::default(),
@@ -149,14 +147,23 @@ impl<'a> SpansDiff<'a> {
         }
     }
 
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.mark_info.set_max(range.end);
+    /// Reposition onto `range`, forward only, resuming the character
+    /// index at `index` — the width of the object's text before
+    /// `range.start`, for a caller walking one object in pieces.
+    pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
+        let Some(op_set) = self.op_set else { return };
         self.op_id.set_max(range.end);
-        self.action_value
-            .shift(self.op_set?, &self.clock, range.clone());
+        self.action_value.shift(op_set, &self.clock, range.clone());
 
-        self.marks = Default::default();
-        self.state = SpanState::empty(self.state.encoding);
+        // the marks open at the new position are whatever the index
+        // says; no need to rebuild state by walking to get here
+        self.marks.advance_to(range.start);
+        self.state = SpanState::empty_at(self.state.encoding, index);
+        self.state.push_marks(self.marks.current());
+    }
+
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.shift_with_index(range, 0);
         self.next()
     }
 
@@ -176,31 +183,11 @@ impl<'a> SpansDiff<'a> {
         encoding: TextEncoding,
         index: usize,
     ) -> Self {
-        Self::new_with_index_and_marks(op_set, range, clock, encoding, index, Default::default())
-    }
-
-    pub(crate) fn new_with_index_and_marks(
-        op_set: &'a OpSet,
-        range: Range<usize>,
-        clock: ClockRange,
-        encoding: TextEncoding,
-        index: usize,
-        marks: RichTextDiff<'a>,
-    ) -> Self {
-        Self::new_with_index_and_marks_inner(op_set, range, clock, encoding, index, marks)
-    }
-
-    fn new_with_index_and_marks_inner(
-        op_set: &'a OpSet,
-        range: Range<usize>,
-        clock: ClockRange,
-        encoding: TextEncoding,
-        index: usize,
-        marks: RichTextDiff<'a>,
-    ) -> Self {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
-        let mark_info = op_set.mark_info_iter_range(&range);
+        // the marks covering `range.start` come straight off the index —
+        // starting mid-object costs a tree descent, not a walk
+        let marks = MarkCursor::new(op_set, clock.clone(), pos);
 
         let action_value = SpansActionValue::new(op_set, &clock, range.clone());
         let mut state = SpanState::empty_at(encoding, index);
@@ -210,7 +197,6 @@ impl<'a> SpansDiff<'a> {
         Self {
             state,
             action_value,
-            mark_info,
             op_id,
             op_set,
             clock,
@@ -230,24 +216,14 @@ impl<'a> SpansDiff<'a> {
         self.op_id.nth(self.pos - id_pos)
     }
 
-    fn next_mark_name(&mut self) -> Option<Cow<'a, str>> {
-        let mark_pos = self.mark_info.pos();
-        let (mark_name, _expand) = self.mark_info.nth(self.pos - mark_pos)?;
-        mark_name.map(Cow::Borrowed)
-    }
-
-    fn process_mark(&mut self, diff: Diff, value: ScalarValue<'a>) {
-        let Some(id) = self.next_opid() else {
-            return;
-        };
-        if let Some(name) = self.next_mark_name() {
-            let data = MarkData { name, value };
-            self.marks.mark_begin_diff(diff, id, data);
-        } else {
-            self.marks.mark_end_diff(diff, id);
-        }
-        let current = self.marks.current();
-        self.state.push_marks(current);
+    /// A mark op row: carry the cursor past it and take the new set.
+    ///
+    /// Nothing is read off the op — its id, name, value and visibility
+    /// are all already in the mark index, and the cursor resolves them
+    /// against the clock.
+    fn process_mark(&mut self) {
+        self.marks.advance_to(self.pos);
+        self.state.push_marks(self.marks.current());
     }
 
     #[inline(always)]
@@ -263,8 +239,8 @@ impl<'a> SpansDiff<'a> {
             }
             (Action::Set, ScalarValue::Str(s), _) => self.state.push_str(diff, &s),
             (Action::MakeMap, _, _) => self.push_block(diff),
-            (Action::Mark, value, _) => {
-                self.process_mark(diff, value);
+            (Action::Mark, _, _) => {
+                self.process_mark();
                 None
             }
             (Action::Delete, _, _) | (Action::Increment, _, _) => None,
@@ -708,14 +684,4 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    pub(crate) fn mark_end_diff(&mut self, diff: Diff, id: OpId) -> bool {
-        match diff {
-            Diff::Add => self.after.mark_end(id),
-            Diff::Del => self.before.mark_end(id),
-            Diff::Same => {
-                self.before.mark_end(id);
-                self.after.mark_end(id)
-            }
-        }
-    }
 }

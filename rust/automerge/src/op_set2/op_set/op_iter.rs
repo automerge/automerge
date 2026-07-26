@@ -825,15 +825,6 @@ impl<'a> MarkInfoIter<'a> {
         Self { name, expand }
     }
 
-    pub(crate) fn set_max(&mut self, pos: usize) {
-        self.name.set_max(pos);
-        self.expand.set_max(pos);
-    }
-
-    pub(crate) fn pos(&self) -> usize {
-        self.expand.pos()
-    }
-
     pub(crate) fn try_next(&mut self) -> Result<(Option<&'a str>, bool), ReadOpError> {
         let expand = self.expand.next().unwrap_or(false);
         let mark_name = self

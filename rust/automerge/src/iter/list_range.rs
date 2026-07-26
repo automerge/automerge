@@ -145,15 +145,10 @@ impl<'a> ListDiff<'a> {
         }
     }
 
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.shift_next_with_index(range, 0)
-    }
-
-    pub(crate) fn shift_next_with_index(
-        &mut self,
-        range: Range<usize>,
-        index: usize,
-    ) -> Option<<Self as Iterator>::Item> {
+    /// Reposition onto `range`, forward only, resuming the list index at
+    /// `index`. The first item lands in the lookahead, so plain
+    /// iteration picks up from there.
+    pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
         self.iter.shift(range.clone());
         if let Some(op_set) = self.op_set {
             self.id = op_set.id_iter_range(&range);
@@ -162,6 +157,10 @@ impl<'a> ListDiff<'a> {
             self.value_pos = range.start;
         }
         self.index = index;
+    }
+
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.shift_with_index(range, 0);
         self.next()
     }
 }

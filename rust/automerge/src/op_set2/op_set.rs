@@ -47,7 +47,7 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
 pub(crate) use mapped_column::{ActorMap, MappedColumn, MappedIter};
-pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
+pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn, MarkPrefix};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
@@ -548,23 +548,23 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn list_visible_items_in_range(&self, range: Range<usize>) -> usize {
-        self.cols
-            .index
-            .top
-            .values()
-            .iter_range(range)
-            .filter(|value| *value)
-            .count()
+    /// A cursor over the visible-element index, whose running total is
+    /// the list index: the count of visible elements consumed so far.
+    ///
+    /// Pair with [`hexane::PrefixIter::reset_prefix`] at an object's
+    /// first row to make the total relative to that object.
+    pub(crate) fn top_prefix_iter(&self) -> hexane::PrefixIter<'_, bool> {
+        self.cols.index.top.iter()
     }
 
-    pub(crate) fn text_visible_width_in_range(&self, range: Range<usize>) -> usize {
-        let start = range.start.min(self.len());
-        let end = range.end.min(self.len());
-        if start >= end {
-            return 0;
-        }
-        self.cols.index.text.sum_range(start..end) as usize
+    /// The same for text width — the running total is the character
+    /// index in the object's text.
+    pub(crate) fn text_prefix_iter(&self) -> hexane::PrefixIter<'_, Option<u32>> {
+        self.cols.index.text.iter()
+    }
+
+    pub(crate) fn mark_index(&self) -> &MarkIndexColumn {
+        &self.cols.index.mark
     }
 
     /// Whether the document contains any marks at all.
@@ -599,10 +599,6 @@ impl OpSet {
         })
     }
 
-    /// The name and value of the mark begun by `id`.
-    pub(crate) fn mark_data(&self, id: &OpId) -> Option<&MarkData<'static>> {
-        self.cols.index.mark.mark_data(id)
-    }
 
     /// Whether `range` contains a mark op. Reads the (sparse) mark
     /// index rather than scanning the action column, so mark-free

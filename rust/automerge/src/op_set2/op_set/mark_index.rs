@@ -2,13 +2,21 @@ use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
 use hexane::PackError;
-use hexane::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
+use hexane::{ColumnValue, PrefixColumn, PrefixIter, PrefixValue, RleEncoding, RleValue, Run};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::sync::Arc;
 
+/// A mark row's contribution to the index.
+///
+/// Both variants store the *mark-begin* op's id — that shared key is
+/// what lets [`MarkAcc`] cancel a `Start` against its `End`, and it is
+/// the key [`MarkIndexColumn::mark_data`] is looked up by. The
+/// mark-end op's own id is one past it (`Op::mark_index` builds the
+/// `End` with `self.id.prev()`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub(crate) enum MarkIdx {
     Start(OpId),
@@ -22,20 +30,6 @@ pub(crate) enum MarkIndexBuilder {
 }
 
 impl MarkIdx {
-    /// The id of the op occupying this row.
-    ///
-    /// Both variants store the *mark-begin* op's id — that shared key is
-    /// what lets [`MarkAcc`] cancel a `Start` against its `End`. The
-    /// mark-end op's own id is one past it (`Op::mark_index` builds the
-    /// `End` with `self.id.prev()`), so reading the row's op back out
-    /// has to undo that.
-    pub(crate) fn op_id(&self) -> OpId {
-        match self {
-            MarkIdx::Start(id) => *id,
-            MarkIdx::End(id) => id.next(),
-        }
-    }
-
     pub(super) fn as_i64(&self) -> i64 {
         match self {
             MarkIdx::Start(id) => {
@@ -109,6 +103,11 @@ impl RleValue for MarkIdx {
 // well-formed column, `closes` stays empty (every `End` cancels with a
 // `Start` from an earlier subtree).  Per-subtree aggregates may have
 // non-empty `closes` when a span crosses a subtree boundary.
+//
+// The prefix type is [`MarkPrefix`], not `MarkAcc` itself: an empty
+// accumulator — every subtree of a mark-free stretch, and every position
+// past the last mark — is a `None`, and a non-empty one is shared behind
+// an `Arc` and mutated copy-on-write.
 
 #[derive(Clone, Default, Debug, PartialEq)]
 pub(crate) struct MarkAcc {
@@ -117,6 +116,11 @@ pub(crate) struct MarkAcc {
 }
 
 impl MarkAcc {
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.opens.is_empty() && self.closes.is_empty()
+    }
+
     /// Flip a single `Start`/`End` delta into the accumulator.
     #[inline]
     fn apply_one(&mut self, val: MarkIdx) {
@@ -188,7 +192,111 @@ impl SubAssign for MarkAcc {
     }
 }
 
-impl Add for MarkAcc {
+// ── MarkPrefix: the prefix type itself ───────────────────────────────
+//
+// Mark rows are sparse, so almost every prefix and almost every stored
+// subtree aggregate is empty. `None` *is* the empty accumulator: it
+// clones without touching an atomic, costs one (niche-packed) word in a
+// tree node, and merges as a no-op. A non-empty accumulator lives behind
+// an `Arc` and is mutated through [`Arc::make_mut`] — in place while the
+// walk holds the only reference, copied once if a consumer is holding
+// the version being replaced.
+//
+// Every mutation re-canonicalizes: an accumulator that drains back to
+// empty becomes `None` again, so emptiness has exactly one
+// representation and text past the last mark returns to the free path.
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub(crate) struct MarkPrefix(Option<Arc<MarkAcc>>);
+
+impl MarkPrefix {
+    /// Whether this is the empty accumulator — no mark spans this
+    /// position. Canonical: an accumulator that drains becomes `None`.
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    /// Whether these describe the same open-mark set *by identity* — a
+    /// pointer comparison, not a set comparison.
+    ///
+    /// Exact for a retained snapshot: holding a clone keeps the refcount
+    /// above one, so the next mutation is forced through
+    /// [`Arc::make_mut`]'s copy and lands on a fresh allocation. Equal
+    /// pointers therefore mean nothing was applied since the snapshot
+    /// was taken. Canonicalization covers the empty case, which has one
+    /// representation.
+    pub(crate) fn same_set(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// The mark-begin ids open at this position. Empty for a `None`
+    /// prefix, which is every position no mark spans.
+    pub(crate) fn opens(&self) -> impl Iterator<Item = OpId> + '_ {
+        self.0.iter().flat_map(|acc| acc.opens.iter().copied())
+    }
+
+    /// [`Self::opens`] by value — takes the set when this is the last
+    /// reference (the usual case for a freshly computed prefix), and
+    /// copies it only if the accumulator is still shared.
+    pub(crate) fn into_opens(self) -> impl Iterator<Item = OpId> {
+        self.0
+            .map(|acc| Arc::try_unwrap(acc).unwrap_or_else(|acc| (*acc).clone()).opens)
+            .unwrap_or_default()
+            .into_iter()
+    }
+
+    /// Ends not yet matched by a start. Empty for any running prefix
+    /// over a well-formed column; only per-subtree aggregates carry
+    /// these (see [`MarkAcc`]).
+    pub(crate) fn has_dangling_closes(&self) -> bool {
+        self.0.as_ref().is_some_and(|acc| !acc.closes.is_empty())
+    }
+
+    /// Mutate through the `Arc`, dropping back to `None` if the
+    /// accumulator drains.
+    #[inline]
+    fn update(&mut self, f: impl FnOnce(&mut MarkAcc)) {
+        let acc = self.0.get_or_insert_with(Default::default);
+        f(Arc::make_mut(acc));
+        if acc.is_empty() {
+            self.0 = None;
+        }
+    }
+}
+
+impl AddAssign for MarkPrefix {
+    fn add_assign(&mut self, rhs: Self) {
+        let Some(rhs) = rhs.0 else { return };
+        // sole owner: take the sets rather than copy them
+        let rhs = Arc::try_unwrap(rhs).unwrap_or_else(|arc| (*arc).clone());
+        self.update(|acc| *acc += rhs);
+    }
+}
+
+/// Hot path: `SlabBTree::find_slab_at_item` descends a level by adding
+/// each visited sibling's stored aggregate into the running prefix. A
+/// mark-free sibling is a `None` and costs nothing at all.
+impl AddAssign<&MarkPrefix> for MarkPrefix {
+    fn add_assign(&mut self, rhs: &MarkPrefix) {
+        let Some(rhs) = &rhs.0 else { return };
+        self.update(|acc| *acc += &**rhs);
+    }
+}
+
+impl SubAssign for MarkPrefix {
+    fn sub_assign(&mut self, rhs: Self) {
+        let Some(rhs) = rhs.0 else { return };
+        let rhs = Arc::try_unwrap(rhs).unwrap_or_else(|arc| (*arc).clone());
+        self.update(|acc| *acc -= rhs);
+    }
+}
+
+impl Add for MarkPrefix {
     type Output = Self;
     fn add(mut self, rhs: Self) -> Self {
         self += rhs;
@@ -196,7 +304,7 @@ impl Add for MarkAcc {
     }
 }
 
-impl Sub for MarkAcc {
+impl Sub for MarkPrefix {
     type Output = Self;
     fn sub(mut self, rhs: Self) -> Self {
         self -= rhs;
@@ -205,11 +313,11 @@ impl Sub for MarkAcc {
 }
 
 impl PrefixValue for MarkIdx {
-    type Prefix = MarkAcc;
+    type Prefix = MarkPrefix;
 
     #[inline]
-    fn accumulate(target: &mut MarkAcc, val: MarkIdx) {
-        target.apply_one(val);
+    fn accumulate(target: &mut MarkPrefix, val: MarkIdx) {
+        target.update(|acc| acc.apply_one(val));
     }
 
     /// `OpId`s are unique per `Start`/`End`, so a multi-row RLE run of
@@ -217,8 +325,8 @@ impl PrefixValue for MarkIdx {
     /// `run.count` is always 1.  Treat any count as 1; the column's
     /// uniqueness invariant makes this correct.
     #[inline]
-    fn accumulate_run(target: &mut MarkAcc, run: &Run<MarkIdx>) {
-        target.apply_one(run.value);
+    fn accumulate_run(target: &mut MarkPrefix, run: &Run<MarkIdx>) {
+        target.update(|acc| acc.apply_one(run.value));
     }
 }
 
@@ -244,6 +352,20 @@ impl MarkIndexColumn {
 
     pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>> {
         self.data.values().iter()
+    }
+
+    /// A prefix cursor over the mark rows, positioned so that its
+    /// running total covers rows `..=pos` — the same inclusive
+    /// convention as [`Self::marks_at`].
+    ///
+    /// Advancing it is how a walk carries the open-mark set along
+    /// instead of re-querying: forward steps cost one run each (a
+    /// mark-free stretch is a single step whatever its length), and a
+    /// jump that leaves the slab costs one tree descent.
+    pub(crate) fn prefix_at(&self, pos: usize) -> PrefixIter<'_, Option<MarkIdx>> {
+        let mut iter = self.data.iter();
+        iter.advance_to(pos + 1);
+        iter
     }
 
     pub(crate) fn iter_range(
@@ -388,12 +510,11 @@ impl MarkIndexColumn {
         // `Start`.  `opens` is the active mark set; iterate it directly.
         let acc = self.data.get_total(target);
         debug_assert!(
-            acc.closes.is_empty(),
+            !acc.has_dangling_closes(),
             "running prefix at marks_at({target}) has dangling closes — \
              malformed mark column?"
         );
-        acc.opens
-            .into_iter()
+        acc.into_opens()
             .filter(move |id| clock.map(|c| c.covers(id)).unwrap_or(true))
     }
 
@@ -466,6 +587,37 @@ pub(crate) mod tests {
         let col = MarkIndexColumn::new();
         let rt = col.rich_text_at(0, None);
         assert!(rt.map.is_empty());
+    }
+
+    /// The empty accumulator has exactly one representation: `None`.
+    /// Everything the prefix buys — cloning without touching an atomic,
+    /// merging a mark-free subtree as a no-op — rests on positions with
+    /// no open mark canonicalizing back to it, not just at the start of
+    /// a column but after every mark has closed.
+    #[test]
+    fn empty_prefix_is_canonical() {
+        let unmarked = build_column(8, &[]);
+        for pos in 0..=8 {
+            assert!(
+                unmarked.data.get_total(pos).is_empty(),
+                "unmarked column has a non-empty prefix at {pos}",
+            );
+        }
+
+        // [_, _, S, _, E, _, S, _, _, E] — open over 2..5 and 6..10
+        let col = build_column(10, &[(2, 4, 0, 1, "bold"), (6, 9, 0, 3, "italic")]);
+        let open_at = |pos: usize| !col.data.get_total(pos).is_empty();
+        for pos in [0, 1, 2, 5, 6, 10] {
+            assert_eq!(
+                open_at(pos),
+                !active_mark_ids(&col, pos).is_empty(),
+                "prefix emptiness disagrees with the active set at {pos}",
+            );
+        }
+        // between the two marks, and past the last one, the accumulator
+        // has drained — not merely become an empty set
+        assert!(!open_at(5), "prefix did not drain between marks");
+        assert!(!open_at(10), "prefix did not drain past the last mark");
     }
 
     #[test]

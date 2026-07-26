@@ -355,7 +355,9 @@ impl<'a> MapDiff<'a> {
         }
     }
 
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+    /// Reposition onto `range`, forward only. The first item lands in
+    /// the lookahead, so plain iteration picks up from there.
+    pub(crate) fn shift(&mut self, range: Range<usize>) {
         self.iter.shift(range.clone());
         if let Some(op_set) = self.op_set {
             self.id = op_set.id_iter_range(&range);
@@ -363,6 +365,10 @@ impl<'a> MapDiff<'a> {
             self.value = op_set.value_iter_range(&range);
             self.value_pos = range.start;
         }
+    }
+
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.shift(range);
         self.next()
     }
 }

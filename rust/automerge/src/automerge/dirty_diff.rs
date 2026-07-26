@@ -1,10 +1,12 @@
 use std::ops::Range;
 
+use hexane::PrefixIter;
+
 use crate::clock::ClockRange;
-use crate::iter::{Diff, ListDiff, MapDiff, RichTextDiff, SpansDiff};
-use crate::op_set2::op_set::MarkIdx;
+use crate::iter::{ListDiff, MapDiff, SpansDiff};
+use crate::op_set2::op_set::OpSet;
 use crate::patches::{Patch, PatchAccumulator};
-use crate::types::{ObjId, ObjMeta, ObjType};
+use crate::types::{ObjId, ObjMeta, ObjType, TextEncoding};
 
 use super::Automerge;
 use crate::ChangeId;
@@ -13,7 +15,6 @@ use crate::ChangeId;
 pub(crate) enum DirtyDiffError {
     MissingObject(usize),
     UnknownObject(ObjId),
-    UnsupportedObjectType(ObjType),
     InvalidHeads(crate::AutomergeError),
 }
 
@@ -24,14 +25,11 @@ struct DirtyObject {
     range: Range<usize>,
 }
 
+/// Caches the object lookup while scanning dirty runs: consecutive
+/// dirty rows almost always land in the same object.
 #[derive(Default, Debug, Clone)]
 struct DirtyObjectContext {
     object: Option<DirtyObject>,
-    list_pos: usize,
-    list_index: usize,
-    text_pos: usize,
-    text_index: usize,
-    text_marks: RichTextDiff<'static>,
 }
 
 impl DirtyObjectContext {
@@ -55,117 +53,69 @@ impl DirtyObjectContext {
             .object_type(&obj)
             .ok_or(DirtyDiffError::UnknownObject(obj))?;
         let object = DirtyObject { obj, typ, range };
-        self.reset_for_object(&object);
         self.object = Some(object.clone());
         Ok(object)
     }
+}
 
-    fn reset_for_object(&mut self, object: &DirtyObject) {
-        self.list_pos = object.range.start;
-        self.list_index = 0;
-        self.text_pos = object.range.start;
-        self.text_index = 0;
-        self.text_marks = RichTextDiff::default();
-    }
+/// The diff pipeline for one dirty pass: one iterator per object type,
+/// plus the two index cursors, all long-lived.
+///
+/// Dirty ranges arrive in document order — `normalize_dirty_object_ranges`
+/// sorts by object and then by range, and an object's ops are contiguous
+/// and ascending — so every cursor here only ever moves forward. A range
+/// is a `shift_next` onto its object type's iterator, and the index
+/// cursors carry their running totals across ranges instead of
+/// recounting from the object's first row.
+struct DirtyIters<'a> {
+    map: MapDiff<'a>,
+    list: ListDiff<'a>,
+    spans: SpansDiff<'a>,
+    /// running count of visible elements: the list index
+    top: PrefixIter<'a, bool>,
+    /// running text width: the character index
+    text: PrefixIter<'a, Option<u32>>,
+    object: Option<ObjId>,
+}
 
-    fn ensure_object(&mut self, object: &DirtyObject) {
-        if self
-            .object
-            .as_ref()
-            .is_none_or(|current| current.obj != object.obj || current.range != object.range)
-        {
-            self.object = Some(object.clone());
-            self.reset_for_object(object);
+impl<'a> DirtyIters<'a> {
+    fn new(op_set: &'a OpSet, clock: ClockRange, encoding: TextEncoding) -> Self {
+        // built over an empty window at row zero: constructing over a
+        // real range would draw a lookahead item (`Unshift::new`), and
+        // the visibility skipper behind it reads ahead far enough that
+        // the first `shift` could then be asked to move backwards
+        let empty = 0..0;
+        Self {
+            map: MapDiff::new(op_set, empty.clone(), clock.clone()),
+            list: ListDiff::new(op_set, empty.clone(), clock.clone()),
+            spans: SpansDiff::new(op_set, empty, clock, encoding),
+            top: op_set.top_prefix_iter(),
+            text: op_set.text_prefix_iter(),
+            object: None,
         }
     }
 
-    fn list_index_at(&mut self, doc: &Automerge, object: &DirtyObject, pos: usize) -> usize {
-        self.advance_list_to(doc, object, pos);
-        self.list_index
+    /// Indexes are relative to their object, so zero the running totals
+    /// at each new object's first row.
+    fn enter(&mut self, object: &DirtyObject) {
+        if self.object == Some(object.obj) {
+            return;
+        }
+        self.top.advance_to(object.range.start);
+        self.top.reset_prefix();
+        self.text.advance_to(object.range.start);
+        self.text.reset_prefix();
+        self.object = Some(object.obj);
     }
 
-    fn advance_list_to(&mut self, doc: &Automerge, object: &DirtyObject, pos: usize) {
-        self.ensure_object(object);
-
-        let pos = pos.min(object.range.end);
-        if pos < self.list_pos {
-            self.list_pos = object.range.start;
-            self.list_index = 0;
-        }
-        if pos > self.list_pos {
-            self.list_index += doc.ops().list_visible_items_in_range(self.list_pos..pos);
-            self.list_pos = pos;
-        }
+    fn list_index(&mut self, pos: usize) -> usize {
+        self.top.advance_to(pos);
+        self.top.total()
     }
 
-    fn text_index_at(
-        &mut self,
-        doc: &Automerge,
-        object: &DirtyObject,
-        pos: usize,
-        clock: &ClockRange,
-    ) -> usize {
-        self.advance_text_to(doc, object, pos, clock);
-        self.text_index
-    }
-
-    fn text_marks(&self) -> RichTextDiff<'static> {
-        self.text_marks.clone()
-    }
-
-    fn advance_text_to(
-        &mut self,
-        doc: &Automerge,
-        object: &DirtyObject,
-        pos: usize,
-        clock: &ClockRange,
-    ) {
-        self.ensure_object(object);
-
-        let pos = pos.min(object.range.end);
-        if pos < self.text_pos {
-            self.text_pos = object.range.start;
-            self.text_index = 0;
-            self.text_marks = RichTextDiff::default();
-        }
-        if pos > self.text_pos {
-            let range = self.text_pos..pos;
-            if doc.ops().has_marks() {
-                self.advance_text_marks(doc, range.clone(), clock);
-            }
-            self.text_index += doc.ops().text_visible_width_in_range(range);
-            self.text_pos = pos;
-        }
-    }
-
-    fn advance_text_marks(&mut self, doc: &Automerge, range: Range<usize>, clock: &ClockRange) {
-        // marks are sparse, and the mark index already holds everything a
-        // mark op contributes — the id, which end it is, and (via the
-        // cache) its name and value. So this walks the index's runs and
-        // never decodes an op.
-        for idx in doc.ops().mark_index_entries(range) {
-            // both ends are keyed on the op that actually occupies the
-            // row: the clock decides visibility per op, and `mark_end`
-            // derives the begin id from the end op itself
-            let id = idx.op_id();
-            let diff = match (clock.visible_before(&id), clock.visible_after(&id)) {
-                (true, true) => Diff::Same,
-                (true, false) => Diff::Del,
-                (false, true) => Diff::Add,
-                (false, false) => continue,
-            };
-            match idx {
-                MarkIdx::Start(_) => {
-                    let Some(data) = doc.ops().mark_data(&id) else {
-                        continue;
-                    };
-                    self.text_marks.mark_begin_diff(diff, id, data.clone());
-                }
-                MarkIdx::End(_) => {
-                    self.text_marks.mark_end_diff(diff, id);
-                }
-            }
-        }
+    fn text_index(&mut self, pos: usize) -> usize {
+        self.text.advance_to(pos);
+        self.text.total() as usize
     }
 }
 
@@ -221,59 +171,46 @@ impl Automerge {
     ) -> Result<(), DirtyDiffError> {
         let encoding = self.text_encoding();
         let ranges = self.dirty_ranges_by_object()?;
-        let mut context = DirtyObjectContext::default();
+        let mut iters = DirtyIters::new(self.ops(), clock, encoding);
         for (object, range) in ranges {
+            iters.enter(&object);
+            let obj = object.obj;
             match object.typ {
                 ObjType::Map | ObjType::Table => {
-                    if !self
-                        .ops()
-                        .map_range_is_on_key_boundaries(&range, object.range.clone())
-                    {
-                        // CLAUDE - I dont understand the point of this
-                        // how could it be reached
-                        return Err(DirtyDiffError::UnsupportedObjectType(object.typ));
-                    }
-                    let iter = MapDiff::new(self.ops(), range, clock.clone());
-                    for item in iter {
-                        item.log(object.obj, patch_accumulator, encoding);
+                    // `MapDiff` reads conflict, expose and the winner by
+                    // counting within a key's register, so a partial one
+                    // yields a wrong patch rather than a failure. This
+                    // checks `dirty_ranges_by_object`'s widening, not the
+                    // op set — a key column that isn't sorted by key is
+                    // past saving here.
+                    debug_assert!(
+                        self.ops()
+                            .map_range_is_on_key_boundaries(&range, object.range.clone()),
+                        "dirty range {range:?} splits a key register",
+                    );
+                    iters.map.shift(range);
+                    for item in iters.map.by_ref() {
+                        item.log(obj, patch_accumulator, encoding);
                     }
                 }
                 ObjType::List => {
-                    if !self
-                        .ops()
-                        .list_range_is_on_register_boundaries(&range, object.range.clone())
-                    {
-                        // CLAUDE - I dont understand the point of this
-                        // how could it be reached
-                        return Err(DirtyDiffError::UnsupportedObjectType(object.typ));
-                    }
-                    let base_index = context.list_index_at(self, &object, range.start);
-                    let iter = ListDiff::new_with_index(
-                        self.ops(),
-                        range.clone(),
-                        clock.clone(),
-                        base_index,
+                    debug_assert!(
+                        self.ops()
+                            .list_range_is_on_register_boundaries(&range, object.range.clone()),
+                        "dirty range {range:?} splits a list register",
                     );
-                    for item in iter {
-                        item.log(object.obj, patch_accumulator, encoding);
+                    let index = iters.list_index(range.start);
+                    iters.list.shift_with_index(range, index);
+                    for item in iters.list.by_ref() {
+                        item.log(obj, patch_accumulator, encoding);
                     }
-                    context.advance_list_to(self, &object, range.end);
                 }
                 ObjType::Text => {
-                    let base_index = context.text_index_at(self, &object, range.start, &clock);
-                    let marks = context.text_marks();
-                    let iter = SpansDiff::new_with_index_and_marks(
-                        self.ops(),
-                        range.clone(),
-                        clock.clone(),
-                        encoding,
-                        base_index,
-                        marks,
-                    );
-                    for item in iter {
-                        item.log(object.obj, patch_accumulator, encoding);
+                    let index = iters.text_index(range.start);
+                    iters.spans.shift_with_index(range, index);
+                    for item in iters.spans.by_ref() {
+                        item.log(obj, patch_accumulator, encoding);
                     }
-                    context.advance_text_to(self, &object, range.end, &clock);
                 }
             }
         }
