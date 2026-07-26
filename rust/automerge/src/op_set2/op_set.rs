@@ -583,29 +583,25 @@ impl OpSet {
     /// The entry carries everything a mark op contributes (its id, and
     /// whether it begins or ends the mark); pair it with
     /// [`Self::mark_data`] for the name and value. Nothing here decodes
-    /// an op.
+    /// an op. Yields the row each entry sits on.
     pub(crate) fn mark_index_entries(
         &self,
         range: Range<usize>,
-    ) -> impl Iterator<Item = MarkIdx> + '_ {
+    ) -> impl Iterator<Item = (usize, MarkIdx)> + '_ {
+        let mut pos = range.start;
         let mut iter = self.cols.index.mark.iter_range(range);
         std::iter::from_fn(move || loop {
             let run = iter.next_run()?;
+            let at = pos;
+            pos += run.count;
             if let Some(idx) = run.value {
                 // op ids are unique, so a `Some` run is a single row
                 debug_assert_eq!(run.count, 1);
-                return Some(idx);
+                return Some((at, idx));
             }
         })
     }
 
-
-    /// Whether `range` contains a mark op. Reads the (sparse) mark
-    /// index rather than scanning the action column, so mark-free
-    /// stretches cost one run step.
-    pub(crate) fn range_has_mark(&self, range: Range<usize>) -> bool {
-        self.mark_index_entries(range).next().is_some()
-    }
 
     pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
         for op in ops {

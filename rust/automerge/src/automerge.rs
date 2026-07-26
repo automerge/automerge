@@ -4214,7 +4214,11 @@ mod dirty_diff_tests {
             assert_eq!(ranges.len(), 1);
             assert!(text_range.start <= ranges[0].start && ranges[0].end <= text_range.end);
             assert_ne!(ranges[0], text_range);
-            assert!(!doc.ops().range_has_mark(ranges[0].clone()));
+            assert!(doc
+                .ops()
+                .mark_index_entries(ranges[0].clone())
+                .next()
+                .is_none());
             assert_dirty_diff_matches_full(&doc, &before, &after);
         }
     }
@@ -4668,8 +4672,16 @@ mod dirty_diff_tests {
         assert_dirty_diff_matches_full(&doc, &before, &after);
     }
 
+    /// The dirty diff pairs a mark's begin and end as it meets them,
+    /// rather than searching for the partner, and emits the patch from
+    /// their two text indexes. That rests on both ops being dirtied
+    /// together — they are written by one transaction, so either both
+    /// rows are new or neither is. A half-dirty mark would silently
+    /// drop the patch, so pin the invariant rather than the workaround
+    /// (this replaces a test for the whole-object expansion, which the
+    /// pairing removes the need for).
     #[test]
-    fn partial_text_mark_dirty_range_expands_to_whole_object() {
+    fn mark_dirties_both_of_its_ops() {
         let mut doc = Automerge::new();
         doc.enable_audit_mode().unwrap();
         let mut tx = doc.transaction();
@@ -4677,6 +4689,7 @@ mod dirty_diff_tests {
         tx.splice_text(&text, 0, 0, "abc").unwrap();
         tx.commit();
         let before = doc.get_heads();
+        doc.ops_mut().clear_dirty();
 
         let mut tx = doc.transaction();
         tx.mark(
@@ -4687,29 +4700,24 @@ mod dirty_diff_tests {
         .unwrap();
         tx.commit();
         let after = doc.get_heads();
+
         let text_obj = doc.exid_to_obj(&text).unwrap().id;
         let text_range = doc.ops().scope_to_obj(&text_obj);
-        let mark_pos = doc
+        let mark_rows: Vec<usize> = doc
             .ops()
             .iter_range(&text_range)
-            .find(|op| op.action == Action::Mark)
-            .unwrap()
-            .pos;
+            .filter(|op| op.action == Action::Mark)
+            .map(|op| op.pos)
+            .collect();
+        assert_eq!(mark_rows.len(), 2, "a mark writes a begin and an end");
 
-        doc.ops_mut().clear_dirty();
-        doc.ops_mut().mark_dirty(mark_pos);
+        let dirty: std::collections::BTreeSet<usize> = doc.ops().dirty_positions().collect();
+        for row in &mark_rows {
+            assert!(dirty.contains(row), "mark op at {row} was not dirtied");
+        }
 
-        let full = doc.diff(&before, &after).unwrap();
-        let dirty = doc.dirty_diff_patches_and_clear(&before, &after).unwrap();
-        assert_patch_effects_match(
-            &doc,
-            &before,
-            &after,
-            "dirty diff",
-            &dirty,
-            "full diff",
-            &full,
-        );
+        assert_dirty_diff_matches_full(&doc, &before, &after);
+        doc.dirty_diff_patches_and_clear(&before, &after).unwrap();
         assert!(doc.ops().dirty_runs().next().is_none());
     }
 }

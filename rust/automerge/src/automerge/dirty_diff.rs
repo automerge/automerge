@@ -1,12 +1,13 @@
+use std::collections::HashMap;
 use std::ops::Range;
 
 use hexane::PrefixIter;
 
 use crate::clock::ClockRange;
 use crate::iter::{ListDiff, MapDiff, SpansDiff};
-use crate::op_set2::op_set::OpSet;
+use crate::op_set2::op_set::{MarkIdx, OpSet};
 use crate::patches::{Patch, PatchAccumulator};
-use crate::types::{ObjId, ObjMeta, ObjType, TextEncoding};
+use crate::types::{ObjId, ObjMeta, ObjType, OpId, TextEncoding};
 
 use super::Automerge;
 use crate::ChangeId;
@@ -246,18 +247,59 @@ impl Automerge {
                             .expand_to_seq_register_boundaries(range, object.range.clone());
                     }
                 }
-                if object.typ == ObjType::Text
-                    && range != object.range
-                    && self.ops().has_marks()
-                    && self.ops().range_has_mark(range.clone())
-                {
-                    range = object.range.clone();
-                }
                 ranges.push((object, range));
                 start = end;
             }
         }
+        self.widen_to_mark_extents(&mut ranges);
         Ok(Self::normalize_dirty_object_ranges(ranges))
+    }
+
+    /// Widen text ranges to cover the span of every dirty mark.
+    ///
+    /// A mark op that appeared changes the formatting of everything it
+    /// brackets, not just the row it sits on, and the patch for that is
+    /// produced by walking those spans — so the span between the two
+    /// ends has to be in range.
+    ///
+    /// Finding the other end needs no search: a mark's begin and end are
+    /// written by one transaction, so either both rows are dirty or
+    /// neither is, and the end always sorts after the begin. Pairing
+    /// them off the ranges already collected is enough. The extents go
+    /// in as further ranges and
+    /// [`Self::normalize_dirty_object_ranges`] merges them.
+    fn widen_to_mark_extents(&self, ranges: &mut Vec<(DirtyObject, Range<usize>)>) {
+        if !self.ops().has_marks() {
+            return;
+        }
+        let mut extents = Vec::new();
+        let mut open: HashMap<OpId, usize> = HashMap::new();
+        for (object, range) in ranges.iter() {
+            if object.typ != ObjType::Text {
+                continue;
+            }
+            for (pos, idx) in self.ops().mark_index_entries(range.clone()) {
+                match idx {
+                    MarkIdx::Start(id) => {
+                        open.insert(id, pos);
+                    }
+                    MarkIdx::End(id) => {
+                        let Some(start) = open.remove(&id) else {
+                            // the begin is dirty whenever the end is, so
+                            // a miss means the pair invariant broke
+                            debug_assert!(false, "dirty mark end {id:?} without its begin");
+                            continue;
+                        };
+                        let extent = self
+                            .ops()
+                            .expand_to_seq_register_boundaries(start..pos + 1, object.range.clone());
+                        extents.push((object.clone(), extent));
+                    }
+                }
+            }
+        }
+        debug_assert!(open.is_empty(), "dirty mark begin without its end");
+        ranges.append(&mut extents);
     }
 
     fn normalize_dirty_object_ranges(
