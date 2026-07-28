@@ -57,6 +57,20 @@ describe("Automerge", () => {
       doc.commit();
     });
 
+    it("should anonymize a document without modifying the source", () => {
+      const doc = create({ actor: "01020304" });
+      doc.put("_root", "private-key", "secret value");
+      doc.commit("private commit message", 1_700_000_000);
+
+      const anonymized = doc.anonymize();
+
+      assert.deepEqual(doc.get("_root", "private-key"), "secret value");
+      assert.deepEqual(anonymized.get("_root", "private-key"), undefined);
+      assert.equal(anonymized.keys("_root").length, 1);
+      assert.equal(anonymized.getChanges([]).length, doc.getChanges([]).length);
+      assert.doesNotThrow(() => load(anonymized.save()));
+    });
+
     it("getting a nonexistent prop does not throw an error", () => {
       const doc = create();
       const root = "_root";
