@@ -476,6 +476,16 @@ impl Automerge {
         Ok(())
     }
 
+    /// Return a copy of this document with its data anonymized while retaining its history and
+    /// structural shape.
+    pub fn anonymize(&mut self) -> Result<Automerge, error::Anonymize> {
+        Ok(Automerge {
+            doc: self.doc.anonymize()?,
+            freeze: self.freeze,
+            external_types: self.external_types.clone(),
+        })
+    }
+
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
         let mut automerge = Automerge {
@@ -2233,7 +2243,7 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
 }
 
 pub mod error {
-    use automerge::{AutomergeError, ObjType};
+    use automerge::{AnonymizeError, AutomergeError, ObjType};
     use js_sys::RangeError;
     use wasm_bindgen::JsValue;
 
@@ -2241,6 +2251,16 @@ pub mod error {
         self,
         error::{BadChangeHash, BadChangeHashes, BadJSChanges, BadUint8Array, GetProp},
     };
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct Anonymize(#[from] AnonymizeError);
+
+    impl From<Anonymize> for JsValue {
+        fn from(error: Anonymize) -> Self {
+            RangeError::new(&error.to_string()).into()
+        }
+    }
 
     #[derive(Debug, thiserror::Error)]
     #[error("could not parse Actor ID as a hex string: {0}")]
