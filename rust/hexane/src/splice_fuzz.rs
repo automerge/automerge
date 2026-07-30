@@ -34,34 +34,9 @@
 //! that can be pasted into a regression test.
 
 use crate::{Column, ColumnValueRef, DeltaColumn, PrefixColumn};
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 use std::fmt::Debug;
-
-// ── deterministic rng ───────────────────────────────────────────────────────
-
-pub(crate) struct Rng(u64);
-
-impl Rng {
-    fn new(seed: u64) -> Self {
-        // avoid the xorshift fixed point at 0
-        Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
-    }
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-    fn below(&mut self, n: usize) -> usize {
-        if n == 0 {
-            0
-        } else {
-            (self.next() as usize) % n
-        }
-    }
-    fn chance(&mut self, one_in: usize) -> bool {
-        self.below(one_in) == 0
-    }
-}
 
 // ── the target abstraction ──────────────────────────────────────────────────
 
@@ -94,7 +69,7 @@ pub(crate) trait FuzzTarget: Sized {
     /// assertion is skipped.
     const SEGMENT_CAP_MIN: usize = 0;
     /// Generate `n` values with the run structure this encoding cares about.
-    fn gen(rng: &mut Rng, n: usize) -> Vec<Self::Val>;
+    fn gen(rng: &mut SmallRng, n: usize) -> Vec<Self::Val>;
 }
 
 fn column_boundaries<T, C, WF, Idx>(col: &Column<T, C, WF, Idx>) -> Vec<usize>
@@ -156,48 +131,48 @@ pub(crate) struct Op<V> {
 /// How a step is shaped. Sizes are expressed relative to `max_segments`
 /// so the segment budget is crossed regularly whatever it is set to.
 fn gen_op<T: FuzzTarget>(
-    rng: &mut Rng,
+    rng: &mut SmallRng,
     len: usize,
     bounds: &[usize],
     max_seg: usize,
 ) -> Op<T::Val> {
     // Positions: uniform, but often snapped to a slab boundary or just
     // either side of one, which is where encoders split and rejoin runs.
-    let pos = if bounds.is_empty() || rng.chance(3) {
-        rng.below(len + 1)
+    let pos = if bounds.is_empty() || rng.random_ratio(1, 3) {
+        rng.random_range(0..=len)
     } else {
-        let b = bounds[rng.below(bounds.len())];
-        match rng.below(4) {
+        let b = bounds[rng.random_range(0..bounds.len())];
+        match rng.random_range(0..4) {
             0 => b.min(len),
             1 => b.saturating_sub(1),
             2 => (b + 1).min(len),
-            _ => rng.below(len + 1),
+            _ => rng.random_range(0..=len),
         }
     };
 
     let remaining = len - pos;
-    let del = match rng.below(6) {
+    let del = match rng.random_range(0..6) {
         0 => 0,
         1 => remaining.min(1),
-        2 => remaining.min(rng.below(max_seg * 2 + 2)),
-        3 => remaining.min(rng.below(16)),
+        2 => remaining.min(rng.random_range(0..max_seg * 2 + 2)),
+        3 => remaining.min(rng.random_range(0..16)),
         // whole-slab and slab-spanning deletes
         4 => {
             let target = bounds.iter().copied().find(|b| *b > pos).unwrap_or(len);
             (target - pos).min(remaining)
         }
-        _ => rng.below(remaining + 1),
+        _ => rng.random_range(0..=remaining),
     };
 
     // Insert sizes: frequently large enough to blow through the segment
     // budget inside a single splice, which is the overflow path.
-    let n = match rng.below(6) {
+    let n = match rng.random_range(0..6) {
         0 => 0,
         1 => 1,
-        2 => rng.below(max_seg + 2),
-        3 => max_seg * 2 + rng.below(max_seg * 2 + 1),
-        4 => rng.below(200),
-        _ => rng.below(max_seg * 4 + 4),
+        2 => rng.random_range(0..max_seg + 2),
+        3 => max_seg * 2 + rng.random_range(0..max_seg * 2 + 1),
+        4 => rng.random_range(0..200),
+        _ => rng.random_range(0..max_seg * 4 + 4),
     };
 
     Op {
@@ -251,7 +226,7 @@ fn replay<T: FuzzTarget>(max_seg: usize, ops: &[Op<T::Val>], deep: bool) -> Opti
         }
         col.check_internal(cap);
         // the round trip is O(n); it is the slowest oracle, so it runs on
-        // the last op always and occasionally in between
+        // the last op always
         if deep || i + 1 == ops.len() {
             let rt = col.round_trip();
             if rt != model {
@@ -331,7 +306,7 @@ pub(crate) fn run<T: FuzzTarget>(seeds: u64, steps: usize, budgets: &[usize]) {
     for &max_seg in budgets {
         for seed in 0..seeds {
             let cap = max_seg >= T::SEGMENT_CAP_MIN;
-            let mut rng = Rng::new(seed ^ ((max_seg as u64) << 32));
+            let mut rng = SmallRng::seed_from_u64(seed ^ ((max_seg as u64) << 32));
             let mut col = T::new(max_seg);
             let mut model: Vec<T::Val> = Vec::new();
             let mut ops: Vec<Op<T::Val>> = Vec::new();
@@ -398,7 +373,7 @@ macro_rules! plain_column {
             fn check_internal(&self, cap: bool) {
                 check_column(self, cap)
             }
-            fn gen(rng: &mut Rng, n: usize) -> Vec<$ty> {
+            fn gen(rng: &mut SmallRng, n: usize) -> Vec<$ty> {
                 #[allow(clippy::redundant_closure_call)]
                 ($gen)(rng, n)
             }
@@ -408,15 +383,19 @@ macro_rules! plain_column {
 
 /// Values in runs: `distinct` controls how often the value changes, which
 /// is what decides run length and therefore segment pressure.
-fn runs_of<V: Clone>(rng: &mut Rng, n: usize, mut pick: impl FnMut(&mut Rng) -> V) -> Vec<V> {
+fn runs_of<V: Clone>(
+    rng: &mut SmallRng,
+    n: usize,
+    mut pick: impl FnMut(&mut SmallRng) -> V,
+) -> Vec<V> {
     let mut out = Vec::with_capacity(n);
     while out.len() < n {
         let v = pick(rng);
         // occasional very long runs alongside rapid alternation
-        let run = if rng.chance(8) {
-            1 + rng.below(40)
+        let run = if rng.random_ratio(1, 8) {
+            rng.random_range(1..=40)
         } else {
-            1 + rng.below(4)
+            rng.random_range(1..=4)
         };
         for _ in 0..run.min(n - out.len()) {
             out.push(v.clone());
@@ -428,25 +407,29 @@ fn runs_of<V: Clone>(rng: &mut Rng, n: usize, mut pick: impl FnMut(&mut Rng) -> 
 plain_column!(
     bool,
     "Column<bool>",
-    |rng: &mut Rng, n| runs_of(rng, n, |r| r.chance(2)),
+    |rng: &mut SmallRng, n| runs_of(rng, n, |r| r.random_bool(0.5)),
     3
 );
 
-plain_column!(u64, "Column<u64> (runs)", |rng: &mut Rng, n| runs_of(
+plain_column!(u64, "Column<u64> (runs)", |rng: &mut SmallRng, n| runs_of(
     rng,
     n,
-    |r| r.next() % 3
+    |r| r.random_range(0..3)
 ));
 
-plain_column!(Option<u64>, "Column<Option<u64>>", |rng: &mut Rng, n| {
-    runs_of(rng, n, |r| {
-        if r.chance(3) {
-            None
-        } else {
-            Some(r.next() % 4)
-        }
-    })
-});
+plain_column!(
+    Option<u64>,
+    "Column<Option<u64>>",
+    |rng: &mut SmallRng, n| {
+        runs_of(rng, n, |r| {
+            if r.random_ratio(1, 3) {
+                None
+            } else {
+                Some(r.random_range(0..4))
+            }
+        })
+    }
+);
 
 impl FuzzTarget for Column<Option<String>> {
     type Val = Option<String>;
@@ -478,8 +461,8 @@ impl FuzzTarget for Column<Option<String>> {
     fn check_internal(&self, cap: bool) {
         check_column(self, cap)
     }
-    fn gen(rng: &mut Rng, n: usize) -> Vec<Self::Val> {
-        runs_of(rng, n, |r| match r.next() % 4 {
+    fn gen(rng: &mut SmallRng, n: usize) -> Vec<Self::Val> {
+        runs_of(rng, n, |r| match r.random_range(0..4) {
             0 => None,
             k => Some(format!("v{k}")),
         })
@@ -515,15 +498,15 @@ impl FuzzTarget for DeltaColumn<i64> {
     fn check_internal(&self, cap: bool) {
         check_column(&self.col, cap)
     }
-    fn gen(rng: &mut Rng, n: usize) -> Vec<i64> {
+    fn gen(rng: &mut SmallRng, n: usize) -> Vec<i64> {
         // both smooth deltas (well compressed) and jumps (literals)
         let mut out = Vec::with_capacity(n);
         let mut cur = 0i64;
         for _ in 0..n {
-            if rng.chance(10) {
-                cur = cur.wrapping_add((rng.next() % 100_000) as i64);
+            if rng.random_ratio(1, 10) {
+                cur = cur.wrapping_add(rng.random_range(0..100_000));
             } else {
-                cur += (rng.next() % 5) as i64 - 2;
+                cur += rng.random_range(-2..=2);
             }
             out.push(cur);
         }
@@ -562,8 +545,8 @@ impl FuzzTarget for PrefixColumn<bool> {
     fn check_internal(&self, cap: bool) {
         check_column(&self.col, cap)
     }
-    fn gen(rng: &mut Rng, n: usize) -> Vec<bool> {
-        runs_of(rng, n, |r| r.chance(2))
+    fn gen(rng: &mut SmallRng, n: usize) -> Vec<bool> {
+        runs_of(rng, n, |r| r.random_bool(0.5))
     }
 }
 
