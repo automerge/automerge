@@ -7,9 +7,9 @@
 // "+toolchain" argument so the workspace's pinned stable toolchain (see
 // rust/rust-toolchain.toml) is left untouched for everything else.
 //
-// CI overrides WASM_TOOLCHAIN with a pinned dated nightly (e.g.
-// `nightly-2026-04-25`) for reproducible builds. Local dev defaults to
-// `nightly`.
+// Current nightlies emit modern (exnref) Wasm exception handling by default.
+// We force legacy EH below so wasm-bindgen can provide its WebAssembly.JSTag
+// polyfill for runtimes without a native JSTag implementation.
 
 import { spawnSync } from "node:child_process"
 
@@ -29,7 +29,7 @@ const args = [
 
 // Compose RUSTFLAGS, preserving any the user already set.
 const env = { ...process.env }
-const extra = "-C panic=unwind"
+const extra = "-C panic=unwind -C llvm-args=-wasm-use-legacy-eh"
 env.RUSTFLAGS = env.RUSTFLAGS ? `${env.RUSTFLAGS} ${extra}` : extra
 
 const result = spawnSync("cargo", args, { stdio: "inherit", env })

@@ -31,9 +31,15 @@ component, since we rebuild std with the unwind panic runtime so Rust panics
 surface as JS exceptions instead of aborting the WASM module:
 
 ```
-rustup toolchain install nightly
-rustup component add rust-src --toolchain nightly
+rustup toolchain install nightly --profile minimal \
+  --component rust-src --target wasm32-unknown-unknown
 ```
+
+The build also passes `-C llvm-args=-wasm-use-legacy-eh`. Current nightlies
+otherwise emit modern (`exnref`) exception handling; legacy EH lets
+wasm-bindgen provide its `WebAssembly.JSTag` polyfill on runtimes such as Node
+20 that do not provide `JSTag` natively. `WASM_TOOLCHAIN` can select a specific
+nightly when a reproducible build is required.
 
 Any time you change the rust code in `../rust/*` you'll need to re-run the
 `npm run build` command.
