@@ -94,7 +94,7 @@ fn main() {
 
         let (frag_new, frag_steady) = bench(&|d: &mut Automerge, i: usize| {
             let v2 = Bundle::try_from(&v2_bytes[i][..]).unwrap();
-            d.apply_fragment(&v2).unwrap();
+            d.apply_bundle(v2).unwrap();
         });
         let (inc_new, inc_steady) = bench(&|d: &mut Automerge, i: usize| {
             d.apply_changes([changes[i].clone()]).unwrap();

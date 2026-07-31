@@ -1,8 +1,8 @@
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
-use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
 use crate::iter::MarkCursor;
+use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
 use crate::op_set2::op_set::{ActionValueIter, OpIdIter, OpSet, TopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
 use crate::patches::PatchAccumulator;
@@ -683,5 +683,4 @@ impl<'a> RichTextDiff<'a> {
             }
         }
     }
-
 }

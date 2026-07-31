@@ -1942,10 +1942,15 @@ fn delete_only_change() {
         .unwrap();
     doc3.transact(|d| d.insert(&list, 0, "b")).unwrap();
 
-    let doc4 = automerge::Automerge::load(&doc3.save())
+    let mut doc4 = automerge::Automerge::load(&doc3.save())
         .unwrap()
         .with_actor(actor)
         .unwrap();
+    // `load` does not inherit doc1's audit mode, and enumerating history
+    // needs the hashes: when a commit's hash happens to form a fragment
+    // (≈1/256) the covered hashes are freed on a non-audit document and
+    // `get_changes` fails with `AuditModeRequired`
+    doc4.enable_audit_mode().unwrap();
 
     let changes = doc4.get_changes(&[]).unwrap();
     assert_eq!(changes.len(), 3);
@@ -3675,13 +3680,17 @@ fn duplicate_seq_number_changes_are_rejected() {
 
 #[test]
 fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
+    // actors and commit times are both pinned: a hash is a pure function
+    // of the ops only when the timestamp is fixed too, and this test
+    // enumerates history (`get_changes`) on documents that are not in
+    // audit mode — an unlucky hash would free the hashes it needs
     let base_actor = ActorId::try_from("aaaaaaaa").unwrap();
     let branch_actor = ActorId::try_from("bbbbbbbb").unwrap();
 
     let mut base_doc = AutoCommit::new().with_actor(base_actor.clone()).unwrap();
     base_doc.enable_audit_mode().unwrap();
     base_doc.put(ROOT, "base", ScalarValue::Uint(0)).unwrap();
-    base_doc.commit();
+    base_doc.commit_with(CommitOptions::default().with_time(0));
     let base_heads = base_doc.get_heads();
     let base = base_doc.save();
 
@@ -3697,13 +3706,13 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
     stale_branch
         .put(ROOT, "stale_missing", ScalarValue::Uint(1))
         .unwrap();
-    stale_branch.commit();
+    stale_branch.commit_with(CommitOptions::default().with_time(0));
     let stale_missing_id = stale_branch.get_heads()[0].clone();
     let stale_missing = stale_branch.get_head_hashes()[0];
     stale_branch
         .put(ROOT, "stale_orphan", ScalarValue::Uint(2))
         .unwrap();
-    stale_branch.commit();
+    stale_branch.commit_with(CommitOptions::default().with_time(0));
     let stale_orphan = stale_branch.get_changes(&[stale_missing_id]).unwrap();
     assert_eq!(stale_orphan.len(), 1);
 
@@ -3717,11 +3726,11 @@ fn queued_orphan_with_conflicting_actor_seq_rejects_incoming_batch() {
     live_branch
         .put(ROOT, "live_1", ScalarValue::Uint(3))
         .unwrap();
-    live_branch.commit();
+    live_branch.commit_with(CommitOptions::default().with_time(0));
     live_branch
         .put(ROOT, "live_2", ScalarValue::Uint(4))
         .unwrap();
-    live_branch.commit();
+    live_branch.commit_with(CommitOptions::default().with_time(0));
     let live_changes = live_branch.get_changes(&base_heads).unwrap();
 
     let Err(AutomergeError::DuplicateSeqNumber(2, actor)) =
@@ -4472,6 +4481,9 @@ fn queued_change_does_not_collide_with_later_local_change() {
 
 #[test]
 fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace() {
+    // pinned timestamps as well as actors: an unpinned commit can hash
+    // to a fragment head (1/256) and free the hashes `merge` needs — see
+    // HASHLESS.md
     let encoding = TextEncoding::UnicodeCodePoint;
     let actor1 = ActorId::try_from("7f0000000000008027").unwrap();
     let actor2 = ActorId::try_from("fe004faf").unwrap();
@@ -4486,22 +4498,22 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
             false,
         )
         .unwrap();
-    target.commit();
+    target.commit_with(automerge::transaction::CommitOptions::default().with_time(0));
 
     let mut left = target.fork();
     left.put(&object, 0, "🦊🐻").unwrap();
-    left.commit();
+    left.commit_with(automerge::transaction::CommitOptions::default().with_time(0));
 
     let mut right = target.fork().with_actor(actor2).unwrap();
     right
         .put(&object, 0, ScalarValue::Bytes(vec![0; 32]))
         .unwrap();
-    right.commit();
+    right.commit_with(automerge::transaction::CommitOptions::default().with_time(0));
 
     target.merge(&mut left).unwrap();
     target.merge(&mut right).unwrap();
     right.delete(&object, 0).unwrap();
-    right.commit();
+    right.commit_with(automerge::transaction::CommitOptions::default().with_time(0));
 
     let mut logged_target = target.document().clone();
     let mut logged_right = right.document().clone();

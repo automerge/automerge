@@ -1,5 +1,7 @@
 mod decoder;
+pub mod edit;
 mod load;
+pub(crate) mod writer;
 pub use load::RleLoadIter;
 pub(crate) mod splice;
 pub(crate) mod state;
@@ -8,6 +10,7 @@ mod tests;
 
 use crate::encoder::RleEncoder;
 pub use decoder::RleDecoder;
+pub(crate) use decoder::RleDecoderState;
 pub(crate) use load::rle_validate_encoding;
 use splice::{do_merge, rle_merge, splice_slab};
 
@@ -125,6 +128,23 @@ where
     type Codec = C;
     type Value = T;
     type Tail = RleTail;
+    type State = crate::rle::RleDecoderState;
+
+    fn state_at(slab: &crate::rle::Slab, at: usize) -> Self::State {
+        let mut d = RleDecoder::<T, C>::new(&slab.data);
+        d.advance_by(at);
+        d.suspend()
+    }
+
+    fn state_peek<'s>(slab: &'s crate::rle::Slab, state: &Self::State) -> Option<T::Get<'s>> {
+        RleDecoder::<T, C>::resume(&slab.data, state).next()
+    }
+
+    fn state_advance(slab: &crate::rle::Slab, state: &mut Self::State, n: usize) {
+        let mut d = RleDecoder::<T, C>::resume(&slab.data, state);
+        d.advance_by(n);
+        *state = d.suspend();
+    }
 
     fn fill(len: usize, value: T::Get<'_>) -> Slab {
         use state::{RleCow, RleState};

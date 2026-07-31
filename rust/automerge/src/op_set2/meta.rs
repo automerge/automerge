@@ -40,6 +40,12 @@ impl ValueMeta {
     pub(crate) fn length(&self) -> usize {
         (self.0 >> 4) as usize
     }
+
+    /// Metadata for `len` bytes — the form the change columns' extra
+    /// bytes take, in both the document and bundle formats.
+    pub(crate) const fn bytes(len: usize) -> Self {
+        Self(((len as u64) << 4) | 7)
+    }
 }
 
 impl From<u64> for ValueMeta {

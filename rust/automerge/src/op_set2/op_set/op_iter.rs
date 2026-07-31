@@ -9,7 +9,7 @@ use crate::{
         types::{Action, ActorIdx, KeyRef, ScalarValue},
         OpSet, SuccInsert,
     },
-    types::{ElemId, ObjId, OpId},
+    types::{ElemId, ObjId, OpId, TextEncoding},
 };
 
 use std::borrow::Cow;
@@ -82,6 +82,8 @@ pub(crate) enum ReadOpError {
     InvalidObjId(usize),
     #[error("ops out of order: the object id at op {0} does not increase")]
     ObjOutOfOrder(usize),
+    #[error(transparent)]
+    ColumnValidation(#[from] super::ColumnValidationError),
 }
 
 impl ExactSizeIterator for OpIter<'_> {
@@ -550,6 +552,50 @@ impl Iterator for InsertIter<'_> {
     }
 }
 
+/// Forward-only element-id reads at scattered rows: the key columns
+/// without the `key_str` half, which a sequence row never carries.
+///
+/// Used by the index builder's fragment register split, where only the
+/// non-insert rows are read and the insert rows in between are skipped.
+#[derive(Clone, Debug)]
+pub(crate) struct ElemIdIter<'a> {
+    key_actor: MappedIter<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+    /// the row both columns stand on
+    pos: usize,
+}
+
+impl<'a> ElemIdIter<'a> {
+    pub(crate) fn new(
+        key_actor: MappedIter<'a, Option<ActorIdx>>,
+        key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+    ) -> Self {
+        Self {
+            key_actor,
+            key_ctr,
+            pos: 0,
+        }
+    }
+
+    /// The element id at `pos`, which must be at or after the last row
+    /// read. `None` is the head of a sequence.
+    pub(crate) fn at(&mut self, pos: usize) -> Result<Option<ElemId>, ReadOpError> {
+        let skip = pos
+            .checked_sub(self.pos)
+            .expect("ElemIdIter::at went backwards");
+        self.pos = pos + 1;
+        let actor = self
+            .key_actor
+            .nth(skip)
+            .ok_or(ReadOpError::MissingValue("key_actor"))?;
+        let ctr = self
+            .key_ctr
+            .nth(skip)
+            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
+        ElemId::try_load(actor, ctr.map(i64::from))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a> {
     key_str: hexane::Iter<'a, Option<String>>,
@@ -914,6 +960,57 @@ impl Shiftable for ActionValueIter<'_> {
         let value = self.value.shift_next(range);
         let pos = self.action.iter.pos();
         Some((action?, value?, pos - 1))
+    }
+}
+
+/// Forward-only text widths: [`ActionValueIter`] plus the encoding to
+/// measure with.
+///
+/// A row's text width is a function of its action and value alone, so
+/// this reads only op columns — none that carry an index. That is what
+/// lets it be held open beside a `hexane::Edit` on the text index and
+/// stepped along with it, instead of materializing an [`Op`] per row.
+#[derive(Clone, Debug)]
+pub(crate) struct WidthIter<'a> {
+    ops: ActionValueIter<'a>,
+    text_encoding: TextEncoding,
+}
+
+impl<'a> WidthIter<'a> {
+    pub(crate) fn new(
+        action: &'a hexane::Column<Action>,
+        value: &'a hexane::RawColumn,
+        value_meta: &'a hexane::PrefixColumn<op_set2::meta::ValueMeta>,
+        text_encoding: TextEncoding,
+    ) -> Self {
+        Self {
+            ops: ActionValueIter::new(
+                ActionIter::new(action.iter()),
+                ValueIter::new(value_meta.iter(), value.iter()),
+            ),
+            text_encoding,
+        }
+    }
+
+    /// The text width of the row at `pos`, which must be at or after the
+    /// last row read.
+    ///
+    /// Mirrors `Op::width(SequenceType::Text, _)`: a mark measures zero,
+    /// a string measures itself, and everything else is one object
+    /// replacement character.
+    ///
+    /// Panics if `pos` is past the end of the columns.
+    pub(crate) fn seek_to(&mut self, pos: usize) -> u32 {
+        let (action, value, _) = self
+            .ops
+            .seek_to(pos)
+            .expect("width of a row that is not there");
+        let s = match (action, &value) {
+            (Action::Mark, _) => return 0,
+            (Action::Set, ScalarValue::Str(s)) => s,
+            _ => "\u{fffc}",
+        };
+        self.text_encoding.width(s) as u32
     }
 }
 

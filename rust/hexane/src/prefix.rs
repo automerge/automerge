@@ -532,6 +532,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     where
         I: IntoIterator<Item = crate::Splice>,
         for<'b> T::Get<'b>: crate::AsColumnRef<T>,
+        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
     {
         self.col.copy_ranges(src.col, splices);
     }
@@ -1037,6 +1038,42 @@ impl<T: PrefixValue> PrefixIterState<T> {
             total: self.total.clone(),
             base: self.base.clone(),
         })
+    }
+}
+
+// ── Cursor ──────────────────────────────────────────────────────────────────
+
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C>
+where
+    T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
+{
+    /// Open a forward-only read/write cursor at the start of the column
+    /// — see [`Column::edit`]. The prefix sums ride the slab weights the
+    /// cursor reconciles anyway, so they need no separate maintenance.
+    pub fn edit(
+        &mut self,
+    ) -> crate::edit::Edit<
+        '_,
+        T,
+        C,
+        PrefixWeightFn<T>,
+        crate::btree::SlabBTree<PrefixSlabWeight<T::Prefix>>,
+    > {
+        self.col.edit()
+    }
+
+    /// [`edit`](Self::edit) starting at original position `at`.
+    pub fn edit_at(
+        &mut self,
+        at: usize,
+    ) -> crate::edit::Edit<
+        '_,
+        T,
+        C,
+        PrefixWeightFn<T>,
+        crate::btree::SlabBTree<PrefixSlabWeight<T::Prefix>>,
+    > {
+        self.col.edit_at(at)
     }
 }
 

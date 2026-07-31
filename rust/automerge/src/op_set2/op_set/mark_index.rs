@@ -245,7 +245,11 @@ impl MarkPrefix {
     /// copies it only if the accumulator is still shared.
     pub(crate) fn into_opens(self) -> impl Iterator<Item = OpId> {
         self.0
-            .map(|acc| Arc::try_unwrap(acc).unwrap_or_else(|acc| (*acc).clone()).opens)
+            .map(|acc| {
+                Arc::try_unwrap(acc)
+                    .unwrap_or_else(|acc| (*acc).clone())
+                    .opens
+            })
             .unwrap_or_default()
             .into_iter()
     }
@@ -516,11 +520,6 @@ impl MarkIndexColumn {
         );
         acc.into_opens()
             .filter(move |id| clock.map(|c| c.covers(id)).unwrap_or(true))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn save(&self) -> Vec<u8> {
-        self.data.save()
     }
 }
 

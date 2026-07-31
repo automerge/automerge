@@ -1,5 +1,6 @@
 use crate::change_graph::ChangeGraph;
 use crate::op_set2::change::{length_prefixed_bytes, ActorMapper, BuildChangeMetadata};
+use crate::op_set2::types::ActorIdx;
 use crate::op_set2::OpSet;
 use crate::storage::change::{Unverified, Verified};
 use crate::storage::{parse, ChunkType, Header};
@@ -14,11 +15,10 @@ mod error;
 mod meta;
 mod storage;
 
-pub use builder::BundleChangeIter;
-
+pub(crate) use builder::ops;
 pub(crate) use builder::{
-    frag_prepass, BundleBuilder, BundleChangeIterUnverified, BundleOp, BundleOpWriter, FragMeta,
-    FragOp, FragOps, OpIter, OpIterUnverified,
+    BundleBuilder, BundleChangeCols, BundleChangeIterUnverified, BundleOpWriter, FragOp, FragOps,
+    OpIterUnverified,
 };
 pub(crate) use error::ParseError;
 pub(crate) use meta::{BundleMetadata, DepRef};
@@ -32,7 +32,9 @@ pub(crate) use storage::BundleStorage;
 /// (only fragment heads have known hashes there). So a bundle chunk
 /// prefixes the changes with:
 ///
-/// * the fragment's **head** hash, paired with its member index
+/// * the **head** hashes it delivers, each paired with its member
+///   index — one for a fragment, one per document head for a bundle
+///   standing in for a whole document
 /// * the **checkpoint** hashes (interior fragment-level hashes), each
 ///   paired with its member index
 /// * the fragment's **boundary** hashes, each paired with its
@@ -47,7 +49,7 @@ pub(crate) use storage::BundleStorage;
 /// ```text
 /// actors      uleb count, then length-prefixed actor ids (only the
 ///             actors the prefix itself references)
-/// head        32-byte hash + uleb member index
+/// heads       uleb count, then per entry: 32-byte hash + uleb member index
 /// checkpoints uleb count, then per entry: uleb member index + 32-byte hash
 /// boundary    uleb count, then per entry: 32-byte hash + uleb actor + uleb seq
 /// deps        uleb count, then per entry: uleb actor + uleb seq
@@ -65,16 +67,25 @@ pub(crate) use storage::BundleStorage;
 ///
 /// This is experimental, the format may still change — do not use it
 /// in systems where you expect data to stick around.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Bundle {
-    pub(crate) head: ChangeHash,
-    pub(crate) head_index: usize,
+    /// The changes this bundle delivers: those no other member depends
+    /// on, each paired with its member index. A bundle built from a
+    /// [`Fragment`](crate::Fragment) has exactly one; a bundle standing
+    /// in for a whole document has one per document head.
+    pub(crate) heads: Vec<(ChangeHash, usize)>,
     /// `(member index, hash)`
     pub(crate) checkpoints: Vec<(usize, ChangeHash)>,
     /// each boundary hash paired with the change it names
     pub(crate) boundary: Vec<(ChangeHash, ChangeId)>,
     /// the change id of each external dep, aligned with [`Self::deps`]
     pub(crate) dep_ids: Vec<ChangeId>,
+    /// Each member change's actor, validated in range at parse time and
+    /// aligned with [`Self::iter_changes`]. Held alongside
+    /// [`Self::member_seqs`] so the apply path can identify members —
+    /// scan for the ones already present, resolve heads and checkpoints —
+    /// without decoding every member's metadata.
+    pub(crate) member_actors: Vec<ActorIdx>,
     /// Each member change's sequence number, validated non-zero at parse
     /// time and aligned with [`Self::iter_changes`].
     pub(crate) member_seqs: Vec<NonZeroU64>,
@@ -84,29 +95,36 @@ pub struct Bundle {
 
 impl Bundle {
     pub(crate) fn new(
-        head: ChangeHash,
-        head_index: usize,
+        heads: Vec<(ChangeHash, usize)>,
         checkpoints: Vec<(usize, ChangeHash)>,
         boundary: Vec<(ChangeHash, ChangeId)>,
         dep_ids: Vec<ChangeId>,
+        member_actors: Vec<ActorIdx>,
         member_seqs: Vec<NonZeroU64>,
         storage: BundleStorage<'static, Verified>,
     ) -> Self {
         Self {
-            head,
-            head_index,
+            heads,
             checkpoints,
             boundary,
             dep_ids,
+            member_actors,
             member_seqs,
             storage,
         }
     }
 
-    /// The hash of the change this bundle delivers — the one member
-    /// nothing else in the bundle depends on.
-    pub fn head(&self) -> ChangeHash {
-        self.head
+    /// The member change columns, for the columnar apply path.
+    pub(crate) fn change_cols(&self) -> BundleChangeCols<'_> {
+        self.storage
+            .change_cols()
+            .expect("a parsed bundle's change columns are well formed")
+    }
+
+    /// The changes this bundle delivers — the members nothing else in
+    /// the bundle depends on.
+    pub fn heads(&self) -> impl ExactSizeIterator<Item = ChangeHash> + '_ {
+        self.heads.iter().map(|(h, _)| *h)
     }
 
     /// The changes carried by the bundle, in topological order.
@@ -116,9 +134,34 @@ impl Bundle {
             .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
     }
 
-    /// Metadata for each carried change, without decoding its ops.
-    pub fn iter_changes(&self) -> BundleChangeIter<'_> {
-        self.storage.iter_change_meta()
+    /// Metadata for each carried change, in topological order, without
+    /// decoding its ops.
+    ///
+    /// Fallible because it is decoded on demand: a parse validates the
+    /// member index (actors and sequence numbers) but leaves the rest of
+    /// the member columns for whoever reads them, so that applying a
+    /// bundle — which reads those columns directly into the change graph
+    /// — never pays for a decode it does not use.
+    pub fn iter_changes(
+        &self,
+    ) -> Result<std::slice::Iter<'_, BundleChange<'static>>, AutomergeError> {
+        Ok(self.changes()?.iter())
+    }
+
+    /// The op columns the parse loaded, taken by value — the apply merges
+    /// them into a document, so they are moved rather than read.
+    pub(crate) fn take_frag_ops(&mut self) -> Result<OpSet, AutomergeError> {
+        self.storage
+            .take_frag_ops()
+            .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
+    }
+
+    /// The member change metadata, decoded on first call (see
+    /// [`Self::iter_changes`]).
+    pub(crate) fn changes(&self) -> Result<&[BundleChange<'static>], AutomergeError> {
+        self.storage
+            .changes()
+            .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
     }
 
     /// The hashes this bundle depends on but does not carry.
@@ -292,15 +335,16 @@ impl Bundle {
     /// Falls back to the uncompressed buffer for storage built before the
     /// per-column compression pass (or parsed from input with no
     /// compressed columns).
-    fn inner_bytes(&self) -> &[u8] {
+    /// The column section in its on-disk form.
+    fn column_bytes(&self) -> &[u8] {
         match &self.storage.compressed_bytes {
             Some(c) => c,
             None => &self.storage.bytes,
         }
     }
 
-    /// The chunk's bytes: the metadata prefix plus the embedded
-    /// bundle's on-disk form.
+    /// The chunk's bytes: the metadata prefix followed by the column
+    /// section.
     pub fn bytes(&self) -> Vec<u8> {
         // dedup the actors the prefix references
         fn actor_idx<'x>(actors: &mut Vec<&'x ActorId>, a: &'x ActorId) -> u64 {
@@ -329,8 +373,11 @@ impl Bundle {
         for a in &actors {
             length_prefixed_bytes(a.to_bytes(), &mut data);
         }
-        data.extend_from_slice(self.head.as_bytes());
-        leb128::write::unsigned(&mut data, self.head_index as u64).unwrap();
+        leb128::write::unsigned(&mut data, self.heads.len() as u64).unwrap();
+        for (h, i) in &self.heads {
+            data.extend_from_slice(h.as_bytes());
+            leb128::write::unsigned(&mut data, *i as u64).unwrap();
+        }
         leb128::write::unsigned(&mut data, self.checkpoints.len() as u64).unwrap();
         for (i, h) in &self.checkpoints {
             leb128::write::unsigned(&mut data, *i as u64).unwrap();
@@ -347,7 +394,7 @@ impl Bundle {
             leb128::write::unsigned(&mut data, *a).unwrap();
             leb128::write::unsigned(&mut data, *s).unwrap();
         }
-        data.extend_from_slice(self.inner_bytes());
+        data.extend_from_slice(self.column_bytes());
 
         let header = Header::new(ChunkType::Bundle, &data);
         let mut out = Vec::with_capacity(header.len() + data.len());
@@ -369,8 +416,17 @@ impl Bundle {
         i: parse::Input<'_>,
     ) -> parse::ParseResult<'_, ParsedPrefix, parse::leb128::Error> {
         let (i, actors) = parse::length_prefixed(parse::actor_id)(i)?;
-        let (i, head) = parse::change_hash(i)?;
-        let (i, head_index) = parse::leb128_u64(i)?;
+
+        // a head is a 32-byte hash plus a uleb member index
+        let (i, n_heads) = parse::leb128_u64(i)?;
+        let mut i = i;
+        let mut heads = Vec::with_capacity(entry_capacity(&i, n_heads, 33));
+        for _ in 0..n_heads {
+            let (j, h) = parse::change_hash(i)?;
+            let (j, idx) = parse::leb128_u64(j)?;
+            heads.push((h, idx as usize));
+            i = j;
+        }
 
         // a checkpoint is a uleb index plus a 32-byte hash
         let (mut i, n_checkpoints) = parse::leb128_u64(i)?;
@@ -409,8 +465,7 @@ impl Bundle {
             i,
             ParsedPrefix {
                 actors,
-                head,
-                head_index: head_index as usize,
+                heads,
                 checkpoints,
                 boundary,
                 deps,
@@ -446,8 +501,7 @@ fn entry_capacity(i: &parse::Input<'_>, count: u64, min_entry_bytes: usize) -> u
 #[derive(Debug)]
 pub(crate) struct ParsedPrefix {
     actors: Vec<ActorId>,
-    head: ChangeHash,
-    head_index: usize,
+    heads: Vec<(ChangeHash, usize)>,
     checkpoints: Vec<(usize, ChangeHash)>,
     boundary: Vec<(ChangeHash, u64, u64)>,
     deps: Vec<(u64, u64)>,
@@ -458,12 +512,10 @@ pub(crate) struct ParsedPrefix {
 pub struct InvalidBundle(pub(crate) String);
 
 /// Parse the inner (carried-changes) chunk of a bundle.
-fn parse_inner_chunk(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>, String> {
+fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>, String> {
     let input = parse::Input::new(bytes);
-    let (i, header) = Header::parse::<crate::storage::chunk::error::Header>(input)
-        .map_err(|e| format!("invalid header: {}", e))?;
-    let (_i, stored) = BundleStorage::parse_following_header(i, header)
-        .map_err(|e| format!("invalid contents: {}", e))?;
+    let (_i, stored) = BundleStorage::parse_columns(input)
+        .map_err(|e| format!("invalid carried changes: {}", e))?;
     let verified = stored
         .verify()
         .map_err(|e| format!("unable to verify ops: {}", e))?;
@@ -489,6 +541,26 @@ pub struct BundleChange<'a> {
     pub message: Option<Cow<'a, str>>,
     pub deps: Vec<u64>,
     pub extra: Cow<'a, [u8]>,
+}
+
+impl BundleChange<'_> {
+    /// Detach from the buffer the metadata was decoded out of, so a
+    /// parsed bundle can cache its change metadata alongside the bytes
+    /// it came from. Only `message` and `extra` borrow, and both are
+    /// usually absent.
+    pub(crate) fn into_owned(self) -> BundleChange<'static> {
+        BundleChange {
+            actor: self.actor,
+            author: self.author,
+            seq: self.seq,
+            start_op: self.start_op,
+            max_op: self.max_op,
+            timestamp: self.timestamp,
+            message: self.message.map(|m| Cow::Owned(m.into_owned())),
+            deps: self.deps,
+            extra: Cow::Owned(self.extra.into_owned()),
+        }
+    }
 }
 
 impl<'a> From<BundleChange<'a>> for BuildChangeMetadata<'a> {
@@ -544,7 +616,7 @@ impl TryFrom<&[u8]> for Bundle {
             .map(|(a, s)| change_id(*a, *s))
             .collect::<Result<Vec<_>, InvalidBundle>>()?;
 
-        let storage = parse_inner_chunk(i.unconsumed_bytes())
+        let storage = parse_bundle_columns(i.unconsumed_bytes())
             .map_err(|e| InvalidBundle(format!("invalid carried changes: {}", e)))?;
 
         // all shape errors are caught here, at parse time — a Bundle
@@ -552,23 +624,18 @@ impl TryFrom<&[u8]> for Bundle {
         if dep_ids.len() != storage.deps().len() {
             return Err(bad("dep ids do not match the carried changes' deps"));
         }
-        let num_actors = storage.actors.len();
-        let member_seqs = storage
-            .iter_change_meta()
-            .map(|c| {
-                if c.actor >= num_actors {
-                    return Err(bad("bad member actor index"));
-                }
-                // `num_ops` is `1 + max_op - start_op`, so an inverted
-                // range would underflow in the applier
-                if c.max_op < c.start_op {
-                    return Err(bad("member max_op precedes its start_op"));
-                }
-                seq(c.seq)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        // the members are validated columnwise — actor indexes in range,
+        // sequence numbers non-zero, `start_op <= max_op` — which is all
+        // the appliers need taken on trust. Their full metadata is only
+        // decoded if someone asks for it (`to_changes`, audit mode).
+        let (member_actors, member_seqs) = storage
+            .member_ids()
+            .map_err(|e| InvalidBundle(format!("invalid change metadata: {}", e)))?;
         let num_members = member_seqs.len();
-        if prefix.head_index >= num_members {
+        if prefix.heads.is_empty() {
+            return Err(bad("a bundle must deliver at least one head"));
+        }
+        if prefix.heads.iter().any(|(_, i)| *i >= num_members) {
             return Err(bad("head index out of range"));
         }
         if prefix.checkpoints.iter().any(|(i, _)| *i >= num_members) {
@@ -576,11 +643,11 @@ impl TryFrom<&[u8]> for Bundle {
         }
 
         Ok(Bundle {
-            head: prefix.head,
-            head_index: prefix.head_index,
+            heads: prefix.heads,
             checkpoints: prefix.checkpoints,
             boundary,
             dep_ids,
+            member_actors,
             member_seqs,
             storage,
         })
@@ -688,17 +755,16 @@ mod tests {
         out
     }
 
-    /// A prefix whose counts are wire-supplied lies. Each of the three
-    /// counted sections claims more entries than exist; none of them may
-    /// turn into an allocation of the size it asked for.
+    /// A prefix whose counts are wire-supplied lies. Each of the four
+    /// counted sections (heads, checkpoints, boundary, deps) claims more
+    /// entries than exist; none may turn into an allocation of the size
+    /// it asked for.
     #[test]
     fn absurd_counts_error_instead_of_allocating() {
-        for section in 0..3 {
+        for section in 0..4 {
             let mut data = Vec::new();
             leb(0, &mut data); // no actors
-            data.extend([0u8; 32]); // head hash
-            leb(0, &mut data); // head index
-            for s in 0..3 {
+            for s in 0..4 {
                 // the section under test claims u64::MAX/64 entries; the
                 // ones before it are empty so parsing reaches it
                 leb(if s == section { u64::MAX / 64 } else { 0 }, &mut data);
@@ -709,6 +775,28 @@ mod tests {
             let err = Bundle::try_from(&chunk(data)[..]);
             assert!(err.is_err(), "section {section} should not parse");
         }
+    }
+
+    /// A bundle has to deliver something.
+    #[test]
+    fn a_bundle_with_no_heads_is_rejected() {
+        let mut doc = crate::Automerge::new();
+        doc.enable_audit_mode().unwrap();
+        {
+            use crate::transaction::Transactable;
+            let mut tx = doc.transaction();
+            tx.put(crate::ROOT, "k", 1).unwrap();
+            tx.commit();
+        }
+        let f = &doc.fragments(..).unwrap()[0];
+        let good = doc.bundle_fragment(f).unwrap();
+        assert_eq!(good.heads().len(), 1);
+
+        // rebuild the prefix with an empty head list
+        let mut b = Bundle::try_from(&good.bytes()[..]).unwrap();
+        b.heads.clear();
+        let err = Bundle::try_from(&b.bytes()[..]).expect_err("no heads must be rejected");
+        assert!(err.0.contains("at least one head"), "got {err}");
     }
 
     /// The counts are only trusted as far as the remaining bytes could
@@ -729,12 +817,16 @@ mod tests {
         use crate::transaction::Transactable;
         use crate::{Automerge, ROOT};
 
-        let mut src = Automerge::new();
+        // pinned actor + timestamp: the fragment layout this test indexes
+        // into depends on which commits hash to fragment heads
+        let mut src = Automerge::new()
+            .with_actor(crate::ActorId::from(&b"zsn"[..]))
+            .unwrap();
         src.enable_audit_mode().unwrap();
         for i in 0..6 {
             let mut tx = src.transaction();
             tx.put(ROOT, "k", i).unwrap();
-            tx.commit();
+            tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
         }
         let frags = src.fragments(0..=0).unwrap();
         // the second fragment has a boundary entry (its dep on the first)
@@ -762,8 +854,12 @@ mod tests {
             let n = read(&bytes, &mut at) as usize;
             at += n;
         }
-        at += 32; // head hash
-        read(&bytes, &mut at); // head index
+        let n_heads = read(&bytes, &mut at);
+        assert!(n_heads > 0, "fixture needs a head");
+        for _ in 0..n_heads {
+            at += 32; // head hash
+            read(&bytes, &mut at); // head member index
+        }
         let n_checkpoints = read(&bytes, &mut at);
         for _ in 0..n_checkpoints {
             read(&bytes, &mut at);

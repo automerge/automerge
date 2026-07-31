@@ -10,17 +10,19 @@ fn main() {
         let bytes = std::fs::read(&path).unwrap();
         let doc = Automerge::load(&bytes).unwrap();
 
-        let v2: Vec<automerge::Bundle> = doc
+        // bytes, not Bundles: apply_bundle consumes each bundle, and the
+        // chain is applied twice below
+        let v2: Vec<Vec<u8>> = doc
             .bundle_fragments(doc.fragments(..).unwrap())
             .unwrap()
-            .iter()
-            .map(|b| automerge::Bundle::try_from(&b[..]).unwrap())
+            .into_iter()
             .collect();
 
         let t = std::time::Instant::now();
         let mut d = Automerge::new();
         for b in &v2 {
-            d.apply_fragment(b).unwrap();
+            d.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
+                .unwrap();
         }
         eprintln!(
             "TOTAL {} {:.3}s over {} fragments",
@@ -34,7 +36,8 @@ fn main() {
         let t = std::time::Instant::now();
         let mut d2 = Automerge::new();
         for b in &v2 {
-            d2.apply_fragment(b).unwrap();
+            d2.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
+                .unwrap();
             let _patches = d2.diff_incremental();
         }
         eprintln!(

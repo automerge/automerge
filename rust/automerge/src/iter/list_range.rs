@@ -470,6 +470,9 @@ mod tests {
 
     #[test]
     fn list_range_conflict() {
+        // Pinned timestamp: see HASHLESS.md — without it a commit can
+        // hash to a fragment head (1/256) and free the hashes `merge`
+        // needs to build its changes.
         let actor1 = "aaaaaaaa".try_into().unwrap();
         let actor2 = "bbbbbbbb".try_into().unwrap();
         let mut doc1 = Automerge::new().with_actor(actor1).unwrap();
@@ -480,17 +483,17 @@ mod tests {
             .map(types::ScalarValue::Int)
             .collect::<Vec<_>>();
         tx1.splice(&list, 0, 0, values.clone()).unwrap();
-        tx1.commit();
+        tx1.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
         let mut doc2 = doc1.fork().with_actor(actor2).unwrap();
 
         let mut tx2 = doc2.transaction();
         tx2.put(&list, 3, 11).unwrap();
-        tx2.commit();
+        tx2.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
         let mut tx1 = doc1.transaction();
         tx1.put(&list, 3, 10).unwrap();
-        tx1.commit();
+        tx1.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
         doc2.merge(&mut doc1).unwrap();
 

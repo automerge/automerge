@@ -1,3 +1,4 @@
+use automerge::transaction::CommitOptions;
 use automerge::{
     transaction::Transactable, ActorId, AuditMode, AutoCommit, Automerge, AutomergeError,
     ChangeHash, ChangeId, LoadOptions, ReadDoc, ROOT,
@@ -46,7 +47,10 @@ fn saved_big_doc_with_unknown_hash() -> (Vec<u8>, AutoCommit, ChangeHash) {
     doc.enable_audit_mode().unwrap();
     for i in 0..4000 {
         doc.put(ROOT, "k", i as i64).unwrap();
-        doc.commit();
+        // pinned actor + pinned timestamp = deterministic hashes, so
+        // which commits form fragments is fixed rather than varying with
+        // wall-clock time
+        doc.commit_with(CommitOptions::default().with_time(0));
     }
     let bytes = doc.save();
     let probe = AutoCommit::load(&bytes).unwrap();
@@ -538,14 +542,37 @@ fn disabled_lifecycle_all_fallible_functions() {
 
     let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load(&bytes).unwrap();
+    // `load` picks a random actor and `commit` stamps wall-clock time,
+    // so without pinning both the post-load hashes differ every run. The
+    // assertions below need both commits to stay *loose*: a commit whose
+    // hash starts with a zero byte is a fragment head (1/256), which
+    // covers the earlier loose commit and frees its hash, after which
+    // `get_changes(&load_heads)` errors. That is the documented design
+    // (see `usurped_fragment_hashes_are_freed_on_live_docs` and
+    // HASHLESS.md), not a bug — so pin both inputs and assert the branch
+    // this test means to take. `unlucky_commit_frees_loose_hashes` covers
+    // the other one.
+    doc.set_actor(ActorId::from(&b"lifecycle"[..])).unwrap();
     let load_heads = doc.get_heads();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
 
     // ── add a few changes after the load ──
     doc.put(ROOT, "k", 100_000).unwrap();
-    let new1 = doc.commit().unwrap();
+    let new1 = doc
+        .commit_with(CommitOptions::default().with_time(0))
+        .unwrap();
+    let h1 = doc.get_head_hashes()[0];
     doc.put(ROOT, "k", 200_000).unwrap();
-    let new2 = doc.commit().unwrap();
+    let new2 = doc
+        .commit_with(CommitOptions::default().with_time(0))
+        .unwrap();
+    let h2 = doc.get_head_hashes()[0];
+    assert_eq!(
+        (h1.fragment_level(), h2.fragment_level()),
+        (0, 0),
+        "the pinned actor must keep both commits loose; if this fires, \
+         pick another actor rather than deleting the assertion"
+    );
     assert_eq!(doc.get_heads(), vec![new2.clone()]);
 
     // ── everything that needs freed interior hashes errors ──
@@ -805,8 +832,8 @@ fn audit_and_manifold_fragment_apply_agree() {
     audit.enable_audit_mode().unwrap();
 
     for b in &bundles {
-        plain.apply_fragment(b).unwrap();
-        audit.apply_fragment(b).unwrap();
+        plain.apply_bundle(b.clone()).unwrap();
+        audit.apply_bundle(b.clone()).unwrap();
     }
 
     assert_eq!(plain.audit_mode(), AuditMode::Disabled);
@@ -842,9 +869,53 @@ fn audit_fragment_apply_missing_deps() {
     audit.enable_audit_mode().unwrap();
     // the second bundle's boundary dep is missing
     assert!(matches!(
-        audit.apply_fragment(&bundles[1]),
+        audit.apply_bundle(bundles[1].clone()),
         Err(AutomergeError::MissingDeps)
     ));
     // heads unchanged — nothing applied
     assert!(audit.get_heads().is_empty());
+}
+
+/// The other side of `disabled_lifecycle_all_fallible_functions`: a
+/// commit whose hash starts with a zero byte becomes a fragment head,
+/// covering the loose commits before it and freeing their hashes. Change
+/// emission then errors, because a `Change`'s encoding embeds its deps'
+/// hashes.
+///
+/// This is the stochastic behaviour HASHLESS.md flags as an open
+/// question. Pinned to an actor that triggers it, so the branch is
+/// covered deterministically instead of surfacing as a flake.
+#[test]
+fn unlucky_commit_frees_loose_hashes() {
+    let (bytes, _orig, _unknown) = saved_big_doc_with_unknown_hash();
+    let mut doc = AutoCommit::load(&bytes).unwrap();
+    doc.set_actor(ActorId::from(&63u32.to_be_bytes()[..]))
+        .unwrap();
+    let load_heads = doc.get_heads();
+
+    doc.put(ROOT, "k", 100_000).unwrap();
+    doc.commit_with(CommitOptions::default().with_time(0));
+    let h1 = doc.get_head_hashes()[0];
+    doc.put(ROOT, "k", 200_000).unwrap();
+    doc.commit_with(CommitOptions::default().with_time(0));
+    let h2 = doc.get_head_hashes()[0];
+
+    assert_eq!(h1.fragment_level(), 0, "the first commit stays loose");
+    assert_eq!(
+        h2.fragment_level(),
+        1,
+        "this actor is pinned because its second commit hashes to a \
+         fragment head (00493e…)"
+    );
+
+    // h2 usurped h1: h1 is now covered history, its hash is freed, and
+    // emitting it is no longer possible outside audit mode
+    assert!(matches!(
+        doc.get_changes(&load_heads),
+        Err(AutomergeError::AuditModeRequired)
+    ));
+
+    // the document itself is unaffected — only hash-keyed emission is
+    let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
+    assert_eq!(v.to_i64(), Some(200_000));
 }

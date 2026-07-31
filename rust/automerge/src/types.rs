@@ -467,7 +467,6 @@ impl OpId {
     pub(crate) fn minus(&self, n: usize) -> OpId {
         OpId(self.0 - n as u32, self.1)
     }
-
 }
 
 impl AsRef<OpId> for OpId {

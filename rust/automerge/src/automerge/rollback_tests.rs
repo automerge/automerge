@@ -256,6 +256,9 @@ fn rollback_delete_conflicted_field() {
 
 #[test]
 fn rollback_increment_counter_conflicted_by_non_counter() {
+    // Pinned timestamp as well as actor: hashes must not vary run to
+    // run, or a commit can land on a fragment-head hash (1/256) and
+    // free hashes this test still needs. See HASHLESS.md.
     // doc1 gets the higher actor so its counter wins over doc2's string.
     let mut doc1 = Automerge::new();
     doc1.set_actor(ActorId::from(b"zzzz")).unwrap();
@@ -265,19 +268,19 @@ fn rollback_increment_counter_conflicted_by_non_counter() {
     {
         let mut tx = doc1.transaction();
         tx.put(ROOT, "val", ScalarValue::counter(0)).unwrap();
-        tx.commit();
+        tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
     }
     doc2.merge(&mut doc1).unwrap();
 
     {
         let mut tx = doc1.transaction();
         tx.increment(ROOT, "val", 5).unwrap();
-        tx.commit();
+        tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
     }
     {
         let mut tx = doc2.transaction();
         tx.put(ROOT, "val", "not a counter").unwrap();
-        tx.commit();
+        tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
     }
     doc1.merge(&mut doc2).unwrap();
 

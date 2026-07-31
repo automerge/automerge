@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 
 use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
+use crate::edit::{Edit, SlabEdit};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
 use crate::PackError;
@@ -189,14 +190,32 @@ pub(crate) fn try_merge_range_skeleton(
     let mut end = range.end;
 
     if !range.is_empty() {
-        // external right — keep merging outward
-        while try_merge_pair(end - 1, end) {}
-        // internal left
-        if (start..end).len() > 1 && try_merge_pair(end - 2, end - 1) {
+        // Only three slabs of a rebuilt range can be undersized, so only
+        // the pairs around them are worth testing — a splice that spills
+        // a thousand slabs should not walk them.
+        //
+        //   [ edited | spill | spill | … | spill | partial ]
+        //
+        // The spills in the middle were cut at the segment budget, so
+        // they are full by construction. What can be short is the *first*
+        // slab (a delete shrank the one being edited), the *last spill*
+        // (it holds whatever was left over), and the *last* slab (one a
+        // cascading delete only partly consumed). `check_invariants`
+        // asserts the result globally, so a violation of that reasoning
+        // fails the fuzz rather than passing silently.
+        //
+        // Right end first: merging there shortens the range, and the left
+        // end's indices do not move.
+        if end >= start + 3 && try_merge_pair(end - 3, end - 2) {
             end -= 1;
         }
-        // internal right
-        if (start..end).len() > 1 && try_merge_pair(start, start + 1) {
+        if end >= start + 2 && try_merge_pair(end - 2, end - 1) {
+            end -= 1;
+        }
+        // external right — keep merging outward
+        while try_merge_pair(end - 1, end) {}
+        // the edited slab against the first slab that follows it
+        if end >= start + 2 && try_merge_pair(start, start + 1) {
             end -= 1;
         }
         // external left — keep merging outward
@@ -679,11 +698,26 @@ pub(crate) fn normalize_ranges(
 /// One point of a multi-point [`Column::copy_ranges`]: at destination
 /// position `pos` (pre-splice coordinates), delete `delete` rows and
 /// insert the source rows `range`.
+///
+/// The default is *all of the source, inserted at the front, deleting
+/// nothing* — source ranges are clamped to the source's length, so
+/// `0..usize::MAX` is the whole column. Copying a whole column onto the
+/// end of another is then `Splice { pos: dst.len(), ..Default::default() }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Splice {
     pub pos: usize,
     pub delete: usize,
     pub range: Range<usize>,
+}
+
+impl Default for Splice {
+    fn default() -> Self {
+        Self {
+            pos: 0,
+            delete: 0,
+            range: 0..usize::MAX,
+        }
+    }
 }
 
 /// Normalize a multi-point splice list: clamp src ranges to `src_len`,
@@ -1046,6 +1080,30 @@ where
     }
 }
 
+/// Call `f` for each gap between `splices`, with the source range to read
+/// and the position in the retained column it belongs at.
+///
+/// Positions are the copied ranges' running length: the rows a gap brings
+/// back land before the next copied range and do not move it.
+pub(crate) fn for_each_gap(
+    splices: &[Splice],
+    src_len: usize,
+    mut f: impl FnMut(usize, Range<usize>),
+) {
+    let mut end = 0;
+    let mut at = 0;
+    for sp in splices {
+        if sp.pos > end {
+            f(at, end..sp.pos);
+        }
+        end = sp.pos + sp.delete;
+        at += sp.range.len();
+    }
+    if src_len > end {
+        f(at, end..src_len);
+    }
+}
+
 impl<T, C, WF, Idx> Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
@@ -1206,6 +1264,78 @@ where
         WF::Weight: SlabAggregate,
     {
         *self = T::Encoding::<C>::remap(self.iter(), self.max_segments, f);
+    }
+
+    /// Check the *structural* invariants of the slab vector and index —
+    /// the things [`save`](Self::save) cannot catch, because it
+    /// re-encodes canonically and so hides slab layout entirely:
+    ///
+    /// * no empty slab (they carry no weight but are not transparent to
+    ///   sequential readers)
+    /// * no slab over the segment budget
+    /// * no adjacent pair that the merge policy should have coalesced —
+    ///   i.e. one of them under `max_segments / 4` and the two fitting
+    ///   in one slab
+    /// * each slab's cached `len` / `segments` / `tail` agrees with a
+    ///   fresh parse of its own bytes
+    /// * `total_len` is the sum of the slab lengths, and the index has
+    ///   one entry per slab with the matching weight
+    ///
+    /// Debug/test helper: O(items).
+    #[doc(hidden)]
+    pub fn check_invariants(&self)
+    where
+        WF::Weight: PartialEq + std::fmt::Debug,
+    {
+        let max = self.max_segments;
+        let min = (max / 4).max(1);
+        if self.total_len == 0 {
+            // an empty column keeps one empty slab to land the next
+            // splice in; more than that is a leak
+            assert!(
+                self.slabs.len() <= 1,
+                "empty column holds {} slabs",
+                self.slabs.len()
+            );
+            return;
+        }
+        for (i, slab) in self.slabs.iter().enumerate() {
+            assert_ne!(slab.len, 0, "slab {i} of {} is empty", self.slabs.len());
+            assert!(
+                slab.segments <= max || slab.segments == 1,
+                "slab {i} has {} segments, over the budget of {max} \
+                 (only a single oversize value may exceed it)",
+                slab.segments
+            );
+            let info = T::Encoding::<C>::validate_encoding(&slab.data)
+                .unwrap_or_else(|e| panic!("slab {i} does not parse: {e}"));
+            assert_eq!(info.len, slab.len, "slab {i} cached len");
+            assert_eq!(info.segments, slab.segments, "slab {i} cached segments");
+        }
+        for i in 1..self.slabs.len() {
+            let (a, b) = (self.slabs[i - 1].segments, self.slabs[i].segments);
+            assert!(
+                !((a < min || b < min) && a + b <= max),
+                "slabs {} and {i} ({a} and {b} segments) should have been merged \
+                 (min {min}, max {max})",
+                i - 1
+            );
+        }
+        assert_eq!(
+            self.total_len,
+            self.slabs.iter().map(|s| s.len).sum::<usize>(),
+            "total_len"
+        );
+        assert_eq!(self.index.len(), self.slabs.len(), "index length");
+        let mut before = 0usize;
+        for (i, slab) in self.slabs.iter().enumerate() {
+            assert_eq!(
+                self.index.items_before(i),
+                before,
+                "index items_before({i})"
+            );
+            before += slab.len;
+        }
     }
 
     /// Validate that the canonical encoding is well-formed.
@@ -1447,6 +1577,8 @@ where
     where
         I: IntoIterator<Item = Splice>,
         for<'b> T::Get<'b>: AsColumnRef<T>,
+        T::Encoding<C>: SlabEdit<Value = T>,
+        WF::Weight: SlabAggregate,
     {
         let splices = normalize_splices(splices, src.len(), self.len());
         if splices.is_empty() {
@@ -1466,16 +1598,24 @@ where
         strategy: CopyStrategy,
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
+        T::Encoding<C>: SlabEdit<Value = T>,
+        WF::Weight: SlabAggregate,
     {
         use crate::shift::Shiftable;
         match strategy {
             CopyStrategy::Direct => {
-                let mut shift = 0isize;
+                // Two forward passes that never restart. The source
+                // ranges ascend and never overlap, so one iterator covers
+                // them; the splice positions ascend in the original
+                // coordinates a cursor seeks in, so one cursor covers
+                // those, and the ones landing in a slab share its rebuild.
+                let mut runs = src.iter().runs();
+                let mut e = self.edit();
                 for sp in splices {
-                    let at = (sp.pos as isize + shift) as usize;
-                    self.splice_runs(at, sp.delete, src.iter().runs().ranges([sp.range.clone()]));
-                    shift += sp.range.len() as isize - sp.delete as isize;
+                    runs.shift(sp.range.clone());
+                    e.seek(sp.pos).delete(sp.delete).insert_runs(&mut runs);
                 }
+                e.finish();
             }
             CopyStrategy::Invert => {
                 // keep src's slabs: swap, drop the gaps (interior slabs
@@ -1486,19 +1626,13 @@ where
                 self.swap_contents(&mut src);
                 let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
                 self.retain_ranges(&ranges);
-                let mut out_pos = 0usize;
-                let mut prev_end = 0usize;
-                for sp in splices {
-                    if sp.pos > prev_end {
-                        self.splice_runs(out_pos, 0, src.iter_range(prev_end..sp.pos).runs());
-                        out_pos += sp.pos - prev_end;
-                    }
-                    prev_end = sp.pos + sp.delete;
-                    out_pos += sp.range.len();
-                }
-                if old_len > prev_end {
-                    self.splice_runs(out_pos, 0, src.iter_range(prev_end..old_len).runs());
-                }
+                let mut runs = src.iter().runs();
+                let mut e = self.edit();
+                for_each_gap(splices, old_len, |at, gap| {
+                    runs.shift(gap);
+                    e.seek(at).insert_runs(&mut runs);
+                });
+                e.finish();
             }
         }
     }
@@ -1776,7 +1910,7 @@ where
         false
     }
 
-    fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
+    pub(crate) fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
         try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
     }
 }
@@ -1984,6 +2118,33 @@ where
     }
 }
 
+impl<T, C, WF, Idx> Column<T, C, WF, Idx>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
+    WF: WeightFn<T, C>,
+    WF::Weight: SlabAggregate,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    /// Open a forward-only read/write cursor at the start of the column.
+    ///
+    /// ```ignore
+    /// col.edit()
+    ///     .seek(10).delete(2).insert(value)
+    ///     .seek(100).replace(|n| n + 1)
+    ///     .finish();
+    /// ```
+    pub fn edit(&mut self) -> Edit<'_, T, C, WF, Idx> {
+        Edit::new(self, 0)
+    }
+
+    /// [`edit`](Self::edit) starting at original position `at`.
+    pub fn edit_at(&mut self, at: usize) -> Edit<'_, T, C, WF, Idx> {
+        Edit::new(self, at)
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2141,5 +2302,399 @@ mod tests {
         let loaded = Column::<u32>::load(&bytes);
         assert!(loaded.is_ok(), "Column<u32> should accept u32::MAX");
         assert_eq!(loaded.unwrap().get(0), Some(u32::MAX));
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+    /// The cursor and a loop of one-shot splices must agree exactly —
+    /// values, saved bytes and length — for every edit script.
+    fn check(input: Vec<u64>, script: Vec<(usize, usize, Vec<u64>)>, max_seg: usize) {
+        let mut a = Column::<u64>::from_values_with_max_segments(input.clone(), max_seg);
+        let mut b = a.clone();
+
+        // via the cursor: one pass, forward only
+        {
+            let mut e = a.edit_at(0);
+            for (pos, del, ins) in &script {
+                e.seek(*pos)
+                    .delete(*del)
+                    .insert_runs(ins.iter().map(|v| Run {
+                        count: 1,
+                        value: *v,
+                    }));
+            }
+            e.finish();
+        }
+
+        // via one-shot splices. The cursor seeks in *original*
+        // coordinates, so the equivalent splice sequence is back to
+        // front — each splice then sees the same positions the cursor
+        // did, with no shift bookkeeping on either side.
+        for (pos, del, ins) in script.iter().rev() {
+            b.splice(*pos, *del, ins.iter().copied());
+        }
+
+        a.check_invariants();
+        b.check_invariants();
+        assert_eq!(
+            a.iter().collect::<Vec<_>>(),
+            b.iter().collect::<Vec<_>>(),
+            "values for {script:?}"
+        );
+        assert_eq!(a.len(), b.len(), "len for {script:?}");
+        assert_eq!(a.save(), b.save(), "bytes for {script:?}");
+    }
+
+    #[test]
+    fn single_insert() {
+        check(vec![1, 1, 2, 3], vec![(2, 0, vec![9])], 64);
+    }
+
+    #[test]
+    fn two_edits_same_slab() {
+        check(
+            vec![1, 1, 1, 1, 1, 1, 1, 1],
+            vec![(1, 0, vec![7]), (4, 0, vec![8, 8])],
+            64,
+        );
+    }
+
+    #[test]
+    fn edits_with_deletes() {
+        check(
+            (0..40u64).map(|i| i / 3).collect(),
+            vec![(3, 2, vec![9]), (10, 1, vec![]), (20, 0, vec![5, 5, 5])],
+            64,
+        );
+    }
+
+    #[test]
+    fn peek_and_replace() {
+        let mut col = Column::<u64>::from_values_with_max_segments(vec![1, 2, 2, 3, 9], 4);
+        {
+            let mut e = col.edit();
+            assert_eq!(e.peek(), Some(1));
+            e.seek(1);
+            assert_eq!(e.peek(), Some(2));
+            // read-modify-write, the succ-count / visibility shape
+            e.replace(|v| v + 10);
+            assert_eq!(e.pos(), 2, "replace consumes the item it rewrote");
+            e.seek(4).replace(|v| v * 2);
+            e.finish();
+        }
+        assert_eq!(col.iter().collect::<Vec<_>>(), vec![1, 12, 2, 3, 18]);
+    }
+
+    /// A replace that does not change the value must leave the slab
+    /// clean — no rebuild at all.
+    #[test]
+    fn noop_replace_stays_clean() {
+        let mut col = Column::<u64>::from_values_with_max_segments(vec![5, 5, 5, 7, 7], 4);
+        let before = col.save();
+        {
+            let mut e = col.edit();
+            e.seek(1).replace(|v| v); // same value
+            e.seek(3).replace(|v| v);
+            assert_eq!(e.rebuilds(), 0, "a no-op replace must not rebuild");
+            e.finish();
+            // and the cursor is still where a real replace would leave it
+        }
+        assert_eq!(col.save(), before, "bytes unchanged");
+        col.check_invariants();
+
+        // one real change rebuilds exactly one slab
+        let mut e = col.edit();
+        e.seek(1).replace(|v| v + 1);
+        assert_eq!(e.rebuilds(), 0, "not yet — the rebuild closes at finish");
+        e.finish();
+        assert_eq!(e.rebuilds(), 1, "one slab touched");
+        drop(e);
+        assert_eq!(col.iter().collect::<Vec<_>>(), vec![5, 6, 5, 7, 7]);
+        col.check_invariants();
+    }
+
+    #[test]
+    fn peek_past_the_end_is_none() {
+        let mut col = Column::<u64>::from_values(vec![1, 2]);
+        let mut e = col.edit();
+        e.seek(2);
+        assert_eq!(e.peek(), None);
+        e.finish();
+    }
+
+    #[test]
+    fn across_slabs() {
+        // small budget so the column has many slabs
+        check(
+            (0..500u64).collect(),
+            vec![(5, 0, vec![9]), (100, 3, vec![7]), (400, 0, vec![1, 1])],
+            8,
+        );
+    }
+
+    #[test]
+    fn overflowing_insert() {
+        // insert enough distinct values in one place to outgrow the budget
+        check(
+            (0..100u64).collect(),
+            vec![(50, 0, (1000..1100u64).collect())],
+            8,
+        );
+    }
+
+    #[test]
+    fn delete_across_slabs() {
+        check((0..300u64).collect(), vec![(10, 120, vec![7])], 8);
+    }
+}
+
+#[cfg(test)]
+mod edit_fuzz {
+    use super::*;
+
+    /// xorshift, so the cases are reproducible without a dev-dependency
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn below(&mut self, n: usize) -> usize {
+            if n == 0 {
+                0
+            } else {
+                (self.next() % n as u64) as usize
+            }
+        }
+    }
+
+    /// An edit script in original coordinates: ascending positions, each
+    /// with a delete count and a run of inserts.
+    fn script(rng: &mut Rng, len: usize, edits: usize) -> Vec<(usize, usize, usize)> {
+        let mut out = Vec::new();
+        let mut pos = 0usize;
+        for _ in 0..edits {
+            pos += rng.below(len / edits.max(1) + 2);
+            if pos > len {
+                break;
+            }
+            let del = rng.below(4).min(len - pos);
+            let ins = rng.below(5);
+            out.push((pos, del, ins));
+            pos += del;
+            if pos > len {
+                break;
+            }
+        }
+        out
+    }
+
+    /// The cursor and a loop of one-shot splices must agree exactly, for
+    /// every value shape and every slab budget.
+    fn run<T, F>(seed: u64, make: F, max_seg: usize)
+    where
+        T: ColumnValueRef + Clone + PartialEq + std::fmt::Debug,
+        T::Encoding<Leb128>: SlabEdit<Value = T>,
+        for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + std::fmt::Debug,
+        F: Fn(&mut Rng) -> T,
+    {
+        let mut rng = Rng(seed.max(1));
+        let len = 1 + rng.below(120);
+        let vals: Vec<T> = (0..len).map(|_| make(&mut rng)).collect();
+        let mut a = Column::<T>::from_values_with_max_segments(vals.clone(), max_seg);
+        let mut b = a.clone();
+        let edits = 1 + rng.below(6);
+        let plan = script(&mut rng, len, edits);
+        let inserts: Vec<Vec<T>> = plan
+            .iter()
+            .map(|(_, _, n)| (0..*n).map(|_| make(&mut rng)).collect())
+            .collect();
+
+        {
+            let mut e = a.edit();
+            for ((pos, del, _), ins) in plan.iter().zip(&inserts) {
+                e.seek(*pos).delete(*del);
+                for v in ins {
+                    e.insert(v.clone());
+                }
+            }
+            e.finish();
+        }
+        for ((pos, del, _), ins) in plan.iter().zip(&inserts).rev() {
+            b.splice(*pos, *del, ins.iter().cloned());
+        }
+
+        a.check_invariants();
+        b.check_invariants();
+        let av: Vec<T> = a.iter().map(T::to_owned).collect();
+        let bv: Vec<T> = b.iter().map(T::to_owned).collect();
+        assert_eq!(av, bv, "values seed={seed} max_seg={max_seg} plan={plan:?}");
+        assert_eq!(a.len(), b.len(), "len seed={seed}");
+        assert_eq!(a.save(), b.save(), "bytes seed={seed} plan={plan:?}");
+    }
+
+    #[test]
+    fn u64_columns() {
+        for seed in 1..300u64 {
+            for max_seg in [4usize, 8, 64] {
+                // a mix of long runs and distinct values, so slabs hold
+                // both repeat runs and literal groups
+                run::<u64, _>(seed, |r| r.below(6) as u64, max_seg);
+                run::<u64, _>(seed, |r| r.next() % 10_000, max_seg);
+            }
+        }
+    }
+
+    #[test]
+    fn nullable_columns() {
+        for seed in 1..200u64 {
+            for max_seg in [4usize, 64] {
+                run::<Option<u64>, _>(
+                    seed,
+                    |r| match r.below(3) {
+                        0 => None,
+                        _ => Some(r.below(5) as u64),
+                    },
+                    max_seg,
+                );
+            }
+        }
+    }
+
+    /// The clone the owned cursor state pays only shows up here.
+    #[test]
+    fn string_columns() {
+        for seed in 1..150u64 {
+            for max_seg in [4usize, 64] {
+                run::<Option<String>, _>(
+                    seed,
+                    |r| match r.below(4) {
+                        0 => None,
+                        _ => Some(format!("v{}", r.below(4))),
+                    },
+                    max_seg,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod merge_skeleton {
+    use super::try_merge_range_skeleton;
+
+    /// Merge the pair when either side is under `min` and the two fit —
+    /// `Column::try_merge`'s rule, over a list of segment counts.
+    fn walk(segs: &mut Vec<usize>, range: std::ops::Range<usize>, min: usize, max: usize) {
+        try_merge_range_skeleton(range, |a, b| {
+            if b >= segs.len() {
+                return false;
+            }
+            if (segs[a] < min || segs[b] < min) && segs[a] + segs[b] <= max {
+                segs[a] += segs[b];
+                segs.remove(b);
+                return true;
+            }
+            false
+        });
+    }
+
+    /// The undersized slab is in the middle of the range, which is where
+    /// a rebuild that spills and then cascades a delete puts it.
+    #[test]
+    fn merges_an_interior_pair() {
+        let mut segs = vec![8, 4, 1, 8];
+        walk(&mut segs, 0..4, 2, 8);
+        assert_eq!(segs, vec![8, 5, 8]);
+    }
+
+    /// The last spill and the partly-consumed slab both short: the merge
+    /// walks from the right end, so the second pair sees the first's
+    /// result.
+    #[test]
+    fn merges_both_short_slabs_at_the_right_end() {
+        let mut segs = vec![8, 4, 1, 1];
+        walk(&mut segs, 0..4, 2, 8);
+        assert_eq!(segs, vec![8, 6]);
+    }
+
+    /// Merging outward, past the right end of the range.
+    #[test]
+    fn merges_past_the_right_end() {
+        let mut segs = vec![3, 1, 3];
+        walk(&mut segs, 1..2, 2, 8);
+        assert_eq!(segs, vec![3, 4]);
+    }
+
+    /// And past the left end.
+    #[test]
+    fn merges_past_the_left_end() {
+        let mut segs = vec![1, 3, 5];
+        walk(&mut segs, 1..2, 2, 8);
+        assert_eq!(segs, vec![4, 5]);
+    }
+
+    /// Neighbours too big to absorb an undersized slab are left alone —
+    /// merging is bounded by the budget, not obligatory.
+    #[test]
+    fn leaves_a_pair_that_would_overflow() {
+        let mut segs = vec![8, 1, 8];
+        walk(&mut segs, 1..2, 2, 8);
+        assert_eq!(segs, vec![8, 1, 8]);
+    }
+}
+
+#[cfg(test)]
+mod edit_small {
+    use super::*;
+
+    /// Exhaustive over small scripts — cheap, and it is what caught the
+    /// end-of-column reposition bug (a delete, then a seek to the end,
+    /// then an insert, landing through a stale slab offset).
+    #[test]
+    fn small_scripts_exhaustive() {
+        for len in 2..10usize {
+            for max_seg in [4usize] {
+                let vals: Vec<u64> = (0..len as u64).collect();
+                for p0 in 0..len {
+                    for d0 in 0..=(len - p0).min(3) {
+                        for p1 in (p0 + d0)..=len {
+                            for i1 in 0..2usize {
+                                let mut a = Column::<u64>::from_values_with_max_segments(
+                                    vals.clone(),
+                                    max_seg,
+                                );
+                                let mut b = a.clone();
+                                {
+                                    let mut e = a.edit();
+                                    e.seek(p0).delete(d0).seek(p1);
+                                    for k in 0..i1 {
+                                        e.insert(100 + k as u64);
+                                    }
+                                    e.finish();
+                                }
+                                b.splice(p1, 0, (0..i1).map(|k| 100 + k as u64));
+                                b.splice(p0, d0, std::iter::empty::<u64>());
+                                b.check_invariants();
+                                a.check_invariants();
+                                let av: Vec<u64> = a.iter().collect();
+                                let bv: Vec<u64> = b.iter().collect();
+                                if av != bv {
+                                    panic!(
+                                        "len={len} p0={p0} d0={d0} p1={p1} ins={i1}\n cursor={av:?}\n splice={bv:?}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

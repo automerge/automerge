@@ -193,39 +193,6 @@ impl Columns {
         (raw, data)
     }
 
-    #[cfg(test)]
-    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
-        [
-            // op
-            ("id_actor", self.id_actor.save()),
-            ("id_ctr", self.id_ctr.save()),
-            ("obj_actor", self.obj_actor.save()),
-            ("obj_ctr", self.obj_ctr.save()),
-            ("key_actor", self.key_actor.save()),
-            ("key_ctr", self.key_ctr.save()),
-            ("key_str", self.key_str.save()),
-            ("insert", self.insert.save()),
-            ("action", self.action.save()),
-            ("value_meta", self.value_meta.save()),
-            ("value", self.value.save()),
-            ("mark_name", self.mark_name.save()),
-            ("expand", self.expand.save()),
-            // succ
-            ("succ_count", self.succ_count.save()),
-            ("succ_actor", self.succ_actor.save()),
-            ("succ_ctr", self.succ_ctr.save()),
-            // indexes
-            ("visible", self.index.visible.save()),
-            ("inc", self.index.inc.save()),
-            ("mark", self.index.mark.save()),
-            ("text", self.index.text.save()),
-            ("top", self.index.top.save()),
-            ("visible", self.index.visible.save()),
-        ]
-        .into_iter()
-        .collect()
-    }
-
     pub(crate) fn validate(
         bytes: usize,
         cols: &RawColumns<Uncompressed>,
@@ -334,6 +301,8 @@ impl Columns {
                 &mut insert_src,
                 &mut key_str_src,
                 rare,
+                // a document's sequence registers are insert-bounded
+                None,
             )?;
         }
         index.flush();
@@ -384,6 +353,9 @@ impl Columns {
         Ok((columns, index))
     }
 
+    /// Load op columns. Documents and fragments share this verbatim: a
+    /// fragment's columns carry the same specs at the same types, plus
+    /// pred and hint, which are never looked up here.
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
@@ -436,69 +408,6 @@ impl Columns {
             mark_name,
             expand,
             index,
-        })
-    }
-
-    /// Load a fragment's op columns through the same per-column loaders
-    /// as [`Self::load`]. Fragments carry the same specs as documents
-    /// (their extra pred/inverse columns are simply not consulted) except
-    /// the id counter, which arrives realized (decoded from the inverse
-    /// column) instead of as a delta column — so it is built from values
-    /// here.
-    pub(super) fn load_frag(
-        cols: BTreeMap<ColumnSpec, Range<usize>>,
-        data: &[u8],
-        id_ctr: &[i64],
-    ) -> Result<Self, PackError> {
-        let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
-
-        let id_actor = MappedColumn::<ActorIdx>::load(_d(ID_ACTOR_COL_SPEC))?;
-        let len = id_actor.len();
-        let opts = hexane::LoadOpts::new().with_length(len);
-
-        if id_ctr.len() != len {
-            return Err(PackError::InvalidLength(id_ctr.len(), len));
-        }
-        let id_ctr =
-            hexane::DeltaColumn::from_values(id_ctr.iter().map(|&v| v as u32).collect::<Vec<_>>());
-        let obj_actor = MappedColumn::load_with(_d(OBJ_ID_ACTOR_COL_SPEC), opts.with_fill(None))?;
-        let obj_ctr = hexane::Column::load_with(_d(OBJ_ID_COUNTER_COL_SPEC), opts.with_fill(None))?;
-        let key_actor = MappedColumn::load_with(_d(KEY_ACTOR_COL_SPEC), opts.with_fill(None))?;
-        let key_ctr =
-            hexane::DeltaColumn::load_with(_d(KEY_COUNTER_COL_SPEC), opts.with_fill(None))?;
-        let key_str = hexane::Column::load_with(_d(KEY_STR_COL_SPEC), opts.with_fill(None))?;
-        let insert = hexane::PrefixColumn::load_with(_d(INSERT_COL_SPEC), opts.with_fill(false))?;
-        let action = hexane::Column::load_with(_d(ACTION_COL_SPEC), opts)?;
-        let value_meta = hexane::PrefixColumn::load_with(_d(VALUE_META_COL_SPEC), opts)?;
-        let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
-        let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
-        let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
-        let succ_count = hexane::PrefixColumn::load_with(_d(SUCC_COUNT_COL_SPEC), opts)?;
-
-        let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
-        let succ_opts = hexane::LoadOpts::new().with_length(succ_len);
-
-        let succ_actor = MappedColumn::load_with(_d(SUCC_ACTOR_COL_SPEC), succ_opts)?;
-        let succ_ctr = hexane::DeltaColumn::load_with(_d(SUCC_COUNTER_COL_SPEC), succ_opts)?;
-
-        Ok(Self {
-            id_actor,
-            id_ctr,
-            obj_actor,
-            obj_ctr,
-            key_actor,
-            key_ctr,
-            key_str,
-            succ_count,
-            succ_actor,
-            succ_ctr,
-            insert,
-            action,
-            value_meta,
-            value,
-            mark_name,
-            expand,
-            index: Indexes::default(),
         })
     }
 
@@ -800,6 +709,30 @@ impl Columns {
 
     pub(crate) fn sub_len(&self) -> usize {
         self.succ_actor.len()
+    }
+
+    /// Every row column holds one entry per row, and the sub columns
+    /// hold what the counts add up to — the invariant an edit that
+    /// misses a column breaks. Op columns only: the indexes are built,
+    /// not edited.
+    pub(super) fn columns_agree(&self) -> bool {
+        let len = self.len();
+        let sub = self.succ_count.get_prefix(len) as usize;
+        len == self.id_ctr.len()
+            && len == self.obj_actor.len()
+            && len == self.obj_ctr.len()
+            && len == self.key_actor.len()
+            && len == self.key_ctr.len()
+            && len == self.key_str.len()
+            && len == self.insert.len()
+            && len == self.action.len()
+            && len == self.value_meta.len()
+            && len == self.mark_name.len()
+            && len == self.expand.len()
+            && len == self.succ_count.len()
+            && sub == self.succ_actor.len()
+            && sub == self.succ_ctr.len()
+            && self.value_meta.get_prefix(len) as usize == self.value.len()
     }
 
     pub(crate) fn dump(&self) {

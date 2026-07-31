@@ -32,6 +32,26 @@ divan = "0.1.15"
 debug = true
 
 [[bench]]
+name = "edit_vs_splice"
+harness = false
+
+[[bench]]
+name = "edit_overhead"
+harness = false
+
+[[bench]]
+name = "delta_edit_vs_splice"
+harness = false
+
+[[bench]]
+name = "delta_overhead"
+harness = false
+
+[[bench]]
+name = "string_clone_cost"
+harness = false
+
+[[bench]]
 name = "column_ops"
 harness = false
 

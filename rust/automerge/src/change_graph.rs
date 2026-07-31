@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Add;
 use std::ops::RangeBounds;
 
@@ -27,10 +27,25 @@ use crate::{
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
-    edges: Vec<Edge>,
     hashes: Hashes,
     actors: Vec<ActorIdx>,
-    parents: Vec<Option<EdgeIdx>>,
+    /// Parent (dependency) edges: `dep_range[n]` is the `(offset, count)`
+    /// of node `n`'s parents within `dep_target`.
+    ///
+    /// The wire format already stores deps as a group column, so a load is
+    /// a straight copy — offsets are the count column's running sum,
+    /// targets are the value column verbatim. This data is append-only
+    /// (nodes arrive in topological order and a node's parents are written
+    /// with it), so no entry is ever moved.
+    ///
+    /// Replaces a per-node linked list whose `add_parent` walked to the
+    /// tail on every edge — quadratic in a node's dep count — and whose
+    /// traversal pointer-chased a `Vec<Edge>`. These are plain `Vec`s, not
+    /// hexane columns, deliberately: `parents()` is read per node inside
+    /// the clock-cache ancestry walks, where an O(1) index and a
+    /// contiguous slice beat a compressed column's `get_prefix`.
+    dep_range: Vec<(u32, u32)>,
+    dep_target: Vec<NodeIdx>,
     seq: Vec<u32>,
     max_ops: Vec<u32>,
     max_op: u32,
@@ -121,6 +136,25 @@ impl Hashes {
             Self::Full(v) => v.get(idx.0 as usize).copied(),
             Self::Retained { map, .. } => map.get(&idx).copied(),
         }
+    }
+
+    /// Every node whose hash is known, in no particular order.
+    ///
+    /// Outside audit mode this is the retained set — a few hundred
+    /// entries on a document with a hundred thousand changes — which is
+    /// why the retention rule reads it rather than the node range.
+    fn iter(&self) -> impl Iterator<Item = (NodeIdx, ChangeHash)> + '_ {
+        let full = match self {
+            Self::Full(v) => Some(v.iter().enumerate().map(|(i, h)| (NodeIdx(i as u32), *h))),
+            Self::Retained { .. } => None,
+        };
+        let retained = match self {
+            Self::Full(_) => None,
+            Self::Retained { map, .. } => Some(map.iter().map(|(n, h)| (*n, *h))),
+        };
+        full.into_iter()
+            .flatten()
+            .chain(retained.into_iter().flatten())
     }
 
     fn try_get(&self, idx: NodeIdx) -> Result<ChangeHash, UncheckedHashes> {
@@ -223,25 +257,16 @@ impl Add<usize> for NodeIdx {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct EdgeIdx(NonZeroU32);
-
-impl EdgeIdx {
-    fn new(value: usize) -> Self {
-        EdgeIdx(NonZeroU32::new(value as u32 + 1).unwrap())
-    }
-    fn get(&self) -> usize {
-        self.0.get() as usize - 1
-    }
+/// The first `n` items of `iter`, filling with `default` once it runs
+/// out — an elided column decodes as empty and stands for a column of
+/// defaults.
+fn pad<T: Clone>(iter: impl Iterator<Item = T>, default: T, n: usize) -> impl Iterator<Item = T> {
+    iter.chain(std::iter::repeat(default)).take(n)
 }
 
-#[derive(PartialEq, Debug, Clone)]
-struct Edge {
-    // Edges are always child -> parent so we only store the target, the child is implicit
-    // as you get the edge from the child
-    target: NodeIdx,
-    next: Option<EdgeIdx>,
-}
+/// A change with no extra bytes: zero-length, and typed as bytes like
+/// every other entry in the extra column.
+const NO_EXTRA: ValueMeta = ValueMeta::bytes(0);
 
 /// A member change of a bundle being applied without conversion into
 /// [`Change`]s — everything the graph needs except the change's hash.
@@ -270,7 +295,6 @@ pub(crate) enum FragmentDep {
 impl ChangeGraph {
     pub(crate) fn new(num_actors: usize) -> Self {
         Self {
-            edges: Vec::new(),
             nodes_by_hash: HashMap::new(),
             hashes: Hashes::default(),
             actors: Vec::new(),
@@ -278,7 +302,8 @@ impl ChangeGraph {
             max_op: 0,
             num_ops: hexane::Column::new(),
             seq: Vec::new(),
-            parents: Vec::new(),
+            dep_range: Vec::new(),
+            dep_target: Vec::new(),
             messages: hexane::Column::new(),
             timestamps: hexane::DeltaColumn::new(),
             extra_bytes_meta: hexane::PrefixColumn::new(),
@@ -447,58 +472,68 @@ impl ChangeGraph {
         (0..end).map(NodeIdx)
     }
 
-    /// The `(node index, hash)` pairs the hash columns persist — see
-    /// `encode`. Empty on a plain unchecked graph.
+    /// Whether the fragment frontier has reached node `n` — i.e. some
+    /// cached fragment's clock covers it. A clock comparison against the
+    /// node's own `(actor, seq)`, not an ancestry walk.
+    fn is_covered(&self, n: NodeIdx) -> bool {
+        let i = n.0 as usize;
+        let actor = usize::from(self.actors[i]);
+        self.fragment_top.get_for_actor(&actor) >= NonZeroU32::new(self.seq[i])
+    }
+
     /// The retention rule: which known-hash nodes must keep their hashes
     /// outside audit mode. Fragment heads and checkpoints (any node with
     /// `fragment_level() > 0`), loose commits (level-0 nodes above the
     /// fragment frontier) plus their covered level-0 parents (anchors —
     /// their fragment boundaries need them). Heads are not included; add
     /// them when the caller needs the full retained set.
-    fn retained_node_bitmap(&self) -> Vec<bool> {
-        let n = self.len();
-        let covered = |i: usize| {
-            let actor = usize::from(self.actors[i]);
-            self.fragment_top.get_for_actor(&actor) >= NonZeroU32::new(self.seq[i])
-        };
-        let mut store = vec![false; n];
-        for i in 0..n {
-            let Some(hash) = self.hashes.get(NodeIdx(i as u32)) else {
-                continue;
-            };
+    ///
+    /// Driven by the *hashes*, not by the node range. Only a node whose
+    /// hash is still known can be retained, so iterating the retained map
+    /// visits every candidate — where walking `0..len()` spent a hash
+    /// lookup per node in the graph to find the same few hundred. On a
+    /// 93k-change document that walk was the entire cost of the retention
+    /// GC (and of every `save`), and it recomputed a set the map already
+    /// delimited.
+    ///
+    /// Ordered, because [`Self::stored_hashes`] must emit ascending node
+    /// indexes.
+    fn retained_nodes(&self) -> BTreeSet<NodeIdx> {
+        let mut keep = BTreeSet::new();
+        for (n, hash) in self.hashes.iter() {
             if hash.fragment_level() > 0 {
-                store[i] = true;
-            } else if !covered(i) {
+                keep.insert(n);
+            } else if !self.is_covered(n) {
                 // a loose commit — plus its covered level-0 parents
                 // (anchors), which its fragment boundary will need
-                store[i] = true;
-                for p in self.parents(NodeIdx(i as u32)) {
-                    let pi = p.0 as usize;
-                    if covered(pi)
+                keep.insert(n);
+                for p in self.parents(n) {
+                    if self.is_covered(p)
                         && self
                             .hashes
                             .get(p)
                             .is_some_and(|ph| ph.fragment_level() == 0)
                     {
-                        store[pi] = true;
+                        keep.insert(p);
                     }
                 }
             }
         }
-        store
+        keep
     }
 
+    /// The `(node index, hash)` pairs the hash columns persist — see
+    /// `encode`. Empty on a plain unchecked graph.
     fn stored_hashes(&self) -> Vec<(u32, ChangeHash)> {
-        let store = self.retained_node_bitmap();
-        (0..self.len())
-            .filter(|i| store[*i])
-            .filter_map(|i| {
-                let hash = self.hashes.get(NodeIdx(i as u32))?;
+        self.retained_nodes()
+            .into_iter()
+            .filter_map(|n| {
+                let hash = self.hashes.get(n)?;
                 // the head-index suffix already stores the heads
                 if self.heads.contains(&hash) {
                     return None;
                 }
-                Some((i as u32, hash))
+                Some((n.0, hash))
             })
             .collect()
     }
@@ -507,23 +542,20 @@ impl ChangeGraph {
     /// in) the [`Hashes::Retained`] representation — the disable-audit
     /// transition, also the GC run when fragments usurp prior coverage.
     pub(crate) fn retain_hashes_only(&mut self) {
-        let store = self.retained_node_bitmap();
+        let keep = self.retained_nodes();
         // the hash count, NOT the graph's node count: during
         // `add_changes` the nodes are all added up front while hashes
         // are pushed one at a time, and a GC firing mid-loop (a new
         // change formed a fragment) must leave the push cursor where
         // it was
         let len = self.hashes.len();
-        let mut map = HashMap::new();
-        for (i, keep) in store.iter().enumerate() {
-            let n = NodeIdx(i as u32);
-            let Some(hash) = self.hashes.get(n) else {
-                continue;
-            };
-            if *keep || self.heads.contains(&hash) {
-                map.insert(n, hash);
-            }
-        }
+        // the heads are retained too, and a head's node need not be in
+        // `keep` (a covered head with a late-arriving child)
+        let map: HashMap<NodeIdx, ChangeHash> = self
+            .hashes
+            .iter()
+            .filter(|(n, hash)| keep.contains(n) || self.heads.contains(hash))
+            .collect();
         self.nodes_by_hash.retain(|_, n| map.contains_key(n));
         self.hashes = Hashes::Retained { map, len };
     }
@@ -647,14 +679,12 @@ impl ChangeGraph {
         &self,
         hash: &ChangeHash,
     ) -> impl Iterator<Item = Result<ChangeHash, UncheckedHashes>> + '_ {
-        let node_idx = self.nodes_by_hash.get(hash);
-        let mut edge_idx = node_idx.and_then(|n| self.parents[n.0 as usize]);
-        std::iter::from_fn(move || {
-            let this_edge_idx = edge_idx?;
-            let edge = &self.edges[this_edge_idx.get()];
-            edge_idx = edge.next;
-            Some(self.hashes.try_get(edge.target))
-        })
+        let parents = self
+            .nodes_by_hash
+            .get(hash)
+            .map(|n| self.parent_slice(*n))
+            .unwrap_or(&[]);
+        parents.iter().map(move |p| self.hashes.try_get(*p))
     }
 
     fn lookup_hash(&self, hash: &ChangeHash) -> HashLookup {
@@ -963,7 +993,6 @@ impl ChangeGraph {
         self.messages.extend(iter.clone().map(|(c, _)| c.message()));
         self.extra_bytes_meta
             .extend(iter.clone().map(|(c, _)| ValueMeta::from(c.extra_bytes())));
-        self.parents.extend(std::iter::repeat_n(None, iter.len()));
         for (c, _) in iter {
             self.extra_bytes_raw.extend_from_slice(c.extra_bytes());
         }
@@ -999,9 +1028,7 @@ impl ChangeGraph {
                 // callers check deps before calling us
                 return Err(MissingDep(*missing).into());
             }
-            for parent in nodes {
-                self.add_parent(node_idx, parent);
-            }
+            self.push_parents(node_idx, nodes);
 
             if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
                 self.cache_clock(node_idx);
@@ -1318,12 +1345,6 @@ impl ChangeGraph {
         }
     }
 
-    fn cache_fragment(&mut self, head: NodeIdx) {
-        if self.cache_fragment_inner(head) {
-            self.gc_retained_hashes();
-        }
-    }
-
     /// Outside audit mode, a new fragment frees the hashes it now covers
     /// (its members become interior history; only heads, checkpoints,
     /// loose commits and anchors stay retained). Callers batching many
@@ -1410,12 +1431,11 @@ impl ChangeGraph {
             .extend(members.iter().map(|m| m.message.clone()));
         self.extra_bytes_meta
             .extend(members.iter().map(|m| ValueMeta::from(m.extra.as_ref())));
-        self.parents
-            .extend(std::iter::repeat_n(None, members.len()));
         for m in &members {
             self.extra_bytes_raw.extend_from_slice(&m.extra);
         }
 
+        let mut parent_buf: Vec<NodeIdx> = Vec::new();
         for (i, m) in members.iter().enumerate() {
             let node_idx = base + i;
             self.max_op = std::cmp::max(self.max_op, m.max_op as u32);
@@ -1424,25 +1444,190 @@ impl ChangeGraph {
             assert_eq!(self.seq_index[m.actor].len() + 1, m.seq as usize);
             self.seq_index[m.actor].push(node_idx);
 
-            for d in &m.deps {
-                let parent = match d {
-                    FragmentDep::Member(j) => {
-                        debug_assert!(*j < i);
-                        base + *j
-                    }
-                    FragmentDep::Node(n) => *n,
-                };
-                self.add_parent(node_idx, parent);
+            parent_buf.clear();
+            parent_buf.extend(m.deps.iter().map(|d| match d {
+                FragmentDep::Member(j) => {
+                    debug_assert!(*j < i);
+                    base + *j
+                }
+                FragmentDep::Node(n) => *n,
+            }));
+            for &parent in &parent_buf {
                 // a parent that was a head is now covered
                 if let Some(h) = self.hashes.get(parent) {
                     self.heads.remove(&h);
                 }
             }
+            self.push_parents(node_idx, parent_buf.iter().copied());
+        }
+        // one forward sweep over the appended range, instead of an
+        // ancestry walk every CACHE_STEP nodes
+        self.cache_clocks_from(base.0 as usize);
+    }
 
-            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
-                self.cache_clock(node_idx);
+    /// Append a bundle's member changes straight from its columns.
+    ///
+    /// The columnar twin of [`Self::add_fragment_members`], and the same
+    /// shape as [`ChangeGraphCols::load`]: each of the bundle's change
+    /// columns is decoded once, in one pass, into the graph's own column
+    /// — no per-member struct, no dep `Vec` per member, no re-encode. The
+    /// caller has already resolved the members' actors and sequence
+    /// numbers (it needs them to decide which members to keep) and the
+    /// external deps, so nothing here has to consult the document.
+    ///
+    /// Only valid when *every* member is being kept: a member's deps name
+    /// other members by position, which is the node offset from `base`
+    /// only if none were skipped. The partial (overlap) case goes through
+    /// [`Self::add_fragment_members`].
+    ///
+    /// `ext_nodes` holds the resolved node of each of the bundle's
+    /// external deps, in the bundle's dep order — a dep index at or above
+    /// the member count indexes it.
+    ///
+    /// The columns are validated where they are read, and every read that
+    /// can fail happens before the graph is touched: a malformed bundle
+    /// leaves the graph exactly as it was.
+    pub(crate) fn add_fragment_members_cols(
+        &mut self,
+        cols: &crate::storage::BundleChangeCols<'_>,
+        member_actors: &[ActorIdx],
+        member_seqs: &[NonZeroU64],
+        actor_map: &[usize],
+        ext_nodes: &[NodeIdx],
+    ) -> Result<(), AutomergeError> {
+        let bad = |s: &'static str| AutomergeError::InvalidFragment(s);
+        let base = NodeIdx(self.len() as u32);
+        let n = member_actors.len();
+        debug_assert_eq!(n, member_seqs.len());
+
+        // ── decode, validating ──────────────────────────────────────
+
+        // The bundle stores num_ops, timestamps, messages and the extra
+        // widths in exactly the encodings the graph keeps them in, so
+        // they are not decoded at all: load them as columns and splice
+        // the slabs in below. An absent column loads as `n` defaults.
+        let opts = hexane::LoadOpts::new().with_length(n);
+        let num_ops = hexane::Column::<u64>::load_with(cols.num_ops, opts.with_fill(1u64))
+            .map_err(|_| bad("invalid member op-count column"))?;
+        let timestamps =
+            hexane::DeltaColumn::<i64>::load_with(cols.timestamp, opts.with_fill(0i64))
+                .map_err(|_| bad("invalid member timestamp column"))?;
+        let messages =
+            hexane::Column::<Option<String>>::load_with(cols.message, opts.with_fill(None))
+                .map_err(|_| bad("invalid member message column"))?;
+        let extra_meta =
+            hexane::PrefixColumn::<ValueMeta>::load_with(cols.extra_meta, opts.with_fill(NO_EXTRA))
+                .map_err(|_| bad("invalid member extra column"))?;
+        // the extra bytes themselves are one contiguous run, so the raw
+        // column is a single copy; its length is the meta column's total
+        let extra_end = extra_meta.sum_range(0..n) as usize;
+        if extra_end > cols.extra.len() {
+            return Err(bad("member extra bytes overrun the column"));
+        }
+
+        // `max_ops` is a plain `Vec` in the graph (the clock walks index
+        // it), so unlike the columns above it is decoded
+        let mut max_ops = Vec::with_capacity(n);
+        for m in cols.max_ops().take(n) {
+            let Some(m) = m else {
+                return Err(bad("short member max_op column"));
+            };
+            max_ops.push(m as u32);
+        }
+        if max_ops.len() != n {
+            return Err(bad("short member max_op column"));
+        }
+
+        // deps: the wire form is already CSR — a count per member and a
+        // flat value column — so the only work is turning each value into
+        // a node index. Values below the member count name members of
+        // this bundle (their node is `base` + the value), the rest index
+        // `ext_nodes`.
+        let mut dep_range = Vec::with_capacity(n);
+        let mut dep_target: Vec<NodeIdx> = Vec::new();
+        let mut dep_values = cols.dep_values();
+        let dep_base = self.dep_target.len() as u32;
+        for (i, count) in pad(cols.dep_counts().map(|c| c.unwrap_or(0)), 0, n).enumerate() {
+            let off = dep_base + dep_target.len() as u32;
+            for _ in 0..count {
+                let Some(Some(d)) = dep_values.next() else {
+                    return Err(bad("short member dep column"));
+                };
+                let d = d as usize;
+                let parent = if d < n {
+                    // members arrive in topological order, which node
+                    // index order has to preserve — the clock sweep and
+                    // every ancestry walk read it that way
+                    if d >= i {
+                        return Err(bad("member dep is not an earlier member"));
+                    }
+                    base + d
+                } else {
+                    let Some(node) = ext_nodes.get(d - n).copied() else {
+                        return Err(bad("member dep index out of range"));
+                    };
+                    node
+                };
+                dep_target.push(parent);
+            }
+            dep_range.push((off, dep_target.len() as u32 + dep_base - off));
+        }
+
+        // ── commit ──────────────────────────────────────────────────
+
+        self.hashes.extend_without_hashes(n);
+        self.actors.extend(
+            member_actors
+                .iter()
+                .map(|a| ActorIdx::from(actor_map[usize::from(*a)])),
+        );
+        self.seq.extend(member_seqs.iter().map(|s| s.get() as u32));
+        self.max_op = std::cmp::max(self.max_op, max_ops.iter().copied().max().unwrap_or(0));
+        self.max_ops.extend(max_ops);
+
+        // slab-level copies: no value is encoded twice, and with an empty
+        // graph (a fresh document) the copy inverts and adopts the
+        // bundle's slabs outright
+        let tail = hexane::Splice {
+            pos: base.0 as usize,
+            ..Default::default()
+        };
+        self.num_ops.copy_ranges(num_ops, [tail.clone()]);
+        self.timestamps.copy_ranges(timestamps, [tail.clone()]);
+        self.messages.copy_ranges(messages, [tail.clone()]);
+        self.extra_bytes_meta.copy_ranges(extra_meta, [tail]);
+        self.extra_bytes_raw
+            .extend_from_slice(&cols.extra[..extra_end]);
+
+        debug_assert_eq!(self.dep_range.len(), base.0 as usize);
+        for parent in &dep_target {
+            // a parent that was a head is now covered. Only nodes that
+            // were already in the graph can be heads — a member of this
+            // bundle has no hash yet — so this skips the whole appended
+            // range.
+            if *parent < base {
+                if let Some(h) = self.hashes.get(*parent) {
+                    self.heads.remove(&h);
+                }
             }
         }
+        self.dep_range.extend(dep_range);
+        self.dep_target.extend(dep_target);
+
+        for i in 0..n {
+            let actor = actor_map[usize::from(member_actors[i])];
+            assert!(actor < self.seq_index.len());
+            assert_eq!(
+                self.seq_index[actor].len() + 1,
+                member_seqs[i].get() as usize
+            );
+            self.seq_index[actor].push(base + i);
+        }
+
+        // one forward sweep over the appended range, instead of an
+        // ancestry walk every CACHE_STEP nodes
+        self.cache_clocks_from(base.0 as usize);
+        Ok(())
     }
 
     /// Record the (unverified, until `enable_audit_mode`) hash of a
@@ -1451,31 +1636,47 @@ impl ChangeGraph {
     /// hash resolvable; maintains the fragment index for fragment-level
     /// hashes. No-op on a checked graph or for post-load nodes, whose
     /// hashes are already known.
-    pub(crate) fn record_node_hash(&mut self, node: NodeIdx, hash: ChangeHash) {
+    /// Record a node's hash, returning whether that formed a new fragment
+    /// — in which case the caller owes a [`Self::gc_after_batch`].
+    ///
+    /// Recording many hashes in one go — a bundle's boundary, external
+    /// deps, head and checkpoints — must not GC per hash: each pass is
+    /// O(graph), so per-hash makes a fragment chain quadratic in the
+    /// document. It is also what [`Self::gc_retained_hashes`] already
+    /// asks batching callers to do.
+    #[must_use = "the caller owes a gc_after_batch"]
+    pub(crate) fn record_node_hash(&mut self, node: NodeIdx, hash: ChangeHash) -> bool {
         // idempotent: every fragment's boundary re-names earlier
         // fragment heads, so a chain apply records the same pairing
         // over and over — and re-caching a fragment head costs a full
         // O(graph) clock walk plus a duplicate fragment-index entry
         if let Some(known) = self.nodes_by_hash.get(&hash) {
             debug_assert_eq!(*known, node, "hash recorded for two nodes");
-            return;
+            return false;
         }
         match &mut self.hashes {
             // audit mode already knows every hash
-            Hashes::Full(_) => return,
+            Hashes::Full(_) => return false,
             Hashes::Retained { map, .. } => {
                 map.insert(node, hash);
             }
         }
         self.nodes_by_hash.insert(hash, node);
-        self.cache_fragment(node);
+        self.cache_fragment_inner(node)
     }
 
     /// [`Self::record_node_hash`] for a fragment's head — the unique
     /// childless member — whose hash also joins the heads.
-    pub(crate) fn record_fragment_head(&mut self, node: NodeIdx, hash: ChangeHash) {
-        self.record_node_hash(node, hash);
+    #[must_use = "the caller owes a gc_after_batch"]
+    pub(crate) fn record_fragment_head(&mut self, node: NodeIdx, hash: ChangeHash) -> bool {
+        let cached = self.record_node_hash(node, hash);
         self.heads.insert(hash);
+        cached
+    }
+
+    /// Run the retention GC a batch of deferred hash records owes.
+    pub(crate) fn gc_after_batch(&mut self) {
+        self.gc_retained_hashes();
     }
 
     pub(crate) fn add_change(
@@ -1514,27 +1715,25 @@ impl ChangeGraph {
         clock
     }
 
-    fn add_parent(&mut self, child_idx: NodeIdx, parent_idx: NodeIdx) {
-        // a change is only ever added once its deps are in the graph, so
-        // a parent's node index is always lower — node index order is a
-        // topological order, which `rev_ancestry_until_clock` walks by
-        debug_assert!(parent_idx < child_idx, "parent added after its child");
-        let new_edge_idx = EdgeIdx::new(self.edges.len());
-        self.edges.push(Edge {
-            target: parent_idx,
-            next: None,
-        });
-
-        let child = &mut self.parents[child_idx.0 as usize];
-        if let Some(edge_idx) = child {
-            let mut edge = &mut self.edges[edge_idx.get()];
-            while let Some(next) = edge.next {
-                edge = &mut self.edges[next.get()];
-            }
-            edge.next = Some(new_edge_idx);
-        } else {
-            *child = Some(new_edge_idx);
+    /// Write node `child_idx`'s parents. Must be called once per node, in
+    /// ascending node order — the CSR layout only appends.
+    fn push_parents(&mut self, child_idx: NodeIdx, parents: impl IntoIterator<Item = NodeIdx>) {
+        debug_assert_eq!(
+            self.dep_range.len(),
+            child_idx.0 as usize,
+            "nodes must receive their parents in order"
+        );
+        let off = self.dep_target.len() as u32;
+        for parent_idx in parents {
+            // a change is only ever added once its deps are in the graph,
+            // so a parent's node index is always lower — node index order
+            // is a topological order, which `rev_ancestry_until_clock`
+            // walks by
+            debug_assert!(parent_idx < child_idx, "parent added after its child");
+            self.dep_target.push(parent_idx);
         }
+        self.dep_range
+            .push((off, self.dep_target.len() as u32 - off));
     }
 
     pub(crate) fn deps(
@@ -1549,13 +1748,17 @@ impl ChangeGraph {
     }
 
     fn parents(&self, node_idx: NodeIdx) -> impl Iterator<Item = NodeIdx> + '_ {
-        let mut edge_idx = self.parents[node_idx.0 as usize];
-        std::iter::from_fn(move || {
-            let this_edge_idx = edge_idx?;
-            let edge = &self.edges[this_edge_idx.get()];
-            edge_idx = edge.next;
-            Some(edge.target)
-        })
+        self.parent_slice(node_idx).iter().copied()
+    }
+
+    /// Node `n`'s parents. Empty for a node whose edges have not been
+    /// written yet — during a bulk append the node columns run ahead of
+    /// `dep_range`, and only already-appended (lower) nodes are walked.
+    fn parent_slice(&self, node_idx: NodeIdx) -> &[NodeIdx] {
+        match self.dep_range.get(node_idx.0 as usize) {
+            Some(&(off, count)) => &self.dep_target[off as usize..off as usize + count as usize],
+            None => &[],
+        }
     }
 
     /// Resolve heads to nodes, silently skipping hashes which definitely
@@ -1687,8 +1890,8 @@ impl ChangeGraph {
         // the recorded heads must be exactly the hashes of the childless
         // nodes
         let mut has_child = vec![false; self.len()];
-        for edge in &self.edges {
-            has_child[edge.target.0 as usize] = true;
+        for target in &self.dep_target {
+            has_child[target.0 as usize] = true;
         }
         let computed_heads: BTreeSet<ChangeHash> = (0..self.len())
             .filter(|n| !has_child[*n])
@@ -1721,8 +1924,20 @@ impl ChangeGraph {
     /// dead once its last child has consumed it, so the live rows are
     /// bounded by the width of the unmerged frontier, not the graph size.
     fn cache_clocks(&mut self) {
+        self.cache_clocks_from(0)
+    }
+
+    /// [`Self::cache_clocks`] restricted to nodes `base..`, for a batch
+    /// appended onto an existing graph.
+    ///
+    /// New nodes may depend on older ones, whose clocks are not in the
+    /// pool — those are materialized once each, up front. A fragment
+    /// attaches at a handful of points, so that is a few walks rather
+    /// than one per cached node, which is what calling `cache_clock`
+    /// inside the append loop cost.
+    fn cache_clocks_from(&mut self, base: usize) {
         let n = self.len();
-        if n < CACHE_STEP as usize {
+        if n < CACHE_STEP as usize || n <= base {
             return; // nothing would be cached
         }
 
@@ -1746,18 +1961,35 @@ impl ChangeGraph {
 
         let num_actors = self.num_actors();
 
-        let mut pending_children = vec![0u32; n];
-        for edge in &self.edges {
-            pending_children[edge.target.0 as usize] += 1;
-        }
-
         const DEAD: u32 = u32::MAX;
         let mut slot_of = vec![DEAD; n]; // node -> pool slot while its row is live
         let mut pool: Vec<SeqClock> = Vec::new();
         let mut free: Vec<u32> = Vec::new();
         let mut parent_buf: Vec<usize> = Vec::new();
 
-        for i in 0..n {
+        // only children inside the swept range keep a row alive; a seeded
+        // row from before `base` is pinned for the whole sweep
+        let mut pending_children = vec![0u32; n];
+        let mut seeds: Vec<usize> = Vec::new();
+        for i in base..n {
+            for p in self.parents(NodeIdx(i as u32)) {
+                let p = p.0 as usize;
+                pending_children[p] += 1;
+                if p < base && slot_of[p] == DEAD {
+                    slot_of[p] = 0; // mark; the real slot is assigned below
+                    seeds.push(p);
+                }
+            }
+        }
+        for &p in &seeds {
+            let clock = self.calculate_clock(vec![NodeIdx(p as u32)]);
+            pool.push(clock);
+            slot_of[p] = (pool.len() - 1) as u32;
+            // pin: never freed, so it stays readable for every child
+            pending_children[p] = u32::MAX;
+        }
+
+        for i in base..n {
             let idx = NodeIdx(i as u32);
 
             parent_buf.clear();
@@ -1773,7 +2005,7 @@ impl ChangeGraph {
                 Some((&first, rest)) => {
                     let first_slot = slot_of[first];
                     debug_assert_ne!(first_slot, DEAD);
-                    let slot = if pending_children[first] == 1 {
+                    let slot = if pending_children[first] == 1 && first >= base {
                         // we are the sole remaining child: take the row as is
                         slot_of[first] = DEAD;
                         first_slot
@@ -1801,6 +2033,9 @@ impl ChangeGraph {
             };
 
             for &p in &parent_buf {
+                if pending_children[p] == u32::MAX {
+                    continue; // pinned seed row
+                }
                 pending_children[p] -= 1;
                 if pending_children[p] == 0 && slot_of[p] != DEAD {
                     free.push(slot_of[p]);
@@ -1815,7 +2050,7 @@ impl ChangeGraph {
                 self.clock_cache.insert(idx, pool[slot as usize].clone());
             }
 
-            if pending_children[i] == 0 {
+            if pending_children[i] == 0 && i >= base {
                 free.push(slot); // no children will ever read this row
             } else {
                 slot_of[i] = slot;
@@ -1900,8 +2135,8 @@ impl ChangeGraphCols {
         // Under `VerificationMode::Check` the caller verifies the two match;
         // under `DontCheck` this corrects a lying header.
         let mut has_child = vec![false; graph.len()];
-        for edge in &graph.edges {
-            has_child[edge.target.0 as usize] = true;
+        for target in &graph.dep_target {
+            has_child[target.0 as usize] = true;
         }
         graph.heads = (0..graph.len() as u32)
             .filter(|n| !has_child[*n as usize])
@@ -1936,8 +2171,8 @@ impl ChangeGraphCols {
 
         // the head nodes must be exactly the childless nodes
         let mut has_child = vec![false; graph.len()];
-        for edge in &graph.edges {
-            has_child[edge.target.0 as usize] = true;
+        for target in &graph.dep_target {
+            has_child[target.0 as usize] = true;
         }
         let num_childless = has_child.iter().filter(|c| !**c).count();
         if num_childless != head_indexes.len() {
@@ -2072,8 +2307,11 @@ impl ChangeGraphCols {
             seq_index[actor].push(NodeIdx(i as u32));
         }
 
-        let mut parents = Vec::with_capacity(len);
-        let mut edges = vec![];
+        // CSR straight off the wire: the format already stores deps as a
+        // group column, so the offsets are the count column's running sum
+        // and the targets are the value column verbatim — no expansion
+        let mut dep_range: Vec<(u32, u32)> = Vec::with_capacity(len);
+        let mut dep_target: Vec<NodeIdx> = Vec::new();
 
         let deps_count: Vec<u32> = hexane::decoder::<u32>(deps_count_bytes).collect();
         let mut deps_val_iter = hexane::DeltaDecoder::<u32>::new(deps_val_bytes);
@@ -2083,13 +2321,13 @@ impl ChangeGraphCols {
             let d = *d as usize;
             if d == 0 {
                 num_ops_vec.push(max_ops[i] as u64);
-                parents.push(None);
+                dep_range.push((dep_target.len() as u32, 0));
                 continue;
             }
 
-            parents.push(Some(EdgeIdx::new(edges.len())));
+            let off = dep_target.len() as u32;
             let mut last_max_op = 0;
-            for e in 0..d {
+            for _ in 0..d {
                 let dep = deps_val_iter
                     .next()
                     .ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))?;
@@ -2100,12 +2338,10 @@ impl ChangeGraphCols {
                 if dep as usize >= i {
                     return Err(LoadError::InvalidDepIndex);
                 }
-                let target = NodeIdx(dep);
-                let next = EdgeIdx::new(edges.len() + 1);
-                let next = if e + 1 == d { None } else { Some(next) };
                 last_max_op = std::cmp::max(last_max_op, max_ops[dep as usize]);
-                edges.push(Edge { target, next })
+                dep_target.push(NodeIdx(dep));
             }
+            dep_range.push((off, d as u32));
             if last_max_op > max_ops[i] {
                 return Err(LoadError::InvalidMaxOp);
             }
@@ -2115,7 +2351,7 @@ impl ChangeGraphCols {
 
         let heads = doc.heads().iter().copied().collect();
 
-        if parents.len() != len {
+        if dep_range.len() != len {
             return Err(LoadError::InvalidColumnLength(DEPS_COUNT_COL_SPEC));
         }
 
@@ -2135,10 +2371,10 @@ impl ChangeGraphCols {
         Ok(ChangeGraphCols {
             saved_hashes,
             graph: ChangeGraph {
-                edges,
                 hashes,
                 actors,
-                parents,
+                dep_range,
+                dep_target,
                 seq,
                 max_ops,
                 max_op,
@@ -2911,7 +3147,7 @@ mod tests {
         let apply_all = || {
             let mut d = Automerge::new();
             for b in &bundles {
-                d.apply_fragment(b).unwrap();
+                d.apply_bundle(b.clone()).unwrap();
             }
             d
         };
@@ -2956,10 +3192,17 @@ mod tests {
                 "frag", "members", "ops", "ms", "doc rows"
             );
             for (k, b) in bundles.iter().enumerate() {
-                let members = b.iter_changes().count();
-                let ops = b.storage.id_ctr.len();
+                let members = b.iter_changes().unwrap().count();
+                // member op count: the row count is no longer
+                // materialized anywhere (the id counters are read
+                // straight off the ID_CTR column now)
+                let ops: usize = b
+                    .iter_changes()
+                    .unwrap()
+                    .map(|c| (1 + c.max_op - c.start_op) as usize)
+                    .sum();
                 let t = Instant::now();
-                d.apply_fragment(b).unwrap();
+                d.apply_bundle(b.clone()).unwrap();
                 let secs = t.elapsed().as_secs_f64();
                 if members == 1 {
                     loose.0 += 1;
@@ -3061,7 +3304,7 @@ mod tests {
         for _ in 0..3 {
             let mut d = Automerge::new();
             let t = Instant::now();
-            d.apply_fragment(&bundle).unwrap();
+            d.apply_bundle(bundle.clone()).unwrap();
             eprintln!(
                 "fragment apply (blank): {:.2?}  ops {}",
                 t.elapsed(),
@@ -3114,7 +3357,7 @@ mod tests {
                 let bundle = &bundle;
                 let (mut rows, mut del_rows, mut succ) = (0usize, 0usize, 0usize);
                 let (mut runs, mut cur, mut max_run) = (0usize, 0usize, 0usize);
-                for bop in bundle.storage.iter_ops() {
+                for bop in bundle.storage.iter_ops_checked().map(Result::unwrap) {
                     rows += 1;
                     succ += bop.succ.len();
                     if bop.op.action == Action::Delete {
@@ -3185,7 +3428,7 @@ mod tests {
             let mut d = Automerge::new();
             for (i, b) in bundles.iter().enumerate() {
                 let before = d.ops.len();
-                d.apply_fragment(b).unwrap();
+                d.apply_bundle(b.clone()).unwrap();
                 sizes[i] = d.ops.len() - before;
             }
         }
@@ -3209,7 +3452,7 @@ mod tests {
             let mut d = Automerge::new();
             for (i, b) in bundles.iter().enumerate() {
                 let t = Instant::now();
-                d.apply_fragment(b).unwrap();
+                d.apply_bundle(b.clone()).unwrap();
                 eprintln!(
                     "apply fragment {i}: {:>10.3}ms  ops {}",
                     t.elapsed().as_secs_f64() * 1e3,
@@ -3410,7 +3653,7 @@ mod tests {
                 last = i;
             }
             let t = Instant::now();
-            d.apply_fragment(b).unwrap();
+            d.apply_bundle(b.clone()).unwrap();
             window += t.elapsed();
         }
         eprintln!("final: {} ops", d.ops.len());
@@ -3449,7 +3692,7 @@ mod tests {
             bundle.dep_ids.len()
         );
         let mut d = Automerge::new();
-        d.apply_fragment(&bundle).unwrap();
+        d.apply_bundle(bundle.clone()).unwrap();
         assert_eq!(d.get_heads(), heads);
         assert_eq!(d.ops.len(), doc.ops.len());
     }
@@ -3498,7 +3741,7 @@ mod tests {
             .collect();
         let mut d = Automerge::new();
         for b in bundles.iter().take(3) {
-            d.apply_fragment(b).unwrap(); // walk path
+            d.apply_bundle(b.clone()).unwrap(); // walk path
         }
         eprintln!("receiver after frags 0-2: {} ops", d.ops.len());
         for range in [575..625usize, 5000..5020] {
@@ -3515,7 +3758,7 @@ mod tests {
         }
         std::env::set_var("MANIFOLD_TRACE", "5855-5916");
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            d.apply_fragment(&bundles[3]).unwrap();
+            d.apply_bundle(bundles[3].clone()).unwrap();
         }));
         std::env::remove_var("MANIFOLD_TRACE");
         eprintln!("frag 3 apply result: {:?}", r.is_ok());
@@ -3534,11 +3777,16 @@ mod tests {
         // (bundle actor indexes differ from doc indexes — match by ctr)
         let at = bundle
             .storage
-            .iter_ops()
-            .position(|bop| bop.op.id.counter() == 115475)
+            .iter_ops_checked()
+            .position(|bop| bop.unwrap().op.id.counter() == 115475)
             .expect("repro delete not in stream");
         let lo = at.saturating_sub(10);
-        for (i, bop) in bundle.storage.iter_ops().enumerate() {
+        for (i, bop) in bundle
+            .storage
+            .iter_ops_checked()
+            .map(Result::unwrap)
+            .enumerate()
+        {
             if (lo..at + 10).contains(&i) {
                 eprintln!(
                     "stream[{i}]{} id {:?} action {:?} insert {} key {:?} pred {:?} succ {:?}",
@@ -3568,8 +3816,8 @@ mod tests {
         let mut w = Automerge::new();
         let mut d = Automerge::new();
         for (i, b) in bundles.iter().enumerate() {
-            w.apply_fragment(b).unwrap();
-            d.apply_fragment(b).unwrap();
+            w.apply_bundle(b.clone()).unwrap();
+            d.apply_bundle(b.clone()).unwrap();
             if d.save() != w.save() {
                 eprintln!("first divergence after fragment {i}");
                 d.debug_cmp(&w);
@@ -3683,13 +3931,13 @@ mod tests {
             let (t3, d3) = time(&|| {
                 let mut d = Automerge::new();
                 for b in &frag_bundles {
-                    d.apply_fragment(b).unwrap();
+                    d.apply_bundle(b.clone()).unwrap();
                 }
                 d
             });
             let (t3c, d3c) = time(&|| {
                 let mut d = Automerge::new();
-                d.apply_fragment(&whole_bundle).unwrap();
+                d.apply_bundle(whole_bundle.clone()).unwrap();
                 d
             });
 

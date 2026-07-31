@@ -181,6 +181,15 @@ where
         &self.map
     }
 
+    /// The column itself, for a cursor edit. Identity-mapped only: a
+    /// value written through the cursor goes in verbatim, which is only
+    /// right where stored and logical space are the same — the fragment
+    /// load paths, which are the only editors.
+    pub(crate) fn identity_mut(&mut self) -> &mut hexane::Column<T> {
+        assert!(self.map.is_identity(), "cursor edit on a mapped column");
+        &mut self.col
+    }
+
     /// Install the successor map after an actor insert — O(1), no slab
     /// access. Stored codes are unchanged; their interpretation shifts.
     pub(crate) fn set_map(&mut self, map: Arc<ActorMap>) {
@@ -268,18 +277,25 @@ where
     }
 
     /// Multi-point copy. Adopting the source's slabs is only sound when
-    /// both sides read their stored codes through the *same* map, so the
-    /// test is `Arc::ptr_eq` — the identity the invariant actually needs.
-    /// (Equal `version()`s are not enough: versions count edits to one
-    /// lineage, so two maps built independently can share a version and
-    /// disagree on every code.) All producers share the document's map,
-    /// so the fallback should never fire; when it does it translates
-    /// per value — correct, never adopting.
+    /// both sides read their stored codes through the same bijection —
+    /// so the test is that the maps *agree*, not merely that they have
+    /// the same `version()`. (Versions count edits to one lineage, so
+    /// two maps built independently can share a version and disagree on
+    /// every code.)
+    ///
+    /// Pointer equality is the common case — every producer shares the
+    /// document's map — but it is not the only one: an empty document
+    /// and a freshly loaded fragment each mint their own identity map,
+    /// and those are interchangeable. Comparing the maps catches that,
+    /// and costs nothing when both are identity (two empty vecs).
+    /// Getting this wrong is silent and expensive rather than incorrect:
+    /// the fallback below translates per value.
     pub(crate) fn copy_ranges<I>(&mut self, src: MappedColumn<T>, splices: I)
     where
         I: IntoIterator<Item = hexane::Splice>,
+        T::Encoding<hexane::Leb128>: hexane::edit::SlabEdit<Value = T>,
     {
-        if Arc::ptr_eq(&self.map, &src.map) {
+        if Arc::ptr_eq(&self.map, &src.map) || self.map == src.map {
             self.col.copy_ranges(src.col, splices);
         } else {
             let mut shift = 0isize;

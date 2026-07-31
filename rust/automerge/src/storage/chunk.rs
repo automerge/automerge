@@ -7,13 +7,19 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
+use super::bundle_v0::BundleV0Storage;
 use super::{change::Unverified, parse, BundleStorage, Change, Compressed, Document, MAGIC_BYTES};
 use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
-    BundleV0(BundleStorage<'a, Unverified>),
+    /// A bundle in the frozen 3.3.x format — see [`super::bundle_v0`].
+    BundleV0(Box<BundleV0Storage<'a, Unverified>>),
+    /// The live bundle format's op/change columns. Boxed: a parsed bundle
+    /// carries its decoded change metadata and op columns, which makes it
+    /// far larger than the other variants.
+    BundleColumns(Box<BundleStorage<'a, Unverified>>),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
@@ -98,33 +104,27 @@ impl<'a> Chunk<'a> {
                     Compressed::new(header.checksum, Cow::Borrowed(chunk_input.bytes())),
                 )
             }
+            // frozen: 3.3.x wrote these and they are still in circulation
             ChunkType::BundleV0 => {
                 let (remaining, bundle) =
-                    BundleStorage::parse_following_header(chunk_input, header)
+                    BundleV0Storage::parse_following_header(chunk_input, header)
                         .map_err(|e| e.lift())?;
                 if !remaining.is_empty() {
                     return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                Chunk::BundleV0(bundle)
+                Chunk::BundleV0(Box::new(bundle))
             }
             ChunkType::Bundle => {
                 // for the generic load path a bundle is just the changes
                 // it carries — the metadata prefix only matters to
-                // apply_fragment, which parses the chunk itself
+                // apply_bundle, which parses the chunk itself
                 let (i, _prefix) = crate::storage::bundle::Bundle::parse_prefix(chunk_input)
                     .map_err(|e| e.lift())?;
-                let (i, inner_header) = Header::parse::<error::Chunk>(i)?;
-                let parse::Split {
-                    first: inner_input,
-                    remaining: after_inner,
-                } = i.split(inner_header.data_bytes().len());
-                let (remaining, bundle) =
-                    BundleStorage::parse_following_header(inner_input, inner_header)
-                        .map_err(|e| e.lift())?;
-                if !remaining.is_empty() || !after_inner.is_empty() {
+                let (remaining, bundle) = BundleStorage::parse_columns(i).map_err(|e| e.lift())?;
+                if !remaining.is_empty() {
                     return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                Chunk::BundleV0(bundle)
+                Chunk::BundleColumns(Box::new(bundle))
             }
         };
         Ok((remaining, chunk))
@@ -138,6 +138,9 @@ impl<'a> Chunk<'a> {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
             Self::BundleV0(b) => b.checksum_valid(),
+            // the columns are part of the bundle chunk, whose checksum
+            // the loader has already validated against the whole chunk
+            Self::BundleColumns(_) => true,
         }
     }
 }
@@ -147,7 +150,10 @@ pub(crate) enum ChunkType {
     Document,
     Change,
     Compressed,
+    /// The frozen 3.3.x bundle format — see [`super::bundle_v0`].
     BundleV0,
+    /// A bundle: fragment metadata prefix followed by the change and op
+    /// columns. Unrelated to [`Self::BundleV0`] beyond the name.
     Bundle,
 }
 

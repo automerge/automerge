@@ -402,11 +402,15 @@ mod tests {
 
     #[test]
     fn test_concurrent_insertions_at_same_index() {
+        // Explicit commits with a pinned timestamp: AutoCommit would
+        // otherwise stamp wall-clock time, so the hashes would vary run
+        // to run — see HASHLESS.md.
         let mut doc = crate::AutoCommit::new()
             .with_actor(crate::ActorId::from("aa".as_bytes()))
             .unwrap();
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
+        doc.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
         let mut doc2 = doc
             .fork()
@@ -414,7 +418,9 @@ mod tests {
             .unwrap();
 
         doc.insert(&list, 0, 1).unwrap();
+        doc.commit_with(crate::transaction::CommitOptions::default().with_time(0));
         doc2.insert(&list, 0, 2).unwrap();
+        doc2.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
         doc.merge(&mut doc2).unwrap();
 

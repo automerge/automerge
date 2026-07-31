@@ -290,9 +290,10 @@ impl Automerge {
                             debug_assert!(false, "dirty mark end {id:?} without its begin");
                             continue;
                         };
-                        let extent = self
-                            .ops()
-                            .expand_to_seq_register_boundaries(start..pos + 1, object.range.clone());
+                        let extent = self.ops().expand_to_seq_register_boundaries(
+                            start..pos + 1,
+                            object.range.clone(),
+                        );
                         extents.push((object.clone(), extent));
                     }
                 }

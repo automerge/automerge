@@ -293,27 +293,32 @@ impl RawColumn {
     // ── Multi-point copy ────────────────────────────────────────────────────
 
     /// Splice byte ranges of `src` into this column at several points in
-    /// one pass, **moving `src`'s slabs** rather than copying their bytes.
+    /// one pass.
     ///
     /// `pos` / `delete` are in this column's *pre-merge* byte coordinates
     /// (as for [`Column::copy_ranges`](crate::Column::copy_ranges)) and
     /// must ascend without overlapping; `range` is a byte range of `src`,
     /// likewise ascending.
     ///
+    /// This is [`splice_slice`](Self::splice_slice) in a loop, applied back
+    /// to front so that each edit lands *above* every splice still to be
+    /// applied and their positions stay valid without any shift
+    /// bookkeeping. A typed [`Column`](crate::Column) needs a bulk path
+    /// because splicing decodes and re-encodes runs; raw bytes have no
+    /// such cost, so a bulk path here would buy nothing but a way to
+    /// diverge from the single-point policy — which is what the previous
+    /// implementation did, cutting the destination at every splice point
+    /// and never coalescing, so a chain of small merges fragmented the
+    /// arena into one slab per insertion point.
+    ///
     /// # Boundaries
     ///
     /// The column does not know where values begin and end, so the caller
     /// must give every `pos` and every `range` endpoint on a value
-    /// boundary — exactly the existing splice contract. Given that, the
-    /// merge only ever *cuts* slabs at those boundaries and otherwise
-    /// carries whole slabs across, so `src`'s boundaries survive intact
-    /// and no value ends up spanning a slab in the result.
-    ///
-    /// Cost is one pass over both slab vectors (plus one `split_off` per
-    /// boundary that falls mid-slab) — no byte is copied for a slab that
-    /// crosses whole, which is what makes merging a large fragment into a
-    /// small document cheap.
-    pub fn copy_ranges<I>(&mut self, mut src: Self, splices: I)
+    /// boundary — exactly the existing splice contract. Splits only ever
+    /// happen at a splice point or at the end of an inserted payload
+    /// (see `pick_split`), so no value ends up spanning a slab.
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
         I: IntoIterator<Item = Splice>,
     {
@@ -321,92 +326,47 @@ impl RawColumn {
         if splices.is_empty() {
             return;
         }
-
-        // Cut both sides so every boundary the merge needs is already a
-        // slab boundary; after this the walk below is pure slab movement.
-        src.split_at_offsets(&sorted_bounds(
-            splices.iter().flat_map(|s| [s.range.start, s.range.end]),
-        ));
-        self.split_at_offsets(&sorted_bounds(
-            splices.iter().flat_map(|s| [s.pos, s.pos + s.delete]),
-        ));
-
-        let src_starts = slab_starts(&src.slabs);
-        // ranges are ascending and non-overlapping, but they need not
-        // cover `src` — the gaps are simply never taken
-        let mut src_slabs: Vec<Option<RawSlab>> = src.slabs.into_iter().map(Some).collect();
-        let slab_at = |offset: usize| -> usize {
-            src_starts
-                .binary_search(&offset)
-                .expect("src range endpoint is a slab boundary after the cut")
-        };
-
-        let mut out: Vec<RawSlab> = Vec::with_capacity(self.slabs.len() + src_slabs.len());
-        let mut dst = std::mem::take(&mut self.slabs).into_iter();
-        let mut pos = 0usize;
-
-        for sp in &splices {
-            // carry this column's slabs across up to the splice point
-            while pos < sp.pos {
-                let slab = dst.next().expect("dst slabs cover every splice pos");
-                pos += slab.data.len();
-                out.push(slab);
+        for sp in splices.iter().rev() {
+            let mut at = sp.pos;
+            let mut del = sp.delete;
+            // Chunked by the source's own slabs. A payload spliced as one
+            // slice wider than the slab budget cannot be split anywhere
+            // the column knows to be a value boundary, so it would land as
+            // a single oversize slab that every later splice then has to
+            // memmove whole; the source's slabs are already budgeted and
+            // already cut at value boundaries.
+            for chunk in src.chunks_in(sp.range.clone()) {
+                self.splice_slice(at, del, chunk);
+                at += chunk.len();
+                del = 0;
             }
-            // hand the source's slabs over whole
-            for slot in &mut src_slabs[slab_at(sp.range.start)..slab_at(sp.range.end)] {
-                out.push(slot.take().expect("src ranges do not overlap"));
-            }
-            // drop the deleted slabs
-            let del_end = sp.pos + sp.delete;
-            while pos < del_end {
-                let slab = dst.next().expect("dst slabs cover every splice range");
-                pos += slab.data.len();
+            if del > 0 {
+                // a pure delete, or one whose splice inserted nothing
+                self.splice_slice(at, del, &[]);
             }
         }
-        out.extend(dst);
-
-        // splitting can leave zero-length slabs behind (a splice point
-        // landing on an existing boundary); they carry no weight but are
-        // not transparent to `RawColumnIter`
-        out.retain(|slab| !slab.data.is_empty());
-        self.total_len = out.iter().map(|s| s.data.len()).sum();
-        self.slabs = out;
-        self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
     }
 
-    /// Re-cut the slab vector so every offset in `offsets` (sorted,
-    /// deduped, each `<= len()`) is a slab boundary. Offsets already on a
-    /// boundary cost nothing; the rest cost one `split_off` of the tail of
-    /// the slab they land in.
-    fn split_at_offsets(&mut self, offsets: &[usize]) {
-        let mut out: Vec<RawSlab> = Vec::with_capacity(self.slabs.len() + offsets.len());
-        let mut pos = 0usize;
-        let mut next = 0usize;
-        for slab in std::mem::take(&mut self.slabs) {
-            if slab.data.is_empty() {
-                // carries no boundary of its own and would make the slab
-                // start offsets ambiguous
-                continue;
+    /// The byte slices covering `range`, one per slab the range touches.
+    fn chunks_in(&self, range: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {
+        let end = range.end.min(self.total_len);
+        let mut pos = range.start;
+        let mut at = if pos < end {
+            Some(self.find_slab(pos))
+        } else {
+            None
+        };
+        std::iter::from_fn(move || {
+            let (i, off) = at?;
+            if pos >= end {
+                return None;
             }
-            let end = pos + slab.data.len();
-            // offsets at or before this slab's start are already boundaries
-            while next < offsets.len() && offsets[next] <= pos {
-                next += 1;
-            }
-            let mut data = slab.data;
-            let mut base = pos;
-            while next < offsets.len() && offsets[next] < end {
-                let tail = data.split_off(offsets[next] - base);
-                out.push(RawSlab { data });
-                data = tail;
-                base = offsets[next];
-                next += 1;
-            }
-            out.push(RawSlab { data });
-            pos = end;
-        }
-        self.slabs = out;
-        self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
+            let data = &self.slabs[i].data;
+            let take = (data.len() - off).min(end - pos);
+            pos += take;
+            at = Some((i + 1, 0));
+            Some(&data[off..off + take])
+        })
     }
 
     // ── Range read ──────────────────────────────────────────────────────────
@@ -525,29 +485,6 @@ impl RawColumn {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Collect boundary offsets into the sorted, deduped form
-/// [`RawColumn::split_at_offsets`] expects.
-fn sorted_bounds(offsets: impl Iterator<Item = usize>) -> Vec<usize> {
-    let mut out: Vec<usize> = offsets.collect();
-    out.sort_unstable();
-    out.dedup();
-    out
-}
-
-/// Exclusive prefix sums of slab lengths, with the total appended — so
-/// `starts[i]` is slab `i`'s first byte and `starts[slabs.len()]` is the
-/// column length. A byte offset on a slab boundary appears exactly once.
-fn slab_starts(slabs: &[RawSlab]) -> Vec<usize> {
-    let mut out = Vec::with_capacity(slabs.len() + 1);
-    let mut pos = 0;
-    for slab in slabs {
-        out.push(pos);
-        pos += slab.data.len();
-    }
-    out.push(pos);
-    out
-}
 
 /// Splice a single slab: delete up to `del` bytes at `index`, insert
 /// `values`.  Mirrors the shape of [`ColumnEncoding::splice_slab`] used by
@@ -1064,6 +1001,41 @@ mod tests {
                 delete: 0,
                 range: 0..4,
             }],
+        );
+    }
+
+    /// A chain of small copies into a growing arena must not fragment it:
+    /// the previous implementation cut the destination at every splice
+    /// point and never coalesced, so the slab count tracked the number of
+    /// insertions rather than the byte count.
+    #[test]
+    fn copy_ranges_keeps_the_arena_compact() {
+        let budget = 256;
+        let mut dst = RawColumn::with_max_segments(budget);
+        dst.splice_slice(0, 0, &vec![b'x'; 8 * budget]);
+        let mut expected = vec![b'x'; 8 * budget];
+        // 400 scattered 4-byte copies, the shape a fragment chain has
+        for i in 0..400 {
+            let mut src = RawColumn::with_max_segments(budget);
+            src.splice_slice(0, 0, b"abcd");
+            let at = ((i * 37) % (dst.len() - 4)) & !3;
+            dst.copy_ranges(
+                src,
+                [Splice {
+                    pos: at,
+                    delete: 0,
+                    range: 0..4,
+                }],
+            );
+            expected.splice(at..at, *b"abcd");
+        }
+        assert_eq!(dst.save(), expected, "bytes");
+        // bounded by bytes, not by the 400 insertion points
+        let slabs = dst.slabs.len();
+        assert!(
+            slabs <= 2 * dst.len().div_ceil(budget),
+            "arena fragmented: {slabs} slabs for {} bytes (budget {budget})",
+            dst.len()
         );
     }
 

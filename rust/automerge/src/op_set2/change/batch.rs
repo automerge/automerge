@@ -324,8 +324,7 @@ impl BatchApply {
         }
 
         // encode the v2 op columns in index (= document) order
-        let (raw, data, id_ctr) =
-            encode_frag_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
+        let (raw, data) = encode_frag_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
 
         // from here on this IS the v2 path: the columns are loaded back
         // as an indexed op set, the streaming manifold resolves them,
@@ -334,7 +333,7 @@ impl BatchApply {
         let frag = super::fragment::FragmentApply::from_parts(
             clock.clone(),
             actor_map,
-            super::fragment::FragSrc::Owned { raw, data, id_ctr },
+            super::fragment::FragSrc::Owned { raw, data },
             doc.ops(),
         )
         .unwrap();
@@ -368,25 +367,10 @@ pub(super) fn encode_frag_ops<'x, I>(
 ) -> (
     crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
     Vec<u8>,
-    Vec<i64>,
 )
 where
     I: Iterator<Item = &'x ChangeOp> + Clone,
 {
-    let mut ranges: HashMap<usize, (u64, u64)> = HashMap::new();
-    for op in ops.clone() {
-        let a = op.id().actor();
-        let c = op.id().counter();
-        let e = ranges.entry(a).or_insert((c, c));
-        e.0 = e.0.min(c);
-        e.1 = e.1.max(c);
-    }
-    let mut members: Vec<(usize, u64, u64)> = ranges
-        .into_iter()
-        .map(|(a, (lo, hi))| (a, lo, hi))
-        .collect();
-    members.sort_unstable();
-
     let actors_len = op_set.actors.len();
     let mut mapper = crate::op_set2::change::ActorMapper::new(&op_set.actors);
     let mut writer = crate::storage::bundle::BundleOpWriter::default();
@@ -398,8 +382,8 @@ where
         .map(|i| Some(crate::op_set2::types::ActorIdx::from(i)))
         .collect();
     let mut data = Vec::new();
-    let (cols, id_ctr) = writer.finish(&mapper, &mut data, &members);
-    (cols.raw_columns(), data, id_ctr)
+    let cols = writer.finish(&mapper, &mut data);
+    (cols.raw_columns(), data)
 }
 
 impl Automerge {

@@ -1120,14 +1120,26 @@ mod tests {
 
     #[test]
     fn materializer_applies_list_conflicts() {
-        let mut doc1 = AutoCommit::new();
+        // Pinned actor + timestamp so the hashes are a pure function of
+        // the ops: an unpinned commit can hash to a fragment head (1/256)
+        // and free hashes this test still needs. See HASHLESS.md.
+        let t0 = || crate::transaction::CommitOptions::default().with_time(0);
+        let mut doc1 = AutoCommit::new()
+            .with_actor(crate::ActorId::from(&b"mlc1"[..]))
+            .unwrap();
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "one").unwrap();
-        let mut doc2 = doc1.fork();
+        doc1.commit_with(t0());
+        let mut doc2 = doc1
+            .fork()
+            .with_actor(crate::ActorId::from(&b"mlc2"[..]))
+            .unwrap();
         let before = doc1.get_heads();
 
         doc1.put(&list, 0, "left").unwrap();
+        doc1.commit_with(t0());
         doc2.put(&list, 0, "right").unwrap();
+        doc2.commit_with(t0());
         doc1.merge(&mut doc2).unwrap();
         let after = doc1.get_heads();
 

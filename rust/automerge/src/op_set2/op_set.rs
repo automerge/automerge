@@ -2,6 +2,9 @@ use super::parents::Parents;
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
+// only the debug-only visibility check needs it
+#[cfg(debug_assertions)]
+use crate::iter::tools::Shiftable;
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
 use crate::storage::columns::BadColumnLayout;
@@ -37,6 +40,7 @@ mod mark_index;
 mod marks;
 mod op_iter;
 mod op_query;
+mod overlap;
 mod top_op;
 mod visible;
 
@@ -51,7 +55,7 @@ pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn, MarkPref
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
-    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter, WidthIter,
 };
 pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
 pub(crate) use top_op::{TopIter, TopOps};
@@ -71,11 +75,6 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn debug_cmp(&self, other: &Self) {
         self.cols.debug_cmp(&other.cols)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
-        self.cols.save_checkpoint()
     }
 
     #[cfg(test)]
@@ -152,111 +151,6 @@ impl OpSet {
         );
     }
 
-    /// Re-run the top/text election over every register inside `range`
-    /// in one forward pass: insert rows bound the registers (map ranges
-    /// contain none and form a single register), the last visible row
-    /// of each register takes top, and each index column is written
-    /// back with a single splice over the range. A row keeping its top
-    /// keeps its text width; a newly-topped row gets its width
-    /// recomputed from the op.
-    pub(crate) fn reset_top_range(&mut self, range: Range<usize>) {
-        let n = range.len();
-        if n == 0 {
-            return;
-        }
-        if n == 1 {
-            // single-row register: top must equal visible, and usually
-            // already does (add_succ cleared both on a kill) — two
-            // point reads instead of the full election
-            let vis = self
-                .cols
-                .index
-                .visible
-                .iter_range(range.clone())
-                .next()
-                .unwrap_or(false);
-            let top = self
-                .cols
-                .index
-                .top
-                .values()
-                .iter_range(range.clone())
-                .next()
-                .unwrap_or(false);
-            if top == vis {
-                return;
-            }
-        }
-        let mut new_top = vec![false; n];
-        {
-            let ins = self.cols.insert.values().iter_range(range.clone());
-            let vis = self.cols.index.visible.iter_range(range.clone());
-            let mut last_vis: Option<usize> = None;
-            for (i, (insert, v)) in ins.zip(vis).enumerate() {
-                if insert && i > 0 {
-                    if let Some(t) = last_vis {
-                        new_top[t] = true;
-                    }
-                    last_vis = None;
-                }
-                if v {
-                    last_vis = Some(i);
-                }
-            }
-            if let Some(t) = last_vis {
-                new_top[t] = true;
-            }
-        }
-        let mut new_text: Vec<Option<u32>> = Vec::with_capacity(n);
-        let mut widths_needed = vec![];
-        let mut changed = false;
-        {
-            let top_old = self.cols.index.top.values().iter_range(range.clone());
-            let text_old = self.cols.index.text.values().iter_range(range.clone());
-            for (i, (t_old, w_old)) in top_old.zip(text_old).enumerate() {
-                changed |= new_top[i] != t_old;
-                new_text.push(match (new_top[i], t_old) {
-                    (true, true) => w_old,
-                    (true, false) => {
-                        widths_needed.push(i);
-                        None // patched below
-                    }
-                    (false, _) => None,
-                });
-            }
-        }
-        if !changed {
-            // the election stands: kept tops keep their text, losers
-            // already read None — nothing to write
-            return;
-        }
-        for i in widths_needed {
-            let w = self
-                .get(range.start + i)
-                .map(|op| op.width(SequenceType::Text, self.text_encoding) as u32);
-            new_text[i] = w;
-        }
-        self.cols.index.top.splice(range.start, n, new_top);
-        self.cols.index.text.splice(range.start, n, new_text);
-        // the election moved: mark the register range dirty (register
-        // granularity matches how the diff expands a dirty row anyway)
-        self.cols.index.dirty.splice(range.start, n, vec![true; n]);
-    }
-
-    /// Re-elect the single register starting at `pos`: it extends to
-    /// the next insert row (or the op set's end).
-    pub(crate) fn reset_register_at(&mut self, pos: usize) {
-        let len = self.len();
-        let mut end = pos + 1;
-        for ins in self.cols.insert.values().iter_range(pos + 1..len) {
-            if ins {
-                break;
-            }
-            end += 1;
-        }
-        self.reset_top(pos..end);
-    }
-
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
         let top = self.cols.index.top.values().iter_range(range.clone());
         let vis = self.cols.index.visible.iter_range(range.clone());
@@ -287,6 +181,65 @@ impl OpSet {
 
         if let Some(n) = expose {
             self.expose(range.start + n)
+        }
+    }
+
+    /// Write a run of decided `top` bits, `(position, top)` in ascending
+    /// position order with no repeats — the batched form of
+    /// [`expose`](Self::expose) / [`conflict`](Self::conflict).
+    ///
+    /// One forward cursor per index column instead of a point splice per
+    /// column per row: a slab holding several of the positions is rebuilt
+    /// once, and the ground between them is carried through without being
+    /// decoded. The newly-topped rows' text widths come off a
+    /// [`WidthIter`] running alongside, so no op is materialized.
+    ///
+    /// `dirty` marks the written rows for the next incremental diff. The
+    /// fragment side of a merge passes `false`: the merge marks every row
+    /// it copies dirty anyway.
+    ///
+    /// Panics (debug) if the positions are not strictly ascending, or if
+    /// a row is given `top` without being visible.
+    pub(crate) fn write_tops(&mut self, writes: &[(usize, bool)], dirty: bool) {
+        if writes.is_empty() {
+            return;
+        }
+        debug_assert!(
+            writes.windows(2).all(|w| w[0].0 < w[1].0),
+            "write_tops wants strictly ascending positions"
+        );
+        let text_encoding = self.text_encoding;
+        // by field, so the width columns stay readable while the index
+        // columns are being written
+        let cols = &mut self.cols;
+
+        // rides along with the write cursor rather than seeking per row
+        #[cfg(debug_assertions)]
+        let mut visible = cols.index.visible.iter();
+
+        let mut top = cols.index.top.edit();
+        for &(pos, t) in writes {
+            // `top` implies `visible`, so nothing here may re-top a row
+            // a preceding `add_succ` deleted
+            #[cfg(debug_assertions)]
+            debug_assert!(!t || visible.seek_to(pos) == Some(true));
+            top.seek(pos).replace(|_| t);
+        }
+        top.finish();
+
+        let mut width = WidthIter::new(&cols.action, &cols.value, &cols.value_meta, text_encoding);
+        let mut text = cols.index.text.edit();
+        for &(pos, t) in writes {
+            text.seek(pos).replace(|_| t.then(|| width.seek_to(pos)));
+        }
+        text.finish();
+
+        if dirty {
+            let mut marks = cols.index.dirty.edit();
+            for &(pos, _) in writes {
+                marks.seek(pos).replace(|_| true);
+            }
+            marks.finish();
         }
     }
 
@@ -601,7 +554,6 @@ impl OpSet {
             }
         })
     }
-
 
     pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
         for op in ops {
@@ -1504,6 +1456,17 @@ impl OpSet {
     ///   truncates `iter_obj_ids`) and strictly increasing, which also
     ///   guarantees each object's ops are contiguous
     pub(crate) fn column_validation(&self) -> Result<(), ColumnValidationError> {
+        self.column_validation_with(self.actors.len())
+    }
+
+    /// [`Self::column_validation`] against an explicit actor count, for
+    /// columns whose actor indexes are not in this op set's actor space
+    /// yet — a freshly loaded fragment, whose indexes are still the
+    /// sender's until `index_frag` rebases them.
+    pub(crate) fn column_validation_with(
+        &self,
+        num_actors: usize,
+    ) -> Result<(), ColumnValidationError> {
         use ColumnValidationError::*;
         let cols = &self.cols;
         let n = cols.id_actor.len();
@@ -1545,7 +1508,6 @@ impl OpSet {
             return Err(RawValueLength(cols.value.len(), raw_total));
         }
 
-        let num_actors = self.actors.len();
         let mut it = cols.id_actor.iter();
         while let Some(run) = it.next_run() {
             if run.value.0 as usize >= num_actors {
@@ -1783,15 +1745,90 @@ impl OpSet {
     pub(crate) fn load_frag(
         raw: &RawColumns<Uncompressed>,
         data: &[u8],
-        id_ctr: &[i64],
         actor_map: &[usize],
         doc: &OpSet,
     ) -> Result<Self, ReadOpError> {
-        let mut cols = Columns::load_frag(raw.as_map(), data, id_ctr)?;
+        // these callers (the batch path, a re-encoded overlap fragment)
+        // carry no boundary to test, so they take the safe reading
+        Self::load_frag_cols(raw, data, actor_map.len())?.index_frag(actor_map, doc, true)
+    }
+
+    /// The document-independent half of [`Self::load_frag`]: decode a
+    /// fragment's op columns and check them over.
+    ///
+    /// This is everything a bundle can do before it meets a document, so
+    /// it runs at parse time — the decode *is* the validation, exactly as
+    /// on the document load path, which is why no separate walk over the
+    /// rows is needed to call the columns well formed.
+    ///
+    /// `actors` is the bundle's own actor table: the columns stay in
+    /// bundle actor space until [`Self::index_frag`] rebases them. Nothing
+    /// reads the returned op set's `text_encoding` before then.
+    /// `num_actors` is the size of the *sender's* actor table: the
+    /// columns' actor indexes are still in that space, and stay there
+    /// until [`Self::index_frag`] rebases them.
+    /// Succ entries the op set holds, over every row.
+    pub(crate) fn succ_entries(&self) -> usize {
+        self.cols.succ_actor.len()
+    }
+
+    /// The `inc` index, keyed by succ position: an entry is `Some` when
+    /// that successor is an increment rather than a delete.
+    pub(crate) fn inc_index(&self) -> &hexane::Column<Option<i64>> {
+        &self.cols.index.inc
+    }
+
+    /// Value bytes the op set holds, over every row.
+    pub(crate) fn value_bytes(&self) -> usize {
+        self.cols.value.len()
+    }
+
+    pub(crate) fn load_frag_cols(
+        raw: &RawColumns<Uncompressed>,
+        data: &[u8],
+        num_actors: usize,
+    ) -> Result<Self, ReadOpError> {
+        // a fragment's op columns are a strict superset of a document's —
+        // same specs, same types, plus pred and hint, which this loader
+        // simply does not ask for
+        let cols = Columns::load(raw.as_map(), data, &[])?;
+        let num_rows = cols.len();
+        let op_set = OpSet {
+            // filled in by `index_frag`, along with the text encoding —
+            // both come from the receiving document
+            actors: vec![],
+            cols,
+            obj_info: ObjIndex::default(),
+            text_encoding: TextEncoding::platform_default(),
+        };
+        op_set.column_validation_with(num_actors)?;
+        validate_pred_columns(raw, data, num_rows, num_actors)?;
+        Ok(op_set)
+    }
+
+    /// The document-dependent half of [`Self::load_frag`]: rebase the
+    /// fragment's actor indexes into `doc`'s actor space and build its
+    /// indexes there.
+    ///
+    /// Both halves need the document — the actor map by definition, and
+    /// the index build because fragment ops can live in document-created
+    /// objects and would register-split like maps without their types.
+    /// `has_deps` says the fragment names changes outside itself. Only
+    /// then can it hold an op aimed at an element it does not contain,
+    /// which is what makes its sequence registers something more than the
+    /// insert column says (see `IndexBuilder::split_by_elem`). A
+    /// dep-free fragment is causally closed: every element it names, it
+    /// created.
+    pub(crate) fn index_frag(
+        mut self,
+        actor_map: &[usize],
+        doc: &OpSet,
+        has_deps: bool,
+    ) -> Result<Self, ReadOpError> {
         let doc_actor_map = doc.actor_map();
         let identity_f = actor_map.iter().enumerate().all(|(i, &m)| i == m);
         if !identity_f || !doc_actor_map.is_identity() {
-            cols.rebase_actors(
+            self.cols.rebase_actors(
                 &|a: ActorIdx| ActorIdx::from(actor_map[u64::from(a) as usize]),
                 &doc_actor_map,
             );
@@ -1799,7 +1836,7 @@ impl OpSet {
         let text_encoding = doc.text_encoding;
         let mut op_set = OpSet {
             actors: doc.actors.clone(),
-            cols,
+            cols: self.cols,
             obj_info: ObjIndex::default(),
             text_encoding,
         };
@@ -1807,6 +1844,9 @@ impl OpSet {
         // fragment ops can live in document-created objects: without
         // their types, sequence objects would register-split like maps
         builder.seed_obj_info(&doc.obj_info);
+        if has_deps {
+            builder.split_by_elem();
+        }
         builder.process_op_set(&op_set)?;
         let (indexes, _mark_order) = builder.finish();
         op_set.set_indexes(indexes);
@@ -2223,6 +2263,98 @@ impl ResolvedAction {
         matches!(action, types::OpType::Increment { .. })
     }
 }
+
+/// Check a fragment's pred columns against each other.
+///
+/// Preds are the one part of a fragment's op columns that is not part of
+/// an op set — they name rows from *before* the fragment and feed the
+/// manifold, not the merge — so loading the op columns says nothing about
+/// them. This is the same check [`OpSet::column_validation`] runs on succ,
+/// and just as cheap: the group counts are loaded as a prefix column, so
+/// their total is a single `get_prefix`, and the id columns are loaded
+/// against that total so hexane rejects a mismatch itself.
+///
+/// Deliberately a width check only. Whether an individual pred is
+/// *meaningful* is not checked here — that is per-op, per-field work, and
+/// the fragment path takes rows on trust (untrusted data goes through
+/// `to_changes`).
+fn validate_pred_columns(
+    raw: &RawColumns<Uncompressed>,
+    data: &[u8],
+    num_rows: usize,
+    num_actors: usize,
+) -> Result<(), ColumnValidationError> {
+    use crate::storage::columns::ColumnType;
+    let mut count_bytes: &[u8] = &[];
+    let mut actor_bytes: &[u8] = &[];
+    let mut ctr_bytes: &[u8] = &[];
+    for col in raw.iter() {
+        if col.spec().id() != PRED_COL_ID_RAW {
+            continue;
+        }
+        let d = &data[col.data()];
+        match col.spec().col_type() {
+            ColumnType::Group => count_bytes = d,
+            ColumnType::Actor => actor_bytes = d,
+            ColumnType::DeltaInteger => ctr_bytes = d,
+            _ => {}
+        }
+    }
+    // an elided pred column means "no preds anywhere", which is
+    // self-consistent — and is the common case, since a fragment stores
+    // in-bundle relationships in succ
+    if count_bytes.is_empty() {
+        if !actor_bytes.is_empty() || !ctr_bytes.is_empty() {
+            return Err(ColumnValidationError::ColumnLength(
+                "pred_count",
+                0,
+                num_rows,
+            ));
+        }
+        return Ok(());
+    }
+    let opts = hexane::LoadOpts::new().with_length(num_rows).with_fill(0);
+    let count = hexane::PrefixColumn::<u32>::load_with(count_bytes, opts)
+        .map_err(|_| ColumnValidationError::ColumnLength("pred_count", 0, num_rows))?;
+    let total = count.get_prefix(num_rows) as usize;
+    let id_opts = hexane::LoadOpts::new().with_length(total);
+    let actor = MappedColumn::<ActorIdx>::load_with(actor_bytes, id_opts)
+        .map_err(|_| ColumnValidationError::ColumnLength("pred_actor", 0, total))?;
+    if actor.len() != total {
+        return Err(ColumnValidationError::ColumnLength(
+            "pred_actor",
+            actor.len(),
+            total,
+        ));
+    }
+    let ctr = hexane::DeltaColumn::<u32>::load_with(ctr_bytes, id_opts)
+        .map_err(|_| ColumnValidationError::ColumnLength("pred_ctr", 0, total))?;
+    if ctr.len() != total {
+        return Err(ColumnValidationError::ColumnLength(
+            "pred_ctr",
+            ctr.len(),
+            total,
+        ));
+    }
+    // the pred column is the one actor column an op set does not hold,
+    // so nothing else checks it — and every reader of it indexes the
+    // actor map directly
+    let mut it = actor.iter();
+    while let Some(run) = it.next_run() {
+        if run.value.0 as usize >= num_actors {
+            return Err(ColumnValidationError::ActorOutOfRange(
+                "pred_actor",
+                run.value.0,
+                num_actors,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Id of the bundle format's pred column group (`ops::PRED_COL_ID`).
+const PRED_COL_ID_RAW: crate::storage::columns::ColumnId =
+    crate::storage::columns::ColumnId::new(7);
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ColumnValidationError {

@@ -16,6 +16,8 @@ pub(crate) enum ParseError {
     Header(#[from] chunk::error::Header),
     #[error("invalid change column")]
     InvalidChangeColumn(u32),
+    #[error("invalid change metadata: {0}")]
+    InvalidChangeMetadata(&'static str),
     #[error("invalid op column")]
     InvalidOpColumn(u32),
     #[error(transparent)]

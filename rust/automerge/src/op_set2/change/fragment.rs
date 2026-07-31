@@ -1,13 +1,6 @@
 use crate::clock::Clock;
-use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::storage::Bundle;
-use crate::types::OpId;
 use crate::{Automerge, AutomergeError};
-
-use super::super::op::{ChangeOp, OpBuilder};
-use super::batch::normalize_increment_successors;
-
-use std::borrow::Cow;
 
 /// Applies the ops of a bundle directly, without converting the bundle
 /// into [`crate::Change`]s first.
@@ -26,7 +19,6 @@ pub(crate) enum FragSrc<'a> {
     Owned {
         raw: crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
         data: Vec<u8>,
-        id_ctr: Vec<i64>,
     },
 }
 
@@ -36,15 +28,13 @@ impl FragSrc<'_> {
     ) -> (
         &crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
         &[u8],
-        &[i64],
     ) {
         match self {
             FragSrc::Bundle(b) => (
                 &b.storage.ops_meta,
                 &b.storage.bytes[b.storage.ops_data.clone()],
-                &b.storage.id_ctr,
             ),
-            FragSrc::Owned { raw, data, id_ctr } => (raw, data, id_ctr),
+            FragSrc::Owned { raw, data } => (raw, data),
         }
     }
 }
@@ -91,22 +81,43 @@ impl<'a> FragmentApply<'a> {
     /// `overlap` marks a bundle whose members are partially present:
     /// the covered rows must not apply again, so the kept ops are
     /// decoded, filtered against `clock` and re-encoded (rare).
+    /// `frag_ops` is the bundle's op columns as the parse left them —
+    /// decoded, validated, still in bundle actor space. All that remains
+    /// is the document-dependent half ([`OpSet::index_frag`]): rebase the
+    /// actors and build the indexes against `doc_ops`.
     pub(crate) fn new(
         bundle: &'a Bundle,
         actor_map: Vec<usize>,
         clock: &Clock,
         overlap: bool,
         doc_ops: &crate::op_set2::op_set::OpSet,
+        frag_ops: crate::op_set2::op_set::OpSet,
     ) -> Result<Self, AutomergeError> {
-        let (src, actor_map) = if overlap {
-            let (ops, _) = decode_ops(|| bundle.storage.iter_ops(), &actor_map, clock)?;
-            let (raw, data, id_ctr) = super::batch::encode_frag_ops(ops.iter(), doc_ops);
-            let identity: Vec<usize> = (0..doc_ops.actors.len()).collect();
-            (FragSrc::Owned { raw, data, id_ctr }, identity)
+        let (src, frag) = if overlap {
+            // the covered rows must not apply again, so they are cut out
+            // — which makes the parse's columns (every row, unfiltered)
+            // the wrong ones for the manifold's read, and the filtered
+            // op set is written back out for it
+            let mut ops = frag_ops;
+            let preds = ops.drop_covered(
+                &bundle.storage.ops_meta,
+                &bundle.storage.bytes[bundle.storage.ops_data.clone()],
+                clock,
+                &actor_map,
+            );
+            let (raw, data) = ops.export_frag(preds);
+            // a filtered fragment names elements it no longer contains
+            // whatever its deps say, so it always takes the safe reading
+            let frag = ops
+                .index_frag(&actor_map, doc_ops, true)
+                .map_err(|_| AutomergeError::InvalidFragment("invalid fragment op columns"))?;
+            (FragSrc::Owned { raw, data }, frag)
         } else {
-            (FragSrc::Bundle(bundle), actor_map)
+            let frag = frag_ops
+                .index_frag(&actor_map, doc_ops, !bundle.storage.deps.is_empty())
+                .map_err(|_| AutomergeError::InvalidFragment("invalid fragment op columns"))?;
+            (FragSrc::Bundle(bundle), frag)
         };
-        let frag = load_frag_set(&src, &actor_map, doc_ops)?;
         Ok(Self {
             clock: clock.clone(),
             actor_map,
@@ -123,93 +134,9 @@ fn load_frag_set(
     actor_map: &[usize],
     doc_ops: &crate::op_set2::op_set::OpSet,
 ) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
-    let (raw, data, id_ctr) = src.parts();
-    crate::op_set2::op_set::OpSet::load_frag(raw, data, id_ctr, actor_map, doc_ops)
+    let (raw, data) = src.parts();
+    crate::op_set2::op_set::OpSet::load_frag(raw, data, actor_map, doc_ops)
         .map_err(|_| AutomergeError::InvalidFragment("invalid fragment op columns"))
-}
-
-/// Decode a doc-ordered succ-format op stream into splice-ready
-/// [`ChangeOp`]s. `iter` is called twice: an increment-value prepass,
-/// then the main pass. Returns the ops and whether any clock-covered
-/// rows were skipped (overlap).
-fn decode_ops<'a, F, I>(
-    iter: F,
-    actor_map: &[usize],
-    clock: &Clock,
-) -> Result<(Vec<ChangeOp>, bool), AutomergeError>
-where
-    F: Fn() -> I,
-    I: Iterator<Item = crate::storage::bundle::BundleOp<'a>>,
-{
-    // increment successors need their value; increments are rows
-    let mut inc_values: std::collections::HashMap<OpId, i64> = Default::default();
-    for bop in iter() {
-        if let Some(v) = bop.op.get_increment_value() {
-            inc_values.insert(bop.op.id, v);
-        }
-    }
-
-    let mut ops = Vec::new();
-    // overlap: a skipped (already-present) row's succ entries that
-    // name *kept* ops must still land as doc succ. The kept
-    // successor is in the same group with a larger id, so document
-    // order puts it after the skipped row — record the pairing and
-    // hand it to the successor as an extra (external) pred, which
-    // the manifold resolves like any other doc-row pred
-    let mut pending: std::collections::HashMap<OpId, Vec<OpId>> = Default::default();
-    let mut overlap = false;
-    for bop in iter() {
-        let op = bop.op;
-        let id = op.id.map(actor_map)?;
-        if clock.covers(&id) {
-            overlap = true;
-            for s in &bop.succ {
-                let sm = s.map(actor_map)?;
-                if !clock.covers(&sm) {
-                    pending.entry(sm).or_default().push(id);
-                }
-            }
-            continue;
-        }
-        let obj = op.obj.map(actor_map)?;
-        let key = match op.key {
-            KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.into_owned())),
-            KeyRef::Seq(e) => KeyRef::Seq(e.map(actor_map)?),
-        };
-        let mut op_pred = op
-            .pred
-            .iter()
-            .map(|p| p.map(actor_map))
-            .collect::<Result<Vec<_>, _>>()?;
-        if let Some(extra) = pending.remove(&id) {
-            op_pred.extend(extra);
-        }
-        let mut succ = bop
-            .succ
-            .iter()
-            .map(|s| Ok((s.map(actor_map)?, inc_values.get(s).copied())))
-            .collect::<Result<Vec<_>, AutomergeError>>()?;
-        let is_counter = matches!(op.value, OpScalarValue::Counter(_));
-        normalize_increment_successors(is_counter, &mut succ);
-        let bld = OpBuilder {
-            id,
-            obj,
-            key,
-            action: op.action,
-            value: op.value.into_owned(),
-            mark_name: op.mark_name.map(|s| Cow::Owned(s.into_owned())),
-            expand: op.expand,
-            insert: op.insert,
-            pred: op_pred,
-        };
-        ops.push(ChangeOp {
-            conflicted: false,
-            succ,
-            bld,
-        });
-    }
-    debug_assert!(pending.is_empty(), "skipped-row successor never arrived");
-    Ok((ops, overlap))
 }
 
 impl<'a> FragmentApply<'a> {
@@ -231,30 +158,38 @@ impl<'a> FragmentApply<'a> {
     /// converting a v1 batch into the succ-format columns.
     pub(super) fn apply_manifold(self, doc: &mut Automerge) -> Result<(), AutomergeError> {
         let mut r = {
-            let (raw, data, id_ctr) = self.src.parts();
-            let meta = crate::storage::bundle::frag_prepass(raw, data, id_ctr, &self.actor_map);
-            let mut fs = crate::storage::bundle::FragOps::new(raw, data, id_ctr, &self.actor_map);
+            let (raw, data) = self.src.parts();
+            let len = self.frag.len();
+            let mut fs = crate::storage::bundle::FragOps::new(
+                raw,
+                data,
+                len,
+                &self.actor_map,
+                self.frag.succ_entries(),
+                self.frag.value_bytes(),
+                self.frag.inc_index(),
+            );
             let m = doc.ops().apply_manifold(self.clock.clone());
-            m.apply_frag(&mut fs, &meta)
+            m.apply_frag(&mut fs)
         };
-
-        // in the succ format every pred names a doc row — nothing can
-        // defer to the batch side
-        debug_assert!(r.change_succ.is_empty(), "fragment op had a batch pred");
 
         // write the doc succ while positions are still pre-merge —
         // add_succ also clears vis/top/text on rows it deletes, so the
         // visible column is final before the elections below read it
         doc.ops.add_succ(std::mem::take(&mut r.doc_succ));
 
+        // top/text are the only index bits that aren't a straight copy.
+        // Each side is written in its own coordinates, before the merge
+        // mixes them: the merge carries the bits into place along with
+        // the columns holding them
+        let mut frag = self.frag;
+        doc.ops.write_tops(&r.doc_tops, true);
+        // every merged row is marked dirty by the merge itself
+        frag.write_tops(&r.batch_tops, false);
+
         // the merge: copy the fragment's columns and indexes in at the
         // insert runs
-        doc.ops.merge(self.frag, &r.insert_runs);
-
-        // top/text are the only index bits that aren't a straight copy,
-        // and only in groups shared between the doc and the fragment —
-        // re-run the last-visible election over each such group
-        reset_mixed_groups(doc, &r);
+        doc.ops.merge(frag, &r.insert_runs);
 
         #[cfg(debug_assertions)]
         if !doc.ops.validate_op_order() {
@@ -273,66 +208,6 @@ impl<'a> FragmentApply<'a> {
             panic!("op order violated");
         }
         Ok(())
-    }
-}
-
-/// Re-run the top/text election in every group the manifold flagged as
-/// mixed. A group's merged range is its doc rows — shifted by the
-/// fragment rows inserted at or before each end — widened to cover the
-/// fragment rows that landed inside it (mapped through the insert
-/// runs). `OpSet::reset_top` then settles the group from its (already
-/// final) visible bits.
-fn reset_mixed_groups(doc: &mut Automerge, r: &crate::op_set2::op_set::manifold::ManifoldResult) {
-    if r.mixed_groups.is_empty() {
-        return;
-    }
-    let runs = &r.insert_runs;
-    // prefix sums: shifts[i] = rows merged before run i
-    let mut shifts = Vec::with_capacity(runs.len());
-    let mut acc = 0usize;
-    for cr in runs.iter() {
-        shifts.push(acc);
-        acc += cr.range.len();
-    }
-    let total = acc;
-    // fragment row -> merged position (rows in mixed groups always merge)
-    let row_pos = |row: usize| -> usize {
-        let i = runs.partition_point(|cr| cr.range.start <= row) - 1;
-        let cr = &runs[i];
-        debug_assert!(cr.range.contains(&row), "mixed-group row not merged");
-        cr.pos + shifts[i] + (row - cr.range.start)
-    };
-    // pre-merge doc position -> merged position: displaced by every
-    // fragment row inserted at or before it
-    let doc_pos = |p: usize| -> usize {
-        // runs 0..i sit at positions <= p, so exactly their rows
-        // displace this doc row
-        let i = runs.partition_point(|cr| cr.pos <= p);
-        p + if i == runs.len() { total } else { shifts[i] }
-    };
-    // consecutive headless runs share one fused register: re-elect each
-    // head once
-    let mut done_head = usize::MAX;
-    for g in &r.mixed_groups {
-        // the fragment's standalone build fused the register holding
-        // this group's first fragment row (deletes included — they
-        // occupy rows too) with the fragment register before it: a
-        // headless run has no insert of its own. That register's
-        // election is poisoned — redo it at its own merged position
-        // (it can sit far from this group)
-        if let Some(head) = g.head_hint {
-            if head != done_head {
-                doc.ops.reset_register_at(row_pos(head));
-                done_head = head;
-            }
-        }
-        let mut start = doc_pos(g.doc.start);
-        let mut end = doc_pos(g.doc.end - 1) + 1;
-        if let Some((lo, hi)) = g.rows {
-            start = start.min(row_pos(lo));
-            end = end.max(row_pos(hi) + 1);
-        }
-        doc.ops.reset_top_range(start..end);
     }
 }
 
@@ -397,7 +272,7 @@ mod tests {
         dst_ref.doc.apply_changes_batch(changes).unwrap();
         dst_ref.validate_top_index();
 
-        dst.doc.apply_fragment(&bundle).unwrap();
+        dst.doc.apply_bundle(bundle.clone()).unwrap();
         dst.validate_top_index();
 
         assert_eq!(dst.doc.audit_mode(), AuditMode::Disabled);
@@ -618,7 +493,7 @@ mod tests {
             let frag = fragment_for(chunk);
             let bytes = src.doc.bundle_fragment(&frag).unwrap().bytes();
             let bundle = Bundle::try_from(&bytes[..]).unwrap();
-            dst.apply_fragment(&bundle).unwrap();
+            dst.apply_bundle(bundle.clone()).unwrap();
         }
 
         assert_eq!(dst.get_heads(), src.get_heads());
@@ -650,19 +525,19 @@ mod tests {
 
         // out of order: the middle chunk's boundary dep is missing
         assert!(matches!(
-            dst.apply_fragment(&bundles[1]),
+            dst.apply_bundle(bundles[1].clone()),
             Err(AutomergeError::MissingDeps)
         ));
 
-        dst.apply_fragment(&bundles[0]).unwrap();
+        dst.apply_bundle(bundles[0].clone()).unwrap();
 
         // duplicate application is a no-op
         let heads = dst.get_heads();
-        dst.apply_fragment(&bundles[0]).unwrap();
+        dst.apply_bundle(bundles[0].clone()).unwrap();
         assert_eq!(dst.get_heads(), heads);
 
-        dst.apply_fragment(&bundles[1]).unwrap();
-        dst.apply_fragment(&bundles[2]).unwrap();
+        dst.apply_bundle(bundles[1].clone()).unwrap();
+        dst.apply_bundle(bundles[2].clone()).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.enable_audit_mode().unwrap();
@@ -689,8 +564,196 @@ mod tests {
         let overlapping = make(&changes[3..]); // 3 present, 3 new
 
         let mut dst = Automerge::new();
-        dst.apply_fragment(&first).unwrap();
-        dst.apply_fragment(&overlapping).unwrap();
+        dst.apply_bundle(first.clone()).unwrap();
+        dst.apply_bundle(overlapping.clone()).unwrap();
+
+        assert_eq!(dst.get_heads(), src.get_heads());
+        dst.debug_cmp(&src.doc);
+        dst.enable_audit_mode().unwrap();
+        assert_eq!(dst.save(), src.doc.save());
+    }
+
+    /// Every mixture of present and new members the history allows:
+    /// bundle a prefix, then a suffix that reaches back into it. The
+    /// cut is taken at a unifying commit so both halves have one head.
+    #[test]
+    fn fragment_fuzz_overlap_apply() {
+        let mut rng = make_rng();
+        let mut src = AutoCommit::new().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
+        let list = src.put_object(&ROOT, "list", ObjType::List).unwrap();
+        let text = src.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        let map = src.put_object(&ROOT, "map", ObjType::Map).unwrap();
+        src.insert(&list, 0, "seed").unwrap();
+        src.splice_text(&text, 0, 0, "seed").unwrap();
+        src.put(&map, "counter", ScalarValue::counter(1)).unwrap();
+        src.commit();
+
+        let mut value = 0;
+        let mut val = move || {
+            value += 1;
+            value
+        };
+        // a cut is a change count with a single head — the only place a
+        // fragment can start or end
+        let mut cuts = vec![src.get_changes(&[]).unwrap().len()];
+        for round in 0..8 {
+            for _ in 0..3 {
+                let mut tmp = src.fork().with_actor(rng.random()).unwrap();
+                tmp.enable_audit_mode().unwrap();
+                for _ in 0..(rng.random::<u32>() % 6 + 1) {
+                    let key = format!("key{}", rng.random::<u32>() % 5);
+                    match rng.random::<u32>() % 8 {
+                        0 => {
+                            let len = tmp.length(&list);
+                            tmp.insert(&list, rng.random::<u32>() as usize % len, val())
+                                .unwrap();
+                        }
+                        1 => {
+                            let len = tmp.length(&list);
+                            tmp.put(&list, rng.random::<u32>() as usize % len, val())
+                                .unwrap();
+                        }
+                        2 => {
+                            let len = tmp.length(&list);
+                            if len > 1 {
+                                tmp.delete(&list, rng.random::<u32>() as usize % len)
+                                    .unwrap();
+                            }
+                        }
+                        3 => {
+                            let len = tmp.length(&text);
+                            let at = rng.random::<u32>() as usize % len;
+                            tmp.splice_text(&text, at, 0, &format!("[{}]", val()))
+                                .unwrap();
+                        }
+                        4 => {
+                            let len = tmp.length(&text);
+                            let at = rng.random::<u32>() as usize % len;
+                            let end = std::cmp::min(at + 3, len);
+                            if at < end {
+                                let mark = Mark {
+                                    start: at,
+                                    end,
+                                    name: "bold".into(),
+                                    value: ScalarValue::from(val()),
+                                };
+                                tmp.mark(&text, mark, ExpandMark::After).unwrap();
+                            }
+                        }
+                        5 => {
+                            tmp.put(&map, key, ScalarValue::counter(val())).unwrap();
+                        }
+                        6 => {
+                            if tmp.get(&map, &key).unwrap().is_some() {
+                                let _ = tmp.increment(&map, key, val());
+                            }
+                        }
+                        _ => {
+                            let _ = tmp.delete(&map, key);
+                        }
+                    }
+                }
+                src.merge(&mut tmp).unwrap();
+            }
+            // unify the concurrent branches, opening a cut
+            src.put(&ROOT, "round", round).unwrap();
+            src.commit();
+            cuts.push(src.get_changes(&[]).unwrap().len());
+        }
+
+        let changes = src.get_changes(&[]).unwrap();
+        let heads = src.get_heads();
+        let saved = src.doc.save();
+        let make = |cs: &[Change]| src.doc.bundle_fragment(&fragment_for(cs)).unwrap();
+        // every (present, new) split: the second bundle re-delivers
+        // everything from `start` on, of which `first` rows are present
+        for (i, &first) in cuts.iter().enumerate() {
+            for &start in &cuts[..i] {
+                let mut dst = Automerge::new();
+                dst.apply_bundle(make(&changes[..first])).unwrap();
+                dst.apply_bundle(make(&changes[start..])).unwrap();
+
+                assert_eq!(dst.get_heads(), heads, "cut {}..{}", start, first);
+                dst.debug_cmp(&src.doc);
+                dst.enable_audit_mode().unwrap();
+                assert_eq!(dst.save(), saved, "cut {}..{}", start, first);
+            }
+        }
+    }
+
+    /// One new op succeeding *both* values of a conflicted register
+    /// whose members are all present: whether it has a row of its own
+    /// (a put) or not (a delete), it ends up carrying two preds.
+    #[test]
+    fn fragment_apply_overlap_succeeds_conflict() {
+        for delete in [true, false] {
+            let mut rng = make_rng();
+            let mut src = AutoCommit::new().with_actor(rng.random()).unwrap();
+            src.enable_audit_mode().unwrap();
+            src.put(&ROOT, "seed", 0).unwrap();
+            src.commit();
+
+            // concurrent writers: each forks before the other's put
+            let mut tmp = src.fork().with_actor(rng.random()).unwrap();
+            tmp.enable_audit_mode().unwrap();
+            tmp.put(&ROOT, "x", 2).unwrap();
+            tmp.commit();
+            src.put(&ROOT, "x", 1).unwrap();
+            src.commit();
+            src.merge(&mut tmp).unwrap();
+            // unify the two writers, leaving x conflicted
+            src.put(&ROOT, "unify", true).unwrap();
+            src.commit();
+
+            let present = src.get_changes(&[]).unwrap().len();
+            if delete {
+                src.delete(&ROOT, "x").unwrap();
+            } else {
+                src.put(&ROOT, "x", 3).unwrap();
+            }
+            src.commit();
+
+            let changes = src.get_changes(&[]).unwrap();
+            let make = |cs: &[Change]| src.doc.bundle_fragment(&fragment_for(cs)).unwrap();
+            let first = make(&changes[..present]);
+            let overlapping = make(&changes);
+
+            let mut dst = Automerge::new();
+            dst.apply_bundle(first).unwrap();
+            dst.apply_bundle(overlapping).unwrap();
+
+            assert_eq!(dst.get(&ROOT, "x").unwrap().is_none(), delete);
+            assert_eq!(dst.get_heads(), src.get_heads());
+            dst.debug_cmp(&src.doc);
+            dst.enable_audit_mode().unwrap();
+            assert_eq!(dst.save(), src.doc.save());
+        }
+    }
+
+    #[test]
+    fn fragment_apply_overlap_delete_of_skipped_op() {
+        // a kept member deletes an op belonging to a skipped member:
+        // the deletion rides the skipped row's succ column and has no
+        // row of its own, so dropping that row must not drop the delete
+        let mut rng = make_rng();
+        let mut src = AutoCommit::new().with_actor(rng.random()).unwrap();
+        src.enable_audit_mode().unwrap();
+        src.put(&ROOT, "x", 1).unwrap();
+        src.commit();
+        src.put(&ROOT, "y", 2).unwrap();
+        src.commit();
+        src.delete(&ROOT, "x").unwrap();
+        src.commit();
+
+        let changes = src.get_changes(&[]).unwrap();
+        let make = |cs: &[Change]| src.doc.bundle_fragment(&fragment_for(cs)).unwrap();
+        let first = make(&changes[..2]);
+        let overlapping = make(&changes); // 2 present, 1 new
+
+        let mut dst = Automerge::new();
+        dst.apply_bundle(first).unwrap();
+        dst.apply_bundle(overlapping).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);

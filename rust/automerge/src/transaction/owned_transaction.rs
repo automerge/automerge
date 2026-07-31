@@ -244,17 +244,30 @@ mod tests {
     #[test]
     fn owned_transaction_at() {
         let mut doc = Automerge::new();
+        // Pinned actor *and* timestamp, so the hashes are a pure
+        // function of the ops. Isolating at `heads_v1` needs that
+        // change's hash retained; if the second commit's hash started
+        // with a zero byte it would be a fragment head, covering the
+        // first and freeing its hash, and `into_transaction` would error
+        // `AuditModeRequired`. Documented design — see HASHLESS.md.
+        doc.set_actor(crate::ActorId::from(&b"otx"[..])).unwrap();
+        let t0 = || crate::transaction::CommitOptions::default().with_time(0);
 
         // Make a first change
         let mut tx = doc.transaction();
         tx.put(ROOT, "v", 1).unwrap();
-        tx.commit();
+        tx.commit_with(t0());
         let heads_v1 = doc.get_heads();
 
         // Make a second change
         let mut tx = doc.transaction();
         tx.put(ROOT, "v", 2).unwrap();
-        tx.commit();
+        tx.commit_with(t0());
+        assert_eq!(
+            doc.get_head_hashes()[0].fragment_level(),
+            0,
+            "the pinned actor must keep the second commit loose"
+        );
 
         // Start an owned transaction isolated at v1 heads
         let mut tx = doc.into_transaction(Some(&heads_v1)).unwrap();

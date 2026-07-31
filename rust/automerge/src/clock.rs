@@ -131,6 +131,13 @@ impl Clock {
     pub(crate) fn covers(&self, id: &OpId) -> bool {
         self.0[id.actor()] as u64 >= id.counter()
     }
+
+    /// The counter this clock reaches for `actor` — [`covers`](Self::covers)
+    /// for a caller holding ids in another actor space, which would
+    /// otherwise translate every one of them.
+    pub(crate) fn max_op(&self, actor: usize) -> u64 {
+        self.0[actor] as u64
+    }
 }
 
 impl std::iter::FromIterator<Option<u32>> for Clock {

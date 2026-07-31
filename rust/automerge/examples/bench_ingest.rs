@@ -66,19 +66,21 @@ fn main() {
             &doc,
         );
 
-        // the branch's own path: v2 fragment chain via apply_fragment
-        // (parsed from bytes, so the wire round-trip is included)
-        let v2: Vec<automerge::Bundle> = doc
+        // the branch's own path: v2 fragment chain via apply_bundle.
+        // Parsing is inside the timed region, so this really does include
+        // the wire round-trip (a bundle is consumed by the apply, so it
+        // cannot be hoisted and reused across rounds anyway).
+        let v2_bytes: Vec<Vec<u8>> = doc
             .bundle_fragments(doc.fragments(..).unwrap())
             .unwrap()
-            .iter()
-            .map(|b| automerge::Bundle::try_from(&b[..]).unwrap())
+            .into_iter()
             .collect();
         let t_frag = best_of(
             || {
                 let mut d = Automerge::new();
-                for b in &v2 {
-                    d.apply_fragment(b).unwrap();
+                for b in &v2_bytes {
+                    d.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
+                        .unwrap();
                 }
                 d
             },

@@ -9,7 +9,7 @@ use crate::op_set2::ValueMeta;
 use crate::op_set2::{ChangeOp, Op, OpBuilder, ReadOpError};
 #[cfg(test)]
 use crate::types::SequenceType;
-use crate::types::{ObjId, ObjType, OpId, TextEncoding};
+use crate::types::{ElemId, ObjId, ObjType, OpId, TextEncoding};
 use hexane::encoder::{BoolEncoder, RleEncoder};
 use hexane::{EncoderApi, RunSrc};
 use std::collections::HashMap;
@@ -41,6 +41,15 @@ pub(crate) struct IndexBuilder {
     obj_info: ObjIndex,
     text_encoding: TextEncoding,
     mark_order: MarkOrderValidator,
+    /// See [`ElemBounds`]: set for a fragment that has boundary deps, the
+    /// only input whose sequence registers are not bounded by inserts
+    /// alone. Off for documents and for dep-free fragments.
+    split_by_elem: bool,
+    /// objects the input creates itself. Their rows are all it has, so
+    /// their registers are insert-bounded whatever `split_by_elem` says —
+    /// and a `Make` always precedes its object in the walk, since an
+    /// object's id orders after the id of the op that made it
+    own_objs: rustc_hash::FxHashSet<ObjId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -313,7 +322,16 @@ impl IndexBuilder {
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
             mark_order: MarkOrderValidator::default(),
+            split_by_elem: false,
+            own_objs: rustc_hash::FxHashSet::default(),
         }
+    }
+
+    /// Bound sequence registers by element identity rather than by the
+    /// insert column alone — see [`ElemBounds`]. Only a fragment with
+    /// boundary deps needs it.
+    pub(crate) fn split_by_elem(&mut self) {
+        self.split_by_elem = true;
     }
 
     /// Seed the object-type index with entries from outside the columns
@@ -421,6 +439,9 @@ impl IndexBuilder {
 
         if let Some(obj_info) = obj_info {
             self.obj_info.insert(id, obj_info);
+            if self.split_by_elem {
+                self.own_objs.insert(ObjId(id));
+            }
         }
 
         self.group.push(GroupOp {
@@ -495,6 +516,17 @@ impl IndexBuilder {
             OpIdIter::new(op_set.cols.succ_actor.iter(), op_set.cols.succ_ctr.iter()),
             op_set.cols.value.iter(),
         );
+        // the element split reads these; a document never opens them
+        let elem = self.split_by_elem.then(|| ElemBounds {
+            elems: super::op_iter::ElemIdIter::new(
+                op_set.cols.key_actor.iter(),
+                op_set.cols.key_ctr.iter(),
+            ),
+            ids: OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
+            ids_pos: 0,
+            span: None,
+            peeked: None,
+        });
         self.process_columns(
             ObjRunWalk::new(op_set.cols.obj_actor.iter(), op_set.cols.obj_ctr.iter()),
             op_set.cols.action.iter(),
@@ -503,6 +535,7 @@ impl IndexBuilder {
             op_set.cols.insert.values().iter(),
             op_set.cols.key_str.iter(),
             rare,
+            elem,
         )
     }
 
@@ -528,6 +561,7 @@ impl IndexBuilder {
         inserts: I,
         keys: K,
         mut rare: RareOps<'_>,
+        elem: Option<ElemBounds<'_>>,
     ) -> Result<(), ReadOpError>
     where
         OA: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
@@ -540,7 +574,7 @@ impl IndexBuilder {
     {
         let objrep = self.text_encoding.width("\u{fffc}") as u32;
         let mut iter = IndexIter::new(action, meta, succ);
-        let mut bounds = BoundaryIter::new(inserts, keys);
+        let mut bounds = BoundaryIter::new(inserts, keys, elem);
         let mut pos = 0;
 
         while let Some((obj, obj_len)) = objs.try_next_obj()? {
@@ -548,7 +582,10 @@ impl IndexBuilder {
                 self.obj_info.object_type(&obj),
                 Some(ObjType::List) | Some(ObjType::Text)
             );
-            bounds.start_obj(seq, obj_len)?;
+            // an object this input created holds every op that ever
+            // touched it, so its registers are insert-bounded outright
+            let split = self.split_by_elem && !self.own_objs.contains(&obj);
+            bounds.start_obj(seq, obj_len, split)?;
 
             while let Some((group_len, repeat)) = bounds.next_batch()? {
                 if group_len == 1 && repeat > 1 {
@@ -621,7 +658,7 @@ impl IndexBuilder {
         rare: &mut RareOps<'_>,
     ) -> Result<(), ReadOpError> {
         debug_assert!(self.group.is_empty());
-        let vis = run.succ == 0;
+        let vis = vis_succ(run) == 0;
         self.visible.append_n(vis, run.count);
         self.top.append_n(vis, run.count);
         self.marks.append_n(None, run.count);
@@ -653,7 +690,7 @@ impl IndexBuilder {
             for i in 0..run.count {
                 let width = self.str_width(run, i, objrep, rare)?;
                 self.group.push(GroupOp {
-                    succ: run.succ,
+                    succ: vis_succ(run),
                     width,
                 });
             }
@@ -665,7 +702,7 @@ impl IndexBuilder {
             };
             self.group.extend(std::iter::repeat_n(
                 GroupOp {
-                    succ: run.succ,
+                    succ: vis_succ(run),
                     width,
                 },
                 run.count,
@@ -733,11 +770,7 @@ impl IndexBuilder {
             };
 
             let is_counter = matches!(value, ScalarValue::Counter(_));
-            let succ_vis = if run.action == Action::Increment {
-                u32::MAX
-            } else {
-                run.succ
-            };
+            let succ_vis = vis_succ(run);
 
             self.process_op_parts(id, mark_index, inc_value, obj_info, succ_vis, width);
 
@@ -805,6 +838,76 @@ impl Indexes {
     }
 }
 
+/// Element identity and op id at a row, for [`BoundaryIter`]'s
+/// fragment-only register split.
+///
+/// A register is a maximal run of rows sharing an element identity — an
+/// insert row's own id, any other row's key. In a *document* that is
+/// exactly what the insert column says, because every element's updates
+/// follow its own insert row. A fragment with boundary deps can break
+/// that: it can hold an update aimed at an element it does not contain,
+/// which arrives with no insert of its own and would otherwise be read as
+/// part of the register before it.
+///
+/// Both readers are forward-only and read only where the split is in
+/// doubt: one id per insert-to-update transition, and the element ids of
+/// the update rows themselves.
+pub(crate) struct ElemBounds<'a> {
+    elems: super::op_iter::ElemIdIter<'a>,
+    ids: OpIdIter<'a>,
+    /// row after the last one `ids` read — it is consulted at scattered
+    /// rows, so it seeks rather than streams
+    ids_pos: usize,
+    /// the span [`elem_run`](Self::elem_run) last measured. An insert
+    /// that turns out to be alone leaves its span for the next call,
+    /// which asks for it again
+    span: Option<(usize, Option<ElemId>, usize)>,
+    /// the row that ended the last span, read to find that it differed
+    peeked: Option<(usize, Option<ElemId>)>,
+}
+
+impl ElemBounds<'_> {
+    /// The op id at `pos`. Callers only ever move forward.
+    fn id_at(&mut self, pos: usize) -> Result<OpId, ReadOpError> {
+        let skip = pos
+            .checked_sub(self.ids_pos)
+            .expect("ElemBounds::id_at went backwards");
+        self.ids_pos = pos + 1;
+        self.ids
+            .maybe_try_nth(skip)?
+            .ok_or(ReadOpError::MissingValue("id"))
+    }
+
+    /// The run of rows from `start` sharing one element id, capped at
+    /// `max`: the id and the run's length.
+    fn elem_run(
+        &mut self,
+        start: usize,
+        max: usize,
+    ) -> Result<(Option<ElemId>, usize), ReadOpError> {
+        if let Some((s, elem, n)) = self.span {
+            if s == start {
+                return Ok((elem, n.min(max)));
+            }
+        }
+        let first = match self.peeked.take() {
+            Some((p, v)) if p == start => v,
+            _ => self.elems.at(start)?,
+        };
+        let mut n = 1;
+        while n < max {
+            let next = self.elems.at(start + n)?;
+            if next != first {
+                self.peeked = Some((start + n, next));
+                break;
+            }
+            n += 1;
+        }
+        self.span = Some((start, first, n));
+        Ok((first, n))
+    }
+}
+
 /// Yields the register lengths of the current object: key_str runs for
 /// maps (each run is one key's register — the run streams are canonical,
 /// so adjacent runs never carry equal values), insert-run structure for
@@ -815,7 +918,10 @@ impl Indexes {
 /// object boundary are clipped against the current object, and whichever
 /// stream an object does not consult (inserts for maps, keys for
 /// sequences) is drained lazily to stay position-aligned.
-struct BoundaryIter<I, K> {
+///
+/// [`ElemBounds`], when present, refines the sequence case for the one
+/// input the insert column does not describe.
+struct BoundaryIter<'a, I, K> {
     inserts: I,
     keys: K,
     insert_head: Option<(bool, usize)>,
@@ -829,10 +935,20 @@ struct BoundaryIter<I, K> {
     /// pending trues from the current insert run; all but the last are
     /// singleton registers, the last stays open for its trailing falses
     ones: usize,
+    /// rows pulled from the insert stream so far, absolute. The pending
+    /// `ones` sit at `abs - ones .. abs`
+    abs: usize,
+    elem: Option<ElemBounds<'a>>,
+    /// this object needs the element split (see [`ElemBounds`])
+    split: bool,
+    /// non-insert rows of the current run still to be assigned to a
+    /// register, and where they start — split objects only
+    falses: usize,
+    false_start: usize,
 }
 
-impl<I, K> BoundaryIter<I, K> {
-    fn new(inserts: I, keys: K) -> Self {
+impl<'e, I, K> BoundaryIter<'e, I, K> {
+    fn new(inserts: I, keys: K, elem: Option<ElemBounds<'e>>) -> Self {
         Self {
             inserts,
             keys,
@@ -843,13 +959,20 @@ impl<I, K> BoundaryIter<I, K> {
             seq: false,
             remaining: 0,
             ones: 0,
+            abs: 0,
+            elem,
+            split: false,
+            falses: 0,
+            false_start: 0,
         }
     }
 
-    fn start_obj(&mut self, seq: bool, len: usize) -> Result<(), ReadOpError> {
+    fn start_obj(&mut self, seq: bool, len: usize, split: bool) -> Result<(), ReadOpError> {
         debug_assert_eq!(self.remaining, 0);
         debug_assert_eq!(self.ones, 0);
+        debug_assert_eq!(self.falses, 0);
         self.seq = seq;
+        self.split = seq && split && self.elem.is_some();
         self.remaining = len;
         if seq {
             self.keys_owed += len;
@@ -875,6 +998,7 @@ impl<I, K> BoundaryIter<I, K> {
             };
             let take = left.min(self.insert_owed);
             self.insert_owed -= take;
+            self.abs += take;
             if left > take {
                 self.insert_head = Some((value, left - take));
             }
@@ -891,6 +1015,7 @@ impl<I, K> BoundaryIter<I, K> {
         };
         let take = left.min(self.remaining);
         self.remaining -= take;
+        self.abs += take;
         if left > take {
             self.insert_head = Some((value, left - take));
         }
@@ -963,9 +1088,19 @@ impl<I, K> BoundaryIter<I, K> {
                 self.ones = 1;
                 return Ok(Some((1, repeat)));
             }
+            if self.falses > 0 {
+                return self.next_elem_span().map(Some);
+            }
             match self.next_insert_run()? {
                 Some((true, count)) => self.ones += count,
                 Some((false, count)) => {
+                    if self.split {
+                        // the falses need not all belong to the insert
+                        // before them — hand them to `next_elem_span`
+                        self.false_start = self.abs - count;
+                        self.falses = count;
+                        continue;
+                    }
                     // falses close the one pending true (if any); `ones`
                     // is 0 only for a defensive headless run
                     let result = self.ones + count;
@@ -979,6 +1114,34 @@ impl<I, K> BoundaryIter<I, K> {
                 None => return Ok(None),
             }
         }
+    }
+
+    /// The next register out of the pending non-insert rows, for an
+    /// object needing the element split.
+    ///
+    /// Only the run's *first* span can continue the insert before it, and
+    /// only if it names that insert. Every later span names a different
+    /// element by construction, so it is a register of its own.
+    fn next_elem_span(&mut self) -> Result<(usize, usize), ReadOpError> {
+        let start = self.false_start;
+        let bounds = self.elem.as_mut().expect("split object without elem ids");
+        let (elem, n) = bounds.elem_run(start, self.falses)?;
+        if self.ones == 1 {
+            // `ones` marks the first span: the insert is still unassigned
+            let ins = bounds.id_at(start - 1)?;
+            self.ones = 0;
+            if elem != Some(ElemId(ins)) {
+                // it names something else — the insert is alone, and this
+                // span opens its own register on the next call
+                return Ok((1, 1));
+            }
+            self.falses -= n;
+            self.false_start += n;
+            return Ok((1 + n, 1));
+        }
+        self.falses -= n;
+        self.false_start += n;
+        Ok((n, 1))
     }
 }
 
@@ -997,6 +1160,23 @@ struct IndexIter<A, M, S> {
     succ_prefix: u64,
     /// absolute raw value byte offset at the current position
     raw_prefix: u64,
+}
+
+/// The successor count a row's visibility is judged by — `u32::MAX`
+/// standing for "never visible, whatever its successors say".
+///
+/// An increment is not the register's value, it adjusts one. And a
+/// delete row exists only to carry a pred naming a *document* op: it
+/// holds no value, and the merge drops it rather than copying it in, so
+/// letting it take `top` would hand the bit to a row that is about to
+/// disappear. (This is also why a delete row cannot appear in an object
+/// the fragment created, or in a fragment with no deps — there is no
+/// document op for it to name.)
+fn vis_succ(run: &IndexRun) -> u32 {
+    match run.action {
+        Action::Increment | Action::Delete => u32::MAX,
+        _ => run.succ,
+    }
 }
 
 /// A block of consecutive ops sharing one action, one value meta and one

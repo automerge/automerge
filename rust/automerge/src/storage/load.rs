@@ -143,7 +143,18 @@ fn load_next_change<'a>(
             changes.push(change);
         }
         storage::Chunk::BundleV0(bundle) => {
-            tracing::trace!("loading bundle chunk");
+            tracing::trace!("loading a 3.3.x bundle chunk");
+            let storage = bundle
+                .into_owned()
+                .verify()
+                .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
+            let bundle_changes = storage
+                .to_changes()
+                .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
+            changes.extend(bundle_changes);
+        }
+        storage::Chunk::BundleColumns(bundle) => {
+            tracing::trace!("loading bundle columns chunk");
             let storage = storage::bundle::verify_inner(bundle.into_owned())
                 .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
             let bundle_changes = storage
