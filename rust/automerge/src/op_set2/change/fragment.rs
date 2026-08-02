@@ -1,4 +1,5 @@
 use crate::clock::Clock;
+use crate::op_set2::op_set::manifold::ManifoldResult;
 use crate::storage::Bundle;
 use crate::{Automerge, AutomergeError};
 
@@ -140,39 +141,35 @@ fn load_frag_set(
 }
 
 impl<'a> FragmentApply<'a> {
-    /// Apply the bundle's ops. Patch generation is deferred: the
-    /// merge/succ/re-election writes mark exactly the touched rows
-    /// dirty as they land, and patches materialize on the next dirty
-    /// diff ([`Automerge::diff_incremental`]).
-    pub(crate) fn apply(self, doc: &mut Automerge) -> Result<(), AutomergeError> {
-        self.apply_manifold(doc)?;
-        Ok(())
-    }
-
     /// Resolve the bundle with [`crate::op_set2::op_set::ApplyManifold`]:
     /// the bundle's ops are already in document order — the manifold's
     /// exact contract — so positions, succ and top/text adjustments come
     /// from seeks over the touched scopes only.
     ///
+    /// Reads only. Everything that can reject a fragment happens here,
+    /// so [`Self::commit`] cannot fail and a rejected fragment leaves
+    /// the document exactly as it was.
+    ///
     /// `pub(super)` so the batch path can join this pipeline after
     /// converting a v1 batch into the succ-format columns.
-    pub(super) fn apply_manifold(self, doc: &mut Automerge) -> Result<(), AutomergeError> {
-        let mut r = {
-            let (raw, data) = self.src.parts();
-            let len = self.frag.len();
-            let mut fs = crate::storage::bundle::FragOps::new(
-                raw,
-                data,
-                len,
-                &self.actor_map,
-                self.frag.succ_entries(),
-                self.frag.value_bytes(),
-                self.frag.inc_index(),
-            );
-            let m = doc.ops().apply_manifold(self.clock.clone());
-            m.apply_frag(&mut fs)
-        };
+    pub(crate) fn resolve(&self, doc: &Automerge) -> Result<ManifoldResult, AutomergeError> {
+        let (raw, data) = self.src.parts();
+        let len = self.frag.len();
+        let mut fs = crate::storage::bundle::FragOps::new(
+            raw,
+            data,
+            len,
+            &self.actor_map,
+            self.frag.succ_entries(),
+            self.frag.value_bytes(),
+            self.frag.inc_index(),
+        );
+        let m = doc.ops().apply_manifold(self.clock.clone());
+        m.apply_frag(&mut fs)
+    }
 
+    /// Write what [`Self::resolve`] decided. Infallible by construction.
+    pub(crate) fn commit(self, doc: &mut Automerge, mut r: ManifoldResult) {
         // write the doc succ while positions are still pre-merge —
         // add_succ also clears vis/top/text on rows it deletes, so the
         // visible column is final before the elections below read it
@@ -207,7 +204,6 @@ impl<'a> FragmentApply<'a> {
             }
             panic!("op order violated");
         }
-        Ok(())
     }
 }
 

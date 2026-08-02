@@ -394,7 +394,7 @@ pub unsafe extern "C" fn AMgetChanges(doc: *mut AMdoc, have_deps: *const AMitems
 pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -> *mut AMresult {
     let doc1 = to_doc_mut!(doc1);
     let doc2 = to_doc_mut!(doc2);
-    to_result(doc1.get_changes_added(doc2))
+    to_result(doc1.get_changes_added_legacy(doc2))
 }
 
 /// \memberof AMdoc
@@ -634,7 +634,7 @@ pub unsafe extern "C" fn AMgetMissingDeps(doc: *mut AMdoc, heads: *const AMitems
 pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     to_result(
-        doc.get_last_local_change()
+        doc.get_last_local_change_legacy()
             .expect("C documents always have a checked hash graph"),
     )
 }

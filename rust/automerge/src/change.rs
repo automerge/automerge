@@ -32,6 +32,13 @@ impl Change {
     ) -> Result<Self, ReadChangeOpError> {
         let mut len = 0;
         let stored = stored.verify_ops(|_| len += 1)?;
+        // Sequence numbers are 1-based everywhere, which is what lets
+        // `ChangeId` hold a `NonZeroU64` and stay total. A change off the
+        // wire has to earn that here, or every later conversion is a
+        // panic waiting on malformed input.
+        if stored.seq() == 0 {
+            return Err(ReadChangeOpError::ZeroSeq);
+        }
         let compression = if let Some(c) = compressed {
             CompressionState::Compressed(c)
         } else {

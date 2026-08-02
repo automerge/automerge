@@ -2519,7 +2519,11 @@ mod tests {
         doc.put(crate::ROOT, "key", "value").unwrap();
         doc.put(crate::ROOT, "key2", "value2").unwrap();
         doc.delete(crate::ROOT, "key2").unwrap();
-        let saved = doc.save();
+        // this test reads the document chunk's op columns directly
+        let saved = doc.save_with_options(crate::SaveOptions {
+            legacy_format: true,
+            ..Default::default()
+        });
         let doc_chunk = load_document_chunk(&saved);
         let opset = super::OpSet::load(&doc_chunk, TextEncoding::platform_default()).unwrap();
         let ops = opset.iter().collect::<Vec<_>>();

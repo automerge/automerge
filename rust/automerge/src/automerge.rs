@@ -264,6 +264,19 @@ impl Automerge {
         }
     }
 
+    /// An empty document in `audit` mode, for the load paths that build
+    /// one up from chunks. Enabling it *before* the chunks land is what
+    /// makes them verified: `apply_bundle` reconstructs and hashes every
+    /// member in audit mode, and trusts them outside it.
+    fn new_with_encoding_and_audit(encoding: TextEncoding, audit: AuditMode) -> Self {
+        let mut doc = Self::new_with_encoding(encoding);
+        if audit == AuditMode::Enabled {
+            doc.enable_audit_mode()
+                .expect("an empty document has no changes to hash");
+        }
+        doc
+    }
+
     pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph) -> Self {
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
@@ -740,7 +753,7 @@ impl Automerge {
             return Err(load::Error::BadChecksum.into());
         }
 
-        let mut changes = vec![];
+        let mut changes: Vec<load::LoadedChunk> = vec![];
         let mut first_chunk_was_doc = false;
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
@@ -761,10 +774,10 @@ impl Automerge {
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
-                changes.push(
+                changes.push(load::LoadedChunk::Change(Box::new(
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
-                );
+                )));
                 Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::BundleV0(bundle) => {
@@ -776,53 +789,65 @@ impl Automerge {
                 let bundle_changes = storage
                     .to_changes()
                     .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
-                changes.extend(bundle_changes);
+                changes.extend(
+                    bundle_changes
+                        .into_iter()
+                        .map(|c| load::LoadedChunk::Change(Box::new(c))),
+                );
                 Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::BundleColumns(bundle) => {
                 tracing::trace!("first chunk is a bundle-columns chunk");
-                let storage = storage::bundle::verify_inner(bundle.into_owned())
-                    .map_err(|e| load::Error::InvalidBundleColumn(Box::new(e)))?;
-                let bundle_changes = storage
-                    .to_changes()
-                    .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
-                changes.extend(bundle_changes);
-                Self::new_with_encoding(options.text_encoding)
+                // a bundle leading the stream is the fragment form of a
+                // document save, orphan chunks and all — so it earns the
+                // same tolerance for changes left over at the end
+                first_chunk_was_doc = true;
+                changes.push(load::LoadedChunk::Bundle(bundle));
+                Self::new_with_encoding_and_audit(options.text_encoding, options.audit)
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
-                changes.push(
+                changes.push(load::LoadedChunk::Change(Box::new(
                     Change::new_from_unverified(
                         stored_change.into_owned(),
                         Some(compressed.into_owned()),
                     )
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
-                );
+                )));
                 Self::new_with_encoding(options.text_encoding)
             }
         };
         tracing::trace!("loading change chunks");
-        match load::load_changes(
+        // The first chunk is applied here too, not at construction: only
+        // a document chunk builds the document outright, and a bundle —
+        // the fragment form of the same thing — is a chunk like any
+        // other. So a partial load must still apply what parsed, or
+        // everything before the corruption is thrown away.
+        let (rest, partial) = match load::load_changes(
             remaining.reset(),
             options.text_encoding,
             &am.change_graph,
             mark_order,
         ) {
-            load::LoadedChanges::Complete(c) => {
-                am.apply_changes(changes.into_iter().chain(c))?;
-                // Only allow missing deps if the first chunk was a document chunk
-                // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty()
-                    && !first_chunk_was_doc
-                    && options.on_partial_load == OnPartialLoad::Error
-                {
-                    return Err(AutomergeError::MissingDeps);
-                }
+            load::LoadedChanges::Complete(c) => (c, None),
+            load::LoadedChanges::Partial { loaded, error, .. } => (loaded, Some(error)),
+        };
+        if let Some(error) = partial {
+            if options.on_partial_load == OnPartialLoad::Error {
+                return Err(error.into());
             }
-            load::LoadedChanges::Partial { error, .. } => {
-                if options.on_partial_load == OnPartialLoad::Error {
-                    return Err(error.into());
-                }
+            let all = changes.into_iter().chain(rest).collect();
+            am.apply_loaded(all)?;
+        } else {
+            let all = changes.into_iter().chain(rest).collect();
+            am.apply_loaded(all)?;
+            // Only allow missing deps if the first chunk was a document chunk
+            // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
+            if !am.queue.is_empty()
+                && !first_chunk_was_doc
+                && options.on_partial_load == OnPartialLoad::Error
+            {
+                return Err(AutomergeError::MissingDeps);
             }
         }
         if let StringMigration::ConvertToText = options.string_migration {
@@ -877,7 +902,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes(changes)?;
+        self.apply_loaded(changes)?;
         Ok(self.ops.len() - start)
     }
 
@@ -892,6 +917,30 @@ impl Automerge {
         patch_accumulator.path_hint(path_map);
     }
 
+    /// Apply what the loader recovered, in order.
+    ///
+    /// Runs of change chunks still go in as one batch; a bundle takes the
+    /// manifold path, which is both faster and the only one that works
+    /// without the members' dep hashes.
+    fn apply_loaded(&mut self, chunks: Vec<load::LoadedChunk>) -> Result<(), AutomergeError> {
+        let mut pending: Vec<Change> = vec![];
+        for chunk in chunks {
+            match chunk {
+                load::LoadedChunk::Change(c) => pending.push(*c),
+                load::LoadedChunk::Bundle(b) => {
+                    if !pending.is_empty() {
+                        self.apply_changes(std::mem::take(&mut pending))?;
+                    }
+                    self.apply_bundle(*b)?;
+                }
+            }
+        }
+        if !pending.is_empty() {
+            self.apply_changes(pending)?;
+        }
+        Ok(())
+    }
+
     /// Apply changes to this document.
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
@@ -900,24 +949,55 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch(changes)
+        let result = self.apply_changes_batch(changes);
+        if result.is_ok() {
+            self.assert_no_unused_actors(cfg!(debug_assertions));
+        }
+        result
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeId>, AutomergeError> {
-        let changes = self.get_changes_added(other)?;
-        tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes(changes)?;
+        if let Some(bundle) = self.get_changes_added(other)? {
+            tracing::trace!(heads=?bundle.heads().collect::<Vec<_>>(), "merging new changes");
+            self.apply_bundle(bundle)?;
+        }
         Ok(self.get_heads())
     }
 
     /// Save the entirety of this document in a compact form.
+    ///
+    /// A whole-document fragment by default;
+    /// [`SaveOptions::legacy_format`] writes the pre-fragment document
+    /// chunk instead, for readers that predate bundles.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        self.assert_no_unused_actors(true);
+        let mut bytes = if options.legacy_format {
+            // this format writes the actor table verbatim, so a stray
+            // entry lands in the saved bytes. `AutoCommit` sweeps them
+            // before getting here; a bare `Automerge` cannot (this takes
+            // `&self`), so it only says so.
+            self.assert_no_unused_actors(cfg!(debug_assertions));
+            Document::new(&self.ops, &self.change_graph, options.compress()).into_bytes()
+        } else if self.change_graph.is_empty() {
+            // a bundle must deliver at least one head, so a document with
+            // no changes saves as nothing at all — which is what loading
+            // it back yields
+            Vec::new()
+        } else {
+            let bundle = self
+                .bundle_document()
+                .expect("a document's own changes are always bundleable");
+            if options.deflate {
+                bundle.bytes()
+            } else {
+                bundle.bytes_uncompressed()
+            }
+        };
 
-        let doc = Document::new(&self.ops, &self.change_graph, options.compress());
-        let mut bytes = doc.into_bytes();
-
+        // Orphans — changes applied without their dependencies — ride
+        // after the document as their own change chunks, which is the
+        // only place they can go: a bundle's members must be causally
+        // closed, and the document chunk has no room for them either.
         if options.retain_orphans {
             for orphaned in self.queue.iter() {
                 bytes.extend(orphaned.raw_bytes());
@@ -929,11 +1009,6 @@ impl Automerge {
     #[cfg(test)]
     pub fn debug_cmp(&self, other: &Self) {
         self.ops.debug_cmp(&other.ops);
-    }
-
-    /// Save the entirety of this document in a compact form.
-    pub fn save(&self) -> Vec<u8> {
-        self.save_with_options(SaveOptions::default())
     }
 
     /// Save the document and attempt to load it before returning - slow!
@@ -951,34 +1026,118 @@ impl Automerge {
         })
     }
 
-    /// Save the changes since the given heads
+    /// The whole document as a single fragment.
     ///
-    /// The output of this will not be a compressed document format, but a series of individual
-    /// changes. This is useful if you know you have only made a small change since the last
-    /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
-    /// single character in a text object).
-    pub fn save_after(&self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
-        let changes = self.get_changes(heads)?;
-        let mut bytes = vec![];
-        for c in changes {
-            bytes.extend(c.raw_bytes());
-        }
-        Ok(bytes)
+    /// Every change the document holds, delivered under every head it
+    /// has — the multi-head case a [`Fragment`] cannot express. The
+    /// known fragment-level hashes ride along as checkpoints, which is
+    /// what lets the receiver rebuild the fragment structure this
+    /// document had; without them it would know only the fragments its
+    /// own heads form.
+    pub fn bundle_document(&self) -> Result<Bundle, AutomergeError> {
+        let nodes = self.change_graph.all_nodes();
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        let heads = self.get_head_hashes();
+        let checkpoints = self.change_graph.checkpoint_hashes();
+        // a whole document depends on nothing outside itself
+        self.assemble_bundle(&heads, &checkpoints, &[], &nodes, storage)
     }
 
-    /// Hash-keyed version of [`Self::save_after`], for the save cursor
-    /// (which stores hashes — the currency of storage).
-    pub(crate) fn save_after_hashes(
+    /// The changes `heads` does not already cover, as one fragment.
+    ///
+    /// `None` when `heads` covers everything. Ids the document does not
+    /// know contribute nothing, the same reading `get_changes` takes —
+    /// "changes since" is legitimately asked with a peer's heads.
+    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Option<Bundle>, AutomergeError> {
+        let nodes: Vec<_> = heads
+            .iter()
+            .filter_map(|id| self.node_for_change_id(id))
+            .collect();
+        let clock = self.change_graph.seq_clock_for_nodes(nodes);
+        let fresh = self.change_graph.get_build_indexes(clock);
+        // the boundary the receiver must already have
+        let boundary = self.change_ids_to_hashes_lossy(heads);
+        self.bundle_nodes(fresh, &boundary)
+    }
+
+    /// Wrap `nodes` as a fragment whose boundary is `boundary` — the
+    /// shared spine between `bundle_after` and the merge/local-change
+    /// helpers. `None` when there is nothing to deliver.
+    fn bundle_nodes(
         &self,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<u8>, AutomergeError> {
-        let clock = self.change_graph.seq_clock_for_heads_lossy(heads);
-        let changes = ChangeCollector::exclude_seq_clock(&self.ops, &self.change_graph, clock)?;
-        let mut bytes = vec![];
-        for c in changes {
-            bytes.extend(c.raw_bytes());
+        nodes: Vec<crate::change_graph::NodeIdx>,
+        boundary: &[ChangeHash],
+    ) -> Result<Option<Bundle>, AutomergeError> {
+        if nodes.is_empty() {
+            return Ok(None);
         }
-        Ok(bytes)
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        // the heads of the delivered set: its members that nothing else
+        // in it depends on
+        let heads: Vec<ChangeHash> = self
+            .get_head_hashes()
+            .into_iter()
+            .filter(|h| {
+                self.change_graph
+                    .node_by_hash(h)
+                    .is_some_and(|n| nodes.binary_search(&n).is_ok())
+            })
+            .collect();
+        // the boundary the receiver must already have: the deps of the
+        // delivered set that are not in it
+        let boundary: Vec<ChangeHash> = boundary
+            .iter()
+            .copied()
+            .filter(|h| {
+                self.change_graph
+                    .node_by_hash(h)
+                    .is_some_and(|n| nodes.binary_search(&n).is_err())
+            })
+            .collect();
+        Ok(Some(self.assemble_bundle(
+            &heads,
+            &[],
+            &boundary,
+            &nodes,
+            storage,
+        )?))
+    }
+
+    /// [`Self::save_with_options`] with the defaults.
+    pub fn save(&self) -> Vec<u8> {
+        self.save_with_options(SaveOptions::default())
+    }
+
+    /// The changes since `heads`, as one fragment — or, with
+    /// [`SaveOptions::legacy_format`], as a series of change chunks.
+    /// Empty when `heads` already covers the document.
+    pub fn save_after(&self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
+        self.save_after_with_options(heads, SaveOptions::default())
+    }
+
+    /// [`Self::save_after`], choosing the format.
+    pub fn save_after_with_options(
+        &self,
+        heads: &[ChangeId],
+        options: SaveOptions,
+    ) -> Result<Vec<u8>, AutomergeError> {
+        if options.legacy_format {
+            let mut bytes = vec![];
+            for c in self.get_changes(heads)? {
+                bytes.extend(c.raw_bytes());
+            }
+            return Ok(bytes);
+        }
+        Ok(self
+            .bundle_after(heads)?
+            .map(|b| {
+                if options.deflate {
+                    b.bytes()
+                } else {
+                    b.bytes_uncompressed()
+                }
+            })
+            .unwrap_or_default())
     }
 
     /// Filter the changes down to those that are not transitive dependencies of the heads.
@@ -1000,8 +1159,12 @@ impl Automerge {
         Ok(())
     }
 
-    /// Get the last change this actor made to the document.
-    pub fn get_last_local_change(&self) -> Result<Option<Change>, AutomergeError> {
+    /// The last change this actor made, as a change chunk.
+    ///
+    /// The pre-fragment form of [`Self::get_last_local_change`]; needs
+    /// the change's dep hashes, so it is an audit-mode call on a loaded
+    /// document.
+    pub fn get_last_local_change_legacy(&self) -> Result<Option<Change>, AutomergeError> {
         let Some(actor) = self.get_actor_index() else {
             return Ok(None);
         };
@@ -1014,6 +1177,27 @@ impl Automerge {
             .change_graph
             .get_hash_for_change_id(&id, &self.ops.actors)?;
         self.get_change_by_hash(&hash)
+    }
+
+    /// The last change this actor made, as a one-member fragment.
+    ///
+    /// `None` when this actor has not committed anything.
+    pub fn get_last_local_change(&self) -> Result<Option<Bundle>, AutomergeError> {
+        let Some(actor) = self.get_actor_index() else {
+            return Ok(None);
+        };
+        let seq = self.change_graph.seq_for_actor(actor);
+        if seq == 0 {
+            return Ok(None);
+        }
+        let id = self.change_id_at(actor, seq);
+        let Some(node) = self.change_graph.node_for_change_id(&id, &self.ops.actors) else {
+            return Ok(None);
+        };
+        // the change's own deps are its boundary: everything else the
+        // receiver must already have
+        let boundary = self.change_graph.parent_hashes(node);
+        self.bundle_nodes(vec![node], &boundary)
     }
 
     /// Clock range for diffing between two head sets, resolved with the
@@ -1100,31 +1284,28 @@ impl Automerge {
             .expect("Change's deps should already be in the document");
     }
 
+    /// Insert every actor in `actors` the document lacks, remapping
+    /// the op columns ONCE for the whole batch instead of once per
+    /// actor. Pure appends (every new actor sorting after the existing
+    /// ones) skip the remap entirely.
     fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
         self.ops.insert_actor(index, actor);
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
         index
     }
-    pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
-        match self.ops.actors.binary_search(actor) {
-            Ok(idx) => idx,
-            Err(idx) => self.insert_actor(idx, actor.clone()),
-        }
-    }
 
-    /// Insert every actor in `actors` the document lacks, remapping
-    /// the op columns ONCE for the whole batch instead of once per
-    /// actor. Pure appends (every new actor sorting after the existing
-    /// ones) skip the remap entirely.
-    pub(crate) fn put_actor_refs(&mut self, actors: &[ActorId]) {
+    /// Insert every actor in `actors` the document lacks, returning the
+    /// ones it inserted so a caller that then fails can put the table
+    /// back exactly as it was ([`Self::undo_actor_refs`]).
+    pub(crate) fn put_actor_refs(&mut self, actors: &[ActorId]) -> Vec<ActorId> {
         let mut new: Vec<ActorId> = actors
             .iter()
             .filter(|a| self.ops.actors.binary_search(a).is_err())
             .cloned()
             .collect();
         if new.is_empty() {
-            return;
+            return new;
         }
         new.sort_unstable();
         new.dedup();
@@ -1145,14 +1326,28 @@ impl Automerge {
         // the cheap per-actor state; the op columns defer their
         // renumbering through the actor map
         let mut amap = self.ops.actor_map();
-        for a in new {
-            let idx = self.ops.actors.binary_search(&a).unwrap_err();
+        for a in &new {
+            let idx = self.ops.actors.binary_search(a).unwrap_err();
             amap = amap.insert(idx, self.ops.actors.len());
-            self.ops.actors.insert(idx, a);
+            self.ops.actors.insert(idx, a.clone());
             self.change_graph.insert_actor(idx);
             self.actor.rewrite_with_new_actor(idx);
         }
         self.ops.set_actor_map(amap);
+        new
+    }
+
+    /// Undo a [`Self::put_actor_refs`]. Descending, so each removal's
+    /// index is still the one the lookup just found.
+    pub(crate) fn undo_actor_refs(&mut self, added: &[ActorId]) {
+        let mut idxs: Vec<usize> = added
+            .iter()
+            .filter_map(|a| self.ops.actors.binary_search(a).ok())
+            .collect();
+        idxs.sort_unstable();
+        for idx in idxs.into_iter().rev() {
+            self.remove_actor(idx);
+        }
     }
 
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
@@ -1354,13 +1549,19 @@ impl Automerge {
     pub fn bundle_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
         let nodes = self.fragment_nodes(f)?;
         let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
-        self.assemble_bundle(f, &nodes, storage)
+        self.assemble_bundle(&[f.head], &f.checkpoints, &f.boundary, &nodes, storage)
     }
 
     /// Wrap collected change storage in its fragment metadata.
+    ///
+    /// `heads` is a list because a bundle standing in for a whole
+    /// document delivers every head the document has, where a fragment
+    /// delivers exactly one.
     fn assemble_bundle(
         &self,
-        f: &Fragment,
+        heads: &[ChangeHash],
+        checkpoints: &[ChangeHash],
+        boundary: &[ChangeHash],
         nodes: &[crate::change_graph::NodeIdx],
         storage: crate::storage::BundleStorage<'static, crate::storage::change::Verified>,
     ) -> Result<Bundle, AutomergeError> {
@@ -1371,11 +1572,14 @@ impl Automerge {
             let n = self.change_graph.node_by_hash(h)?;
             nodes.binary_search(&n).ok()
         };
-        let head_index = member_index(&f.head).ok_or_else(unknown)?;
-        let checkpoints = f
-            .checkpoints
+        let heads = heads
             .iter()
-            .filter(|h| **h != f.head)
+            .map(|h| member_index(h).map(|i| (*h, i)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(unknown)?;
+        let checkpoints = checkpoints
+            .iter()
+            .filter(|h| !heads.iter().any(|(head, _)| *head == **h))
             .map(|h| member_index(h).map(|i| (i, *h)))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
@@ -1383,8 +1587,7 @@ impl Automerge {
             let n = self.change_graph.node_by_hash(h)?;
             Some(self.change_graph.change_id(n, &self.ops.actors))
         };
-        let boundary = f
-            .boundary
+        let boundary = boundary
             .iter()
             .map(|h| change_id(h).map(|id| (*h, id)))
             .collect::<Option<Vec<_>>>()
@@ -1401,7 +1604,7 @@ impl Automerge {
         let (member_actors, member_seqs) = storage.member_ids().map_err(|_| unknown())?;
 
         Ok(Bundle::new(
-            vec![(f.head, head_index)],
+            heads,
             checkpoints,
             boundary,
             dep_ids,
@@ -1427,26 +1630,12 @@ impl Automerge {
             .iter()
             .zip(nodes.iter())
             .zip(storages)
-            .map(|((f, n), storage)| Ok(self.assemble_bundle(f, n, storage)?.bytes()))
+            .map(|((f, n), storage)| {
+                Ok(self
+                    .assemble_bundle(&[f.head], &f.checkpoints, &f.boundary, n, storage)?
+                    .bytes())
+            })
             .collect()
-    }
-
-    /// The node a bundle member occupies in this document's change graph,
-    /// by its (actor, seq) — which is how the graph indexes changes. The
-    /// members must already be applied.
-    fn member_node(
-        &self,
-        bundle: &Bundle,
-        actor_map: &[usize],
-        index: usize,
-    ) -> Option<crate::change_graph::NodeIdx> {
-        let doc_actor = actor_map[usize::from(bundle.member_actors[index])];
-        let id = ChangeId::new(
-            bundle.member_seqs[index],
-            self.ops.actors[doc_actor].clone(),
-            doc_actor,
-        );
-        self.change_graph.node_for_change_id(&id, &self.ops.actors)
     }
 
     /// Apply a bundle's changes.
@@ -1455,22 +1644,51 @@ impl Automerge {
     /// loaded once, on the way in, and *moved* into this document's op
     /// set by the merge — so the bundle is consumed rather than read.
     /// Apply the same bundle to a second document by cloning it.
-    pub fn apply_bundle(&mut self, mut bundle: Bundle) -> Result<(), AutomergeError> {
+    pub fn apply_bundle(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
+        // The apply takes the sender's whole actor table up front, before
+        // it knows the bundle is applicable, so a bail leaves actors no
+        // change names. Harmless to a fragment save, which names only
+        // the actors its ops use; the legacy save is where it matters,
+        // and where it is swept up.
+        let result = self.apply_bundle_inner(bundle);
+        if result.is_ok() {
+            self.assert_no_unused_actors(cfg!(debug_assertions));
+        }
+        result
+    }
+
+    fn apply_bundle_inner(&mut self, mut bundle: Bundle) -> Result<(), AutomergeError> {
         if self.audit_mode() == AuditMode::Enabled {
             // audit mode keeps and verifies every hash: reconstruct the
             // member changes and apply them individually, computing each
             // hash instead of taking the bundle's metadata on trust
-            self.apply_changes(bundle.to_changes()?)?;
-            // the members applied (rather than queued) exactly when every
-            // computed head hash names a change — this both enforces the
-            // manifold path's no-missing-deps contract and verifies the
-            // bundle's claimed heads against the computed hashes
-            if bundle
-                .heads()
-                .any(|h| self.change_graph.hash_to_index(&h).is_none())
-            {
-                return Err(AutomergeError::MissingDeps);
+            let changes = bundle.to_changes()?;
+            // The manifold path's no-missing-deps contract, checked
+            // before anything is applied rather than after: a dep must
+            // be a change we have or one the bundle carries. Checking it
+            // afterwards (by asking whether the heads made it into the
+            // graph) meant a rejected bundle had already been applied.
+            let carried: std::collections::HashSet<ChangeHash> =
+                changes.iter().map(|c| c.hash()).collect();
+            for c in &changes {
+                for dep in c.deps() {
+                    if !carried.contains(dep) && !self.change_graph.has_change(dep)? {
+                        return Err(AutomergeError::MissingDeps);
+                    }
+                }
             }
+            // and the claimed heads against the computed ones: this is
+            // the mode that does not take a bundle's metadata on trust,
+            // and a head that does not hash to what it claims is a
+            // forgery
+            for (hash, index) in &bundle.heads {
+                if changes.get(*index).map(|c| c.hash()) != Some(*hash) {
+                    return Err(AutomergeError::InvalidFragment(
+                        "bundle head does not hash to the member it names",
+                    ));
+                }
+            }
+            self.apply_changes(changes)?;
             return Ok(());
         }
 
@@ -1492,19 +1710,29 @@ impl Automerge {
         // Bundle parsing catches all shape errors — a bundle that
         // exists is well formed, so indexes below need no bounds checks
 
-        // insert any new actors, then map bundle actor indexes to the
-        // (possibly shifted) document indexes
-        self.put_actor_refs(bundle.actors());
-        let actor_map: Vec<usize> = bundle
-            .actors()
-            .iter()
-            .map(|a| self.ops.lookup_actor(a).expect("actor was just inserted"))
-            .collect();
+        // ── resolve ─────────────────────────────────────────────────
+        //
+        // Nothing below this point in the phase touches the document.
+        // Every lookup goes through the bundle's own actor ids, so it
+        // works before this document has heard of them — which is what
+        // lets the whole decision be made before anything is written.
 
-        // everything the document already has, as clocks: a member (or
+        // a member's id, in the bundle's terms. The hint is a guess the
+        // resolver checks and falls back from, so it costs nothing to be
+        // wrong about a document that has never seen this actor.
+        let member_id = |i: usize| -> ChangeId {
+            ChangeId::new(
+                member_seqs[i],
+                bundle.actors()[usize::from(member_actors[i])].clone(),
+                0,
+            )
+        };
+
+        // everything the document already has, as a clock: a member (or
         // one of its ops) is already here exactly when the clock covers
-        // it, since changes arrive in per-actor order
-        let clock = self.change_graph.current_clock();
+        // it, since changes arrive in per-actor order. Indexed by this
+        // document's actors, so the ops clock has to wait until the
+        // bundle's actors have joined them.
         let seq_clock = self.change_graph.current_seq_clock();
 
         // Split the members into ones we already have (skipped — applying
@@ -1518,8 +1746,10 @@ impl Automerge {
         for i in 0..num_members {
             let actor = usize::from(member_actors[i]);
             let seq = member_seqs[i].get();
-            let have = seq_clock
-                .get_for_actor(&actor_map[actor])
+            let have = self
+                .ops
+                .lookup_actor(&bundle.actors()[actor])
+                .and_then(|idx| seq_clock.get_for_actor(&idx))
                 .map(|s| s.get() as u64)
                 .unwrap_or(0);
             let next = next_seq[actor].unwrap_or(have + 1);
@@ -1540,49 +1770,33 @@ impl Automerge {
             // everything is already in the document
             return Ok(());
         }
-
-        // load the ops before touching the graph, so a malformed bundle
-        // fails without altering history. Ops the clock covers belong to
-        // skipped members and are dropped.
         let overlap = num_kept < num_members;
-        let ops = match FragmentApply::new(
-            bundle,
-            actor_map.clone(),
-            &clock,
-            overlap,
-            &self.ops,
-            frag_ops,
-        ) {
-            Ok(f) => f,
-            Err(e) => {
-                self.remove_unused_actors(false);
-                return Err(e);
+
+        // The nodes the kept members will occupy. Known now because the
+        // graph only ever grows and only the commit below appends to it,
+        // which is what lets the heads be resolved before the members
+        // exist.
+        let base = self.change_graph.len() as u32;
+        let member_node = |i: usize| -> Option<crate::change_graph::NodeIdx> {
+            if keep[i] {
+                Some(crate::change_graph::NodeIdx(base + kept_index[i] as u32))
+            } else {
+                self.change_graph
+                    .node_for_change_id(&member_id(i), &self.ops.actors)
             }
         };
 
-        // record the boundary pairings — every boundary head is an
-        // ancestor of the members, so it must already be a node here
-        //
-        // FIXME: this loop, and the dep loop below, record hashes into
-        // the change graph *before* a later entry can return
-        // `MissingDeps` — so a rejected bundle can still leave hash ->
-        // node pairings (and the fragment-index entries `cache_fragment`
-        // derives from them) behind, contradicting this method's "nothing
-        // is applied on error" contract. The pairings are unverified
-        // bundle metadata, and `has_change` consults them, so a bad
-        // bundle can teach the document a hash it does not have. Resolve
-        // and drain the pairings first, then commit them only once every
-        // member has resolved.
-        // The retention GC is O(graph), so it runs once for this whole
-        // apply rather than once per hash recorded below — per-hash makes
-        // a fragment chain quadratic in the document.
-        let mut owes_gc = false;
+        // Hash pairings to learn, resolved but not yet recorded: the
+        // boundary heads (ancestors of the members, so already nodes
+        // here) and, below, the external deps.
+        let mut hash_pairs: Vec<(crate::change_graph::NodeIdx, ChangeHash)> =
+            Vec::with_capacity(bundle.boundary.len() + bundle.dep_ids.len());
         for (hash, id) in &bundle.boundary {
             let node = self
                 .change_graph
                 .node_for_change_id(id, &self.ops.actors)
                 .ok_or(AutomergeError::MissingDeps)?;
-            owes_gc |= self.change_graph.record_node_hash(node, *hash);
+            hash_pairs.push((node, *hash));
         }
 
         // A member's deps name other members (by position) or changes the
@@ -1594,18 +1808,12 @@ impl Automerge {
         // `add_fragment_members*` drops each resolved parent from the
         // graph's heads and `record_fragment_head` below adds the new
         // one, so the head set needs no separate maintenance here.
+        let mut graph_members: Vec<FragmentMember<'_>> = Vec::new();
+        let mut ext_nodes: Vec<crate::change_graph::NodeIdx> = Vec::new();
         if overlap {
             // the members' own metadata, decoded (only this path needs it)
             let members = bundle.changes()?;
-            let member_ids: Vec<ChangeId> = member_actors
-                .iter()
-                .zip(member_seqs)
-                .map(|(a, seq)| {
-                    let doc_actor = actor_map[usize::from(*a)];
-                    ChangeId::new(*seq, self.ops.actors[doc_actor].clone(), doc_actor)
-                })
-                .collect();
-            let mut graph_members = Vec::with_capacity(num_kept);
+            graph_members.reserve(num_kept);
             for (i, m) in members.iter().enumerate() {
                 if !keep[i] {
                     continue;
@@ -1619,7 +1827,7 @@ impl Automerge {
                         } else {
                             let node = self
                                 .change_graph
-                                .node_for_change_id(&member_ids[d], &self.ops.actors);
+                                .node_for_change_id(&member_id(d), &self.ops.actors);
                             deps.push(FragmentDep::Node(node.ok_or(AutomergeError::MissingDeps)?));
                         }
                     } else {
@@ -1633,14 +1841,12 @@ impl Automerge {
                             .ok_or(AutomergeError::MissingDeps)?;
                         // learn the dep's hash pairing — an anchor for
                         // later fragments that reference it by hash
-                        owes_gc |= self
-                            .change_graph
-                            .record_node_hash(node, bundle.deps()[d - num_members]);
+                        hash_pairs.push((node, bundle.deps()[d - num_members]));
                         deps.push(FragmentDep::Node(node));
                     }
                 }
                 graph_members.push(FragmentMember {
-                    actor: actor_map[m.actor],
+                    actor: usize::from(member_actors[i]),
                     seq: m.seq,
                     max_op: m.max_op,
                     num_ops: 1 + m.max_op - m.start_op,
@@ -1652,7 +1858,6 @@ impl Automerge {
                     deps,
                 });
             }
-            self.change_graph.add_fragment_members(graph_members);
         } else {
             // Every member is kept, so a member dep's node is just its
             // position offset from the first appended node and no member
@@ -1663,7 +1868,7 @@ impl Automerge {
             // A dep the document does not have is `MissingDeps` whether or
             // not a member turns out to reference it: the bundle declares
             // it as history it builds on.
-            let mut ext_nodes = Vec::with_capacity(bundle.dep_ids.len());
+            ext_nodes.reserve(bundle.dep_ids.len());
             for (i, dep_id) in bundle.dep_ids.iter().enumerate() {
                 let node = self
                     .change_graph
@@ -1671,39 +1876,110 @@ impl Automerge {
                     .ok_or(AutomergeError::MissingDeps)?;
                 // learn the dep's hash pairing — an anchor for later
                 // fragments that reference it by hash
-                owes_gc |= self.change_graph.record_node_hash(node, bundle.deps()[i]);
+                hash_pairs.push((node, bundle.deps()[i]));
                 ext_nodes.push(node);
             }
-            self.change_graph.add_fragment_members_cols(
-                &bundle.change_cols(),
-                member_actors,
-                member_seqs,
-                &actor_map,
-                &ext_nodes,
-            )?;
         }
 
-        // record the head and checkpoint hashes on their nodes: the heads
-        // so they can serve as heads of the document and anchors for
-        // the next fragment, the checkpoints so nested fragments stay
-        // exportable
+        // the heads this bundle delivers, and the checkpoints that keep
+        // nested fragments exportable
+        let mut head_nodes = Vec::with_capacity(bundle.heads.len());
         for (hash, index) in &bundle.heads {
-            let head_node = self.member_node(bundle, &actor_map, *index).ok_or(
-                AutomergeError::InvalidFragment("bundle head is not a member of the bundle"),
-            )?;
-            owes_gc |= self.change_graph.record_fragment_head(head_node, *hash);
+            head_nodes.push((
+                member_node(*index).ok_or(AutomergeError::InvalidFragment(
+                    "bundle head is not a member of the bundle",
+                ))?,
+                *hash,
+            ));
         }
-        for (i, hash) in &bundle.checkpoints {
-            if let Some(node) = self.member_node(bundle, &actor_map, *i) {
-                owes_gc |= self.change_graph.record_node_hash(node, *hash);
+        let checkpoint_nodes: Vec<_> = bundle
+            .checkpoints
+            .iter()
+            .filter_map(|(i, hash)| member_node(*i).map(|n| (n, *hash)))
+            .collect();
+
+        // ── commit ──────────────────────────────────────────────────
+        //
+        // Two fallible steps remain, and both leave the graph untouched
+        // when they fail; the actor table is the one thing already
+        // written, and it is put back exactly. Everything after them is
+        // infallible, so the document either takes the whole bundle or
+        // none of it.
+        let added = self.put_actor_refs(bundle.actors());
+        let actor_map: Vec<usize> = bundle
+            .actors()
+            .iter()
+            .map(|a| self.ops.lookup_actor(a).expect("actor was just inserted"))
+            .collect();
+        let clock = self.change_graph.current_clock();
+
+        // load the ops before touching the graph, so a malformed bundle
+        // fails without altering history. Ops the clock covers belong to
+        // skipped members and are dropped.
+        let ops = match FragmentApply::new(
+            bundle,
+            actor_map.clone(),
+            &clock,
+            overlap,
+            &self.ops,
+            frag_ops,
+        ) {
+            Ok(ops) => ops,
+            Err(e) => {
+                self.undo_actor_refs(&added);
+                return Err(e);
             }
+        };
+        // resolving the ops against the document reads only, and it is
+        // the last thing that can reject the fragment — a bad position
+        // hint surfaces here
+        let resolved = match ops.resolve(self) {
+            Ok(r) => r,
+            Err(e) => {
+                self.undo_actor_refs(&added);
+                return Err(e);
+            }
+        };
+
+        if overlap {
+            // the members' actors were resolved in bundle space; they are
+            // document indexes now
+            for m in &mut graph_members {
+                m.actor = actor_map[m.actor];
+            }
+            self.change_graph.add_fragment_members(graph_members);
+        } else if let Err(e) = self.change_graph.add_fragment_members_cols(
+            &bundle.change_cols(),
+            member_actors,
+            member_seqs,
+            &actor_map,
+            &ext_nodes,
+        ) {
+            self.undo_actor_refs(&added);
+            return Err(e);
+        }
+
+        // The retention GC is O(graph), so it runs once for this whole
+        // apply rather than once per hash recorded here — per-hash makes
+        // a fragment chain quadratic in the document.
+        let mut owes_gc = false;
+        for (node, hash) in hash_pairs {
+            owes_gc |= self.change_graph.record_node_hash(node, hash);
+        }
+        // the heads so they can serve as heads of the document and
+        // anchors for the next fragment
+        for (node, hash) in head_nodes {
+            owes_gc |= self.change_graph.record_fragment_head(node, hash);
+        }
+        for (node, hash) in checkpoint_nodes {
+            owes_gc |= self.change_graph.record_node_hash(node, hash);
         }
         if owes_gc {
             self.change_graph.gc_after_batch();
         }
 
-        self.remove_unused_actors(true);
-        ops.apply(self)
+        ops.commit(self, resolved);
+        Ok(())
     }
 
     /// Test-support deep validation of the document.
@@ -1940,6 +2216,19 @@ impl Automerge {
             .collect()
     }
 
+    /// [`Self::change_ids_to_hashes`] keeping only the ids this document
+    /// knows and still has a hash for.
+    ///
+    /// A fragment's boundary is exactly that set: a hash it cannot
+    /// resolve is one the receiver identifies by dep id instead, and an
+    /// id from a peer's heads may name a change this document has never
+    /// seen.
+    pub(crate) fn change_ids_to_hashes_lossy(&self, ids: &[ChangeId]) -> Vec<ChangeHash> {
+        ids.iter()
+            .filter_map(|id| self.change_id_to_hash(id).ok().flatten())
+            .collect()
+    }
+
     /// Whether this document contains the change identified by `id`.
     ///
     /// This never needs hashes so it works in any audit mode.
@@ -1999,8 +2288,19 @@ impl Automerge {
         }
     }
 
+    /// [`Self::get_changes_added`] as change chunks.
+    ///
+    /// Needs the changes' dep hashes, so it is an audit-mode call on a
+    /// loaded document.
+    pub fn get_changes_added_legacy(&self, other: &Self) -> Result<Vec<Change>, AutomergeError> {
+        match self.get_changes_added(other)? {
+            Some(bundle) => bundle.to_changes(),
+            None => Ok(vec![]),
+        }
+    }
+
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added(&self, other: &Self) -> Result<Vec<Change>, AutomergeError> {
+    pub fn get_changes_added(&self, other: &Self) -> Result<Option<Bundle>, AutomergeError> {
         // hash-free: per-actor change sequences are linear, so a change
         // in `other` is new to us exactly when our seq clock does not
         // cover its (actor, seq) — the same identify-by-(actor, seq)
@@ -2049,7 +2349,11 @@ impl Automerge {
                 exclude.include(other_idx, Some(shared));
             }
         }
-        ChangeCollector::exclude_seq_clock(&other.ops, &other.change_graph, exclude)
+        let nodes = other.change_graph.get_build_indexes(exclude);
+        // the boundary is what we already have and they build on: our
+        // heads, as far as they are known to `other`
+        let boundary = self.get_head_hashes();
+        other.bundle_nodes(nodes, &boundary)
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -2904,6 +3208,14 @@ pub struct SaveOptions {
     pub deflate: bool,
     /// Whether to save changes which we do not have the dependencies for
     pub retain_orphans: bool,
+    /// Write the pre-fragment **document chunk** instead of a
+    /// whole-document fragment.
+    ///
+    /// The two carry the same history. The document chunk is what
+    /// readers older than the fragment format understand; the fragment
+    /// is self-contained, needs no change hashes, and keeps the
+    /// document's fragment structure across a round trip.
+    pub legacy_format: bool,
 }
 
 impl SaveOptions {
@@ -2919,6 +3231,7 @@ impl SaveOptions {
 impl std::default::Default for SaveOptions {
     fn default() -> Self {
         Self {
+            legacy_format: false,
             deflate: true,
             retain_orphans: true,
         }
@@ -4840,5 +5153,237 @@ mod dirty_diff_tests {
         assert_dirty_diff_matches_full(&doc, &before, &after);
         doc.dirty_diff_patches_and_clear(&before, &after).unwrap();
         assert!(doc.ops().dirty_runs().next().is_none());
+    }
+}
+
+/// The actor table must hold exactly the actors the change graph names.
+///
+/// Actors are added speculatively — a transaction takes one before it
+/// knows whether it will commit, an apply takes the whole sender's table
+/// before it knows whether the changes are applicable — so every path
+/// that can bail after taking one has to put it back. A stray entry is
+/// not cosmetic: the table is the index space for every actor column, so
+/// it shifts the indexes a save writes.
+#[cfg(test)]
+mod actor_hygiene_tests {
+    use super::*;
+    use crate::transaction::Transactable;
+    use crate::{AutoCommit, ROOT};
+
+    fn actor(n: u8) -> ActorId {
+        ActorId::from(&[n, n, n, n][..])
+    }
+
+    /// The invariant, as the save paths assert it.
+    fn assert_clean(doc: &Automerge, what: &str) {
+        let unused: Vec<_> = doc.change_graph.unused_actors().collect();
+        assert!(
+            unused.is_empty(),
+            "{what}: {} actors in the table, {} named by the graph, unused {:?}",
+            doc.ops.actors.len(),
+            doc.change_graph.actor_ids().count(),
+            unused,
+        );
+    }
+
+    #[test]
+    fn rolled_back_transaction_leaves_no_actor() {
+        let mut doc = Automerge::new();
+        doc.set_actor(actor(1)).unwrap();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "k", 1).unwrap();
+        tx.rollback();
+        assert_clean(&doc, "rollback of a new actor's first transaction");
+
+        // and again once the actor has a change of its own to keep
+        doc.transact::<_, _, AutomergeError>(|tx| tx.put(ROOT, "k", 1))
+            .unwrap();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "k", 2).unwrap();
+        tx.rollback();
+        assert_clean(&doc, "rollback of an established actor's transaction");
+    }
+
+    #[test]
+    fn empty_transaction_leaves_no_actor() {
+        let mut doc = Automerge::new();
+        doc.set_actor(actor(1)).unwrap();
+        let tx = doc.transaction();
+        assert!(tx.commit().is_none());
+        assert_clean(&doc, "empty commit by a new actor");
+    }
+
+    /// A failed fragment apply changes nothing at all — not the ops,
+    /// not the graph, not the actor table. Every fallible step resolves
+    /// before the first write, and the one write that precedes the last
+    /// two (the actor table) is put back exactly.
+    #[test]
+    fn failed_bundle_apply_changes_nothing() {
+        let mut src = AutoCommit::new().with_actor(actor(7)).unwrap();
+        src.enable_audit_mode().unwrap();
+        src.put(ROOT, "a", 1).unwrap();
+        src.commit();
+        src.put(ROOT, "b", 2).unwrap();
+        src.commit();
+        let changes = src.get_changes(&[]).unwrap();
+
+        // a bundle whose boundary the receiver does not have
+        let head = changes[1].hash();
+        let orphan = crate::Fragment {
+            head,
+            level: head.fragment_level(),
+            boundary: vec![changes[0].hash()],
+            checkpoints: vec![],
+            members: vec![changes[1].id()],
+        };
+        // and one whose members start above the receiver's chain
+        let head0 = changes[0].hash();
+        let whole = crate::Fragment {
+            head,
+            level: head.fragment_level(),
+            boundary: vec![],
+            checkpoints: vec![],
+            members: vec![changes[1].id(), changes[0].id()],
+        };
+        let _ = head0;
+
+        for (what, frag) in [("missing boundary", orphan), ("whole", whole)] {
+            let bundle = src.doc.bundle_fragment(&frag).unwrap();
+
+            let mut dst = AutoCommit::new().with_actor(actor(1)).unwrap();
+            dst.put(ROOT, "seed", 0).unwrap();
+            dst.commit();
+            let before_save = dst.save();
+            let before_heads = dst.get_heads();
+            let before_actors = dst.doc.ops.actors.clone();
+            let before_ops = dst.doc.ops.len();
+
+            let r = dst.doc.apply_bundle(bundle);
+            if what == "whole" {
+                // this one is applicable — the guard is the other case
+                assert!(r.is_ok());
+                continue;
+            }
+            assert!(matches!(r, Err(AutomergeError::MissingDeps)), "{what}");
+
+            assert_eq!(dst.doc.ops.actors, before_actors, "{what}: actor table");
+            assert_eq!(dst.doc.ops.len(), before_ops, "{what}: op count");
+            assert_eq!(dst.get_heads(), before_heads, "{what}: heads");
+            assert_eq!(dst.save(), before_save, "{what}: saved bytes");
+            assert_clean(&dst.doc, what);
+        }
+    }
+
+    /// Where a stray actor would actually do damage, if one ever got in:
+    /// the legacy chunk writes the actor table verbatim, so it carries
+    /// one through a save; a bundle's table is built from the actors its
+    /// ops name, so it cannot.
+    #[test]
+    fn only_the_legacy_chunk_carries_a_stray_actor() {
+        let mut doc = Automerge::new();
+        doc.set_actor(actor(1)).unwrap();
+        doc.transact::<_, _, AutomergeError>(|tx| tx.put(ROOT, "k", 1))
+            .unwrap();
+        let clean = doc.ops.actors.len();
+
+        doc.put_actor(actor(9));
+        assert_eq!(doc.change_graph.unused_actors().count(), 1);
+
+        // the formats themselves, below the save entry points (which
+        // assert the state this test is deliberately in)
+        let bundle = doc.bundle_document().unwrap();
+        assert_eq!(
+            bundle.actors().len(),
+            clean,
+            "a bundle names only the actors its ops use"
+        );
+
+        let legacy = crate::storage::Document::new(
+            &doc.ops,
+            &doc.change_graph,
+            crate::storage::document::CompressConfig::None,
+        );
+        assert_eq!(
+            legacy.actors().len(),
+            clean + 1,
+            "the legacy chunk writes the actor table verbatim"
+        );
+    }
+
+    /// A batch that cannot be applied applies none of it. Every step
+    /// that can reject a change reads the document and writes only
+    /// locals, so the first write happens once nothing can fail — and
+    /// the batch's other changes go back in the queue rather than being
+    /// dropped.
+    #[test]
+    fn failed_change_batch_changes_nothing() {
+        let mut src = AutoCommit::new().with_actor(actor(7)).unwrap();
+        src.enable_audit_mode().unwrap();
+        src.put(ROOT, "a", 1).unwrap();
+        src.commit();
+        src.put(ROOT, "b", 2).unwrap();
+        src.commit();
+        let good = src.get_changes(&[]).unwrap();
+
+        // A change that survives parsing and fails during the apply.
+        // Found rather than hand-built: which byte carries what is the
+        // encoding's business, and it moves.
+        let base = good[1].raw_bytes().to_vec();
+        let broken = (0..base.len())
+            .flat_map(|i| (0..8).map(move |b| (i, b)))
+            .find_map(|(i, bit)| {
+                let mut raw = base.clone();
+                raw[i] ^= 1 << bit;
+                let c = crate::Change::try_from(&raw[..]).ok()?;
+                let mut probe = Automerge::new();
+                probe
+                    .apply_changes(vec![good[0].clone(), c.clone()])
+                    .is_err()
+                    .then_some(c)
+            })
+            .expect("some corruption of a change fails during apply");
+
+        let mut dst = AutoCommit::new().with_actor(actor(1)).unwrap();
+        dst.enable_audit_mode().unwrap();
+        dst.put(ROOT, "seed", 0).unwrap();
+        dst.commit();
+        let before_save = dst.save();
+        let before_heads = dst.get_heads();
+        let before_actors = dst.doc.ops.actors.clone();
+        let before_ops = dst.doc.ops.len();
+
+        // the good first change rides in the same batch as the broken one
+        assert!(dst
+            .doc
+            .apply_changes(vec![good[0].clone(), broken])
+            .is_err());
+
+        assert_eq!(dst.doc.ops.actors, before_actors, "actor table");
+        assert_eq!(dst.doc.ops.len(), before_ops, "op count");
+        assert_eq!(dst.get_heads(), before_heads, "heads");
+        assert_eq!(dst.save(), before_save, "saved bytes");
+        assert_clean(&dst.doc, "after a rejected batch");
+    }
+
+    #[test]
+    fn failed_change_apply_leaves_no_actor() {
+        // (this one never took an actor: the equivocation is caught
+        // before the batch is applied)
+        // two different changes at the same (actor, seq): the second is
+        // an equivocation and must be rejected
+        let mut a = AutoCommit::new().with_actor(actor(3)).unwrap();
+        a.enable_audit_mode().unwrap();
+        let mut b = a.fork().with_actor(actor(3)).unwrap();
+        a.put(ROOT, "x", 1).unwrap();
+        a.commit();
+        b.put(ROOT, "x", 2).unwrap();
+        b.commit();
+
+        let mut dst = Automerge::new();
+        dst.enable_audit_mode().unwrap();
+        dst.apply_changes(a.get_changes(&[]).unwrap()).unwrap();
+        let err = dst.apply_changes(b.get_changes(&[]).unwrap());
+        assert!(err.is_err(), "expected the equivocating change to fail");
+        assert_clean(&dst, "change apply that failed on an equivocation");
     }
 }

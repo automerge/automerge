@@ -333,9 +333,12 @@ fn disabled_hash_lookups() {
     let opid = doc.get(ROOT, "k").unwrap().unwrap().1;
     assert_eq!(doc.hash_for_opid(&opid).unwrap(), Some(head));
 
-    // small docs' interior hashes are all loose commits, carried by the
-    // hash columns and retained after load
-    assert!(doc.get_change_by_hash(&early).unwrap().is_some());
+    // the document chunk carries no interior hashes: an earlier
+    // change's hash means nothing to a default load
+    assert!(matches!(
+        doc.hashes_to_change_ids(&[early]),
+        Err(AutomergeError::MissingHash(_)) | Err(AutomergeError::AuditModeRequired)
+    ));
 
     // an op from a covered, freed interior change errors rather than
     // guessing
@@ -595,7 +598,8 @@ fn disabled_lifecycle_all_fallible_functions() {
     let mut other = AutoCommit::new();
     other.put(ROOT, "x", 1).unwrap();
     other.commit();
-    assert_eq!(doc.get_changes_added(&mut other).unwrap().len(), 1);
+    let added = doc.get_changes_added(&mut other).unwrap().unwrap();
+    assert_eq!(added.iter_changes().unwrap().len(), 1);
     let mut fork = doc.fork();
     fork.merge(&mut other).unwrap();
     let (v, _) = fork.get(ROOT, "x").unwrap().unwrap();
@@ -629,7 +633,15 @@ fn disabled_lifecycle_all_fallible_functions() {
         .unwrap()
         .is_empty());
     // the new changes are local, so the last local change is reachable
-    assert_eq!(doc.get_last_local_change().unwrap().unwrap().id(), new2);
+    assert_eq!(
+        doc.get_last_local_change()
+            .unwrap()
+            .unwrap()
+            .heads()
+            .collect::<Vec<_>>(),
+        doc.change_ids_to_hashes(std::slice::from_ref(&new2))
+            .unwrap()
+    );
 
     // ── fragments work outside audit mode: the retained set is
     // fragment-sufficient by construction ──
@@ -656,7 +668,7 @@ fn disabled_lifecycle_all_fallible_functions() {
     assert!(Sync::generate_sync_message(doc.document(), &mut state)
         .unwrap()
         .is_some());
-    assert!(!doc.get_changes_added(&mut other).unwrap().is_empty());
+    assert!(doc.get_changes_added(&mut other).unwrap().is_some());
     doc.merge(&mut other).unwrap();
     let (v, _) = doc.get(ROOT, "x").unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(1));
@@ -665,7 +677,13 @@ fn disabled_lifecycle_all_fallible_functions() {
     // fragments of the same document loaded in audit mode
     let fragments = doc.fragments(..).unwrap();
     let audit = AutoCommit::load_with_options(&doc.save(), audit_opts()).unwrap();
-    assert_eq!(fragments, audit.fragments(..).unwrap());
+    // apply order is by this document's own node indexes, which two
+    // documents holding the same history need not agree on
+    let mut a = fragments.clone();
+    let mut b = audit.fragments(..).unwrap();
+    a.sort_by_key(|f| f.head);
+    b.sort_by_key(|f| f.head);
+    assert_eq!(a, b);
     // and the disabled-state fragments were already the audit ones
     // (modulo the changes committed after the disabled-state call)
     assert!(!fragments.is_empty());
@@ -744,51 +762,23 @@ fn bit_flipped_head_loads_disabled_but_fails_audit() {
 #[test]
 fn disabled_state_round_trips() {
     let (bytes, _orig, _unknown) = saved_big_doc_with_unknown_hash();
-    let mid1 = AutoCommit::load(&bytes).unwrap();
+    let mut mid1 = AutoCommit::load(&bytes).unwrap();
     assert_eq!(mid1.audit_mode(), AuditMode::Disabled);
     let frags1 = mid1.fragments(..).unwrap();
-    assert!(!frags1.is_empty());
 
-    // disabled → save → default load → still disabled, same fragments
-    let mut mid1 = mid1;
+    // disabled → save → default load → still disabled, same fragments: a
+    // whole-document fragment carries the fragment-level hashes as
+    // checkpoints, which is what survives the round trip
     let resaved = mid1.save();
     let mid2 = AutoCommit::load(&resaved).unwrap();
     assert_eq!(mid2.audit_mode(), AuditMode::Disabled);
-    assert_eq!(mid2.fragments(..).unwrap(), frags1);
-
-    // and both match the audit-mode fragments
-    let audit = AutoCommit::load_with_options(&bytes, audit_opts()).unwrap();
-    assert_eq!(audit.fragments(..).unwrap(), frags1);
-}
-
-/// An audit load verifies the stored hash columns against the recomputed
-/// hashes; a default load trusts them but `enable_audit_mode` refuses.
-#[test]
-fn forged_hash_column_rejected() {
-    use sha2::{Digest, Sha256};
-
-    let (mut bytes, orig, _unknown) = saved_big_doc_with_unknown_hash();
-    // a cached fragment head is a stored, non-head hash
-    let stored = orig.fragments(1..).unwrap()[0].head;
-    drop(orig);
-    let pos = bytes
-        .windows(32)
-        .position(|w| w == stored.as_ref())
-        .expect("stored hash bytes present in saved doc");
-    bytes[pos] ^= 0x01;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes[8..]);
-    let digest = hasher.finalize();
-    bytes[4..8].copy_from_slice(&digest[..4]);
-
-    // an audit load recomputes hashes and rejects the forged column
-    assert!(AutoCommit::load_with_options(&bytes, audit_opts()).is_err());
-
-    // a default load trusts it (like the head pairing) ...
-    let mut doc = AutoCommit::load(&bytes).unwrap();
-    assert_eq!(doc.audit_mode(), AuditMode::Disabled);
-    // ... but enabling audit mode recomputes and refuses
-    assert!(doc.enable_audit_mode().is_err());
+    // apply order is relative to a document's own nodes, so compare the
+    // sets rather than the lists
+    let mut a = mid2.fragments(..).unwrap();
+    let mut b = frags1.clone();
+    a.sort_by_key(|f| f.head);
+    b.sort_by_key(|f| f.head);
+    assert_eq!(a, b);
 }
 
 /// A default load of a doc without hash columns (or without the

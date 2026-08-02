@@ -376,6 +376,8 @@ pub enum ReadChangeOpError {
     InvalidOpType(#[from] InvalidOpType),
     #[error("counter too large")]
     CounterTooLarge,
+    #[error("change sequence number is zero")]
+    ZeroSeq,
 }
 
 #[derive(Clone)]

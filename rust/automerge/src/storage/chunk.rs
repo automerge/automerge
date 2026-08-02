@@ -8,7 +8,7 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use super::bundle_v0::BundleV0Storage;
-use super::{change::Unverified, parse, BundleStorage, Change, Compressed, Document, MAGIC_BYTES};
+use super::{change::Unverified, parse, Change, Compressed, Document, MAGIC_BYTES};
 use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 
 pub(crate) enum Chunk<'a> {
@@ -16,10 +16,10 @@ pub(crate) enum Chunk<'a> {
     Change(Change<'a, Unverified>),
     /// A bundle in the frozen 3.3.x format — see [`super::bundle_v0`].
     BundleV0(Box<BundleV0Storage<'a, Unverified>>),
-    /// The live bundle format's op/change columns. Boxed: a parsed bundle
-    /// carries its decoded change metadata and op columns, which makes it
-    /// far larger than the other variants.
-    BundleColumns(Box<BundleStorage<'a, Unverified>>),
+    /// The live bundle format, parsed. Boxed: a bundle carries its
+    /// change metadata and op columns, which makes it far larger than
+    /// the other variants.
+    BundleColumns(Box<crate::storage::Bundle>),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
@@ -35,6 +35,8 @@ pub(crate) mod error {
         Leb128(#[from] parse::leb128::Error),
         #[error("failed to parse bundle: {0}")]
         BundleV0(#[from] bundle::ParseError),
+        #[error("invalid bundle: {0}")]
+        Bundle(#[from] crate::storage::bundle::InvalidBundle),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
         #[error("bad change chunk: {0}")]
@@ -115,15 +117,8 @@ impl<'a> Chunk<'a> {
                 Chunk::BundleV0(Box::new(bundle))
             }
             ChunkType::Bundle => {
-                // for the generic load path a bundle is just the changes
-                // it carries — the metadata prefix only matters to
-                // apply_bundle, which parses the chunk itself
-                let (i, _prefix) = crate::storage::bundle::Bundle::parse_prefix(chunk_input)
-                    .map_err(|e| e.lift())?;
-                let (remaining, bundle) = BundleStorage::parse_columns(i).map_err(|e| e.lift())?;
-                if !remaining.is_empty() {
-                    return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
-                }
+                let bundle = crate::storage::Bundle::parse_after_header(chunk_input)
+                    .map_err(|e| parse::ParseError::Error(error::Chunk::Bundle(e)))?;
                 Chunk::BundleColumns(Box::new(bundle))
             }
         };

@@ -64,17 +64,6 @@ pub(crate) struct ChangeGraph {
 
 pub(crate) struct ChangeGraphCols {
     graph: ChangeGraph,
-    /// `(node index, hash)` pairs from the document's hash columns:
-    /// fragment-level (> 0) hashes plus loose commits and anchors,
-    /// excluding the heads (those live in the head-index suffix).
-    saved_hashes: Vec<(u32, ChangeHash)>,
-}
-
-impl ChangeGraphCols {
-    /// Whether the document carried hash columns (fragment hashes)
-    pub(crate) fn has_saved_hashes(&self) -> bool {
-        !self.saved_hashes.is_empty()
-    }
 }
 
 const CACHE_STEP: u32 = 16;
@@ -228,12 +217,6 @@ struct ResolvedHashes {
 #[error("this operation needs change hashes that are not retained, call enable_audit_mode() first")]
 pub(crate) struct UncheckedHashes;
 
-/// The document's stored hash columns are malformed or disagree with the
-/// recomputed change hashes
-#[derive(Debug, thiserror::Error)]
-#[error("the document's change-hash columns are invalid")]
-pub(crate) struct InvalidHashColumn;
-
 /// The document's head index suffix does not describe the change graph's
 /// childless nodes
 #[derive(Debug, thiserror::Error)]
@@ -247,7 +230,7 @@ impl From<UncheckedHashes> for AutomergeError {
 }
 
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct NodeIdx(u32);
+pub(crate) struct NodeIdx(pub(crate) u32);
 
 impl Add<usize> for NodeIdx {
     type Output = Self;
@@ -353,6 +336,28 @@ impl ChangeGraph {
 
     pub(crate) fn num_actors(&self) -> usize {
         self.seq_index.len()
+    }
+
+    /// Every node, ascending — which is topological order.
+    pub(crate) fn all_nodes(&self) -> Vec<NodeIdx> {
+        (0..self.len() as u32).map(NodeIdx).collect()
+    }
+
+    /// The known fragment-level hashes that are not heads.
+    ///
+    /// A whole-document bundle carries these as checkpoints: the receiver
+    /// records them on their nodes, which is what lets it rebuild the
+    /// fragment structure the sender had. Without them a loaded document
+    /// knows only the fragments its own heads form.
+    pub(crate) fn checkpoint_hashes(&self) -> Vec<ChangeHash> {
+        let mut v: Vec<ChangeHash> = self
+            .hashes
+            .iter()
+            .filter(|(_, h)| h.fragment_level() > 0 && !self.heads.contains(h))
+            .map(|(_, h)| h)
+            .collect();
+        v.sort_unstable();
+        v
     }
 
     pub(crate) fn insert_actor(&mut self, idx: usize) {
@@ -495,9 +500,6 @@ impl ChangeGraph {
     /// 93k-change document that walk was the entire cost of the retention
     /// GC (and of every `save`), and it recomputed a set the map already
     /// delimited.
-    ///
-    /// Ordered, because [`Self::stored_hashes`] must emit ascending node
-    /// indexes.
     fn retained_nodes(&self) -> BTreeSet<NodeIdx> {
         let mut keep = BTreeSet::new();
         for (n, hash) in self.hashes.iter() {
@@ -520,22 +522,6 @@ impl ChangeGraph {
             }
         }
         keep
-    }
-
-    /// The `(node index, hash)` pairs the hash columns persist — see
-    /// `encode`. Empty on a plain unchecked graph.
-    fn stored_hashes(&self) -> Vec<(u32, ChangeHash)> {
-        self.retained_nodes()
-            .into_iter()
-            .filter_map(|n| {
-                let hash = self.hashes.get(n)?;
-                // the head-index suffix already stores the heads
-                if self.heads.contains(&hash) {
-                    return None;
-                }
-                Some((n.0, hash))
-            })
-            .collect()
     }
 
     /// Drop every hash outside the retained set and switch to (or stay
@@ -583,7 +569,7 @@ impl ChangeGraph {
         let raw = out.len()..out.len() + self.extra_bytes_raw.len();
         out.extend(&self.extra_bytes_raw);
 
-        let mut cols = vec![
+        let cols = vec![
             RawColumn::new(ACTOR_COL_SPEC, actor),
             RawColumn::new(SEQ_COL_SPEC, seq),
             RawColumn::new(MAX_OP_COL_SPEC, max_op),
@@ -594,33 +580,6 @@ impl ChangeGraph {
             RawColumn::new(EXTRA_META_COL_SPEC, meta),
             RawColumn::new(EXTRA_VAL_COL_SPEC, raw),
         ];
-
-        // ── the hash columns ──
-        // Persist every hash a future fragment-hashes load needs:
-        // fragment-level (> 0) hashes, loose commits (not covered by any
-        // cached fragment), and anchors (covered level-0 parents of loose
-        // commits, needed for loose fragment boundaries). Heads are
-        // excluded — the head-index suffix already stores them. Skipped
-        // entirely on a plain unchecked graph, whose interior hashes are
-        // unknown anyway.
-        let stored = self.stored_hashes();
-        if !stored.is_empty() {
-            let index =
-                hexane::DeltaEncoder::<u64>::encode_to(out, stored.iter().map(|(i, _)| *i as u64));
-            // one identical meta entry per hash — a single RLE run whose
-            // only job is making the raw value column structurally legal
-            let hash_meta = hexane::Encoder::<ValueMeta>::encode_to(
-                out,
-                stored.iter().map(|(_, h)| ValueMeta::from(h.as_ref())),
-            );
-            let hash_raw_start = out.len();
-            for (_, h) in &stored {
-                out.extend_from_slice(h.as_ref());
-            }
-            cols.push(RawColumn::new(HASH_INDEX_COL_SPEC, index));
-            cols.push(RawColumn::new(HASH_META_COL_SPEC, hash_meta));
-            cols.push(RawColumn::new(HASH_VAL_COL_SPEC, hash_raw_start..out.len()));
-        }
 
         cols.into_iter().collect()
     }
@@ -645,9 +604,6 @@ impl ChangeGraph {
                         | DEPS_VAL_COL_SPEC
                         | EXTRA_META_COL_SPEC
                         | EXTRA_VAL_COL_SPEC
-                        | HASH_INDEX_COL_SPEC
-                        | HASH_META_COL_SPEC
-                        | HASH_VAL_COL_SPEC
                 )
             })
             .cloned()
@@ -913,7 +869,9 @@ impl ChangeGraph {
         changes
     }
 
-    fn get_build_indexes(&self, clock: SeqClock) -> Vec<NodeIdx> {
+    /// The nodes a seq clock does *not* cover, ascending — which is node
+    /// order, which is topological order.
+    pub(crate) fn get_build_indexes(&self, clock: SeqClock) -> Vec<NodeIdx> {
         let mut change_indexes: Vec<NodeIdx> = Vec::new();
         // walk the state from the given deps clock and add them into the vec
         for (actor_index, actor_changes) in self.seq_index.iter().enumerate() {
@@ -1747,6 +1705,16 @@ impl ChangeGraph {
         })
     }
 
+    /// A node's parents, as hashes — the ones still known. A fragment
+    /// boundary names changes the receiver must already have, so a
+    /// parent whose hash was freed is one the receiver identifies by
+    /// dep id instead.
+    pub(crate) fn parent_hashes(&self, node_idx: NodeIdx) -> Vec<ChangeHash> {
+        self.parents(node_idx)
+            .filter_map(|p| self.hashes.get(p))
+            .collect()
+    }
+
     fn parents(&self, node_idx: NodeIdx) -> impl Iterator<Item = NodeIdx> + '_ {
         self.parent_slice(node_idx).iter().copied()
     }
@@ -1771,15 +1739,6 @@ impl ChangeGraph {
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, UncheckedHashes> {
         let nodes = self.heads_to_nodes(heads)?;
         Ok(self.clock_for_nodes(nodes))
-    }
-
-    /// Like [`Self::clock_for_heads_lossy`] but returning the seq clock.
-    pub(crate) fn seq_clock_for_heads_lossy(&self, heads: &[ChangeHash]) -> SeqClock {
-        let nodes = heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h).copied())
-            .collect();
-        self.calculate_clock(nodes)
     }
 
     pub(crate) fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
@@ -2102,7 +2061,7 @@ impl ChangeGraphCols {
         self.graph.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change]) -> Result<ChangeGraph, InvalidHashColumn> {
+    pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
         let mut graph = self.graph;
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.len() == 0);
@@ -2122,14 +2081,6 @@ impl ChangeGraphCols {
             graph.hashes.push(hash)
         }
 
-        // a checked load recomputed every hash — the document's stored
-        // hash columns must agree
-        for (i, saved) in &self.saved_hashes {
-            if graph.hashes.get(NodeIdx(*i)) != Some(*saved) {
-                return Err(InvalidHashColumn);
-            }
-        }
-
         // The heads loaded from the document header are untrusted: replace
         // them with the computed heads (the hashes of the childless nodes).
         // Under `VerificationMode::Check` the caller verifies the two match;
@@ -2147,7 +2098,7 @@ impl ChangeGraphCols {
 
         graph.cache_fragments();
 
-        Ok(graph)
+        graph
     }
 
     /// Finish loading without computing any change hashes.
@@ -2193,22 +2144,6 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(*hash, node);
         }
 
-        // import the hash columns (fragment-level hashes, loose commits
-        // and anchors) — trusted like the head pairing until
-        // `enable_audit_mode` verifies them
-        for (i, hash) in self.saved_hashes {
-            if i as usize >= graph.len() {
-                return Err(BadHeadIndexes);
-            }
-            let node = NodeIdx(i);
-            match pre.insert(node, hash) {
-                // the column must not contradict the head pairing
-                Some(prev) if prev != hash => return Err(BadHeadIndexes),
-                _ => {}
-            }
-            graph.nodes_by_hash.insert(hash, node);
-        }
-
         let len = graph.len();
         graph.hashes = Hashes::Retained { map: pre, len };
 
@@ -2238,34 +2173,6 @@ impl ChangeGraphCols {
         let extra_meta_bytes = meta.bytes(EXTRA_META_COL_SPEC, bytes);
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
-
-        // the hash columns: a delta column of node indices plus the raw
-        // 32-byte hashes (the metadata column is only there to keep the
-        // value column legal — its contents are implied and regenerated
-        // on save)
-        let hash_index_bytes = meta.bytes(HASH_INDEX_COL_SPEC, bytes);
-        let hash_val_bytes = meta.bytes(HASH_VAL_COL_SPEC, bytes);
-        let saved_hashes = {
-            let indices: Vec<u64> = hexane::DeltaColumn::<u64>::load(hash_index_bytes)?
-                .iter()
-                .collect();
-            if hash_val_bytes.len() != 32 * indices.len() {
-                return Err(LoadError::InvalidHashColumns);
-            }
-            let mut saved = Vec::with_capacity(indices.len());
-            let mut prev: Option<u64> = None;
-            for (i, chunk) in indices.iter().zip(hash_val_bytes.chunks_exact(32)) {
-                if prev.is_some_and(|p| p >= *i) {
-                    return Err(LoadError::InvalidHashColumns);
-                }
-                prev = Some(*i);
-                let idx = u32::try_from(*i).map_err(|_| LoadError::InvalidHashColumns)?;
-                let mut hash = [0u8; 32];
-                hash.copy_from_slice(chunk);
-                saved.push((idx, ChangeHash(hash)));
-            }
-            saved
-        };
 
         let actors: Vec<ActorIdx> = hexane::decoder::<ActorIdx>(actor_bytes).collect();
         let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::new(max_op_bytes).collect();
@@ -2362,14 +2269,7 @@ impl ChangeGraphCols {
         let fragments = vec![];
         let fragment_top = SeqClock::new(num_actors);
 
-        if let Some((last, _)) = saved_hashes.last() {
-            if *last as usize >= len {
-                return Err(LoadError::InvalidHashColumns);
-            }
-        }
-
         Ok(ChangeGraphCols {
-            saved_hashes,
             graph: ChangeGraph {
                 hashes,
                 actors,
@@ -4107,8 +4007,7 @@ pub(crate) mod ids {
     pub(super) const DEPS_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
     pub(super) const EXTRA_META_COL_SPEC: ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
     pub(super) const EXTRA_VAL_COL_SPEC:  ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
-    const HASH_COL_ID: ColumnId = ColumnId::new(6);
-    pub(super) const HASH_INDEX_COL_SPEC: ColumnSpec = ColumnSpec::new_delta(HASH_COL_ID);
-    pub(super) const HASH_META_COL_SPEC:  ColumnSpec = ColumnSpec::new_value_metadata(HASH_COL_ID);
-    pub(super) const HASH_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_value(HASH_COL_ID);
+    // ColumnId 6 was the change-hash column group, written only on the
+    // `hashless` branch: a document that carries it still parses, and
+    // `validate` filters it out. Do not reuse the id.
 }

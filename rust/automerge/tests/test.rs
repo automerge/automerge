@@ -155,7 +155,11 @@ fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_t
     let heads = doc.get_heads();
     let mut fork = doc.fork_at(&heads).unwrap();
     let before = fork.hydrate(&ROOT, None).unwrap();
-    let bytes = fork.save_nocompress();
+    let bytes = fork.save_with_options(automerge::SaveOptions {
+        legacy_format: true,
+        deflate: false,
+        ..Default::default()
+    });
     let loaded = AutoCommit::load_with_options(&bytes, LoadOptions::new()).unwrap();
     let after = loaded.hydrate(&ROOT, None).unwrap();
 
@@ -1993,7 +1997,7 @@ fn test_compressed_changes() {
     // crate::storage::DEFLATE_MIN_SIZE is 250, so this should trigger compression
     doc.put(ROOT, "bytes", ScalarValue::Bytes(vec![10; 300]))
         .unwrap();
-    let mut change = doc.get_last_local_change().unwrap().unwrap().clone();
+    let mut change = doc.get_last_local_change_legacy().unwrap().unwrap().clone();
     let uncompressed = change.raw_bytes().to_vec();
     assert!(uncompressed.len() > 256);
     let compressed = change.bytes().to_vec();
@@ -2015,8 +2019,15 @@ fn test_compressed_doc_cols() {
         doc.insert(&list, i, i as u64).unwrap();
         expected.push(i as u64);
     }
-    let uncompressed = doc.save_nocompress();
-    let compressed = doc.save();
+    let uncompressed = doc.save_with_options(automerge::SaveOptions {
+        legacy_format: true,
+        deflate: false,
+        ..Default::default()
+    });
+    let compressed = doc.save_with_options(automerge::SaveOptions {
+        legacy_format: true,
+        ..Default::default()
+    });
     assert!(compressed.len() < uncompressed.len());
     let loaded = automerge::Automerge::load(&compressed).unwrap();
     assert_doc!(
@@ -2180,9 +2191,22 @@ fn fuzz_crashers() {
     for path in paths {
         // uncomment this line to figure out which fixture is crashing:
         println!("{:?}", path.as_ref().unwrap().path().display());
-        let bytes = fs::read(path.as_ref().unwrap().path());
-        let res = Automerge::load(&bytes.unwrap());
-        assert!(res.is_err());
+        let path = path.as_ref().unwrap().path();
+        let bytes = fs::read(&path).unwrap();
+        // `incorrect_max_op` is structurally sound and lies only about
+        // its head hash. Catching that means recomputing every change
+        // hash, which is what audit mode is — a default load takes the
+        // header's heads on trust, as it does for any hashless document.
+        if path.file_name().unwrap() == "incorrect_max_op.automerge" {
+            assert!(Automerge::load(&bytes).is_ok());
+            assert!(Automerge::load_with_options(
+                &bytes,
+                automerge::LoadOptions::new().with_audit_mode()
+            )
+            .is_err());
+            continue;
+        }
+        assert!(Automerge::load(&bytes).is_err());
     }
 }
 
@@ -2341,7 +2365,7 @@ fn regression_insert_opid() {
         .unwrap();
     tx.commit();
 
-    let change1 = doc.get_last_local_change().unwrap().unwrap().clone();
+    let change1 = doc.get_last_local_change_legacy().unwrap().unwrap().clone();
     let mut tx = doc.transaction();
 
     const N: usize = 30;
@@ -2351,7 +2375,7 @@ fn regression_insert_opid() {
     }
     tx.commit();
 
-    let change2 = doc.get_last_local_change().unwrap().unwrap().clone();
+    let change2 = doc.get_last_local_change_legacy().unwrap().unwrap().clone();
     let mut new_doc = Automerge::new();
     new_doc.enable_audit_mode().unwrap();
     let before = new_doc.get_heads();
@@ -2411,7 +2435,7 @@ fn big_list() {
     let list_id = tx.put_object(&ROOT, "list", ObjType::List).unwrap();
     tx.commit();
 
-    let change1 = doc.get_last_local_change().unwrap().unwrap().clone();
+    let change1 = doc.get_last_local_change_legacy().unwrap().unwrap().clone();
     let mut tx = doc.transaction();
 
     const N: usize = B;
@@ -2423,7 +2447,7 @@ fn big_list() {
     }
     tx.commit();
 
-    let change2 = doc.get_last_local_change().unwrap().unwrap().clone();
+    let change2 = doc.get_last_local_change_legacy().unwrap().unwrap().clone();
     let mut new_doc = Automerge::new();
     new_doc.enable_audit_mode().unwrap();
     let before = new_doc.get_heads();
@@ -3211,9 +3235,9 @@ fn test_get_last_local_change_generation() {
 }
 
 fn confirm_last_change(doc: &mut AutoCommit) {
-    let heads = doc.get_heads();
-    let change = doc.get_last_local_change().unwrap().unwrap();
-    assert_eq!(vec![change.id()], heads);
+    let heads = doc.get_head_hashes();
+    let last = doc.get_last_local_change().unwrap().unwrap();
+    assert_eq!(last.heads().collect::<Vec<_>>(), heads);
 }
 
 #[test]
@@ -3876,9 +3900,13 @@ fn round_trip_change_with_extra_bytes() {
     check(doc.get_changes(&[]).unwrap());
 
     // After a save/load round-trip (rebuilds the change graph and reads
-    // the extra-bytes arena through the prefix-sum meta column).
+    // the extra-bytes arena through the prefix-sum meta column). Audit
+    // mode because emitting changes needs their dep hashes, which the
+    // document chunk no longer carries.
     let saved = doc.save();
-    let doc2 = Automerge::load(&saved).unwrap();
+    let doc2 =
+        Automerge::load_with_options(&saved, automerge::LoadOptions::new().with_audit_mode())
+            .unwrap();
     check(doc2.get_changes(&[]).unwrap());
 }
 
@@ -4207,7 +4235,7 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
 
     let expected_heads = doc.get_heads();
     let expected = doc.hydrate(&ROOT, None).unwrap();
-    let mut change = doc.get_last_local_change().unwrap().unwrap().clone();
+    let mut change = doc.get_last_local_change_legacy().unwrap().unwrap().clone();
     let uncompressed_change = change.raw_bytes().to_vec();
     let compressed_change = change.bytes().to_vec();
     assert_ne!(compressed_change, uncompressed_change);

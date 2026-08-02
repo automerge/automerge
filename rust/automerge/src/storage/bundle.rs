@@ -2,7 +2,7 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::change::{length_prefixed_bytes, ActorMapper, BuildChangeMetadata};
 use crate::op_set2::types::ActorIdx;
 use crate::op_set2::OpSet;
-use crate::storage::change::{Unverified, Verified};
+use crate::storage::change::Verified;
 use crate::storage::{parse, ChunkType, Header};
 use crate::types::{ActorId, ChangeHash};
 use crate::{AutomergeError, Change, ChangeId};
@@ -346,6 +346,16 @@ impl Bundle {
     /// The chunk's bytes: the metadata prefix followed by the column
     /// section.
     pub fn bytes(&self) -> Vec<u8> {
+        self.bytes_with(true)
+    }
+
+    /// [`Self::bytes`] with the column section left uncompressed. The
+    /// builder assembles both forms, so this only chooses between them.
+    pub fn bytes_uncompressed(&self) -> Vec<u8> {
+        self.bytes_with(false)
+    }
+
+    fn bytes_with(&self, deflate: bool) -> Vec<u8> {
         // dedup the actors the prefix references
         fn actor_idx<'x>(actors: &mut Vec<&'x ActorId>, a: &'x ActorId) -> u64 {
             match actors.iter().position(|x| *x == a) {
@@ -394,7 +404,11 @@ impl Bundle {
             leb128::write::unsigned(&mut data, *a).unwrap();
             leb128::write::unsigned(&mut data, *s).unwrap();
         }
-        data.extend_from_slice(self.column_bytes());
+        data.extend_from_slice(if deflate {
+            self.column_bytes()
+        } else {
+            &self.storage.bytes
+        });
 
         let header = Header::new(ChunkType::Bundle, &data);
         let mut out = Vec::with_capacity(header.len() + data.len());
@@ -522,13 +536,6 @@ fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>
     Ok(verified.into_owned())
 }
 
-/// Build the verified storage from a chunk the loader already split out.
-pub(crate) fn verify_inner(
-    stored: BundleStorage<'static, Unverified>,
-) -> Result<BundleStorage<'static, Verified>, ParseError> {
-    stored.verify()
-}
-
 /// Metadata for one change carried by a bundle.
 #[derive(Clone, Debug)]
 pub struct BundleChange<'a> {
@@ -583,14 +590,25 @@ impl TryFrom<&[u8]> for Bundle {
     type Error = InvalidBundle;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let bad = |s: &str| InvalidBundle(s.to_string());
         let input = parse::Input::new(bytes);
         let (i, header) = Header::parse::<crate::storage::chunk::error::Header>(input)
             .map_err(|e| InvalidBundle(format!("invalid header: {}", e)))?;
         if header.chunk_type() != ChunkType::Bundle {
-            return Err(bad("not a bundle chunk"));
+            return Err(InvalidBundle("not a bundle chunk".to_string()));
         }
+        Self::parse_after_header(i)
+    }
+}
 
+impl Bundle {
+    /// The whole bundle, from the input the chunk parser leaves after the
+    /// header.
+    ///
+    /// The chunk parser calls this rather than validating the columns and
+    /// throwing the result away: parsing a bundle's columns is most of
+    /// what loading one costs, and doing it twice doubled the load.
+    pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidBundle> {
+        let bad = |s: &str| InvalidBundle(s.to_string());
         let (i, prefix) =
             Self::parse_prefix(i).map_err(|e| InvalidBundle(format!("invalid prefix: {}", e)))?;
 

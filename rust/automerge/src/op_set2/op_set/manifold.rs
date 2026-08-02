@@ -14,6 +14,7 @@ use crate::op_set2::op::DocSucc;
 use crate::op_set2::types::Action;
 use crate::storage::bundle::{FragOp, FragOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
+use crate::AutomergeError;
 
 use super::index::ObjIndex;
 use super::op_iter::{ObjIdIter, OpIdIter, SuccIterIter};
@@ -135,6 +136,9 @@ pub(crate) struct ApplyManifold<'a> {
     // mixed-group detection: one scope at a time, finalized at the
     // same boundaries the succ cache flushes
     top: TopCalc,
+    // a hint jumped past its own target: the rescan below found the row
+    // in the region the jump skipped, which a sound floor cannot do
+    bad_hint: bool,
 }
 
 impl<'a> ApplyManifold<'a> {
@@ -188,6 +192,7 @@ impl<'a> ApplyManifold<'a> {
             last_ins_row: None,
             elem_scope: 0..0,
             top: TopCalc::new(),
+            bad_hint: false,
         }
     }
 
@@ -237,7 +242,13 @@ impl<'a> ApplyManifold<'a> {
     /// doc cursor has passed the object's last row, the tail fast path
     /// takes over: clean insert runs are consumed wholesale and the
     /// rest run in blank mode with no doc iterator work.
-    pub(crate) fn apply_frag(mut self, src: &mut FragOps<'_>) -> ManifoldResult {
+    /// Resolve the fragment against the document. Reads only — the
+    /// writes happen from the [`ManifoldResult`] afterwards, which is
+    /// what lets a rejected fragment leave the document untouched.
+    pub(crate) fn apply_frag(
+        mut self,
+        src: &mut FragOps<'_>,
+    ) -> Result<ManifoldResult, AutomergeError> {
         while src.pos < src.len {
             if self.tail_ready(src) {
                 self.consume_tail(src);
@@ -245,8 +256,19 @@ impl<'a> ApplyManifold<'a> {
             }
             let op = src.next_op();
             self.apply_frag_op(&op);
+            if self.bad_hint {
+                // A hint is a *floor* on where its target sits in any
+                // document holding the fragment's deps, so overshooting
+                // one is not a divergence this document should paper
+                // over — it is a fragment whose hints were computed
+                // wrong, and the sender should hear about it. Applying
+                // it in audit mode ignores hints entirely.
+                return Err(AutomergeError::InvalidFragment(
+                    "op position hint overshot its target row",
+                ));
+            }
         }
-        self.finish()
+        Ok(self.finish())
     }
 
     /// Push a resolved slot and note whether appends have begun: once
@@ -601,11 +623,14 @@ impl<'a> ApplyManifold<'a> {
                     let mut found = self.id_iter.scan_to_value(&e.0).is_some();
 
                     if !found && jumped {
-                        // suspect hint (receiver diverged from the
-                        // fragment's causal past): rescan the skipped
-                        // region
+                        // the jump may have skipped the row, or the row
+                        // may be behind the cursor entirely (legitimate).
+                        // Rescanning the skipped region tells the two
+                        // apart: finding it there means the hint was not
+                        // the floor it claims to be.
                         self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
                         found = self.id_iter.scan_to_value(&e.0).is_some();
+                        self.bad_hint |= found;
                     }
                     if found {
                         self.consumed.insert(e.0);
@@ -706,9 +731,12 @@ impl<'a> ApplyManifold<'a> {
                             let mut found = self.id_iter.scan_to_value(&e.0);
 
                             if found.is_none() && jumped {
+                                // see the insert arm: a rescan that finds
+                                // the row proves the hint overshot it
                                 self.id_iter =
                                     self.op_set.id_iter_range(&(start..self.obj_scope.end));
                                 found = self.id_iter.scan_to_value(&e.0);
+                                self.bad_hint |= found.is_some();
                             }
                             match found {
                                 Some(p) => p,

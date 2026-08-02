@@ -448,6 +448,16 @@ macro_rules! log {
     };
 }
 
+/// The JS package's bytes are consumed by stored documents and by
+/// automerge-repo, so the JS save paths stay on the pre-fragment chunk
+/// formats until the JS API is ported deliberately.
+fn legacy_opts() -> automerge::SaveOptions {
+    automerge::SaveOptions {
+        legacy_format: true,
+        ..Default::default()
+    }
+}
+
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Automerge {
@@ -1302,13 +1312,16 @@ impl Automerge {
         Ok(())
     }
 
+    // The JS package's bytes are consumed by stored documents and by
+    // automerge-repo, so save/saveIncremental stay on the legacy chunk
+    // formats until the JS API is ported deliberately.
     pub fn save(&mut self) -> Uint8Array {
-        Uint8Array::from(self.doc.save().as_slice())
+        Uint8Array::from(self.doc.save_with_options(legacy_opts()).as_slice())
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]
     pub fn save_incremental(&mut self) -> Uint8Array {
-        let bytes = self.doc.save_incremental();
+        let bytes = self.doc.save_incremental_with_options(legacy_opts());
         Uint8Array::from(bytes.as_slice())
     }
 
@@ -1318,13 +1331,17 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
     ) -> Result<Uint8Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or(Vec::new());
-        let bytes = self.doc.save_after(&heads)?;
+        let bytes = self.doc.save_after_with_options(&heads, legacy_opts())?;
         Ok(Uint8Array::from(bytes.as_slice()))
     }
 
     #[wasm_bindgen(js_name = saveNoCompress)]
     pub fn save_nocompress(&mut self) -> Uint8Array {
-        let bytes = self.doc.save_nocompress();
+        let bytes = self.doc.save_with_options(automerge::SaveOptions {
+            legacy_format: true,
+            deflate: false,
+            ..Default::default()
+        });
         Uint8Array::from(bytes.as_slice())
     }
 
@@ -1470,7 +1487,7 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getChangesAdded, unchecked_return_type="Change[]")]
     pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
-        let changes = self.doc.get_changes_added(&mut other.doc)?;
+        let changes = self.doc.get_changes_added_legacy(&mut other.doc)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
@@ -1603,7 +1620,7 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
     pub fn get_last_local_change(&mut self) -> Result<JsValue, error::Merge> {
-        if let Some(change) = self.doc.get_last_local_change()? {
+        if let Some(change) = self.doc.get_last_local_change_legacy()? {
             Ok(Uint8Array::from(change.raw_bytes()).into())
         } else {
             Ok(JsValue::null())

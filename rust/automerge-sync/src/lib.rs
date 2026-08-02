@@ -128,6 +128,15 @@ impl MessageVersion {
     }
 }
 
+/// A v2 sync peer expects the pre-fragment document chunk; the protocol
+/// moves to fragments as its own change.
+fn legacy_opts() -> automerge::SaveOptions {
+    automerge::SaveOptions {
+        legacy_format: true,
+        ..Default::default()
+    }
+}
+
 impl Sync {
     /// Generate a sync message for the remote peer represented by `sync_state`
     ///
@@ -194,7 +203,9 @@ impl Sync {
         } else if let Some((their_have, their_need)) = sync_state.their() {
             if sync_state.send_doc() {
                 let hashes = doc.change_hashes(&[])?;
-                MessageBuilder::new_v2(doc.save(), hashes)
+                // the wire format a v2 peer expects: sync stays on the
+                // legacy document chunk until the protocol itself moves
+                MessageBuilder::new_v2(doc.save_with_options(legacy_opts()), hashes)
             } else {
                 let all_hashes = Self::get_hashes_to_send(doc, their_have, their_need)
                     .expect("Should have only used hashes that are in the document");
@@ -206,7 +217,7 @@ impl Sync {
                 if hashes.len() > doc.num_changes() / 3 && sync_state.supports_v2_messages() {
                     // sending more than a 1/3 of the document?  send everything
                     let all_hashes = doc.change_hashes(&[])?;
-                    MessageBuilder::new_v2(doc.save(), all_hashes)
+                    MessageBuilder::new_v2(doc.save_with_options(legacy_opts()), all_hashes)
                 } else {
                     let Ok(changes) = doc.changes_by_hash(&hashes) else {
                         return Ok(None);
@@ -1300,7 +1311,11 @@ mod tests {
         let mut s2 = State::new();
 
         doc1.put(ROOT, "x", 0).unwrap();
-        let change1 = doc1.get_last_local_change().unwrap().unwrap().clone();
+        let change1 = doc1
+            .get_last_local_change_legacy()
+            .unwrap()
+            .unwrap()
+            .clone();
 
         doc2.apply_changes([change1.clone()]).unwrap();
         doc3.apply_changes([change1]).unwrap();
@@ -1316,8 +1331,16 @@ mod tests {
         for i in 1..20 {
             doc1.put(ROOT, "n1", i).unwrap();
             doc2.put(ROOT, "n2", i).unwrap();
-            let change1 = doc1.get_last_local_change().unwrap().unwrap().clone();
-            let change2 = doc2.get_last_local_change().unwrap().unwrap().clone();
+            let change1 = doc1
+                .get_last_local_change_legacy()
+                .unwrap()
+                .unwrap()
+                .clone();
+            let change2 = doc2
+                .get_last_local_change_legacy()
+                .unwrap()
+                .unwrap()
+                .clone();
             doc1.apply_changes([change2.clone()]).unwrap();
             doc2.apply_changes([change1]).unwrap();
         }
@@ -1325,7 +1348,11 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         //// Having n3's last change concurrent to the last sync heads forces us into the slower code path
-        let change3 = doc3.get_last_local_change().unwrap().unwrap().clone();
+        let change3 = doc3
+            .get_last_local_change_legacy()
+            .unwrap()
+            .unwrap()
+            .clone();
         doc2.apply_changes([change3]).unwrap();
 
         doc1.put(ROOT, "n1", "final").unwrap();

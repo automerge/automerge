@@ -224,18 +224,37 @@ impl BatchApply {
             .unwrap_or(false)
     }
 
-    pub(crate) fn insert_new_actors(&mut self, doc: &mut Automerge) {
-        for c in self.changes.iter().filter(|c| c.seq() == 1) {
-            doc.put_actor_ref(c.actor_id());
-        }
+    /// Take the actors this batch introduces, returning the ones the
+    /// document did not already have so a failed apply can put the table
+    /// back. Only a first change can introduce one; a later change's
+    /// actor is already here or the change is not ready.
+    pub(crate) fn insert_new_actors(&mut self, doc: &mut Automerge) -> Vec<crate::ActorId> {
+        let actors: Vec<crate::ActorId> = self
+            .changes
+            .iter()
+            .filter(|c| c.seq() == 1)
+            .map(|c| c.actor_id().clone())
+            .collect();
+        doc.put_actor_refs(&actors)
     }
 
     /// Apply the batch: convert the v1 changes into the v2 succ-format
     /// columns and run the v2 pipeline. Patch generation is deferred to
     /// the dirty diff — the merge/succ/re-election writes mark exactly
     /// the touched rows dirty as they land.
-    pub(crate) fn apply(&mut self, doc: &mut Automerge) {
-        self.apply_v2(doc);
+    /// Apply the batch, or nothing at all.
+    ///
+    /// Every fallible step reads the document and writes only locals, so
+    /// they all run before the first write. The actor table is the one
+    /// exception — importing an op maps its ids through it — and it is
+    /// put back exactly if anything after it fails.
+    pub(crate) fn apply(&mut self, doc: &mut Automerge) -> Result<(), AutomergeError> {
+        let added = self.insert_new_actors(doc);
+        let result = self.apply_v2(doc);
+        if result.is_err() {
+            doc.undo_actor_refs(&added);
+        }
+        result
     }
 
     /// Normalize to the succ-carrying shape fragment bundles arrive in:
@@ -276,13 +295,13 @@ impl BatchApply {
     /// [`FragmentApply`], which decodes and applies them exactly like a
     /// received fragment. Measures the conversion tax of making the
     /// compressed columns canonical.
-    fn apply_v2(&mut self, doc: &mut Automerge) {
-        self.insert_new_actors(doc);
+    fn apply_v2(&mut self, doc: &mut Automerge) -> Result<(), AutomergeError> {
         for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops).unwrap();
+            doc.import_ops_to(c, &mut self.ops)?;
         }
+        // the clock as it is *before* this batch — what the manifold
+        // resolves against, and what `stamp_succ` reads
         let clock = doc.change_graph.current_clock();
-        doc.update_history_batch(&self.changes);
 
         self.stamp_succ(&clock);
 
@@ -335,9 +354,14 @@ impl BatchApply {
             actor_map,
             super::fragment::FragSrc::Owned { raw, data },
             doc.ops(),
-        )
-        .unwrap();
-        frag.apply_manifold(doc).unwrap();
+        )?;
+        // reads only, and the last thing that can reject the batch
+        let r = frag.resolve(doc)?;
+
+        // ── commit ──────────────────────────────────────────────────
+        doc.update_history_batch(&self.changes);
+        frag.commit(doc, r);
+        Ok(())
     }
 }
 
@@ -432,7 +456,12 @@ impl Automerge {
             chap.push(c);
         }
 
-        chap.apply(self);
+        // All or nothing: on failure the batch applied none of its
+        // changes. They are *not* re-queued — one of them is the reason
+        // the batch failed, and a queue holding it would fail every
+        // apply after this one. The caller is told nothing landed and
+        // still has the changes.
+        chap.apply(self)?;
 
         // A change still queued because a dep hash lookup was AMBIGUOUS
         // (outside audit mode the dep may name a change we have whose
@@ -462,10 +491,19 @@ impl Automerge {
     }
 
     fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
+        // A ready change's referenced actors are all here: its own came
+        // in with it, and every other belongs to an op it names, which
+        // its deps brought. A change naming one we do not have is
+        // malformed, not merely early — and this is untrusted input, so
+        // it is an error rather than an unwrap.
         let actors: Vec<_> = change
             .actors()
-            .map(|a| self.ops.lookup_actor(a).unwrap())
-            .collect();
+            .map(|a| {
+                self.ops
+                    .lookup_actor(a)
+                    .ok_or_else(|| AutomergeError::InvalidActorId(a.to_string()))
+            })
+            .collect::<Result<_, _>>()?;
 
         change
             .iter_ops()
@@ -843,7 +881,7 @@ mod tests {
         for i in 0..10 {
             let mut tmp = doc1.fork().with_actor(rng.random()).unwrap();
             tmp.insert(&list, 1, i).unwrap();
-            //let change = tmp.get_last_local_change().unwrap().unwrap();
+            //let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
             doc2.merge(&mut tmp).unwrap();
         }
 
@@ -1184,7 +1222,7 @@ mod tests {
                     let index = rng.random::<u32>() % (len as u32);
                     tmp.delete(&list1, index as usize).unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1233,7 +1271,7 @@ mod tests {
                     let index = rng.random::<u32>() % (len as u32);
                     tmp.delete(&list1, index as usize).unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1275,7 +1313,7 @@ mod tests {
                     )
                     .unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1338,7 +1376,7 @@ mod tests {
                     };
                     tmp.mark(&text1, mark, ExpandMark::After).unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1407,7 +1445,7 @@ mod tests {
 
             let changes: Vec<_> = docs
                 .iter_mut()
-                .map(|d| d.get_last_local_change().unwrap().unwrap())
+                .map(|d| d.get_last_local_change_legacy().unwrap().unwrap())
                 .collect();
 
             doc.apply_changes(changes).unwrap();
@@ -1449,7 +1487,7 @@ mod tests {
 
             let changes: Vec<_> = docs
                 .iter_mut()
-                .map(|d| d.get_last_local_change().unwrap().unwrap())
+                .map(|d| d.get_last_local_change_legacy().unwrap().unwrap())
                 .collect();
 
             doc.apply_changes(changes).unwrap();
@@ -1510,7 +1548,7 @@ mod tests {
 
             let changes: Vec<_> = docs
                 .iter_mut()
-                .map(|d| d.get_last_local_change().unwrap().unwrap())
+                .map(|d| d.get_last_local_change_legacy().unwrap().unwrap())
                 .collect();
 
             doc.apply_changes(changes).unwrap();

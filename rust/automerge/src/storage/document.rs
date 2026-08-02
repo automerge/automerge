@@ -347,12 +347,10 @@ impl<'a> Document<'a> {
         let change_cols = ChangeGraphCols::load(self)?;
 
         // audit mode always recomputes and verifies every hash; outside
-        // it the stored hash columns are trusted when present, and old
-        // documents without them (or without a head index suffix to
-        // pair heads with nodes) fall back to computing once
-        let compute_hashes = audit == AuditMode::Enabled
-            || !change_cols.has_saved_hashes()
-            || self.head_indexes().is_none();
+        // it only the heads are known, paired with their nodes by the
+        // head index suffix. A document old enough to lack that suffix
+        // falls back to computing once.
+        let compute_hashes = audit == AuditMode::Enabled || self.head_indexes().is_none();
 
         let head_indexes = if compute_hashes {
             None
@@ -379,9 +377,7 @@ impl<'a> Document<'a> {
         op_set.set_indexes(indexes);
 
         let mut change_graph = match &changes {
-            Some(changes) => change_cols
-                .finalize(&changes.changes)
-                .map_err(|_| ReconstructError::InvalidHashColumns)?,
+            Some(changes) => change_cols.finalize(&changes.changes),
             None => {
                 let head_indexes = head_indexes.expect("checked above");
                 change_cols
@@ -459,8 +455,6 @@ pub(crate) enum ReconstructError {
     InvalidColumns(#[from] crate::op_set2::op_set::ColumnValidationError),
     #[error("invalid actor id {0}")]
     InvalidActorId(usize),
-    #[error("the document's change-hash columns are invalid")]
-    InvalidHashColumns,
     #[error("invalid column length {0:?}")]
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]

@@ -42,19 +42,31 @@ pub enum Error {
     InvalidBundleColumn(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("a bundle contained an invalid change")]
     InvalidBundleChange(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("invalid bundle: {0}")]
+    InvalidBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("error inflating document chunk ops: {0}")]
     InflateDocument(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("bad checksum")]
     BadChecksum,
 }
 
+/// One chunk the loader recovered.
+///
+/// A bundle stays a bundle: inflating it to changes would need its
+/// members' dep hashes, which is exactly what a hashless document does
+/// not have — and would take the slow path even when it does.
+pub(crate) enum LoadedChunk {
+    Change(Box<Change>),
+    Bundle(Box<crate::storage::Bundle>),
+}
+
 pub(crate) enum LoadedChanges<'a> {
-    /// All the data was succesfully loaded into a list of changes
-    Complete(Vec<Change>),
-    /// We only managed to load _some_ changes.
+    /// All the data was succesfully loaded
+    Complete(Vec<LoadedChunk>),
+    /// We only managed to load _some_ of it.
     Partial {
-        /// The succesfully loaded changes
-        loaded: Vec<Change>,
+        /// The succesfully loaded chunks
+        loaded: Vec<LoadedChunk>,
         /// The data which we were unable to parse
         #[allow(dead_code)]
         remaining: parse::Input<'a>,
@@ -78,7 +90,7 @@ pub(crate) fn load_changes<'a>(
     current: &ChangeGraph,
     mark_order: MarkOrderValidation,
 ) -> LoadedChanges<'a> {
-    let mut changes = Vec::new();
+    let mut changes: Vec<LoadedChunk> = Vec::new();
     while !data.is_empty() {
         let remaining =
             match load_next_change(data, &mut changes, text_encoding, current, mark_order) {
@@ -98,7 +110,7 @@ pub(crate) fn load_changes<'a>(
 
 fn load_next_change<'a>(
     data: parse::Input<'a>,
-    changes: &mut Vec<Change>,
+    changes: &mut Vec<LoadedChunk>,
     text_encoding: TextEncoding,
     current: &ChangeGraph,
     mark_order: MarkOrderValidation,
@@ -126,7 +138,11 @@ fn load_next_change<'a>(
                     }) if mark_order.allows_invalid() => changes,
                     Err(e) => return Err(Error::InflateDocument(Box::new(e))),
                 };
-                changes.extend(new_changes);
+                changes.extend(
+                    new_changes
+                        .into_iter()
+                        .map(|c| LoadedChunk::Change(Box::new(c))),
+                );
             }
         }
         storage::Chunk::Change(change) => {
@@ -140,7 +156,7 @@ fn load_next_change<'a>(
             }
             #[cfg(not(feature = "slow_path_assertions"))]
             tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
-            changes.push(change);
+            changes.push(LoadedChunk::Change(Box::new(change)));
         }
         storage::Chunk::BundleV0(bundle) => {
             tracing::trace!("loading a 3.3.x bundle chunk");
@@ -151,23 +167,22 @@ fn load_next_change<'a>(
             let bundle_changes = storage
                 .to_changes()
                 .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
-            changes.extend(bundle_changes);
+            changes.extend(
+                bundle_changes
+                    .into_iter()
+                    .map(|c| LoadedChunk::Change(Box::new(c))),
+            );
         }
         storage::Chunk::BundleColumns(bundle) => {
             tracing::trace!("loading bundle columns chunk");
-            let storage = storage::bundle::verify_inner(bundle.into_owned())
-                .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
-            let bundle_changes = storage
-                .to_changes()
-                .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
-            changes.extend(bundle_changes);
+            changes.push(LoadedChunk::Bundle(bundle));
         }
         storage::Chunk::CompressedChange(change, compressed) => {
             tracing::trace!("loading compressed change chunk");
             let change =
                 Change::new_from_unverified(change.into_owned(), Some(compressed.into_owned()))
                     .map_err(|e| Error::InvalidChangeColumns(Box::new(e)))?;
-            changes.push(change);
+            changes.push(LoadedChunk::Change(Box::new(change)));
         }
     };
     Ok(remaining)

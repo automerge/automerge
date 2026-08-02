@@ -11,6 +11,7 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchAccumulator;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
+use crate::Bundle;
 use crate::Fragment;
 use crate::{hydrate, OnPartialLoad, TextEncoding};
 use crate::{
@@ -63,8 +64,10 @@ pub struct AutoCommit {
     transaction: Option<TransactionInner>,
     diff_cursor: Vec<ChangeId>,
     diff_cache: Option<(OpRange, ObjId, bool, Vec<Patch>)>,
-    /// The save cursor stores hashes — the currency of storage.
-    save_cursor: Vec<ChangeHash>,
+    /// Where the last save left off. [`ChangeId`]s, not hashes: a
+    /// hashless document may not be able to name its own history any
+    /// other way.
+    save_cursor: Vec<ChangeId>,
     /// The heads this document is isolated at, if any. Stored as
     /// [`ChangeId`]s; the hashes (needed as the deps of any change
     /// committed in isolation) are validated to be resolvable when
@@ -119,7 +122,7 @@ impl AutoCommit {
         let save_cursor = if doc.audit_mode() == crate::AuditMode::Enabled {
             Vec::new()
         } else {
-            doc.get_head_hashes()
+            doc.get_heads()
         };
         Ok(Self {
             doc,
@@ -147,13 +150,12 @@ impl AutoCommit {
 
     pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_with_options(data, options)?;
-        // outside audit mode pre-load interior hashes may be freed, so
-        // start the incremental-save cursor at the load heads (the
-        // loaded bytes are, by definition, already saved)
+        // the loaded bytes are, by definition, already saved, so the
+        // incremental-save cursor starts at the load heads
         let save_cursor = if doc.audit_mode() == crate::AuditMode::Enabled {
             Vec::new()
         } else {
-            doc.get_head_hashes()
+            doc.get_heads()
         };
         Ok(Self {
             doc,
@@ -510,12 +512,19 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
+    /// [`Self::save`], choosing the format — see [`SaveOptions`].
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
-        self.doc.remove_unused_actors(true);
+        if options.legacy_format {
+            // the one place a stray actor has to be swept: the document
+            // chunk writes the actor table verbatim, where a fragment's
+            // is built from the actors its ops name. An apply that bailed
+            // after taking the sender's table is how one gets here.
+            self.doc.remove_unused_actors(false);
+        }
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_head_hashes()
+            self.save_cursor = self.doc.get_heads()
         }
         bytes
     }
@@ -545,20 +554,24 @@ impl AutoCommit {
         })
     }
 
-    /// Save the changes since the last call to [`Self::save()`]
+    /// The changes since the last save.
     ///
-    /// The output of this will not be a compressed document format, but a series of individual
-    /// changes. This is useful if you know you have only made a small change since the last [`Self::save()`]
-    /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
-    /// text object).
+    /// Useful when you know you have made only a small change since the
+    /// last [`Self::save()`] and want to send it somewhere immediately.
+    /// Empty when there is nothing new.
     pub fn save_incremental(&mut self) -> Vec<u8> {
+        self.save_incremental_with_options(SaveOptions::default())
+    }
+
+    /// [`Self::save_incremental`], choosing the format.
+    pub fn save_incremental_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
         let bytes = self
             .doc
-            .save_after_hashes(&self.save_cursor)
-            .expect("changes since the save cursor are always exportable");
+            .save_after_with_options(&self.save_cursor, options)
+            .expect("the save cursor names changes this document has");
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_head_hashes()
+            self.save_cursor = self.doc.get_heads()
         }
         bytes
     }
@@ -567,10 +580,19 @@ impl AutoCommit {
         self.doc.is_empty()
     }
 
-    /// Save everything which is not a (transitive) dependency of `heads`
+    /// Everything which is not a (transitive) dependency of `heads`
     pub fn save_after(&mut self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
+        self.save_after_with_options(heads, SaveOptions::default())
+    }
+
+    /// [`Self::save_after`], choosing the format.
+    pub fn save_after_with_options(
+        &mut self,
+        heads: &[ChangeId],
+        options: SaveOptions,
+    ) -> Result<Vec<u8>, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.save_after(heads)
+        self.doc.save_after_with_options(heads, options)
     }
 
     pub fn get_missing_deps(
@@ -581,8 +603,15 @@ impl AutoCommit {
         self.doc.get_missing_deps(heads)
     }
 
-    /// Get the last change made by this documents actor ID
-    pub fn get_last_local_change(&mut self) -> Result<Option<Change>, AutomergeError> {
+    /// The last change made by this document's actor, as a change chunk
+    pub fn get_last_local_change_legacy(&mut self) -> Result<Option<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.get_last_local_change_legacy()
+    }
+
+    /// The last change made by this document's actor, as a one-member
+    /// fragment
+    pub fn get_last_local_change(&mut self) -> Result<Option<Bundle>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
     }
@@ -617,7 +646,20 @@ impl AutoCommit {
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added(&mut self, other: &mut Self) -> Result<Vec<Change>, AutomergeError> {
+    /// [`Self::get_changes_added`] as change chunks
+    pub fn get_changes_added_legacy(
+        &mut self,
+        other: &mut Self,
+    ) -> Result<Vec<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        other.ensure_transaction_closed();
+        self.doc.get_changes_added_legacy(&other.doc)
+    }
+
+    pub fn get_changes_added(
+        &mut self,
+        other: &mut Self,
+    ) -> Result<Option<Bundle>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
