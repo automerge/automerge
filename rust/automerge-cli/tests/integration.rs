@@ -61,6 +61,29 @@ fn import_export_isomorphic() {
     assert_eq!(stdout, json_bytes);
 }
 
+#[test]
+fn anonymize_scrubs_a_document_from_stdin() {
+    use automerge::transaction::Transactable;
+    use automerge::{AutoCommit, Automerge, ReadDoc, ROOT};
+
+    let bin = env!("CARGO_BIN_EXE_automerge");
+    let mut source = AutoCommit::new();
+    source.put(ROOT, "private-key", "private value").unwrap();
+    let source_bytes = source.save();
+
+    let output = cmd!(bin, "anonymize")
+        .stdin_bytes(source_bytes.clone())
+        .stdout_capture()
+        .stderr_capture()
+        .run()
+        .unwrap();
+    let anonymized = Automerge::load(&output.stdout).unwrap();
+
+    assert_eq!(anonymized.get_changes(&[]).unwrap().len(), 1);
+    assert!(anonymized.get(ROOT, "private-key").unwrap().is_none());
+    assert_ne!(output.stdout, source_bytes);
+}
+
 /*
 #[test]
 fn import_change_export() {

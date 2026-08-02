@@ -175,6 +175,8 @@ mod sealed {
 }
 
 #[cfg(test)]
+mod splice_fuzz;
+#[cfg(test)]
 mod tests;
 
 pub use bool::BoolEncoding;

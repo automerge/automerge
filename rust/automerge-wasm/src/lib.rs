@@ -498,6 +498,16 @@ impl Automerge {
         Ok(())
     }
 
+    /// Return a copy of this document with its data anonymized while retaining its history and
+    /// structural shape.
+    pub fn anonymize(&mut self) -> Result<Automerge, error::Anonymize> {
+        Ok(Automerge {
+            doc: self.doc.anonymize()?,
+            freeze: self.freeze,
+            external_types: self.external_types.clone(),
+        })
+    }
+
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
         let mut automerge = Automerge {
@@ -1916,11 +1926,31 @@ impl Automerge {
     }
 }
 
+// Runs once at module instantiation (wasm-bindgen's `start` function). We
+// install a console-logging hook for hard aborts (instance termination) so
+// that even when wasm traps and the module is permanently torn down, the
+// failure is visible in the console rather than just surfacing as the
+// generic "Module terminated" error on every subsequent export call.
+//
+// Recoverable Rust panics surface as `PanicError` exceptions at the JS
+// boundary thanks to the `panic=unwind` build, so we don't install
+// `console_error_panic_hook`: the panic info already reaches the caller as
+// a thrown exception and there's no need to additionally log it.
+#[wasm_bindgen(start)]
+fn on_start() {
+    fn log_abort() {
+        web_sys::console::error_1(
+            &"automerge-wasm: WASM instance aborted; subsequent calls will throw \"Module terminated\""
+                .into(),
+        );
+    }
+    let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
-    console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     Automerge::new(actor)
 }
@@ -2379,7 +2409,7 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
 }
 
 pub mod error {
-    use automerge::{AutomergeError, ObjType};
+    use automerge::{AnonymizeError, AutomergeError, ObjType};
     use js_sys::RangeError;
     use wasm_bindgen::JsValue;
 
@@ -2387,6 +2417,16 @@ pub mod error {
         self,
         error::{BadChangeHash, BadChangeHashes, BadJSChanges, BadUint8Array, GetProp},
     };
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct Anonymize(#[from] AnonymizeError);
+
+    impl From<Anonymize> for JsValue {
+        fn from(error: Anonymize) -> Self {
+            RangeError::new(&error.to_string()).into()
+        }
+    }
 
     #[derive(Debug, thiserror::Error)]
     #[error("could not parse Actor ID as a hex string: {0}")]

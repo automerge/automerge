@@ -412,7 +412,7 @@ where
 // prefix-sum queries without a sidecar.
 
 pub struct PrefixColumn<T: PrefixValue, C: Codec = Leb128> {
-    col: Column<T, C, PrefixWeightFn<T>>,
+    pub(crate) col: Column<T, C, PrefixWeightFn<T>>,
 }
 
 impl<T: PrefixValue, C: Codec> Clone for PrefixColumn<T, C> {

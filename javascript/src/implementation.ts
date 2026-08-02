@@ -378,6 +378,47 @@ export function clone<T>(
   return handle.applyPatches(doc, { ...stateSansHeads, handle })
 }
 
+/**
+ * Return a copy of an Automerge document with its private data anonymized.
+ *
+ * The complete change history is retained, but actor IDs, map keys, mark names,
+ * scalar values, change metadata, and extra bytes are replaced. The resulting
+ * document still exposes structural information including its change graph,
+ * object and value types, collection sizes, string lengths, and whitespace.
+ * Review the result before publishing it.
+ *
+ * The returned document has an unknown schema because its map keys and values
+ * no longer correspond to those of the input document.
+ */
+export function anonymize<T>(doc: Doc<T>): Doc<Record<string, unknown>> {
+  const state = _state(doc)
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.anonymize cannot be nested")
+  }
+  let source = state.handle
+  let temporarySource = false
+  if (state.heads !== undefined) {
+    source = state.handle.fork(undefined, state.heads)
+    temporarySource = true
+  }
+
+  let handle: Automerge
+  try {
+    handle = source.anonymize()
+  } finally {
+    if (temporarySource) {
+      source.free()
+    }
+  }
+
+  handle.enableFreeze(state.freeze)
+  return handle.materialize("/", undefined, {
+    handle,
+    heads: undefined,
+    freeze: state.freeze,
+  }) as Doc<Record<string, unknown>>
+}
+
 /** Explicity free the memory backing a document. Note that this is note
  * necessary in environments which support
  * [`FinalizationRegistry`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry)

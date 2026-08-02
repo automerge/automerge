@@ -11,9 +11,8 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchAccumulator;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
-use crate::Bundle;
 use crate::Fragment;
-use crate::{hydrate, OnPartialLoad, TextEncoding};
+use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash,
     ChangeId, Cursor, Prop, Value,
@@ -110,6 +109,19 @@ impl AutoCommit {
             save_cursor: Vec::new(),
             isolation: None,
         }
+    }
+
+    /// Return a copy of this document with its data anonymized.
+    pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
+        self.ensure_transaction_closed();
+        Ok(Self {
+            doc: self.doc.anonymize()?,
+            transaction: None,
+            diff_cursor: Vec::new(),
+            diff_cache: None,
+            save_cursor: Vec::new(),
+            isolation: None,
+        })
     }
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {

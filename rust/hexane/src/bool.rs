@@ -104,6 +104,44 @@ fn make_suffix_slab<C: Codec>(
     })
 }
 
+/// Build an overflow slab from the raw suffix bytes alone, for the case
+/// where the boundary run has already been written into an earlier slab.
+///
+/// The counterpart to [`make_suffix_slab`]: that one owns the partial run
+/// *and* the raw bytes, this one only the raw bytes. They resume on a
+/// `!suffix.value` run, so the zero-count `false` pad a bool slab needs to
+/// start on is required exactly when `suffix.value` is `false`.
+///
+/// `raw_suffix` is empty whenever `suffix.count` is zero (the partition's
+/// no-partial-run case puts `pos` at the end of the data), so there is no
+/// case where the leading run's value is `suffix.value` itself.
+fn make_raw_suffix_slab<C: Codec>(
+    suffix: &BoolPartition,
+    raw_suffix: &[u8],
+    len: usize,
+    tail: u8,
+) -> Option<Slab> {
+    if len == 0 {
+        return None;
+    }
+    // Only reachable via the partition's partial-run case, which is what
+    // makes the leading run `!suffix.value`.
+    debug_assert!(suffix.count > 0, "raw suffix without a partial run");
+    let mut data = Vec::new();
+    let mut segments = suffix.segments;
+    if !suffix.value {
+        data.extend(C::encode_count(0));
+        segments += 1;
+    }
+    data.extend_from_slice(raw_suffix);
+    Some(Slab {
+        data,
+        len,
+        segments,
+        tail,
+    })
+}
+
 /// Find the partition boundaries for a splice at `[start_index, end_index)`.
 ///
 /// Returns `(prefix_cursor, suffix_cursor)` such that the slab can be
@@ -372,7 +410,7 @@ pub(crate) fn splice_slab<C: Codec>(
             });
         } else {
             // Suffix would exceed max_segments — flush current buf,
-            // then put suffix in its own slab.
+            // then put the suffix in its own slab.
             if segments > 0 || !buf.is_empty() {
                 overflow.push(Slab {
                     data: buf,
@@ -382,7 +420,11 @@ pub(crate) fn splice_slab<C: Codec>(
                 });
             }
 
-            overflow.extend(make_suffix_slab::<C>(
+            // Only the raw bytes are left: `suffix.count` was merged into
+            // the run flushed above. Re-emitting it here (as the other
+            // overflow exit does, where the merge has not happened yet)
+            // would duplicate those items.
+            overflow.extend(make_raw_suffix_slab::<C>(
                 &suffix,
                 &raw_suffix,
                 raw_suffix_item_count,

@@ -38,7 +38,7 @@
     "release": "cross-env PROFILE=release TARGET_DIR=release npm run buildall",
     "buildall": "cross-env TARGET=nodejs npm run target && cross-env TARGET=bundler npm run target && cross-env TARGET=deno npm run target && TARGET=web npm run target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node -e \"require('fs').cpSync('./nodejs/automerge_wasm.d.ts', './index.d.ts')\" && node ./fixup-node-cjs.mjs",
     "target": "rimraf ./$TARGET && npm run compile && npm run bindgen && npm run opt",
-    "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
+    "compile": "node ./scripts/compile.mjs",
     "bindgen": "wasm-bindgen --omit-default-module-path --weak-refs --typescript --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "tsc --noEmit && mocha --loader=ts-node/esm test/**/*.mts"
