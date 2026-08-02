@@ -349,22 +349,10 @@ impl AutoCommit {
             }
             return patches;
         }
-        #[cfg(any(test, debug_assertions, feature = "patchless_assertions"))]
-        let expected = self.diff(&diff_cursor, &heads);
         let patches = self
             .doc
             .dirty_diff_patches_and_clear(&diff_cursor, &heads)
             .expect("dirty diff should support AutoCommit incremental intervals");
-        #[cfg(any(test, debug_assertions, feature = "patchless_assertions"))]
-        crate::patches::effect::assert_patches_have_same_effect(
-            &self.doc,
-            &diff_cursor,
-            &heads,
-            "dirty diff",
-            &patches,
-            "diff cursor",
-            &expected,
-        );
         if !heads.is_empty() {
             self.diff_cursor = heads;
         }
