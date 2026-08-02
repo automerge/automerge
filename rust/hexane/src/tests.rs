@@ -4095,6 +4095,10 @@ fn xorshift(state: &mut u64) -> u64 {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_delta_column() {
     let mut rng: u64 = 11111;
 
@@ -4180,6 +4184,10 @@ fn fuzz_delta_column() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_delta_column_nullable() {
     let mut rng: u64 = 22222;
 
@@ -4211,6 +4219,10 @@ fn fuzz_delta_column_nullable() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_prefix_column() {
     let mut rng: u64 = 33333;
 

@@ -795,11 +795,6 @@ impl OpSet {
         MapRange::new(self, start..end, clock)
     }
 
-    #[cfg(test)]
-    pub(crate) fn cols_sub_len(&self) -> usize {
-        self.cols.sub_len()
-    }
-
     pub(crate) fn len(&self) -> usize {
         self.cols.len()
     }

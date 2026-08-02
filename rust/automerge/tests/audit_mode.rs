@@ -1,7 +1,7 @@
 use automerge::transaction::CommitOptions;
 use automerge::{
     transaction::Transactable, ActorId, AuditMode, AutoCommit, Automerge, AutomergeError,
-    ChangeHash, ChangeId, LoadOptions, ReadDoc, ROOT,
+    ChangeHash, ChangeId, LoadOptions, ReadDoc, TextEncoding, ROOT,
 };
 
 fn audit_opts() -> LoadOptions {
@@ -393,22 +393,26 @@ fn enable_audit_mode_unlocks_everything() {
 /// same edits made in audit mode keep everything.
 #[test]
 fn usurped_fragment_hashes_are_freed_on_live_docs() {
+    // plain `Automerge`, deliberately: this is the `GcMode::Auto`
+    // behaviour, and `AutoCommit` defers its GC to save time
     let build = |audit: bool| {
-        let mut doc = AutoCommit::new()
-            .with_actor(ActorId::from(&b"aaaa"[..]))
-            .unwrap();
+        let mut doc = Automerge::new();
+        doc.set_actor(ActorId::from(&b"aaaa"[..])).unwrap();
         if audit {
             doc.enable_audit_mode().unwrap();
         }
         for i in 0..4000 {
-            doc.put(ROOT, "k", i as i64).unwrap();
-            doc.commit();
+            doc.transact::<_, _, AutomergeError>(|tx| {
+                tx.put(ROOT, "k", i as i64)?;
+                Ok(())
+            })
+            .unwrap();
         }
         doc
     };
     // same actor + same edits → identical change hashes
-    let mut audit = build(true);
-    let mut plain = build(false);
+    let audit = build(true);
+    let plain = build(false);
     assert_eq!(audit.get_head_hashes(), plain.get_head_hashes());
 
     let all: Vec<_> = audit
@@ -878,16 +882,26 @@ fn audit_fragment_apply_missing_deps() {
 #[test]
 fn unlucky_commit_frees_loose_hashes() {
     let (bytes, _orig, _unknown) = saved_big_doc_with_unknown_hash();
-    let mut doc = AutoCommit::load(&bytes).unwrap();
+    // plain `Automerge`, deliberately: this is the `GcMode::Auto`
+    // behaviour, and `AutoCommit` defers its GC to save time
+    let mut doc = Automerge::load(&bytes).unwrap();
     doc.set_actor(ActorId::from(&63u32.to_be_bytes()[..]))
         .unwrap();
     let load_heads = doc.get_heads();
 
-    doc.put(ROOT, "k", 100_000).unwrap();
-    doc.commit_with(CommitOptions::default().with_time(0));
+    let commit = |doc: &mut Automerge, v: i64| {
+        doc.transact_with::<_, _, AutomergeError, _>(
+            |_| CommitOptions::default().with_time(0),
+            |tx| {
+                tx.put(ROOT, "k", v)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    };
+    commit(&mut doc, 100_000);
     let h1 = doc.get_head_hashes()[0];
-    doc.put(ROOT, "k", 200_000).unwrap();
-    doc.commit_with(CommitOptions::default().with_time(0));
+    commit(&mut doc, 200_000);
     let h2 = doc.get_head_hashes()[0];
 
     assert_eq!(h1.fragment_level(), 0, "the first commit stays loose");
@@ -908,4 +922,73 @@ fn unlucky_commit_frees_loose_hashes() {
     // the document itself is unaffected — only hash-keyed emission is
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
     assert_eq!(v.to_i64(), Some(200_000));
+}
+
+/// `merge` must work outside audit mode even when the retention GC has
+/// freed the hash of a change on the boundary of the delivered set.
+///
+/// Plain `Automerge` deliberately: it is the `GcMode::Auto` type, so a
+/// fragment forming mid-test frees covered hashes exactly as it would in
+/// production. `AutoCommit` defers its GC to save time and would never
+/// reach this state.
+///
+/// The trigger is a change whose hash happens to start with a zero byte
+/// (a fragment head, 1/256), so the actor is swept rather than pinned —
+/// a single actor would exercise the freed-boundary path only rarely.
+#[test]
+fn merge_outside_audit_mode_survives_a_freed_boundary() {
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let pin = || CommitOptions::default().with_time(0);
+
+    for a in 0..300u32 {
+        let mut target = Automerge::new_with_encoding(encoding);
+        target
+            .set_actor(ActorId::from(&a.to_be_bytes()[..]))
+            .unwrap();
+        let object = target
+            .transact_with::<_, _, AutomergeError, _>(
+                |_| pin(),
+                |tx| tx.put_object(ROOT, "value", automerge::ObjType::Text),
+            )
+            .unwrap()
+            .result;
+
+        let mut left = target.fork();
+        left.set_actor(ActorId::from(&(a ^ 0xa5a5_a5a5).to_be_bytes()[..]))
+            .unwrap();
+        left.transact_with::<_, _, AutomergeError, _>(
+            |_| pin(),
+            |tx| tx.splice_text(&object, 0, 0, "left"),
+        )
+        .unwrap();
+
+        let mut right = target.fork();
+        right
+            .set_actor(ActorId::from(&(a ^ 0x5a5a_5a5a).to_be_bytes()[..]))
+            .unwrap();
+        right
+            .transact_with::<_, _, AutomergeError, _>(
+                |_| pin(),
+                |tx| tx.splice_text(&object, 0, 0, "right"),
+            )
+            .unwrap();
+
+        // the merge that used to fail with MissingDep once a boundary
+        // change's hash had been freed
+        target
+            .merge(&mut left)
+            .unwrap_or_else(|e| panic!("actor={a}: merge(left) failed: {e}"));
+        target
+            .merge(&mut right)
+            .unwrap_or_else(|e| panic!("actor={a}: merge(right) failed: {e}"));
+
+        assert_eq!(target.audit_mode(), AuditMode::Disabled);
+        // the two branches are concurrent, so both tips survive as heads
+        assert_eq!(target.get_heads().len(), 2, "actor={a}");
+        // and both edits landed
+        assert_eq!(
+            target.text(&object).unwrap().len(),
+            "left".len() + "right".len()
+        );
+    }
 }

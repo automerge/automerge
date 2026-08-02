@@ -698,7 +698,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn from_values(values: Vec<T>) -> Self {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
-        col.splice(0, 0, deltas_from::<T::Inner>(&inner, 0));
+        let _ = col.splice_inner(0, 0, deltas_from::<T::Inner>(&inner, 0).map(|v| (v, 1)));
         Self {
             col,
             _phantom: PhantomData,

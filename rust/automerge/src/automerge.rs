@@ -98,6 +98,27 @@ pub enum AuditMode {
     Disabled,
 }
 
+/// When the retention GC runs outside audit mode.
+///
+/// Forming a fragment makes its members interior history, so their
+/// hashes can be freed. Doing that eagerly ([`GcMode::Auto`]) keeps
+/// memory flat, but it can free a hash that a later minimal
+/// `save_incremental` still needs to name the boundary of its change
+/// set — the saved delta then has to reach further back than it should.
+///
+/// [`GcMode::Manual`] defers the free until [`Automerge::gc`] is
+/// called. [`crate::AutoCommit`] uses it by default and runs the GC
+/// itself after each `save_incremental`, so a save always sees every
+/// hash and the collection happens immediately afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GcMode {
+    /// Free covered hashes as soon as a fragment forms. The default.
+    #[default]
+    Auto,
+    /// Free them only when [`Automerge::gc`] is called.
+    Manual,
+}
+
 /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
 #[derive(Debug)]
 pub enum StringMigration {
@@ -114,6 +135,8 @@ pub struct LoadOptions {
     string_migration: StringMigration,
     text_encoding: TextEncoding,
     audit: AuditMode,
+    /// None is default
+    gc: Option<GcMode>,
 }
 
 impl LoadOptions {
@@ -174,6 +197,30 @@ impl LoadOptions {
     pub fn with_audit_mode(self) -> Self {
         self.audit(AuditMode::Enabled)
     }
+
+    /// The [`GcMode`] to load the document in.
+    ///
+    /// Unset, an [`Automerge`] loads in [`GcMode::Auto`] and a
+    /// [`crate::AutoCommit`] in [`GcMode::Manual`]; setting it here
+    /// overrides both.
+    pub fn gc(self, gc: GcMode) -> Self {
+        Self {
+            gc: Some(gc),
+            ..self
+        }
+    }
+
+    /// Load in [`GcMode::Manual`] — see [`Self::gc`].
+    pub fn with_manual_gc(self) -> Self {
+        self.gc(GcMode::Manual)
+    }
+
+    /// Resolve an unset [`GcMode`] to the loading type's default,
+    /// leaving an explicit choice alone.
+    pub(crate) fn gc_or(mut self, default: GcMode) -> Self {
+        self.gc = Some(self.gc.unwrap_or(default));
+        self
+    }
 }
 
 impl std::default::Default for LoadOptions {
@@ -184,6 +231,7 @@ impl std::default::Default for LoadOptions {
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
             audit: AuditMode::default(),
+            gc: None,
         }
     }
 }
@@ -834,6 +882,9 @@ impl Automerge {
                 Self::new_with_encoding(options.text_encoding)
             }
         };
+        // set before the change chunks are applied: a fragment forming
+        // during the load would otherwise GC under the default mode
+        am.change_graph.set_gc_mode(options.gc.unwrap_or_default());
         tracing::trace!("loading change chunks");
         // The first chunk is applied here too, not at construction: only
         // a document chunk builds the document outright, and a bundle —
@@ -2084,6 +2135,37 @@ impl Automerge {
         self.change_graph.retain_hashes_only();
     }
 
+    /// Run a deferred retention GC — see [`GcMode`].
+    ///
+    /// Under [`GcMode::Auto`] there is never anything owed, so this is a
+    /// no-op beyond a pass over the retained set. In audit mode nothing
+    /// is freed at all.
+    pub fn gc(&mut self) {
+        self.change_graph.run_gc();
+    }
+
+    /// This document's [`GcMode`].
+    pub fn gc_mode(&self) -> GcMode {
+        self.change_graph.gc_mode()
+    }
+
+    /// Switch this document's [`GcMode`].
+    ///
+    /// Moving to [`GcMode::Auto`] runs any GC that [`GcMode::Manual`]
+    /// deferred, so the two modes never leave freeable hashes behind.
+    pub fn set_gc_mode(&mut self, mode: GcMode) {
+        self.change_graph.set_gc_mode(mode);
+        if mode == GcMode::Auto && self.change_graph.gc_owed() {
+            self.change_graph.run_gc();
+        }
+    }
+
+    pub fn with_manual_gc(mut self) -> Self {
+       self.set_gc_mode(GcMode::Manual);
+       self
+    }
+
+
     /// Get the heads of this document.
     ///
     /// The heads are the [`ChangeId`]s of the changes which have no
@@ -2367,6 +2449,10 @@ impl Automerge {
             }
         }
         let nodes = other.change_graph.get_build_indexes(exclude);
+        // outside audit mode a boundary dep's hash may have been freed,
+        // and a bundle can only name external deps by hash — so grow the
+        // set until the boundary is one the retention rule keeps
+        let nodes = other.change_graph.extend_to_retained_boundary(nodes);
         // the boundary is what we already have and they build on: our
         // heads, as far as they are known to `other`
         let boundary = self.get_head_hashes();

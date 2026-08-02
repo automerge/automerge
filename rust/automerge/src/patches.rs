@@ -1,8 +1,9 @@
 /// Patch-effect model: materializes a document and replays patches over
 /// it, so two patch streams can be checked to land the same state. Only
-/// the assertion paths use it, so it is compiled out of release builds
-/// (matching the `cfg` on every call site).
-#[cfg(any(test, debug_assertions, feature = "patchless_assertions"))]
+/// the tests use it now, so the `cfg` here matches the `cfg(test)` on
+/// every remaining call site; a wider gate leaves it dead in ordinary
+/// debug builds and trips `clippy -D warnings`.
+#[cfg(test)]
 pub(crate) mod effect;
 mod patch;
 mod patch_accumulator;

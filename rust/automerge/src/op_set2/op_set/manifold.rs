@@ -1569,6 +1569,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "deep_fuzz"),
+        ignore = "deep fuzz: run with --features deep_fuzz"
+    )]
     fn manifold_pending_targets_stress() {
         // fork-of-fork: a second actor updates/deletes/increments
         // elements (and writes into an object) that are themselves

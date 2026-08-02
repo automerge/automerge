@@ -644,6 +644,7 @@ mod tests {
     proptest! {
 
         #[test]
+        #[cfg_attr(not(feature = "deep_fuzz"), ignore = "deep fuzz: run with --features deep_fuzz")]
         fn proptest_insert(indices in arb_indices()) {
             let mut t = SequenceTreeInternal::<usize>::new();
             let mut v = Vec::new();
@@ -668,6 +669,7 @@ mod tests {
         // sequencetree) so we only do a few runs
         #![proptest_config(ProptestConfig::with_cases(20))]
         #[test]
+        #[cfg_attr(not(feature = "deep_fuzz"), ignore = "deep fuzz: run with --features deep_fuzz")]
         fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
             let mut t = SequenceTreeInternal::<usize>::new();
             let mut v = Vec::new();

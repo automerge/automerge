@@ -16,8 +16,8 @@ utf16-indexing = []
 # Whether to enable "slow path" assertions which check that various invariants hold
 # should only be enabled when running tests
 slow_path_assertions = ["hexane/slow_path_assertions"]
-# Enable dirty-range incremental diff shadow assertions in non-test release builds.
-patchless_assertions = []
+# Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
+deep_fuzz = ["hexane/deep_fuzz"]
 
 [dependencies]
 hexane = { version = "1.0.0-alpha.2", path = "../hexane" }

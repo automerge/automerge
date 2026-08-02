@@ -469,9 +469,11 @@ mod tests {
 
         // anonymizing reads the source's changes, which needs its hash
         // graph — a default load does not keep one
-        let source =
-            Automerge::load_with_options(&source.save(), crate::LoadOptions::new().with_audit_mode())
-                .unwrap();
+        let source = Automerge::load_with_options(
+            &source.save(),
+            crate::LoadOptions::new().with_audit_mode(),
+        )
+        .unwrap();
         let anonymized = Anonymization::from_seed([7; 32])
             .anonymize(&source)
             .unwrap();

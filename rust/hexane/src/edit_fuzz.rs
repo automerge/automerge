@@ -492,6 +492,10 @@ fn opt_str(r: &mut Rng) -> Option<String> {
 const TIGHT: [usize; 4] = [2, 3, 4, 5];
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn random_scripts_u64() {
     for seed in 0..400u64 {
         for max_seg in TIGHT {
@@ -1137,6 +1141,10 @@ mod delta {
 /// Every small boolean column against every small edit — the space where
 /// an off-by-one in run splitting or parity has nowhere to hide.
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn exhaustive_tiny_bool() {
     for len in 0..=7usize {
         for bits in 0..(1u32 << len) {

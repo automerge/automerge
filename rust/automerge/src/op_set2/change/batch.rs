@@ -917,6 +917,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "deep_fuzz"),
+        ignore = "deep fuzz: run with --features deep_fuzz"
+    )]
     fn fuzz_batch_list_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
@@ -1084,6 +1088,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "deep_fuzz"),
+        ignore = "deep fuzz: run with --features deep_fuzz"
+    )]
     fn fuzz_batch_map_counter_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();

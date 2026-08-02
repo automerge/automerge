@@ -1137,7 +1137,7 @@ where
 
     pub fn from_values_with_max_segments(values: Vec<T>, max_segments: usize) -> Self {
         let mut col = Self::with_max_segments(max_segments);
-        col.splice(0, 0, values);
+        let _ = col.splice_inner(0, 0, values.into_iter().map(|v| (v, 1)));
         col
     }
 
@@ -1502,12 +1502,12 @@ where
     // ── Mutations ───────────────────────────────────────────────────────
 
     pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
-        self.splice(index, 0, [value]);
+        let _ = self.splice_inner(index, 0, [(value, 1)]);
     }
 
     pub fn remove(&mut self, index: usize) {
         if index < self.total_len {
-            self.splice::<T, _>(index, 1, std::iter::empty());
+            let _ = self.splice_inner::<T, _>(index, 1, std::iter::empty());
         }
     }
 
@@ -1521,25 +1521,25 @@ where
     /// `splice`'s contract).
     pub fn remove_n(&mut self, index: usize, n: usize) {
         if n > 0 {
-            self.splice::<T, _>(index, n, std::iter::empty());
+            let _ = self.splice_inner::<T, _>(index, n, std::iter::empty());
         }
     }
 
     pub fn push(&mut self, value: impl AsColumnRef<T>) {
         let len = self.total_len;
-        self.splice(len, 0, [value]);
+        let _ = self.splice_inner(len, 0, [(value, 1)]);
     }
 
     pub fn clear(&mut self) {
         let len = self.total_len;
         if len > 0 {
-            self.splice::<T, _>(0, len, std::iter::empty());
+            let _ = self.splice_inner::<T, _>(0, len, std::iter::empty());
         }
     }
 
     pub fn truncate(&mut self, len: usize) {
         if len < self.total_len {
-            self.splice::<T, _>(len, self.total_len - len, std::iter::empty());
+            let _ = self.splice_inner::<T, _>(len, self.total_len - len, std::iter::empty());
         }
     }
 
@@ -1547,8 +1547,15 @@ where
     where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = V>,
+        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
+        WF::Weight: SlabAggregate,
     {
-        let _ = self.splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
+        let mut e = self.edit_at(index);
+        e.delete(del);
+        for v in values {
+            e.insert(v);
+        }
+        e.finish();
     }
 
     /// Splice [`Run`]s in — the run-aware fast path for bulk uniform data.
@@ -1558,8 +1565,15 @@ where
     where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = Run<V>>,
+        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
+        WF::Weight: SlabAggregate,
     {
-        let _ = self.splice_inner(index, del, runs.into_iter().map(|r| (r.value, r.count)));
+        let mut e = self.edit_at(index);
+        e.delete(del);
+        for r in runs {
+            e.insert_run(r.value, r.count);
+        }
+        e.finish();
     }
 
     /// Splice `ranges` of `src` into `self` at `index`, deleting `del`
@@ -1706,6 +1720,8 @@ where
         strategy: CopyStrategy,
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
+        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
+        WF::Weight: SlabAggregate,
     {
         assert!(index + del <= self.len(), "splice range out of bounds");
         match strategy {
@@ -2114,7 +2130,7 @@ where
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.total_len;
-        self.splice(len, 0, iter);
+        let _ = self.splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }
 

@@ -80,7 +80,7 @@ pub struct AutoCommit {
 impl Default for AutoCommit {
     fn default() -> Self {
         AutoCommit {
-            doc: Automerge::new(),
+            doc: Automerge::new().with_manual_gc(),
             transaction: None,
             diff_cursor: Vec::new(),
             diff_cache: None,
@@ -100,7 +100,7 @@ impl AutoCommit {
     }
 
     pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
-        let doc = Automerge::new_with_encoding(encoding);
+        let doc = Automerge::new_with_encoding(encoding).with_manual_gc();
         AutoCommit {
             doc,
             transaction: None,
@@ -115,7 +115,7 @@ impl AutoCommit {
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
         self.ensure_transaction_closed();
         Ok(Self {
-            doc: self.doc.anonymize()?,
+            doc: self.doc.anonymize()?.with_manual_gc(),
             transaction: None,
             diff_cursor: Vec::new(),
             diff_cache: None,
@@ -129,7 +129,7 @@ impl AutoCommit {
     }
 
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        let doc = Automerge::load_unverified_heads(data)?;
+        let doc = Automerge::load_unverified_heads(data)?.with_manual_gc();
         // see `load_with_options` for the cursor rationale
         let save_cursor = if doc.audit_mode() == crate::AuditMode::Enabled {
             Vec::new()
@@ -161,6 +161,8 @@ impl AutoCommit {
     }
 
     pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
+        // unset means this type's default, which is manual
+        let options = options.gc_or(crate::GcMode::Manual);
         let doc = Automerge::load_with_options(data, options)?;
         // the loaded bytes are, by definition, already saved, so the
         // incremental-save cursor starts at the load heads
@@ -516,16 +518,13 @@ impl AutoCommit {
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
         if options.legacy_format {
-            // the one place a stray actor has to be swept: the document
-            // chunk writes the actor table verbatim, where a fragment's
-            // is built from the actors its ops name. An apply that bailed
-            // after taking the sender's table is how one gets here.
             self.doc.remove_unused_actors(false);
         }
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
+        self.doc.gc();
         bytes
     }
 
@@ -573,6 +572,7 @@ impl AutoCommit {
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
+        self.doc.gc();
         bytes
     }
 

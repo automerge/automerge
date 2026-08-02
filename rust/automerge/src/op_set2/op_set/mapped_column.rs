@@ -263,6 +263,8 @@ where
     pub(crate) fn splice<I>(&mut self, index: usize, del: usize, values: I)
     where
         I: IntoIterator<Item = T>,
+        // EXPERIMENT: required because hexane's splice now goes through edit()
+        T::Encoding<hexane::Leb128>: hexane::edit::SlabEdit<Value = T>,
     {
         if self.map.is_identity() {
             self.col.splice(index, del, values);

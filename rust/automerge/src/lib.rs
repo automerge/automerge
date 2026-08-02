@@ -285,7 +285,9 @@ mod types;
 mod value;
 
 pub use crate::anonymize::AnonymizeError;
-pub use crate::automerge::{AuditMode, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
+pub use crate::automerge::{
+    AuditMode, Automerge, GcMode, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
+};
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};

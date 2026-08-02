@@ -513,7 +513,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = V>,
     {
-        self.col.splice(index, del, values);
+        let _ = self
+            .col
+            .splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
     /// Splice [`crate::Run`]s in — the run-aware fast path for bulk uniform
@@ -524,7 +526,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = crate::Run<V>>,
     {
-        self.col.splice_runs(index, del, runs);
+        let _ = self
+            .col
+            .splice_inner(index, del, runs.into_iter().map(|r| (r.value, r.count)));
     }
 
     /// See [`Column::copy_ranges`](crate::Column::copy_ranges).
@@ -1091,7 +1095,9 @@ where
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.col.len();
-        self.col.splice(len, 0, iter);
+        let _ = self
+            .col
+            .splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }
 
