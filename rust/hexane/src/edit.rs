@@ -1,9 +1,6 @@
 //! Progressive editing: a forward-only cursor over a
 //! [`Column`], and the contract an encoding implements so
 //! its slabs can be rebuilt in place.
-//!
-//! Nothing here is specific to an encoding — [`RleEdit`](crate::rle::edit::RleEdit)
-//! and [`BoolEdit`](crate::bool::BoolEdit) are the implementations.
 
 use crate::btree::SlabAggregate;
 use crate::column::{Column, ColumnRef, WeightFn};
@@ -19,15 +16,9 @@ pub trait SlabEdit: crate::encoding::ColumnEncoding {
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries
     /// and paying for a write-back.
-    ///
-    /// It belongs to the encoding because the two sides differ: carrying
-    /// an RLE run costs a decode and a re-encode against a cheap byte
-    /// splice, where a boolean run is arithmetic against the same.
     const CARRY_BUDGET: usize = RUN_BUDGET;
 }
 
-/// A rebuild in progress on one slab. A cursor keeps one for its whole
-/// life and resets it onto each slab it touches.
 pub trait EditSlab: Default {
     type Tail: Copy + std::fmt::Debug + Default;
     type Value: crate::ColumnValueRef;
@@ -79,11 +70,6 @@ type Enc<T, C> = <T as ColumnValueRef>::Encoding<C>;
 type EditOf<T, C> = <Enc<T, C> as SlabEdit>::Edit;
 type StateOf<T, C> = <Enc<T, C> as crate::encoding::ColumnEncoding>::State;
 
-/// A cursor's reader, and the offset in the current slab it stands at.
-///
-/// `at` trails the cursor's `in_slab` — the reader only catches up when
-/// something reads — so the two are not the same number and the gap is
-/// the work a read still owes.
 struct Reader<S> {
     state: S,
     at: usize,
@@ -97,11 +83,6 @@ struct Reader<S> {
 /// they are. In runs rather than items because that is what the work is:
 /// a long span of one value is carried for nothing, the same span of
 /// distinct values is better memmoved.
-///
-/// 8 is the knee of a sweep over `edit_vs_splice`. Flushing sooner loses
-/// everywhere (2 runs costs 1.5× on the string shapes); past 8 nothing
-/// moves, since `est_runs` has already dispatched the long spans. Never
-/// flushing costs 1.3× to 4.9×.
 pub(crate) const RUN_BUDGET: usize = 8;
 
 /// A forward-only read/write cursor over a [`Column`].
@@ -262,11 +243,6 @@ where
         self
     }
 
-    /// [`advance`](Self::advance), reporting to `f` every run it carries
-    /// through an open rebuild. Returns how many items it did *not*
-    /// report: a clean cursor jumps whole slabs through the index without
-    /// decoding them, which is what makes a long seek cheap and what a
-    /// caller keeping an accumulator has to make up for from the column
     /// itself.
     pub(crate) fn advance_with<F>(&mut self, n: usize, mut f: F) -> usize
     where
@@ -516,13 +492,6 @@ where
         left
     }
 
-    /// What carrying `n` items would cost in encoder pushes, from the
-    /// slab's own density — `segments` and `len` are already on it, so
-    /// this decides without decoding anything.
-    ///
-    /// Deciding here rather than mid-carry is what makes it free; the
-    /// budget passed to `pass` is only a guard for slabs whose runs are
-    /// unevenly distributed.
     fn est_runs(&self, n: usize) -> usize {
         let s = &self.col.slabs[self.slab];
         if s.len == 0 {

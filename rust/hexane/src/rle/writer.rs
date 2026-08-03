@@ -1,32 +1,8 @@
-//! The splice writer: encode a rebuilt region into a byte buffer, cutting
-//! new slabs at the segment budget as it goes.
-//!
-//! This is the cut-and-overflow logic of
-//! `build_splice_buf` lifted into a
-//! type that can be *driven* rather than only called. Two callers want
-//! it:
-//!
-//! * a one-shot splice — push the inserted values, finish with the
-//!   postfix (see `build_splice_buf_v2`, held to byte-identity with the
-//!   original in `writer_matches_v1`);
-//! * a cursor making several edits in one slab — push the inserted
-//!   values *and* the runs it carries through between them, then finish
-//!   once. That is what makes N edits in a slab cost one partition, one
-//!   buffer and one byte splice.
-//!
-//! The writer owns its buffer and its encoder state, so it can live
-//! across calls next to a `&mut Column`; the state holds owned values
-//! ([`RleState::into_owned`]), which is a register move for every `Copy`
-//! column and a clone per retained run for the string ones.
-
 use crate::rle::state::{FlushState, OwnedPostfix, RleState};
 use crate::rle::{RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 use std::ops::Range;
 
-/// What a finished rebuild hands back: the bytes that replace
-/// `range` in the slab, the slab's new metadata, and any slabs the
-/// rebuild spilled into.
 #[derive(Debug, Default)]
 pub(crate) struct Rebuilt {
     pub(crate) bytes: Vec<u8>,
@@ -38,36 +14,21 @@ pub(crate) struct Rebuilt {
     pub(crate) wpos: crate::rle::state::WPos,
 }
 
-/// Encodes a rebuilt region, cutting slabs at the budget.
 pub(crate) struct SpliceWriter<T: RleValue, C: Codec> {
     state: RleState<'static, T, T, C>,
     f: FlushState,
     buf: Vec<u8>,
     max_segments: usize,
-    /// budget for the chunk in hand — halves after the first cut, so a
-    /// spill leaves room for later growth rather than filling to the brim
     target: usize,
-    /// segments standing before the chunk in hand
     starting_segments: usize,
-    /// segments of the slab before the rebuilt region, which stay put
     prefix_segments: usize,
-    /// items of the slab before the rebuilt region — they stay in the
-    /// edited slab, so its length counts them
     head_len: usize,
     overflowed: bool,
-    /// items emitted into the chunk in hand
     inserted: usize,
     out: Rebuilt,
 }
 
 impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
-    /// An idle writer, holding nothing but its buffer.
-    ///
-    /// A cursor builds one of these and [`reset`](Self::reset)s it for
-    /// each slab it edits, rather than constructing a writer per slab: the
-    /// struct is a few hundred bytes, and on a one-edit cursor that
-    /// construction is a measurable share of the whole operation. It also
-    /// means the encode buffer is allocated once for the cursor's life.
     pub(crate) fn empty() -> Self {
         SpliceWriter {
             state: RleState::empty(),
@@ -84,11 +45,6 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
         }
     }
 
-    /// Open a rebuild whose encoder state and segment count come from a
-    /// partition, replacing `range` of the slab's bytes.
-    ///
-    /// Every field is written, so nothing carries over from the last slab
-    /// this writer rebuilt.
     pub(crate) fn reset(
         &mut self,
         state: RleState<'static, T, T, C>,
@@ -113,8 +69,6 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
         };
     }
 
-    /// Take back the buffer a finished rebuild wrote into, so the next one
-    /// reuses the allocation.
     pub(crate) fn recycle(&mut self, mut bytes: Vec<u8>) {
         if bytes.capacity() > self.buf.capacity() {
             bytes.clear();
@@ -122,8 +76,6 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
         }
     }
 
-    /// Append `count` copies of `value`, cutting a slab first if the
-    /// chunk in hand has reached its budget.
     pub(crate) fn push(&mut self, value: impl AsColumnRef<T>, count: usize) {
         if self.starting_segments + self.f.segments + self.state.pending_segments() >= self.target {
             self.cut();
@@ -133,7 +85,6 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
         self.f += self.state.append_n(&mut self.buf, value, count);
     }
 
-    /// The rebuilt region's end, known only when the rebuild closes.
     pub(crate) fn set_range_end(&mut self, end: usize) {
         self.out.range.end = end;
     }
@@ -163,17 +114,6 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
         self.starting_segments = 0;
     }
 
-    /// Close the rebuild, carrying the slab's remaining bytes through as
-    /// the postfix.
-    ///
-    /// `head_len` is the item count of the slab's untouched head (the
-    /// items before `range.start`), `tail_count` the item count the
-    /// postfix stands for, and `data_len` the slab's current byte length.
-    /// `tail_bytes` is the slab's bytes from `range.end` to its end —
-    /// the region the postfix stands for, carried through unchanged. In
-    /// the spill case it moves onto the last new slab (which is why the
-    /// replaced range then covers the whole tail); when the rebuild fits
-    /// in one slab it stays where it is and this is unused.
     pub(crate) fn finish(
         &mut self,
         postfix: Option<OwnedPostfix<T>>,
@@ -257,11 +197,6 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
 }
 
 impl Rebuilt {
-    /// Write the rebuild back into the slab it came from, returning the
-    /// slabs it spilled into. Mirrors what `splice_slab` does with a
-    /// `SpliceBuf`, which is the only other consumer of this shape.
-    /// Returns the spilled slabs and the encode buffer, so the caller can
-    /// reuse the allocation for the next slab it edits.
     // T is only read by the debug-build slab validation below
     #[cfg_attr(not(debug_assertions), allow(clippy::extra_unused_type_parameters))]
     pub(crate) fn apply<T: RleValue, C: Codec>(&mut self, slab: &mut Slab) -> (Vec<Slab>, Vec<u8>) {
