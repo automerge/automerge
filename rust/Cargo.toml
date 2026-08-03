@@ -18,3 +18,14 @@ codegen-units = 1
 
 [profile.bench]
 debug = true
+
+# Optimized but keeps `debug_assert!` and overflow checks. What the
+# automerge-wasm test suite builds against: a dev-profile wasm runs its
+# tests ~20x slower. LTO is off and codegen-units high to keep the
+# build itself quick.
+[profile.wasm-test]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true
+lto = false
+codegen-units = 16
