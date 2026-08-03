@@ -688,10 +688,17 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         }
     }
 
+    /// Slab-arrangement and index checks on the delta storage — see
+    /// [`Column::check_invariants`](crate::Column::check_invariants).
+    #[doc(hidden)]
+    pub fn check_invariants(&self) {
+        self.col.check_invariants();
+    }
+
     pub fn from_values(values: Vec<T>) -> Self {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
-        col.splice(0, 0, deltas_from::<T::Inner>(&inner, 0));
+        let _ = col.splice_inner(0, 0, deltas_from::<T::Inner>(&inner, 0).map(|v| (v, 1)));
         Self {
             col,
             _phantom: PhantomData,
@@ -921,9 +928,13 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         )
     }
 
-    /// Splice [`DeltaRun`]s instead of indiviaul values allowing for
-    /// Run at a time copying.  Will identify mismatched delta runs and
-    /// break them up as needed.
+    /// Splice [`DeltaRun`]s in — the run-aware fast path for bulk data.
+    /// A run whose `prefix` matches the running value copies through as
+    /// one inner run; a mismatch costs one peeled fix-up delta.
+    ///
+    /// Each run's realized values must lie in `T`'s value domain (a
+    /// writer-side contract, like [`DeltaValue::to_i64`]); null runs
+    /// panic on non-nullable columns.
     pub fn splice_runs(
         &mut self,
         index: usize,
@@ -945,6 +956,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
         I: IntoIterator<Item = crate::Splice>,
+        T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
     {
         let splices = crate::column::normalize_splices(splices, src.len(), self.len());
         if splices.is_empty() {
@@ -962,17 +974,24 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         mut src: Self,
         splices: &[crate::Splice],
         strategy: crate::column::CopyStrategy,
-    ) {
+    ) where
+        T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+    {
         use crate::column::CopyStrategy;
         use crate::Shiftable;
         match strategy {
             CopyStrategy::Direct => {
-                let mut shift = 0isize;
+                // as `Column::copy_splices_with`, and the cursor carries
+                // the running realized value too, so the per-splice
+                // boundary lookup goes as well: a run that arrives
+                // already anchored copies straight through.
+                let mut runs = src.iter().runs();
+                let mut e = self.edit();
                 for sp in splices {
-                    let at = (sp.pos as isize + shift) as usize;
-                    self.splice_runs(at, sp.delete, src.iter().runs().ranges([sp.range.clone()]));
-                    shift += sp.range.len() as isize - sp.delete as isize;
+                    runs.shift(sp.range.clone());
+                    e.seek(sp.pos).delete(sp.delete).insert_runs(&mut runs);
                 }
+                e.finish();
             }
             CopyStrategy::Invert => {
                 let old_len = self.len();
@@ -980,19 +999,13 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
                 let ranges: Vec<std::ops::Range<usize>> =
                     splices.iter().map(|sp| sp.range.clone()).collect();
                 self.retain_ranges(&ranges);
-                let mut out_pos = 0usize;
-                let mut prev_end = 0usize;
-                for sp in splices {
-                    if sp.pos > prev_end {
-                        self.splice_runs(out_pos, 0, src.iter_range(prev_end..sp.pos).runs());
-                        out_pos += sp.pos - prev_end;
-                    }
-                    prev_end = sp.pos + sp.delete;
-                    out_pos += sp.range.len();
-                }
-                if old_len > prev_end {
-                    self.splice_runs(out_pos, 0, src.iter_range(prev_end..old_len).runs());
-                }
+                let mut runs = src.iter().runs();
+                let mut e = self.edit();
+                crate::column::for_each_gap(splices, old_len, |at, gap| {
+                    runs.shift(gap);
+                    e.seek(at).insert_runs(&mut runs);
+                });
+                e.finish();
             }
         }
     }
@@ -1102,6 +1115,322 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
                 Some(iter.running + T::Inner::to_opt(run.value).unwrap()),
             ),
         }
+    }
+}
+
+// ── DeltaEdit ───────────────────────────────────────────────────────────────
+
+/// The inner cursor a [`DeltaEdit`] drives — an ordinary column cursor
+/// over the delta storage.
+type InnerEdit<'a, T, C> = crate::edit::Edit<
+    'a,
+    <T as DeltaValue>::Inner,
+    C,
+    IndexedDeltaWeightFn,
+    crate::btree::SlabBTree<crate::btree::SlabAgg>,
+>;
+
+/// A cursor over a [`DeltaColumn`], in realized values.
+///
+/// The storage underneath is an ordinary RLE column of deltas, so this is
+/// [`Column::edit`](crate::Column::edit) with two things attached:
+///
+/// * an **accumulator** — the realized value standing before the cursor,
+///   which every op needs and which `splice` looks up per call in
+///   `find_boundaries`. The cursor watches the runs the rebuild carries
+///   and keeps it in step for free; only a jump over untouched slabs
+///   loses it, and that reads it back from the index there and then.
+///
+/// * a pending **fix-up** — after an edit the next non-null delta has to
+///   absorb the difference, or every realized value after the cursor
+///   shifts. A splice pays that per call; a cursor pays it once, when it
+///   moves on. Nulls hold no delta, so they carry through and the debt
+///   lands on the first non-null after them.
+///
+/// The delta storage is RLE for every codec, but only the `Leb128`
+/// instance says so in the type system, which is why the edit API
+/// restates it.
+pub struct DeltaEdit<'a, T: DeltaValue, C: Codec = Leb128>
+where
+    T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+{
+    inner: InnerEdit<'a, T, C>,
+    /// realized value of the last item before the cursor, in the column
+    /// being written
+    running: i64,
+    /// what the next non-null original delta owes: the original running
+    /// value minus the one being written
+    adjust: i64,
+    _phantom: PhantomData<T>,
+}
+
+impl<'a, T: DeltaValue, C: Codec> DeltaEdit<'a, T, C>
+where
+    T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+{
+    fn new(col: &'a mut InnerColumn<T, C>, at: usize) -> Self {
+        // before the cursor borrows the column: the realized value it
+        // starts from, which position 0 gets for nothing
+        let running = Self::prefix_at(col, at);
+        DeltaEdit {
+            inner: col.edit_at(at),
+            running,
+            adjust: 0,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// The realized value `at` items into `col` — an index jump, the same
+    /// one [`DeltaColumn::splice`] makes on every call.
+    fn prefix_at(col: &InnerColumn<T, C>, at: usize) -> i64 {
+        if at == 0 {
+            return 0;
+        }
+        let mut iter: DeltaIter<'_, T, C> = DeltaIter {
+            inner: col.iter(),
+            running: 0,
+            col: Some(col),
+            _phantom: PhantomData,
+        };
+        iter.advance_by(at);
+        iter.running
+    }
+
+    /// The cursor's position in the column's original coordinates.
+    pub fn pos(&self) -> usize {
+        self.inner.pos()
+    }
+
+    /// Move forward to original position `to`, carrying everything in
+    /// between through unchanged. Forward-only, like the inner cursor.
+    pub fn seek(&mut self, to: usize) -> &mut Self {
+        let n = to.saturating_sub(self.inner.pos());
+        self.advance(n)
+    }
+
+    /// Move forward `n` items from wherever the cursor is.
+    pub fn advance(&mut self, n: usize) -> &mut Self {
+        let mut want = n;
+        // The fix-up lands on the first non-null item carried across, so
+        // it is paid *out of* this move, not before it: settling first
+        // and then moving `n` would carry one item too many.
+        while want > 0 && self.adjust != 0 && self.pay_step() {
+            want -= 1;
+        }
+        if want == 0 {
+            return self;
+        }
+        let mut sum = 0i64;
+        let jumped = self.inner.advance_with(want, |v, count| {
+            sum += T::Inner::to_opt(v).unwrap_or(0) * count as i64
+        });
+        if jumped > 0 {
+            // The cursor jumped whole slabs without reading them, so the
+            // accumulator lost track. A jump closes any open rebuild, so
+            // the column is consistent right here and can be asked — and
+            // it has to be asked *now*: the next op may open a rebuild,
+            // after which the index no longer describes the column.
+            self.running = Self::prefix_at(self.inner.column(), self.inner.out_pos());
+        } else {
+            self.running += sum;
+        }
+        self
+    }
+
+    /// The realized value at the cursor, without consuming it.
+    pub fn peek(&mut self) -> Option<T> {
+        let cur = self.inner.peek().map(T::Inner::to_opt)?;
+        match cur {
+            None => Some(T::null_value()),
+            Some(d) => {
+                // the original delta is relative to the original running
+                // value, which is what the fix-up has yet to close
+                let orig = self.running + self.adjust;
+                Some(T::try_from_i64(orig + d).expect("a stored value is in the domain"))
+            }
+        }
+    }
+
+    /// Insert one realized `value` at the cursor.
+    pub fn insert(&mut self, value: T) -> &mut Self {
+        self.insert_run(value, 1)
+    }
+
+    /// Insert `n` copies of a realized `value` — one delta to reach it,
+    /// then a run of zeroes, which is what a repeated value is.
+    pub fn insert_run(&mut self, value: T, n: usize) -> &mut Self {
+        if n == 0 {
+            return self;
+        }
+        match value.to_i64() {
+            None => {
+                // nulls hold no delta and leave the running value alone
+                self.inner.insert_run(T::Inner::from_opt(None), n);
+            }
+            Some(v) => {
+                let r = self.running;
+                self.inner.insert(T::Inner::from_opt(Some(v - r)));
+                if n > 1 {
+                    self.inner.insert_run(T::Inner::from_opt(Some(0)), n - 1);
+                }
+                // the original values after the cursor are still relative
+                // to where they were; the difference is now owed
+                self.adjust += r - v;
+                self.running = v;
+            }
+        }
+        self
+    }
+
+    /// Insert [`DeltaRun`]s at the cursor — the run-aware path, for
+    /// copying spans of one delta column into another.
+    ///
+    /// A run whose `prefix` already matches the running value copies
+    /// through as one inner run; a mismatch costs one peeled delta to
+    /// re-anchor it, and the rest still copies as a run. That is the same
+    /// bargain [`DeltaColumn::splice_runs`] makes, except the running
+    /// value is already in hand rather than looked up per call.
+    pub fn insert_runs(&mut self, runs: impl IntoIterator<Item = DeltaRun>) -> &mut Self {
+        for run in runs {
+            if run.count == 0 {
+                continue;
+            }
+            let Some(d) = run.delta else {
+                // a null run holds no delta and leaves the running value
+                // where it is
+                self.inner.insert_run(T::Inner::from_opt(None), run.count);
+                continue;
+            };
+            let r = self.running;
+            let first = run.prefix + d;
+            if first - r == d {
+                // already anchored where this run expects: copy verbatim
+                self.inner
+                    .insert_run(T::Inner::from_opt(Some(d)), run.count);
+            } else {
+                self.inner.insert(T::Inner::from_opt(Some(first - r)));
+                if run.count > 1 {
+                    self.inner
+                        .insert_run(T::Inner::from_opt(Some(d)), run.count - 1);
+                }
+            }
+            self.running = run.prefix + d * run.count as i64;
+            // the original values after the cursor are still relative to
+            // where they were; the difference is now owed
+            self.adjust += r - self.running;
+        }
+        self
+    }
+
+    /// Delete `n` items at the cursor.
+    pub fn delete(&mut self, n: usize) -> &mut Self {
+        if n == 0 {
+            return self;
+        }
+        // one cell, two closures: the runs of a partly-consumed slab and
+        // the aggregate of one dropped whole both land in the same sum
+        let sum = std::cell::Cell::new(0i64);
+        self.inner.delete_with(
+            n,
+            |v, count| sum.set(sum.get() + T::Inner::to_opt(v).unwrap_or(0) * count as i64),
+            // a slab dropped whole is never decoded; its aggregate holds
+            // the sum of every delta in it
+            |w| sum.set(sum.get() + w.total),
+        );
+        // the deleted items are gone from the output but the ones after
+        // them still decode against their sum
+        self.adjust += sum.get();
+        self
+    }
+
+    /// Read the value at the cursor and replace it with what `f` returns.
+    pub fn replace(&mut self, f: impl FnOnce(T) -> T) -> &mut Self {
+        let Some(cur) = self.peek() else {
+            return self;
+        };
+        let next = f(cur);
+        if next == cur {
+            return self.advance(1);
+        }
+        self.delete(1);
+        self.insert(next)
+    }
+
+    /// Close the cursor: pay the boundary and write back.
+    pub fn finish(&mut self) {
+        self.settle();
+        self.inner.finish();
+    }
+
+    // ── internals ───────────────────────────────────────────────────
+
+    /// Delete the item at the cursor and return the delta it held.
+    ///
+    /// A single item can still be a whole slab — a cursor resting at a
+    /// slab's end deletes into the next one — and a slab consumed whole
+    /// is never decoded, so its aggregate is what reports it.
+    fn take_delta(&mut self) -> i64 {
+        let d = std::cell::Cell::new(0i64);
+        self.inner.delete_with(
+            1,
+            |v, _| d.set(d.get() + T::Inner::to_opt(v).unwrap_or(0)),
+            |w| d.set(d.get() + w.total),
+        );
+        d.get()
+    }
+
+    /// Hand the debt to the next real delta, one item at a time. Returns
+    /// whether it consumed one.
+    fn pay_step(&mut self) -> bool {
+        if self.inner.remaining() == 0 {
+            // nothing follows, so nothing decodes against the cursor
+            self.adjust = 0;
+            return false;
+        }
+        // a null holds no delta: carry it and keep looking
+        if T::NULLABLE && self.inner.peek().map(T::Inner::to_opt) == Some(None) {
+            self.inner.advance(1);
+            return true;
+        }
+        let d = self.take_delta() + self.adjust;
+        self.running += d;
+        self.adjust = 0;
+        self.inner.insert(T::Inner::from_opt(Some(d)));
+        true
+    }
+
+    /// Pay the debt wherever it falls: the next non-null delta absorbs
+    /// what the edits before it owe, so every realized value after the
+    /// cursor is what it was. Unbounded, for a cursor that is closing.
+    fn settle(&mut self) {
+        while self.adjust != 0 {
+            self.pay_step();
+        }
+    }
+}
+
+impl<T: DeltaValue, C: Codec> Drop for DeltaEdit<'_, T, C>
+where
+    T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+{
+    fn drop(&mut self) {
+        // a dropped cursor still owes the boundary
+        self.settle();
+    }
+}
+
+impl<T: DeltaValue, C: Codec> DeltaColumn<T, C>
+where
+    T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+{
+    /// A cursor at the front of the column — see [`DeltaEdit`].
+    pub fn edit(&mut self) -> DeltaEdit<'_, T, C> {
+        DeltaEdit::new(&mut self.col, 0)
+    }
+
+    /// A cursor at item `at`.
+    pub fn edit_at(&mut self, at: usize) -> DeltaEdit<'_, T, C> {
+        DeltaEdit::new(&mut self.col, at)
     }
 }
 

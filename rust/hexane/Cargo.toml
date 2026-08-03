@@ -15,6 +15,8 @@ bench = false
 [features]
 wasm = ["web-sys"]
 slow_path_assertions = []
+# Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
+deep_fuzz = []
 bijou64 = ["dep:bijoux"]
 
 
@@ -30,38 +32,6 @@ divan = "0.1.15"
 
 [profile.release]
 debug = true
-
-[[bench]]
-name = "column_ops"
-harness = false
-
-[[bench]]
-name = "load"
-harness = false
-
-[[bench]]
-name = "max_segments"
-harness = false
-
-[[bench]]
-name = "profile_bool_replace"
-harness = false
-
-[[bench]]
-name = "column_u64_mutations"
-harness = false
-
-[[bench]]
-name = "btree_b_sweep"
-harness = false
-
-[[bench]]
-name = "remap"
-harness = false
-
-[[bench]]
-name = "seek_to_value"
-harness = false
 
 [dependencies.web-sys]
 version = "^0.3.55"

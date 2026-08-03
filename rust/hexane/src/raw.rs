@@ -15,7 +15,8 @@
 //! is what makes the zero-copy [`RawColumn::get`] API safe.
 
 use crate::column::{
-    bit_point_update, find_slab_bit, rebuild_bit, splice_bytes, try_merge_range_skeleton,
+    bit_point_update, find_slab_bit, normalize_splices, rebuild_bit, splice_bytes,
+    try_merge_range_skeleton, Splice,
 };
 use crate::PackError;
 use std::ops::Range;
@@ -287,6 +288,85 @@ impl RawColumn {
         } else {
             false
         }
+    }
+
+    // ── Multi-point copy ────────────────────────────────────────────────────
+
+    /// Splice byte ranges of `src` into this column at several points in
+    /// one pass.
+    ///
+    /// `pos` / `delete` are in this column's *pre-merge* byte coordinates
+    /// (as for [`Column::copy_ranges`](crate::Column::copy_ranges)) and
+    /// must ascend without overlapping; `range` is a byte range of `src`,
+    /// likewise ascending.
+    ///
+    /// This is [`splice_slice`](Self::splice_slice) in a loop, applied back
+    /// to front so that each edit lands *above* every splice still to be
+    /// applied and their positions stay valid without any shift
+    /// bookkeeping. A typed [`Column`](crate::Column) needs a bulk path
+    /// because splicing decodes and re-encodes runs; raw bytes have no
+    /// such cost, so a bulk path here would buy nothing but a way to
+    /// diverge from the single-point policy — which is what the previous
+    /// implementation did, cutting the destination at every splice point
+    /// and never coalescing, so a chain of small merges fragmented the
+    /// arena into one slab per insertion point.
+    ///
+    /// # Boundaries
+    ///
+    /// The column does not know where values begin and end, so the caller
+    /// must give every `pos` and every `range` endpoint on a value
+    /// boundary — exactly the existing splice contract. Splits only ever
+    /// happen at a splice point or at the end of an inserted payload
+    /// (see `pick_split`), so no value ends up spanning a slab.
+    pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
+    where
+        I: IntoIterator<Item = Splice>,
+    {
+        let splices = normalize_splices(splices, src.len(), self.total_len);
+        if splices.is_empty() {
+            return;
+        }
+        for sp in splices.iter().rev() {
+            let mut at = sp.pos;
+            let mut del = sp.delete;
+            // Chunked by the source's own slabs. A payload spliced as one
+            // slice wider than the slab budget cannot be split anywhere
+            // the column knows to be a value boundary, so it would land as
+            // a single oversize slab that every later splice then has to
+            // memmove whole; the source's slabs are already budgeted and
+            // already cut at value boundaries.
+            for chunk in src.chunks_in(sp.range.clone()) {
+                self.splice_slice(at, del, chunk);
+                at += chunk.len();
+                del = 0;
+            }
+            if del > 0 {
+                // a pure delete, or one whose splice inserted nothing
+                self.splice_slice(at, del, &[]);
+            }
+        }
+    }
+
+    /// The byte slices covering `range`, one per slab the range touches.
+    fn chunks_in(&self, range: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {
+        let end = range.end.min(self.total_len);
+        let mut pos = range.start;
+        let mut at = if pos < end {
+            Some(self.find_slab(pos))
+        } else {
+            None
+        };
+        std::iter::from_fn(move || {
+            let (i, off) = at?;
+            if pos >= end {
+                return None;
+            }
+            let data = &self.slabs[i].data;
+            let take = (data.len() - off).min(end - pos);
+            pos += take;
+            at = Some((i + 1, 0));
+            Some(&data[off..off + take])
+        })
     }
 
     // ── Range read ──────────────────────────────────────────────────────────
@@ -866,6 +946,290 @@ mod tests {
         let range = col.save_to(&mut out);
         assert_eq!(&out[range.clone()], b"abcdefgh");
         assert_eq!(&out[..range.start], b"prefix:");
+    }
+
+    // ── copy_ranges ─────────────────────────────────────────────────────────
+
+    /// Reference model: apply the splices to a plain `Vec<u8>`.
+    fn reference_copy(dst: &[u8], src: &[u8], splices: &[Splice]) -> Vec<u8> {
+        let mut out = dst.to_vec();
+        let mut shift = 0isize;
+        for sp in splices {
+            let at = (sp.pos as isize + shift) as usize;
+            let bytes = &src[sp.range.clone()];
+            out.splice(at..at + sp.delete, bytes.iter().copied());
+            shift += sp.range.len() as isize - sp.delete as isize;
+        }
+        out
+    }
+
+    fn assert_copy(dst_bytes: &[u8], src_bytes: &[u8], max_seg: usize, splices: Vec<Splice>) {
+        let mut dst = RawColumn::with_max_segments(max_seg);
+        dst.splice_slice(0, 0, dst_bytes);
+        let mut src = RawColumn::with_max_segments(max_seg);
+        src.splice_slice(0, 0, src_bytes);
+
+        let expected = reference_copy(dst_bytes, src_bytes, &splices);
+        dst.copy_ranges(src, splices);
+
+        assert_eq!(dst.save(), expected, "merged bytes");
+        assert_eq!(dst.len(), expected.len(), "merged len");
+        // the BIT and the slab vector must agree, and no slab may be empty
+        assert!(dst.slabs.iter().all(|s| !s.data.is_empty()), "empty slab");
+        assert_eq!(
+            dst.bit,
+            rebuild_bit(&dst.slabs, |s| s.data.len()),
+            "BIT out of sync"
+        );
+        // every byte must still be reachable through the sequential reader
+        let mut it = dst.iter();
+        let mut seen = Vec::new();
+        while it.pos() < dst.len() {
+            seen.extend_from_slice(it.take(1));
+        }
+        assert_eq!(seen, expected, "sequential read");
+    }
+
+    #[test]
+    fn copy_ranges_single_append() {
+        assert_copy(
+            b"abcd",
+            b"WXYZ",
+            32,
+            vec![Splice {
+                pos: 4,
+                delete: 0,
+                range: 0..4,
+            }],
+        );
+    }
+
+    /// A chain of small copies into a growing arena must not fragment it:
+    /// the previous implementation cut the destination at every splice
+    /// point and never coalesced, so the slab count tracked the number of
+    /// insertions rather than the byte count.
+    #[test]
+    fn copy_ranges_keeps_the_arena_compact() {
+        let budget = 256;
+        let mut dst = RawColumn::with_max_segments(budget);
+        dst.splice_slice(0, 0, &vec![b'x'; 8 * budget]);
+        let mut expected = vec![b'x'; 8 * budget];
+        // 400 scattered 4-byte copies, the shape a fragment chain has
+        for i in 0..400 {
+            let mut src = RawColumn::with_max_segments(budget);
+            src.splice_slice(0, 0, b"abcd");
+            let at = ((i * 37) % (dst.len() - 4)) & !3;
+            dst.copy_ranges(
+                src,
+                [Splice {
+                    pos: at,
+                    delete: 0,
+                    range: 0..4,
+                }],
+            );
+            expected.splice(at..at, *b"abcd");
+        }
+        assert_eq!(dst.save(), expected, "bytes");
+        // bounded by bytes, not by the 400 insertion points
+        let slabs = dst.slabs.len();
+        assert!(
+            slabs <= 2 * dst.len().div_ceil(budget),
+            "arena fragmented: {slabs} slabs for {} bytes (budget {budget})",
+            dst.len()
+        );
+    }
+
+    #[test]
+    fn copy_ranges_multi_point() {
+        assert_copy(
+            b"aaaabbbbcccc",
+            b"XXYYZZ",
+            32,
+            vec![
+                Splice {
+                    pos: 0,
+                    delete: 0,
+                    range: 0..2,
+                },
+                Splice {
+                    pos: 4,
+                    delete: 0,
+                    range: 2..4,
+                },
+                Splice {
+                    pos: 12,
+                    delete: 0,
+                    range: 4..6,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn copy_ranges_with_deletes() {
+        assert_copy(
+            b"aaaabbbbcccc",
+            b"XXXXYYYY",
+            32,
+            vec![
+                Splice {
+                    pos: 0,
+                    delete: 4,
+                    range: 0..4,
+                },
+                Splice {
+                    pos: 8,
+                    delete: 4,
+                    range: 4..8,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn copy_ranges_skips_gaps_in_src() {
+        // the middle of src is never referenced — those slabs are dropped
+        assert_copy(
+            b"..",
+            b"AAAABBBBCCCC",
+            4,
+            vec![
+                Splice {
+                    pos: 1,
+                    delete: 0,
+                    range: 0..4,
+                },
+                Splice {
+                    pos: 2,
+                    delete: 0,
+                    range: 8..12,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn copy_ranges_empty_dst() {
+        assert_copy(
+            b"",
+            b"hello",
+            32,
+            vec![Splice {
+                pos: 0,
+                delete: 0,
+                range: 0..5,
+            }],
+        );
+    }
+
+    #[test]
+    fn copy_ranges_noop_when_empty() {
+        let mut dst = RawColumn::with_max_segments(8);
+        dst.splice_slice(0, 0, b"abcd");
+        let src = RawColumn::load(b"xyz").unwrap();
+        dst.copy_ranges(src, std::iter::empty());
+        drive(&dst, b"abcd");
+    }
+
+    /// The point of the exercise: a big source merged into a small
+    /// destination must carry the source's slabs across whole, so its
+    /// value boundaries survive and `get` never reports a cross-slab read.
+    #[test]
+    fn copy_ranges_preserves_src_slab_boundaries() {
+        // 12 four-byte "values", one per splice, so every value boundary
+        // is a slab boundary in src
+        let mut src = RawColumn::with_max_segments(4);
+        for i in 0..12u8 {
+            let v = [b'a' + i; 4];
+            src.splice_slice(src.len(), 0, &v);
+        }
+        assert_eq!(src.slabs.len(), 12, "one slab per value");
+
+        let mut dst = RawColumn::with_max_segments(4);
+        dst.splice_slice(0, 0, b"0000");
+
+        dst.copy_ranges(
+            src,
+            vec![
+                Splice {
+                    pos: 0,
+                    delete: 0,
+                    range: 0..24,
+                },
+                Splice {
+                    pos: 4,
+                    delete: 0,
+                    range: 24..48,
+                },
+            ],
+        );
+
+        assert_eq!(dst.len(), 52);
+        // no byte copying: the 12 source slabs plus the untouched dst slab
+        assert_eq!(dst.slabs.len(), 13, "src slabs carried across whole");
+        // every value is still readable as one contiguous slice
+        for i in 0..13 {
+            assert_eq!(dst.get(i * 4..i * 4 + 4).len(), 4);
+        }
+    }
+
+    #[test]
+    fn copy_ranges_cuts_src_mid_slab() {
+        // ranges that do not line up with src's slab boundaries still work;
+        // only the straddling slabs pay a split
+        assert_copy(
+            b"__",
+            b"abcdefghijkl",
+            32, // src is one slab
+            vec![
+                Splice {
+                    pos: 1,
+                    delete: 0,
+                    range: 2..5,
+                },
+                Splice {
+                    pos: 2,
+                    delete: 0,
+                    range: 7..11,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn fuzz_copy_ranges_vs_vec() {
+        use rand::{RngExt, SeedableRng};
+
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0xc0de_1234);
+        for round in 0..500 {
+            let max_seg = [4usize, 7, 16, 4096][round % 4];
+            let dst_len = rng.random_range(0..40);
+            let src_len = rng.random_range(0..60);
+            let dst_bytes: Vec<u8> = (0..dst_len).map(|_| rng.random::<u8>()).collect();
+            let src_bytes: Vec<u8> = (0..src_len).map(|_| rng.random::<u8>()).collect();
+
+            // ascending, non-overlapping on both sides
+            let mut splices = Vec::new();
+            let mut dst_pos = 0usize;
+            let mut src_pos = 0usize;
+            while dst_pos <= dst_len && src_pos < src_len {
+                let pos = dst_pos + rng.random_range(0..=(dst_len - dst_pos));
+                let delete = rng.random_range(0..=(dst_len - pos).min(3));
+                let start = src_pos + rng.random_range(0..=(src_len - src_pos).min(5));
+                let end = start + rng.random_range(0..=(src_len - start).min(8));
+                splices.push(Splice {
+                    pos,
+                    delete,
+                    range: start..end,
+                });
+                dst_pos = pos + delete;
+                src_pos = end;
+                if rng.random_range(0..3) == 0 {
+                    break;
+                }
+            }
+            assert_copy(&dst_bytes, &src_bytes, max_seg, splices);
+        }
     }
 
     // ── Randomised fuzz ─────────────────────────────────────────────────────

@@ -29,6 +29,10 @@ macro_rules! __log {
      }
  }
 
+pub mod edit;
+
+#[cfg(test)]
+mod edit_fuzz;
 mod error;
 pub use error::PackError;
 
