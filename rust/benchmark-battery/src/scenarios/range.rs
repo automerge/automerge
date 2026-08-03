@@ -48,6 +48,9 @@ fn range_at(n: u64) -> Box<dyn FnMut()> {
     let doc = doc(n);
     let heads = doc.get_heads();
     Box::new(move || {
-        black_box(&doc).values_at(ROOT, &heads).unwrap().for_each(drop);
+        black_box(&doc)
+            .values_at(ROOT, &heads)
+            .unwrap()
+            .for_each(drop);
     })
 }

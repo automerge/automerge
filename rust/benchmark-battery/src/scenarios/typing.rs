@@ -1,7 +1,7 @@
 use super::SeriesBenchmark;
-use benchmark_battery::sync::{self, Sync};
 use benchmark_battery::automerge::transaction::Transactable;
 use benchmark_battery::automerge::{AutoCommit, ObjType, ReadDoc, ROOT};
+use benchmark_battery::sync::{self, Sync};
 use rand::distr::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, RngExt, SeedableRng};

@@ -1,9 +1,8 @@
 use super::{Benchmark, SampledBenchmark, SeriesBenchmark};
-use benchmark_battery::sync::{self, Message, Sync};
 use benchmark_battery::automerge::{
-    transaction::Transactable,
-    Automerge, ReadDoc, ScalarValue, ROOT,
+    transaction::Transactable, Automerge, ReadDoc, ScalarValue, ROOT,
 };
+use benchmark_battery::sync::{self, Message, Sync};
 use benchmark_battery::{list_splice_100, rand, text_splice_100};
 
 const FULL_SYNC_SIZE: u64 = 10_000;
