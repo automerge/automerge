@@ -1551,11 +1551,14 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
     ) -> Result<(), error::AddCommits> {
         let commits = Vec::<Commit>::try_from(JS(commits))?;
-        let changes = commits
-            .into_iter()
-            .map(|commit| commit.into_change())
-            .collect::<Result<Vec<_>, _>>()?;
-        self.doc.apply_changes(changes)?;
+        let mut bytes = Vec::new();
+        for commit in commits {
+            // Touch the metadata so parsing validates the whole input shape even
+            // though the commit bytes remain the authoritative representation.
+            let _metadata = (commit.head, commit.parents);
+            bytes.extend(commit.bytes);
+        }
+        self.doc.load_incremental(&bytes)?;
         Ok(())
     }
 
@@ -2237,25 +2240,6 @@ struct Commit {
     bytes: Vec<u8>,
 }
 
-impl Commit {
-    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
-        let change = Change::try_from(self.bytes.as_slice())?;
-        // Validate that JS metadata lines up with the supplied bytes. This keeps
-        // Automerge's API shaped like Subduction's addCommits input while still
-        // treating the encoded change as authoritative.
-        if change.hash() != self.head {
-            return Err(error::BadCommitBytes::HeadMismatch {
-                expected: self.head.to_string(),
-                actual: change.hash().to_string(),
-            });
-        }
-        if change.deps() != self.parents.as_slice() {
-            return Err(error::BadCommitBytes::ParentsMismatch);
-        }
-        Ok(change)
-    }
-}
-
 impl TryFrom<JS> for Commit {
     type Error = error::BadJSCommit;
 
@@ -2504,23 +2488,11 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    pub enum BadCommitBytes {
-        #[error("bad commit bytes: {0}")]
-        Load(#[from] automerge::LoadChangeError),
-        #[error("commit input head mismatch: expected {expected}, actual {actual}")]
-        HeadMismatch { expected: String, actual: String },
-        #[error("commit input parents do not match encoded change dependencies")]
-        ParentsMismatch,
-    }
-
-    #[derive(Debug, thiserror::Error)]
     pub enum AddCommits {
         #[error(transparent)]
         BadInputs(#[from] BadJSCommits),
-        #[error(transparent)]
-        BadBytes(#[from] BadCommitBytes),
-        #[error("error applying commits: {0}")]
-        Apply(#[from] AutomergeError),
+        #[error("error loading commits: {0}")]
+        Load(#[from] AutomergeError),
     }
 
     impl From<AddCommits> for JsValue {

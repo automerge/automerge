@@ -1479,6 +1479,7 @@ describe("Automerge", () => {
 
     it("should reconstitute element ID counters", () => {
       const s1 = Automerge.init<any>("01234567")
+      Automerge.enableAuditMode(s1)
       const s2 = Automerge.change(s1, doc => (doc.list = ["a"]))
       const listId = Automerge.getObjectId(s2.list)
       const changes12 = Automerge.getAllChanges(s2).map(Automerge.decodeChange)
@@ -1512,7 +1513,10 @@ describe("Automerge", () => {
         },
       ])
       const s3 = Automerge.change(s2, doc => doc.list.deleteAt(0))
-      const s4 = Automerge.load<any>(Automerge.save(s3), "01234567")
+      const s4 = Automerge.load<any>(Automerge.save(s3), {
+        actor: "01234567",
+        auditMode: true,
+      })
       const s5 = Automerge.change(s4, doc => doc.list.push("b"))
       const changes45 = Automerge.getAllChanges(s5).map(Automerge.decodeChange)
       assert.deepStrictEqual(s5, { list: ["b"] })
