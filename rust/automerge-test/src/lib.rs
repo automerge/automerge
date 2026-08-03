@@ -19,8 +19,7 @@ pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::AutoCommit {
     // hash happens to form a fragment
     d.enable_audit_mode()
         .expect("a fresh document can always enter audit mode");
-    d.set_actor(actor)
-        .expect("a fresh document accepts any actor");
+    d.set_actor(actor);
     d
 }
 

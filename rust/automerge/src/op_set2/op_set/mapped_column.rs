@@ -322,7 +322,7 @@ where
     /// Rewrite into a (possibly different) target space: values become
     /// `target.sto(f(logical))` and the column adopts `target`'s map.
     /// This is the fragment-load remap — the same single O(fragment)
-    /// pass the bundle→doc translation always needed.
+    /// pass the change set→doc translation always needed.
     pub(crate) fn remap_into<F>(&mut self, f: &F, target: Arc<ActorMap>)
     where
         F: Fn(ActorIdx) -> ActorIdx,

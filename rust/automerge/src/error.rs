@@ -70,10 +70,16 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error(transparent)]
     EncodingError(#[from] PackError),
-    #[error("failed to unbundle: {0}")]
-    Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("failed to decode change set: {0}")]
+    DecodeChangeSet(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// A caller-supplied [`crate::Fragment`] names history this document
+    /// cannot resolve.
     #[error("invalid fragment: {0}")]
     InvalidFragment(&'static str),
+    /// A change set could not be decoded, or its metadata contradicts its
+    /// contents — i.e. the sender's bytes are malformed or forged.
+    #[error("malformed change set: {0}")]
+    MalformedChangeSet(&'static str),
 }
 
 impl PartialEq for AutomergeError {

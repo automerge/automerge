@@ -38,12 +38,12 @@ pub enum Error {
     InvalidOpsColumns(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("a chunk contained leftover data")]
     LeftoverData,
-    #[error("a bundle contained an invalid column")]
-    InvalidBundleColumn(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("a bundle contained an invalid change")]
-    InvalidBundleChange(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("invalid bundle: {0}")]
-    InvalidBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("a change_set contained an invalid column")]
+    InvalidChangeSetColumn(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("a change_set contained an invalid change")]
+    InvalidChangeSetChange(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("invalid change_set: {0}")]
+    InvalidChangeSet(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("error inflating document chunk ops: {0}")]
     InflateDocument(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("bad checksum")]
@@ -52,12 +52,12 @@ pub enum Error {
 
 /// One chunk the loader recovered.
 ///
-/// A bundle stays a bundle: inflating it to changes would need its
+/// A change set stays a change set: inflating it to changes would need its
 /// members' dep hashes, which is exactly what a hashless document does
 /// not have — and would take the slow path even when it does.
 pub(crate) enum LoadedChunk {
     Change(Box<Change>),
-    Bundle(Box<crate::storage::Bundle>),
+    ChangeSet(Box<crate::storage::ChangeSet>),
 }
 
 pub(crate) enum LoadedChanges<'a> {
@@ -158,24 +158,24 @@ fn load_next_change<'a>(
             tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
             changes.push(LoadedChunk::Change(Box::new(change)));
         }
-        storage::Chunk::BundleV0(bundle) => {
-            tracing::trace!("loading a 3.3.x bundle chunk");
-            let storage = bundle
+        storage::Chunk::BundleV0(change_set) => {
+            tracing::trace!("loading a 3.3.x change_set chunk");
+            let storage = change_set
                 .into_owned()
                 .verify()
-                .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
-            let bundle_changes = storage
+                .map_err(|e| Error::InvalidChangeSetColumn(Box::new(e)))?;
+            let change_set_changes = storage
                 .to_changes()
-                .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
+                .map_err(|e| Error::InvalidChangeSetChange(Box::new(e)))?;
             changes.extend(
-                bundle_changes
+                change_set_changes
                     .into_iter()
                     .map(|c| LoadedChunk::Change(Box::new(c))),
             );
         }
-        storage::Chunk::BundleColumns(bundle) => {
-            tracing::trace!("loading bundle columns chunk");
-            changes.push(LoadedChunk::Bundle(bundle));
+        storage::Chunk::ChangeSetColumns(change_set) => {
+            tracing::trace!("loading change_set columns chunk");
+            changes.push(LoadedChunk::ChangeSet(change_set));
         }
         storage::Chunk::CompressedChange(change, compressed) => {
             tracing::trace!("loading compressed change chunk");

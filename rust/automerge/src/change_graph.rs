@@ -6,7 +6,7 @@ use std::ops::Add;
 use std::ops::RangeBounds;
 
 use crate::change_id::ChangeId;
-use crate::storage::{BundleMetadata, DepRef};
+use crate::storage::{ChangeSetMetadata, DepRef};
 use crate::{
     clock::{Clock, SeqClock},
     error::AutomergeError,
@@ -257,10 +257,10 @@ fn pad<T: Clone>(iter: impl Iterator<Item = T>, default: T, n: usize) -> impl It
 /// every other entry in the extra column.
 const NO_EXTRA: ValueMeta = ValueMeta::bytes(0);
 
-/// A member change of a bundle being applied without conversion into
+/// A member change of a change set being applied without conversion into
 /// [`Change`]s — everything the graph needs except the change's hash.
 #[derive(Debug, Clone)]
-pub(crate) struct FragmentMember<'a> {
+pub(crate) struct ChangeSetMember<'a> {
     /// The member's actor as a document actor index
     pub(crate) actor: usize,
     pub(crate) seq: u64,
@@ -269,14 +269,14 @@ pub(crate) struct FragmentMember<'a> {
     pub(crate) timestamp: i64,
     pub(crate) message: Option<String>,
     pub(crate) extra: Cow<'a, [u8]>,
-    pub(crate) deps: Vec<FragmentDep>,
+    pub(crate) deps: Vec<ChangeSetDep>,
 }
 
-/// A [`FragmentMember`]'s dependency: another member of the same bundle
+/// A [`ChangeSetMember`]'s dependency: another member of the same change set
 /// (by its position in the member list, which is topological order) or
 /// a node already in the graph.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum FragmentDep {
+pub(crate) enum ChangeSetDep {
     Member(usize),
     Node(NodeIdx),
 }
@@ -349,23 +349,6 @@ impl ChangeGraph {
     /// Every node, ascending — which is topological order.
     pub(crate) fn all_nodes(&self) -> Vec<NodeIdx> {
         (0..self.len() as u32).map(NodeIdx).collect()
-    }
-
-    /// The known fragment-level hashes that are not heads.
-    ///
-    /// A whole-document bundle carries these as checkpoints: the receiver
-    /// records them on their nodes, which is what lets it rebuild the
-    /// fragment structure the sender had. Without them a loaded document
-    /// knows only the fragments its own heads form.
-    pub(crate) fn checkpoint_hashes(&self) -> Vec<ChangeHash> {
-        let mut v: Vec<ChangeHash> = self
-            .hashes
-            .iter()
-            .filter(|(_, h)| h.fragment_level() > 0 && !self.heads.contains(h))
-            .map(|(_, h)| h)
-            .collect();
-        v.sort_unstable();
-        v
     }
 
     pub(crate) fn insert_actor(&mut self, idx: usize) {
@@ -527,6 +510,13 @@ impl ChangeGraph {
                         keep.insert(p);
                     }
                 }
+            }
+        }
+        // every actor's tip: committing as an actor names its latest
+        // change by hash
+        for changes in &self.seq_index {
+            if let Some(tip) = changes.last() {
+                keep.insert(*tip);
             }
         }
         keep
@@ -726,10 +716,10 @@ impl ChangeGraph {
         }
     }
 
-    pub(crate) fn get_bundle_metadata<I>(
+    pub(crate) fn get_change_set_metadata<I>(
         &self,
         hashes: I,
-    ) -> impl Iterator<Item = Result<BundleMetadata<'_>, MissingDep>>
+    ) -> impl Iterator<Item = Result<ChangeSetMetadata<'_>, MissingDep>>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
@@ -741,7 +731,7 @@ impl ChangeGraph {
             match self.nodes_by_hash.get(&hash) {
                 Some(n) => nodes.push(*n),
                 None => {
-                    missing = Some(MissingDep(hash));
+                    missing = Some(MissingDep);
                     break;
                 }
             }
@@ -749,17 +739,17 @@ impl ChangeGraph {
         nodes.sort_unstable();
         let err = missing.into_iter().map(Err);
         let ok = if err.len() > 0 { Vec::new() } else { nodes };
-        self.bundle_metadata_for_nodes(ok).chain(err)
+        self.change_set_metadata_for_nodes(ok).chain(err)
     }
 
-    /// Bundle metadata for a set of member nodes, deps pre-resolved to
+    /// Change set metadata for a set of member nodes, deps pre-resolved to
     /// member positions or external hashes. Only the *external* (boundary)
     /// hashes need to be known, so this works on a graph in the
     /// fragment-hashes state. `nodes` must be sorted ascending.
-    pub(crate) fn bundle_metadata_for_nodes(
+    pub(crate) fn change_set_metadata_for_nodes(
         &self,
         nodes: Vec<NodeIdx>,
-    ) -> impl Iterator<Item = Result<BundleMetadata<'_>, MissingDep>> {
+    ) -> impl Iterator<Item = Result<ChangeSetMetadata<'_>, MissingDep>> {
         debug_assert!(nodes.is_sorted());
         let pos_of: HashMap<NodeIdx, usize> =
             nodes.iter().enumerate().map(|(p, n)| (*n, p)).collect();
@@ -779,17 +769,13 @@ impl ChangeGraph {
                 .parents(index)
                 .map(|p| match pos_of.get(&p) {
                     Some(pos) => Ok(DepRef::Internal(*pos)),
-                    None => self
-                        .hashes
-                        .get(p)
-                        .map(DepRef::External)
-                        .ok_or(MissingDep(ChangeHash([0; 32]))),
+                    None => self.hashes.get(p).map(DepRef::External).ok_or(MissingDep),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
             let start_op = max_op - num_ops + 1;
             let seq = self.seq[i] as u64;
-            Ok(BundleMetadata {
+            Ok(ChangeSetMetadata {
                 actor,
                 seq,
                 start_op,
@@ -816,7 +802,7 @@ impl ChangeGraph {
                 // on an unchecked graph an unknown hash is indistinguishable
                 // from a not-yet-computed one — refuse rather than guess
                 HashLookup::Found(n) => Ok(n),
-                HashLookup::Absent => Err(crate::AutomergeError::from(MissingDep(hash))),
+                HashLookup::Absent => Err(crate::AutomergeError::from(MissingDep)),
                 HashLookup::Unknown => Err(crate::AutomergeError::AuditModeRequired),
             })
             .collect::<Result<_, _>>()?;
@@ -877,35 +863,12 @@ impl ChangeGraph {
         changes
     }
 
-    /// The nodes a seq clock does *not* cover, ascending — which is node
-    /// order, which is topological order.
-    /// Grow a bundle's member set until every dep outside it still has
-    /// its hash.
-    ///
-    /// A bundle names its external deps by hash, so a boundary node
-    /// whose hash the retention GC freed cannot be referenced at all —
-    /// which is what made a plain `merge` fail outside audit mode once a
-    /// fragment happened to cover the boundary. Pulling such a dep into
-    /// the bundle turns it into an internal, position-indexed reference
-    /// and moves the boundary back onto *its* parents; repeating settles
-    /// on a boundary the retention rule keeps (fragment heads and
-    /// checkpoints, loose commits, anchors, heads). This over-delivers
-    /// changes the receiver already has, which is cheap next to being
-    /// unable to build the bundle.
-    ///
-    /// Terminates: each step either stops at a retained hash or consumes
-    /// a node, and the document's first change has no parents — so the
-    /// worst case is the whole document, whose boundary is empty.
-    ///
-    /// A no-op in audit mode, where every hash is present, and a no-op
-    /// whenever the boundary already resolves.
-    /// FIXME - revisit this once change sets are defined by heads / deps
-    pub(crate) fn extend_to_retained_boundary(&self, nodes: Vec<NodeIdx>) -> Vec<NodeIdx> {
-        if self.hashes.is_full() {
-            return nodes;
-        }
-        let mut members: BTreeSet<NodeIdx> = nodes.iter().copied().collect();
-        let mut pending: Vec<NodeIdx> = nodes;
+    /// `node` and every ancestor whose hash the GC freed, ascending —
+    /// the set a rebuild must reconstruct.
+    pub(crate) fn nodes_back_to_retained(&self, node: NodeIdx) -> Vec<NodeIdx> {
+        let mut members: BTreeSet<NodeIdx> = BTreeSet::new();
+        members.insert(node);
+        let mut pending = vec![node];
         while let Some(n) = pending.pop() {
             for p in self.parent_slice(n).to_vec() {
                 if members.contains(&p) || self.hashes.get(p).is_some() {
@@ -915,11 +878,44 @@ impl ChangeGraph {
                 pending.push(p);
             }
         }
-        // NodeIdx order is insertion order, which is topological — the
-        // order both the member list and `binary_search` expect
+        // NodeIdx order is insertion order, which is topological
         members.into_iter().collect()
     }
 
+    /// Whether every dep falling outside `nodes` still has its hash, and
+    /// so can be named in a change set's boundary.
+    pub(crate) fn boundary_is_nameable(&self, nodes: &[NodeIdx]) -> bool {
+        if self.hashes.is_full() {
+            return true;
+        }
+        nodes.iter().all(|n| {
+            self.parent_slice(*n)
+                .iter()
+                .all(|p| nodes.binary_search(p).is_ok() || self.hashes.get(*p).is_some())
+        })
+    }
+
+    /// Smallest fragment whose extent covers `deps`. Reversed so the
+    /// first match is the finest. Not binary-searchable: concurrent
+    /// fragments interleave.
+    fn smallest_fragment_covering(&self, deps: &SeqClock) -> Option<&FragmentNode> {
+        self.fragments.iter().rev().find(|f| f.clock.covers(deps))
+    }
+
+    /// A boundary the GC has left unnameable, moved back to the deps of
+    /// the smallest fragment reaching that far. Those are fragment heads,
+    /// which are always retained, so one step suffices. `None` when
+    /// nothing needs widening.
+    pub(crate) fn widen_boundary_to_fragment(&self, deps: &SeqClock) -> Option<SeqClock> {
+        if self.hashes.is_full() {
+            return None;
+        }
+        let f = self.smallest_fragment_covering(deps)?;
+        Some(self.calculate_clock(f.deps.clone()))
+    }
+
+    /// The nodes a seq clock does *not* cover, ascending — which is node
+    /// order, which is topological order.
     pub(crate) fn get_build_indexes(&self, clock: SeqClock) -> Vec<NodeIdx> {
         let mut change_indexes: Vec<NodeIdx> = Vec::new();
         // walk the state from the given deps clock and add them into the vec
@@ -1031,9 +1027,9 @@ impl ChangeGraph {
             self.seq_index[actor].push(node_idx);
 
             let ResolvedHashes { nodes, missing } = self.resolve_hashes(change.deps().iter())?;
-            if let Some(missing) = missing.first() {
+            if !missing.is_empty() {
                 // callers check deps before calling us
-                return Err(MissingDep(*missing).into());
+                return Err(MissingDep.into());
             }
             self.push_parents(node_idx, nodes);
 
@@ -1229,7 +1225,7 @@ impl ChangeGraph {
     }
 
     /// The fragments covering `heads` at the given levels, in the order
-    /// `apply_fragment` needs them: coarsest first, and within a level
+    /// `apply_change_set_opsment` needs them: coarsest first, and within a level
     /// oldest first. Nothing here sorts — the index is maintained in
     /// that order ([`FragmentNode::sort_key`]) and loose commits, all
     /// level 0, follow it in causal order.
@@ -1282,6 +1278,16 @@ impl ChangeGraph {
         self.ancestry_until_clock(nodes, &self.fragment_top)
             .filter_map(|n| self.loose_commit(n, actors))
             .collect()
+    }
+
+    /// Everything reachable from `heads` that `dep_clock` does not
+    /// cover, oldest first.
+    pub(crate) fn members_between(
+        &self,
+        heads: impl IntoIterator<Item = NodeIdx>,
+        dep_clock: &SeqClock,
+    ) -> Vec<NodeIdx> {
+        self.ancestry_until_clock(heads, dep_clock).collect()
     }
 
     /// The member nodes of a fragment, oldest first: `node`'s ancestry
@@ -1447,7 +1453,7 @@ impl ChangeGraph {
         self.hashes.get(node)
     }
 
-    /// Append the member changes of a bundle without knowing their
+    /// Append the member changes of a change set without knowing their
     /// hashes.
     ///
     /// The members must be in topological order and each member's seq
@@ -1455,7 +1461,7 @@ impl ChangeGraph {
     /// outside audit mode (audit-mode fragment application converts to
     /// changes instead); the new nodes have no hash, so they cannot
     /// appear in `nodes_by_hash`, `heads` or the fragment index yet.
-    pub(crate) fn add_fragment_members(&mut self, members: Vec<FragmentMember<'_>>) {
+    pub(crate) fn add_change_set_members(&mut self, members: Vec<ChangeSetMember<'_>>) {
         let base = NodeIdx(self.len() as u32);
 
         self.hashes.extend_without_hashes(members.len());
@@ -1485,11 +1491,11 @@ impl ChangeGraph {
 
             parent_buf.clear();
             parent_buf.extend(m.deps.iter().map(|d| match d {
-                FragmentDep::Member(j) => {
+                ChangeSetDep::Member(j) => {
                     debug_assert!(*j < i);
                     base + *j
                 }
-                FragmentDep::Node(n) => *n,
+                ChangeSetDep::Node(n) => *n,
             }));
             for &parent in &parent_buf {
                 // a parent that was a head is now covered
@@ -1504,10 +1510,10 @@ impl ChangeGraph {
         self.cache_clocks_from(base.0 as usize);
     }
 
-    /// Append a bundle's member changes straight from its columns.
+    /// Append a change set's member changes straight from its columns.
     ///
-    /// The columnar twin of [`Self::add_fragment_members`], and the same
-    /// shape as [`ChangeGraphCols::load`]: each of the bundle's change
+    /// The columnar twin of [`Self::add_change_set_members`], and the same
+    /// shape as [`ChangeGraphCols::load`]: each of the change set's change
     /// columns is decoded once, in one pass, into the graph's own column
     /// — no per-member struct, no dep `Vec` per member, no re-encode. The
     /// caller has already resolved the members' actors and sequence
@@ -1517,31 +1523,31 @@ impl ChangeGraph {
     /// Only valid when *every* member is being kept: a member's deps name
     /// other members by position, which is the node offset from `base`
     /// only if none were skipped. The partial (overlap) case goes through
-    /// [`Self::add_fragment_members`].
+    /// [`Self::add_change_set_members`].
     ///
-    /// `ext_nodes` holds the resolved node of each of the bundle's
-    /// external deps, in the bundle's dep order — a dep index at or above
+    /// `ext_nodes` holds the resolved node of each of the change set's
+    /// external deps, in the change set's dep order — a dep index at or above
     /// the member count indexes it.
     ///
     /// The columns are validated where they are read, and every read that
-    /// can fail happens before the graph is touched: a malformed bundle
+    /// can fail happens before the graph is touched: a malformed change set
     /// leaves the graph exactly as it was.
-    pub(crate) fn add_fragment_members_cols(
+    pub(crate) fn add_change_set_members_cols(
         &mut self,
-        cols: &crate::storage::BundleChangeCols<'_>,
+        cols: &crate::storage::ChangeSetChangeCols<'_>,
         member_actors: &[ActorIdx],
         member_seqs: &[NonZeroU64],
         actor_map: &[usize],
         ext_nodes: &[NodeIdx],
     ) -> Result<(), AutomergeError> {
-        let bad = |s: &'static str| AutomergeError::InvalidFragment(s);
+        let bad = |s: &'static str| AutomergeError::MalformedChangeSet(s);
         let base = NodeIdx(self.len() as u32);
         let n = member_actors.len();
         debug_assert_eq!(n, member_seqs.len());
 
         // ── decode, validating ──────────────────────────────────────
 
-        // The bundle stores num_ops, timestamps, messages and the extra
+        // The change set stores num_ops, timestamps, messages and the extra
         // widths in exactly the encodings the graph keeps them in, so
         // they are not decoded at all: load them as columns and splice
         // the slabs in below. An absent column loads as `n` defaults.
@@ -1580,7 +1586,7 @@ impl ChangeGraph {
         // deps: the wire form is already CSR — a count per member and a
         // flat value column — so the only work is turning each value into
         // a node index. Values below the member count name members of
-        // this bundle (their node is `base` + the value), the rest index
+        // this change set (their node is `base` + the value), the rest index
         // `ext_nodes`.
         let mut dep_range = Vec::with_capacity(n);
         let mut dep_target: Vec<NodeIdx> = Vec::new();
@@ -1626,7 +1632,7 @@ impl ChangeGraph {
 
         // slab-level copies: no value is encoded twice, and with an empty
         // graph (a fresh document) the copy inverts and adopts the
-        // bundle's slabs outright
+        // change set's slabs outright
         let tail = hexane::Splice {
             pos: base.0 as usize,
             ..Default::default()
@@ -1642,7 +1648,7 @@ impl ChangeGraph {
         for parent in &dep_target {
             // a parent that was a head is now covered. Only nodes that
             // were already in the graph can be heads — a member of this
-            // bundle has no hash yet — so this skips the whole appended
+            // change set has no hash yet — so this skips the whole appended
             // range.
             if *parent < base {
                 if let Some(h) = self.hashes.get(*parent) {
@@ -1671,14 +1677,14 @@ impl ChangeGraph {
 
     /// Record the (unverified, until `enable_audit_mode`) hash of a
     /// node whose hash was unknown — a fragment head, checkpoint or
-    /// boundary/dep pairing learned from an applied bundle. Makes the
+    /// boundary/dep pairing learned from an applied change set. Makes the
     /// hash resolvable; maintains the fragment index for fragment-level
     /// hashes. No-op on a checked graph or for post-load nodes, whose
     /// hashes are already known.
     /// Record a node's hash, returning whether that formed a new fragment
     /// — in which case the caller owes a [`Self::gc_after_batch`].
     ///
-    /// Recording many hashes in one go — a bundle's boundary, external
+    /// Recording many hashes in one go — a change set's boundary, external
     /// deps, head and checkpoints — must not GC per hash: each pass is
     /// O(graph), so per-hash makes a fragment chain quadratic in the
     /// document. It is also what [`Self::gc_retained_hashes`] already
@@ -1731,7 +1737,7 @@ impl ChangeGraph {
 
         for h in change.deps().iter() {
             if !self.has_change(h)? {
-                return Err(MissingDep(*h).into());
+                return Err(MissingDep.into());
             }
         }
 
@@ -2377,9 +2383,10 @@ impl ChangeGraphCols {
     }
 }
 
+/// A change names a dependency this document cannot resolve.
 #[derive(Debug, thiserror::Error)]
 #[error("attempted to derive a clock for a change with dependencies we don't have")]
-pub struct MissingDep(ChangeHash);
+pub struct MissingDep;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum AddChangeError {
@@ -2865,8 +2872,8 @@ mod tests {
         let saved = base.save();
         let mut a = AutoCommit::load(&saved).unwrap();
         let mut b = AutoCommit::load(&saved).unwrap();
-        a.set_actor(ActorId::random()).unwrap();
-        b.set_actor(ActorId::random()).unwrap();
+        a.set_actor(ActorId::random());
+        b.set_actor(ActorId::random());
         // merge is a hash-level operation
         a.enable_audit_mode().unwrap();
         b.enable_audit_mode().unwrap();
@@ -3055,7 +3062,7 @@ mod tests {
     }
 
     #[test]
-    fn bundle_fragments_roundtrips_through_load_incremental() {
+    fn change_sets_for_fragments_roundtrips_through_load_incremental() {
         let mut rng = make_rng();
         let mut doc = Automerge::new();
 
@@ -3069,9 +3076,9 @@ mod tests {
 
         let fragments = doc.fragments(..).unwrap();
 
-        let bundles = doc.bundle_fragments(fragments).unwrap();
+        let change_sets = doc.change_sets_for_fragments(fragments).unwrap();
 
-        let joined: Vec<u8> = bundles.into_iter().flatten().collect();
+        let joined: Vec<u8> = change_sets.into_iter().flatten().collect();
 
         let mut loaded = AutoCommit::new();
         loaded.load_incremental(&joined).unwrap();
@@ -3089,7 +3096,7 @@ mod tests {
     fn fragment_apply_manifold_matches_walk() {
         use crate::read::ReadDoc;
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         let text = doc.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
         let map = doc.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
         doc.put(&map, "c", crate::ScalarValue::counter(0)).unwrap();
@@ -3119,15 +3126,15 @@ mod tests {
         doc.commit();
 
         let fragments = doc.doc.fragments(..).unwrap();
-        let bundles: Vec<_> = fragments
+        let change_sets: Vec<_> = fragments
             .iter()
-            .map(|f| doc.doc.bundle_fragment(f).unwrap())
+            .map(|f| doc.doc.change_set_for_fragment(f).unwrap())
             .collect();
 
         let apply_all = || {
             let mut d = Automerge::new();
-            for b in &bundles {
-                d.apply_bundle(b.clone()).unwrap();
+            for b in &change_sets {
+                d.apply_change_set(b.clone()).unwrap();
             }
             d
         };

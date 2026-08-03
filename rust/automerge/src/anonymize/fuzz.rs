@@ -40,7 +40,7 @@ fn document_from_program(program: &[u8]) -> Automerge {
     // stochastic outside audit mode"). A fuzz program long enough to be
     // interesting will hit that, so the replicas keep their hashes.
     base.enable_audit_mode().unwrap();
-    base.set_actor(actor(0)).unwrap();
+    base.set_actor(actor(0));
     let list = base.put_object(ROOT, "items", ObjType::List).unwrap();
     let text = base.put_object(ROOT, "notes", ObjType::Text).unwrap();
     base.put(ROOT, "counter", ScalarValue::counter(0)).unwrap();
@@ -53,7 +53,7 @@ fn document_from_program(program: &[u8]) -> Automerge {
     let mut replicas = (0..REPLICA_COUNT)
         .map(|index| {
             let mut replica = base.fork();
-            replica.set_actor(actor(index as u8 + 1)).unwrap();
+            replica.set_actor(actor(index as u8 + 1));
             replica
         })
         .collect::<Vec<_>>();

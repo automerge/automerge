@@ -472,8 +472,7 @@ impl Automerge {
         let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
-            doc.set_actor(a)
-                .expect("a fresh document always has a checked hash graph");
+            doc.set_actor(a);
         }
         Ok(Automerge {
             doc,
@@ -518,7 +517,7 @@ impl Automerge {
         if let Some(s) = actor {
             let actor =
                 automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor)?;
+            automerge.doc.set_actor(actor);
         }
         Ok(automerge)
     }
@@ -544,7 +543,7 @@ impl Automerge {
         if let Some(s) = actor {
             let actor =
                 automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor)?;
+            automerge.doc.set_actor(actor);
         }
         Ok(automerge)
     }
@@ -1540,7 +1539,7 @@ impl Automerge {
         let fragments = Vec::<am::Fragment>::try_from(JS(fragments))?;
         Ok(self
             .doc
-            .bundle_fragments(fragments)?
+            .change_sets_for_fragments(fragments)?
             .iter()
             .map(|bytes| Uint8Array::from(bytes.as_slice()))
             .collect())
@@ -2010,7 +2009,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-        doc.set_actor(actor)?;
+        doc.set_actor(actor);
     }
     Ok(Automerge {
         doc,
@@ -2380,7 +2379,7 @@ impl TryFrom<JS> for Vec<am::Fragment> {
 #[wasm_bindgen(js_name = "readBundle")]
 pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     let bundle_bytes = bundle.to_vec();
-    let bundle = automerge::Bundle::try_from(bundle_bytes.as_slice())
+    let bundle = automerge::ChangeSet::try_from(bundle_bytes.as_slice())
         .map_err(|e| error::ReadBundle(e.to_string()))?;
     let changes = bundle
         .to_changes()

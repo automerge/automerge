@@ -1,17 +1,17 @@
-//! Cutting a bundle's already-present rows out of its fragment.
+//! Cutting a change set's already-present rows out of its fragment.
 //!
-//! A bundle whose members are only partly new — an *overlap* — carries
+//! A change set whose members are only partly new — an *overlap* — carries
 //! rows for members the document already has. Applying them again would
 //! be an error, so they are cut out before the fragment meets the
 //! manifold: one walk marks every row's fate, then one cursor per column
 //! applies the marks.
 //!
-//! Cutting a row is not always just a delete. The bundle format keeps a
+//! Cutting a row is not always just a delete. The change set format keeps a
 //! relationship between two members in the *succ* column of the older
 //! one and gives an op a row of its own only when its pred names
-//! something the bundle does not contain (`BundleBuilder::flush_deletes`).
+//! something the change set does not contain (`ChangeSetBuilder::flush_deletes`).
 //! Dropping a row therefore leaves its surviving successors in exactly
-//! the position an out-of-bundle target puts them: the relationship
+//! the position an out-of-change set target puts them: the relationship
 //! moves to the successor's pred column — and a successor that had no
 //! row of its own, a delete, gains one at the end of its register, which
 //! is where the builder would have written it.
@@ -21,7 +21,7 @@ use super::super::meta::ValueMeta;
 use super::super::types::{Action, ActorIdx, ScalarValue};
 use super::OpSet;
 use crate::clock::Clock;
-use crate::storage::bundle::ops as spec;
+use crate::storage::change_set::ops as spec;
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::{RawColumn, RawColumns};
 
@@ -31,15 +31,15 @@ impl OpSet {
     /// Cut the rows `clock` covers out of this fragment, which the
     /// document already has.
     ///
-    /// `raw`/`data` are the bundle's own op columns — the source of the
+    /// `raw`/`data` are the change set's own op columns — the source of the
     /// pred and hint columns, which are not part of an op set. Returns
     /// them rebuilt for the rows that remain: every dropped row takes
     /// its preds with it and some kept rows gain one, so they are
     /// re-encoded rather than edited (they are the two smallest columns
     /// a fragment has, and usually empty).
     ///
-    /// `actor_map` maps this bundle's actor indexes to the document's;
-    /// the columns stay in bundle space, so it is only consulted to ask
+    /// `actor_map` maps this change set's actor indexes to the document's;
+    /// the columns stay in change set space, so it is only consulted to ask
     /// the clock about a row.
     pub(crate) fn drop_covered(
         &mut self,
@@ -55,20 +55,20 @@ impl OpSet {
         plan.apply(&mut self.cols)
     }
 
-    /// This fragment's op columns as a bundle's, for the streaming read
-    /// the manifold makes ([`crate::storage::bundle::FragOps`]) — the op
+    /// This fragment's op columns as a change set's, for the streaming read
+    /// the manifold makes ([`crate::storage::change_set::ManifoldOps`]) — the op
     /// columns plus the pred and hint columns it holds separately.
     ///
     /// Only that reader consumes the result, and it looks columns up by
     /// spec, so the appended columns need no place in the spec order.
-    pub(crate) fn export_frag(&self, preds: PredCols) -> (RawColumns<Uncompressed>, Vec<u8>) {
+    pub(crate) fn export_change_set(&self, preds: PredCols) -> (RawColumns<Uncompressed>, Vec<u8>) {
         let (raw, mut data) = self.cols.export();
         let extra = preds.save_to(&mut data);
         (raw.iter().cloned().chain(extra).collect(), data)
     }
 }
 
-/// An op id as the fragment stores it: bundle actor space, which is
+/// An op id as the fragment stores it: change set actor space, which is
 /// where every comparison and every write in this pass happens.
 ///
 /// Ordered as an [`crate::types::OpId`] is — by counter, then actor —
@@ -94,7 +94,7 @@ struct Register<'a> {
 }
 
 /// A run of rows the walk drops, with the sub-column spans it takes
-/// with it. A skipped member's ops are contiguous, so a bundle that is
+/// with it. A skipped member's ops are contiguous, so a change set that is
 /// nearly all present comes out as a handful of runs rather than one
 /// cut per row — the difference between a few cursor writes and
 /// thousands.
@@ -276,7 +276,7 @@ impl Plan {
     }
 
     /// Give every orphan left in the closing register a row: it is a
-    /// delete whose target the bundle held, and no longer does.
+    /// delete whose target the change set held, and no longer does.
     fn close_register(
         &mut self,
         register: Option<Register<'_>>,
@@ -477,7 +477,7 @@ impl PredCols {
         self.ctr.append(id.ctr as i64);
     }
 
-    /// Write the columns into `data`, as the bundle writer does — a
+    /// Write the columns into `data`, as the change set writer does — a
     /// fragment with no preds (or no hints) drops the column rather
     /// than carrying a run of defaults.
     fn save_to(self, data: &mut Vec<u8>) -> Vec<RawColumn<Uncompressed>> {

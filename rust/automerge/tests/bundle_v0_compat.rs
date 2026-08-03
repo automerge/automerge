@@ -2,7 +2,7 @@
 //!
 //! The fixture is a real bundle emitted by automerge 3.3.2 — built by
 //! checking that tag out and calling `doc.bundle(hashes)` — not by any
-//! code in this tree. Bundles in that format are in circulation, so this
+//! code in this tree. Change sets in that format are in circulation, so this
 //! test is the contract that they keep loading.
 //!
 //! If this fails, `storage::bundle_v0` has been "improved". Don't fix the

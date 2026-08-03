@@ -15,15 +15,16 @@ use crate::types::{ActorId, ChangeHash};
 use crate::Change;
 
 use super::{
-    BundleChange, BundleChangeCols, BundleChangeIterUnverified, OpIterUnverified, ParseError,
+    ChangeSetChange, ChangeSetChangeCols, ChangeSetChangeIterUnverified, OpIterUnverified,
+    ParseError,
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct BundleStorage<'a, OpReadState> {
+pub(crate) struct ChangeSetStorage<'a, OpReadState> {
     /// Uncompressed in-memory form. Iterators index into this.
     pub(crate) bytes: Cow<'a, [u8]>,
     /// On-disk form, if columns were DEFLATE-compressed. `None` for
-    /// bundles that were written or received in fully-uncompressed form
+    /// change sets that were written or received in fully-uncompressed form
     /// (in which case `bytes` is also the on-disk form).
     pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
     pub(crate) deps: Vec<ChangeHash>,
@@ -40,24 +41,24 @@ pub(crate) struct BundleStorage<'a, OpReadState> {
     /// change graph reads the rest of the columns directly. What is left
     /// here is the row-shaped view — [`Self::to_changes`] and audit mode
     /// — which wants every field of every member anyway.
-    pub(crate) changes: OnceLock<Vec<BundleChange<'static>>>,
-    /// The op columns, decoded once, in *bundle* actor space and without
-    /// indexes — everything [`OpSet::load_frag_cols`] can establish
+    pub(crate) changes: OnceLock<Vec<ChangeSetChange<'static>>>,
+    /// The op columns, decoded once, in *change set* actor space and without
+    /// indexes — everything [`OpSet::load_change_set_cols`] can establish
     /// without a receiving document.
     ///
     /// The apply path takes this out and finishes it against the document
-    /// ([`OpSet::index_frag`]), which is why `apply_bundle` consumes the
-    /// bundle: the columns are moved into the document's op set, not read
-    /// from. Empty on the builder path (a bundle being sent is never
+    /// ([`OpSet::index_change_set`]), which is why `apply_change_set` consumes the
+    /// change set: the columns are moved into the document's op set, not read
+    /// from. Empty on the builder path (a change set being sent is never
     /// applied) and after an apply has taken it; either way the next
     /// reader re-loads from `bytes`.
-    pub(crate) frag_ops: OnceLock<OpSet>,
+    pub(crate) change_set_ops: OnceLock<OpSet>,
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
-impl<O: OpReadState> BundleStorage<'_, O> {
-    pub(crate) fn into_owned(self) -> BundleStorage<'static, O> {
-        BundleStorage {
+impl<O: OpReadState> ChangeSetStorage<'_, O> {
+    pub(crate) fn into_owned(self) -> ChangeSetStorage<'static, O> {
+        ChangeSetStorage {
             bytes: Cow::Owned(self.bytes.into_owned()),
             compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
             deps: self.deps,
@@ -67,7 +68,7 @@ impl<O: OpReadState> BundleStorage<'_, O> {
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
             changes: self.changes,
-            frag_ops: self.frag_ops,
+            change_set_ops: self.change_set_ops,
             _phantom: self._phantom,
         }
     }
@@ -78,8 +79,8 @@ impl<O: OpReadState> BundleStorage<'_, O> {
     /// straight into the change graph's own columns — rather than through
     /// [`Self::changes`], which materialises a struct (and a dep `Vec`)
     /// per member.
-    pub(crate) fn change_cols(&self) -> Result<BundleChangeCols<'_>, ParseError> {
-        BundleChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
+    pub(crate) fn change_cols(&self) -> Result<ChangeSetChangeCols<'_>, ParseError> {
+        ChangeSetChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
     }
 
     /// Each member's actor and sequence number, read columnwise.
@@ -87,18 +88,18 @@ impl<O: OpReadState> BundleStorage<'_, O> {
     /// This is the member index every applier needs first — to decide
     /// which members the document already has, and to name a member's
     /// node — so it is what a parse reads, in place of decoding every
-    /// member's full metadata into a [`BundleChange`]. Two things are
+    /// member's full metadata into a [`ChangeSetChange`]. Two things are
     /// checked, both of which a caller would otherwise have to guard on
     /// every use:
     ///
-    /// * actor indexes name an actor the bundle carries
+    /// * actor indexes name an actor the change set carries
     /// * sequence numbers are non-zero (a [`crate::ChangeId`] holds a
     ///   `NonZeroU64`, and seq 0 would break the per-actor chain check)
     ///
     /// The member count is the `actor` column's length; the `seq` column
     /// must match it. The rest of the member columns are validated where
     /// they are read — see
-    /// [`ChangeGraph::add_fragment_members_cols`](crate::change_graph::ChangeGraph::add_fragment_members_cols)
+    /// [`ChangeGraph::add_change_set_members_cols`](crate::change_graph::ChangeGraph::add_change_set_members_cols)
     /// and [`Self::changes`] — so that a malformed column costs one decode
     /// rather than two.
     pub(crate) fn member_ids(&self) -> Result<(Vec<ActorIdx>, Vec<NonZeroU64>), ParseError> {
@@ -125,7 +126,7 @@ impl<O: OpReadState> BundleStorage<'_, O> {
     }
 
     /// The member change metadata, decoding it on first call.
-    pub(crate) fn changes(&self) -> Result<&[BundleChange<'static>], ParseError> {
+    pub(crate) fn changes(&self) -> Result<&[ChangeSetChange<'static>], ParseError> {
         if self.changes.get().is_none() {
             let decoded =
                 decode_change_meta(&self.changes_meta, &self.bytes[self.changes_data.clone()])?;
@@ -138,21 +139,21 @@ impl<O: OpReadState> BundleStorage<'_, O> {
             .expect("change metadata was just decoded"))
     }
 
-    /// The op columns in bundle actor space, taken by value.
+    /// The op columns in change set actor space, taken by value.
     ///
     /// The parse paths leave them here; this hands them over (the apply
-    /// merges them into a document, consuming them). A bundle whose cache
+    /// merges them into a document, consuming them). A change set whose cache
     /// is empty — built in-process, or applied once already — loads them
     /// again from `bytes`.
-    pub(crate) fn take_frag_ops(&mut self) -> Result<OpSet, ParseError> {
-        if let Some(ops) = self.frag_ops.take() {
+    pub(crate) fn take_change_set_ops(&mut self) -> Result<OpSet, ParseError> {
+        if let Some(ops) = self.change_set_ops.take() {
             return Ok(ops);
         }
-        self.load_frag_ops()
+        self.load_change_set_ops()
     }
 
-    fn load_frag_ops(&self) -> Result<OpSet, ParseError> {
-        OpSet::load_frag_cols(
+    fn load_change_set_ops(&self) -> Result<OpSet, ParseError> {
+        OpSet::load_change_set_cols(
             &self.ops_meta,
             &self.bytes[self.ops_data.clone()],
             self.actors.len(),
@@ -166,9 +167,9 @@ impl<O: OpReadState> BundleStorage<'_, O> {
 fn decode_change_meta(
     changes_meta: &RawColumns<compression::Uncompressed>,
     data: &[u8],
-) -> Result<Vec<BundleChange<'static>>, ParseError> {
-    BundleChangeIterUnverified::try_new(changes_meta, data)?
-        .map(|c| c.map(BundleChange::into_owned))
+) -> Result<Vec<ChangeSetChange<'static>>, ParseError> {
+    ChangeSetChangeIterUnverified::try_new(changes_meta, data)?
+        .map(|c| c.map(ChangeSetChange::into_owned))
         .collect()
 }
 
@@ -180,14 +181,14 @@ fn primed<T>(value: T) -> OnceLock<T> {
     cell
 }
 
-impl<'a> BundleStorage<'a, Unverified> {
-    /// Parse the column section of a bundle chunk — everything after the
+impl<'a> ChangeSetStorage<'a, Unverified> {
+    /// Parse the column section of a change set chunk — everything after the
     /// fragment metadata prefix. There is no nested chunk header: these
-    /// columns are part of chunk [`ChunkType::Bundle`], not a chunk of
+    /// columns are part of chunk [`ChunkType::ChangeSet`], not a chunk of
     /// their own.
     pub(crate) fn parse_columns(
         input: parse::Input<'a>,
-    ) -> parse::ParseResult<'a, BundleStorage<'a, Unverified>, ParseError> {
+    ) -> parse::ParseResult<'a, ChangeSetStorage<'a, Unverified>, ParseError> {
         // positions tracked by the parser are absolute offsets within
         // this buffer
         let full_bytes = input.bytes();
@@ -221,11 +222,11 @@ impl<'a> BundleStorage<'a, Unverified> {
             (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
         {
             // decoding the op columns is what validates them
-            let frag_ops = OpSet::load_frag_cols(&ops_meta, ops.value, actors.len())
+            let change_set_ops = OpSet::load_change_set_cols(&ops_meta, ops.value, actors.len())
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
             return Ok((
                 parse::Input::empty(),
-                BundleStorage {
+                ChangeSetStorage {
                     bytes: full_bytes.into(),
                     compressed_bytes: None,
                     deps,
@@ -235,7 +236,7 @@ impl<'a> BundleStorage<'a, Unverified> {
                     changes_meta,
                     changes_data: changes_data_range,
                     changes: OnceLock::new(),
-                    frag_ops: primed(frag_ops),
+                    change_set_ops: primed(change_set_ops),
                     _phantom: PhantomData,
                 },
             ));
@@ -272,13 +273,13 @@ impl<'a> BundleStorage<'a, Unverified> {
         let new_ops_end = out.len();
 
         // decoding the op columns is what validates them
-        let frag_ops =
-            OpSet::load_frag_cols(&ops_meta, &out[new_ops_start..new_ops_end], actors.len())
+        let change_set_ops =
+            OpSet::load_change_set_cols(&ops_meta, &out[new_ops_start..new_ops_end], actors.len())
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
 
         Ok((
             parse::Input::empty(),
-            BundleStorage {
+            ChangeSetStorage {
                 bytes: Cow::Owned(out),
                 compressed_bytes: Some(full_bytes.into()),
                 deps,
@@ -288,7 +289,7 @@ impl<'a> BundleStorage<'a, Unverified> {
                 changes_meta,
                 changes_data: new_changes_start..new_changes_end,
                 changes: OnceLock::new(),
-                frag_ops: primed(frag_ops),
+                change_set_ops: primed(change_set_ops),
                 _phantom: PhantomData,
             },
         ))
@@ -299,18 +300,18 @@ impl<'a> BundleStorage<'a, Unverified> {
     ///
     /// Nothing is left to check, and there is deliberately no row-by-row
     /// walk here. `parse_columns` decodes the change metadata
-    /// (`Self::changes`) and the op columns (`Self::frag_ops`, which runs
+    /// (`Self::changes`) and the op columns (`Self::change_set_ops`, which runs
     /// `column_validation`) — between them the same facts a document
     /// establishes on its load path, reached the same way: by decoding the
-    /// columns once rather than materialising every row into a `BundleOp`
+    /// columns once rather than materialising every row into a `ChangeSetOp`
     /// and dropping it.
     ///
     /// Rows malformed in ways a column decode cannot see (a map op with a
     /// null key, say) are caught by [`Self::to_changes`], which is the
     /// path untrusted data takes — audit mode always reconstructs the
     /// member changes rather than trusting the columns.
-    pub(crate) fn verify(self) -> Result<BundleStorage<'a, Verified>, ParseError> {
-        Ok(BundleStorage {
+    pub(crate) fn verify(self) -> Result<ChangeSetStorage<'a, Verified>, ParseError> {
+        Ok(ChangeSetStorage {
             bytes: self.bytes,
             compressed_bytes: self.compressed_bytes,
             deps: self.deps,
@@ -320,16 +321,16 @@ impl<'a> BundleStorage<'a, Unverified> {
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
             changes: self.changes,
-            frag_ops: self.frag_ops,
+            change_set_ops: self.change_set_ops,
             _phantom: PhantomData,
         })
     }
 }
 
-impl BundleStorage<'_, Verified> {
-    /// Rebuild the member [`Change`]s. The bundle stores in-bundle
+impl ChangeSetStorage<'_, Verified> {
+    /// Rebuild the member [`Change`]s. The change set stores in-change set
     /// relationships in the succ column (and elides delete ops whose
-    /// targets are all in-bundle), so this inverts them back into pred
+    /// targets are all in-change set), so this inverts them back into pred
     /// lists: a succ entry `(target -> s)` becomes a pred `target` on
     /// op `s`, and a successor with no row of its own is an elided
     /// delete, resurrected with its group's obj/key. Preds are merged
@@ -342,7 +343,7 @@ impl BundleStorage<'_, Verified> {
         use std::collections::{HashMap, HashSet};
 
         let change_meta = self.changes()?.to_vec();
-        let mut collector = ChangeCollector::from_bundle_changes(change_meta, &self.actors);
+        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &self.actors);
 
         // pass 1: row ids + the succ inversion (successor -> targets,
         // accumulated in doc order = ascending id within a group)
@@ -400,10 +401,10 @@ impl BundleStorage<'_, Verified> {
             }
         }
 
-        let bundle = collector
-            .unbundle(&self.actors, &self.deps)
-            .map_err(|e| ParseError::Unbundle(Box::new(e)))?;
-        Ok(bundle)
+        let change_set = collector
+            .decode_change_set(&self.actors, &self.deps)
+            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
+        Ok(change_set)
     }
 
     /// Rows with their decode errors intact.

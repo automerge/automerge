@@ -426,7 +426,7 @@ impl Columns {
         // the fragment-side sub/value spans arrive precomputed on each
         // CopyRange (stamped by the manifold while streaming); only
         // this column set's own positions are resolved here
-        let frag_len = frag.len();
+        let change_set_len = frag.len();
         let subs: Vec<hexane::Splice> = runs
             .iter()
             .map(|cr| hexane::Splice {
@@ -486,7 +486,7 @@ impl Columns {
         // every merged fragment row is a new row
         self.index
             .dirty
-            .copy_ranges(hexane::Column::fill(frag_len, true), rows());
+            .copy_ranges(hexane::Column::fill(change_set_len, true), rows());
     }
 
     pub(super) fn actor_map(&self) -> std::sync::Arc<super::op_set::ActorMap> {

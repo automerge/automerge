@@ -12,7 +12,7 @@ use crate::patches::PatchAccumulator;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
 use crate::Fragment;
-use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
+use crate::{hydrate, AnonymizeError, ChangeSet, OnPartialLoad, TextEncoding};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash,
     ChangeId, Cursor, Prop, Value,
@@ -404,21 +404,17 @@ impl AutoCommit {
     }
 
     /// Set the actor id for this document.
-    ///
-    /// See [`Automerge::with_actor`] for the error contract.
-    pub fn with_actor(mut self, actor: ActorId) -> Result<Self, AutomergeError> {
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor)?;
-        Ok(self)
+        self.doc.set_actor(actor);
+        self
     }
 
     /// Set the actor id for this document.
-    ///
-    /// See [`Automerge::with_actor`] for the error contract.
-    pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor)?;
-        Ok(self)
+        self.doc.set_actor(actor);
+        self
     }
 
     pub fn get_actor(&self) -> &ActorId {
@@ -611,7 +607,7 @@ impl AutoCommit {
 
     /// The last change made by this document's actor, as a one-member
     /// fragment
-    pub fn get_last_local_change(&mut self) -> Result<Option<Bundle>, AutomergeError> {
+    pub fn get_last_local_change(&mut self) -> Result<Option<ChangeSet>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
     }
@@ -659,7 +655,7 @@ impl AutoCommit {
     pub fn get_changes_added(
         &mut self,
         other: &mut Self,
-    ) -> Result<Option<Bundle>, AutomergeError> {
+    ) -> Result<Option<ChangeSet>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
@@ -697,11 +693,11 @@ impl AutoCommit {
         self.doc.get_fragment(head)
     }
 
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn change_sets_for_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        self.doc.bundle_fragments(fragments)
+        self.doc.change_sets_for_fragments(fragments)
     }
 
     /// See [`Automerge::enable_audit_mode`]

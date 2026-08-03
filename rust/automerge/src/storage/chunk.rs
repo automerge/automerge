@@ -14,18 +14,18 @@ use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
-    /// A bundle in the frozen 3.3.x format — see [`super::bundle_v0`].
+    /// A change set in the frozen 3.3.x format — see [`super::bundle_v0`].
     BundleV0(Box<BundleV0Storage<'a, Unverified>>),
-    /// The live bundle format, parsed. Boxed: a bundle carries its
+    /// The live change set format, parsed. Boxed: a change set carries its
     /// change metadata and op columns, which makes it far larger than
     /// the other variants.
-    BundleColumns(Box<crate::storage::Bundle>),
+    ChangeSetColumns(Box<crate::storage::ChangeSet>),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
 pub(crate) mod error {
     use super::parse;
-    use crate::storage::{bundle, change, document};
+    use crate::storage::{change, change_set, document};
 
     #[derive(thiserror::Error, Debug)]
     pub(crate) enum Chunk {
@@ -33,10 +33,10 @@ pub(crate) mod error {
         LeftoverData,
         #[error(transparent)]
         Leb128(#[from] parse::leb128::Error),
-        #[error("failed to parse bundle: {0}")]
-        BundleV0(#[from] bundle::ParseError),
-        #[error("invalid bundle: {0}")]
-        Bundle(#[from] crate::storage::bundle::InvalidBundle),
+        #[error("failed to parse change_set: {0}")]
+        BundleV0(#[from] change_set::ParseError),
+        #[error("invalid change_set: {0}")]
+        ChangeSet(#[from] crate::storage::change_set::InvalidChangeSet),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
         #[error("bad change chunk: {0}")]
@@ -108,18 +108,18 @@ impl<'a> Chunk<'a> {
             }
             // frozen: 3.3.x wrote these and they are still in circulation
             ChunkType::BundleV0 => {
-                let (remaining, bundle) =
+                let (remaining, change_set) =
                     BundleV0Storage::parse_following_header(chunk_input, header)
                         .map_err(|e| e.lift())?;
                 if !remaining.is_empty() {
                     return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                Chunk::BundleV0(Box::new(bundle))
+                Chunk::BundleV0(Box::new(change_set))
             }
-            ChunkType::Bundle => {
-                let bundle = crate::storage::Bundle::parse_after_header(chunk_input)
-                    .map_err(|e| parse::ParseError::Error(error::Chunk::Bundle(e)))?;
-                Chunk::BundleColumns(Box::new(bundle))
+            ChunkType::ChangeSet => {
+                let change_set = crate::storage::ChangeSet::parse_after_header(chunk_input)
+                    .map_err(|e| parse::ParseError::Error(error::Chunk::ChangeSet(e)))?;
+                Chunk::ChangeSetColumns(Box::new(change_set))
             }
         };
         Ok((remaining, chunk))
@@ -133,9 +133,9 @@ impl<'a> Chunk<'a> {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
             Self::BundleV0(b) => b.checksum_valid(),
-            // the columns are part of the bundle chunk, whose checksum
+            // the columns are part of the change set chunk, whose checksum
             // the loader has already validated against the whole chunk
-            Self::BundleColumns(_) => true,
+            Self::ChangeSetColumns(_) => true,
         }
     }
 }
@@ -145,11 +145,11 @@ pub(crate) enum ChunkType {
     Document,
     Change,
     Compressed,
-    /// The frozen 3.3.x bundle format — see [`super::bundle_v0`].
+    /// The frozen 3.3.x change set format — see [`super::bundle_v0`].
     BundleV0,
-    /// A bundle: fragment metadata prefix followed by the change and op
+    /// A change set: fragment metadata prefix followed by the change and op
     /// columns. Unrelated to [`Self::BundleV0`] beyond the name.
-    Bundle,
+    ChangeSet,
 }
 
 impl TryFrom<u8> for ChunkType {
@@ -161,7 +161,7 @@ impl TryFrom<u8> for ChunkType {
             1 => Ok(Self::Change),
             2 => Ok(Self::Compressed),
             3 => Ok(Self::BundleV0),
-            4 => Ok(Self::Bundle),
+            4 => Ok(Self::ChangeSet),
             other => Err(other),
         }
     }
@@ -174,7 +174,7 @@ impl From<ChunkType> for u8 {
             ChunkType::Change => 1,
             ChunkType::Compressed => 2,
             ChunkType::BundleV0 => 3,
-            ChunkType::Bundle => 4,
+            ChunkType::ChangeSet => 4,
         }
     }
 }

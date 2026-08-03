@@ -1,12 +1,14 @@
 // Keystroke latency: apply ONE text-insert op to a large document,
-// three ways — a single-change v2 fragment via apply_fragment, the
+// three ways — a single-change v2 fragment via apply_change_set_opsment, the
 // single raw change via load_incremental, and (for context) the same
 // via apply_changes. This is the single-keystroke-commit path that
 // hurts on main.
 //
 //   cargo run --release -p automerge --example bench_keystroke [S1 S2 S3 ...]
 use automerge::transaction::Transactable;
-use automerge::{Automerge, Bundle, ChangeHash, ChangeId, Fragment, ObjType, ReadDoc, Value, ROOT};
+use automerge::{
+    Automerge, ChangeHash, ChangeId, ChangeSet, Fragment, ObjType, ReadDoc, Value, ROOT,
+};
 use std::time::Instant;
 
 fn find_text(doc: &Automerge) -> automerge::ObjId {
@@ -47,7 +49,7 @@ fn main() {
         // a new peer" case, which pays the actor-column rewrite.
         // Applying the second is steady-state typing.
         let mut src = base.fork();
-        // src emits the changes/bundles, which needs its full hash set;
+        // src emits the changes/change sets, which needs its full hash set;
         // the measured targets (base clones) stay in the default mode
         src.enable_audit_mode().unwrap();
         for ch in ["x", "y"] {
@@ -72,7 +74,7 @@ fn main() {
                         std::num::NonZeroU64::new(change.seq()).unwrap(),
                     )],
                 };
-                src.bundle_fragment(&frag).unwrap().bytes()
+                src.change_set_for_fragment(&frag).unwrap().bytes()
             })
             .collect();
 
@@ -93,8 +95,8 @@ fn main() {
         };
 
         let (frag_new, frag_steady) = bench(&|d: &mut Automerge, i: usize| {
-            let v2 = Bundle::try_from(&v2_bytes[i][..]).unwrap();
-            d.apply_bundle(v2).unwrap();
+            let v2 = ChangeSet::try_from(&v2_bytes[i][..]).unwrap();
+            d.apply_change_set(v2).unwrap();
         });
         let (inc_new, inc_steady) = bench(&|d: &mut Automerge, i: usize| {
             d.apply_changes([changes[i].clone()]).unwrap();

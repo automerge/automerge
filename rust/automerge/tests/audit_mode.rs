@@ -11,9 +11,7 @@ fn audit_opts() -> LoadOptions {
 /// A doc with 3 sequential changes by one actor. The doc is kept in
 /// audit mode so its full history stays enumerable.
 fn saved_doc() -> (Vec<u8>, AutoCommit) {
-    let mut doc = AutoCommit::new()
-        .with_actor(ActorId::from(&b"aaaa"[..]))
-        .unwrap();
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
     doc.enable_audit_mode().unwrap();
     for i in 0..3 {
         doc.put(ROOT, "k", i as i64).unwrap();
@@ -41,9 +39,7 @@ fn early_hash(orig: &mut AutoCommit) -> ChangeHash {
 /// anchor) — i.e. freed outside audit mode. Small docs have no such
 /// hashes: their whole history is loose commits, which stay retained.
 fn saved_big_doc_with_unknown_hash() -> (Vec<u8>, AutoCommit, ChangeHash) {
-    let mut doc = AutoCommit::new()
-        .with_actor(ActorId::from(&b"aaaa"[..]))
-        .unwrap();
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
     doc.enable_audit_mode().unwrap();
     for i in 0..4000 {
         doc.put(ROOT, "k", i as i64).unwrap();
@@ -71,13 +67,11 @@ fn saved_big_doc_with_unknown_hash() -> (Vec<u8>, AutoCommit, ChangeHash) {
 
 /// A doc with two concurrent branches, saved with two heads
 fn saved_multi_head_doc() -> (Vec<u8>, AutoCommit) {
-    let mut doc1 = AutoCommit::new()
-        .with_actor(ActorId::from(&b"aaaa"[..]))
-        .unwrap();
+    let mut doc1 = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
     doc1.enable_audit_mode().unwrap();
     doc1.put(ROOT, "base", 0).unwrap();
     doc1.commit();
-    let mut doc2 = doc1.fork().with_actor(ActorId::from(&b"bbbb"[..])).unwrap();
+    let mut doc2 = doc1.fork().with_actor(ActorId::from(&b"bbbb"[..]));
     doc1.put(ROOT, "left", 1).unwrap();
     doc1.commit();
     doc2.put(ROOT, "right", 2).unwrap();
@@ -264,34 +258,31 @@ fn sync_requires_audit_mode() {
 }
 
 #[test]
-fn disabled_set_actor_guard() {
+fn set_actor_accepts_any_actor() {
     let (bytes, _) = saved_doc();
     let mut doc = AutoCommit::load(&bytes).unwrap();
 
-    // actor "aaaa" made the last change, which IS the current (single) head,
-    // so resurrecting it is fine
-    assert!(doc.set_actor(ActorId::from(&b"aaaa"[..])).is_ok());
+    // actor "aaaa" made the last change, which IS the current (single) head
+    doc.set_actor(ActorId::from(&b"aaaa"[..]));
     doc.put(ROOT, "k", 100).unwrap();
     assert!(doc.commit().is_some());
 
     // a fresh actor is always fine
-    assert!(doc.set_actor(ActorId::random()).is_ok());
+    doc.set_actor(ActorId::random());
 }
 
+/// Committing as an actor names its latest change by hash, so an actor
+/// whose tip is buried under another's history must still be resumable
+/// outside audit mode.
 #[test]
-fn disabled_set_actor_errors_for_non_head_tip() {
-    // actor aaaa's last change is buried deep under actor bbbb's changes,
-    // covered by cached fragments and so not in the retained set
-    let mut doc = AutoCommit::new()
-        .with_actor(ActorId::from(&b"aaaa"[..]))
-        .unwrap();
+fn set_actor_resurrects_an_actor_whose_tip_is_buried() {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
     doc.enable_audit_mode().unwrap();
     for i in 0..2000 {
         doc.put(ROOT, "k", i as i64).unwrap();
         doc.commit();
     }
-    let aaaa_tip = doc.get_head_hashes()[0];
-    doc.set_actor(ActorId::from(&b"bbbb"[..])).unwrap();
+    doc.set_actor(ActorId::from(&b"bbbb"[..]));
     for i in 0..2000 {
         doc.put(ROOT, "k", 10_000 + i as i64).unwrap();
         doc.commit();
@@ -299,22 +290,17 @@ fn disabled_set_actor_errors_for_non_head_tip() {
     let bytes = doc.save();
 
     let mut doc = AutoCommit::load(&bytes).unwrap();
-    if matches!(
-        doc.get_change_by_hash(&aaaa_tip),
-        Err(AutomergeError::AuditModeRequired)
-    ) {
-        // aaaa's tip hash is freed: resurrecting the actor would need it
-        assert!(matches!(
-            doc.set_actor(ActorId::from(&b"aaaa"[..])),
-            Err(AutomergeError::AuditModeRequired)
-        ));
-    } else {
-        // (vanishingly unlikely: the tip happened to be retained as a
-        // fragment hash or anchor — then resurrecting is legal)
-        assert!(doc.set_actor(ActorId::from(&b"aaaa"[..])).is_ok());
-    }
-    // bbbb's tip is the head: fine
-    assert!(doc.set_actor(ActorId::from(&b"bbbb"[..])).is_ok());
+    assert_eq!(doc.audit_mode(), AuditMode::Disabled);
+    // aaaa's tip is buried under 2000 of bbbb's changes, but resurrecting
+    // the actor and committing as it both succeed
+    doc.set_actor(ActorId::from(&b"aaaa"[..]));
+    doc.put(ROOT, "k", 1).unwrap();
+    // committing is the proof: the change records a sequential dependency
+    // on aaaa's old tip, so that hash had to be resolvable to get here
+    assert!(doc.commit().is_some());
+
+    // bbbb's tip is the head: fine too
+    doc.set_actor(ActorId::from(&b"bbbb"[..]));
     doc.put(ROOT, "k", 2).unwrap();
     assert!(doc.commit().is_some());
 }
@@ -397,7 +383,7 @@ fn usurped_fragment_hashes_are_freed_on_live_docs() {
     // behaviour, and `AutoCommit` defers its GC to save time
     let build = |audit: bool| {
         let mut doc = Automerge::new();
-        doc.set_actor(ActorId::from(&b"aaaa"[..])).unwrap();
+        doc.set_actor(ActorId::from(&b"aaaa"[..]));
         if audit {
             doc.enable_audit_mode().unwrap();
         }
@@ -559,7 +545,7 @@ fn disabled_lifecycle_all_fallible_functions() {
     // HASHLESS.md), not a bug — so pin both inputs and assert the branch
     // this test means to take. `unlucky_commit_frees_loose_hashes` covers
     // the other one.
-    doc.set_actor(ActorId::from(&b"lifecycle"[..])).unwrap();
+    doc.set_actor(ActorId::from(&b"lifecycle"[..]));
     let load_heads = doc.get_heads();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
 
@@ -652,7 +638,7 @@ fn disabled_lifecycle_all_fallible_functions() {
     let mid_fragments = doc.fragments(..).unwrap();
     assert!(!mid_fragments.is_empty());
     assert!(!doc
-        .bundle_fragments(mid_fragments.clone())
+        .change_sets_for_fragments(mid_fragments.clone())
         .unwrap()
         .is_empty());
 
@@ -709,7 +695,7 @@ fn fragments_work_without_hash_columns() {
     let head = doc.get_head_hashes()[0];
     assert!(doc.get_fragment(head).unwrap().is_some());
     assert!(!doc
-        .bundle_fragments(doc.fragments(..).unwrap())
+        .change_sets_for_fragments(doc.fragments(..).unwrap())
         .unwrap()
         .is_empty());
 
@@ -805,7 +791,7 @@ fn default_load_computes_then_retains_without_columns() {
     assert!(doc.get_change_by_hash(&head).unwrap().is_some());
 }
 
-/// Applying the same Bundle chain in audit mode (to_changes +
+/// Applying the same Change set chain in audit mode (to_changes +
 /// apply_changes, hashing everything) and outside it (the manifold fast
 /// path) produces identical documents — and the audit doc keeps every
 /// hash.
@@ -815,19 +801,19 @@ fn audit_and_manifold_fragment_apply_agree() {
     drop(bytes);
 
     let fragments = src.fragments(..).unwrap();
-    let bundles: Vec<_> = fragments
+    let change_sets: Vec<_> = fragments
         .into_iter()
-        .map(|f| src.document().bundle_fragment(&f).unwrap())
+        .map(|f| src.document().change_set_for_fragment(&f).unwrap())
         .collect();
-    assert!(bundles.len() > 1);
+    assert!(change_sets.len() > 1);
 
     let mut plain = Automerge::new();
     let mut audit = Automerge::new();
     audit.enable_audit_mode().unwrap();
 
-    for b in &bundles {
-        plain.apply_bundle(b.clone()).unwrap();
-        audit.apply_bundle(b.clone()).unwrap();
+    for b in &change_sets {
+        plain.apply_change_set(b.clone()).unwrap();
+        audit.apply_change_set(b.clone()).unwrap();
     }
 
     assert_eq!(plain.audit_mode(), AuditMode::Disabled);
@@ -846,24 +832,24 @@ fn audit_and_manifold_fragment_apply_agree() {
 }
 
 /// The audit fragment path enforces the manifold path's no-missing-deps
-/// contract: an out-of-order bundle errors instead of queueing.
+/// contract: an out-of-order change set errors instead of queueing.
 #[test]
 fn audit_fragment_apply_missing_deps() {
     let (bytes, mut src, _unknown) = saved_big_doc_with_unknown_hash();
     drop(bytes);
 
     let fragments = src.fragments(..).unwrap();
-    let bundles: Vec<_> = fragments
+    let change_sets: Vec<_> = fragments
         .into_iter()
-        .map(|f| src.document().bundle_fragment(&f).unwrap())
+        .map(|f| src.document().change_set_for_fragment(&f).unwrap())
         .collect();
-    assert!(bundles.len() > 1);
+    assert!(change_sets.len() > 1);
 
     let mut audit = Automerge::new();
     audit.enable_audit_mode().unwrap();
-    // the second bundle's boundary dep is missing
+    // the second change set's boundary dep is missing
     assert!(matches!(
-        audit.apply_bundle(bundles[1].clone()),
+        audit.apply_change_set(change_sets[1].clone()),
         Err(AutomergeError::MissingDeps)
     ));
     // heads unchanged — nothing applied
@@ -885,8 +871,7 @@ fn unlucky_commit_frees_loose_hashes() {
     // plain `Automerge`, deliberately: this is the `GcMode::Auto`
     // behaviour, and `AutoCommit` defers its GC to save time
     let mut doc = Automerge::load(&bytes).unwrap();
-    doc.set_actor(ActorId::from(&63u32.to_be_bytes()[..]))
-        .unwrap();
+    doc.set_actor(ActorId::from(&63u32.to_be_bytes()[..]));
     let load_heads = doc.get_heads();
 
     let commit = |doc: &mut Automerge, v: i64| {
@@ -942,9 +927,7 @@ fn merge_outside_audit_mode_survives_a_freed_boundary() {
 
     for a in 0..300u32 {
         let mut target = Automerge::new_with_encoding(encoding);
-        target
-            .set_actor(ActorId::from(&a.to_be_bytes()[..]))
-            .unwrap();
+        target.set_actor(ActorId::from(&a.to_be_bytes()[..]));
         let object = target
             .transact_with::<_, _, AutomergeError, _>(
                 |_| pin(),
@@ -954,8 +937,7 @@ fn merge_outside_audit_mode_survives_a_freed_boundary() {
             .result;
 
         let mut left = target.fork();
-        left.set_actor(ActorId::from(&(a ^ 0xa5a5_a5a5).to_be_bytes()[..]))
-            .unwrap();
+        left.set_actor(ActorId::from(&(a ^ 0xa5a5_a5a5).to_be_bytes()[..]));
         left.transact_with::<_, _, AutomergeError, _>(
             |_| pin(),
             |tx| tx.splice_text(&object, 0, 0, "left"),
@@ -963,9 +945,7 @@ fn merge_outside_audit_mode_survives_a_freed_boundary() {
         .unwrap();
 
         let mut right = target.fork();
-        right
-            .set_actor(ActorId::from(&(a ^ 0x5a5a_5a5a).to_be_bytes()[..]))
-            .unwrap();
+        right.set_actor(ActorId::from(&(a ^ 0x5a5a_5a5a).to_be_bytes()[..]));
         right
             .transact_with::<_, _, AutomergeError, _>(
                 |_| pin(),

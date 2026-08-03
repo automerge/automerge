@@ -340,9 +340,9 @@ mod tests {
     fn test_counters() {
         let actor1 = crate::ActorId::from("aa".as_bytes());
         let actor2 = crate::ActorId::from("bb".as_bytes());
-        let mut doc = crate::AutoCommit::new().with_actor(actor2).unwrap();
+        let mut doc = crate::AutoCommit::new().with_actor(actor2);
 
-        let mut doc2 = doc.fork().with_actor(actor1).unwrap();
+        let mut doc2 = doc.fork().with_actor(actor1);
         doc2.put(crate::ROOT, "key", "someval").unwrap();
 
         doc.put(crate::ROOT, "key", crate::ScalarValue::Counter(1.into()))
@@ -405,17 +405,12 @@ mod tests {
         // Explicit commits with a pinned timestamp: AutoCommit would
         // otherwise stamp wall-clock time, so the hashes would vary run
         // to run — see HASHLESS.md.
-        let mut doc = crate::AutoCommit::new()
-            .with_actor(crate::ActorId::from("aa".as_bytes()))
-            .unwrap();
+        let mut doc = crate::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
         doc.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
-        let mut doc2 = doc
-            .fork()
-            .with_actor(crate::ActorId::from("bb".as_bytes()))
-            .unwrap();
+        let mut doc2 = doc.fork().with_actor(crate::ActorId::from("bb".as_bytes()));
 
         doc.insert(&list, 0, 1).unwrap();
         doc.commit_with(crate::transaction::CommitOptions::default().with_time(0));
@@ -458,9 +453,7 @@ mod tests {
 
     #[test]
     fn test_insert_objects() {
-        let mut doc = crate::AutoCommit::new()
-            .with_actor(crate::ActorId::from("aa".as_bytes()))
-            .unwrap();
+        let mut doc = crate::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
 

@@ -1457,7 +1457,7 @@ impl OpSet {
     /// [`Self::column_validation`] against an explicit actor count, for
     /// columns whose actor indexes are not in this op set's actor space
     /// yet — a freshly loaded fragment, whose indexes are still the
-    /// sender's until `index_frag` rebases them.
+    /// sender's until `index_change_set` rebases them.
     pub(crate) fn column_validation_with(
         &self,
         num_actors: usize,
@@ -1737,7 +1737,7 @@ impl OpSet {
     /// visibility — and everything derived from it — cannot change on
     /// merge. Groups shared with the document are corrected by the
     /// manifold's conflict/expose output.
-    pub(crate) fn load_frag(
+    pub(crate) fn load_change_set(
         raw: &RawColumns<Uncompressed>,
         data: &[u8],
         actor_map: &[usize],
@@ -1745,23 +1745,24 @@ impl OpSet {
     ) -> Result<Self, ReadOpError> {
         // these callers (the batch path, a re-encoded overlap fragment)
         // carry no boundary to test, so they take the safe reading
-        Self::load_frag_cols(raw, data, actor_map.len())?.index_frag(actor_map, doc, true)
+        Self::load_change_set_cols(raw, data, actor_map.len())?
+            .index_change_set(actor_map, doc, true)
     }
 
-    /// The document-independent half of [`Self::load_frag`]: decode a
+    /// The document-independent half of [`Self::load_change_set`]: decode a
     /// fragment's op columns and check them over.
     ///
-    /// This is everything a bundle can do before it meets a document, so
+    /// This is everything a change set can do before it meets a document, so
     /// it runs at parse time — the decode *is* the validation, exactly as
     /// on the document load path, which is why no separate walk over the
     /// rows is needed to call the columns well formed.
     ///
-    /// `actors` is the bundle's own actor table: the columns stay in
-    /// bundle actor space until [`Self::index_frag`] rebases them. Nothing
+    /// `actors` is the change set's own actor table: the columns stay in
+    /// change set actor space until [`Self::index_change_set`] rebases them. Nothing
     /// reads the returned op set's `text_encoding` before then.
     /// `num_actors` is the size of the *sender's* actor table: the
     /// columns' actor indexes are still in that space, and stay there
-    /// until [`Self::index_frag`] rebases them.
+    /// until [`Self::index_change_set`] rebases them.
     /// Succ entries the op set holds, over every row.
     pub(crate) fn succ_entries(&self) -> usize {
         self.cols.succ_actor.len()
@@ -1778,7 +1779,7 @@ impl OpSet {
         self.cols.value.len()
     }
 
-    pub(crate) fn load_frag_cols(
+    pub(crate) fn load_change_set_cols(
         raw: &RawColumns<Uncompressed>,
         data: &[u8],
         num_actors: usize,
@@ -1789,7 +1790,7 @@ impl OpSet {
         let cols = Columns::load(raw.as_map(), data, &[])?;
         let num_rows = cols.len();
         let op_set = OpSet {
-            // filled in by `index_frag`, along with the text encoding —
+            // filled in by `index_change_set`, along with the text encoding —
             // both come from the receiving document
             actors: vec![],
             cols,
@@ -1801,7 +1802,7 @@ impl OpSet {
         Ok(op_set)
     }
 
-    /// The document-dependent half of [`Self::load_frag`]: rebase the
+    /// The document-dependent half of [`Self::load_change_set`]: rebase the
     /// fragment's actor indexes into `doc`'s actor space and build its
     /// indexes there.
     ///
@@ -1814,7 +1815,7 @@ impl OpSet {
     /// insert column says (see `IndexBuilder::split_by_elem`). A
     /// dep-free fragment is causally closed: every element it names, it
     /// created.
-    pub(crate) fn index_frag(
+    pub(crate) fn index_change_set(
         mut self,
         actor_map: &[usize],
         doc: &OpSet,
@@ -2297,7 +2298,7 @@ fn validate_pred_columns(
     }
     // an elided pred column means "no preds anywhere", which is
     // self-consistent — and is the common case, since a fragment stores
-    // in-bundle relationships in succ
+    // in-change set relationships in succ
     if count_bytes.is_empty() {
         if !actor_bytes.is_empty() || !ctr_bytes.is_empty() {
             return Err(ColumnValidationError::ColumnLength(
@@ -2347,7 +2348,7 @@ fn validate_pred_columns(
     Ok(())
 }
 
-/// Id of the bundle format's pred column group (`ops::PRED_COL_ID`).
+/// Id of the change set format's pred column group (`ops::PRED_COL_ID`).
 const PRED_COL_ID_RAW: crate::storage::columns::ColumnId =
     crate::storage::columns::ColumnId::new(7);
 

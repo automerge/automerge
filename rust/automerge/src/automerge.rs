@@ -14,16 +14,16 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
-use crate::change_graph::{ChangeGraph, FragmentDep, FragmentMember};
+use crate::change_graph::{ChangeGraph, ChangeSetDep, ChangeSetMember};
 use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
-use crate::op_set2::change::fragment::FragmentApply;
+use crate::op_set2::change::change_set::ChangeSetApply;
 use crate::patches::{Patch, PatchAccumulator};
 use crate::storage::document::ReconstructError;
-use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
+use crate::storage::{self, change, load, ChangeSet, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
     TransactionArgs,
@@ -79,7 +79,7 @@ pub enum OnPartialLoad {
 /// only the hashes it needs — the heads, loose commits, fragment heads
 /// and checkpoints, and their deps — and frees the rest as fragments
 /// cover them. Everything id-based works (reads, transactions, forks,
-/// diffs, fragment/bundle exchange); operations that need arbitrary
+/// diffs, fragment/change set exchange); operations that need arbitrary
 /// interior hashes (the hash-based sync protocol, exporting the full
 /// change history) return [`AutomergeError::AuditModeRequired`].
 ///
@@ -331,7 +331,7 @@ impl Automerge {
 
     /// An empty document in `audit` mode, for the load paths that build
     /// one up from chunks. Enabling it *before* the chunks land is what
-    /// makes them verified: `apply_bundle` reconstructs and hashes every
+    /// makes them verified: `apply_change_set` reconstructs and hashes every
     /// member in audit mode, and trusts them outside it.
     fn new_with_encoding_and_audit(encoding: TextEncoding, audit: AuditMode) -> Self {
         let mut doc = Self::new_with_encoding(encoding);
@@ -389,37 +389,49 @@ impl Automerge {
     /// (because the hash graph has not been built) and that change is not one
     /// of the current heads — committing as this actor would require the
     /// missing hash.
-    pub fn with_actor(mut self, actor: ActorId) -> Result<Self, AutomergeError> {
-        self.set_actor(actor)?;
-        Ok(self)
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
+        self.set_actor(actor);
+        self
     }
 
     /// Set the actor id for this document.
     ///
     /// See [`Self::with_actor`] for the error contract.
-    pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => {
-                self.check_actor_tip_hash(idx)?;
+                self.ensure_actor_tip_hash(idx);
                 self.actor = Actor::Cached(idx)
             }
             Err(_) => self.actor = Actor::Unused(actor),
         }
-        Ok(self)
+        self
     }
 
     /// Committing as an actor with prior history needs the hash of the
     /// actor's latest change (to record the sequential dependency). Refuse
     /// actors for which that hash is missing.
-    fn check_actor_tip_hash(&self, actor_idx: usize) -> Result<(), AutomergeError> {
+    /// Committing as this actor names its latest change by hash, so make
+    /// sure that hash exists. Only the tip is installed.
+    fn ensure_actor_tip_hash(&mut self, actor_idx: usize) {
         let seq = self.change_graph.seq_for_actor(actor_idx);
         if seq == 0 {
-            return Ok(());
+            return;
         }
         let id = self.change_id_at(actor_idx, seq);
-        self.change_graph
-            .get_hash_for_change_id(&id, &self.ops.actors)?;
-        Ok(())
+        let Some(node) = self.change_graph.node_for_change_id(&id, &self.ops.actors) else {
+            return;
+        };
+        if self.change_graph.hash_for_node(node).is_some() {
+            return;
+        }
+        if let Some(hash) = self.rebuild_hash(node) {
+            // recording a hash can cache a fragment, and that owes a GC;
+            // the tip we just installed is retained either way
+            if self.change_graph.record_node_hash(node, hash) {
+                self.change_graph.gc_after_batch();
+            }
+        }
     }
 
     /// Get the current actor id of this document.
@@ -621,8 +633,7 @@ impl Automerge {
     /// This will create a new actor ID for the forked document
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
-        f.set_actor(ActorId::random())
-            .expect("a random actor is always acceptable");
+        f.set_actor(ActorId::random());
         f
     }
 
@@ -655,8 +666,7 @@ impl Automerge {
             hashes.push(hash);
         }
         let mut f = Self::new_with_encoding(self.text_encoding());
-        f.set_actor(ActorId::random())
-            .expect("a random actor is always acceptable");
+        f.set_actor(ActorId::random());
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
         Ok(f)
@@ -845,29 +855,29 @@ impl Automerge {
                 )));
                 Self::new_with_encoding(options.text_encoding)
             }
-            storage::Chunk::BundleV0(bundle) => {
-                tracing::trace!("first chunk is a 3.3.x bundle chunk");
-                let storage = bundle
+            storage::Chunk::BundleV0(change_set) => {
+                tracing::trace!("first chunk is a 3.3.x change_set chunk");
+                let storage = change_set
                     .into_owned()
                     .verify()
-                    .map_err(|e| load::Error::InvalidBundleColumn(Box::new(e)))?;
-                let bundle_changes = storage
+                    .map_err(|e| load::Error::InvalidChangeSetColumn(Box::new(e)))?;
+                let change_set_changes = storage
                     .to_changes()
-                    .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
+                    .map_err(|e| load::Error::InvalidChangeSetChange(Box::new(e)))?;
                 changes.extend(
-                    bundle_changes
+                    change_set_changes
                         .into_iter()
                         .map(|c| load::LoadedChunk::Change(Box::new(c))),
                 );
                 Self::new_with_encoding(options.text_encoding)
             }
-            storage::Chunk::BundleColumns(bundle) => {
-                tracing::trace!("first chunk is a bundle-columns chunk");
-                // a bundle leading the stream is the fragment form of a
+            storage::Chunk::ChangeSetColumns(change_set) => {
+                tracing::trace!("first chunk is a change_set-columns chunk");
+                // a change set leading the stream is the fragment form of a
                 // document save, orphan chunks and all — so it earns the
                 // same tolerance for changes left over at the end
                 first_chunk_was_doc = true;
-                changes.push(load::LoadedChunk::Bundle(bundle));
+                changes.push(load::LoadedChunk::ChangeSet(change_set));
                 Self::new_with_encoding_and_audit(options.text_encoding, options.audit)
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
@@ -887,7 +897,7 @@ impl Automerge {
         am.change_graph.set_gc_mode(options.gc.unwrap_or_default());
         tracing::trace!("loading change chunks");
         // The first chunk is applied here too, not at construction: only
-        // a document chunk builds the document outright, and a bundle —
+        // a document chunk builds the document outright, and a change set —
         // the fragment form of the same thing — is a chunk like any
         // other. So a partial load must still apply what parsed, or
         // everything before the corruption is thrown away.
@@ -952,7 +962,7 @@ impl Automerge {
                     // replacing self must not change the audit mode
                     .audit(self.audit_mode()),
             )?;
-            doc = doc.with_actor(self.actor_id().clone())?;
+            doc = doc.with_actor(self.actor_id().clone());
             doc.ops_mut().mark_all_dirty();
             *self = doc;
             return Ok(self.ops.len());
@@ -987,7 +997,7 @@ impl Automerge {
 
     /// Apply what the loader recovered, in order.
     ///
-    /// Runs of change chunks still go in as one batch; a bundle takes the
+    /// Runs of change chunks still go in as one batch; a change set takes the
     /// manifold path, which is both faster and the only one that works
     /// without the members' dep hashes.
     fn apply_loaded(&mut self, chunks: Vec<load::LoadedChunk>) -> Result<(), AutomergeError> {
@@ -995,11 +1005,11 @@ impl Automerge {
         for chunk in chunks {
             match chunk {
                 load::LoadedChunk::Change(c) => pending.push(*c),
-                load::LoadedChunk::Bundle(b) => {
+                load::LoadedChunk::ChangeSet(b) => {
                     if !pending.is_empty() {
                         self.apply_changes(std::mem::take(&mut pending))?;
                     }
-                    self.apply_bundle(*b)?;
+                    self.apply_change_set(*b)?;
                 }
             }
         }
@@ -1026,9 +1036,9 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeId>, AutomergeError> {
-        if let Some(bundle) = self.get_changes_added(other)? {
-            tracing::trace!(heads=?bundle.heads().collect::<Vec<_>>(), "merging new changes");
-            self.apply_bundle(bundle)?;
+        if let Some(change_set) = self.get_changes_added(other)? {
+            tracing::trace!(heads=?change_set.heads().collect::<Vec<_>>(), "merging new changes");
+            self.apply_change_set(change_set)?;
         }
         Ok(self.get_heads())
     }
@@ -1037,7 +1047,7 @@ impl Automerge {
     ///
     /// A whole-document fragment by default;
     /// [`SaveOptions::legacy_format`] writes the pre-fragment document
-    /// chunk instead, for readers that predate bundles.
+    /// chunk instead, for readers that predate change sets.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         let mut bytes = if options.legacy_format {
             // this format writes the actor table verbatim, so a stray
@@ -1047,24 +1057,24 @@ impl Automerge {
             self.assert_no_unused_actors(cfg!(debug_assertions));
             Document::new(&self.ops, &self.change_graph, options.compress()).into_bytes()
         } else if self.change_graph.is_empty() {
-            // a bundle must deliver at least one head, so a document with
+            // a change set must deliver at least one head, so a document with
             // no changes saves as nothing at all — which is what loading
             // it back yields
             Vec::new()
         } else {
-            let bundle = self
-                .bundle_document()
-                .expect("a document's own changes are always bundleable");
+            let change_set = self
+                .change_set_document()
+                .expect("a document's own changes can always be made into a change set");
             if options.deflate {
-                bundle.bytes()
+                change_set.bytes()
             } else {
-                bundle.bytes_uncompressed()
+                change_set.bytes_uncompressed()
             }
         };
 
         // Orphans — changes applied without their dependencies — ride
         // after the document as their own change chunks, which is the
-        // only place they can go: a bundle's members must be causally
+        // only place they can go: a change set's members must be causally
         // closed, and the document chunk has no room for them either.
         if options.retain_orphans {
             for orphaned in self.queue.iter() {
@@ -1102,13 +1112,12 @@ impl Automerge {
     /// what lets the receiver rebuild the fragment structure this
     /// document had; without them it would know only the fragments its
     /// own heads form.
-    pub fn bundle_document(&self) -> Result<Bundle, AutomergeError> {
+    pub fn change_set_document(&self) -> Result<ChangeSet, AutomergeError> {
         let nodes = self.change_graph.all_nodes();
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
         let heads = self.get_head_hashes();
-        let checkpoints = self.change_graph.checkpoint_hashes();
         // a whole document depends on nothing outside itself
-        self.assemble_bundle(&heads, &checkpoints, &[], &nodes, storage)
+        self.assemble_change_set(&heads, &[], &nodes, storage)
     }
 
     /// The changes `heads` does not already cover, as one fragment.
@@ -1116,7 +1125,10 @@ impl Automerge {
     /// `None` when `heads` covers everything. Ids the document does not
     /// know contribute nothing, the same reading `get_changes` takes —
     /// "changes since" is legitimately asked with a peer's heads.
-    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Option<Bundle>, AutomergeError> {
+    pub fn change_set_after(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Option<ChangeSet>, AutomergeError> {
         let nodes: Vec<_> = heads
             .iter()
             .filter_map(|id| self.node_for_change_id(id))
@@ -1125,21 +1137,21 @@ impl Automerge {
         let fresh = self.change_graph.get_build_indexes(clock);
         // the boundary the receiver must already have
         let boundary = self.change_ids_to_hashes_lossy(heads);
-        self.bundle_nodes(fresh, &boundary)
+        self.change_set_nodes(fresh, &boundary)
     }
 
     /// Wrap `nodes` as a fragment whose boundary is `boundary` — the
-    /// shared spine between `bundle_after` and the merge/local-change
+    /// shared spine between `change_set_after` and the merge/local-change
     /// helpers. `None` when there is nothing to deliver.
-    fn bundle_nodes(
+    fn change_set_nodes(
         &self,
         nodes: Vec<crate::change_graph::NodeIdx>,
         boundary: &[ChangeHash],
-    ) -> Result<Option<Bundle>, AutomergeError> {
+    ) -> Result<Option<ChangeSet>, AutomergeError> {
         if nodes.is_empty() {
             return Ok(None);
         }
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
         // the heads of the delivered set: its members that nothing else
         // in it depends on
         let heads: Vec<ChangeHash> = self
@@ -1162,13 +1174,9 @@ impl Automerge {
                     .is_some_and(|n| nodes.binary_search(&n).is_err())
             })
             .collect();
-        Ok(Some(self.assemble_bundle(
-            &heads,
-            &[],
-            &boundary,
-            &nodes,
-            storage,
-        )?))
+        Ok(Some(
+            self.assemble_change_set(&heads, &boundary, &nodes, storage)?,
+        ))
     }
 
     /// [`Self::save_with_options`] with the defaults.
@@ -1197,7 +1205,7 @@ impl Automerge {
             return Ok(bytes);
         }
         Ok(self
-            .bundle_after(heads)?
+            .change_set_after(heads)?
             .map(|b| {
                 if options.deflate {
                     b.bytes()
@@ -1250,7 +1258,7 @@ impl Automerge {
     /// The last change this actor made, as a one-member fragment.
     ///
     /// `None` when this actor has not committed anything.
-    pub fn get_last_local_change(&self) -> Result<Option<Bundle>, AutomergeError> {
+    pub fn get_last_local_change(&self) -> Result<Option<ChangeSet>, AutomergeError> {
         let Some(actor) = self.get_actor_index() else {
             return Ok(None);
         };
@@ -1265,7 +1273,7 @@ impl Automerge {
         // the change's own deps are its boundary: everything else the
         // receiver must already have
         let boundary = self.change_graph.parent_hashes(node);
-        self.bundle_nodes(vec![node], &boundary)
+        self.change_set_nodes(vec![node], &boundary)
     }
 
     /// Clock range for diffing between two head sets, resolved with the
@@ -1613,28 +1621,137 @@ impl Automerge {
         Ok(nodes)
     }
 
+    /// Build a change set from the changes it delivers (`heads`) and the
+    /// set covering everything before it (`boundary`).
+    ///
+    /// Members, checkpoints and deps are all derived; none is taken from
+    /// the caller.
+    pub fn make_change_set(
+        &self,
+        heads: &[ChangeId],
+        boundary: &[ChangeId],
+    ) -> Result<ChangeSet, AutomergeError> {
+        let unknown = || AutomergeError::InvalidFragment("change set names an unknown change");
+        let node_of = |id: &ChangeId| {
+            self.change_graph
+                .node_for_change_id(id, &self.ops.actors)
+                .ok_or_else(unknown)
+        };
+        let head_nodes = heads.iter().map(node_of).collect::<Result<Vec<_>, _>>()?;
+        let boundary_nodes = boundary
+            .iter()
+            .map(node_of)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let clock = self
+            .change_graph
+            .seq_clock_for_nodes(boundary_nodes.clone());
+        let members = self
+            .change_graph
+            .members_between(head_nodes.clone(), &clock);
+
+        let hash_of = |n: &crate::change_graph::NodeIdx| {
+            self.change_graph.hash_for_node(*n).ok_or_else(unknown)
+        };
+        let head_hashes = head_nodes
+            .iter()
+            .map(hash_of)
+            .collect::<Result<Vec<_>, _>>()?;
+        let boundary_hashes = boundary_nodes
+            .iter()
+            .map(hash_of)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, members.clone())?;
+        self.assemble_change_set(&head_hashes, &boundary_hashes, &members, storage)
+    }
+
+    /// [`Self::make_change_set`] for a [`Fragment`]. Debug builds check
+    /// the derived contents against the ones the fragment carries.
+    pub fn make_change_set_from_fragment(&self, f: &Fragment) -> Result<ChangeSet, AutomergeError> {
+        let unknown = || AutomergeError::InvalidFragment("fragment names an unknown change");
+        let id_of = |h: &ChangeHash| {
+            self.change_graph
+                .node_by_hash(h)
+                .map(|n| self.change_graph.change_id(n, &self.ops.actors))
+                .ok_or_else(unknown)
+        };
+        let heads = vec![id_of(&f.head)?];
+        let boundary = f
+            .boundary
+            .iter()
+            .map(id_of)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let change_set = self.make_change_set(&heads, &boundary)?;
+
+        #[cfg(debug_assertions)]
+        {
+            let sorted = |mut v: Vec<ChangeHash>| {
+                v.sort_unstable();
+                v
+            };
+            debug_assert_eq!(
+                sorted(change_set.checkpoints.iter().map(|(_, h)| *h).collect()),
+                sorted(f.checkpoints.clone()),
+                "derived checkpoints disagree with the fragment's",
+            );
+            debug_assert_eq!(
+                sorted(change_set.boundary.iter().map(|(h, _)| *h).collect()),
+                sorted(f.boundary.clone()),
+                "derived boundary disagrees with the fragment's",
+            );
+            let mut derived: Vec<ChangeId> = change_set
+                .member_actors
+                .iter()
+                .zip(change_set.member_seqs.iter())
+                .map(|(a, s)| ChangeId::new(*s, change_set.actors()[usize::from(*a)].clone(), 0))
+                .collect();
+            let mut declared = f.members.clone();
+            derived.sort();
+            declared.sort();
+            debug_assert_eq!(
+                derived, declared,
+                "derived members disagree with the fragment's"
+            );
+        }
+
+        Ok(change_set)
+    }
+
     #[doc(hidden)]
-    pub fn bundle_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
+    pub fn change_set_for_fragment(&self, f: &Fragment) -> Result<ChangeSet, AutomergeError> {
         let nodes = self.fragment_nodes(f)?;
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
-        self.assemble_bundle(&[f.head], &f.checkpoints, &f.boundary, &nodes, storage)
+        let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        self.assemble_change_set(&[f.head], &f.boundary, &nodes, storage)
     }
 
     /// Wrap collected change storage in its fragment metadata.
     ///
-    /// `heads` is a list because a bundle standing in for a whole
+    /// `heads` is a list because a change set standing in for a whole
     /// document delivers every head the document has, where a fragment
     /// delivers exactly one.
-    fn assemble_bundle(
+    /// Checkpoints are derived: the members at fragment level > 0 that
+    /// are not already delivered as heads.
+    fn assemble_change_set(
         &self,
         heads: &[ChangeHash],
-        checkpoints: &[ChangeHash],
         boundary: &[ChangeHash],
         nodes: &[crate::change_graph::NodeIdx],
-        storage: crate::storage::BundleStorage<'static, crate::storage::change::Verified>,
-    ) -> Result<Bundle, AutomergeError> {
+        storage: crate::storage::ChangeSetStorage<'static, crate::storage::change::Verified>,
+    ) -> Result<ChangeSet, AutomergeError> {
+        let checkpoints: Vec<ChangeHash> = {
+            let mut v: Vec<ChangeHash> = nodes
+                .iter()
+                .filter_map(|n| self.change_graph.hash_for_node(*n))
+                .filter(|h| h.fragment_level() > 0 && !heads.contains(h))
+                .collect();
+            v.sort_unstable();
+            v
+        };
+        let checkpoints = &checkpoints[..];
         let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
-        // member indexes are positions in the bundle's (topologically
+        // member indexes are positions in the change set's (topologically
         // ordered) change list, which is node order
         let member_index = |h: &ChangeHash| -> Option<usize> {
             let n = self.change_graph.node_by_hash(h)?;
@@ -1666,12 +1783,12 @@ impl Automerge {
             .map(change_id)
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
-        // mirrors what `Bundle::try_from` validates on the way back in, so
-        // a locally built bundle carries the same member index a received
+        // mirrors what `ChangeSet::try_from` validates on the way back in, so
+        // a locally built change set carries the same member index a received
         // one does
         let (member_actors, member_seqs) = storage.member_ids().map_err(|_| unknown())?;
 
-        Ok(Bundle::new(
+        Ok(ChangeSet::new(
             heads,
             checkpoints,
             boundary,
@@ -1682,7 +1799,7 @@ impl Automerge {
         ))
     }
 
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn change_sets_for_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
@@ -1691,51 +1808,52 @@ impl Automerge {
             .iter()
             .map(|f| self.fragment_nodes(f))
             .collect::<Result<Vec<_>, _>>()?;
-        // one shared pass resolves every bundle's hint ranks; bundling
+        // one shared pass resolves every change set's hint ranks; bundling
         // them separately would walk the document once each
-        let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, nodes.clone())?;
+        let storages =
+            ChangeSet::storage_for_node_sets(&self.ops, &self.change_graph, nodes.clone())?;
         fragments
             .iter()
             .zip(nodes.iter())
             .zip(storages)
             .map(|((f, n), storage)| {
                 Ok(self
-                    .assemble_bundle(&[f.head], &f.checkpoints, &f.boundary, n, storage)?
+                    .assemble_change_set(&[f.head], &f.boundary, n, storage)?
                     .bytes())
             })
             .collect()
     }
 
-    /// Apply a bundle's changes.
+    /// Apply a change set's changes.
     ///
-    /// Takes the bundle by value: a received bundle's op columns are
+    /// Takes the change set by value: a received change set's op columns are
     /// loaded once, on the way in, and *moved* into this document's op
-    /// set by the merge — so the bundle is consumed rather than read.
-    /// Apply the same bundle to a second document by cloning it.
-    pub fn apply_bundle(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
+    /// set by the merge — so the change set is consumed rather than read.
+    /// Apply the same change set to a second document by cloning it.
+    pub fn apply_change_set(&mut self, change_set: ChangeSet) -> Result<(), AutomergeError> {
         // The apply takes the sender's whole actor table up front, before
-        // it knows the bundle is applicable, so a bail leaves actors no
+        // it knows the change set is applicable, so a bail leaves actors no
         // change names. Harmless to a fragment save, which names only
         // the actors its ops use; the legacy save is where it matters,
         // and where it is swept up.
-        let result = self.apply_bundle_inner(bundle);
+        let result = self.apply_change_set_inner(change_set);
         if result.is_ok() {
             self.assert_no_unused_actors(cfg!(debug_assertions));
         }
         result
     }
 
-    fn apply_bundle_inner(&mut self, mut bundle: Bundle) -> Result<(), AutomergeError> {
+    fn apply_change_set_inner(&mut self, mut change_set: ChangeSet) -> Result<(), AutomergeError> {
         if self.audit_mode() == AuditMode::Enabled {
             // audit mode keeps and verifies every hash: reconstruct the
             // member changes and apply them individually, computing each
-            // hash instead of taking the bundle's metadata on trust
-            let changes = bundle.to_changes()?;
+            // hash instead of taking the change set's metadata on trust
+            let changes = change_set.to_changes()?;
             // The manifold path's no-missing-deps contract, checked
             // before anything is applied rather than after: a dep must
-            // be a change we have or one the bundle carries. Checking it
+            // be a change we have or one the change set carries. Checking it
             // afterwards (by asking whether the heads made it into the
-            // graph) meant a rejected bundle had already been applied.
+            // graph) meant a rejected change set had already been applied.
             let carried: std::collections::HashSet<ChangeHash> =
                 changes.iter().map(|c| c.hash()).collect();
             for c in &changes {
@@ -1746,13 +1864,13 @@ impl Automerge {
                 }
             }
             // and the claimed heads against the computed ones: this is
-            // the mode that does not take a bundle's metadata on trust,
+            // the mode that does not take a change set's metadata on trust,
             // and a head that does not hash to what it claims is a
             // forgery
-            for (hash, index) in &bundle.heads {
+            for (hash, index) in &change_set.heads {
                 if changes.get(*index).map(|c| c.hash()) != Some(*hash) {
-                    return Err(AutomergeError::InvalidFragment(
-                        "bundle head does not hash to the member it names",
+                    return Err(AutomergeError::MalformedChangeSet(
+                        "change set head does not hash to the member it names",
                     ));
                 }
             }
@@ -1762,36 +1880,36 @@ impl Automerge {
 
         // the op columns as the parse left them; taken by value because
         // the merge moves them into this document's op set
-        let frag_ops = bundle.take_frag_ops()?;
-        // borrowed for the rest: the bundle lives until this returns,
+        let change_set_ops = change_set.take_change_set_ops()?;
+        // borrowed for the rest: the change set lives until this returns,
         // which is all its borrowed metadata needs
-        let bundle = &bundle;
+        let change_set = &change_set;
 
         // the members, in topological order, identified by the columns the
         // parse validated — enough to decide what to keep and to resolve
         // heads, checkpoints and deps. Only the overlap path below needs
         // their full metadata.
-        let member_actors = &bundle.member_actors;
-        let member_seqs = &bundle.member_seqs;
+        let member_actors = &change_set.member_actors;
+        let member_seqs = &change_set.member_seqs;
         let num_members = member_seqs.len();
 
-        // Bundle parsing catches all shape errors — a bundle that
+        // Change set parsing catches all shape errors — a change set that
         // exists is well formed, so indexes below need no bounds checks
 
         // ── resolve ─────────────────────────────────────────────────
         //
         // Nothing below this point in the phase touches the document.
-        // Every lookup goes through the bundle's own actor ids, so it
+        // Every lookup goes through the change set's own actor ids, so it
         // works before this document has heard of them — which is what
         // lets the whole decision be made before anything is written.
 
-        // a member's id, in the bundle's terms. The hint is a guess the
+        // a member's id, in the change set's terms. The hint is a guess the
         // resolver checks and falls back from, so it costs nothing to be
         // wrong about a document that has never seen this actor.
         let member_id = |i: usize| -> ChangeId {
             ChangeId::new(
                 member_seqs[i],
-                bundle.actors()[usize::from(member_actors[i])].clone(),
+                change_set.actors()[usize::from(member_actors[i])].clone(),
                 0,
             )
         };
@@ -1800,7 +1918,7 @@ impl Automerge {
         // one of its ops) is already here exactly when the clock covers
         // it, since changes arrive in per-actor order. Indexed by this
         // document's actors, so the ops clock has to wait until the
-        // bundle's actors have joined them.
+        // change set's actors have joined them.
         let seq_clock = self.change_graph.current_seq_clock();
 
         // Split the members into ones we already have (skipped — applying
@@ -1810,13 +1928,13 @@ impl Automerge {
         // a kept member's position among the kept (its graph-member index)
         let mut kept_index = vec![usize::MAX; num_members];
         let mut num_kept = 0;
-        let mut next_seq: Vec<Option<u64>> = vec![None; bundle.actors().len()];
+        let mut next_seq: Vec<Option<u64>> = vec![None; change_set.actors().len()];
         for i in 0..num_members {
             let actor = usize::from(member_actors[i]);
             let seq = member_seqs[i].get();
             let have = self
                 .ops
-                .lookup_actor(&bundle.actors()[actor])
+                .lookup_actor(&change_set.actors()[actor])
                 .and_then(|idx| seq_clock.get_for_actor(&idx))
                 .map(|s| s.get() as u64)
                 .unwrap_or(0);
@@ -1858,8 +1976,8 @@ impl Automerge {
         // boundary heads (ancestors of the members, so already nodes
         // here) and, below, the external deps.
         let mut hash_pairs: Vec<(crate::change_graph::NodeIdx, ChangeHash)> =
-            Vec::with_capacity(bundle.boundary.len() + bundle.dep_ids.len());
-        for (hash, id) in &bundle.boundary {
+            Vec::with_capacity(change_set.boundary.len() + change_set.dep_ids.len());
+        for (hash, id) in &change_set.boundary {
             let node = self
                 .change_graph
                 .node_for_change_id(id, &self.ops.actors)
@@ -1870,17 +1988,17 @@ impl Automerge {
         // A member's deps name other members (by position) or changes the
         // document already has: external deps via their (actor, seq) ids
         // from the metadata prefix — whose hash pairings we record for
-        // later fragments — and, when the bundle overlaps, its own
+        // later fragments — and, when the change set overlaps, its own
         // skipped members.
         //
-        // `add_fragment_members*` drops each resolved parent from the
+        // `add_change_set_members*` drops each resolved parent from the
         // graph's heads and `record_fragment_head` below adds the new
         // one, so the head set needs no separate maintenance here.
-        let mut graph_members: Vec<FragmentMember<'_>> = Vec::new();
+        let mut graph_members: Vec<ChangeSetMember<'_>> = Vec::new();
         let mut ext_nodes: Vec<crate::change_graph::NodeIdx> = Vec::new();
         if overlap {
             // the members' own metadata, decoded (only this path needs it)
-            let members = bundle.changes()?;
+            let members = change_set.changes()?;
             graph_members.reserve(num_kept);
             for (i, m) in members.iter().enumerate() {
                 if !keep[i] {
@@ -1891,36 +2009,36 @@ impl Automerge {
                     let d = *d as usize;
                     if d < num_members {
                         if keep[d] {
-                            deps.push(FragmentDep::Member(kept_index[d]));
+                            deps.push(ChangeSetDep::Member(kept_index[d]));
                         } else {
                             let node = self
                                 .change_graph
                                 .node_for_change_id(&member_id(d), &self.ops.actors);
-                            deps.push(FragmentDep::Node(node.ok_or(AutomergeError::MissingDeps)?));
+                            deps.push(ChangeSetDep::Node(node.ok_or(AutomergeError::MissingDeps)?));
                         }
                     } else {
-                        let dep_id = bundle
+                        let dep_id = change_set
                             .dep_ids
                             .get(d - num_members)
-                            .ok_or(AutomergeError::InvalidFragment("bad dep index"))?;
+                            .ok_or(AutomergeError::MalformedChangeSet("bad dep index"))?;
                         let node = self
                             .change_graph
                             .node_for_change_id(dep_id, &self.ops.actors)
                             .ok_or(AutomergeError::MissingDeps)?;
                         // learn the dep's hash pairing — an anchor for
                         // later fragments that reference it by hash
-                        hash_pairs.push((node, bundle.deps()[d - num_members]));
-                        deps.push(FragmentDep::Node(node));
+                        hash_pairs.push((node, change_set.deps()[d - num_members]));
+                        deps.push(ChangeSetDep::Node(node));
                     }
                 }
-                graph_members.push(FragmentMember {
+                graph_members.push(ChangeSetMember {
                     actor: usize::from(member_actors[i]),
                     seq: m.seq,
                     max_op: m.max_op,
                     num_ops: 1 + m.max_op - m.start_op,
                     timestamp: m.timestamp,
                     message: m.message.as_ref().map(|s| s.to_string()),
-                    // the bundle outlives this call, so the extra bytes
+                    // the change set outlives this call, so the extra bytes
                     // ride borrowed rather than copied
                     extra: Cow::Borrowed(m.extra.as_ref()),
                     deps,
@@ -1934,33 +2052,33 @@ impl Automerge {
             // graph the columns.
             //
             // A dep the document does not have is `MissingDeps` whether or
-            // not a member turns out to reference it: the bundle declares
+            // not a member turns out to reference it: the change set declares
             // it as history it builds on.
-            ext_nodes.reserve(bundle.dep_ids.len());
-            for (i, dep_id) in bundle.dep_ids.iter().enumerate() {
+            ext_nodes.reserve(change_set.dep_ids.len());
+            for (i, dep_id) in change_set.dep_ids.iter().enumerate() {
                 let node = self
                     .change_graph
                     .node_for_change_id(dep_id, &self.ops.actors)
                     .ok_or(AutomergeError::MissingDeps)?;
                 // learn the dep's hash pairing — an anchor for later
                 // fragments that reference it by hash
-                hash_pairs.push((node, bundle.deps()[i]));
+                hash_pairs.push((node, change_set.deps()[i]));
                 ext_nodes.push(node);
             }
         }
 
-        // the heads this bundle delivers, and the checkpoints that keep
+        // the heads this change set delivers, and the checkpoints that keep
         // nested fragments exportable
-        let mut head_nodes = Vec::with_capacity(bundle.heads.len());
-        for (hash, index) in &bundle.heads {
+        let mut head_nodes = Vec::with_capacity(change_set.heads.len());
+        for (hash, index) in &change_set.heads {
             head_nodes.push((
-                member_node(*index).ok_or(AutomergeError::InvalidFragment(
-                    "bundle head is not a member of the bundle",
+                member_node(*index).ok_or(AutomergeError::MalformedChangeSet(
+                    "change set head is not a member of the change set",
                 ))?,
                 *hash,
             ));
         }
-        let checkpoint_nodes: Vec<_> = bundle
+        let checkpoint_nodes: Vec<_> = change_set
             .checkpoints
             .iter()
             .filter_map(|(i, hash)| member_node(*i).map(|n| (n, *hash)))
@@ -1971,26 +2089,26 @@ impl Automerge {
         // Two fallible steps remain, and both leave the graph untouched
         // when they fail; the actor table is the one thing already
         // written, and it is put back exactly. Everything after them is
-        // infallible, so the document either takes the whole bundle or
+        // infallible, so the document either takes the whole change set or
         // none of it.
-        let added = self.put_actor_refs(bundle.actors());
-        let actor_map: Vec<usize> = bundle
+        let added = self.put_actor_refs(change_set.actors());
+        let actor_map: Vec<usize> = change_set
             .actors()
             .iter()
             .map(|a| self.ops.lookup_actor(a).expect("actor was just inserted"))
             .collect();
         let clock = self.change_graph.current_clock();
 
-        // load the ops before touching the graph, so a malformed bundle
+        // load the ops before touching the graph, so a malformed change set
         // fails without altering history. Ops the clock covers belong to
         // skipped members and are dropped.
-        let ops = match FragmentApply::new(
-            bundle,
+        let ops = match ChangeSetApply::new(
+            change_set,
             actor_map.clone(),
             &clock,
             overlap,
             &self.ops,
-            frag_ops,
+            change_set_ops,
         ) {
             Ok(ops) => ops,
             Err(e) => {
@@ -2010,14 +2128,14 @@ impl Automerge {
         };
 
         if overlap {
-            // the members' actors were resolved in bundle space; they are
+            // the members' actors were resolved in change set space; they are
             // document indexes now
             for m in &mut graph_members {
                 m.actor = actor_map[m.actor];
             }
-            self.change_graph.add_fragment_members(graph_members);
-        } else if let Err(e) = self.change_graph.add_fragment_members_cols(
-            &bundle.change_cols(),
+            self.change_graph.add_change_set_members(graph_members);
+        } else if let Err(e) = self.change_graph.add_change_set_members_cols(
+            &change_set.change_cols(),
             member_actors,
             member_seqs,
             &actor_map,
@@ -2135,6 +2253,23 @@ impl Automerge {
         self.change_graph.retain_hashes_only();
     }
 
+    /// The hash of `node`, rehashing back to the nearest retained hashes
+    /// if the GC freed it. Slow; only reachable on a document loaded
+    /// without them.
+    pub(crate) fn rebuild_hash(&self, node: crate::change_graph::NodeIdx) -> Option<ChangeHash> {
+        if let Some(h) = self.change_graph.hash_for_node(node) {
+            return Some(h);
+        }
+        let nodes = self.change_graph.nodes_back_to_retained(node);
+        let pos = nodes.binary_search(&node).ok()?;
+        let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes).ok()?;
+        // members come back in the order they went in, which is node
+        // order, which is topological — so each change's deps are hashed
+        // before it is
+        let changes = storage.to_changes().ok()?;
+        changes.get(pos).map(|c| c.hash())
+    }
+
     /// Run a deferred retention GC — see [`GcMode`].
     ///
     /// Under [`GcMode::Auto`] there is never anything owed, so this is a
@@ -2161,10 +2296,9 @@ impl Automerge {
     }
 
     pub fn with_manual_gc(mut self) -> Self {
-       self.set_gc_mode(GcMode::Manual);
-       self
+        self.set_gc_mode(GcMode::Manual);
+        self
     }
-
 
     /// Get the heads of this document.
     ///
@@ -2393,13 +2527,13 @@ impl Automerge {
     /// loaded document.
     pub fn get_changes_added_legacy(&self, other: &Self) -> Result<Vec<Change>, AutomergeError> {
         match self.get_changes_added(other)? {
-            Some(bundle) => bundle.to_changes(),
+            Some(change_set) => change_set.to_changes(),
             None => Ok(vec![]),
         }
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added(&self, other: &Self) -> Result<Option<Bundle>, AutomergeError> {
+    pub fn get_changes_added(&self, other: &Self) -> Result<Option<ChangeSet>, AutomergeError> {
         // hash-free: per-actor change sequences are linear, so a change
         // in `other` is new to us exactly when our seq clock does not
         // cover its (actor, seq) — the same identify-by-(actor, seq)
@@ -2448,15 +2582,27 @@ impl Automerge {
                 exclude.include(other_idx, Some(shared));
             }
         }
-        let nodes = other.change_graph.get_build_indexes(exclude);
-        // outside audit mode a boundary dep's hash may have been freed,
-        // and a bundle can only name external deps by hash — so grow the
-        // set until the boundary is one the retention rule keeps
-        let nodes = other.change_graph.extend_to_retained_boundary(nodes);
+        let nodes = other.change_graph.get_build_indexes(exclude.clone());
+        // Outside audit mode the retention GC may have freed the hash of
+        // a change on this boundary, and a change set can only name its
+        // external deps by hash. When that happens hand the boundary
+        // back to the fragment that swallowed it and re-derive the
+        // members from there — the boundary only moves backwards, so the
+        // delivered set only grows.
+        let nodes = if other.change_graph.boundary_is_nameable(&nodes) {
+            nodes
+        } else {
+            match other.change_graph.widen_boundary_to_fragment(&exclude) {
+                Some(widened) => other.change_graph.get_build_indexes(widened),
+                // no fragment reaches that far back: nothing to widen to,
+                // so let the assemble report the unnameable dep
+                None => nodes,
+            }
+        };
         // the boundary is what we already have and they build on: our
         // heads, as far as they are known to `other`
         let boundary = self.get_head_hashes();
-        other.bundle_nodes(nodes, &boundary)
+        other.change_set_nodes(nodes, &boundary)
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -3864,14 +4010,14 @@ mod dirty_diff_tests {
 
     #[test]
     fn batch_remote_adjacent_list_update_and_conflict_dirty_register_ranges() {
-        let mut doc1 = Automerge::new().with_actor(ActorId::from([1])).unwrap();
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
         tx.insert(&list, 1, "b").unwrap();
         tx.insert(&list, 2, "c").unwrap();
         tx.commit();
-        let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
 
         let mut tx = doc1.transaction();
         tx.put(&list, 1, "local-b").unwrap();
@@ -3966,14 +4112,14 @@ mod dirty_diff_tests {
 
     #[test]
     fn batch_remote_insert_before_conflicting_list_element_matches_full_diff() {
-        let mut doc1 = Automerge::new().with_actor(ActorId::from([1])).unwrap();
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "a").unwrap();
         tx.insert(&list, 1, "b").unwrap();
         tx.insert(&list, 2, "c").unwrap();
         tx.commit();
-        let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
 
         let mut tx = doc1.transaction();
         tx.put(&list, 1, "local-b").unwrap();
@@ -4254,13 +4400,13 @@ mod dirty_diff_tests {
         // Pinned timestamp: hashes must be a pure function of the ops,
         // or a commit can land on a fragment-head hash (1/256) and free
         // the hashes this test's change emission needs. See HASHLESS.md.
-        let mut doc1 = Automerge::new().with_actor(ActorId::from([1])).unwrap();
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
         let mut tx = doc1.transaction();
         let map = tx.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
         tx.put(&map, "key", 1).unwrap();
         tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
         let before = doc1.get_heads();
-        let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
 
         doc1.ops_mut().clear_dirty();
         let mut tx = doc1.transaction();
@@ -4315,13 +4461,13 @@ mod dirty_diff_tests {
     fn remote_map_conflict_dirties_changed_rows() {
         for local in ["0b", "fb"] {
             let mut doc1 = Automerge::new();
-            doc1.set_actor(local.try_into().unwrap()).unwrap();
+            doc1.set_actor(local.try_into().unwrap());
             doc1.enable_audit_mode().unwrap();
             let mut tx = doc1.transaction();
             tx.put(ROOT, "key", 1).unwrap();
             tx.commit();
             let mut doc2 = doc1.fork();
-            doc2.set_actor("aa".try_into().unwrap()).unwrap();
+            doc2.set_actor("aa".try_into().unwrap());
 
             let mut tx = doc1.transaction();
             tx.put(ROOT, "key", 2).unwrap();
@@ -4358,8 +4504,8 @@ mod dirty_diff_tests {
     fn batched_remote_map_conflict_dirties_whole_new_key_register() {
         let mut doc1 = Automerge::new();
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
-        let mut doc3 = doc1.fork().with_actor(ActorId::from([3])).unwrap();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
+        let mut doc3 = doc1.fork().with_actor(ActorId::from([3]));
 
         let mut tx = doc2.transaction();
         tx.put(ROOT, "key", "a").unwrap();
@@ -4419,14 +4565,14 @@ mod dirty_diff_tests {
     fn remote_list_conflict_dirties_changed_rows() {
         for local in ["0b", "fb"] {
             let mut doc1 = Automerge::new();
-            doc1.set_actor(local.try_into().unwrap()).unwrap();
+            doc1.set_actor(local.try_into().unwrap());
             doc1.enable_audit_mode().unwrap();
             let mut tx = doc1.transaction();
             let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
             tx.insert(&list, 0, "a").unwrap();
             tx.commit();
             let mut doc2 = doc1.fork();
-            doc2.set_actor("aa".try_into().unwrap()).unwrap();
+            doc2.set_actor("aa".try_into().unwrap());
 
             let mut tx = doc1.transaction();
             tx.put(&list, 0, "A").unwrap();
@@ -4494,11 +4640,11 @@ mod dirty_diff_tests {
         // Pinned timestamp: hashes must be a pure function of the ops,
         // or a commit can land on a fragment-head hash (1/256) and free
         // the hashes this test's change emission needs. See HASHLESS.md.
-        let mut doc1 = Automerge::new().with_actor(ActorId::from([1])).unwrap();
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
         let mut tx = doc1.transaction();
         tx.put(ROOT, "key", "base").unwrap();
         tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
-        let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
 
         let mut tx = doc1.transaction();
         tx.put(ROOT, "key", "a").unwrap();
@@ -4525,12 +4671,12 @@ mod dirty_diff_tests {
 
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_list_conflict_resolution_exposes_value() {
-        let mut doc1 = Automerge::new().with_actor(ActorId::from([1])).unwrap();
+        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", crate::ObjType::List).unwrap();
         tx.insert(&list, 0, "base").unwrap();
         tx.commit();
-        let mut doc2 = doc1.fork().with_actor(ActorId::from([2])).unwrap();
+        let mut doc2 = doc1.fork().with_actor(ActorId::from([2]));
 
         let mut tx = doc1.transaction();
         tx.put(&list, 0, "a").unwrap();
@@ -5292,7 +5438,7 @@ mod actor_hygiene_tests {
     #[test]
     fn rolled_back_transaction_leaves_no_actor() {
         let mut doc = Automerge::new();
-        doc.set_actor(actor(1)).unwrap();
+        doc.set_actor(actor(1));
         let mut tx = doc.transaction();
         tx.put(ROOT, "k", 1).unwrap();
         tx.rollback();
@@ -5310,7 +5456,7 @@ mod actor_hygiene_tests {
     #[test]
     fn empty_transaction_leaves_no_actor() {
         let mut doc = Automerge::new();
-        doc.set_actor(actor(1)).unwrap();
+        doc.set_actor(actor(1));
         let tx = doc.transaction();
         assert!(tx.commit().is_none());
         assert_clean(&doc, "empty commit by a new actor");
@@ -5321,8 +5467,8 @@ mod actor_hygiene_tests {
     /// before the first write, and the one write that precedes the last
     /// two (the actor table) is put back exactly.
     #[test]
-    fn failed_bundle_apply_changes_nothing() {
-        let mut src = AutoCommit::new().with_actor(actor(7)).unwrap();
+    fn failed_change_set_apply_changes_nothing() {
+        let mut src = AutoCommit::new().with_actor(actor(7));
         src.enable_audit_mode().unwrap();
         src.put(ROOT, "a", 1).unwrap();
         src.commit();
@@ -5330,7 +5476,7 @@ mod actor_hygiene_tests {
         src.commit();
         let changes = src.get_changes(&[]).unwrap();
 
-        // a bundle whose boundary the receiver does not have
+        // a change set whose boundary the receiver does not have
         let head = changes[1].hash();
         let orphan = crate::Fragment {
             head,
@@ -5351,9 +5497,9 @@ mod actor_hygiene_tests {
         let _ = head0;
 
         for (what, frag) in [("missing boundary", orphan), ("whole", whole)] {
-            let bundle = src.doc.bundle_fragment(&frag).unwrap();
+            let change_set = src.doc.change_set_for_fragment(&frag).unwrap();
 
-            let mut dst = AutoCommit::new().with_actor(actor(1)).unwrap();
+            let mut dst = AutoCommit::new().with_actor(actor(1));
             dst.put(ROOT, "seed", 0).unwrap();
             dst.commit();
             let before_save = dst.save();
@@ -5361,7 +5507,7 @@ mod actor_hygiene_tests {
             let before_actors = dst.doc.ops.actors.clone();
             let before_ops = dst.doc.ops.len();
 
-            let r = dst.doc.apply_bundle(bundle);
+            let r = dst.doc.apply_change_set(change_set);
             if what == "whole" {
                 // this one is applicable — the guard is the other case
                 assert!(r.is_ok());
@@ -5379,12 +5525,12 @@ mod actor_hygiene_tests {
 
     /// Where a stray actor would actually do damage, if one ever got in:
     /// the legacy chunk writes the actor table verbatim, so it carries
-    /// one through a save; a bundle's table is built from the actors its
+    /// one through a save; a change set's table is built from the actors its
     /// ops name, so it cannot.
     #[test]
     fn only_the_legacy_chunk_carries_a_stray_actor() {
         let mut doc = Automerge::new();
-        doc.set_actor(actor(1)).unwrap();
+        doc.set_actor(actor(1));
         doc.transact::<_, _, AutomergeError>(|tx| tx.put(ROOT, "k", 1))
             .unwrap();
         let clean = doc.ops.actors.len();
@@ -5394,11 +5540,11 @@ mod actor_hygiene_tests {
 
         // the formats themselves, below the save entry points (which
         // assert the state this test is deliberately in)
-        let bundle = doc.bundle_document().unwrap();
+        let change_set = doc.change_set_document().unwrap();
         assert_eq!(
-            bundle.actors().len(),
+            change_set.actors().len(),
             clean,
-            "a bundle names only the actors its ops use"
+            "a change_set names only the actors its ops use"
         );
 
         let legacy = crate::storage::Document::new(
@@ -5420,7 +5566,7 @@ mod actor_hygiene_tests {
     /// dropped.
     #[test]
     fn failed_change_batch_changes_nothing() {
-        let mut src = AutoCommit::new().with_actor(actor(7)).unwrap();
+        let mut src = AutoCommit::new().with_actor(actor(7));
         src.enable_audit_mode().unwrap();
         src.put(ROOT, "a", 1).unwrap();
         src.commit();
@@ -5446,7 +5592,7 @@ mod actor_hygiene_tests {
             })
             .expect("some corruption of a change fails during apply");
 
-        let mut dst = AutoCommit::new().with_actor(actor(1)).unwrap();
+        let mut dst = AutoCommit::new().with_actor(actor(1));
         dst.enable_audit_mode().unwrap();
         dst.put(ROOT, "seed", 0).unwrap();
         dst.commit();
@@ -5474,9 +5620,9 @@ mod actor_hygiene_tests {
         // before the batch is applied)
         // two different changes at the same (actor, seq): the second is
         // an equivocation and must be rejected
-        let mut a = AutoCommit::new().with_actor(actor(3)).unwrap();
+        let mut a = AutoCommit::new().with_actor(actor(3));
         a.enable_audit_mode().unwrap();
-        let mut b = a.fork().with_actor(actor(3)).unwrap();
+        let mut b = a.fork().with_actor(actor(3));
         a.put(ROOT, "x", 1).unwrap();
         a.commit();
         b.put(ROOT, "x", 2).unwrap();

@@ -9,7 +9,7 @@ use automerge_sync as sync;
 use automerge_sync::Sync;
 
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
-    doc.set_actor(ActorId::from(actor.to_vec())).unwrap();
+    doc.set_actor(ActorId::from(actor.to_vec()));
     doc.commit();
 }
 

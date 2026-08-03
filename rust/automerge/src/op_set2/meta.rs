@@ -42,7 +42,7 @@ impl ValueMeta {
     }
 
     /// Metadata for `len` bytes — the form the change columns' extra
-    /// bytes take, in both the document and bundle formats.
+    /// bytes take, in both the document and change set formats.
     pub(crate) const fn bytes(len: usize) -> Self {
         Self(((len as u64) << 4) | 7)
     }

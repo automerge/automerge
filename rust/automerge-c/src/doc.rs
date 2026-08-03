@@ -125,9 +125,7 @@ pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
 #[no_mangle]
 pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
     to_result(match actor_id.as_ref() {
-        Some(actor_id) => am::AutoCommit::new()
-            .with_actor(actor_id.as_ref().clone())
-            .expect("a fresh document accepts any actor"),
+        Some(actor_id) => am::AutoCommit::new().with_actor(actor_id.as_ref().clone()),
         None => am::AutoCommit::new(),
     })
 }
@@ -988,7 +986,8 @@ pub unsafe extern "C" fn AMsetActorId(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let actor_id = to_actor_id!(actor_id);
-    to_result(doc.set_actor(actor_id.as_ref().clone()).map(|_| ()))
+    doc.set_actor(actor_id.as_ref().clone());
+    to_result(Ok::<(), am::AutomergeError>(()))
 }
 
 /// \memberof AMdoc

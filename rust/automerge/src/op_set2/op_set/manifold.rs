@@ -12,7 +12,7 @@
 
 use crate::op_set2::op::DocSucc;
 use crate::op_set2::types::Action;
-use crate::storage::bundle::{FragOp, FragOps};
+use crate::storage::change_set::{ManifoldOp, ManifoldOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
 use crate::AutomergeError;
 
@@ -108,8 +108,8 @@ pub(crate) struct ApplyManifold<'a> {
     op_index: usize,
     // fragment succ entries / value bytes consumed through the pushed
     // ops so far — the source of each CopyRange's sub/val ranges
-    frag_sub: usize,
-    frag_val: usize,
+    change_set_sub: usize,
+    change_set_val: usize,
     succ_cache: SuccCache,
     // the last row a slot scan stopped on: (row id, slot). Reusable by
     // any op that beats the row — except one anchored at the row
@@ -181,8 +181,8 @@ impl<'a> ApplyManifold<'a> {
             key: None,
             insert_runs: vec![],
             op_index: 0,
-            frag_sub: 0,
-            frag_val: 0,
+            change_set_sub: 0,
+            change_set_val: 0,
             succ_cache,
             lesser: None,
             appending: false,
@@ -203,20 +203,20 @@ impl<'a> ApplyManifold<'a> {
     /// neither, so consecutive runs' sub/val ranges stay contiguous.
     fn push_pos(&mut self, pos: usize, sub: usize, val: usize) {
         let i = self.op_index;
-        let (sub0, val0) = (self.frag_sub, self.frag_val);
-        self.frag_sub += sub;
-        self.frag_val += val;
+        let (sub0, val0) = (self.change_set_sub, self.change_set_val);
+        self.change_set_sub += sub;
+        self.change_set_val += val;
         match self.insert_runs.last_mut() {
             Some(cr) if cr.pos == pos && cr.range.end == i => {
                 cr.range.end = i + 1;
-                cr.sub_range.end = self.frag_sub;
-                cr.val_range.end = self.frag_val;
+                cr.sub_range.end = self.change_set_sub;
+                cr.val_range.end = self.change_set_val;
             }
             _ => self.insert_runs.push(CopyRange {
                 pos,
                 range: i..i + 1,
-                sub_range: sub0..self.frag_sub,
-                val_range: val0..self.frag_val,
+                sub_range: sub0..self.change_set_sub,
+                val_range: val0..self.change_set_val,
             }),
         }
     }
@@ -236,7 +236,7 @@ impl<'a> ApplyManifold<'a> {
     }
 
     /// Drive the manifold from a fragment's columns: ops stream out of
-    /// [`FragOps`] minimally decoded and in document order. When every
+    /// [`ManifoldOps`] minimally decoded and in document order. When every
     /// remaining op of the current object is fragment-internal (no doc
     /// preds — visible as a zero run on the pred-count column) and the
     /// doc cursor has passed the object's last row, the tail fast path
@@ -245,9 +245,9 @@ impl<'a> ApplyManifold<'a> {
     /// Resolve the fragment against the document. Reads only — the
     /// writes happen from the [`ManifoldResult`] afterwards, which is
     /// what lets a rejected fragment leave the document untouched.
-    pub(crate) fn apply_frag(
+    pub(crate) fn apply_change_set_ops(
         mut self,
-        src: &mut FragOps<'_>,
+        src: &mut ManifoldOps<'_>,
     ) -> Result<ManifoldResult, AutomergeError> {
         while src.pos < src.len {
             if self.tail_ready(src) {
@@ -255,15 +255,15 @@ impl<'a> ApplyManifold<'a> {
                 continue;
             }
             let op = src.next_op();
-            self.apply_frag_op(&op);
+            self.apply_change_set_ops_op(&op);
             if self.bad_hint {
                 // A hint is a *floor* on where its target sits in any
-                // document holding the fragment's deps, so overshooting
+                // document holding the change set's deps, so overshooting
                 // one is not a divergence this document should paper
-                // over — it is a fragment whose hints were computed
+                // over — it is a change set whose hints were computed
                 // wrong, and the sender should hear about it. Applying
                 // it in audit mode ignores hints entirely.
-                return Err(AutomergeError::InvalidFragment(
+                return Err(AutomergeError::MalformedChangeSet(
                     "op position hint overshot its target row",
                 ));
             }
@@ -292,7 +292,7 @@ impl<'a> ApplyManifold<'a> {
     /// current object and the remaining same-object ops carry no doc
     /// preds (document order guarantees the latter once appends begin —
     /// the pred-run peek is the cheap proof).
-    fn tail_ready(&self, src: &FragOps<'_>) -> bool {
+    fn tail_ready(&self, src: &ManifoldOps<'_>) -> bool {
         if !self.appending || src.pos >= src.len {
             return false;
         }
@@ -311,7 +311,7 @@ impl<'a> ApplyManifold<'a> {
     /// and [`consume_blank`](Self::consume_blank) takes the rest of the
     /// object in bulk. The trailing scope is closed here so the next
     /// object's flush starts clean.
-    fn consume_tail(&mut self, src: &mut FragOps<'_>) {
+    fn consume_tail(&mut self, src: &mut ManifoldOps<'_>) {
         let end = self.obj_scope.end;
         let mut rem = src.same_obj_run(src.len - src.pos);
         let mut straddling = true;
@@ -330,19 +330,19 @@ impl<'a> ApplyManifold<'a> {
                 // follows, its candidate is reconstructed there.
                 let i = self.op_index;
                 let run = src.skip_clean(n);
-                let (sub0, val0) = (self.frag_sub, self.frag_val);
-                self.frag_val += run.val_bytes;
+                let (sub0, val0) = (self.change_set_sub, self.change_set_val);
+                self.change_set_val += run.val_bytes;
                 match self.insert_runs.last_mut() {
                     Some(cr) if cr.pos == end && cr.range.end == i => {
                         cr.range.end = i + n;
-                        cr.sub_range.end = self.frag_sub;
-                        cr.val_range.end = self.frag_val;
+                        cr.sub_range.end = self.change_set_sub;
+                        cr.val_range.end = self.change_set_val;
                     }
                     _ => self.insert_runs.push(CopyRange {
                         pos: end,
                         range: i..i + n,
-                        sub_range: sub0..self.frag_sub,
-                        val_range: val0..self.frag_val,
+                        sub_range: sub0..self.change_set_sub,
+                        val_range: val0..self.change_set_val,
                     }),
                 }
                 self.op_index += n;
@@ -435,7 +435,7 @@ impl<'a> ApplyManifold<'a> {
     /// next object-creating row, then that one row through the normal
     /// decode. On a text document with no `Make*` in the object this is
     /// one skip for the whole tail.
-    fn consume_blank(&mut self, src: &mut FragOps<'_>, end: usize, mut rem: usize) {
+    fn consume_blank(&mut self, src: &mut ManifoldOps<'_>, end: usize, mut rem: usize) {
         // Past the last document row there is nothing left to decide,
         // for any object: no group can be mixed (that needs doc rows),
         // no op can carry a doc pred (its group has none), no succ can
@@ -449,22 +449,22 @@ impl<'a> ApplyManifold<'a> {
                 return;
             }
             let i = self.op_index;
-            let (sub0, val0) = (self.frag_sub, self.frag_val);
+            let (sub0, val0) = (self.change_set_sub, self.change_set_val);
             // the rest of the fragment in one range, and the extents it
             // ends at are the columns' lengths — no rows to read, and
             // nothing after this reads the cursor state they would set
-            (self.frag_sub, self.frag_val) = src.consume_rest();
+            (self.change_set_sub, self.change_set_val) = src.consume_rest();
             match self.insert_runs.last_mut() {
                 Some(cr) if cr.pos == end && cr.range.end == i => {
                     cr.range.end = i + rem;
-                    cr.sub_range.end = self.frag_sub;
-                    cr.val_range.end = self.frag_val;
+                    cr.sub_range.end = self.change_set_sub;
+                    cr.val_range.end = self.change_set_val;
                 }
                 _ => self.insert_runs.push(CopyRange {
                     pos: end,
                     range: i..i + rem,
-                    sub_range: sub0..self.frag_sub,
-                    val_range: val0..self.frag_val,
+                    sub_range: sub0..self.change_set_sub,
+                    val_range: val0..self.change_set_val,
                 }),
             }
             self.op_index += rem;
@@ -475,20 +475,20 @@ impl<'a> ApplyManifold<'a> {
             if n > 0 {
                 let i = self.op_index;
                 let run = src.skip_tail(n);
-                let (sub0, val0) = (self.frag_sub, self.frag_val);
-                self.frag_sub += run.sub;
-                self.frag_val += run.val;
+                let (sub0, val0) = (self.change_set_sub, self.change_set_val);
+                self.change_set_sub += run.sub;
+                self.change_set_val += run.val;
                 match self.insert_runs.last_mut() {
                     Some(cr) if cr.pos == end && cr.range.end == i => {
                         cr.range.end = i + n;
-                        cr.sub_range.end = self.frag_sub;
-                        cr.val_range.end = self.frag_val;
+                        cr.sub_range.end = self.change_set_sub;
+                        cr.val_range.end = self.change_set_val;
                     }
                     _ => self.insert_runs.push(CopyRange {
                         pos: end,
                         range: i..i + n,
-                        sub_range: sub0..self.frag_sub,
-                        val_range: val0..self.frag_val,
+                        sub_range: sub0..self.change_set_sub,
+                        val_range: val0..self.change_set_val,
                     }),
                 }
                 self.op_index += n;
@@ -523,7 +523,7 @@ impl<'a> ApplyManifold<'a> {
 
     /// Process one fragment op. Ops must arrive in document order (see
     /// the type-level contract).
-    fn apply_frag_op(&mut self, op: &FragOp<'_>) {
+    fn apply_change_set_ops_op(&mut self, op: &ManifoldOp<'_>) {
         if let Ok(obj_type) = ObjType::try_from(op.action) {
             self.obj_info.insert(
                 op.id,
@@ -614,7 +614,9 @@ impl<'a> ApplyManifold<'a> {
                     // before it may mean anything
                     let mut jumped = false;
                     if let Some(h) = op.hint {
-                        let h = h as usize;
+                        // hints are ranks within the object, so rebase
+                        // onto the scope already resolved
+                        let h = self.obj_scope.start + h as usize;
                         if h > start && h < self.obj_scope.end {
                             self.id_iter.advance_to(h);
                             jumped = true;
@@ -722,7 +724,9 @@ impl<'a> ApplyManifold<'a> {
                             // HINT JUMP (see the insert arm)
                             let mut jumped = false;
                             if let Some(h) = op.hint {
-                                let h = h as usize;
+                                // hints are ranks within the object, so
+                                // rebase onto the scope already resolved
+                                let h = self.obj_scope.start + h as usize;
                                 if h > start && h < self.obj_scope.end {
                                     self.id_iter.advance_to(h);
                                     jumped = true;
@@ -876,7 +880,7 @@ impl TopCalc {
     /// Register a batch op competing for this register's top bit.
     /// Increments never compete — they change a counter's value, not
     /// which op the register shows.
-    fn candidate(&mut self, op: &FragOp<'_>, slot: usize, row: usize) {
+    fn candidate(&mut self, op: &ManifoldOp<'_>, slot: usize, row: usize) {
         if op.action == Action::Increment {
             return;
         }
@@ -1066,22 +1070,22 @@ mod tests {
     #[test]
     fn manifold_own_object_put_and_delete() {
         let actor = |b: u8| crate::ActorId::from(vec![b]);
-        let mut doc = AutoCommit::new().with_actor(actor(1)).unwrap();
+        let mut doc = AutoCommit::new().with_actor(actor(1));
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "base", "x").unwrap();
         doc.commit();
         let heads = doc.get_heads();
 
         // the list and its element are created inside the fragment
-        let mut src = doc.fork().with_actor(actor(3)).unwrap();
+        let mut src = doc.fork().with_actor(actor(3));
         let list = src.put_object(&ROOT, "list", ObjType::List).unwrap();
         src.insert(&list, 0, "a").unwrap();
         src.commit();
 
         // concurrent put and delete of that element, also in the fragment
-        let mut fa = src.fork().with_actor(actor(2)).unwrap();
+        let mut fa = src.fork().with_actor(actor(2));
         fa.put(&list, 0, "put").unwrap();
-        let mut fb = src.fork().with_actor(actor(9)).unwrap();
+        let mut fb = src.fork().with_actor(actor(9));
         fb.delete(&list, 0).unwrap();
         src.merge(&mut fa).unwrap();
         src.merge(&mut fb).unwrap();
@@ -1098,18 +1102,18 @@ mod tests {
     #[test]
     fn manifold_concurrent_put_and_delete_same_key() {
         let actor = |b: u8| crate::ActorId::from(vec![b]);
-        let mut doc = AutoCommit::new().with_actor(actor(1)).unwrap();
+        let mut doc = AutoCommit::new().with_actor(actor(1));
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "v").unwrap();
         doc.commit();
         let heads = doc.get_heads();
 
-        let mut fa = doc.fork().with_actor(actor(2)).unwrap();
+        let mut fa = doc.fork().with_actor(actor(2));
         fa.put(&ROOT, "k", "a").unwrap();
-        let mut fb = doc.fork().with_actor(actor(9)).unwrap();
+        let mut fb = doc.fork().with_actor(actor(9));
         fb.delete(&ROOT, "k").unwrap();
 
-        let mut src = doc.fork().with_actor(actor(3)).unwrap();
+        let mut src = doc.fork().with_actor(actor(3));
         src.merge(&mut fa).unwrap();
         src.merge(&mut fb).unwrap();
 
@@ -1120,14 +1124,14 @@ mod tests {
     #[test]
     fn manifold_insert_then_update_of_doc_element() {
         let actor = |b: u8| crate::ActorId::from(vec![b]);
-        let mut doc = AutoCommit::new().with_actor(actor(1)).unwrap();
+        let mut doc = AutoCommit::new().with_actor(actor(1));
         doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, "a").unwrap();
         doc.insert(&list, 1, "b").unwrap();
         let heads = doc.get_heads();
 
-        let mut f = doc.fork().with_actor(actor(2)).unwrap();
+        let mut f = doc.fork().with_actor(actor(2));
         f.insert(&list, 0, "x").unwrap();
         f.put(&list, 1, "a2").unwrap();
 
@@ -1142,16 +1146,16 @@ mod tests {
     #[test]
     fn manifold_double_increment_same_pred() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "c", ScalarValue::counter(10)).unwrap();
         let heads = doc.get_heads();
 
-        let mut f1 = doc.fork().with_actor(rng.random()).unwrap();
-        let mut f2 = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f1 = doc.fork().with_actor(rng.random());
+        let mut f2 = doc.fork().with_actor(rng.random());
         f1.increment(&ROOT, "c", 5).unwrap();
         f2.increment(&ROOT, "c", 7).unwrap();
-        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        let mut src = doc.fork().with_actor(rng.random());
         src.merge(&mut f1).unwrap();
         src.merge(&mut f2).unwrap();
 
@@ -1164,7 +1168,7 @@ mod tests {
         // the doc holds update rows inside element groups; new sibling
         // inserts must not split them
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, "a").unwrap();
@@ -1173,12 +1177,12 @@ mod tests {
         doc.put(&list, 0, "a3").unwrap();
         let heads = doc.get_heads();
 
-        let mut f1 = doc.fork().with_actor(rng.random()).unwrap();
-        let mut f2 = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f1 = doc.fork().with_actor(rng.random());
+        let mut f2 = doc.fork().with_actor(rng.random());
         f1.insert(&list, 1, "x").unwrap(); // after a, competing with b
         f2.insert(&list, 1, "y").unwrap();
         f2.insert(&list, 2, "z").unwrap(); // chained after y
-        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        let mut src = doc.fork().with_actor(rng.random());
         src.merge(&mut f1).unwrap();
         src.merge(&mut f2).unwrap();
 
@@ -1189,7 +1193,7 @@ mod tests {
     #[test]
     fn manifold_memo_resets_across_objects() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         let l1 = doc.put_object(&ROOT, "l1", ObjType::List).unwrap();
         let l2 = doc.put_object(&ROOT, "l2", ObjType::List).unwrap();
@@ -1197,10 +1201,10 @@ mod tests {
         doc.insert(&l2, 0, 2).unwrap();
         let heads = doc.get_heads();
 
-        let mut f = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f = doc.fork().with_actor(rng.random());
         f.insert(&l1, 0, 10).unwrap();
         f.insert(&l2, 0, 20).unwrap();
-        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        let mut src = doc.fork().with_actor(rng.random());
         src.merge(&mut f).unwrap();
 
         let changes = changes_since(&mut src, &heads);
@@ -1211,17 +1215,17 @@ mod tests {
     fn manifold_pending_chains() {
         // typing runs: every insert anchors at the previous pending one
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "base").unwrap();
         let heads = doc.get_heads();
 
-        let mut f1 = doc.fork().with_actor(rng.random()).unwrap();
-        let mut f2 = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f1 = doc.fork().with_actor(rng.random());
+        let mut f2 = doc.fork().with_actor(rng.random());
         f1.splice_text(&text, 2, 0, "hello world").unwrap();
         f2.splice_text(&text, 4, 0, "concurrent!").unwrap();
-        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        let mut src = doc.fork().with_actor(rng.random());
         src.merge(&mut f1).unwrap();
         src.merge(&mut f2).unwrap();
 
@@ -1240,27 +1244,27 @@ mod tests {
     #[test]
     fn manifold_head_insert_after_update_groups() {
         let actor = |b: u8| crate::ActorId::from(vec![b]);
-        let mut doc = AutoCommit::new().with_actor(actor(1)).unwrap();
+        let mut doc = AutoCommit::new().with_actor(actor(1));
         doc.enable_audit_mode().unwrap();
         let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "ab").unwrap();
 
         // concurrent head typing by the LARGER actor: its subtree
         // leads the list once merged
-        let mut f_c = doc.fork().with_actor(actor(3)).unwrap();
+        let mut f_c = doc.fork().with_actor(actor(3));
         f_c.splice_text(&text, 0, 0, "cd").unwrap();
 
         // concurrent head typing by the SMALLER actor (lands after
         // actor 3's subtree), plus an insert after 'a' and a delete of
         // 'b' — the covered-anchor ops downstream of the head chain
-        let mut f_b = doc.fork().with_actor(actor(2)).unwrap();
+        let mut f_b = doc.fork().with_actor(actor(2));
         f_b.splice_text(&text, 0, 0, "hij").unwrap();
         f_b.splice_text(&text, 4, 0, "k").unwrap();
         f_b.splice_text(&text, 5, 1, "").unwrap();
 
         // deletes of c,d are causally after f_c: in the batch they are
         // update groups on doc rows, resolved first in document order
-        let mut src = doc.fork().with_actor(actor(4)).unwrap();
+        let mut src = doc.fork().with_actor(actor(4));
         src.merge(&mut f_c).unwrap();
         src.splice_text(&text, 0, 2, "").unwrap();
         src.merge(&mut f_b).unwrap();
@@ -1277,7 +1281,7 @@ mod tests {
     fn manifold_fuzz() {
         let mut rng = make_rng();
         for _ in 0..20 {
-            let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+            let mut doc = AutoCommit::new().with_actor(rng.random());
             doc.enable_audit_mode().unwrap();
             let map = doc.put_object(&ROOT, "map", ObjType::Map).unwrap();
             let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
@@ -1290,9 +1294,9 @@ mod tests {
             doc.put(&list, 3, "u2").unwrap();
             let heads = doc.get_heads();
 
-            let mut src = doc.fork().with_actor(rng.random()).unwrap();
+            let mut src = doc.fork().with_actor(rng.random());
             for _ in 0..6 {
-                let mut f = doc.fork().with_actor(rng.random()).unwrap();
+                let mut f = doc.fork().with_actor(rng.random());
                 for _ in 0..rng.random_range(1..8u32) {
                     match rng.random_range(0..7u32) {
                         0 => {
@@ -1346,7 +1350,7 @@ mod tests {
         // miss in the first list parks them at the column end and every
         // later object then sizes groups/hops against nothing
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         let l1 = doc.put_object(&ROOT, "a", ObjType::List).unwrap();
         let l2 = doc.put_object(&ROOT, "b", ObjType::List).unwrap();
@@ -1356,7 +1360,7 @@ mod tests {
         }
         let heads = doc.get_heads();
 
-        let mut f = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f = doc.fork().with_actor(rng.random());
         // update the LAST element of l1: its group-end scan misses
         // inside l1 (no later insert row in the object)
         f.put(&l1, 3, "tail").unwrap();
@@ -1375,7 +1379,7 @@ mod tests {
         // row consumes it; that element's updates arrive right after
         // (doc order) and must resolve it through the memo
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         for i in 0..5 {
@@ -1383,13 +1387,13 @@ mod tests {
         }
         let heads = doc.get_heads();
 
-        let mut f1 = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f1 = doc.fork().with_actor(rng.random());
         // insert after elem 1: slot scan stops on elem 2's row
         f1.insert(&list, 2, 50i64).unwrap();
-        let mut f2 = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f2 = doc.fork().with_actor(rng.random());
         // update elem 2: arrives after the insert in document order
         f2.put(&list, 2, "upd").unwrap();
-        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        let mut src = doc.fork().with_actor(rng.random());
         src.merge(&mut f1).unwrap();
         src.merge(&mut f2).unwrap();
 
@@ -1402,13 +1406,11 @@ mod tests {
         // the doc evolves past the fork point: the batch's put wins by
         // id but the doc's own concurrent put stays visible -> the
         // standing top is demoted with Adjust::Conflict
-        let mut doc = AutoCommit::new()
-            .with_actor("aa".try_into().unwrap())
-            .unwrap();
+        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "old").unwrap();
         doc.commit();
-        let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap());
         let heads = doc.get_heads();
         f.put(&ROOT, "k", "fork1").unwrap();
         f.commit();
@@ -1422,13 +1424,11 @@ mod tests {
     fn manifold_batch_put_loses_to_local() {
         // mirror image: the local put has the higher ctr, the batch op
         // becomes the conflicted loser, no doc adjustment
-        let mut doc = AutoCommit::new()
-            .with_actor("aa".try_into().unwrap())
-            .unwrap();
+        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "old").unwrap();
         doc.commit();
-        let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap());
         let heads = doc.get_heads();
         f.put(&ROOT, "k", "fork").unwrap(); // ctr 3
         doc.put(&ROOT, "k", "l1").unwrap();
@@ -1445,13 +1445,11 @@ mod tests {
         // must be re-promoted (Adjust::Expose). Both actor orders run
         // so the winner is on each side once
         for other in ["0b", "fb"] {
-            let mut doc = AutoCommit::new()
-                .with_actor("aa".try_into().unwrap())
-                .unwrap();
+            let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
             doc.enable_audit_mode().unwrap();
             doc.put(&ROOT, "k", "old").unwrap();
             doc.commit();
-            let mut fa = doc.fork().with_actor(other.try_into().unwrap()).unwrap();
+            let mut fa = doc.fork().with_actor(other.try_into().unwrap());
             fa.put(&ROOT, "k", "a").unwrap();
             fa.commit();
             doc.put(&ROOT, "k", "b").unwrap();
@@ -1469,18 +1467,18 @@ mod tests {
         // two actors concurrently update an element that is itself
         // pending in the batch: one update wins, the other is flagged
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, 1i64).unwrap();
         let heads = doc.get_heads();
 
-        let mut f1 = doc.fork().with_actor(rng.random()).unwrap();
+        let mut f1 = doc.fork().with_actor(rng.random());
         f1.insert(&list, 1, 100i64).unwrap();
         f1.commit();
-        let mut f2 = f1.fork().with_actor(rng.random()).unwrap();
+        let mut f2 = f1.fork().with_actor(rng.random());
         f2.put(&list, 1, "x").unwrap();
-        let mut f3 = f1.fork().with_actor(rng.random()).unwrap();
+        let mut f3 = f1.fork().with_actor(rng.random());
         f3.put(&list, 1, "y").unwrap();
         f1.merge(&mut f2).unwrap();
         f1.merge(&mut f3).unwrap();
@@ -1492,13 +1490,11 @@ mod tests {
     fn manifold_increment_only_scope_no_adjusts() {
         // increments keep the counter visible and on top: the scope
         // takes the early-out and emits nothing
-        let mut doc = AutoCommit::new()
-            .with_actor("aa".try_into().unwrap())
-            .unwrap();
+        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "c", ScalarValue::counter(5)).unwrap();
         let heads = doc.get_heads();
-        let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap());
         f.increment(&ROOT, "c", 2).unwrap();
         f.commit();
         f.increment(&ROOT, "c", 3).unwrap();
@@ -1513,19 +1509,19 @@ mod tests {
         // both counters carry multiple preds, exercising the flush
         // memo's (pred, succ) ordering
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc = AutoCommit::new().with_actor(rng.random());
         doc.enable_audit_mode().unwrap();
         doc.put(&ROOT, "k", "seed").unwrap();
         let heads = doc.get_heads();
 
-        let mut fa = doc.fork().with_actor(rng.random()).unwrap();
+        let mut fa = doc.fork().with_actor(rng.random());
         fa.put(&ROOT, "k", ScalarValue::counter(0)).unwrap();
         fa.commit();
         for i in 0..4 {
             fa.increment(&ROOT, "k", i + 1).unwrap();
             fa.commit();
         }
-        let mut fb = doc.fork().with_actor(rng.random()).unwrap();
+        let mut fb = doc.fork().with_actor(rng.random());
         fb.put(&ROOT, "k", ScalarValue::counter(10)).unwrap();
         fb.commit();
         for i in 0..3 {
@@ -1533,14 +1529,14 @@ mod tests {
             fb.commit();
         }
         // fc sees BOTH counters: its increments list both as preds
-        let mut fc = fa.fork().with_actor(rng.random()).unwrap();
+        let mut fc = fa.fork().with_actor(rng.random());
         fc.merge(&mut fb).unwrap();
         for i in 0..3 {
             fc.increment(&ROOT, "k", 100 * (i + 1)).unwrap();
             fc.commit();
         }
 
-        let mut src = doc.fork().with_actor(rng.random()).unwrap();
+        let mut src = doc.fork().with_actor(rng.random());
         src.merge(&mut fa).unwrap();
         src.merge(&mut fb).unwrap();
         src.merge(&mut fc).unwrap();
@@ -1549,17 +1545,17 @@ mod tests {
 
         // same shape but the counters are already IN the doc when the
         // multi-pred increments arrive (covered preds -> flush memo)
-        let mut doc2 = AutoCommit::new().with_actor(rng.random()).unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(rng.random());
         doc2.enable_audit_mode().unwrap();
         doc2.put(&ROOT, "k", "seed").unwrap();
-        let mut ga = doc2.fork().with_actor(rng.random()).unwrap();
+        let mut ga = doc2.fork().with_actor(rng.random());
         ga.put(&ROOT, "k", ScalarValue::counter(0)).unwrap();
-        let mut gb = doc2.fork().with_actor(rng.random()).unwrap();
+        let mut gb = doc2.fork().with_actor(rng.random());
         gb.put(&ROOT, "k", ScalarValue::counter(10)).unwrap();
         doc2.merge(&mut ga).unwrap();
         doc2.merge(&mut gb).unwrap(); // doc2: conflicted counter pair
         let heads2 = doc2.get_heads();
-        let mut gc = doc2.fork().with_actor(rng.random()).unwrap();
+        let mut gc = doc2.fork().with_actor(rng.random());
         for i in 0..4 {
             gc.increment(&ROOT, "k", i + 1).unwrap();
             gc.commit();
@@ -1579,7 +1575,7 @@ mod tests {
         // pending in the batch
         let mut rng = make_rng();
         for _ in 0..50 {
-            let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
+            let mut doc = AutoCommit::new().with_actor(rng.random());
             doc.enable_audit_mode().unwrap();
             let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
             for i in 0..4 {
@@ -1588,9 +1584,9 @@ mod tests {
             doc.put(&list, 1, "u1").unwrap();
             let heads = doc.get_heads();
 
-            let mut src = doc.fork().with_actor(rng.random()).unwrap();
+            let mut src = doc.fork().with_actor(rng.random());
             for _ in 0..4 {
-                let mut f1 = doc.fork().with_actor(rng.random()).unwrap();
+                let mut f1 = doc.fork().with_actor(rng.random());
                 let at = rng.random_range(0..=f1.length(&list) as u32) as usize;
                 f1.insert(&list, at, 100i64).unwrap();
                 let at2 = rng.random_range(0..=f1.length(&list) as u32) as usize;
@@ -1598,7 +1594,7 @@ mod tests {
                 let at3 = rng.random_range(0..=f1.length(&list) as u32) as usize;
                 let nested = f1.insert_object(&list, at3, ObjType::Map).unwrap();
                 f1.commit();
-                let mut f2 = f1.fork().with_actor(rng.random()).unwrap();
+                let mut f2 = f1.fork().with_actor(rng.random());
                 for _ in 0..rng.random_range(1..8u32) {
                     let len = f2.length(&list) as u32;
                     match rng.random_range(0..5u32) {

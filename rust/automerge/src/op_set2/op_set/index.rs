@@ -1332,9 +1332,7 @@ mod tests {
         assert_builders_match(&doc);
 
         // map conflicts across actors + nested objects + list ops
-        let mut doc1 = Automerge::new()
-            .with_actor("aaaaaa".try_into().unwrap())
-            .unwrap();
+        let mut doc1 = Automerge::new().with_actor("aaaaaa".try_into().unwrap());
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         tx.insert(&list, 0, 1).unwrap();
@@ -1343,10 +1341,7 @@ mod tests {
         let map = tx.put_object(ROOT, "map", ObjType::Map).unwrap();
         tx.put(&map, "k", "v").unwrap();
         tx.commit();
-        let mut doc2 = doc1
-            .fork()
-            .with_actor("bbbbbb".try_into().unwrap())
-            .unwrap();
+        let mut doc2 = doc1.fork().with_actor("bbbbbb".try_into().unwrap());
         let mut tx = doc2.transaction();
         tx.put(&map, "k", "w").unwrap();
         tx.put(&list, 1, 20).unwrap();

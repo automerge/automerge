@@ -30,8 +30,8 @@ pub(crate) enum ParseError {
     Pack(#[from] hexane::PackError),
     #[error(transparent)]
     Deflate(#[from] std::io::Error),
-    #[error("failed to unbundle: {0}")]
-    Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("failed to decode_change_set: {0}")]
+    DecodeChangeSet(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("failed to decode ID_CTR_INVERSE column")]
     InverseDecode,
     #[error("ID_CTR_INVERSE length does not match op count")]

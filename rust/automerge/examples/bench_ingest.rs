@@ -1,6 +1,6 @@
 // Ingest each egwalker doc as one load_incremental() call, three ways:
 // concatenated raw changes (comparable to automerge main), concatenated
-// v1 bundles through the walk, and the same bundles through the batch
+// v1 change sets through the walk, and the same change sets through the batch
 // manifold (BATCH_MANIFOLD). Plus a plain full-doc load for context.
 use automerge::{Automerge, LoadOptions};
 use std::time::Instant;
@@ -27,7 +27,7 @@ fn main() {
             continue;
         };
         // the source doc enumerates its full history below (changes and
-        // bundle emission), which needs audit mode; the measured ingest
+        // change set emission), which needs audit mode; the measured ingest
         // paths run on default (non-audit) documents
         let doc =
             Automerge::load_with_options(&bytes, LoadOptions::new().with_audit_mode()).unwrap();
@@ -40,8 +40,8 @@ fn main() {
             changes.extend_from_slice(c.raw_bytes());
         }
         let fragments = doc.fragments(..).unwrap();
-        let bundles: Vec<u8> = doc
-            .bundle_fragments(fragments)
+        let change_sets: Vec<u8> = doc
+            .change_sets_for_fragments(fragments)
             .unwrap()
             .into_iter()
             .flatten()
@@ -54,7 +54,7 @@ fn main() {
         };
 
         let t_changes = best_of(|| ingest(&changes), &doc);
-        let t_bundles = best_of(|| ingest(&bundles), &doc);
+        let t_change_sets = best_of(|| ingest(&change_sets), &doc);
         let t_load_p = best_of(|| Automerge::load(&bytes).unwrap(), &doc);
         let t_changes_p = best_of(
             || {
@@ -66,12 +66,12 @@ fn main() {
             &doc,
         );
 
-        // the branch's own path: v2 fragment chain via apply_bundle.
+        // the branch's own path: v2 fragment chain via apply_change set.
         // Parsing is inside the timed region, so this really does include
-        // the wire round-trip (a bundle is consumed by the apply, so it
+        // the wire round-trip (a change set is consumed by the apply, so it
         // cannot be hoisted and reused across rounds anyway).
         let v2_bytes: Vec<Vec<u8>> = doc
-            .bundle_fragments(doc.fragments(..).unwrap())
+            .change_sets_for_fragments(doc.fragments(..).unwrap())
             .unwrap()
             .into_iter()
             .collect();
@@ -79,7 +79,7 @@ fn main() {
             || {
                 let mut d = Automerge::new();
                 for b in &v2_bytes {
-                    d.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
+                    d.apply_change_set(automerge::ChangeSet::try_from(&b[..]).unwrap())
                         .unwrap();
                 }
                 d
@@ -88,13 +88,13 @@ fn main() {
         );
 
         println!(
-            "{name}: changes {:>7.3}s (patches {:>7.3}s) | fragments {:>7.3}s | full load {:>6.3}s (patches {:>6.3}s) | bundles {:>7.3}s",
+            "{name}: changes {:>7.3}s (patches {:>7.3}s) | fragments {:>7.3}s | full load {:>6.3}s (patches {:>6.3}s) | change_sets {:>7.3}s",
             t_changes,
             t_changes_p,
             t_frag,
             full,
             t_load_p,
-            t_bundles,
+            t_change_sets,
         );
     }
 }

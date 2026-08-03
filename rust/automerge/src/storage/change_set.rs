@@ -17,23 +17,23 @@ mod storage;
 
 pub(crate) use builder::ops;
 pub(crate) use builder::{
-    BundleBuilder, BundleChangeCols, BundleChangeIterUnverified, BundleOpWriter, FragOp, FragOps,
-    OpIterUnverified,
+    ChangeSetBuilder, ChangeSetChangeCols, ChangeSetChangeIterUnverified, ChangeSetOpWriter,
+    ManifoldOp, ManifoldOps, OpIterUnverified,
 };
 pub(crate) use error::ParseError;
-pub(crate) use meta::{BundleMetadata, DepRef};
-pub(crate) use storage::BundleStorage;
+pub(crate) use meta::{ChangeSetMetadata, DepRef};
+pub(crate) use storage::ChangeSetStorage;
 
 /// EXPERIMENTAL: A set of changes in compressed columnar form, plus the
 /// fragment metadata a fragments-mode document needs to apply them.
 ///
 /// The carried changes name their external dependencies by hash alone,
 /// which a document in the fragment-hashes state cannot resolve to nodes
-/// (only fragment heads have known hashes there). So a bundle chunk
+/// (only fragment heads have known hashes there). So a change set chunk
 /// prefixes the changes with:
 ///
 /// * the **head** hashes it delivers, each paired with its member
-///   index — one for a fragment, one per document head for a bundle
+///   index — one for a fragment, one per document head for a change set
 ///   standing in for a whole document
 /// * the **checkpoint** hashes (interior fragment-level hashes), each
 ///   paired with its member index
@@ -53,7 +53,7 @@ pub(crate) use storage::BundleStorage;
 /// checkpoints uleb count, then per entry: uleb member index + 32-byte hash
 /// boundary    uleb count, then per entry: 32-byte hash + uleb actor + uleb seq
 /// deps        uleb count, then per entry: uleb actor + uleb seq
-/// changes     a complete legacy bundle chunk, header and all — the
+/// changes     a complete legacy change set chunk, header and all — the
 ///             carried changes in columnar form
 /// ```
 ///
@@ -68,10 +68,10 @@ pub(crate) use storage::BundleStorage;
 /// This is experimental, the format may still change — do not use it
 /// in systems where you expect data to stick around.
 #[derive(Debug, Clone)]
-pub struct Bundle {
-    /// The changes this bundle delivers: those no other member depends
-    /// on, each paired with its member index. A bundle built from a
-    /// [`Fragment`](crate::Fragment) has exactly one; a bundle standing
+pub struct ChangeSet {
+    /// The changes this change set delivers: those no other member depends
+    /// on, each paired with its member index. A change set built from a
+    /// [`Fragment`](crate::Fragment) has exactly one; a change set standing
     /// in for a whole document has one per document head.
     pub(crate) heads: Vec<(ChangeHash, usize)>,
     /// `(member index, hash)`
@@ -89,11 +89,11 @@ pub struct Bundle {
     /// Each member change's sequence number, validated non-zero at parse
     /// time and aligned with [`Self::iter_changes`].
     pub(crate) member_seqs: Vec<NonZeroU64>,
-    /// The carried changes, in the columnar bundle encoding.
-    pub(crate) storage: BundleStorage<'static, Verified>,
+    /// The carried changes, in the columnar change set encoding.
+    pub(crate) storage: ChangeSetStorage<'static, Verified>,
 }
 
-impl Bundle {
+impl ChangeSet {
     pub(crate) fn new(
         heads: Vec<(ChangeHash, usize)>,
         checkpoints: Vec<(usize, ChangeHash)>,
@@ -101,7 +101,7 @@ impl Bundle {
         dep_ids: Vec<ChangeId>,
         member_actors: Vec<ActorIdx>,
         member_seqs: Vec<NonZeroU64>,
-        storage: BundleStorage<'static, Verified>,
+        storage: ChangeSetStorage<'static, Verified>,
     ) -> Self {
         Self {
             heads,
@@ -115,23 +115,23 @@ impl Bundle {
     }
 
     /// The member change columns, for the columnar apply path.
-    pub(crate) fn change_cols(&self) -> BundleChangeCols<'_> {
+    pub(crate) fn change_cols(&self) -> ChangeSetChangeCols<'_> {
         self.storage
             .change_cols()
-            .expect("a parsed bundle's change columns are well formed")
+            .expect("a parsed change_set's change columns are well formed")
     }
 
-    /// The changes this bundle delivers — the members nothing else in
-    /// the bundle depends on.
+    /// The changes this change set delivers — the members nothing else in
+    /// the change set depends on.
     pub fn heads(&self) -> impl ExactSizeIterator<Item = ChangeHash> + '_ {
         self.heads.iter().map(|(h, _)| *h)
     }
 
-    /// The changes carried by the bundle, in topological order.
+    /// The changes carried by the change set, in topological order.
     pub fn to_changes(&self) -> Result<Vec<Change>, AutomergeError> {
         self.storage
             .to_changes()
-            .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
+            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
     }
 
     /// Metadata for each carried change, in topological order, without
@@ -140,31 +140,31 @@ impl Bundle {
     /// Fallible because it is decoded on demand: a parse validates the
     /// member index (actors and sequence numbers) but leaves the rest of
     /// the member columns for whoever reads them, so that applying a
-    /// bundle — which reads those columns directly into the change graph
+    /// change set — which reads those columns directly into the change graph
     /// — never pays for a decode it does not use.
     pub fn iter_changes(
         &self,
-    ) -> Result<std::slice::Iter<'_, BundleChange<'static>>, AutomergeError> {
+    ) -> Result<std::slice::Iter<'_, ChangeSetChange<'static>>, AutomergeError> {
         Ok(self.changes()?.iter())
     }
 
     /// The op columns the parse loaded, taken by value — the apply merges
     /// them into a document, so they are moved rather than read.
-    pub(crate) fn take_frag_ops(&mut self) -> Result<OpSet, AutomergeError> {
+    pub(crate) fn take_change_set_ops(&mut self) -> Result<OpSet, AutomergeError> {
         self.storage
-            .take_frag_ops()
-            .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
+            .take_change_set_ops()
+            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
     }
 
     /// The member change metadata, decoded on first call (see
     /// [`Self::iter_changes`]).
-    pub(crate) fn changes(&self) -> Result<&[BundleChange<'static>], AutomergeError> {
+    pub(crate) fn changes(&self) -> Result<&[ChangeSetChange<'static>], AutomergeError> {
         self.storage
             .changes()
-            .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
+            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
     }
 
-    /// The hashes this bundle depends on but does not carry.
+    /// The hashes this change set depends on but does not carry.
     pub fn deps(&self) -> &[ChangeHash] {
         self.storage.deps()
     }
@@ -180,12 +180,12 @@ impl Bundle {
         op_set: &OpSet,
         change_graph: &ChangeGraph,
         hashes: I,
-    ) -> Result<BundleStorage<'static, Verified>, AutomergeError>
+    ) -> Result<ChangeSetStorage<'static, Verified>, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
         let changes = change_graph
-            .get_bundle_metadata(hashes)
+            .get_change_set_metadata(hashes)
             .collect::<Result<_, _>>()?;
         Ok(Self::storage_from_meta(op_set, changes))
     }
@@ -197,7 +197,7 @@ impl Bundle {
         op_set: &OpSet,
         change_graph: &ChangeGraph,
         nodes: Vec<crate::change_graph::NodeIdx>,
-    ) -> Result<BundleStorage<'static, Verified>, AutomergeError> {
+    ) -> Result<ChangeSetStorage<'static, Verified>, AutomergeError> {
         Ok(
             Self::storage_for_node_sets(op_set, change_graph, vec![nodes])?
                 .pop()
@@ -205,36 +205,34 @@ impl Bundle {
         )
     }
 
-    /// [`Self::storage_for_nodes`] for several bundles at once.
+    /// [`Self::storage_for_nodes`] for several change sets at once.
     ///
-    /// Each bundle's own ops come from a counter-ranged walk, which is
+    /// Each change set's own ops come from a counter-ranged walk, which is
     /// already sparse — a one-change fragment reads a handful of rows.
     /// The hint ranks are the part that does not scale: a rank is a
     /// position among the rows the fragment's clock covers, so finding
     /// one means walking the id column from the start of the document.
-    /// Done per bundle that is O(bundles x document); done here it is a
-    /// single walk with every bundle's counters advanced together, and
+    /// Done per change set that is O(change sets x document); done here it is a
+    /// single walk with every change set's counters advanced together, and
     /// it stops as soon as the last outstanding target is found.
     pub(crate) fn storage_for_node_sets(
         op_set: &OpSet,
         change_graph: &ChangeGraph,
         node_sets: Vec<Vec<crate::change_graph::NodeIdx>>,
-    ) -> Result<Vec<BundleStorage<'static, Verified>>, AutomergeError> {
+    ) -> Result<Vec<ChangeSetStorage<'static, Verified>>, AutomergeError> {
         let mut jobs = Vec::with_capacity(node_sets.len());
         for nodes in node_sets {
             let clock = change_graph.clock_for_nodes(nodes.clone());
             let changes = change_graph
-                .bundle_metadata_for_nodes(nodes)
+                .change_set_metadata_for_nodes(nodes)
                 .collect::<Result<Vec<_>, _>>()?;
             let collector = Self::collect_ops(op_set, changes);
-            let needed = collector.hint_targets();
+            let needed = collector.hint_targets_by_obj();
             jobs.push(HintJob {
-                remaining: needed.len(),
                 needed,
                 collector,
                 clock,
                 ranks: std::collections::HashMap::new(),
-                rank: 0,
             });
         }
 
@@ -248,58 +246,86 @@ impl Bundle {
     /// One walk of the id column answering every job's outstanding hint
     /// targets. Jobs drop out of `active` as they are satisfied, and the
     /// walk ends with the last of them.
+    /// Hint ranks, one object at a time: each object is visited only if
+    /// some job targets it, and left at that job's last target.
     fn resolve_hint_ranks(op_set: &OpSet, jobs: &mut [HintJob<'_>]) {
-        let mut active: Vec<usize> = (0..jobs.len()).filter(|&i| jobs[i].remaining > 0).collect();
-        if active.is_empty() {
-            return;
-        }
-        for id in op_set.id_iter() {
-            let mut k = 0;
-            while k < active.len() {
-                let job = &mut jobs[active[k]];
-                // the cheap test first: a row which is neither covered
-                // nor a target cannot affect this job at all
-                let covered = job.clock.covers(&id);
-                let wanted = job.remaining > 0 && job.needed.contains(&id);
-                if !covered && !wanted {
-                    k += 1;
-                    continue;
-                }
-                // members do not count towards the rank — a receiver
-                // about to apply the bundle does not have them yet
-                if job.collector.is_member(id) {
-                    k += 1;
-                    continue;
-                }
-                if wanted {
-                    job.ranks.insert(id, job.rank);
-                    job.remaining -= 1;
-                }
-                if covered {
-                    job.rank += 1;
-                }
-                if job.remaining == 0 {
-                    active.swap_remove(k);
-                    continue;
-                }
-                k += 1;
-            }
-            if active.is_empty() {
-                break;
+        // which jobs target which object. `BTreeMap` for key order, which
+        // for `ObjId` is document order — so one forward-only cursor
+        // covers every object
+        let mut objs: std::collections::BTreeMap<crate::types::ObjId, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (i, job) in jobs.iter().enumerate() {
+            for obj in job.needed.keys() {
+                objs.entry(*obj).or_default().push(i);
             }
         }
-        debug_assert!(
-            jobs.iter().all(|j| j.remaining == 0),
-            "hint target missing from doc"
-        );
+
+        let mut obj_id_iter = op_set.obj_id_iter();
+
+        for (obj, interested) in objs {
+            let scope = obj_id_iter.seek_to_value(obj);
+            // hoisted out of the row loop: one hash lookup per object,
+            // not per row
+            let targets: Vec<rustc_hash::FxHashSet<crate::types::OpId>> = interested
+                .iter()
+                .map(|&i| jobs[i].needed.remove(&obj).unwrap_or_default())
+                .collect();
+            // rank restarts at each object: hints are object-relative
+            let mut rank: Vec<u64> = vec![0; interested.len()];
+            let mut remaining: Vec<usize> = targets.iter().map(|t| t.len()).collect();
+            let mut active: Vec<usize> = (0..interested.len())
+                .filter(|&k| remaining[k] > 0)
+                .collect();
+
+            for id in op_set.id_iter_range(&scope) {
+                let mut k = 0;
+                while k < active.len() {
+                    let slot = active[k];
+                    let job = &mut jobs[interested[slot]];
+                    let wanted = targets[slot].contains(&id);
+                    let covered = job.clock.covers(&id);
+                    // a row that is neither covered nor a target cannot
+                    // affect this job at all
+                    if !covered && !wanted {
+                        k += 1;
+                        continue;
+                    }
+                    // members do not count towards the rank — a receiver
+                    // about to apply the change set does not have them yet
+                    if job.collector.is_member(id) {
+                        k += 1;
+                        continue;
+                    }
+                    if wanted {
+                        job.ranks.insert(id, rank[slot]);
+                        remaining[slot] -= 1;
+                    }
+                    if covered {
+                        rank[slot] += 1;
+                    }
+                    if remaining[slot] == 0 {
+                        active.swap_remove(k);
+                        continue;
+                    }
+                    k += 1;
+                }
+                if active.is_empty() {
+                    break;
+                }
+            }
+            debug_assert!(active.is_empty(), "hint target missing from its object",);
+        }
     }
 
-    /// Read the bundle's own ops out of the op set.
+    /// Read the change set's own ops out of the op set.
     ///
-    /// The walk is counter-ranged, so it costs the rows the bundle
+    /// The walk is counter-ranged, so it costs the rows the change set
     /// carries (plus whatever the skip iterator steps over between
     /// them) rather than the document.
-    fn collect_ops<'a>(op_set: &'a OpSet, changes: Vec<BundleMetadata<'a>>) -> BundleBuilder<'a> {
+    fn collect_ops<'a>(
+        op_set: &'a OpSet,
+        changes: Vec<ChangeSetMetadata<'a>>,
+    ) -> ChangeSetBuilder<'a> {
         let min = changes
             .iter()
             .map(|c| c.start_op as usize)
@@ -308,7 +334,7 @@ impl Bundle {
         let max = changes.iter().map(|c| c.max_op as usize).max().unwrap_or(0) + 1;
 
         let mapper = ActorMapper::new(&op_set.actors);
-        let mut collector = BundleBuilder::from_change_meta(changes, mapper);
+        let mut collector = ChangeSetBuilder::from_change_meta(changes, mapper);
 
         for op in op_set.iter_ctr_range(min..max) {
             let op_id = op.id;
@@ -325,8 +351,8 @@ impl Bundle {
     /// The hash-keyed path, which has no clock and so writes no hints.
     fn storage_from_meta(
         op_set: &OpSet,
-        changes: Vec<BundleMetadata<'_>>,
-    ) -> BundleStorage<'static, Verified> {
+        changes: Vec<ChangeSetMetadata<'_>>,
+    ) -> ChangeSetStorage<'static, Verified> {
         Self::collect_ops(op_set, changes).finish_with_ranks(&std::collections::HashMap::new())
     }
 
@@ -410,7 +436,7 @@ impl Bundle {
             &self.storage.bytes
         });
 
-        let header = Header::new(ChunkType::Bundle, &data);
+        let header = Header::new(ChunkType::ChangeSet, &data);
         let mut out = Vec::with_capacity(header.len() + data.len());
         header.write(&mut out);
         out.extend(data);
@@ -488,16 +514,17 @@ impl Bundle {
     }
 }
 
-/// One bundle's state during the shared hint walk: its collected ops,
+/// One change set's state during the shared hint walk: its collected ops,
 /// the targets it still needs a rank for, and the running count of
 /// clock-covered non-member rows seen so far.
 struct HintJob<'a> {
-    collector: BundleBuilder<'a>,
+    collector: ChangeSetBuilder<'a>,
     clock: crate::clock::Clock,
-    needed: rustc_hash::FxHashSet<crate::types::OpId>,
+    /// targets grouped by the object they live in — the walk visits one
+    /// object at a time and only consults the jobs targeting it
+    needed:
+        std::collections::HashMap<crate::types::ObjId, rustc_hash::FxHashSet<crate::types::OpId>>,
     ranks: std::collections::HashMap<crate::types::OpId, u64>,
-    remaining: usize,
-    rank: u64,
 }
 
 /// How many entries it is safe to reserve for a wire-supplied `count`:
@@ -510,7 +537,7 @@ fn entry_capacity(i: &parse::Input<'_>, count: u64, min_entry_bytes: usize) -> u
     usize::try_from(count).unwrap_or(usize::MAX).min(ceiling)
 }
 
-/// The decoded metadata prefix of a [`Bundle`] chunk, with actors
+/// The decoded metadata prefix of a [`ChangeSet`] chunk, with actors
 /// still in index form.
 #[derive(Debug)]
 pub(crate) struct ParsedPrefix {
@@ -522,13 +549,13 @@ pub(crate) struct ParsedPrefix {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("invalid bundle: {0}")]
-pub struct InvalidBundle(pub(crate) String);
+#[error("invalid change_set: {0}")]
+pub struct InvalidChangeSet(pub(crate) String);
 
-/// Parse the inner (carried-changes) chunk of a bundle.
-fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>, String> {
+/// Parse the inner (carried-changes) chunk of a change set.
+fn parse_change_set_columns(bytes: &[u8]) -> Result<ChangeSetStorage<'static, Verified>, String> {
     let input = parse::Input::new(bytes);
-    let (_i, stored) = BundleStorage::parse_columns(input)
+    let (_i, stored) = ChangeSetStorage::parse_columns(input)
         .map_err(|e| format!("invalid carried changes: {}", e))?;
     let verified = stored
         .verify()
@@ -536,9 +563,9 @@ fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>
     Ok(verified.into_owned())
 }
 
-/// Metadata for one change carried by a bundle.
+/// Metadata for one change carried by a change set.
 #[derive(Clone, Debug)]
-pub struct BundleChange<'a> {
+pub struct ChangeSetChange<'a> {
     pub actor: usize,
     pub author: Option<usize>,
     pub seq: u64,
@@ -550,13 +577,13 @@ pub struct BundleChange<'a> {
     pub extra: Cow<'a, [u8]>,
 }
 
-impl BundleChange<'_> {
+impl ChangeSetChange<'_> {
     /// Detach from the buffer the metadata was decoded out of, so a
-    /// parsed bundle can cache its change metadata alongside the bytes
+    /// parsed change set can cache its change metadata alongside the bytes
     /// it came from. Only `message` and `extra` borrow, and both are
     /// usually absent.
-    pub(crate) fn into_owned(self) -> BundleChange<'static> {
-        BundleChange {
+    pub(crate) fn into_owned(self) -> ChangeSetChange<'static> {
+        ChangeSetChange {
             actor: self.actor,
             author: self.author,
             seq: self.seq,
@@ -570,49 +597,49 @@ impl BundleChange<'_> {
     }
 }
 
-impl<'a> From<BundleChange<'a>> for BuildChangeMetadata<'a> {
-    fn from(bundle: BundleChange<'a>) -> Self {
+impl<'a> From<ChangeSetChange<'a>> for BuildChangeMetadata<'a> {
+    fn from(change_set: ChangeSetChange<'a>) -> Self {
         BuildChangeMetadata {
-            actor: bundle.actor,
-            seq: bundle.seq,
-            start_op: bundle.start_op,
-            max_op: bundle.max_op,
-            timestamp: bundle.timestamp,
-            message: bundle.message,
-            deps: bundle.deps,
-            extra: bundle.extra,
+            actor: change_set.actor,
+            seq: change_set.seq,
+            start_op: change_set.start_op,
+            max_op: change_set.max_op,
+            timestamp: change_set.timestamp,
+            message: change_set.message,
+            deps: change_set.deps,
+            extra: change_set.extra,
             builder: 0,
         }
     }
 }
 
-impl TryFrom<&[u8]> for Bundle {
-    type Error = InvalidBundle;
+impl TryFrom<&[u8]> for ChangeSet {
+    type Error = InvalidChangeSet;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let input = parse::Input::new(bytes);
         let (i, header) = Header::parse::<crate::storage::chunk::error::Header>(input)
-            .map_err(|e| InvalidBundle(format!("invalid header: {}", e)))?;
-        if header.chunk_type() != ChunkType::Bundle {
-            return Err(InvalidBundle("not a bundle chunk".to_string()));
+            .map_err(|e| InvalidChangeSet(format!("invalid header: {}", e)))?;
+        if header.chunk_type() != ChunkType::ChangeSet {
+            return Err(InvalidChangeSet("not a change_set chunk".to_string()));
         }
         Self::parse_after_header(i)
     }
 }
 
-impl Bundle {
-    /// The whole bundle, from the input the chunk parser leaves after the
+impl ChangeSet {
+    /// The whole change set, from the input the chunk parser leaves after the
     /// header.
     ///
     /// The chunk parser calls this rather than validating the columns and
-    /// throwing the result away: parsing a bundle's columns is most of
+    /// throwing the result away: parsing a change set's columns is most of
     /// what loading one costs, and doing it twice doubled the load.
-    pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidBundle> {
-        let bad = |s: &str| InvalidBundle(s.to_string());
-        let (i, prefix) =
-            Self::parse_prefix(i).map_err(|e| InvalidBundle(format!("invalid prefix: {}", e)))?;
+    pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidChangeSet> {
+        let bad = |s: &str| InvalidChangeSet(s.to_string());
+        let (i, prefix) = Self::parse_prefix(i)
+            .map_err(|e| InvalidChangeSet(format!("invalid prefix: {}", e)))?;
 
-        let resolve = |a: u64| -> Result<ActorId, InvalidBundle> {
+        let resolve = |a: u64| -> Result<ActorId, InvalidChangeSet> {
             prefix
                 .actors
                 .get(a as usize)
@@ -627,17 +654,17 @@ impl Bundle {
             .boundary
             .iter()
             .map(|(h, a, s)| Ok((*h, change_id(*a, *s)?)))
-            .collect::<Result<Vec<_>, InvalidBundle>>()?;
+            .collect::<Result<Vec<_>, InvalidChangeSet>>()?;
         let dep_ids = prefix
             .deps
             .iter()
             .map(|(a, s)| change_id(*a, *s))
-            .collect::<Result<Vec<_>, InvalidBundle>>()?;
+            .collect::<Result<Vec<_>, InvalidChangeSet>>()?;
 
-        let storage = parse_bundle_columns(i.unconsumed_bytes())
-            .map_err(|e| InvalidBundle(format!("invalid carried changes: {}", e)))?;
+        let storage = parse_change_set_columns(i.unconsumed_bytes())
+            .map_err(|e| InvalidChangeSet(format!("invalid carried changes: {}", e)))?;
 
-        // all shape errors are caught here, at parse time — a Bundle
+        // all shape errors are caught here, at parse time — a Change set
         // that exists is well formed and appliers need no bounds checks
         if dep_ids.len() != storage.deps().len() {
             return Err(bad("dep ids do not match the carried changes' deps"));
@@ -648,10 +675,10 @@ impl Bundle {
         // decoded if someone asks for it (`to_changes`, audit mode).
         let (member_actors, member_seqs) = storage
             .member_ids()
-            .map_err(|e| InvalidBundle(format!("invalid change metadata: {}", e)))?;
+            .map_err(|e| InvalidChangeSet(format!("invalid change metadata: {}", e)))?;
         let num_members = member_seqs.len();
         if prefix.heads.is_empty() {
-            return Err(bad("a bundle must deliver at least one head"));
+            return Err(bad("a change_set must deliver at least one head"));
         }
         if prefix.heads.iter().any(|(_, i)| *i >= num_members) {
             return Err(bad("head index out of range"));
@@ -659,8 +686,24 @@ impl Bundle {
         if prefix.checkpoints.iter().any(|(i, _)| *i >= num_members) {
             return Err(bad("checkpoint index out of range"));
         }
+        // soundness only: completeness would need every member's hash,
+        // which a parse does not compute
+        if prefix
+            .checkpoints
+            .iter()
+            .any(|(_, h)| h.fragment_level() == 0)
+        {
+            return Err(bad("checkpoint is not a fragment head"));
+        }
+        if prefix
+            .checkpoints
+            .iter()
+            .any(|(_, c)| prefix.heads.iter().any(|(h, _)| h == c))
+        {
+            return Err(bad("checkpoint duplicates a delivered head"));
+        }
 
-        Ok(Bundle {
+        Ok(ChangeSet {
             heads: prefix.heads,
             checkpoints: prefix.checkpoints,
             boundary,
@@ -674,15 +717,59 @@ impl Bundle {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::storage::MAGIC_BYTES;
 
-    /// A bundle's bytes must be a function of its content, and batched
+    /// Every change set carries its fragment-level members as
+    /// checkpoints, without which it cannot serve as a Fragment.
+    #[test]
+    fn change_sets_carry_their_fragment_level_members_as_checkpoints() {
+        use crate::transaction::{CommitOptions, Transactable};
+        use crate::{ActorId, AutoCommit, ROOT};
+
+        let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
+        for i in 0..2000 {
+            doc.put(ROOT, "k", i as i64).unwrap();
+            doc.commit_with(CommitOptions::default().with_time(0));
+        }
+        let _ = doc.save();
+        for i in 0..1000 {
+            doc.put(ROOT, "k", 100_000 + i as i64).unwrap();
+            doc.commit_with(CommitOptions::default().with_time(0));
+        }
+
+        let bytes = doc.save_incremental();
+        let cs = ChangeSet::try_from(bytes.as_slice()).unwrap();
+
+        let heads: Vec<ChangeHash> = cs.heads().collect();
+        let mut expected: Vec<ChangeHash> = cs
+            .to_changes()
+            .unwrap()
+            .iter()
+            .map(|c| c.hash())
+            .filter(|h| h.fragment_level() > 0 && !heads.contains(h))
+            .collect();
+        let mut got: Vec<ChangeHash> = cs.checkpoints.iter().map(|(_, h)| *h).collect();
+        expected.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(
+            got, expected,
+            "a change set must carry exactly its non-head fragment-level members",
+        );
+        // and every checkpoint must index a real member
+        assert!(cs
+            .checkpoints
+            .iter()
+            .all(|(i, _)| *i < cs.member_seqs.len()));
+    }
+
+    /// A change set's bytes must be a function of its content, and batched
     /// bundling must agree with bundling one fragment at a time.
     ///
     /// Guards the fix for `flush_deletes` emitting a key group's
     /// concurrent deletes in `HashMap` order, which is seeded per
-    /// instance — the same fragment bundled twice in one process gave
+    /// instance — the same fragment change setd twice in one process gave
     /// different bytes. NOTE: this fixture does not reproduce that
     /// (it needs several concurrent deletes pending in one group at
     /// once, which turned out to be rare — 1 fragment in 191 on the
@@ -698,9 +785,7 @@ mod tests {
         // *concurrent* deletes land on the same element — that is the
         // shape whose emission order was unstable. Concurrent text
         // editing produces it naturally.
-        let mut doc = AutoCommit::new()
-            .with_actor(crate::ActorId::from(&[0u8][..]))
-            .unwrap();
+        let mut doc = AutoCommit::new().with_actor(crate::ActorId::from(&[0u8][..]));
         doc.enable_audit_mode().unwrap();
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, &"abcdefghij".repeat(8))
@@ -711,8 +796,7 @@ mod tests {
             for a in 1..=6u8 {
                 let mut fork = doc
                     .fork()
-                    .with_actor(crate::ActorId::from(&[round * 16 + a][..]))
-                    .unwrap();
+                    .with_actor(crate::ActorId::from(&[round * 16 + a][..]));
                 fork.enable_audit_mode().unwrap();
                 // every fork deletes the same span, concurrently
                 let _ = fork.splice_text(&text, 0, 4, "");
@@ -727,22 +811,25 @@ mod tests {
         let fragments = doc.document().fragments(..).unwrap();
         assert!(!fragments.is_empty());
         for f in &fragments {
-            let first = doc.document().bundle_fragment(f).unwrap().bytes();
+            let first = doc.document().change_set_for_fragment(f).unwrap().bytes();
             for _ in 0..4 {
                 assert_eq!(
-                    doc.document().bundle_fragment(f).unwrap().bytes(),
+                    doc.document().change_set_for_fragment(f).unwrap().bytes(),
                     first,
-                    "bundle bytes vary between identical calls"
+                    "change_set bytes vary between identical calls"
                 );
             }
         }
 
         // ...and bundling the whole set in one batch must agree with
         // bundling each fragment on its own
-        let batched = doc.document().bundle_fragments(fragments.clone()).unwrap();
+        let batched = doc
+            .document()
+            .change_sets_for_fragments(fragments.clone())
+            .unwrap();
         let singly: Vec<Vec<u8>> = fragments
             .iter()
-            .map(|f| doc.document().bundle_fragment(f).unwrap().bytes())
+            .map(|f| doc.document().change_set_for_fragment(f).unwrap().bytes())
             .collect();
         assert_eq!(batched, singly, "batched bundling diverges");
     }
@@ -762,12 +849,12 @@ mod tests {
     }
 
     /// A chunk header around `data`. The checksum is never verified by
-    /// `Bundle::try_from`, so it is left blank — the point of these
+    /// `ChangeSet::try_from`, so it is left blank — the point of these
     /// tests is what the parser does with hostile *content*.
     fn chunk(data: Vec<u8>) -> Vec<u8> {
         let mut out = MAGIC_BYTES.to_vec();
         out.extend([0u8; 4]);
-        out.push(u8::from(ChunkType::Bundle));
+        out.push(u8::from(ChunkType::ChangeSet));
         leb(data.len() as u64, &mut out);
         out.extend(data);
         out
@@ -790,14 +877,14 @@ mod tests {
                     break;
                 }
             }
-            let err = Bundle::try_from(&chunk(data)[..]);
+            let err = ChangeSet::try_from(&chunk(data)[..]);
             assert!(err.is_err(), "section {section} should not parse");
         }
     }
 
-    /// A bundle has to deliver something.
+    /// A change set has to deliver something.
     #[test]
-    fn a_bundle_with_no_heads_is_rejected() {
+    fn a_change_set_with_no_heads_is_rejected() {
         let mut doc = crate::Automerge::new();
         doc.enable_audit_mode().unwrap();
         {
@@ -807,13 +894,13 @@ mod tests {
             tx.commit();
         }
         let f = &doc.fragments(..).unwrap()[0];
-        let good = doc.bundle_fragment(f).unwrap();
+        let good = doc.change_set_for_fragment(f).unwrap();
         assert_eq!(good.heads().len(), 1);
 
         // rebuild the prefix with an empty head list
-        let mut b = Bundle::try_from(&good.bytes()[..]).unwrap();
+        let mut b = ChangeSet::try_from(&good.bytes()[..]).unwrap();
         b.heads.clear();
-        let err = Bundle::try_from(&b.bytes()[..]).expect_err("no heads must be rejected");
+        let err = ChangeSet::try_from(&b.bytes()[..]).expect_err("no heads must be rejected");
         assert!(err.0.contains("at least one head"), "got {err}");
     }
 
@@ -837,9 +924,7 @@ mod tests {
 
         // pinned actor + timestamp: the fragment layout this test indexes
         // into depends on which commits hash to fragment heads
-        let mut src = Automerge::new()
-            .with_actor(crate::ActorId::from(&b"zsn"[..]))
-            .unwrap();
+        let mut src = Automerge::new().with_actor(crate::ActorId::from(&b"zsn"[..]));
         src.enable_audit_mode().unwrap();
         for i in 0..6 {
             let mut tx = src.transaction();
@@ -848,8 +933,8 @@ mod tests {
         }
         let frags = src.fragments(0..=0).unwrap();
         // the second fragment has a boundary entry (its dep on the first)
-        let mut bytes = src.bundle_fragment(&frags[1]).unwrap().bytes();
-        assert!(Bundle::try_from(&bytes[..]).is_ok(), "baseline parses");
+        let mut bytes = src.change_set_for_fragment(&frags[1]).unwrap().bytes();
+        assert!(ChangeSet::try_from(&bytes[..]).is_ok(), "baseline parses");
 
         // walk the prefix to the first boundary entry's seq and zero it
         let mut at = MAGIC_BYTES.len() + 4 + 1;
@@ -893,7 +978,7 @@ mod tests {
         assert_ne!(seq, 0);
 
         bytes[seq_at] = 0;
-        let err = Bundle::try_from(&bytes[..]).expect_err("zero seq must be rejected");
+        let err = ChangeSet::try_from(&bytes[..]).expect_err("zero seq must be rejected");
         assert!(err.0.contains("sequence number"), "got {err}");
     }
 }

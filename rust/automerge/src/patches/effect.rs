@@ -1124,16 +1124,11 @@ mod tests {
         // the ops: an unpinned commit can hash to a fragment head (1/256)
         // and free hashes this test still needs. See HASHLESS.md.
         let t0 = || crate::transaction::CommitOptions::default().with_time(0);
-        let mut doc1 = AutoCommit::new()
-            .with_actor(crate::ActorId::from(&b"mlc1"[..]))
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(crate::ActorId::from(&b"mlc1"[..]));
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "one").unwrap();
         doc1.commit_with(t0());
-        let mut doc2 = doc1
-            .fork()
-            .with_actor(crate::ActorId::from(&b"mlc2"[..]))
-            .unwrap();
+        let mut doc2 = doc1.fork().with_actor(crate::ActorId::from(&b"mlc2"[..]));
         let before = doc1.get_heads();
 
         doc1.put(&list, 0, "left").unwrap();

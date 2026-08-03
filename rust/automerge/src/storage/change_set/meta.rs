@@ -2,10 +2,10 @@ use std::borrow::Cow;
 
 use crate::types::ChangeHash;
 
-/// A change's dependency as the bundle builder consumes it: either
-/// another member of the bundle (by its position in the member list,
-/// which is topological order) or a change outside the bundle (by
-/// hash). Resolving deps to positions up front is what lets bundles be
+/// A change's dependency as the change set builder consumes it: either
+/// another member of the change set (by its position in the member list,
+/// which is topological order) or a change outside the change set (by
+/// hash). Resolving deps to positions up front is what lets change sets be
 /// built without knowing the members' own hashes — only boundary
 /// (external) hashes are needed.
 #[derive(Clone, Copy, Debug)]
@@ -15,7 +15,7 @@ pub(crate) enum DepRef {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BundleMetadata<'a> {
+pub(crate) struct ChangeSetMetadata<'a> {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
     pub(crate) max_op: u64,
@@ -27,7 +27,7 @@ pub(crate) struct BundleMetadata<'a> {
     pub(crate) builder: usize,
 }
 
-impl BundleMetadata<'_> {
+impl ChangeSetMetadata<'_> {
     pub(crate) fn num_ops(&self) -> usize {
         (1 + self.max_op - self.start_op) as usize
     }

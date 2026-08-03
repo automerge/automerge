@@ -13,8 +13,8 @@ use std::num::NonZero;
 use std::ops::Range;
 
 pub(crate) mod batch;
+pub(crate) mod change_set;
 pub(crate) mod collector;
-pub(crate) mod fragment;
 
 #[cfg(test)]
 pub(crate) use collector::IndexedChangeCollector;

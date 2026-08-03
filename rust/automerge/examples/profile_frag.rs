@@ -10,10 +10,10 @@ fn main() {
         let bytes = std::fs::read(&path).unwrap();
         let doc = Automerge::load(&bytes).unwrap();
 
-        // bytes, not Bundles: apply_bundle consumes each bundle, and the
+        // bytes, not Change sets: apply_change set consumes each change set, and the
         // chain is applied twice below
         let v2: Vec<Vec<u8>> = doc
-            .bundle_fragments(doc.fragments(..).unwrap())
+            .change_sets_for_fragments(doc.fragments(..).unwrap())
             .unwrap()
             .into_iter()
             .collect();
@@ -21,7 +21,7 @@ fn main() {
         let t = std::time::Instant::now();
         let mut d = Automerge::new();
         for b in &v2 {
-            d.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
+            d.apply_change_set(automerge::ChangeSet::try_from(&b[..]).unwrap())
                 .unwrap();
         }
         eprintln!(
@@ -36,7 +36,7 @@ fn main() {
         let t = std::time::Instant::now();
         let mut d2 = Automerge::new();
         for b in &v2 {
-            d2.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
+            d2.apply_change_set(automerge::ChangeSet::try_from(&b[..]).unwrap())
                 .unwrap();
             let _patches = d2.diff_incremental();
         }

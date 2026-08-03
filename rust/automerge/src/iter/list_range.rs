@@ -475,7 +475,7 @@ mod tests {
         // needs to build its changes.
         let actor1 = "aaaaaaaa".try_into().unwrap();
         let actor2 = "bbbbbbbb".try_into().unwrap();
-        let mut doc1 = Automerge::new().with_actor(actor1).unwrap();
+        let mut doc1 = Automerge::new().with_actor(actor1);
         let mut tx1 = doc1.transaction();
         let list = tx1.put_object(&ROOT, "list", ObjType::List).unwrap();
         let values = [1, 2, 3, 4, 5]
@@ -485,7 +485,7 @@ mod tests {
         tx1.splice(&list, 0, 0, values.clone()).unwrap();
         tx1.commit_with(crate::transaction::CommitOptions::default().with_time(0));
 
-        let mut doc2 = doc1.fork().with_actor(actor2).unwrap();
+        let mut doc2 = doc1.fork().with_actor(actor2);
 
         let mut tx2 = doc2.transaction();
         tx2.put(&list, 3, 11).unwrap();

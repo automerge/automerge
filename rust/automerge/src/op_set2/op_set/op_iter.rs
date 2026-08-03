@@ -1399,13 +1399,13 @@ mod tests {
         let a2 = ActorId::try_from("bbbbbbbb").unwrap();
         let a3 = ActorId::try_from("cccccccc").unwrap();
 
-        let mut doc = crate::AutoCommit::new().with_actor(a1).unwrap();
+        let mut doc = crate::AutoCommit::new().with_actor(a1);
         let list = doc.put_object(&ROOT, "list", crate::ObjType::List).unwrap();
         for i in 0..8 {
             doc.insert(&list, i, i as i64).unwrap();
         }
-        let mut d2 = doc.fork().with_actor(a2).unwrap();
-        let mut d3 = doc.fork().with_actor(a3).unwrap();
+        let mut d2 = doc.fork().with_actor(a2);
+        let mut d3 = doc.fork().with_actor(a3);
         for i in 0..5 {
             d2.insert(&list, 2 + i, 100 + i as i64).unwrap();
             d3.insert(&list, 6, 200 + i as i64).unwrap();
@@ -1448,7 +1448,7 @@ mod tests {
         let actor3 = ActorId::try_from("cccccccc").unwrap();
         let actor4 = ActorId::try_from("dddddddd").unwrap();
 
-        let mut doc = Automerge::new().with_actor(actor1).unwrap();
+        let mut doc = Automerge::new().with_actor(actor1);
         let mut tx = doc.transaction();
         tx.put(&ROOT, "key1", "val1").unwrap();
         tx.put(&ROOT, "key2", "val2").unwrap();
@@ -1461,17 +1461,17 @@ mod tests {
         tx.put(&ROOT, "key9", "val9").unwrap();
         tx.commit();
 
-        let mut doc2 = doc.fork().with_actor(actor2).unwrap();
+        let mut doc2 = doc.fork().with_actor(actor2);
         let mut tx = doc2.transaction();
         tx.put(&ROOT, "key5", "val10B").unwrap(); // 10
         tx.commit();
 
-        let mut doc3 = doc.fork().with_actor(actor3).unwrap();
+        let mut doc3 = doc.fork().with_actor(actor3);
         let mut tx = doc3.transaction();
         tx.delete(&ROOT, "key5").unwrap(); // 10
         tx.commit();
 
-        let mut doc4 = doc.fork().with_actor(actor4).unwrap();
+        let mut doc4 = doc.fork().with_actor(actor4);
         let mut tx = doc4.transaction();
         tx.put(&ROOT, "key5", "val10D").unwrap(); // 10
         tx.commit();

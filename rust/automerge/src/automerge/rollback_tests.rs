@@ -215,9 +215,9 @@ fn rollback_delete_text_range() {
 #[test]
 fn rollback_delete_conflicted_field() {
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"aaaa")).unwrap();
+    doc1.set_actor(ActorId::from(b"aaaa"));
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"bbbb")).unwrap();
+    doc2.set_actor(ActorId::from(b"bbbb"));
 
     {
         let mut tx = doc1.transaction();
@@ -261,9 +261,9 @@ fn rollback_increment_counter_conflicted_by_non_counter() {
     // free hashes this test still needs. See HASHLESS.md.
     // doc1 gets the higher actor so its counter wins over doc2's string.
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"zzzz")).unwrap();
+    doc1.set_actor(ActorId::from(b"zzzz"));
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"aaaa")).unwrap();
+    doc2.set_actor(ActorId::from(b"aaaa"));
 
     {
         let mut tx = doc1.transaction();
@@ -352,9 +352,9 @@ fn rollback_scoped_transaction_on_conflicted_register() {
     // This test exercises the logic required by ensuring that the checkpoints
     // before and after a rollback of a scoped transaction are the same.
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"aaaa")).unwrap();
+    doc1.set_actor(ActorId::from(b"aaaa"));
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"bbbb")).unwrap();
+    doc2.set_actor(ActorId::from(b"bbbb"));
 
     {
         let mut tx = doc1.transaction();
@@ -395,9 +395,9 @@ fn rollback_scoped_transaction_on_conflicted_register() {
 #[test]
 fn rollback_combined_operations() {
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"aaaa")).unwrap();
+    doc1.set_actor(ActorId::from(b"aaaa"));
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"bbbb")).unwrap();
+    doc2.set_actor(ActorId::from(b"bbbb"));
 
     let list;
     let text;

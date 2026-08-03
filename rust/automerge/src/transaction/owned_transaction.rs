@@ -250,7 +250,7 @@ mod tests {
         // with a zero byte it would be a fragment head, covering the
         // first and freeing its hash, and `into_transaction` would error
         // `AuditModeRequired`. Documented design — see HASHLESS.md.
-        doc.set_actor(crate::ActorId::from(&b"otx"[..])).unwrap();
+        doc.set_actor(crate::ActorId::from(&b"otx"[..]));
         let t0 = || crate::transaction::CommitOptions::default().with_time(0);
 
         // Make a first change

@@ -16,7 +16,7 @@ use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
-use super::{BundleChange, BundleMetadata, BundleStorage, ParseError};
+use super::{ChangeSetChange, ChangeSetMetadata, ChangeSetStorage, ParseError};
 
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
@@ -41,21 +41,21 @@ fn save_actor(
     enc.save_to_and_remap(data, |a: ActorIdx| mapping[usize::from(a)].unwrap())
 }
 
-pub(crate) struct BundleBuilder<'a> {
+pub(crate) struct ChangeSetBuilder<'a> {
     mapper: ActorMapper<'a>,
-    change_writer: BundleChangeWriter<'a>,
-    op_writer: BundleOpWriter<'a>,
+    change_writer: ChangeSetChangeWriter<'a>,
+    op_writer: ChangeSetOpWriter<'a>,
     builders: Vec<ChangeBuilder>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
     max_op: u64,
 }
 
-impl<'a> BundleBuilder<'a> {
+impl<'a> ChangeSetBuilder<'a> {
     pub(super) fn from_change_meta(
-        mut changes: Vec<BundleMetadata<'a>>,
+        mut changes: Vec<ChangeSetMetadata<'a>>,
         mut mapper: ActorMapper<'a>,
-    ) -> BundleBuilder<'a> {
+    ) -> ChangeSetBuilder<'a> {
         // change[n].builder starts off as NodeIdx which is topo order
         // writing the changes in topo order prevents un-needed hashes in the external buffer
         changes.sort_by(|a, b| a.builder.cmp(&b.builder));
@@ -79,14 +79,14 @@ impl<'a> BundleBuilder<'a> {
             .enumerate()
             .for_each(|(index, b)| changes[b.change].builder = index);
 
-        let mut change_writer = BundleChangeWriter::new(changes.len());
+        let mut change_writer = ChangeSetChangeWriter::new(changes.len());
         for c in &changes {
             change_writer.add(c, &mut mapper);
         }
 
-        let op_writer = BundleOpWriter::default();
+        let op_writer = ChangeSetOpWriter::default();
 
-        BundleBuilder {
+        ChangeSetBuilder {
             mapper,
             change_writer,
             op_writer,
@@ -118,9 +118,9 @@ impl<'a> BundleBuilder<'a> {
         let pred = self.preds.remove(&op.id).unwrap_or_default();
 
         if let Some(index) = self.builders_index(op.id) {
-            // a member row carries its in-bundle successors in the succ
+            // a member row carries its in-change set successors in the succ
             // column; relationships to later, non-member ops are not the
-            // bundle's business and are dropped
+            // change set's business and are dropped
             let internal_succ: Vec<OpId> = succ
                 .iter()
                 .copied()
@@ -152,23 +152,23 @@ impl<'a> BundleBuilder<'a> {
 
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
-        // only relationships that cross INTO the bundle ride the pred
-        // column: an in-bundle target carries the relationship in its
+        // only relationships that cross INTO the change set ride the pred
+        // column: an in-change set target carries the relationship in its
         // succ column instead
         if self.builders_index(op_id).is_none() && self.builders_index(succ_id).is_some() {
             self.preds.entry(succ_id).or_default().push(op_id);
         }
     }
 
-    /// Write the delete ops whose preds crossed into the bundle from
-    /// outside. Deletes whose targets are all in-bundle never reach
+    /// Write the delete ops whose preds crossed into the change set from
+    /// outside. Deletes whose targets are all in-change set never reach
     /// `preds` — they have no row; their ids live in the targets' succ
     /// column.
     pub(crate) fn flush_deletes(&mut self) {
         if let Some((obj, key)) = self.last.take() {
             let target = self.hint_target(&key);
             // `preds` is a HashMap, whose iteration order is seeded per
-            // instance — emitting in that order would make a bundle's
+            // instance — emitting in that order would make a change set's
             // bytes depend on which allocation it happened to get rather
             // than on its content. Within a key group document order is
             // by op id, so sort.
@@ -187,8 +187,17 @@ impl<'a> BundleBuilder<'a> {
 
     /// The covered seq targets referenced by the member ops — the rows
     /// whose covered-rank the hint column carries.
-    pub(crate) fn hint_targets(&self) -> rustc_hash::FxHashSet<OpId> {
-        self.op_writer.targets.iter().flatten().copied().collect()
+    /// The covered seq targets, grouped by the object each lives in —
+    /// the unit the rank walk scans.
+    pub(crate) fn hint_targets_by_obj(
+        &self,
+    ) -> std::collections::HashMap<crate::types::ObjId, rustc_hash::FxHashSet<OpId>> {
+        let mut by_obj: std::collections::HashMap<_, rustc_hash::FxHashSet<OpId>> =
+            std::collections::HashMap::new();
+        for (id, obj) in self.op_writer.targets.iter().flatten() {
+            by_obj.entry(*obj).or_default().insert(*id);
+        }
+        by_obj
     }
 
     pub(crate) fn is_member(&self, id: OpId) -> bool {
@@ -198,7 +207,7 @@ impl<'a> BundleBuilder<'a> {
     pub(crate) fn finish_with_ranks(
         mut self,
         ranks: &std::collections::HashMap<OpId, u64>,
-    ) -> BundleStorage<'static, crate::storage::change::Verified> {
+    ) -> ChangeSetStorage<'static, crate::storage::change::Verified> {
         self.flush_deletes();
 
         let mut mapper = self.mapper;
@@ -242,7 +251,7 @@ impl<'a> BundleBuilder<'a> {
         let ops_data_end_u = data_u.len();
 
         // No chunk header of its own: these columns are the tail of the
-        // bundle chunk, not a nested chunk. Offsets are relative to the
+        // change set chunk, not a nested chunk. Offsets are relative to the
         // start of the column data.
         let bytes_u = data_u;
         let changes_data_u_range = changes_data_start_u..changes_data_end_u;
@@ -267,7 +276,7 @@ impl<'a> BundleBuilder<'a> {
 
         let bytes_c = data_c;
 
-        let storage = BundleStorage {
+        let storage = ChangeSetStorage {
             bytes: Cow::Owned(bytes_u),
             compressed_bytes: Some(Cow::Owned(bytes_c)),
             ops_meta,
@@ -279,9 +288,9 @@ impl<'a> BundleBuilder<'a> {
             // the builder's caller reads the members back to validate
             // them; that first read fills this
             changes: Default::default(),
-            // a bundle being sent is never applied, so its op columns are
+            // a change set being sent is never applied, so its op columns are
             // not loaded here
-            frag_ops: Default::default(),
+            change_set_ops: Default::default(),
             _phantom: PhantomData,
         };
 
@@ -305,7 +314,7 @@ impl<'a> BundleBuilder<'a> {
 }
 
 #[derive(Default)]
-pub(crate) struct BundleChangeWriter<'a> {
+pub(crate) struct ChangeSetChangeWriter<'a> {
     len: usize,
     cap: usize,
     seen: HashMap<ChangeHash, usize>,
@@ -326,15 +335,15 @@ pub(crate) struct BundleChangeWriter<'a> {
     extra: Vec<u8>,
 }
 
-impl<'a> BundleChangeWriter<'a> {
+impl<'a> ChangeSetChangeWriter<'a> {
     fn new(cap: usize) -> Self {
-        BundleChangeWriter {
+        ChangeSetChangeWriter {
             cap,
             ..Default::default()
         }
     }
 
-    fn add(&mut self, change: &BundleMetadata<'a>, mapper: &mut ActorMapper<'_>) {
+    fn add(&mut self, change: &ChangeSetMetadata<'a>, mapper: &mut ActorMapper<'_>) {
         assert!(self.len < self.cap);
         mapper.process_actor(change.actor);
         self.len += 1;
@@ -369,7 +378,7 @@ impl<'a> BundleChangeWriter<'a> {
         }
     }
 
-    fn finish(self, mapper: &ActorMapper<'_>, data: &mut Vec<u8>) -> BundleChangeColumns {
+    fn finish(self, mapper: &ActorMapper<'_>, data: &mut Vec<u8>) -> ChangeSetChangeColumns {
         let actor = save_actor(self.actor, &mapper.mapping, data);
         let seq = self.seq.save_to(data);
         let num_ops = self.num_ops.save_to(data);
@@ -382,7 +391,7 @@ impl<'a> BundleChangeWriter<'a> {
         let start = data.len();
         data.extend_from_slice(&self.extra);
         let extra = start..data.len();
-        BundleChangeColumns {
+        ChangeSetChangeColumns {
             actor,
             seq,
             num_ops,
@@ -398,9 +407,12 @@ impl<'a> BundleChangeWriter<'a> {
 }
 
 #[derive(Default)]
-pub(crate) struct BundleOpWriter<'a> {
-    /// per-op covered seq target (key elem) for the hint column
-    targets: Vec<Option<OpId>>,
+pub(crate) struct ChangeSetOpWriter<'a> {
+    /// per-op covered seq target (key elem) for the hint column,
+    /// paired with the object it lives in — an insert's anchor is always
+    /// a row of the sequence being inserted into, so the hint's rank is
+    /// counted within that object rather than from the document start
+    targets: Vec<Option<(OpId, crate::types::ObjId)>>,
     obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
     obj_ctr: hexane::Encoder<'a, Option<u64>>,
     key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
@@ -424,7 +436,7 @@ pub(crate) struct BundleOpWriter<'a> {
     id_ctr_values: Vec<i64>,
 }
 
-impl<'a> BundleOpWriter<'a> {
+impl<'a> ChangeSetOpWriter<'a> {
     pub(crate) fn add(
         &mut self,
         op: &OpBuilder<'_>,
@@ -445,7 +457,7 @@ impl<'a> BundleOpWriter<'a> {
         mapper: &mut ActorMapper<'a>,
         target: Option<OpId>,
     ) {
-        self.targets.push(target);
+        self.targets.push(target.map(|t| (t, op.obj)));
         mapper.process_op(op);
         self.succ_count.append(succ.len() as u32);
         for s in succ {
@@ -476,22 +488,29 @@ impl<'a> BundleOpWriter<'a> {
         self.id_ctr_values.push(op.id.counter() as i64);
     }
 
-    pub(crate) fn finish(self, mapper: &ActorMapper<'a>, data: &mut Vec<u8>) -> BundleOpsColumns {
+    pub(crate) fn finish(
+        self,
+        mapper: &ActorMapper<'a>,
+        data: &mut Vec<u8>,
+    ) -> ChangeSetOpsColumns {
         self.finish_with_ranks(mapper, data, &Default::default())
     }
 
     /// [`Self::finish`] with the covered-rank of every recorded target:
     /// each op's hint value is `ranks[target]` — the number of
-    /// dep-covered ops preceding the target row in document order.
+    /// dep-covered ops preceding the target row **within its object**.
+    /// Object-relative so producing it costs a scan of one object rather
+    /// than of the whole document; the receiver rebases onto the object
+    /// it has already scoped to.
     pub(crate) fn finish_with_ranks(
         self,
         mapper: &ActorMapper<'a>,
         data: &mut Vec<u8>,
         ranks: &std::collections::HashMap<OpId, u64>,
-    ) -> BundleOpsColumns {
+    ) -> ChangeSetOpsColumns {
         let mut hint_enc = hexane::DeltaEncoder::<Option<i64>>::default();
         for t in &self.targets {
-            hint_enc.append(t.and_then(|id| ranks.get(&id)).map(|&r| r as i64));
+            hint_enc.append(t.and_then(|(id, _)| ranks.get(&id)).map(|&r| r as i64));
         }
         let hint = hint_enc.save_to_unless(data, None);
         let obj_actor = save_opt_actor_unless_empty(self.obj_actor, &mapper.mapping, data);
@@ -506,7 +525,7 @@ impl<'a> BundleOpWriter<'a> {
         let value_start = data.len();
         data.extend_from_slice(&self.value);
         let value = value_start..data.len();
-        // a bundle whose members reference nothing outside — a whole
+        // a change set whose members reference nothing outside — a whole
         // document — has no preds at all; drop the all-zero column
         let pred_count = self.pred_count.save_to_unless(data, 0);
         let pred_actor = save_actor(self.pred_actor, &mapper.mapping, data);
@@ -526,7 +545,7 @@ impl<'a> BundleOpWriter<'a> {
         }
         let id_ctr = id_ctr_enc.save_to(data);
 
-        BundleOpsColumns {
+        ChangeSetOpsColumns {
             id_actor,
             id_ctr,
             obj_actor,
@@ -552,7 +571,7 @@ impl<'a> BundleOpWriter<'a> {
 }
 
 #[derive(Default)]
-pub(crate) struct BundleOpsColumns {
+pub(crate) struct ChangeSetOpsColumns {
     pub(crate) id_actor: Range<usize>,
     pub(crate) id_ctr: Range<usize>,
     pub(crate) obj_actor: Range<usize>,
@@ -576,7 +595,7 @@ pub(crate) struct BundleOpsColumns {
 }
 
 #[derive(Default)]
-pub(crate) struct BundleChangeColumns {
+pub(crate) struct ChangeSetChangeColumns {
     actor: Range<usize>,
     seq: Range<usize>,
     max_op: Range<usize>,
@@ -589,7 +608,7 @@ pub(crate) struct BundleChangeColumns {
     extra: Range<usize>,
 }
 
-impl BundleChangeColumns {
+impl ChangeSetChangeColumns {
     fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (change::ACTOR, &self.actor),
@@ -610,7 +629,7 @@ impl BundleChangeColumns {
     }
 }
 
-impl BundleOpsColumns {
+impl ChangeSetOpsColumns {
     pub(crate) fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (ops::OBJ_ACTOR, &self.obj_actor),
@@ -652,16 +671,16 @@ struct ChangeBuilder {
     max_op: u64,
 }
 
-/// A bundle's change-metadata columns as raw byte slices.
+/// A change set's change-metadata columns as raw byte slices.
 ///
-/// The columnar counterpart to [`BundleChangeIterUnverified`]: where the
-/// iterator materialises a [`BundleChange`] per member (a `Vec` of deps,
+/// The columnar counterpart to [`ChangeSetChangeIterUnverified`]: where the
+/// iterator materialises a [`ChangeSetChange`] per member (a `Vec` of deps,
 /// an owned message, an owned extra), this hands out the columns so a
 /// consumer can decode one column at a time — which is how the document
 /// load path builds the same graph state. An absent column is an empty
 /// slice, which every decoder reads as all-default.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct BundleChangeCols<'a> {
+pub(crate) struct ChangeSetChangeCols<'a> {
     pub(crate) actor: &'a [u8],
     pub(crate) seq: &'a [u8],
     pub(crate) num_ops: &'a [u8],
@@ -674,7 +693,7 @@ pub(crate) struct BundleChangeCols<'a> {
     pub(crate) extra: &'a [u8],
 }
 
-impl<'a> BundleChangeCols<'a> {
+impl<'a> ChangeSetChangeCols<'a> {
     pub(crate) fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
@@ -737,12 +756,12 @@ impl<'a> BundleChangeCols<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct BundleChangeIterUnverified<'a> {
-    inner: Option<BundleChangeIterInner<'a>>,
+pub(crate) struct ChangeSetChangeIterUnverified<'a> {
+    inner: Option<ChangeSetChangeIterInner<'a>>,
 }
 
 #[derive(Debug)]
-struct BundleChangeIterInner<'a> {
+struct ChangeSetChangeIterInner<'a> {
     actor: hexane::Decoder<'a, Option<ActorIdx>>,
     seq: hexane::DeltaDecoder<'a, Option<i64>>,
     max_op: hexane::DeltaDecoder<'a, Option<i64>>,
@@ -755,8 +774,8 @@ struct BundleChangeIterInner<'a> {
     extra: &'a [u8],
 }
 
-impl<'a> Iterator for BundleChangeIterUnverified<'a> {
-    type Item = Result<BundleChange<'a>, ParseError>;
+impl<'a> Iterator for ChangeSetChangeIterUnverified<'a> {
+    type Item = Result<ChangeSetChange<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -767,23 +786,23 @@ impl<'a> Iterator for BundleChangeIterUnverified<'a> {
     }
 }
 
-impl<'a> BundleChangeIterUnverified<'a> {
+impl<'a> ChangeSetChangeIterUnverified<'a> {
     pub(crate) fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
         Ok(Self {
-            inner: Some(BundleChangeIterInner::try_new(columns, data)?),
+            inner: Some(ChangeSetChangeIterInner::try_new(columns, data)?),
         })
     }
 }
 
-impl<'a> BundleChangeIterInner<'a> {
+impl<'a> ChangeSetChangeIterInner<'a> {
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
-        let cols = BundleChangeCols::try_new(columns, data)?;
+        let cols = ChangeSetChangeCols::try_new(columns, data)?;
         Ok(Self {
             actor: cols.actors(),
             seq: cols.seqs(),
@@ -798,7 +817,7 @@ impl<'a> BundleChangeIterInner<'a> {
         })
     }
 
-    fn try_next(&mut self) -> Result<Option<BundleChange<'a>>, ParseError> {
+    fn try_next(&mut self) -> Result<Option<ChangeSetChange<'a>>, ParseError> {
         let actor = match self.actor.next().flatten() {
             Some(a) => a.into(),
             None => return Ok(None),
@@ -845,7 +864,7 @@ impl<'a> BundleChangeIterInner<'a> {
         let extra = Cow::Borrowed(extra);
         self.extra = tail;
 
-        Ok(Some(BundleChange {
+        Ok(Some(ChangeSetChange {
             actor,
             author: None,
             seq,
@@ -894,20 +913,20 @@ struct OpIterInner<'a> {
     value: &'a [u8],
 }
 
-/// One bundle op row: the op itself (pred = references to ops before
-/// the bundle) plus its in-bundle successors from the succ column.
-/// `succ` is empty for bundles predating the succ column — those carry
+/// One change set op row: the op itself (pred = references to ops before
+/// the change set) plus its in-change set successors from the succ column.
+/// `succ` is empty for change sets predating the succ column — those carry
 /// every relationship (and every delete) in pred/rows instead.
 #[derive(Debug, Clone)]
-pub(crate) struct BundleOp<'a> {
+pub(crate) struct ChangeSetOp<'a> {
     pub(crate) op: OpBuilder<'a>,
     pub(crate) succ: Vec<OpId>,
 }
 
 impl<'a> Iterator for OpIterUnverified<'a> {
-    type Item = Result<BundleOp<'a>, ParseError>;
+    type Item = Result<ChangeSetOp<'a>, ParseError>;
 
-    fn next(&mut self) -> Option<Result<BundleOp<'a>, ParseError>> {
+    fn next(&mut self) -> Option<Result<ChangeSetOp<'a>, ParseError>> {
         self.inner
             .as_mut()?
             .try_next()
@@ -917,7 +936,7 @@ impl<'a> Iterator for OpIterUnverified<'a> {
 }
 
 impl<'a> OpIterInner<'a> {
-    fn try_next(&mut self) -> Result<Option<BundleOp<'a>>, ParseError> {
+    fn try_next(&mut self) -> Result<Option<ChangeSetOp<'a>>, ParseError> {
         let id_actor = self.id_actor.next().flatten();
         let id_ctr = self.id_ctr.next().flatten();
         let id = match OpId::try_load(id_actor, id_ctr) {
@@ -969,7 +988,7 @@ impl<'a> OpIterInner<'a> {
             succ.push(OpId::try_load(succ_actor, succ_ctr)?);
         }
 
-        Ok(Some(BundleOp {
+        Ok(Some(ChangeSetOp {
             op: OpBuilder {
                 id,
                 obj,
@@ -1073,13 +1092,13 @@ impl<'a> OpIterInner<'a> {
     }
 }
 
-/// A minimally-decoded fragment op for the streaming manifold: no
+/// A minimally-decoded change set op for the streaming manifold: no
 /// marks, actor indexes already doc-mapped.
 #[derive(Debug)]
-pub(crate) struct FragOp<'a> {
+pub(crate) struct ManifoldOp<'a> {
     pub(crate) id: OpId,
     pub(crate) obj: ObjId,
-    pub(crate) key: FragKey<'a>,
+    pub(crate) key: ChangeSetKey<'a>,
     pub(crate) insert: bool,
     pub(crate) action: Action,
     /// external (doc-row) predecessors
@@ -1100,23 +1119,23 @@ pub(crate) struct FragOp<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum FragKey<'a> {
+pub(crate) enum ChangeSetKey<'a> {
     Map(&'a str),
     Seq(ElemId),
 }
 
-impl FragKey<'_> {
+impl ChangeSetKey<'_> {
     pub(crate) fn key_str(&self) -> Option<&str> {
         match self {
-            FragKey::Map(s) => Some(s),
-            FragKey::Seq(_) => None,
+            ChangeSetKey::Map(s) => Some(s),
+            ChangeSetKey::Seq(_) => None,
         }
     }
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
-            FragKey::Map(_) => None,
-            FragKey::Seq(e) => Some(*e),
+            ChangeSetKey::Map(_) => None,
+            ChangeSetKey::Seq(e) => Some(*e),
         }
     }
 }
@@ -1174,7 +1193,7 @@ pub(crate) struct CleanRun {
     pub(crate) val_bytes: usize,
 }
 
-/// What a bulk tail skip resolved: see [`FragOps::skip_tail`].
+/// What a bulk tail skip resolved: see [`ManifoldOps::skip_tail`].
 pub(crate) struct TailRun {
     /// succ entries the skipped rows carry, in total
     pub(crate) sub: usize,
@@ -1190,7 +1209,7 @@ pub(crate) struct TailRun {
 /// of the value column only an increment's own amount (the rest of it
 /// is stepped over by width). Run-level peeks power the tail fast path.
 #[derive(Clone)]
-pub(crate) struct FragOps<'a> {
+pub(crate) struct ManifoldOps<'a> {
     pub(crate) pos: usize,
     pub(crate) len: usize,
     /// succ entries and value bytes the whole fragment holds — parse
@@ -1236,7 +1255,7 @@ pub(crate) struct FragOps<'a> {
     obj_absent: bool,
 }
 
-impl<'a> FragOps<'a> {
+impl<'a> ManifoldOps<'a> {
     pub(crate) fn new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
@@ -1246,7 +1265,7 @@ impl<'a> FragOps<'a> {
         value_bytes: usize,
         inc: &'a hexane::Column<Option<i64>>,
     ) -> Self {
-        let mut s = FragOps {
+        let mut s = ManifoldOps {
             pos: 0,
             len,
             succ_entries,
@@ -1332,7 +1351,7 @@ impl<'a> FragOps<'a> {
     }
 
     /// Decode the next op (minimal fields), doc-mapping every actor.
-    pub(crate) fn next_op(&mut self) -> FragOp<'a> {
+    pub(crate) fn next_op(&mut self) -> ManifoldOp<'a> {
         debug_assert!(self.pos < self.len, "read past the end of the fragment");
         self.pos += 1;
 
@@ -1352,7 +1371,7 @@ impl<'a> FragOps<'a> {
         let ka = self.key_actor.next().flatten();
         let kc = self.key_ctr.next().flatten();
         let key = match ks {
-            Some(sv) => FragKey::Map(sv),
+            Some(sv) => ChangeSetKey::Map(sv),
             None => {
                 let e = match (ka, kc) {
                     (None, Some(0)) | (None, None) => ElemId(OpId::new(0, 0)),
@@ -1361,7 +1380,7 @@ impl<'a> FragOps<'a> {
                     }
                     _ => panic!("invalid elem key"),
                 };
-                FragKey::Seq(e)
+                ChangeSetKey::Seq(e)
             }
         };
 
@@ -1409,7 +1428,7 @@ impl<'a> FragOps<'a> {
 
         let hint = self.hint.next().flatten().map(|h| h as u64);
 
-        FragOp {
+        ManifoldOp {
             id,
             obj,
             key,
@@ -1648,10 +1667,10 @@ pub(crate) mod ops {
     pub(super) const ACTION_COL_ID:         ColumnId = ColumnId::new(4);
     pub(super) const VAL_COL_ID:            ColumnId = ColumnId::new(5);
     pub(super) const PRED_COL_ID:           ColumnId = ColumnId::new(7);
-    /// In-bundle successors of each op, mirroring the document format's
-    /// succ group. Only relationships between two bundle members are
+    /// In-change set successors of each op, mirroring the document format's
+    /// succ group. Only relationships between two change set members are
     /// stored here; the pred column holds only references to ops from
-    /// before the bundle.
+    /// before the change set.
     pub(super) const SUCC_COL_ID:           ColumnId = ColumnId::new(8);
     pub(super) const EXPAND_COL_ID:         ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID:      ColumnId = ColumnId::new(10);

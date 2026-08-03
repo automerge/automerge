@@ -1032,13 +1032,9 @@ mod tests {
     #[test]
     fn should_allow_simultaneous_messages_during_synchronisation() {
         // create & synchronize two nodes
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
@@ -1157,13 +1153,9 @@ mod tests {
         // where n2 is a false positive in the Bloom filter containing {n1}.
         // lastSync is c9.
 
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
@@ -1180,16 +1172,14 @@ mod tests {
         let (mut doc1, mut doc2) = loop {
             let mut doc1copy = doc1
                 .clone()
-                .with_actor(ActorId::try_from("01234567").unwrap())
-                .unwrap();
+                .with_actor(ActorId::try_from("01234567").unwrap());
             let val1 = format!("{} @ n1", i);
             doc1copy.put(ROOT, "x", val1).unwrap();
             doc1copy.commit();
 
             let mut doc2copy = doc1
                 .clone()
-                .with_actor(ActorId::try_from("89abcdef").unwrap())
-                .unwrap();
+                .with_actor(ActorId::try_from("89abcdef").unwrap());
             let val2 = format!("{} @ n2", i);
             doc2copy.put(ROOT, "x", val2).unwrap();
             doc2copy.commit();
@@ -1224,13 +1214,9 @@ mod tests {
         ////                                   `-- n2c1 <-- n2c2 <-- n2c3
         //// where n2c1 and n2c2 are both false positives in the Bloom filter containing {c5}.
         //// lastSync is c4.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
@@ -1251,8 +1237,7 @@ mod tests {
         let mut doc2 = loop {
             let mut doc = doc2
                 .fork()
-                .with_actor(ActorId::try_from("89abcdef").unwrap())
-                .unwrap();
+                .with_actor(ActorId::try_from("89abcdef").unwrap());
             doc.put(ROOT, "x", format!("{} at 89abdef", i)).unwrap();
             doc.commit();
             if bloom.contains_hash(&doc.get_head_hashes()[0]) {
@@ -1266,8 +1251,7 @@ mod tests {
         let mut doc2 = loop {
             let mut doc = doc2
                 .fork()
-                .with_actor(ActorId::try_from("89abcdef").unwrap())
-                .unwrap();
+                .with_actor(ActorId::try_from("89abcdef").unwrap());
             doc.put(ROOT, "x", format!("{} again", i)).unwrap();
             doc.commit();
             if bloom.contains_hash(&doc.get_head_hashes()[0]) {
@@ -1295,17 +1279,11 @@ mod tests {
 
     #[test]
     fn should_handle_lots_of_branching_and_merging() {
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("01234567").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("01234567").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("89abcdef").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("89abcdef").unwrap());
         doc2.enable_audit_mode().unwrap();
-        let mut doc3 = AutoCommit::new()
-            .with_actor(ActorId::try_from("fedcba98").unwrap())
-            .unwrap();
+        let mut doc3 = AutoCommit::new().with_actor(ActorId::try_from("fedcba98").unwrap());
         doc3.enable_audit_mode().unwrap();
         let mut s1 = State::new();
         let mut s2 = State::new();
@@ -1474,13 +1452,9 @@ mod tests {
 
     #[test]
     fn read_only_sync_does_not_apply_incoming_changes() {
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         doc1.put(ROOT, "from_doc1", "hello").unwrap();
@@ -1541,13 +1515,9 @@ mod tests {
     fn both_peers_read_only() {
         // When both peers are read-only, neither applies the other's changes.
         // The protocol should still converge.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         doc1.put(ROOT, "from_doc1", "hello").unwrap();
@@ -1576,13 +1546,9 @@ mod tests {
     fn both_peers_read_only_converges_to_none() {
         // Explicitly verify that generate_sync_message returns None on both
         // sides after the initial exchange between two read-only peers.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         doc1.put(ROOT, "from_doc1", "hello").unwrap();
@@ -1613,13 +1579,9 @@ mod tests {
         // Both peers are read-only. One makes local changes between sync
         // rounds. The updated heads should be communicated (no changes sent),
         // and the protocol should converge.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         let mut s1 = State::new_read_only();
@@ -1666,13 +1628,9 @@ mod tests {
         // Both peers are read-only and both make local changes between sync
         // rounds. Both should learn the other's updated heads, neither should
         // receive actual changes, and the protocol should converge each round.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         let mut s1 = State::new_read_only();
@@ -1733,13 +1691,9 @@ mod tests {
         // Both peers are read-only. Both make changes, then exchange messages
         // simultaneously (like the simultaneous sync test). Must converge.
         for _ in 0..100 {
-            let mut doc1 = AutoCommit::new()
-                .with_actor(ActorId::try_from("abc123").unwrap())
-                .unwrap();
+            let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
             doc1.enable_audit_mode().unwrap();
-            let mut doc2 = AutoCommit::new()
-                .with_actor(ActorId::try_from("def456").unwrap())
-                .unwrap();
+            let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
             doc2.enable_audit_mode().unwrap();
 
             let mut s1 = State::new_read_only();
@@ -1781,13 +1735,9 @@ mod tests {
     fn read_only_peer_new_changes_between_sync_rounds() {
         // After an initial sync converges, the read-only peer makes new local
         // changes and syncs again. The new changes should flow to the other peer.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         doc1.put(ROOT, "round1", "from_doc1").unwrap();
@@ -1849,13 +1799,9 @@ mod tests {
         // a read-only peer. The read-only peer makes a change after receiving a
         // message but before the sync loop completes.
         for _ in 0..300 {
-            let mut doc1 = AutoCommit::new()
-                .with_actor(ActorId::try_from("abc123").unwrap())
-                .unwrap();
+            let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
             doc1.enable_audit_mode().unwrap();
-            let mut doc2 = AutoCommit::new()
-                .with_actor(ActorId::try_from("def456").unwrap())
-                .unwrap();
+            let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
             doc2.enable_audit_mode().unwrap();
             let mut s1 = State::new_read_only();
             let mut s2 = State::new();
@@ -1890,17 +1836,11 @@ mod tests {
         // R (read-only) publishes to A and B separately.
         // A makes its own changes. Then B syncs with R again.
         // B should NOT get A's changes through R (R never accepted them).
-        let mut r = AutoCommit::new()
-            .with_actor(ActorId::try_from("aaaaaa").unwrap())
-            .unwrap();
+        let mut r = AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
         r.enable_audit_mode().unwrap();
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("bbbbbb").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("cccccc").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
         b.enable_audit_mode().unwrap();
 
         r.put(ROOT, "from_r", "hello").unwrap();
@@ -1937,17 +1877,11 @@ mod tests {
         // Now B syncs with R directly. R should recognize B already has its
         // changes (via bloom filter) and not redundantly send them.
         // The protocol should converge.
-        let mut r = AutoCommit::new()
-            .with_actor(ActorId::try_from("aaaaaa").unwrap())
-            .unwrap();
+        let mut r = AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
         r.enable_audit_mode().unwrap();
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("bbbbbb").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("cccccc").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
         b.enable_audit_mode().unwrap();
 
         r.put(ROOT, "from_r", "hello").unwrap();
@@ -1991,17 +1925,11 @@ mod tests {
         // All three have their own changes. Each pair syncs.
         // A and B should converge to having A's + B's + R's changes.
         // R should only have its own changes.
-        let mut r = AutoCommit::new()
-            .with_actor(ActorId::try_from("aaaaaa").unwrap())
-            .unwrap();
+        let mut r = AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
         r.enable_audit_mode().unwrap();
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("bbbbbb").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("cccccc").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
         b.enable_audit_mode().unwrap();
 
         r.put(ROOT, "from_r", "r_val").unwrap();
@@ -2055,17 +1983,11 @@ mod tests {
         // Now B syncs with R using a fresh State. R tries to send its changes
         // to B, but B already has them (received via A). The bloom filter
         // should prevent redundant sending and the protocol should converge.
-        let mut r = AutoCommit::new()
-            .with_actor(ActorId::try_from("aaaaaa").unwrap())
-            .unwrap();
+        let mut r = AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
         r.enable_audit_mode().unwrap();
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("bbbbbb").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("cccccc").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
         b.enable_audit_mode().unwrap();
 
         // R has several changes to make bloom filter interaction interesting
@@ -2111,17 +2033,11 @@ mod tests {
         // Then A syncs with R (read-only), then B syncs with R (read-only).
         // R ignores changes both times. R's sync state must handle receiving
         // announcements about the same changes from two different peers.
-        let mut r = AutoCommit::new()
-            .with_actor(ActorId::try_from("aaaaaa").unwrap())
-            .unwrap();
+        let mut r = AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
         r.enable_audit_mode().unwrap();
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("bbbbbb").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("cccccc").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
         b.enable_audit_mode().unwrap();
 
         r.put(ROOT, "from_r", "r_val").unwrap();
@@ -2176,13 +2092,9 @@ mod tests {
         // Then A switches to read-write and syncs again.
         // A should now receive B's changes despite B having previously sent
         // them (the sent_hashes problem).
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "hello").unwrap();
@@ -2213,13 +2125,9 @@ mod tests {
     fn switch_read_write_to_read_only_mid_session() {
         // A and B sync normally (both read-write). Then A switches to
         // read-only. B makes new changes. A should not receive them.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "hello").unwrap();
@@ -2259,13 +2167,9 @@ mod tests {
         // A starts read-only, syncs multiple rounds with B (B makes changes
         // each round). A switches to read-write. A should receive ALL of B's
         // accumulated changes.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "initial").unwrap();
@@ -2307,13 +2211,9 @@ mod tests {
     #[test]
     fn toggle_read_only_multiple_times() {
         // Rapidly toggle read-only on and off, making changes between each toggle.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         let mut sa = State::new_read_only();
@@ -2359,13 +2259,9 @@ mod tests {
     #[test]
     fn peer_discovers_remote_read_only_status() {
         // After exchanging messages, B should discover that A is read-only.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "hello").unwrap();
@@ -2407,13 +2303,9 @@ mod tests {
     fn changes_not_sent_to_read_only_peer() {
         // B should not send changes to A when B knows A is read-only.
         // This saves bandwidth.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         b.put(ROOT, "from_b", "world").unwrap();
@@ -2456,13 +2348,9 @@ mod tests {
         // After calling generate_sync_message (setting in_flight=true),
         // then set_read_only, the next generate_sync_message must still
         // produce a message so the peer learns about the mode change.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "hello").unwrap();
@@ -2507,13 +2395,9 @@ mod tests {
     #[test]
     fn generate_message_after_set_read_only_false_even_with_in_flight() {
         // Same as above but switching from read-only to read-write.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "hello").unwrap();
@@ -2558,13 +2442,9 @@ mod tests {
         // Both peers start read-only with their own changes, sync (exchanging
         // heads but not changes), then both switch to read-write simultaneously.
         // After syncing again, both should have each other's changes.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         doc1.put(ROOT, "from_doc1", "hello").unwrap();
@@ -2596,13 +2476,9 @@ mod tests {
     fn both_toggle_read_only_to_read_write_with_new_changes() {
         // Both peers start read-only, sync, then both switch to read-write
         // and make additional changes before syncing.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         doc1.put(ROOT, "original_1", "v1").unwrap();
@@ -2641,13 +2517,9 @@ mod tests {
         // Both peers are read-only for several rounds, making changes each
         // round. Then both switch to read-write. All accumulated changes
         // from all rounds should be exchanged.
-        let mut doc1 = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut doc1 = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         doc1.enable_audit_mode().unwrap();
-        let mut doc2 = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut doc2 = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         doc2.enable_audit_mode().unwrap();
 
         let mut s1 = State::new_read_only();
@@ -2694,13 +2566,9 @@ mod tests {
         // peer is an old implementation that doesn't understand SyncReset.
         // Old peers have their_capabilities = None. The fallback sends empty
         // heads, which triggers the old "peer lost all data" reset path.
-        let mut a = AutoCommit::new()
-            .with_actor(ActorId::try_from("abc123").unwrap())
-            .unwrap();
+        let mut a = AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
         a.enable_audit_mode().unwrap();
-        let mut b = AutoCommit::new()
-            .with_actor(ActorId::try_from("def456").unwrap())
-            .unwrap();
+        let mut b = AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
         b.enable_audit_mode().unwrap();
 
         a.put(ROOT, "from_a", "hello").unwrap();
