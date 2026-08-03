@@ -1,0 +1,20 @@
+[package]
+name = "benchmark-battery"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+license = "MIT"
+
+[features]
+memory = []
+
+[dependencies]
+automerge = { path = "../automerge" }
+automerge-sync = { path = "../automerge-sync" }
+anyhow = "1.0.98"
+clap = { version = "4.5.42", features = ["derive"] }
+getrandom = "0.4"
+rand = "^0.10"
+resvg = "0.47.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"

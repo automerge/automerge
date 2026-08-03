@@ -61,28 +61,10 @@ serde_json = { version = "^1.0.73", features = [
     "float_roundtrip",
 ], default-features = true }
 maplit = { version = "^1.0" }
-criterion = "0.8"
 test-log = { version = "0.2.10", features = [
     "trace",
 ], default-features = false }
 tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"
-
-[[bench]]
-name = "range"
-harness = false
-
-[[bench]]
-name = "map"
-harness = false
-
-[[bench]]
-name = "sync"
-harness = false
-
-[[bench]]
-name = "load_save"
-harness = false
-
 

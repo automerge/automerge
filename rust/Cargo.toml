@@ -3,6 +3,7 @@ members = [
     "automerge-sync",
     "automerge",
     "automerge-c",
+    "benchmark-battery",
     "automerge-cli",
     "automerge-test",
     "automerge-wasm",
