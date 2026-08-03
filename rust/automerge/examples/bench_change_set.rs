@@ -30,7 +30,7 @@ fn main() {
         };
         let doc =
             Automerge::load_with_options(&bytes, LoadOptions::new().with_audit_mode()).unwrap();
-        let fragments = doc.fragments(..).unwrap();
+        let fragments = doc.fragments(..);
         let n = fragments.len();
 
         let all = best_of(3, || {

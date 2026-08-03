@@ -38,31 +38,42 @@ fn early_hash(orig: &mut AutoCommit) -> ChangeHash {
 /// the retained set (covered by a cached fragment, level 0, not an
 /// anchor) — i.e. freed outside audit mode. Small docs have no such
 /// hashes: their whole history is loose commits, which stay retained.
-fn saved_big_doc_with_unknown_hash() -> (Vec<u8>, AutoCommit, ChangeHash) {
-    let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
-    doc.enable_audit_mode().unwrap();
-    for i in 0..4000 {
-        doc.put(ROOT, "k", i as i64).unwrap();
-        // pinned actor + pinned timestamp = deterministic hashes, so
-        // which commits form fragments is fixed rather than varying with
-        // wall-clock time
-        doc.commit_with(CommitOptions::default().with_time(0));
-    }
-    let bytes = doc.save();
-    let probe = AutoCommit::load(&bytes).unwrap();
-    let unknown = doc
-        .get_changes(&[])
-        .unwrap()
-        .iter()
-        .map(|c| c.hash())
-        .find(|h| {
-            matches!(
-                probe.get_change_by_hash(h),
-                Err(AutomergeError::AuditModeRequired)
-            )
-        })
-        .expect("a 4000-change doc has covered interior hashes outside the retained set");
-    (bytes, doc, unknown)
+fn saved_big_doc_with_unknown_hash() -> (Vec<u8>, ChangeHash) {
+    static FIXTURE: std::sync::OnceLock<(Vec<u8>, ChangeHash)> = std::sync::OnceLock::new();
+    let (bytes, unknown) = FIXTURE.get_or_init(|| {
+        let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
+        doc.enable_audit_mode().unwrap();
+        for i in 0..4000 {
+            doc.put(ROOT, "k", i as i64).unwrap();
+            // pinned actor + pinned timestamp = deterministic hashes, so
+            // which commits form fragments is fixed rather than varying with
+            // wall-clock time
+            doc.commit_with(CommitOptions::default().with_time(0));
+        }
+        let bytes = doc.save();
+        let probe = AutoCommit::load(&bytes).unwrap();
+        let unknown = doc
+            .get_changes(&[])
+            .unwrap()
+            .iter()
+            .map(|c| c.hash())
+            .find(|h| {
+                matches!(
+                    probe.get_change_by_hash(h),
+                    Err(AutomergeError::AuditModeRequired)
+                )
+            })
+            .expect("a 4000-change doc has covered interior hashes outside the retained set");
+        (bytes, unknown)
+    });
+    (bytes.clone(), *unknown)
+}
+
+/// The fixture reloaded in audit mode, for the tests that need the
+/// source document rather than just its bytes.
+fn big_doc_in_audit_mode() -> AutoCommit {
+    let (bytes, _) = saved_big_doc_with_unknown_hash();
+    AutoCommit::load_with_options(&bytes, audit_opts()).unwrap()
 }
 
 /// A doc with two concurrent branches, saved with two heads
@@ -188,7 +199,7 @@ fn disabled_save_incremental_is_infallible() {
 
 #[test]
 fn disabled_save_after_narrow_failure() {
-    let (bytes, _orig, early) = saved_big_doc_with_unknown_hash();
+    let (bytes, early) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load(&bytes).unwrap();
     let load_heads = doc.get_heads();
 
@@ -328,7 +339,7 @@ fn disabled_hash_lookups() {
 
     // an op from a covered, freed interior change errors rather than
     // guessing
-    let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
+    let (bytes, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load(&bytes).unwrap();
     let list = doc
         .put_object(ROOT, "list", automerge::ObjType::List)
@@ -425,14 +436,14 @@ fn usurped_fragment_hashes_are_freed_on_live_docs() {
     let head = plain.get_head_hashes()[0];
     assert!(plain.get_change_by_hash(&head).unwrap().is_some());
     // and the fragment index is intact: same fragments as the audit doc
-    assert_eq!(plain.fragments(..).unwrap(), audit.fragments(..).unwrap());
+    assert_eq!(plain.fragments(..), audit.fragments(..));
 }
 
 /// enable → disable → enable round trip: disabling frees the interior
 /// hashes again, re-enabling recomputes and verifies them.
 #[test]
 fn enable_disable_enable_cycle() {
-    let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
+    let (bytes, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load(&bytes).unwrap();
     assert!(matches!(
         doc.get_change_by_hash(&unknown),
@@ -533,7 +544,7 @@ fn disabled_diff_works() {
 fn disabled_lifecycle_all_fallible_functions() {
     use automerge_sync::Sync;
 
-    let (bytes, _orig, unknown) = saved_big_doc_with_unknown_hash();
+    let (bytes, unknown) = saved_big_doc_with_unknown_hash();
     let mut doc = AutoCommit::load(&bytes).unwrap();
     // `load` picks a random actor and `commit` stamps wall-clock time,
     // so without pinning both the post-load hashes differ every run. The
@@ -635,7 +646,7 @@ fn disabled_lifecycle_all_fallible_functions() {
 
     // ── fragments work outside audit mode: the retained set is
     // fragment-sufficient by construction ──
-    let mid_fragments = doc.fragments(..).unwrap();
+    let mid_fragments = doc.fragments(..);
     assert!(!mid_fragments.is_empty());
     assert!(!doc
         .change_sets_for_fragments(mid_fragments.clone())
@@ -665,12 +676,12 @@ fn disabled_lifecycle_all_fallible_functions() {
 
     // the fragment index survives the transition: identical to the
     // fragments of the same document loaded in audit mode
-    let fragments = doc.fragments(..).unwrap();
+    let fragments = doc.fragments(..);
     let audit = AutoCommit::load_with_options(&doc.save(), audit_opts()).unwrap();
     // apply order is by this document's own node indexes, which two
     // documents holding the same history need not agree on
     let mut a = fragments.clone();
-    let mut b = audit.fragments(..).unwrap();
+    let mut b = audit.fragments(..);
     a.sort_by_key(|f| f.head);
     b.sort_by_key(|f| f.head);
     assert_eq!(a, b);
@@ -691,16 +702,16 @@ fn fragments_work_without_hash_columns() {
 
     let mut doc = AutoCommit::load(&bytes).unwrap();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
-    assert_eq!(doc.fragments(..).unwrap().len(), 1);
+    assert_eq!(doc.fragments(..).len(), 1);
     let head = doc.get_head_hashes()[0];
-    assert!(doc.get_fragment(head).unwrap().is_some());
+    assert!(doc.get_fragment(head).is_some());
     assert!(!doc
-        .change_sets_for_fragments(doc.fragments(..).unwrap())
+        .change_sets_for_fragments(doc.fragments(..))
         .unwrap()
         .is_empty());
 
     doc.enable_audit_mode().unwrap();
-    assert_eq!(doc.fragments(..).unwrap().len(), 1);
+    assert_eq!(doc.fragments(..).len(), 1);
 }
 
 /// A saved document whose recorded head hash has a flipped bit (with the
@@ -751,10 +762,10 @@ fn bit_flipped_head_loads_disabled_but_fails_audit() {
 /// re-emits the hash columns it imported.
 #[test]
 fn disabled_state_round_trips() {
-    let (bytes, _orig, _unknown) = saved_big_doc_with_unknown_hash();
+    let (bytes, _unknown) = saved_big_doc_with_unknown_hash();
     let mut mid1 = AutoCommit::load(&bytes).unwrap();
     assert_eq!(mid1.audit_mode(), AuditMode::Disabled);
-    let frags1 = mid1.fragments(..).unwrap();
+    let frags1 = mid1.fragments(..);
 
     // disabled → save → default load → still disabled, same fragments: a
     // whole-document fragment carries the fragment-level hashes as
@@ -764,7 +775,7 @@ fn disabled_state_round_trips() {
     assert_eq!(mid2.audit_mode(), AuditMode::Disabled);
     // apply order is relative to a document's own nodes, so compare the
     // sets rather than the lists
-    let mut a = mid2.fragments(..).unwrap();
+    let mut a = mid2.fragments(..);
     let mut b = frags1.clone();
     a.sort_by_key(|f| f.head);
     b.sort_by_key(|f| f.head);
@@ -785,7 +796,7 @@ fn default_load_computes_then_retains_without_columns() {
     let small_bytes = small.save();
     let mut doc = AutoCommit::load(&small_bytes).unwrap();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
-    assert_eq!(doc.fragments(..).unwrap().len(), 1);
+    assert_eq!(doc.fragments(..).len(), 1);
     // its single change is the head: retained
     let head = doc.get_head_hashes()[0];
     assert!(doc.get_change_by_hash(&head).unwrap().is_some());
@@ -797,10 +808,9 @@ fn default_load_computes_then_retains_without_columns() {
 /// hash.
 #[test]
 fn audit_and_manifold_fragment_apply_agree() {
-    let (bytes, mut src, _unknown) = saved_big_doc_with_unknown_hash();
-    drop(bytes);
+    let mut src = big_doc_in_audit_mode();
 
-    let fragments = src.fragments(..).unwrap();
+    let fragments = src.fragments(..);
     let change_sets: Vec<_> = fragments
         .into_iter()
         .map(|f| src.document().change_set_for_fragment(&f).unwrap())
@@ -835,10 +845,9 @@ fn audit_and_manifold_fragment_apply_agree() {
 /// contract: an out-of-order change set errors instead of queueing.
 #[test]
 fn audit_fragment_apply_missing_deps() {
-    let (bytes, mut src, _unknown) = saved_big_doc_with_unknown_hash();
-    drop(bytes);
+    let mut src = big_doc_in_audit_mode();
 
-    let fragments = src.fragments(..).unwrap();
+    let fragments = src.fragments(..);
     let change_sets: Vec<_> = fragments
         .into_iter()
         .map(|f| src.document().change_set_for_fragment(&f).unwrap())
@@ -867,7 +876,7 @@ fn audit_fragment_apply_missing_deps() {
 /// covered deterministically instead of surfacing as a flake.
 #[test]
 fn unlucky_commit_frees_loose_hashes() {
-    let (bytes, _orig, _unknown) = saved_big_doc_with_unknown_hash();
+    let (bytes, _unknown) = saved_big_doc_with_unknown_hash();
     // plain `Automerge`, deliberately: this is the `GcMode::Auto`
     // behaviour, and `AutoCommit` defers its GC to save time
     let mut doc = Automerge::load(&bytes).unwrap();

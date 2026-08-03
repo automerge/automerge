@@ -39,7 +39,7 @@ fn main() {
         for c in doc.get_changes(&[]).unwrap() {
             changes.extend_from_slice(c.raw_bytes());
         }
-        let fragments = doc.fragments(..).unwrap();
+        let fragments = doc.fragments(..);
         let change_sets: Vec<u8> = doc
             .change_sets_for_fragments(fragments)
             .unwrap()
@@ -71,7 +71,7 @@ fn main() {
         // the wire round-trip (a change set is consumed by the apply, so it
         // cannot be hoisted and reused across rounds anyway).
         let v2_bytes: Vec<Vec<u8>> = doc
-            .change_sets_for_fragments(doc.fragments(..).unwrap())
+            .change_sets_for_fragments(doc.fragments(..))
             .unwrap()
             .into_iter()
             .collect();

@@ -1512,7 +1512,7 @@ impl Automerge {
         let levels = JsFragmentLevelRange::try_from(levels)?;
         Ok(self
             .doc
-            .fragments(levels)?
+            .fragments(levels)
             .iter()
             .map(fragment_to_js)
             .collect())
@@ -1526,7 +1526,7 @@ impl Automerge {
         let head = JS(head).try_into()?;
         Ok(self
             .doc
-            .get_fragment(head)?
+            .get_fragment(head)
             .map(|f| fragment_to_js(&f))
             .unwrap_or(JsValue::null()))
     }

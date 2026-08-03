@@ -1587,17 +1587,13 @@ impl Automerge {
         self.change_graph.audit_mode()
     }
 
-    pub fn fragments<R: RangeBounds<usize>>(
-        &self,
-        levels: R,
-    ) -> Result<Vec<Fragment>, AutomergeError> {
-        Ok(self
-            .change_graph
-            .fragments(&self.get_head_hashes(), levels, &self.ops.actors))
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.change_graph
+            .fragments(&self.get_head_hashes(), levels, &self.ops.actors)
     }
 
-    pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
-        Ok(self.change_graph.get_fragment(head, &self.ops.actors))
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.change_graph.get_fragment(head, &self.ops.actors)
     }
 
     /// A fragment's member changes as sorted, deduped node indexes.

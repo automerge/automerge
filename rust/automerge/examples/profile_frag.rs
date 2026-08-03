@@ -13,7 +13,7 @@ fn main() {
         // bytes, not Change sets: apply_change set consumes each change set, and the
         // chain is applied twice below
         let v2: Vec<Vec<u8>> = doc
-            .change_sets_for_fragments(doc.fragments(..).unwrap())
+            .change_sets_for_fragments(doc.fragments(..))
             .unwrap()
             .into_iter()
             .collect();

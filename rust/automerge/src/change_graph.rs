@@ -2893,7 +2893,7 @@ mod tests {
         let graph = &doc.change_graph;
 
         // what `fragments` returns: level descending, node index ascending
-        let returned = doc.fragments(..).unwrap();
+        let returned = doc.fragments(..);
         let cached: Vec<_> = returned.iter().filter(|f| f.level > 0).cloned().collect();
         // the same fragments in node index order alone
         let mut by_node = cached.clone();
@@ -3043,16 +3043,12 @@ mod tests {
 
         // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
         let l = &loose[0];
-        let got = graph
-            .get_fragment(l.head, &builder.actors)
-            .expect("loose fragment exists");
+        let got = graph.get_fragment(l.head, &builder.actors).unwrap();
         assert_eq!(got, *l);
 
         // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
         let c = &cached[0];
-        let got = graph
-            .get_fragment(c.head, &builder.actors)
-            .expect("cached fragment exists");
+        let got = graph.get_fragment(c.head, &builder.actors).unwrap();
         assert_eq!(got, *c);
 
         // unknown hash returns None
@@ -3074,7 +3070,7 @@ mod tests {
             tx.commit();
         }
 
-        let fragments = doc.fragments(..).unwrap();
+        let fragments = doc.fragments(..);
 
         let change_sets = doc.change_sets_for_fragments(fragments).unwrap();
 
@@ -3125,7 +3121,7 @@ mod tests {
         }
         doc.commit();
 
-        let fragments = doc.doc.fragments(..).unwrap();
+        let fragments = doc.doc.fragments(..);
         let change_sets: Vec<_> = fragments
             .iter()
             .map(|f| doc.doc.change_set_for_fragment(f).unwrap())

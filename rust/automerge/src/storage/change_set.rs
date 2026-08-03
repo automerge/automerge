@@ -808,7 +808,7 @@ mod tests {
         doc.put(ROOT, "done", true).unwrap();
         doc.commit();
 
-        let fragments = doc.document().fragments(..).unwrap();
+        let fragments = doc.document().fragments(..);
         assert!(!fragments.is_empty());
         for f in &fragments {
             let first = doc.document().change_set_for_fragment(f).unwrap().bytes();
@@ -893,7 +893,7 @@ mod tests {
             tx.put(crate::ROOT, "k", 1).unwrap();
             tx.commit();
         }
-        let f = &doc.fragments(..).unwrap()[0];
+        let f = &doc.fragments(..)[0];
         let good = doc.change_set_for_fragment(f).unwrap();
         assert_eq!(good.heads().len(), 1);
 
@@ -931,7 +931,7 @@ mod tests {
             tx.put(ROOT, "k", i).unwrap();
             tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
         }
-        let frags = src.fragments(0..=0).unwrap();
+        let frags = src.fragments(0..=0);
         // the second fragment has a boundary entry (its dep on the first)
         let mut bytes = src.change_set_for_fragment(&frags[1]).unwrap().bytes();
         assert!(ChangeSet::try_from(&bytes[..]).is_ok(), "baseline parses");

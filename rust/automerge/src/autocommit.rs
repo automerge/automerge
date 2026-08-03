@@ -682,14 +682,11 @@ impl AutoCommit {
         self.doc.audit_mode()
     }
 
-    pub fn fragments<R: RangeBounds<usize>>(
-        &self,
-        levels: R,
-    ) -> Result<Vec<Fragment>, AutomergeError> {
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
         self.doc.fragments(levels)
     }
 
-    pub fn get_fragment(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
         self.doc.get_fragment(head)
     }
 
