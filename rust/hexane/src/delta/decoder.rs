@@ -54,12 +54,11 @@ impl<'a, T: DeltaValue, C: Codec> DeltaDecoder<'a, T, C> {
         })
     }
 
-    /// Advance past `n` items in O(runs), keeping the running sum
-    /// correct. Panics if fewer than `n` items remain.
-    pub fn advance_by(&mut self, mut n: usize) {
-        while n > 0 {
-            let run = self.next_delta_run_max(n).expect("advance past column end");
-            n -= run.count;
+    /// Advance past `n` items in O(runs), leaving the running sum where
+    /// item `n` starts. Stops at the end of the column.
+    pub fn advance_by(&mut self, n: usize) {
+        if n > 0 {
+            self.nth(n - 1);
         }
     }
 }
@@ -77,6 +76,14 @@ impl<T: DeltaValue, C: Codec> Iterator for DeltaDecoder<'_, T, C> {
                 Some(T::from_i64(self.running))
             }
         }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<T> {
+        let mut left = n;
+        while left > 0 {
+            left -= self.next_delta_run_max(left)?.count;
+        }
+        self.next()
     }
 }
 

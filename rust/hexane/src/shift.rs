@@ -64,9 +64,13 @@ pub trait Shiftable: Iterator + Debug {
 
     /// Consume through `pos`, returning the item there. Equivalent to
     /// `nth(pos - get_pos())`; `pos` must be at or ahead of the
-    /// current position.
-    fn scan_to_pos(&mut self, pos: usize) -> Option<<Self as Iterator>::Item> {
-        self.nth(pos - self.get_pos())
+    /// current position, otherwise returns None
+    fn seek_to(&mut self, pos: usize) -> Option<<Self as Iterator>::Item> {
+        if pos >= self.get_pos() {
+            self.nth(pos - self.get_pos())
+        } else {
+            None
+        }
     }
 
     /// Wrap in an [`Unshift`], pulling the first item as the lookahead.
@@ -193,7 +197,7 @@ impl<'a, T: ColumnValueRef, C: crate::Codec + Debug> Shiftable for crate::column
         self.next()
     }
 
-    fn scan_to_pos(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
+    fn seek_to(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
         self.0.advance_to(pos);
         self.next()
     }
@@ -225,7 +229,7 @@ impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRu
         self.next()
     }
 
-    fn scan_to_pos(&mut self, pos: usize) -> Option<crate::delta::DeltaRun> {
+    fn seek_to(&mut self, pos: usize) -> Option<crate::delta::DeltaRun> {
         self.0.advance_to(pos);
         self.next()
     }

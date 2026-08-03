@@ -241,7 +241,86 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>, C: Codec = Leb128> 
 
 type Cow<'a, T, V> = RleCow<'a, T, V>;
 
+/// A postfix detached from the slab it was read from.
+///
+/// [`Postfix`] borrows the slab, which is
+/// what a one-shot splice wants; a cursor closes its rebuild while
+/// holding `&mut Column`, so it needs the owned form.
+#[derive(Debug)]
+pub(crate) enum OwnedPostfix<T> {
+    Run {
+        count: usize,
+        value: T,
+        segments: usize,
+    },
+    Lit {
+        value: T,
+        lit: usize,
+        segments: usize,
+    },
+    LonePlusLit {
+        lone: T,
+        value: T,
+        lit: usize,
+        segments: usize,
+    },
+}
+
+impl<T> OwnedPostfix<T> {
+    /// Segments from the postfix's own end to the end of the slab.
+    pub(crate) fn segments(&self) -> usize {
+        match self {
+            Self::Run { segments, .. } | Self::Lit { segments, .. } => *segments,
+            Self::LonePlusLit { segments, .. } => *segments,
+        }
+    }
+
+    /// Segments the postfix itself will contribute when flushed.
+    pub(crate) fn pending(&self) -> usize {
+        match self {
+            Self::Run { .. } | Self::Lit { .. } => 1,
+            Self::LonePlusLit { .. } => 2,
+        }
+    }
+}
+
 impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
+    /// Detach from the slab the state was opened against, cloning the one
+    /// or two values it is holding.
+    ///
+    /// A one-shot splice keeps its state on the stack for the length of a
+    /// borrow of the slab, so it can hold `Get` values by reference. A
+    /// [`RleEdit`](crate::rle::edit::RleEdit) keeps its state across calls,
+    /// alongside a `&mut Column`, so it cannot — this is what lets the
+    /// cursor own its state.
+    pub(crate) fn into_owned(self) -> RleState<'static, T, T, C> {
+        fn own<T: RleValue, V: AsColumnRef<T>>(c: RleCow<'_, T, V>) -> RleCow<'static, T, T> {
+            RleCow::Owned(match c {
+                RleCow::Owned(v) => T::to_owned(v.as_column_ref()),
+                RleCow::Ref(g) => T::to_owned(g),
+            })
+        }
+        match self {
+            RleState::Empty(_) => RleState::Empty(PhantomData),
+            RleState::Lone(v) => RleState::Lone(own(v)),
+            RleState::Run(n, v) => RleState::Run(n, own(v)),
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                bytes,
+                current,
+            } => RleState::Lit {
+                count,
+                local,
+                header_pos,
+                bytes,
+                current: own(current),
+            },
+            RleState::Null(n) => RleState::Null(n),
+        }
+    }
+
     /// The initial (empty) state.
     pub const fn empty() -> Self {
         RleState::Empty(PhantomData)
@@ -436,6 +515,52 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
             }) => {
                 f += self.append(buf, RleCow::Ref(lone));
                 f += self.append(buf, RleCow::Ref(value));
+                f += self.flush_with_lit(buf, lit);
+                segments
+            }
+        };
+        (f, postfix_segs)
+    }
+
+    /// [`Self::flush_postfix`] for a postfix that has been detached from
+    /// the slab — the form a cursor closes with.
+    pub fn flush_postfix_owned(
+        &mut self,
+        buf: &mut Vec<u8>,
+        postfix: Option<OwnedPostfix<V>>,
+    ) -> (FlushState, usize) {
+        let mut f = FlushState::default();
+        let postfix_segs = match postfix {
+            None => {
+                f += self.flush(buf);
+                0
+            }
+            Some(OwnedPostfix::Run {
+                count,
+                value,
+                segments,
+            }) => {
+                f += self.append_n(buf, RleCow::Owned(value), count);
+                f += self.flush(buf);
+                segments
+            }
+            Some(OwnedPostfix::Lit {
+                value,
+                lit,
+                segments,
+            }) => {
+                f += self.append(buf, RleCow::Owned(value));
+                f += self.flush_with_lit(buf, lit);
+                segments
+            }
+            Some(OwnedPostfix::LonePlusLit {
+                lone,
+                value,
+                lit,
+                segments,
+            }) => {
+                f += self.append(buf, RleCow::Owned(lone));
+                f += self.append(buf, RleCow::Owned(value));
                 f += self.flush_with_lit(buf, lit);
                 segments
             }

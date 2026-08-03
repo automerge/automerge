@@ -513,7 +513,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = V>,
     {
-        self.col.splice(index, del, values);
+        let _ = self
+            .col
+            .splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
     /// Splice [`crate::Run`]s in — the run-aware fast path for bulk uniform
@@ -524,7 +526,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = crate::Run<V>>,
     {
-        self.col.splice_runs(index, del, runs);
+        let _ = self
+            .col
+            .splice_inner(index, del, runs.into_iter().map(|r| (r.value, r.count)));
     }
 
     /// See [`Column::copy_ranges`](crate::Column::copy_ranges).
@@ -532,6 +536,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     where
         I: IntoIterator<Item = crate::Splice>,
         for<'b> T::Get<'b>: crate::AsColumnRef<T>,
+        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
     {
         self.col.copy_ranges(src.col, splices);
     }
@@ -1040,6 +1045,42 @@ impl<T: PrefixValue> PrefixIterState<T> {
     }
 }
 
+// ── Cursor ──────────────────────────────────────────────────────────────────
+
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C>
+where
+    T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
+{
+    /// Open a forward-only read/write cursor at the start of the column
+    /// — see [`Column::edit`]. The prefix sums ride the slab weights the
+    /// cursor reconciles anyway, so they need no separate maintenance.
+    pub fn edit(
+        &mut self,
+    ) -> crate::edit::Edit<
+        '_,
+        T,
+        C,
+        PrefixWeightFn<T>,
+        crate::btree::SlabBTree<PrefixSlabWeight<T::Prefix>>,
+    > {
+        self.col.edit()
+    }
+
+    /// [`edit`](Self::edit) starting at original position `at`.
+    pub fn edit_at(
+        &mut self,
+        at: usize,
+    ) -> crate::edit::Edit<
+        '_,
+        T,
+        C,
+        PrefixWeightFn<T>,
+        crate::btree::SlabBTree<PrefixSlabWeight<T::Prefix>>,
+    > {
+        self.col.edit_at(at)
+    }
+}
+
 // ── Trait impls ─────────────────────────────────────────────────────────────
 
 impl<T: PrefixValue, C: Codec> FromIterator<T> for PrefixColumn<T, C> {
@@ -1054,7 +1095,9 @@ where
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.col.len();
-        self.col.splice(len, 0, iter);
+        let _ = self
+            .col
+            .splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }
 

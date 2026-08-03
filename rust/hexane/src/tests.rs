@@ -532,22 +532,22 @@ fn scan_to_value_on_rle_columns() {
 }
 
 #[test]
-fn scan_to_pos_consumes_through() {
+fn scan_to_consumes_through() {
     use crate::Shiftable;
     let col = Column::<u64>::from_values((0..100).collect());
     let mut it = col.iter();
-    assert_eq!(it.scan_to_pos(10), Some(10));
+    assert_eq!(it.seek_to(10), Some(10));
     assert_eq!(it.next(), Some(11));
-    assert_eq!(it.scan_to_pos(50), Some(50));
+    assert_eq!(it.seek_to(50), Some(50));
 
     let col = DeltaColumn::<u64>::from_values((0..100).collect());
     let mut it = col.iter();
-    assert_eq!(it.scan_to_pos(7), Some(7));
+    assert_eq!(it.seek_to(7), Some(7));
     assert_eq!(it.next(), Some(8));
 
     let col = PrefixColumn::<u64>::from_values((0..100).collect());
     let mut it = col.iter();
-    assert_eq!(it.scan_to_pos(5).map(|pv| pv.value), Some(5));
+    assert_eq!(it.seek_to(5).map(|pv| pv.value), Some(5));
 }
 
 #[test]
@@ -4095,6 +4095,10 @@ fn xorshift(state: &mut u64) -> u64 {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_delta_column() {
     let mut rng: u64 = 11111;
 
@@ -4180,6 +4184,10 @@ fn fuzz_delta_column() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_delta_column_nullable() {
     let mut rng: u64 = 22222;
 
@@ -4211,6 +4219,10 @@ fn fuzz_delta_column_nullable() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_prefix_column() {
     let mut rng: u64 = 33333;
 
