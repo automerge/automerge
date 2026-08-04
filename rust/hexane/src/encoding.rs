@@ -1,4 +1,3 @@
-use crate::btree::SlabAggregate;
 use crate::column;
 use crate::column::{Column, Slab, WeightFn};
 use crate::index::ColumnIndex;
@@ -71,7 +70,6 @@ pub trait ColumnEncoding: Default {
     ) -> Column<Self::Value, Self::Codec, WF, Idx>
     where
         WF: WeightFn<Self::Value, Self::Codec>,
-        WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
     {
@@ -248,7 +246,6 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     fn into_column<WF, Idx>(self) -> Column<T, C, WF, Idx>
     where
         WF: WeightFn<T, C>,
-        WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
     {
         Column::load(&self.save()).unwrap()

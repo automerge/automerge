@@ -698,7 +698,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn from_values(values: Vec<T>) -> Self {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
-        let _ = col.splice_inner(0, 0, deltas_from::<T::Inner>(&inner, 0).map(|v| (v, 1)));
+        col.splice_inner(0, 0, deltas_from::<T::Inner>(&inner, 0).map(|v| (v, 1)));
         Self {
             col,
             _phantom: PhantomData,
@@ -912,7 +912,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     }
 
     pub fn splice(&mut self, index: usize, del: usize, values: impl IntoIterator<Item = T>) {
-        let _ = self.splice_inner(index, del, values);
+        self.splice_inner(index, del, values);
     }
 
     pub(crate) fn splice_inner(
@@ -920,7 +920,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         index: usize,
         del: usize,
         values: impl IntoIterator<Item = T>,
-    ) -> std::ops::Range<usize> {
+    ) {
         self.splice_items_inner(
             index,
             del,
@@ -941,7 +941,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         del: usize,
         runs: impl IntoIterator<Item = DeltaRun>,
     ) {
-        let _ = self.splice_items_inner(
+        self.splice_items_inner(
             index,
             del,
             runs.into_iter()
@@ -1068,13 +1068,13 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         index: usize,
         del: usize,
         items: impl Iterator<Item = SpliceItem>,
-    ) -> std::ops::Range<usize> {
+    ) {
         let len = self.col.len();
         assert!(index + del <= len, "splice range out of bounds");
 
         let mut items = items.peekable();
         if del == 0 && items.peek().is_none() {
-            return 0..0;
+            return;
         }
 
         let (prev, skip, next_val) = self.find_boundaries(index, del);

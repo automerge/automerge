@@ -5740,3 +5740,31 @@ mod codec_modules {
             crate::bijou::Column::<u64>::load(&bij).unwrap();
     }
 }
+
+/// A write must invalidate suspended iterators. `IterState::try_resume`
+/// also compares slab counts, so the case that needs the counter is a
+/// splice that leaves the slab count alone.
+#[test]
+fn splice_invalidates_a_suspended_iter() {
+    let mut col = Column::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    it.next();
+    let state = it.suspend();
+    assert!(
+        state.try_resume(&col).is_ok(),
+        "unmutated column should resume"
+    );
+
+    let slabs_before = col.slabs.len();
+    col.splice(50, 1, std::iter::once(999u64));
+    assert_eq!(
+        slabs_before,
+        col.slabs.len(),
+        "test needs a slab-count-preserving splice"
+    );
+
+    assert!(
+        state.try_resume(&col).is_err(),
+        "resume across a write must fail",
+    );
+}
