@@ -2,7 +2,6 @@
 //! [`Column`], and the contract an encoding implements so
 //! its slabs can be rebuilt in place.
 
-use crate::btree::SlabAggregate;
 use crate::column::{Column, ColumnRef, WeightFn};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
@@ -106,7 +105,6 @@ where
     C: Codec,
     T::Encoding<C>: SlabEdit,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     col: &'a mut Column<T, C, WF, Idx>,
@@ -161,9 +159,7 @@ impl<'a, T, C, WF, Idx> Edit<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
     C: Codec,
-    T::Encoding<C>: SlabEdit<Value = T>,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     pub(crate) fn new(col: &'a mut Column<T, C, WF, Idx>, at: usize) -> Self {
@@ -405,6 +401,7 @@ where
                 left -= avail;
                 dropped = true;
                 self.locate_out();
+                self.stamp();
                 continue;
             }
             // the delete reaches this slab's end: finish it here and go on
@@ -421,6 +418,7 @@ where
             let range = self.col.try_merge_range(self.slab..self.slab + 1);
             self.reconcile(range);
             self.locate_out();
+            self.stamp();
         }
         self
     }
@@ -504,6 +502,13 @@ where
     /// the index. Only valid with no rebuild open: `out` is a position in
     /// the column as it stands, which is only true once the slab it
     /// touched has been written back.
+    /// Record a write. Suspended iterators resume against this token, so
+    /// every path that moves slabs must bump it — a write-back that
+    /// leaves the slab count alone is otherwise undetectable.
+    fn stamp(&mut self) {
+        self.col.counter += 1;
+    }
+
     fn locate_out(&mut self) {
         let at_end = self.out >= self.col.total_len;
         let (si, off) = if at_end {
@@ -583,6 +588,7 @@ where
         // downstream trust them — a caller that skipped it would read
         // through a stale offset.
         self.locate_out();
+        self.stamp();
     }
 
     /// Bring the slab index back in step with `slabs` over `range`.
@@ -608,7 +614,6 @@ where
     C: Codec,
     T::Encoding<C>: SlabEdit,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn drop(&mut self) {
