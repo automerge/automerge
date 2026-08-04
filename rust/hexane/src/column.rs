@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 
 use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
-use crate::edit::{Edit, SlabEdit};
+use crate::edit::Edit;
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
 use crate::PackError;
@@ -86,7 +86,7 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     /// via `AddAssign`/`SubAssign`).  For the B-tree-backed path it only needs
     /// [`SlabAggregate`](SlabAggregate), which permits
     /// non-invertible aggregates like min/max.
-    type Weight: Clone + Default + std::fmt::Debug;
+    type Weight: Clone + Default + std::fmt::Debug + SlabAggregate;
     fn compute(slab: &Slab<TailOf<T, C>>) -> Self::Weight;
 
     /// `true` when `compute` has to re-decode the slab bytes (prefix sums,
@@ -1008,6 +1008,18 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 // over the old BIT-backed Column (now deleted); this is the equivalent for
 // the B-tree path, mutating via the `ColumnIndex` trait.
 
+/// Where the last write left off, so the next edit near it can skip the
+/// index lookup. `slab`/`in_slab` are only meaningful while `counter`
+/// still matches the column's; the default is the front of the column,
+/// which is a valid cursor for any column.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct LastEdit {
+    pub(crate) counter: usize,
+    pub(crate) pos: usize,
+    pub(crate) slab: usize,
+    pub(crate) in_slab: usize,
+}
+
 /// A typed column of RLE- or bool-encoded values with O(log S) random
 /// access and in-place splice.
 ///
@@ -1030,6 +1042,7 @@ pub struct Column<
     pub(crate) total_len: usize,
     pub(crate) max_segments: usize,
     pub(crate) counter: usize,
+    pub(crate) last: LastEdit,
     #[allow(clippy::type_complexity)]
     _phantom: PhantomData<fn() -> (T, C, WF)>,
 }
@@ -1048,6 +1061,7 @@ where
             total_len: self.total_len,
             max_segments: self.max_segments,
             counter: self.counter,
+            last: self.last,
             _phantom: PhantomData,
         }
     }
@@ -1127,6 +1141,7 @@ where
             total_len: 0,
             max_segments,
             counter: 0,
+            last: LastEdit::default(),
             _phantom: PhantomData,
         }
     }
@@ -1137,7 +1152,7 @@ where
 
     pub fn from_values_with_max_segments(values: Vec<T>, max_segments: usize) -> Self {
         let mut col = Self::with_max_segments(max_segments);
-        let _ = col.splice_inner(0, 0, values.into_iter().map(|v| (v, 1)));
+        col.splice_inner(0, 0, values.into_iter().map(|v| (v, 1)));
         col
     }
 
@@ -1216,6 +1231,7 @@ where
             total_len,
             max_segments,
             counter: 0,
+            last: LastEdit::default(),
             _phantom: PhantomData,
         }
     }
@@ -1233,6 +1249,7 @@ where
             total_len: len,
             max_segments: DEFAULT_MAX_SEG,
             counter: 0,
+            last: LastEdit::default(),
             _phantom: PhantomData,
         }
     }
@@ -1243,6 +1260,33 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.total_len == 0
+    }
+
+    /// `(slab, offset)` for `index` from the cached cursor, when the last
+    /// write left one in a slab that still covers `index`. Pure
+    /// arithmetic: `in_slab` is an item offset, so landing before or
+    /// after the cursor inside its slab costs the same.
+    pub(crate) fn resume_at(&self, index: usize) -> Option<(usize, usize)> {
+        let last = self.last;
+        if last.counter != self.counter || last.slab >= self.slabs.len() {
+            return None;
+        }
+        let start = last.pos.checked_sub(last.in_slab)?;
+        let end = start + self.slabs[last.slab].len;
+        // exclusive: `index == end` is the next slab's item 0, which is
+        // where `find_slab` puts it — claiming it here as `(slab, len)`
+        // is a different cursor and the rebuild reads it differently
+        let hit = (index >= start && index < end).then(|| (last.slab, index - start));
+        #[cfg(feature = "slow_path_assertions")]
+        if let Some(h) = hit {
+            let truth = self.find_slab(index);
+            assert_eq!(
+                h, truth,
+                "resume_at disagrees at index={index}: last={last:?} slab_len={}",
+                self.slabs[last.slab].len
+            );
+        }
+        hit
     }
 
     pub fn slab_count(&self) -> usize {
@@ -1261,7 +1305,6 @@ where
     pub fn remap<F>(&mut self, f: F)
     where
         F: Fn(T) -> T,
-        WF::Weight: SlabAggregate,
     {
         *self = T::Encoding::<C>::remap(self.iter(), self.max_segments, f);
     }
@@ -1502,12 +1545,12 @@ where
     // ── Mutations ───────────────────────────────────────────────────────
 
     pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
-        let _ = self.splice_inner(index, 0, [(value, 1)]);
+        self.splice_inner(index, 0, [(value, 1)]);
     }
 
     pub fn remove(&mut self, index: usize) {
         if index < self.total_len {
-            let _ = self.splice_inner::<T, _>(index, 1, std::iter::empty());
+            self.splice_inner::<T, _>(index, 1, std::iter::empty());
         }
     }
 
@@ -1521,25 +1564,25 @@ where
     /// `splice`'s contract).
     pub fn remove_n(&mut self, index: usize, n: usize) {
         if n > 0 {
-            let _ = self.splice_inner::<T, _>(index, n, std::iter::empty());
+            self.splice_inner::<T, _>(index, n, std::iter::empty());
         }
     }
 
     pub fn push(&mut self, value: impl AsColumnRef<T>) {
         let len = self.total_len;
-        let _ = self.splice_inner(len, 0, [(value, 1)]);
+        self.splice_inner(len, 0, [(value, 1)]);
     }
 
     pub fn clear(&mut self) {
         let len = self.total_len;
         if len > 0 {
-            let _ = self.splice_inner::<T, _>(0, len, std::iter::empty());
+            self.splice_inner::<T, _>(0, len, std::iter::empty());
         }
     }
 
     pub fn truncate(&mut self, len: usize) {
         if len < self.total_len {
-            let _ = self.splice_inner::<T, _>(len, self.total_len - len, std::iter::empty());
+            self.splice_inner::<T, _>(len, self.total_len - len, std::iter::empty());
         }
     }
 
@@ -1547,15 +1590,8 @@ where
     where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = V>,
-        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
-        WF::Weight: SlabAggregate,
     {
-        let mut e = self.edit_at(index);
-        e.delete(del);
-        for v in values {
-            e.insert(v);
-        }
-        e.finish();
+        self.splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
     /// Splice [`Run`]s in — the run-aware fast path for bulk uniform data.
@@ -1565,15 +1601,8 @@ where
     where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = Run<V>>,
-        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
-        WF::Weight: SlabAggregate,
     {
-        let mut e = self.edit_at(index);
-        e.delete(del);
-        for r in runs {
-            e.insert_run(r.value, r.count);
-        }
-        e.finish();
+        self.splice_inner(index, del, runs.into_iter().map(|r| (r.value, r.count)));
     }
 
     /// Splice `ranges` of `src` into `self` at `index`, deleting `del`
@@ -1591,8 +1620,6 @@ where
     where
         I: IntoIterator<Item = Splice>,
         for<'b> T::Get<'b>: AsColumnRef<T>,
-        T::Encoding<C>: SlabEdit<Value = T>,
-        WF::Weight: SlabAggregate,
     {
         let splices = normalize_splices(splices, src.len(), self.len());
         if splices.is_empty() {
@@ -1612,8 +1639,6 @@ where
         strategy: CopyStrategy,
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
-        T::Encoding<C>: SlabEdit<Value = T>,
-        WF::Weight: SlabAggregate,
     {
         use crate::shift::Shiftable;
         match strategy {
@@ -1720,8 +1745,6 @@ where
         strategy: CopyStrategy,
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
-        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
-        WF::Weight: SlabAggregate,
     {
         assert!(index + del <= self.len(), "splice range out of bounds");
         match strategy {
@@ -1778,135 +1801,19 @@ where
     ///
     /// Each iterator item is `(value, count)` — pass `count = 1` for a single
     /// value, or a larger count to insert a run of identical values in bulk.
-    pub(crate) fn splice_inner<V, I>(&mut self, index: usize, del: usize, values: I) -> Range<usize>
+    /// The one write path: every mutation goes through the edit cursor.
+    pub(crate) fn splice_inner<V, I>(&mut self, index: usize, del: usize, values: I)
     where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = (V, usize)>,
     {
-        self.counter += 1;
         assert!(index + del <= self.total_len, "splice range out of bounds");
-
-        let mut iter = values.into_iter().peekable();
-        if del == 0 && iter.peek().is_none() {
-            return 0..0;
+        let mut e = self.edit_at(index);
+        e.delete(del);
+        for (v, n) in values {
+            e.insert_run(v, n);
         }
-
-        if self.slabs.is_empty() {
-            let empty = T::Encoding::<C>::empty_slab();
-            self.index.splice(0..0, [WF::compute(&empty)]);
-            self.slabs.push(empty);
-        }
-
-        let (mut si, mut offset) = self.find_slab(index);
-        if si >= self.slabs.len() {
-            si = self.slabs.len() - 1;
-            offset = self.slabs[si].len;
-        }
-
-        let range = self.encoder_splice(si, offset, del, iter);
-
-        if self.index.len() == self.slabs.len() && range.len() == 1 {
-            // Fast path: single slab mutated, no count change.
-            // update_slab is O(log n) on both BIT and B-tree.
-            let new_weight = WF::compute(&self.slabs[range.start]);
-            self.index.update_slab(range.start, new_weight);
-        } else {
-            // Structural change — splice the stale region of the index.
-            let new_weights = self.slabs[range.clone()].iter().map(WF::compute);
-            let old_end = range.end + self.index.len() - self.slabs.len();
-            self.index.splice(range.start..old_end, new_weights);
-            debug_assert_eq!(self.index.len(), self.slabs.len());
-        }
-
-        range
-    }
-
-    /// Inlined body of [`ColumnEncoding::splice_slab`]'s default, adapted to
-    /// `&mut Column`.  Mutates `self.slabs` + `self.total_len` + runs
-    /// `try_merge_range`; leaves the index untouched (the outer
-    /// `splice_inner` reconciles it).
-    fn encoder_splice<V, I>(
-        &mut self,
-        si: usize,
-        offset: usize,
-        del: usize,
-        values: I,
-    ) -> Range<usize>
-    where
-        V: AsColumnRef<T>,
-        I: Iterator<Item = (V, usize)>,
-    {
-        let mut range = si..(si + 1);
-        let mut old_slab_len = self.slabs[si].len;
-
-        let (overflow, overflow_del) = T::Encoding::<C>::splice_slab(
-            &mut self.slabs[si],
-            offset,
-            del,
-            values,
-            self.max_segments,
-        );
-
-        let overflow_len = overflow.len();
-
-        // Walk subsequent slabs to satisfy overflow_del (cascade delete).
-        // Don't shift the slab Vec yet — just identify what's consumed.
-        let consume_start = si + 1;
-        let mut consume_end = consume_start;
-        let mut remaining = overflow_del;
-        let mut has_partial = false;
-
-        while remaining > 0 && consume_end < self.slabs.len() {
-            let slab_len = self.slabs[consume_end].len;
-            if remaining >= slab_len {
-                old_slab_len += slab_len;
-                remaining -= slab_len;
-                consume_end += 1;
-            } else {
-                old_slab_len += self.slabs[consume_end].len;
-                let (partial_overflow, _) = T::Encoding::<C>::splice_slab(
-                    &mut self.slabs[consume_end],
-                    0,
-                    remaining,
-                    std::iter::empty::<(V, usize)>(),
-                    self.max_segments,
-                );
-                consume_end += 1;
-                has_partial = true;
-                assert!(partial_overflow.is_empty());
-                break;
-            }
-        }
-
-        // How many slabs were fully consumed (should be removed)?
-        let fully_consumed = if has_partial {
-            consume_end - consume_start - 1
-        } else {
-            consume_end - consume_start
-        };
-
-        // Single Vec::splice replaces fully-consumed slabs with overflow
-        // slabs.  For replace ops (overflow_len ≈ fully_consumed), this
-        // is nearly a no-op — overwrites in place instead of shifting
-        // the entire tail twice.
-        self.slabs
-            .splice(consume_start..consume_start + fully_consumed, overflow);
-
-        // Compute range: landing slab + overflow + any partial slab.
-        let partial_kept = if has_partial { 1 } else { 0 };
-        range.end = consume_start + overflow_len + partial_kept;
-
-        self.total_len += self.slabs[range.clone()]
-            .iter()
-            .map(|s| s.len)
-            .sum::<usize>();
-        self.total_len -= old_slab_len;
-        debug_assert_eq!(
-            self.total_len,
-            self.slabs.iter().map(|s| s.len).sum::<usize>()
-        );
-
-        self.try_merge_range(range)
+        e.finish();
     }
 
     fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
@@ -2095,6 +2002,7 @@ where
             total_len,
             max_segments: self.max_segments,
             counter: 0,
+            last: LastEdit::default(),
             _phantom: PhantomData,
         })
     }
@@ -2130,7 +2038,7 @@ where
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.total_len;
-        let _ = self.splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
+        self.splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }
 
@@ -2138,9 +2046,7 @@ impl<T, C, WF, Idx> Column<T, C, WF, Idx>
 where
     T: ColumnValueRef,
     C: Codec,
-    T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     /// Open a forward-only read/write cursor at the start of the column.
@@ -2516,7 +2422,6 @@ mod edit_fuzz {
     fn run<T, F>(seed: u64, make: F, max_seg: usize)
     where
         T: ColumnValueRef + Clone + PartialEq + std::fmt::Debug,
-        T::Encoding<Leb128>: SlabEdit<Value = T>,
         for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + std::fmt::Debug,
         F: Fn(&mut Rng) -> T,
     {

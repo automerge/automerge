@@ -28,8 +28,7 @@
 //! millions of edits, with the in-rebuild slab validation still live.
 
 use crate::column::Column;
-use crate::edit::SlabEdit;
-use crate::{AsColumnRef, ColumnValueRef, Leb128, Run};
+use crate::{AsColumnRef, ColumnValueRef, Run};
 use std::fmt::Debug;
 
 /// xorshift64* — reproducible without a dev-dependency.
@@ -291,7 +290,6 @@ fn run_script<T>(
     tag: &str,
 ) where
     T: ColumnValueRef + Clone + PartialEq + Debug,
-    T::Encoding<Leb128>: SlabEdit<Value = T>,
     for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + Debug,
 {
     let mut model = Model::new(vals);
@@ -375,7 +373,6 @@ fn run_script<T>(
 fn fuzz_one<T, F>(seed: u64, max_seg: usize, len: usize, make: &F, ops: usize)
 where
     T: ColumnValueRef + Clone + PartialEq + Debug,
-    T::Encoding<Leb128>: SlabEdit<Value = T>,
     for<'x> T::Get<'x>: AsColumnRef<T> + PartialEq + Debug,
     F: Fn(&mut Rng) -> T,
 {

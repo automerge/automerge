@@ -513,8 +513,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = V>,
     {
-        let _ = self
-            .col
+        self.col
             .splice_inner(index, del, values.into_iter().map(|v| (v, 1)));
     }
 
@@ -526,8 +525,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         V: crate::AsColumnRef<T>,
         I: IntoIterator<Item = crate::Run<V>>,
     {
-        let _ = self
-            .col
+        self.col
             .splice_inner(index, del, runs.into_iter().map(|r| (r.value, r.count)));
     }
 
@@ -536,7 +534,6 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     where
         I: IntoIterator<Item = crate::Splice>,
         for<'b> T::Get<'b>: crate::AsColumnRef<T>,
-        T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
     {
         self.col.copy_ranges(src.col, splices);
     }
@@ -1047,10 +1044,7 @@ impl<T: PrefixValue> PrefixIterState<T> {
 
 // ── Cursor ──────────────────────────────────────────────────────────────────
 
-impl<T: PrefixValue, C: Codec> PrefixColumn<T, C>
-where
-    T::Encoding<C>: crate::edit::SlabEdit<Value = T>,
-{
+impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// Open a forward-only read/write cursor at the start of the column
     /// — see [`Column::edit`]. The prefix sums ride the slab weights the
     /// cursor reconciles anyway, so they need no separate maintenance.
@@ -1095,8 +1089,7 @@ where
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
         let len = self.col.len();
-        let _ = self
-            .col
+        self.col
             .splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }

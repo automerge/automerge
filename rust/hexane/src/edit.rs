@@ -5,7 +5,6 @@
 //! Nothing here is specific to an encoding — [`RleEdit`](crate::rle::edit::RleEdit)
 //! and [`BoolEdit`](crate::bool::BoolEdit) are the implementations.
 
-use crate::btree::SlabAggregate;
 use crate::column::{Column, ColumnRef, WeightFn};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
@@ -125,7 +124,6 @@ where
     C: Codec,
     T::Encoding<C>: SlabEdit,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     col: &'a mut Column<T, C, WF, Idx>,
@@ -180,9 +178,7 @@ impl<'a, T, C, WF, Idx> Edit<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
     C: Codec,
-    T::Encoding<C>: SlabEdit<Value = T>,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     pub(crate) fn new(col: &'a mut Column<T, C, WF, Idx>, at: usize) -> Self {
@@ -195,7 +191,13 @@ where
         // the front of the column needs no lookup — and `col.edit()`
         // followed by a seek is the common chain, which would otherwise
         // pay for positioning twice
-        let (slab, in_slab) = if at == 0 { (0, 0) } else { col.find_slab(at) };
+        let (slab, in_slab) = if at == 0 {
+            (0, 0)
+        } else if let Some(hit) = col.resume_at(at) {
+            hit
+        } else {
+            col.find_slab(at)
+        };
         let (slab, in_slab) = if slab >= col.slabs.len() {
             (col.slabs.len() - 1, col.slabs[col.slabs.len() - 1].len)
         } else {
@@ -429,6 +431,7 @@ where
                 left -= avail;
                 dropped = true;
                 self.locate_out();
+                self.stamp();
                 continue;
             }
             // the delete reaches this slab's end: finish it here and go on
@@ -445,6 +448,7 @@ where
             let range = self.col.try_merge_range(self.slab..self.slab + 1);
             self.reconcile(range);
             self.locate_out();
+            self.stamp();
         }
         self
     }
@@ -535,6 +539,20 @@ where
     /// the index. Only valid with no rebuild open: `out` is a position in
     /// the column as it stands, which is only true once the slab it
     /// touched has been written back.
+    /// Record a write: bump the column's change token and leave the
+    /// cursor where the next edit can pick it up. Every path that moves
+    /// slabs must call this, or a stale cursor outlives the layout it
+    /// describes.
+    fn stamp(&mut self) {
+        self.col.counter += 1;
+        self.col.last = crate::column::LastEdit {
+            counter: self.col.counter,
+            pos: self.out,
+            slab: self.slab,
+            in_slab: self.in_slab,
+        };
+    }
+
     fn locate_out(&mut self) {
         let at_end = self.out >= self.col.total_len;
         let (si, off) = if at_end {
@@ -614,6 +632,7 @@ where
         // downstream trust them — a caller that skipped it would read
         // through a stale offset.
         self.locate_out();
+        self.stamp();
     }
 
     /// Bring the slab index back in step with `slabs` over `range`.
@@ -639,7 +658,6 @@ where
     C: Codec,
     T::Encoding<C>: SlabEdit,
     WF: WeightFn<T, C>,
-    WF::Weight: SlabAggregate,
     Idx: ColumnIndex<WF::Weight>,
 {
     fn drop(&mut self) {
