@@ -228,6 +228,23 @@ impl Automerge {
         }
     }
 
+    /// Return a copy of this document with its data anonymized using a fresh random seed.
+    ///
+    // Anonymization replaces actor IDs, map keys, mark names, scalar values, change metadata, and
+    // extra bytes. It retains the change graph, operation and object types, sequence positions,
+    // scalar string and byte-value lengths, and the UTF-8/UTF-16 width of each character. The
+    // intention is to make a document that has very similar performance characteristics to the
+    // original. This makes it useful when you want to send a document which is causing performance
+    // problems to someone to diagnose.
+    //
+    // That said, the data scrubbing here is best-effort. The anonymized document still reveals
+    // a bunch of information about editing patterns. A determined adversary could probably still
+    // learn a great deal from such a document. The intended use is really for sending documents
+    // to mostly trusted parties who are helping with bug fixing (e.g. library maintainers).
+    pub fn anonymize(&self) -> Result<Self, crate::AnonymizeError> {
+        crate::anonymize::anonymize(self)
+    }
+
     /// Overwrite the keys of the root object with the values from `value`
     ///
     /// This is useful to initialize an empty document with a large initial

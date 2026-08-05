@@ -2884,8 +2884,24 @@ fn fuzz_bool_splice_exhaustive() {
             let mut c = col.clone();
             let new_vals: Vec<bool> = (0..ins_count).map(|_| r.random()).collect();
             let del = del_count.min(c.len() - pos);
-            c.splice(pos, del, new_vals);
+            c.splice(pos, del, new_vals.iter().copied());
             validate_bool_column(&c);
+            // Self-consistency is not correctness: a slab that duplicated
+            // a run is entirely self-consistent. Compare to a model.
+            let mut model = initial.clone();
+            model.splice(pos..pos + del, new_vals.iter().copied());
+            assert_eq!(
+                c.len(),
+                model.len(),
+                "len after splice(pos={pos}, del={del}, ins={})",
+                new_vals.len()
+            );
+            assert_eq!(
+                c.iter().collect::<Vec<_>>(),
+                model,
+                "contents after splice(pos={pos}, del={del}, ins={})",
+                new_vals.len()
+            );
         }
     }
 }
@@ -2929,9 +2945,14 @@ fn fuzz_option_u64_splice_exhaustive() {
                 .map(|_| choices[r.random_range(0..choices.len())])
                 .collect();
             let del = del_count.min(c.len() - pos);
+            let mut model = initial.clone();
+            model.splice(pos..pos + del, new_vals.iter().copied());
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 c.splice(pos, del, new_vals.clone());
                 validate_rle_column(&c);
+                // Self-consistency is not correctness — compare to a model.
+                assert_eq!(c.len(), model.len(), "len");
+                assert_eq!(c.iter().collect::<Vec<_>>(), model, "contents");
             }));
             if result.is_err() {
                 panic!(

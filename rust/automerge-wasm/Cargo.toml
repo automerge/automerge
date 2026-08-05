@@ -20,11 +20,10 @@ crate-type = ["cdylib", "rlib"]
 bench = false
 
 [features]
-# default = ["console_error_panic_hook", "wee_alloc"]
-default = ["console_error_panic_hook"]
+# default = ["wee_alloc"]
+default = []
 
 [dependencies]
-console_error_panic_hook = { version = "^0.1", optional = true }
 # wee_alloc = { version = "^0.4", optional = true }
 automerge = { path = "../automerge", features = ["wasm", "utf16-indexing"] }
 js-sys = "^0.3"
@@ -38,7 +37,7 @@ thiserror = "^2.0.12"
 rustc-hash = "^2.1.1"
 
 [dependencies.wasm-bindgen]
-version = "= 0.2.121"
+version = "= 0.2.126"
 features = ["serde-serialize", "std"]
 
 [package.metadata.wasm-pack.profile.release]
