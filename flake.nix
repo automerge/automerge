@@ -31,6 +31,7 @@
         pkgs = import nixpkgs {inherit system overlays;};
         unstable = import nixos-unstable {inherit system overlays;};
 
+        nodejs = pkgs.nodejs_26;
         rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
           extensions = [
             "cargo"
@@ -84,7 +85,7 @@
         node = "${unstable.nodejs_20}/bin/node";
         wasm-opt = "${pkgs.binaryen}/bin/wasm-opt";
         wasm-pack = "${unstable.wasm-pack}/bin/wasm-pack";
-        npm = "${pkgs.nodejs_22}/bin/npm";
+        npm = "${nodejs}/bin/npm";
 
         cmd = command-utils.cmd.${system};
 
@@ -253,7 +254,7 @@
               # JS
               chromedriver
               unstable.deno
-              nodejs_22 # Current LTS
+              nodejs # Current LTS
 
               # Clang
               cmake
