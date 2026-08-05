@@ -53,6 +53,38 @@
           ];
         };
 
+        # Pinned nightly for the wasm build (must match WASM_TOOLCHAIN in CI).
+        # `-Zbuild-std` needs a nightly cargo/rustc plus the rust-src component.
+        wasm-rust-toolchain = pkgs.rust-bin.nightly."2026-04-25".minimal.override {
+          extensions = ["rust-src"];
+          targets = ["wasm32-unknown-unknown"];
+        };
+
+        # rustup-style `cargo +nightly` doesn't work without rustup, so expose
+        # the nightly toolchain behind a wrapper that javascript/scripts/build.mjs
+        # can use via WASM_CARGO. PATH is prepended so nightly cargo also picks
+        # up nightly rustc rather than the stable one from the devshell.
+        wasm-cargo = pkgs.writeShellScriptBin "wasm-cargo" ''
+          export PATH=${wasm-rust-toolchain}/bin:$PATH
+          exec cargo "$@"
+        '';
+
+        # CI pins wasm-bindgen-cli 0.2.126 (see .github/workflows/ci.yaml);
+        # the CLI version must match the `wasm-bindgen` crate in rust/Cargo.lock.
+        wasm-bindgen-cli = unstable.buildWasmBindgenCli rec {
+          src = pkgs.fetchCrate {
+            pname = "wasm-bindgen-cli";
+            version = "0.2.126";
+            hash = "sha256-H6Is3fiZVxZCfOMWK5dWMSrtn50VGv0sfdnsT+cTtyk=";
+          };
+
+          cargoDeps = unstable.rustPlatform.fetchCargoVendor {
+            inherit src;
+            inherit (src) pname version;
+            hash = "sha256-VucqkXbCi4qtQzY/HrXiDnbSURsagPsdNVMn1Tw3UiY=";
+          };
+        };
+
         format-pkgs = with pkgs; [
           nixpkgs-fmt
           alejandra
@@ -76,7 +108,7 @@
           cargo-watch
           # llvmPackages.bintools
           twiggy
-          unstable.wasm-bindgen-cli
+          wasm-bindgen-cli
           wasm-tools
         ];
 
@@ -245,6 +277,7 @@
               cargo-fuzz
               cargo-watch
               rust-toolchain
+              wasm-cargo
               unstable.irust
 
               # Wasm
@@ -253,6 +286,7 @@
 
               # JS
               chromedriver
+              chromium
               unstable.deno
               nodejs # Current LTS
 
@@ -274,6 +308,13 @@
             ++ format-pkgs
             ++ cargo-installs
             ++ lib.optionals stdenv.isDarwin darwin-installs;
+
+          WASM_CARGO = "wasm-cargo";
+
+          # Use the Nix-provided Chromium for the JS packaging tests; the
+          # Chrome that Puppeteer downloads does not run on NixOS.
+          PUPPETEER_SKIP_DOWNLOAD = "1";
+          PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
 
           shellHook = "menu";
         };
