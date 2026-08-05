@@ -127,9 +127,13 @@ function buildWasm(outputDir, gitHead) {
   ]
     .filter(Boolean)
     .join(" ")
+  // `cargo +<toolchain>` requires rustup. Environments without rustup (e.g.
+  // Nix) can set WASM_CARGO to a cargo invocation that already resolves to a
+  // suitable nightly toolchain.
   const toolchain = process.env.WASM_TOOLCHAIN ?? "nightly"
+  const cargo = process.env.WASM_CARGO ?? `cargo +${toolchain}`
   execSync(
-    `cargo +${toolchain} build --target wasm32-unknown-unknown --release ` +
+    `${cargo} build --target wasm32-unknown-unknown --release ` +
       "-Zbuild-std=std,panic_unwind",
     {
       cwd: automergeWasmPath,
