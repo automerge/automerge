@@ -18,30 +18,29 @@ utf16-indexing = []
 slow_path_assertions = ["hexane/slow_path_assertions"]
 
 [dependencies]
-hexane = { version = "1.0.0-alpha.2", path = "../hexane" }
-hex = "^0.4.3"
-itertools = "0.15.0"
-leb128 = "^0.2.5"
-sha2 = "^0.11.0-rc.5"
-thiserror = "^2.0.12"
+cfg-if = "1.0"
 # zlib-rs backend: pure Rust (works on wasm), ~25% faster inflate than the
 # default miniz_oxide backend natively and ~2x faster on wasm
 flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
-smol_str = { version = "0.3", features = ["serde"] }
-tracing = { version = "^0.1.29" }
-rustc-hash = "^2.1.1"
-tinyvec = { version = "^1.5.1", features = ["alloc"] }
-serde = { version = "^1.0", features = ["derive"] }
-cfg-if = "1.0"
 getrandom = "0.4"
+hex = "^0.4.3"
+hexane = { version = "1.0.0-alpha.2", path = "../hexane" }
+itertools = "0.15.0"
+leb128 = "^0.2.5"
+rustc-hash = "^2.1.1"
+serde = { version = "^1.0", features = ["derive"] }
+sha2 = "^0.11.0-rc.5"
+smol_str = { version = "0.3", features = ["serde"] }
+thiserror = "^2.0.12"
+tinyvec = { version = "^1.5.1", features = ["alloc"] }
+tracing = { version = "^0.1.29" }
+unicode-segmentation = "1.10.1"
 
 # optional deps
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
-wasm-bindgen = { version = "^0.2", optional = true }
 rand = { version = "^0.10", optional = false }
-
-unicode-segmentation = "1.10.1"
+wasm-bindgen = { version = "^0.2", optional = true }
 
 [dependencies.web-sys]
 version = "^0.3.55"
@@ -49,16 +48,11 @@ features = ["console"]
 optional = true
 
 [dev-dependencies]
-pretty_assertions = "1.0.0"
-proptest = { version = "^1.7.0", default-features = false, features = ["std"] }
-serde_json = { version = "^1.0.73", features = [
-    "float_roundtrip",
-], default-features = true }
-maplit = { version = "^1.0" }
-test-log = { version = "0.2.10", features = [
-    "trace",
-], default-features = false }
-tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
+maplit = { version = "^1.0" }
+pretty_assertions = "1.0.0"
 prettytable = "0.10.0"
-
+proptest = { version = "^1.7.0", default-features = false, features = ["std"] }
+serde_json = { version = "^1.0.73", features = ["float_roundtrip"], default-features = true }
+test-log = { version = "0.2.10", features = ["trace"], default-features = false }
+tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
