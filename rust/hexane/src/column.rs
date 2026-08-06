@@ -1223,6 +1223,11 @@ where
 
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
+        // a longer run count is not encodable, so it would not read back
+        assert!(
+            len <= i64::MAX as usize,
+            "fill length {len} is not encodable"
+        );
         if len == 0 {
             return Self::new();
         }
