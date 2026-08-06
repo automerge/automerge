@@ -814,7 +814,7 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
         }
 
         segments += 1;
-        // untrusted counts: a wrapped length describes bytes that are not there
+        // untrusted count
         len = len
             .checked_add(count)
             .ok_or(PackError::InvalidValue("length overflows usize".into()))?;
@@ -1004,7 +1004,7 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             let value = !self.run_index.is_multiple_of(2);
             self.pos = next_pos;
             self.run_index += 1;
-            // untrusted counts: a wrapped total mints a bogus column length
+            // untrusted count
             self.slab_items = self
                 .slab_items
                 .checked_add(count)
