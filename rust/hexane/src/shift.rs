@@ -286,8 +286,7 @@ impl<T: Iterator> Iterator for Unshift<T> {
         if n == 0 {
             return self.next();
         }
-        // the lookahead is item 0, so item `n` is the inner iterator's
-        // `n - 1`; taking it also drops the lookahead, as it should
+        // the lookahead is item 0, so item `n` is the inner's `n - 1`
         let out = self.inner.nth(n - 1);
         self.next = self.inner.next();
         out

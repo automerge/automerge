@@ -1833,7 +1833,6 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
                 // increasing: first j at or above lo
                 match lo.checked_sub(running) {
                     // overflow means further than `count` steps, not one
-                    // — answering 1 checks the wrong item
                     Some(gap) => gap
                         .checked_add(d - 1)
                         .map_or(count as i64, |n| n.div_euclid(d))
@@ -1842,9 +1841,8 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
                     None => 1,
                 }
             } else {
-                // decreasing: first j at or below hi. `-i64::MIN` does not
-                // exist, but a delta that large admits only `j == 1`; the
-                // range check below still has to confirm it.
+                // decreasing: first j at or below hi. `-i64::MIN` has no
+                // negation, and admits only `j == 1` anyway.
                 match d.checked_neg() {
                     None => 1,
                     Some(d) => match running.checked_sub(hi) {

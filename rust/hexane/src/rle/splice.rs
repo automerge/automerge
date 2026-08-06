@@ -1063,8 +1063,6 @@ pub(crate) fn tail<T: RleValue, C: Codec>(
             let state = RleState::Lit {
                 count,
                 local: 0,
-                // `bytes` above located `current` in the slab; nothing has
-                // been written locally, so there is no width to record
                 bytes: None,
                 current,
                 header_pos,

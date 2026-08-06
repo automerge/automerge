@@ -233,10 +233,7 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>, C: Codec = Leb128> 
         count: usize,
         local: usize,
         header_pos: usize,
-        /// Byte width of the last value written into the local buffer —
-        /// `None` until one has been, which is exactly `local == 0`. The
-        /// value a run was imported with is not it: that one is `current`,
-        /// still unwritten.
+        /// Width of the last value written locally; `None` until one is.
         bytes: Option<std::num::NonZeroUsize>,
         current: RleCow<'a, T, V>,
     },
@@ -436,7 +433,6 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                     count: 1,
                     local: 1,
                     header_pos,
-                    // written just above, so the width is known
                     bytes: std::num::NonZeroUsize::new(bytes),
                     current: value,
                 })
@@ -464,8 +460,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         flushed
     }
 
-    /// A literal run imported from a slab. Nothing has been written
-    /// locally yet, so there is no last-written width to record.
+    /// A literal run imported from a slab; nothing written locally yet.
     pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize) -> Self {
         if count == 0 {
             Self::Lone(current)

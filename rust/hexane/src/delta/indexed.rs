@@ -112,8 +112,7 @@ fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
                 max_off = max_off.max(partial);
             }
             Some(v) => {
-                // the loader rejects these, so accepting them here writes
-                // a column that cannot be read back
+                // the loader rejects these
                 let span = v
                     .checked_mul(run.count as i64)
                     .expect("delta run overflows i64");

@@ -545,7 +545,6 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     }
 
     pub fn advance_by(&mut self, amount: usize) {
-        // past the end already means "stop at the end"
         self.advance_to(self.pos.saturating_add(amount))
     }
 
@@ -641,8 +640,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
             self.slab_idx = si;
             self.pos = pos;
             self.items_left = 0;
-            // terminal: a live reader lets a later re-extend yield
-            // items already passed
+            // else a later re-extend decodes items already passed
             self.slab_remaining = 0;
             self.decoder = T::Encoding::<C>::decoder(&[]);
             false
@@ -1227,7 +1225,6 @@ where
 
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
-        // a longer run count is not encodable, so it would not read back
         assert!(
             len <= i64::MAX as usize,
             "fill length {len} is not encodable"
