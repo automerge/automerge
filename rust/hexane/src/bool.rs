@@ -7,6 +7,7 @@ use crate::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
 
 use crate::{AsColumnRef, Codec, Leb128, Run};
 use std::marker::PhantomData;
+use std::ops::Range;
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
@@ -465,6 +466,41 @@ impl<C: Codec> Clone for BoolDecoder<'_, C> {
     }
 }
 
+/// A [`BoolDecoder`]'s position, detached from the slab it was reading.
+///
+/// Public only because [`ColumnEncoding::State`](crate::ColumnEncoding::State)
+/// names it; nothing outside the crate can do anything with one.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoolDecoderState {
+    byte_pos: usize,
+    remaining: usize,
+    /// starts `true` so the first `advance_run` flip yields `false`, as
+    /// the wire format requires
+    value: bool,
+}
+
+impl BoolDecoderState {
+    /// The state of a decoder standing at the start of a slab.
+    pub(crate) fn start() -> Self {
+        Self::default()
+    }
+}
+
+// hand-written rather than derived: a slab-start reader carries `value:
+// true`, so that the first run's flip yields the `false` the wire format
+// begins with. A derived `Default` would give `false` and read every run
+// at the wrong parity.
+impl Default for BoolDecoderState {
+    fn default() -> Self {
+        BoolDecoderState {
+            byte_pos: 0,
+            remaining: 0,
+            value: true,
+        }
+    }
+}
+
 impl<'a, C: Codec> BoolDecoder<'a, C> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         BoolDecoder {
@@ -472,6 +508,38 @@ impl<'a, C: Codec> BoolDecoder<'a, C> {
             byte_pos: 0,
             remaining: 0,
             value: true,
+            _codec: PhantomData,
+        }
+    }
+
+    /// Advance past `n` items in O(runs skipped). Stops at the end of
+    /// the column.
+    // inherent, so a call on a concrete decoder is never ambiguous with
+    // the unstable `Iterator::advance_by`
+    pub fn advance_by(&mut self, n: usize) {
+        if n > 0 {
+            self.nth(n - 1);
+        }
+    }
+
+    /// Capture the position so it can be restored against the same bytes
+    /// later, without holding a borrow of them.
+    pub(crate) fn suspend(&self) -> BoolDecoderState {
+        BoolDecoderState {
+            byte_pos: self.byte_pos,
+            remaining: self.remaining,
+            value: self.value,
+        }
+    }
+
+    /// Restore a suspended position against `data`, which must be the
+    /// bytes it was suspended from.
+    pub(crate) fn resume(data: &'a [u8], state: &BoolDecoderState) -> Self {
+        BoolDecoder {
+            data,
+            byte_pos: state.byte_pos,
+            remaining: state.remaining,
+            value: state.value,
             _codec: PhantomData,
         }
     }
@@ -566,6 +634,23 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
     type Codec = C;
     type Value = bool;
     type Tail = u8;
+    type State = BoolDecoderState;
+
+    fn state_at(slab: &Slab, at: usize) -> Self::State {
+        let mut d = BoolDecoder::<C>::new(&slab.data);
+        d.advance_by(at);
+        d.suspend()
+    }
+
+    fn state_peek(slab: &Slab, state: &Self::State) -> Option<bool> {
+        BoolDecoder::<C>::resume(&slab.data, state).next()
+    }
+
+    fn state_advance(slab: &Slab, state: &mut Self::State, n: usize) {
+        let mut d = BoolDecoder::<C>::resume(&slab.data, state);
+        d.advance_by(n);
+        *state = d.suspend();
+    }
 
     fn fill(len: usize, value: bool) -> Slab {
         let mut data = Vec::new();
@@ -709,7 +794,7 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
     let mut run_index = 0;
     let mut value = false;
     let mut segments = 0;
-    let mut len = 0;
+    let mut len: usize = 0;
     let mut last_cb: u8 = 0;
 
     while byte_pos < slab.len() {
@@ -729,7 +814,10 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
         }
 
         segments += 1;
-        len += count;
+        // untrusted count
+        len = len
+            .checked_add(count)
+            .ok_or(PackError::InvalidValue("length overflows usize".into()))?;
         last_cb = cb as u8;
 
         byte_pos = next_pos;
@@ -916,7 +1004,11 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             let value = !self.run_index.is_multiple_of(2);
             self.pos = next_pos;
             self.run_index += 1;
-            self.slab_items += count;
+            // untrusted count
+            self.slab_items = self
+                .slab_items
+                .checked_add(count)
+                .ok_or(PackError::BadFormat)?;
             self.slab_segs += 1;
             // Cut after target_segments — always even, so the next slab
             // starts on a false run and can be memcpy'd as-is.
@@ -998,6 +1090,535 @@ impl<'a, C: Codec> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a, C
 
     fn finalize(self) -> Result<Vec<Slab>, PackError> {
         BoolLoadIter::finalize(self)
+    }
+}
+
+// ── Cursor ──────────────────────────────────────────────────────────────────
+
+/// The slab's tail at the read cursor: the unread part of the run the
+/// cursor stands in, which has to be re-encoded because its count
+/// changed, and the bytes after that run, which are carried untouched.
+struct BoolTail {
+    value: bool,
+    partial: usize,
+    /// where the carried bytes begin
+    start: usize,
+    /// items in the carried bytes, not counting `partial`
+    items: usize,
+    segments: usize,
+}
+
+impl BoolTail {
+    /// The tail as a slab of its own: a false pad if it would start true,
+    /// the partial run, then the carried bytes.
+    fn into_slab<C: Codec>(self, data: &[u8], old_tail: u8) -> Option<Slab> {
+        let mut buf = Vec::new();
+        let mut segments = 0;
+        let mut tail = 0u8;
+        if self.value && self.partial > 0 {
+            buf.extend(C::encode_count(0));
+            segments += 1;
+            tail = 1;
+        }
+        if self.partial > 0 {
+            let c = C::encode_count(self.partial);
+            tail = c.len() as u8;
+            buf.extend(c);
+            segments += 1;
+        }
+        if self.segments > 0 {
+            tail = old_tail;
+        }
+        buf.extend_from_slice(&data[self.start..]);
+        let len = self.partial + self.items;
+        (len > 0).then_some(Slab {
+            data: buf,
+            len,
+            segments: segments + self.segments,
+            tail,
+        })
+    }
+}
+
+/// What a finished rebuild hands back: the bytes replacing `range` in the
+/// slab, the slab's new metadata, and any slabs it spilled into.
+#[derive(Debug, Default)]
+struct BoolRebuilt {
+    bytes: Vec<u8>,
+    range: Range<usize>,
+    len: usize,
+    segments: usize,
+    tail: u8,
+    overflow: Vec<Slab>,
+}
+
+/// A rebuild in progress within one boolean slab.
+///
+/// Same contract as the RLE cursor: the head before the edit and the tail
+/// after it are carried as raw bytes and never re-encoded, no byte is
+/// decoded twice, and N edits landing in one slab cost one partition, one
+/// byte splice and one index update.
+///
+/// What the boolean encoding makes simpler is the state. A run is a
+/// count, parity alternates, and any header is resumable — so the encoder
+/// state is one `(value, count)` pair, there is no postfix type, no
+/// literal-group header to rewrite, and a `peek` is one count read.
+pub struct BoolEdit<C: Codec = Leb128> {
+    /// the run being written: parity, and items in it so far
+    cur_value: bool,
+    cur_count: usize,
+    buf: Vec<u8>,
+    /// segments written into the chunk in hand
+    segments: usize,
+    /// segments of the slab before `byte_start`, which stay put
+    prefix_segments: usize,
+    /// items of the slab before `byte_start`, which stay put
+    head_len: usize,
+    /// where the rebuilt bytes replace the original
+    byte_start: usize,
+    /// items flushed into `buf` — the pending run is not counted
+    emitted: usize,
+    /// byte length of the last count written into `buf`
+    tail_byte: u8,
+    max_segments: usize,
+    /// budget for the chunk in hand — halves after the first cut, so a
+    /// spill leaves room for later growth rather than filling to the brim
+    target: usize,
+    overflowed: bool,
+    out: BoolRebuilt,
+    /// Where reading stopped — the same reader the cursor carries.
+    dec: BoolDecoderState,
+    /// Complete runs behind the reader; the writer needs it to describe
+    /// the tail it carries, and a decoder has no use for it.
+    read_segments: usize,
+    read: usize,
+    _phantom: PhantomData<fn() -> C>,
+}
+
+impl<C: Codec> Default for BoolEdit<C> {
+    fn default() -> Self {
+        BoolEdit {
+            cur_value: false,
+            cur_count: 0,
+            buf: Vec::new(),
+            segments: 0,
+            prefix_segments: 0,
+            head_len: 0,
+            byte_start: 0,
+            emitted: 0,
+            tail_byte: 0,
+            max_segments: 0,
+            target: 0,
+            overflowed: false,
+            out: BoolRebuilt::default(),
+            dec: BoolDecoderState::start(),
+            read_segments: 0,
+            read: 0,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+/// The scan's view of where `at` lands: the run's header, how many of
+/// its items are behind `at`, its parity, and the runs before it. Local
+/// to [`BoolEdit::open_at`], which turns it into the reader the rebuild
+/// keeps and the region the writer opens.
+struct BoolResumeLocal {
+    byte: usize,
+    off: usize,
+    value: bool,
+    segments: usize,
+}
+
+impl<C: Codec> BoolEdit<C> {
+    /// Point the rebuild at item `at`, reading the head once.
+    fn open_at(&mut self, slab: &Slab, at: usize, max_segments: usize) {
+        let data: &[u8] = &slab.data;
+        let mut byte = 0usize;
+        let mut item = 0usize;
+        let mut value = false;
+        let mut segments = 0usize;
+        // the run before the one `at` falls in, for the backing-up below
+        let mut prev: Option<(usize, usize, usize)> = None; // (byte, count, segments)
+
+        // `(header, consumed, count_bytes)` of the run `at` falls in —
+        // the scan's vocabulary, which the writer's half below is written
+        // in; the reader is stored in the decoder's.
+        let (header, off, cbytes, count) = loop {
+            if byte >= data.len() {
+                break (byte, 0, 0, 0);
+            }
+            let (cb, count) = C::read_count(&data[byte..]).expect("a valid bool slab");
+            if item + count > at {
+                break (byte, at - item, cb, count);
+            }
+            if count > 0 {
+                prev = Some((byte, count, segments));
+            }
+            item += count;
+            byte += cb;
+            value = !value;
+            segments += 1;
+        };
+        let resume = BoolResumeLocal {
+            byte: header,
+            off,
+            value,
+            segments,
+        };
+
+        // The pending run must not be empty, or a push of the opposite
+        // parity would have to merge into a run already encoded in the
+        // head. When the cursor lands on a run boundary, back up one run
+        // and re-encode it instead — the same reason the RLE cursor opens
+        // its region at a run header rather than an item boundary.
+        let (byte_start, prefix_segments, head_len, cur_value, cur_count) = if resume.off > 0 {
+            (
+                resume.byte,
+                resume.segments,
+                at - resume.off,
+                resume.value,
+                resume.off,
+            )
+        } else if let Some((pbyte, pcount, psegs)) = prev {
+            (pbyte, psegs, at - pcount, !resume.value, pcount)
+        } else {
+            (0, 0, 0, false, 0)
+        };
+
+        self.cur_value = cur_value;
+        self.cur_count = cur_count;
+        self.buf.clear();
+        self.segments = 0;
+        self.prefix_segments = prefix_segments;
+        self.head_len = head_len;
+        self.byte_start = byte_start;
+        self.emitted = 0;
+        self.tail_byte = 0;
+        self.max_segments = max_segments;
+        self.target = max_segments;
+        self.overflowed = false;
+        self.out = BoolRebuilt::default();
+        self.dec = BoolDecoderState {
+            byte_pos: resume.byte + cbytes,
+            remaining: count - resume.off,
+            value: resume.value,
+        };
+        self.read_segments = resume.segments;
+        self.read = at;
+    }
+
+    /// Segments standing before the chunk in hand: the untouched head for
+    /// the first chunk, nothing for a spilled one.
+    fn standing(&self) -> usize {
+        if self.overflowed {
+            0
+        } else {
+            self.prefix_segments
+        }
+    }
+
+    /// Write the pending run out. Nothing is written for an empty one —
+    /// a zero count is only ever legal as the pad below.
+    fn flush_run(&mut self) {
+        if self.cur_count > 0 {
+            let c = C::encode_count(self.cur_count);
+            self.tail_byte = c.len() as u8;
+            self.buf.extend(c);
+            self.emitted += self.cur_count;
+            self.segments += 1;
+        }
+    }
+
+    /// Append `n` items of `value`.
+    fn push(&mut self, value: bool, n: usize) {
+        if n == 0 {
+            return;
+        }
+        if value == self.cur_value {
+            self.cur_count += n;
+            return;
+        }
+        if self.cur_count == 0 && self.segments == 0 && !self.overflowed {
+            // The rebuild starts the slab and its first run is true, so
+            // the slab needs a zero-count false pad to start on. (An
+            // empty pending run only ever happens here: everywhere else
+            // it is opened with a non-zero count.)
+            debug_assert!(!self.cur_value && self.byte_start == 0);
+            self.buf.extend(C::encode_count(0));
+            self.tail_byte = 1;
+            self.segments += 1;
+        } else {
+            self.flush_run();
+        }
+        self.cur_value = value;
+        self.cur_count = n;
+        if self.standing() + self.segments >= self.target {
+            self.cut();
+        }
+    }
+
+    /// Close the chunk in hand and start a new slab.
+    fn cut(&mut self) {
+        if !self.overflowed {
+            self.overflowed = true;
+            self.target = (self.max_segments / 2).max(1);
+            self.out.bytes = std::mem::take(&mut self.buf);
+            self.out.len = self.head_len + self.emitted;
+            self.out.segments = self.prefix_segments + self.segments;
+            self.out.tail = self.tail_byte;
+        } else {
+            self.out.overflow.push(Slab {
+                data: std::mem::take(&mut self.buf),
+                len: self.emitted,
+                segments: self.segments,
+                tail: self.tail_byte,
+            });
+        }
+        self.segments = 0;
+        self.emitted = 0;
+        self.tail_byte = 0;
+        // a fresh slab starts on a false run
+        if self.cur_value {
+            self.buf.extend(C::encode_count(0));
+            self.tail_byte = 1;
+            self.segments = 1;
+        }
+    }
+
+    /// Move the read cursor `n` items forward, keeping them when `emit`.
+    /// Reading resumes where it stopped, so no run is decoded twice
+    /// except the one the cursor is standing in.
+    fn walk<F>(&mut self, slab: &Slab, n: usize, emit: bool, f: &mut F) -> usize
+    where
+        F: FnMut(bool, usize),
+    {
+        let mut dec = BoolDecoder::<C>::resume(&slab.data, &self.dec);
+        let mut want = n;
+        while want > 0 {
+            // bounded by what is still wanted, so the decoder keeps the
+            // rest of a run it only partly gave up
+            let Some(run) = dec.next_run_max(want) else {
+                break;
+            };
+            f(run.value, run.count);
+            if emit {
+                self.push(run.value, run.count);
+            }
+            self.read += run.count;
+            want -= run.count;
+            if dec.remaining == 0 {
+                self.read_segments += 1;
+            }
+        }
+        self.dec = dec.suspend();
+        want
+    }
+
+    /// Write the rebuild back, carrying the slab's remaining bytes
+    /// through untouched.
+    /// The tail at the read cursor. Reads one count — the run the cursor
+    /// stands in; everything past it is bytes.
+    fn tail(&self, slab: &Slab) -> BoolTail {
+        let data_len = slab.data.len();
+        // the run in hand: what the reader left of the one it is inside,
+        // or — standing exactly on a boundary — the whole of the next
+        let (value, partial, start) = if self.dec.remaining > 0 {
+            (self.dec.value, self.dec.remaining, self.dec.byte_pos)
+        } else if self.dec.byte_pos < data_len {
+            let (cb, count) =
+                C::read_count(&slab.data[self.dec.byte_pos..]).expect("a valid bool slab");
+            (!self.dec.value, count, self.dec.byte_pos + cb)
+        } else {
+            return BoolTail {
+                value: self.dec.value,
+                partial: 0,
+                start: data_len,
+                items: 0,
+                segments: 0,
+            };
+        };
+        BoolTail {
+            value,
+            partial,
+            start,
+            items: slab.len - self.read - partial,
+            // the run in hand is carried by the encoder, not by the bytes
+            segments: slab.segments - self.read_segments - 1,
+        }
+    }
+
+    /// Write the rebuild back, carrying the slab's remaining bytes
+    /// through untouched.
+    fn write_back(&mut self, slab: &mut Slab) -> Vec<Slab> {
+        let t = self.tail(slab);
+        // the partial run costs a segment unless it merges into the
+        // pending one
+        let joins = t.partial > 0 && t.value == self.cur_value;
+        let need =
+            usize::from(self.cur_count > 0) + t.segments + usize::from(t.partial > 0 && !joins);
+        if self.standing() + self.segments + need > self.max_segments {
+            // the tail does not fit: it becomes a slab of its own
+            self.flush_run();
+            self.cur_count = 0;
+            self.seal(slab, slab.data.len(), 0, 0);
+            let spill = t.into_slab::<C>(&slab.data, slab.tail);
+            self.out.overflow.extend(spill);
+            return self.apply(slab);
+        }
+        // it fits: the partial run goes through the encoder like any
+        // other, which merges it with the pending run when the parities
+        // agree, and pads or cuts when they do not
+        self.push(t.value, t.partial);
+        self.flush_run();
+        self.cur_count = 0;
+        self.seal(slab, t.start, t.items, t.segments);
+        self.apply(slab)
+    }
+
+    /// Finish the chunk in hand: the edited slab's replacement when
+    /// nothing has spilled, another new slab when something has — and in
+    /// that case the carried tail moves onto it, so everything from
+    /// `byte_start` to the end of the original is replaced.
+    fn seal(
+        &mut self,
+        slab: &Slab,
+        tail_start: usize,
+        raw_tail_items: usize,
+        tail_segments: usize,
+    ) {
+        let data_len = slab.data.len();
+        // the slab's last count is unchanged when any tail bytes remain
+        let tail = if tail_start < data_len {
+            slab.tail
+        } else {
+            self.tail_byte
+        };
+        if !self.overflowed {
+            self.out.bytes = std::mem::take(&mut self.buf);
+            self.out.range = self.byte_start..tail_start;
+            self.out.len = self.head_len + self.emitted + raw_tail_items;
+            self.out.segments = self.prefix_segments + self.segments + tail_segments;
+            self.out.tail = tail;
+        } else {
+            let mut data = std::mem::take(&mut self.buf);
+            data.extend_from_slice(&slab.data[tail_start..]);
+            self.out.overflow.push(Slab {
+                data,
+                len: self.emitted + raw_tail_items,
+                segments: self.segments + tail_segments,
+                tail,
+            });
+            self.out.range = self.byte_start..data_len;
+        }
+    }
+
+    /// Splice the rebuilt bytes in place of the region they replace.
+    fn apply(&mut self, slab: &mut Slab) -> Vec<Slab> {
+        let out = std::mem::take(&mut self.out);
+        let range = out.range;
+        crate::column::splice_bytes(&mut slab.data, range.start, range.len(), &out.bytes);
+        slab.len = out.len;
+        slab.segments = out.segments;
+        slab.tail = out.tail;
+        // hand the buffer back for the next slab this cursor edits
+        self.buf = out.bytes;
+        self.buf.clear();
+        #[cfg(debug_assertions)]
+        {
+            validate_slab::<C>(slab);
+            for s in &out.overflow {
+                validate_slab::<C>(s);
+            }
+        }
+        out.overflow
+    }
+}
+
+impl<C: Codec> crate::edit::SlabEdit for BoolEncoding<C> {
+    type Edit = BoolEdit<C>;
+}
+
+impl<C: Codec> crate::edit::EditSlab for BoolEdit<C> {
+    type Tail = u8;
+    type Value = bool;
+    type State = BoolDecoderState;
+
+    fn reset(&mut self, slab: &Slab, at: usize, max_segments: usize) {
+        self.open_at(slab, at, max_segments)
+    }
+
+    fn pass<F>(&mut self, slab: &Slab, n: usize, _runs: usize, f: &mut F) -> usize
+    where
+        F: FnMut(bool, usize),
+    {
+        self.walk(slab, n, true, f)
+    }
+
+    fn insert<V: AsColumnRef<bool>>(&mut self, value: V, n: usize) {
+        self.push(value.as_column_ref(), n)
+    }
+
+    fn delete<F>(&mut self, slab: &Slab, n: usize, f: &mut F)
+    where
+        F: FnMut(bool, usize),
+    {
+        debug_assert!(self.read + n <= slab.len, "delete past the end of the slab");
+        self.walk(slab, n, false, f);
+    }
+
+    fn read_state(&self) -> &BoolDecoderState {
+        &self.dec
+    }
+
+    fn close(&mut self, slab: &mut Slab) -> Vec<Slab> {
+        self.write_back(slab)
+    }
+}
+
+#[cfg(test)]
+mod suspend_tests {
+    use super::*;
+
+    fn check(values: Vec<bool>) {
+        let bytes = crate::Column::<bool>::from_values(values.clone()).save();
+        let want: Vec<bool> = crate::decoder::<bool>(&bytes).collect();
+        for cut in 0..=want.len() {
+            let mut dec = BoolDecoder::<Leb128>::new(&bytes);
+            for _ in 0..cut {
+                dec.next().expect("value before the cut");
+            }
+            let state = dec.suspend();
+            let mut resumed = BoolDecoder::<Leb128>::resume(&bytes, &state);
+            let got: Vec<bool> = std::iter::from_fn(|| resumed.next()).collect();
+            assert_eq!(got, want[cut..], "resume at {cut}");
+        }
+    }
+
+    #[test]
+    fn resume_runs() {
+        check((0..200).map(|i| (i / 7) % 2 == 0).collect());
+    }
+
+    #[test]
+    fn resume_alternating() {
+        check((0..200).map(|i| i % 2 == 0).collect());
+    }
+
+    #[test]
+    fn resume_all_true() {
+        check(vec![true; 64]);
+    }
+
+    /// A fresh decoder and one resumed from the start state must agree —
+    /// the first run is `false`, which the `value` field has to encode.
+    #[test]
+    fn start_state_matches_fresh() {
+        let bytes = crate::Column::<bool>::from_values(vec![true; 8]).save();
+        let fresh: Vec<bool> = BoolDecoder::<Leb128>::new(&bytes).collect();
+        let resumed: Vec<bool> =
+            BoolDecoder::<Leb128>::resume(&bytes, &BoolDecoderState::start()).collect();
+        assert_eq!(fresh, resumed);
     }
 }
 

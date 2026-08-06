@@ -29,6 +29,10 @@ macro_rules! __log {
      }
  }
 
+pub mod edit;
+
+#[cfg(test)]
+mod edit_fuzz;
 mod error;
 pub use error::PackError;
 
@@ -214,7 +218,8 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
     /// The encoding strategy for this value type, parameterized by the
     /// varint codec `C` (see [`Codec`]).  `Column<T>` uses
     /// `T::Encoding<Leb128>`; `Column<T, C>` uses `T::Encoding<C>`.
-    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>;
+    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>
+        + crate::edit::SlabEdit<Value = Self>;
 
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
@@ -286,7 +291,8 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
 /// ```
 pub trait ColumnValue: Copy + PartialEq + Debug + 'static {
     /// The encoding strategy — always `RleEncoding<Self, C>` for RLE types.
-    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>;
+    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>
+        + crate::edit::SlabEdit<Value = Self>;
 }
 
 impl<T: ColumnValue> ColumnValueRef for T {

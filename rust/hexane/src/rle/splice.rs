@@ -80,14 +80,36 @@ struct RlePartition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> {
     outer: Range<usize>,
     prefix: Prefix<'a, T, V, C>,
     postfix: Option<Postfix<'a, T>>,
+    /// complete runs behind `range.start` — see [`PartitionAt::read_segments`]
+    read_segments: usize,
+    /// a reader standing at `range.start`
+    read_state: crate::rle::RleDecoderState,
 }
 
 fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
     slab: &'a Slab,
     range: Range<usize>,
 ) -> RlePartition<'a, T, V, C> {
+    find_partition_inner(slab, range, true)
+}
+
+/// `want_postfix` builds the tail description, which costs a run decode
+/// and sometimes a peek past it. A splice needs it; a cursor opening a
+/// rebuild does not — it describes the tail from wherever it stops
+/// reading, which is not where the rebuild opened.
+fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
+    slab: &'a Slab,
+    range: Range<usize>,
+    want_postfix: bool,
+) -> RlePartition<'a, T, V, C> {
     let mut decoder = RleDecoder::<T, C>::new(&slab.data);
-    let mut byte_before = decoder.byte_pos;
+    let base = 0;
+    let mut byte_before = base + decoder.byte_pos;
+    let mut read_segments = 0usize;
+    let mut read_state = crate::rle::RleDecoderState::start();
+    // the reader as of the run boundary in hand, kept only until the cut
+    // is found; field copies, no decode
+    let mut boundary = decoder.suspend();
     let mut item_pos: usize = 0;
     let mut segments: usize = 0;
 
@@ -113,12 +135,21 @@ fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
             lit_start_item = item_pos;
             lit_segments_before = segments;
         }
-
         let run_end_item = item_pos + run.count;
 
         // ── Prefix ──────────────────────────────────────────────────────
         if !prefix_done && range.start <= run_end_item {
             let k = range.start - item_pos;
+            // A cut landing on a run's end is *past* that run for a
+            // reader, though the writer's region still opens at its
+            // header — which is why the two counts differ by one there.
+            read_segments = segments + usize::from(k == run.count);
+            // the reader at the cut: the boundary before this run, plus
+            // the k items of it that are behind the cut. O(1) — the same
+            // run the writer's state below describes.
+            let mut d = RleDecoder::<T, C>::resume(&slab.data, &boundary);
+            d.advance_by(k);
+            read_state = d.suspend();
             outer.start = byte_before;
             prefix.segments = segments;
             prefix.bytes = byte_before;
@@ -126,14 +157,12 @@ fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
             if is_lit {
                 let count = item_pos - lit_start_item;
-                let bytes = decoder.byte_pos - byte_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else if is_null {
                 prefix.state = RleState::Null(k);
             } else if k == 1 && !is_lit && was_lit {
                 let count = segments - lit_segments_before;
-                let bytes = decoder.byte_pos - byte_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else {
                 prefix.state = RleState::make_run(k, RleCow::Ref(run.value));
             }
@@ -141,50 +170,31 @@ fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
         // ── Postfix ─────────────────────────────────────────────────────
         if prefix_done && range.end < run_end_item {
-            let count = run_end_item - range.end;
-            let value = run.value;
-            let consumed = segments + 1; // loop segments + this run
-            outer.end = decoder.byte_pos;
-            let p = if is_lit {
-                let lit = decoder.remaining;
-                Postfix::Lit {
-                    value,
-                    lit,
-                    segments: slab.segments - consumed,
-                }
-            } else {
-                (|| {
-                    if count == 1 && !is_null {
-                        if let Some(post_run) = decoder.next_run() {
-                            if decoder.is_literal() && post_run.count == 1 {
-                                let lone = value;
-                                let value = post_run.value;
-                                let lit = decoder.remaining;
-                                outer.end = decoder.byte_pos; // past the first lit value
-                                return Some(Postfix::LonePlusLit {
-                                    lone,
-                                    value,
-                                    lit,
-                                    segments: slab.segments - consumed - 1, // -1 for the peeked lit value
-                                });
-                            }
-                        }
-                    }
-                    None
-                })()
-                .unwrap_or_else(|| Postfix::Run {
-                    count,
-                    value,
-                    segments: slab.segments - consumed,
-                })
-            };
+            if !want_postfix {
+                break;
+            }
+            let (p, end) = postfix_from_run(
+                slab,
+                &mut decoder,
+                base,
+                run,
+                is_lit,
+                run_end_item - range.end,
+                segments,
+            );
+            outer.end = end;
             postfix = Some(p);
             break;
         }
 
         segments += 1;
         item_pos = run_end_item;
-        byte_before = decoder.byte_pos;
+        byte_before = base + decoder.byte_pos;
+        if !prefix_done {
+            // only the run the cut lands in needs a boundary behind it;
+            // the walk carries on past it to describe the tail
+            boundary = decoder.suspend();
+        }
         was_lit = is_lit;
     }
 
@@ -192,6 +202,142 @@ fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
         outer,
         prefix,
         postfix,
+        read_segments,
+        read_state,
+    }
+}
+
+/// Build the postfix at a split point.
+///
+/// `run` is the run the split falls inside (or that begins at it), `count`
+/// how many of its items lie after the split, `segments_before` the slab's
+/// segment count before `run`, and `dec` a decoder positioned just past
+/// `run` — the lone-plus-literal case consumes one more run from it.
+/// Returns the postfix and the byte offset where the slab's carried-through
+/// bytes resume.
+///
+/// Both callers stop reading somewhere in a slab and need to describe the
+/// tail: [`find_partition`] at the end of a splice range, and
+/// [`RleEdit`](crate::rle::edit::RleEdit)'s walk at wherever its cursor
+/// stands. Keeping it in one place is what lets the cursor close without
+/// re-reading anything: it captures the postfix as it passes, where a
+/// second walk would have to decode a whole literal group again to reach
+/// the same point.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn postfix_from_run<'a, T: RleValue, C: Codec>(
+    slab: &'a Slab,
+    dec: &mut RleDecoder<'a, T, C>,
+    base: usize,
+    run: crate::Run<T::Get<'a>>,
+    is_lit: bool,
+    count: usize,
+    segments_before: usize,
+) -> (Postfix<'a, T>, usize) {
+    let value = run.value;
+    let is_null = T::is_null(value);
+    let consumed = segments_before + 1; // runs before this one, plus it
+    let mut byte_end = base + dec.byte_pos;
+    let p = if is_lit {
+        Postfix::Lit {
+            value,
+            lit: dec.remaining,
+            segments: slab.segments - consumed,
+        }
+    } else {
+        // A repeat run cannot be left holding a single item — that is not
+        // canonical — so when the split leaves one behind and a literal
+        // group follows, the two are flushed together.
+        let lone_plus_lit = if count == 1 && !is_null {
+            dec.next_run().and_then(|post_run| {
+                (dec.is_literal() && post_run.count == 1).then(|| {
+                    byte_end = base + dec.byte_pos; // past the first lit value
+                    Postfix::LonePlusLit {
+                        lone: value,
+                        value: post_run.value,
+                        lit: dec.remaining,
+                        segments: slab.segments - consumed - 1, // the peeked lit value
+                    }
+                })
+            })
+        } else {
+            None
+        };
+        lone_plus_lit.unwrap_or(Postfix::Run {
+            count,
+            value,
+            segments: slab.segments - consumed,
+        })
+    };
+    (p, byte_end)
+}
+
+/// [`find_partition`] at a single item position, repackaged for
+/// [`RleEdit`](crate::rle::edit::RleEdit): the encoder state and byte
+/// offset *at* `at`, plus the postfix describing everything after it.
+pub(crate) struct PartitionAt<'a, T: RleValue, C: Codec> {
+    pub(crate) state: RleState<'a, T, T, C>,
+    /// segments of the slab before `byte_start`
+    pub(crate) segments: usize,
+    pub(crate) byte_start: usize,
+    /// Complete runs behind this position, counted for a *reader*: a
+    /// position at a run's end is past it, where [`segments`](Self::segments)
+    /// — the writer's count, of runs before the region it opens — is not.
+    pub(crate) read_segments: usize,
+    /// A reader standing at this position, built from the same walk —
+    /// so opening a rebuild reads the slab once, not once for the writer
+    /// and again for the reader.
+    pub(crate) read_state: crate::rle::RleDecoderState,
+}
+
+pub(crate) fn find_partition_at<T: RleValue, C: Codec>(
+    slab: &Slab,
+    at: usize,
+) -> PartitionAt<'_, T, C> {
+    let p = find_partition_inner::<T, T, C>(slab, at..at, false);
+    PartitionAt {
+        state: p.prefix.state,
+        segments: p.prefix.segments,
+        byte_start: p.outer.start,
+        read_segments: p.read_segments,
+        read_state: p.read_state,
+    }
+}
+
+impl<'a, T: RleValue> Postfix<'a, T> {
+    /// Detach from the slab, cloning the one or two values held.
+    pub(crate) fn into_owned(self) -> crate::rle::state::OwnedPostfix<T> {
+        use crate::rle::state::OwnedPostfix as O;
+        match self {
+            Postfix::Run {
+                count,
+                value,
+                segments,
+            } => O::Run {
+                count,
+                value: T::to_owned(value),
+                segments,
+            },
+            Postfix::Lit {
+                value,
+                lit,
+                segments,
+            } => O::Lit {
+                value: T::to_owned(value),
+                lit,
+                segments,
+            },
+            Postfix::LonePlusLit {
+                lone,
+                value,
+                lit,
+                segments,
+            } => O::LonePlusLit {
+                lone: T::to_owned(lone),
+                value: T::to_owned(value),
+                lit,
+                segments,
+            },
+        }
     }
 }
 
@@ -917,9 +1063,9 @@ pub(crate) fn tail<T: RleValue, C: Codec>(
             let state = RleState::Lit {
                 count,
                 local: 0,
+                bytes: None,
                 current,
                 header_pos,
-                bytes,
             };
             (state, value_pos, 1)
         }

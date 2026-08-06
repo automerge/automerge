@@ -178,7 +178,12 @@ impl CutState {
 }
 
 impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
+    /// # Panics
+    ///
+    /// If `max_segments < 2`: it halves to a zero cut target, which emits
+    /// an empty slab.
     pub fn new(data: &'a [u8], max_segments: usize) -> Self {
+        assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
             decoder: RleDecoder::new(data),
             input: data,
