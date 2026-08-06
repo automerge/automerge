@@ -545,7 +545,8 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     }
 
     pub fn advance_by(&mut self, amount: usize) {
-        self.advance_to(self.pos + amount)
+        // past the end already means "stop at the end"
+        self.advance_to(self.pos.saturating_add(amount))
     }
 
     /// Returns the next run of identical values, merging across slab boundaries.
