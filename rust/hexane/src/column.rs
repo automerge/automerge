@@ -641,6 +641,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
             self.slab_idx = si;
             self.pos = pos;
             self.items_left = 0;
+            // terminal: a live reader lets a later re-extend yield
+            // items already passed
+            self.slab_remaining = 0;
+            self.decoder = T::Encoding::<C>::decoder(&[]);
             false
         } else {
             debug_assert!(pos >= self.pos);
