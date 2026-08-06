@@ -233,7 +233,11 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>, C: Codec = Leb128> 
         count: usize,
         local: usize,
         header_pos: usize,
-        bytes: usize,
+        /// Byte width of the last value written into the local buffer —
+        /// `None` until one has been, which is exactly `local == 0`. The
+        /// value a run was imported with is not it: that one is `current`,
+        /// still unwritten.
+        bytes: Option<std::num::NonZeroUsize>,
         current: RleCow<'a, T, V>,
     },
     Null(usize),
@@ -384,7 +388,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                 } else {
                     flushed.rewrite = Some(RewriteHeader::new(*count, *header_pos));
                 }
-                flushed.wpos = WPos::trunc(*count, *header_pos, *bytes, *local == *count);
+                flushed.wpos = WPos::trunc(
+                    *count,
+                    *header_pos,
+                    bytes.map_or(0, |b| b.get()),
+                    *local == *count,
+                );
                 flushed.segments = *local;
                 Some(RleState::Run(n + 1, value))
             }
@@ -395,7 +404,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                 bytes,
                 ..
             } if n == 1 => {
-                *bytes = current.pack::<C>(buf);
+                *bytes = std::num::NonZeroUsize::new(current.pack::<C>(buf));
                 *count += 1;
                 *local += 1;
                 *current = value;
@@ -427,7 +436,8 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                     count: 1,
                     local: 1,
                     header_pos,
-                    bytes,
+                    // written just above, so the width is known
+                    bytes: std::num::NonZeroUsize::new(bytes),
                     current: value,
                 })
             }
@@ -454,7 +464,9 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         flushed
     }
 
-    pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize, bytes: usize) -> Self {
+    /// A literal run imported from a slab. Nothing has been written
+    /// locally yet, so there is no last-written width to record.
+    pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize) -> Self {
         if count == 0 {
             Self::Lone(current)
         } else {
@@ -463,7 +475,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                 local: 0,
                 current,
                 header_pos,
-                bytes,
+                bytes: None,
             }
         }
     }

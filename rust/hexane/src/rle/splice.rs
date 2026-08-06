@@ -157,14 +157,12 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
             if is_lit {
                 let count = item_pos - lit_start_item;
-                let bytes = base + decoder.byte_pos - byte_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else if is_null {
                 prefix.state = RleState::Null(k);
             } else if k == 1 && !is_lit && was_lit {
                 let count = segments - lit_segments_before;
-                let bytes = base + decoder.byte_pos - byte_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else {
                 prefix.state = RleState::make_run(k, RleCow::Ref(run.value));
             }
@@ -1065,9 +1063,11 @@ pub(crate) fn tail<T: RleValue, C: Codec>(
             let state = RleState::Lit {
                 count,
                 local: 0,
+                // `bytes` above located `current` in the slab; nothing has
+                // been written locally, so there is no width to record
+                bytes: None,
                 current,
                 header_pos,
-                bytes,
             };
             (state, value_pos, 1)
         }
