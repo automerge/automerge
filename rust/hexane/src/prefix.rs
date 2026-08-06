@@ -607,7 +607,8 @@ where
             return 0;
         }
         if self.col.is_empty() {
-            return 0;
+            // documented past-the-end sentinel: `target` is above a zero total
+            return 1;
         }
 
         let (si, prefix_before, items_before) = self.col.index.find_slab_at_prefix(target);
