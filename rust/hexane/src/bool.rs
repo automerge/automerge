@@ -794,7 +794,7 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
     let mut run_index = 0;
     let mut value = false;
     let mut segments = 0;
-    let mut len = 0;
+    let mut len: usize = 0;
     let mut last_cb: u8 = 0;
 
     while byte_pos < slab.len() {
@@ -814,7 +814,10 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
         }
 
         segments += 1;
-        len += count;
+        // untrusted counts: a wrapped length describes bytes that are not there
+        len = len
+            .checked_add(count)
+            .ok_or(PackError::InvalidValue("length overflows usize".into()))?;
         last_cb = cb as u8;
 
         byte_pos = next_pos;
