@@ -1004,7 +1004,11 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             let value = !self.run_index.is_multiple_of(2);
             self.pos = next_pos;
             self.run_index += 1;
-            self.slab_items += count;
+            // untrusted counts: a wrapped total mints a bogus column length
+            self.slab_items = self
+                .slab_items
+                .checked_add(count)
+                .ok_or(PackError::BadFormat)?;
             self.slab_segs += 1;
             // Cut after target_segments — always even, so the next slab
             // starts on a false run and can be memcpy'd as-is.
