@@ -1071,14 +1071,12 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         // Add new changes, deduplicating and checking for duplicate seq numbers.
         let mut batch = ChangeBatch::new();
-        for c in changes {
+        // Skip any changes that are already in the change graph or in the queue.
+        let changes = changes.into_iter().filter(|c| {
             let hash = c.hash();
-            if self.change_graph.has_change(&hash) {
-                continue;
-            }
-            if self.queue.has_hash(&c.hash()) {
-                continue;
-            }
+            !(self.change_graph.has_change(&hash) || self.queue.has_hash(&hash))
+        });
+        for c in changes {
             if self.has_actor_seq(&c) {
                 self.queue
                     .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
