@@ -1,6 +1,6 @@
 use crate::types::Clock;
 
-use super::{Action, KeyRef, Op, OpQueryTerm, OpsFound};
+use super::{Action, KeyRef, Op, OpsFound};
 
 use std::fmt::Debug;
 
@@ -25,7 +25,7 @@ impl<'a, I: Iterator<Item = Op<'a>>> OpsFoundIter<'a, I> {
     }
 }
 
-impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
+impl<'a, I: Iterator<Item = Op<'a>>> Iterator for OpsFoundIter<'a, I> {
     type Item = OpsFound<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
