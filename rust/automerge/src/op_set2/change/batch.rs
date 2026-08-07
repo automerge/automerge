@@ -1172,6 +1172,23 @@ mod tests {
     use crate::{make_rng, ActorId, AutoCommit, ROOT};
     use rand::prelude::*;
 
+    #[test]
+    fn increment_plus_trailing_insert_keeps_group_order() {
+        // InsertQuery::resolve had a bug where increments inserted into the wrong row
+        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
+        let list = doc.put_object(&ROOT, "list", crate::ObjType::List).unwrap();
+        doc.insert(&list, 0, crate::ScalarValue::counter(5))
+            .unwrap();
+        let heads = doc.get_heads();
+
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap());
+        f.increment(&list, 0, 1).unwrap();
+        f.insert(&list, 1, "x").unwrap();
+
+        doc.merge(&mut f).unwrap();
+        let _ = doc.doc.get_changes(&heads);
+    }
+
     impl AutoCommit {
         fn apply_changes_iter(
             &mut self,
