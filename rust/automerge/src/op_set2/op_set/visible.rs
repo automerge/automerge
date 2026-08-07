@@ -169,11 +169,7 @@ impl<'a, I: OpQueryTerm<'a> + Clone> VisibleOpIter<'a, I> {
 }
 
 fn vis(clock: Option<&Clock>, id: &OpId) -> bool {
-    if let Some(c) = clock {
-        c.covers(id)
-    } else {
-        true
-    }
+    clock.is_none_or(|c| c.covers(id))
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for VisibleOpIter<'a, I> {
