@@ -27,7 +27,6 @@ pub(crate) struct TransactionInner {
     message: Option<String>,
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
-    //checkpoint: OpSetCheckpoint,
     pending: Vec<TxOp>,
 }
 
