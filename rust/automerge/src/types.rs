@@ -426,9 +426,22 @@ impl Display for Prop {
 /// position in the [`OpSet`].
 ///
 /// [`OpSet`]: crate::op_set2::OpSet
-// FIXME - isn't having ord and partial ord here dangerous?
-#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(u32, u32);
+
+// ParitalOrd and Ord are implemented by hand here to ensure that total order of
+// `OpId` does not easily break from a generated `derive` implementation.
+impl PartialOrd for OpId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OpId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0).then(self.1.cmp(&other.1))
+    }
+}
 
 impl OpId {
     pub(crate) fn with_new_actor(self, idx: usize) -> Self {
