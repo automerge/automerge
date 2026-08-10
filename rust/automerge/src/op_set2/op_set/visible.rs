@@ -168,6 +168,9 @@ impl<'a, I: OpQueryTerm<'a> + Clone> VisibleOpIter<'a, I> {
     }
 }
 
+/// Returns `true` if the [`OpId`] is covered by the [`Clock`] (see [`Clock::covers`]).
+///
+/// If no [`Clock`] is provided, then this will always return `true`.
 fn vis(clock: Option<&Clock>, id: &OpId) -> bool {
     clock.is_none_or(|c| c.covers(id))
 }
@@ -239,6 +242,11 @@ impl<'a> Op<'a> {
     }
 }
 
+/// Track if an [`Op`] is considered visible, usually in relation to a
+/// [`Clock`], if one is given.
+///
+/// The [`Op`] is considered visible if it predates the given [`Clock`], and is
+/// not considered deleted within the given [`Clock`] timeframe.
 #[derive(Debug)]
 struct Visibility {
     predates: bool,
