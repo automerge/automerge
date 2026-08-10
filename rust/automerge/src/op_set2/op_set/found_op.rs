@@ -4,6 +4,23 @@ use super::{Action, KeyRef, Op, OpsFound};
 
 use std::fmt::Debug;
 
+/// Iterate over a series of [`Op`]s to return [`OpsFound`].
+///
+/// The [`Iterator`] is expected to receive [`Op`]s in a contiguous order, where
+/// they are grouped by their [`KeyRef`] (given by [`Op::elemid_or_key`]).
+///
+/// An [`Op`] is kept as a found operation if it is:
+///   1. Not an [`Action::Increment`], as these are not stand alone values,
+///   2. And the operation is considered visible; that is within the scope of
+///      the given [`Clock`], the [`Op`] occurs in and is not deleted with the
+///      timeframe of the [`Clock`].
+///
+/// The resulting [`OpsFound`] will either have:
+///   1. A singleton [`Op`] for a given key,
+///   2. Or many [`Op`]s, which indicates a conflict for the given key.
+///
+/// Notably, if a given key's operations are all filtered out, this key is
+/// skipped, and never returned as an [`OpsFound`].
 #[derive(Clone, Debug)]
 pub(crate) struct OpsFoundIter<'a, I: Iterator<Item = Op<'a>>> {
     iter: I,
