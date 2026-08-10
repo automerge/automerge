@@ -418,6 +418,14 @@ impl Display for Prop {
     }
 }
 
+/// An [`OpId`] is a pair of [`OpId::counter`] and [`OpId::actor`].
+/// Subsequent operations for the same actor increase the [`OpId::counter`].
+///
+/// Notably, the actor of the [`OpId`] is not represented using [`ActorId`].
+/// Instead it uses a smaller, `u32` representation which relates to the actor's
+/// position in the [`OpSet`].
+///
+/// [`OpSet`]: crate::op_set2::OpSet
 // FIXME - isn't having ord and partial ord here dangerous?
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(u32, u32);
