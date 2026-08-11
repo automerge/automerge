@@ -24,7 +24,7 @@ cfg-if = "1.0"
 flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
 getrandom = "0.4"
 hex = "^0.4.3"
-hexane = { version = "1.0.0-alpha.2", path = "../hexane" }
+hexane = { version = "1.0.0-alpha.5", path = "../hexane" }
 itertools = "0.15.0"
 leb128 = "^0.2.5"
 rustc-hash = "^2.1.1"
