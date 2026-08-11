@@ -1,17 +1,63 @@
-## Unreleased
+## 0.11.0
 
-### Fixed 
+### Breaking Changes
 
-* Inserting a zero width mark could cause subsequent insertions into the same
-  text object to throw errors on valid insertion indexes
-* The order of mark operations was not validated when loading documents leading
-  to the same errors as above
+* The minimum supported Rust version is now 1.90.
+* `Change::message` now returns `Option<&str>` instead of `Option<&String>`.
+* Loading now rejects documents whose rich-text mark end operations precede
+  their corresponding mark starts. Such documents could be produced by bugs in
+  earlier releases; use `Automerge::rescue` to recover their current value.
+* Batch object creation now rejects map-key operations inside text objects, and
+  `Transactable::splice` on a text object now accepts only string scalar values.
+  These operations previously used invalid list semantics and could corrupt the
+  in-memory document.
 
 ### Added
 
-* `Automerge::rescue` which returns the current value of a document even if it
-  fails validation. This is intended for use when loading corrupted documents
-  produced by now fixed bugs
+* `Automerge::anonymize`, `AutoCommit::anonymize`, and
+  `automerge::anonymize::anonymize` create a copy of a document with actor IDs,
+  keys, values, and change metadata randomized while preserving its history and
+  operation shape for debugging. This is best-effort anonymization, not
+  cryptographic protection.
+* `Automerge::rescue` returns the current hydrated value of a document even when
+  its mark ordering fails strict validation. It is intended for recovering
+  documents produced by bugs in earlier releases.
+* Experimental, documentation-hidden `fragments`, `get_fragment`, and
+  `bundle_fragments` methods on `Automerge` and `AutoCommit` for partitioning
+  document history and encoding fragments as changes or bundles.
+
+### Changed
+
+* Text, span, and mark reads are substantially faster, particularly for large
+  documents. Several large-document text benchmarks improved by 69–94%.
+* DEFLATE compression now uses the pure-Rust `zlib-rs` backend, improving load
+  performance on native and WebAssembly targets.
+
+### Fixed
+
+* Fixed rich-text mark creation for zero-width ranges and ranges ending inside
+  multi-unit text elements. Also fixed insertion indexes around conflicted text,
+  empty text scalars, and removed marks, and made spans return only the winning
+  value of conflicted text elements.
+* Preserved non-default text encodings in `fork_at`, incremental loading into an
+  empty document, and loads whose first chunk is a change or bundle rather than
+  a document.
+* Fixed patch generation and hydrated patch application for embedded text
+  blocks, text element replacements, multi-unit text values, counter increments
+  which resolve conflicts, and deletion or exposure of conflicted values.
+* Fixed incremental and historical patches across isolation/integration
+  transitions, including event ordering, object paths, conflict metadata, and
+  exposure of surviving nested objects.
+* Historical and isolated transactions now scope patches to the transaction's
+  branch and reject edits to objects outside that branch.
+* Applying changes now handles diamond-shaped dependency graphs and rejects a
+  batch atomically when it contains duplicate actor sequence numbers. Queued
+  changes on incompatible actor branches are also discarded before they can
+  corrupt a later save.
+* Sync no longer stalls by requesting dependencies of unrelated queued orphan
+  changes or advertising requests for changes the sender does not have.
+* Fixed bundle encoding for marked text and preserved exact change operation
+  counts after loading, including changes created from isolated history.
 
 
 ## 0.10.0
