@@ -184,4 +184,51 @@ describe("Proxies", () => {
       assert.deepEqual(doc, { map: { key: "value", number: 2 } })
     })
   })
+
+  // Ensure that falsy values are respected when checking their values in the
+  // proxy implementation.
+  describe("Falsy values are respected", () => {
+    type FalsyDoc = {
+      zero?: number
+      empty?: string
+      flag?: boolean
+      nothing?: null
+    }
+
+    it("should read back zero", () => {
+      const doc = from({} as FalsyDoc)
+      change(doc, d => {
+        d.zero = 0
+        assert.strictEqual(d.zero, 0)
+        assert.strictEqual(d.zero, 0)
+      })
+    })
+
+    it("should read back empty", () => {
+      const doc = from({} as FalsyDoc)
+      change(doc, d => {
+        d.empty = ""
+        assert.strictEqual(d.empty, "")
+        assert.strictEqual(d.empty, "")
+      })
+    })
+
+    it("should read back flag", () => {
+      const doc = from({} as FalsyDoc)
+      change(doc, d => {
+        d.flag = false
+        assert.strictEqual(d.flag, false)
+        assert.strictEqual(d.flag, false)
+      })
+    })
+
+    it("should read back nothing", () => {
+      const doc = from({} as FalsyDoc)
+      change(doc, d => {
+        d.nothing = null
+        assert.strictEqual(d.nothing, null)
+        assert.strictEqual(d.nothing, null)
+      })
+    })
+  })
 })
