@@ -2,7 +2,6 @@ use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
 use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
-use hexane::PackError;
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,10 +69,16 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error(transparent)]
     PatchLogMismatch(#[from] PatchLogMismatch),
-    #[error(transparent)]
-    EncodingError(#[from] PackError),
+    #[error("{0}")]
+    EncodingError(String),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl AutomergeError {
+    pub(crate) fn encoding(error: impl std::fmt::Display) -> Self {
+        Self::EncodingError(error.to_string())
+    }
 }
 
 impl PartialEq for AutomergeError {
