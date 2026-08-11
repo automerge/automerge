@@ -231,4 +231,77 @@ describe("Proxies", () => {
       })
     })
   })
+
+  describe("Object.prototype toString, valueOf, and hasOwnProperty properties", () => {
+    // TS sees `{}` as having Object.prototype's toString(), which clashes
+    // with our declared `toString?: { x: number }`.
+    //
+    // To instantiate a new `PropDoc`, you must cast the object:
+    //     const doc = from({} as PropDoc)
+    type PropDoc = {
+      toString?: { x: number }
+      valueOf?: { x: number }
+      hasOwnProperty?: { x: number }
+    }
+
+    it("should respect `in` and Object.keys for toString", () => {
+      const doc = from({} as PropDoc)
+      change(doc, d => {
+        assert.equal("toString" in d, false)
+        assert.deepEqual(Object.keys(d), [])
+        d.toString = { x: 1 }
+        assert.equal("toString" in d, true)
+        assert.deepEqual(Object.keys(d), ["toString"])
+      })
+    })
+
+    it("should respect `in` and Object.keys for valueOf", () => {
+      const doc = from({} as PropDoc)
+      change(doc, d => {
+        assert.equal("valueOf" in d, false)
+        assert.deepEqual(Object.keys(d), [])
+        d.valueOf = { x: 1 }
+        assert.equal("valueOf" in d, true)
+        assert.deepEqual(Object.keys(d), ["valueOf"])
+      })
+    })
+
+    it("should respect `in` and Object.keys for hasOwnProperty", () => {
+      const doc = from({} as PropDoc)
+      change(doc, d => {
+        assert.equal("hasOwnProperty" in d, false)
+        assert.deepEqual(Object.keys(d), [])
+        d.hasOwnProperty = { x: 1 }
+        assert.equal("hasOwnProperty" in d, true)
+        assert.deepEqual(Object.keys(d), ["hasOwnProperty"])
+      })
+    })
+
+    it("should read back the assigned toString inside and outside change()", () => {
+      let doc = from({} as PropDoc)
+      doc = change(doc, d => {
+        d.toString = { x: 1 }
+        assert.deepEqual(d.toString, { x: 1 })
+      })
+      assert.deepEqual(doc.toString, { x: 1 })
+    })
+
+    it("should read back the assigned valueOf inside and outside change()", () => {
+      let doc = from({} as PropDoc)
+      doc = change(doc, d => {
+        d.valueOf = { x: 1 }
+        assert.deepEqual(d.valueOf, { x: 1 })
+      })
+      assert.deepEqual(doc.valueOf, { x: 1 })
+    })
+
+    it("should read back the assigned hasOwnProperty inside and outside change()", () => {
+      let doc = from({} as PropDoc)
+      doc = change(doc, d => {
+        d.hasOwnProperty = { x: 1 }
+        assert.deepEqual(d.hasOwnProperty, { x: 1 })
+      })
+      assert.deepEqual(doc.hasOwnProperty, { x: 1 })
+    })
+  })
 })
