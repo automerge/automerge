@@ -273,8 +273,14 @@ pub(crate) struct OpIdIter<'a> {
 impl OpIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<OpIdIter<'a>, AutomergeError> {
         Ok(OpIdIter {
-            actor: self.actor_state.try_resume(&op_set.cols.id_actor)?,
-            ctr: self.ctr_state.try_resume(&op_set.cols.id_ctr)?,
+            actor: self
+                .actor_state
+                .try_resume(&op_set.cols.id_actor)
+                .map_err(AutomergeError::encoding)?,
+            ctr: self
+                .ctr_state
+                .try_resume(&op_set.cols.id_ctr)
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }
@@ -410,7 +416,10 @@ pub(crate) struct InsertIterState(hexane::column::IterState);
 impl InsertIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<InsertIter<'a>, AutomergeError> {
         Ok(InsertIter {
-            iter: self.0.try_resume(op_set.cols.insert.values())?,
+            iter: self
+                .0
+                .try_resume(op_set.cols.insert.values())
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }
@@ -467,9 +476,18 @@ pub(crate) struct KeyIterState {
 impl KeyIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<KeyIter<'a>, AutomergeError> {
         Ok(KeyIter {
-            key_str: self.key_str.try_resume(&op_set.cols.key_str)?,
-            key_actor: self.key_actor.try_resume(&op_set.cols.key_actor)?,
-            key_ctr: self.key_ctr.try_resume(&op_set.cols.key_ctr)?,
+            key_str: self
+                .key_str
+                .try_resume(&op_set.cols.key_str)
+                .map_err(AutomergeError::encoding)?,
+            key_actor: self
+                .key_actor
+                .try_resume(&op_set.cols.key_actor)
+                .map_err(AutomergeError::encoding)?,
+            key_ctr: self
+                .key_ctr
+                .try_resume(&op_set.cols.key_ctr)
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }
@@ -563,8 +581,14 @@ pub(crate) struct ObjIdIterState {
 impl ObjIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ObjIdIter<'a>, AutomergeError> {
         Ok(ObjIdIter {
-            obj_actor: self.obj_actor.try_resume(&op_set.cols.obj_actor)?,
-            obj_ctr: self.obj_ctr.try_resume(&op_set.cols.obj_ctr)?,
+            obj_actor: self
+                .obj_actor
+                .try_resume(&op_set.cols.obj_actor)
+                .map_err(AutomergeError::encoding)?,
+            obj_ctr: self
+                .obj_ctr
+                .try_resume(&op_set.cols.obj_ctr)
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }
@@ -664,8 +688,14 @@ pub(crate) struct MarkInfoIterState {
 impl MarkInfoIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<MarkInfoIter<'a>, AutomergeError> {
         Ok(MarkInfoIter {
-            name: self.name.try_resume(&op_set.cols.mark_name)?,
-            expand: self.expand.try_resume(&op_set.cols.expand)?,
+            name: self
+                .name
+                .try_resume(&op_set.cols.mark_name)
+                .map_err(AutomergeError::encoding)?,
+            expand: self
+                .expand
+                .try_resume(&op_set.cols.expand)
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }
@@ -786,7 +816,10 @@ pub(crate) struct ActionIterState {
 impl ActionIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ActionIter<'a>, AutomergeError> {
         Ok(ActionIter {
-            iter: self.state.try_resume(&op_set.cols.action)?,
+            iter: self
+                .state
+                .try_resume(&op_set.cols.action)
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }
@@ -843,7 +876,10 @@ pub(crate) struct ValueIterState {
 impl ValueIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ValueIter<'a>, AutomergeError> {
         Ok(ValueIter {
-            meta: self.meta.try_resume(&op_set.cols.value_meta)?,
+            meta: self
+                .meta
+                .try_resume(&op_set.cols.value_meta)
+                .map_err(AutomergeError::encoding)?,
             raw: op_set.cols.value.iter_at(self.raw),
         })
     }
@@ -932,10 +968,22 @@ pub(crate) struct SuccIterIterState {
 impl SuccIterIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<SuccIterIter<'a>, AutomergeError> {
         Ok(SuccIterIter {
-            count: self.count.try_resume(&op_set.cols.succ_count)?,
-            actor: self.actor.try_resume(&op_set.cols.succ_actor)?,
-            ctr: self.ctr.try_resume(&op_set.cols.succ_ctr)?,
-            incs: self.incs.try_resume(&op_set.cols.index.inc)?,
+            count: self
+                .count
+                .try_resume(&op_set.cols.succ_count)
+                .map_err(AutomergeError::encoding)?,
+            actor: self
+                .actor
+                .try_resume(&op_set.cols.succ_actor)
+                .map_err(AutomergeError::encoding)?,
+            ctr: self
+                .ctr
+                .try_resume(&op_set.cols.succ_ctr)
+                .map_err(AutomergeError::encoding)?,
+            incs: self
+                .incs
+                .try_resume(&op_set.cols.index.inc)
+                .map_err(AutomergeError::encoding)?,
         })
     }
 }

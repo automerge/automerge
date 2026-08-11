@@ -1142,7 +1142,7 @@ impl Automerge {
                     id,
                     obj,
                     key,
-                    action: c.action.try_into()?,
+                    action: c.action.try_into().map_err(AutomergeError::encoding)?,
                     value: c.val.into_ref(),
                     mark_name: c.mark_name.map(String::from).map(Cow::Owned),
                     expand: c.expand,
