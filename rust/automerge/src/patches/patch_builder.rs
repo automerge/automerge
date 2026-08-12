@@ -84,13 +84,7 @@ impl PatchBuilder<'_> {
                 //marks,
             } => {
                 let opid = doc.id_to_exid(*id);
-                self.insert(
-                    exid,
-                    *index,
-                    (value.into(), opid),
-                    *conflict,
-                    //marks.clone(),
-                );
+                self.insert(exid, *index, (value.into(), opid), *conflict);
             }
             Event::DeleteSeq { index, num } => {
                 self.delete_seq(exid, *index, *num);
