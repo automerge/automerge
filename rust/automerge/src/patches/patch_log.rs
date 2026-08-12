@@ -655,6 +655,18 @@ impl PatchLog {
             return Ok(());
         }
         if self.actors.is_empty() {
+            // An empty baseline together with buffered events is
+            // unmigratable: we no longer know which actor table the events'
+            // indices refer to, so adopting `others` silently corrupts any
+            // event whose actor index was shifted (issue #1270). Every
+            // ingestion path must establish the baseline (see
+            // [`Self::seed_actors`]) before logging events.
+            debug_assert!(
+                self.events.is_empty() && self.expose.is_empty(),
+                "patch log has buffered events but no actor baseline; \
+                 events were logged without seeding the baseline first \
+                 (see issue #1270)"
+            );
             self.actors = others.to_vec();
             return Ok(());
         }
