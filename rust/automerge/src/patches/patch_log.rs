@@ -245,6 +245,7 @@ impl PatchLog {
         Self::new(false)
     }
 
+    /// An alternative name for [`PatchLog::inactive`].
     pub fn null() -> Self {
         Self::new(false)
     }
