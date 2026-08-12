@@ -641,6 +641,26 @@ impl PatchLog {
         debug_assert_eq!(self.actors.as_slice(), doc_actors);
     }
 
+    /// Record the actor table that subsequently logged events will be indexed
+    /// against.
+    ///
+    /// This must be called before events are logged into a patch log which can
+    /// outlive changes to the document's actor table (e.g. `AutoCommit`'s
+    /// internal log, or a caller-held log passed to
+    /// `load_incremental_log_patches`). Without a baseline,
+    /// [`Self::migrate_actors`] cannot re-index buffered events when a new
+    /// actor is inserted before existing ones, producing corrupted patches
+    /// (issue #1270).
+    ///
+    /// Logs which are filled and drained against a single document state
+    /// (e.g. `Automerge::diff`) never migrate and do not need a baseline,
+    /// though seeding them is harmless.
+    pub(crate) fn seed_actors(&mut self, actors: &[ActorId]) {
+        if self.is_active() && self.actors.is_empty() {
+            self.actors = actors.to_vec();
+        }
+    }
+
     // Re-align this patch log's actor list (and the event indices into it) with the document's
     // actor list (`others`).
     //
