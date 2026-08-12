@@ -67,7 +67,7 @@ type Target = {
   context: Automerge
   objectId: ObjID
   path: Array<Prop>
-  cache: object
+  cache: Map<Prop | symbol, AutomergeValue | undefined>
   trace?: any
 }
 
@@ -245,7 +245,7 @@ const MapHandler = {
   get<T extends Target>(
     target: T,
     key: any,
-  ): AutomergeValue | ObjID | boolean | { handle: Automerge } {
+  ): AutomergeValue | ObjID | boolean | { handle: Automerge } | undefined {
     const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
@@ -254,15 +254,15 @@ const MapHandler = {
     if (key === IS_PROXY) return true
     if (key === TRACE) return target.trace
     if (key === STATE) return { handle: context }
-    if (!cache[key]) {
-      cache[key] = valueAt(target, key)
+    if (!cache.has(key)) {
+      cache.set(key, valueAt(target, key))
     }
-    return cache[key]
+    return cache.get(key)
   },
 
   set(target: Target, key: any, val: any) {
     const { context, objectId, path } = target
-    target.cache = {} // reset cache on set
+    target.cache.clear() // reset cache on set
     if (isSameDocument(val, context)) {
       throw new RangeError(
         "Cannot create a reference to an existing document object",
@@ -296,7 +296,7 @@ const MapHandler = {
 
   deleteProperty(target: Target, key: any) {
     const { context, objectId } = target
-    target.cache = {} // reset cache on delete
+    target.cache.clear() // reset cache on delete
     context.delete(objectId, key)
     return true
   },
@@ -466,7 +466,7 @@ export function mapProxy(
     context,
     objectId,
     path: path || [],
-    cache: {},
+    cache: new Map(),
   }
   const proxied = {}
   Object.assign(proxied, target)
@@ -484,7 +484,7 @@ export function listProxy(
     context,
     objectId,
     path: path || [],
-    cache: {},
+    cache: new Map(),
   }
   const proxied = []
   Object.assign(proxied, target)
