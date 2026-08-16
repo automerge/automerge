@@ -97,6 +97,7 @@ impl<'a> InsertQuery<'a> {
         while let Some(mut op) = self.iter.next() {
             let op_pos = op.pos;
             if op.is_inc() {
+                pos = op_pos;
                 continue;
             }
             let visible = op.scope_to_clock(self.clock.as_ref());
