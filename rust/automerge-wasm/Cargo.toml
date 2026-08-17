@@ -42,7 +42,7 @@ serde_json = "^1.0"
 thiserror = "^2.0.12"
 
 [dependencies.wasm-bindgen]
-version = "= 0.2.126"
+version = "= 0.2.127"
 features = ["serde-serialize", "std"]
 
 # The `web-sys` crate allows you to interact with the various browser APIs,

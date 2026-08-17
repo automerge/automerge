@@ -78,7 +78,7 @@ jobs:
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.126"
+          version: "0.2.127"
       - name: Install pinned nightly + wasm32 target + rust-src
         run: |
           rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
@@ -102,7 +102,7 @@ jobs:
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.126"
+          version: "0.2.127"
       - name: Install pinned nightly + wasm32 target + rust-src
         run: |
           rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
@@ -128,7 +128,7 @@ jobs:
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.126"
+          version: "0.2.127"
       - name: Install pinned nightly + wasm32 target + rust-src
         run: |
           rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
