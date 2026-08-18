@@ -974,6 +974,12 @@ impl Automerge {
         patch_log: &mut PatchLog,
         recursive: bool,
     ) {
+        // Establish the actor baseline before logging events: the caller's
+        // patch log may outlive changes to this document's actor table
+        // (issue #1270 variant: `load_incremental_log_patches` on an empty
+        // document followed by a transaction with a smaller actor). See
+        // `PatchLog::seed_actors`.
+        patch_log.seed_actors(&self.ops.actors);
         let clock = ClockRange::default();
         let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
         patch_log.path_hint(path_map);
