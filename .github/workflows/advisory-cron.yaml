@@ -12,7 +12,5 @@ jobs:
           - bans licenses sources
     steps:
       - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          manifest-path: './rust/Cargo.toml'
-          command: check ${{ matrix.checks }}
+      - uses: cachix/install-nix-action@v31
+      - run: nix run .#ci-cargo-deny -- ${{ matrix.checks }}
