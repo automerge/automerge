@@ -6,71 +6,36 @@ on:
 jobs:
   publish-js:
     runs-on: ubuntu-latest
-    env:
-      # Pinned for reproducible wasm builds; bump deliberately when needed.
-      WASM_TOOLCHAIN: nightly-2026-04-25
-    defaults:
-      run:
-        working-directory: ./javascript
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20.x"
-          registry-url: "https://registry.npmjs.org"
-      - uses: jetli/wasm-bindgen-action@v0.2.0
-        with:
-          # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.127"
-      - name: Install pinned nightly + wasm32 target + rust-src
+      - uses: cachix/install-nix-action@v31
+      - name: Build JS package
+        run: nix run .#release-js-build
+      - name: Configure npm authentication
         run: |
-          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
-          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
-          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
-      - name: npm install
-        run: npm install
-      - name: build js
-        run: node ./scripts/build.mjs
+          printf '%s\n' "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" \
+            > "$RUNNER_TEMP/.npmrc"
       - name: "npm publish pre-release"
-        if: "github.event.release.prerelease"
-        run: npm publish --tag next --access public
+        if: github.event.release.prerelease
+        run: nix run .#release-js-publish -- --tag next --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/.npmrc
       - name: "npm publish release"
         if: "!github.event.release.prerelease"
-        run: npm publish --access public
+        run: nix run .#release-js-publish -- --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/.npmrc
 
   publish-js-docs:
     runs-on: ubuntu-latest
     if: "!github.event.release.prerelease"
-    env:
-      WASM_TOOLCHAIN: nightly-2026-04-25
-    defaults:
-      run:
-        working-directory: ./javascript
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20.x"
-          registry-url: "https://registry.npmjs.org"
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli wasm-opt
-      - name: Install pinned nightly + wasm32 target + rust-src
-        run: |
-          rustup toolchain install "$WASM_TOOLCHAIN" --profile minimal
-          rustup component add rust-src --toolchain "$WASM_TOOLCHAIN"
-          rustup target add --toolchain "$WASM_TOOLCHAIN" wasm32-unknown-unknown
-      - name: npm install
-        run: npm install
-      - name: build js
-        run: node ./scripts/build.mjs
-      - name: build js docs
-        id: build_release
-        run: |
-          npx typedoc --out api-docs
+      - uses: cachix/install-nix-action@v31
+      - name: Build JS docs
+        run: nix run .#release-js-docs
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4
         with:
