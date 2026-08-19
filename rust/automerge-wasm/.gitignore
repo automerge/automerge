@@ -3,6 +3,8 @@
 /nodejs
 /deno
 /web
+/nodejs-memory64
+/web-memory64
 Cargo.lock
 package-lock.json
 index.d.ts
