@@ -15,9 +15,12 @@ import { spawnSync } from "node:child_process"
 
 const profile = process.env.PROFILE ?? "dev"
 const toolchain = process.env.WASM_TOOLCHAIN ?? "nightly"
+// `cargo +<toolchain>` requires rustup. Nix supplies a cargo executable which
+// already selects the pinned nightly toolchain via WASM_CARGO.
+const cargo = process.env.WASM_CARGO ?? "cargo"
 
 const args = [
-  `+${toolchain}`,
+  ...(process.env.WASM_CARGO ? [] : [`+${toolchain}`]),
   "build",
   "--target",
   "wasm32-unknown-unknown",
@@ -32,7 +35,7 @@ const env = { ...process.env }
 const extra = "-C panic=unwind -C llvm-args=-wasm-use-legacy-eh"
 env.RUSTFLAGS = env.RUSTFLAGS ? `${env.RUSTFLAGS} ${extra}` : extra
 
-const result = spawnSync("cargo", args, { stdio: "inherit", env })
+const result = spawnSync(cargo, args, { stdio: "inherit", env })
 if (result.error) {
   console.error(result.error)
   process.exit(1)
