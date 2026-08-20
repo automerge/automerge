@@ -1,0 +1,25 @@
+# You must change these to your own details.
+[package]
+name = "automerge-node-api"
+description = "An Node-API wrapper for the rust implementation of automerge-backend"
+repository = "https://github.com/automerge/automerge"
+version = "0.1.0"
+authors = ["Kræn Hansen <mail@kraenhansen.dk>"]
+categories = []
+readme = "README.md"
+edition = "2021"
+license = "MIT"
+rust-version = "1.57.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+automerge = { path = "../automerge", features = [] }
+hex = "^0.4.3"
+napi = "3.0.0-beta.3"
+napi-derive = "3.0.0-beta.3"
+thiserror = "^1.0.16"
+
+[build-dependencies]
+napi-build = "2.2.0"
