@@ -3734,6 +3734,7 @@ fn round_trip_change_with_extra_bytes() {
                 insert: false,
             }],
             actor_id: actor.clone(),
+            author: None,
             hash: None,
             seq,
             start_op: std::num::NonZero::new(seq).unwrap(),

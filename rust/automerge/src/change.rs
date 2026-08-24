@@ -7,6 +7,7 @@ use crate::{
         parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
     },
     types::{ActorId, ChangeHash, ElemId},
+    Author,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +43,10 @@ impl Change {
             len,
             compression,
         })
+    }
+
+    pub fn author<'a>(&'a self) -> Option<Author<'a>> {
+        decode_author_footer(self.stored.extra_bytes())
     }
 
     pub fn actor_id(&self) -> &ActorId {
@@ -345,6 +350,7 @@ impl From<&Change> for crate::ExpandedChange {
         crate::ExpandedChange {
             operations,
             actor_id: actors.get(&0).unwrap().clone(),
+            author: c.author().map(Author::into_owned),
             hash: Some(c.hash()),
             time: c.timestamp(),
             deps: c.deps().to_vec(),
@@ -352,6 +358,71 @@ impl From<&Change> for crate::ExpandedChange {
             start_op: c.start_op(),
             extra_bytes: c.extra_bytes().to_vec(),
             message: c.message().map(|s| s.to_owned()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Footer {
+    Author = 1,
+}
+
+/// Encode an [`Author`] into an owned byte buffer, if `author` is `Some`.
+///
+/// # Encoding
+///
+/// The first byte is the [`Footer::Author`], followed by the length of the
+/// [`Author`] bytes, finalized with the [`Author`] bytes themselves.
+pub(crate) fn encode_author_footer<'a>(author: &Option<Author<'_>>) -> Cow<'a, [u8]> {
+    if let Some(author) = author.as_ref() {
+        let mut buf = vec![];
+        leb128::write::unsigned(&mut buf, Footer::Author as u64).unwrap();
+        leb128::write::unsigned(&mut buf, author.as_bytes().len() as u64).unwrap();
+        buf.extend_from_slice(author.as_bytes());
+        Cow::Owned(buf)
+    } else {
+        Cow::Borrowed(&[])
+    }
+}
+
+/// Decode an [`Author`] from `buff`.
+///
+/// # Decoding
+///
+/// Read the footer identifier, expected to be [`Footer::Author`], followed by
+/// the expected length of the author bytes. The resulting bytes are the
+/// [`Author`].
+fn decode_author_footer<'a>(mut buff: &'a [u8]) -> Option<Author<'a>> {
+    let id = leb128::read::unsigned(&mut buff).ok()?;
+    let len = leb128::read::unsigned(&mut buff).ok()? as usize;
+    if id == Footer::Author as u64 && buff.len() >= len {
+        Some(Author::from(&buff[0..len]))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_author_footer, encode_author_footer};
+    use crate::Author;
+    use proptest::prelude::*;
+
+    /// Author byte lengths that cross the leb128 single-byte boundary
+    /// (127/128), so the length prefix is sometimes multi-byte.
+    fn gen_author() -> impl Strategy<Value = Author<'static>> {
+        proptest::collection::vec(any::<u8>(), 0..=300).prop_map(Author::from)
+    }
+
+    proptest! {
+        // Encoding then decoding an author footer yields exactly the
+        // author's bytes: neither the footer id nor the length prefix
+        // may leak into the decoded output.
+        #[test]
+        fn author_footer_roundtrip(author in gen_author()) {
+            let encoded = encode_author_footer(&Some(author.clone()));
+            let decoded = decode_author_footer(&encoded);
+            prop_assert_eq!(decoded, Some(author));
         }
     }
 }
