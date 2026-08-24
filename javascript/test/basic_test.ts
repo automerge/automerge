@@ -319,6 +319,23 @@ describe("Automerge", () => {
         assert.equal(changes[i].time, meta[i].time)
         assert.deepEqual(changes[i].deps, meta[i].deps)
         assert.deepEqual(changes[i].startOp, meta[i].startOp)
+        assert.equal(meta[i].author, null)
+      }
+    })
+    it("get change metadata includes the author when set", () => {
+      const author = "ab".repeat(32)
+      let doc = Automerge.init<any>({ author })
+      let heads = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.foo = "bar"
+      })
+      doc = Automerge.change(doc, d => {
+        d.zip = "zop"
+      })
+      const meta = Automerge.getChangesMetaSince(doc, heads)
+      assert.equal(meta.length, 2)
+      for (const m of meta) {
+        assert.equal(m.author, author)
       }
     })
   })
@@ -879,5 +896,22 @@ describe("Automerge", () => {
     assert.throws(() => {
       let doc4 = Automerge.from<any>({ bad: imin - BigInt("1") })
     }, /smaller than/)
+  })
+  it("it should be able to handle authors", () => {
+    let doc1 = Automerge.from<any>({ hello: "world" })
+    assert.equal(Automerge.getAuthor(doc1), null)
+    let doc2 = Automerge.from<any>({ hello: "world" }, { author: "aabbcc" })
+    assert.equal(Automerge.getAuthor(doc2), "aabbcc")
+    let doc3 = Automerge.init({ author: "ff00ff" })
+    assert.equal(Automerge.getAuthor(doc3), "ff00ff")
+    let doc4 = Automerge.clone(doc2, { author: "ffaa00" })
+    assert.equal(Automerge.getAuthor(doc4), "ffaa00")
+    let doc5 = Automerge.change(doc4, d => (d.foo = "bar"))
+    let doc6 = Automerge.merge(doc5,doc2)
+    assert.equal(Automerge.getAuthor(doc6), "ffaa00")
+    assert.deepEqual(Automerge.getAuthors(doc6), ["aabbcc", "ffaa00"])
+    let actor = Automerge.getActorId(doc6);
+    assert.equal(Automerge.getAuthorForActor(doc6, actor), "ffaa00")
+    assert.deepEqual(Automerge.getActorsForAuthor(doc6, "ffaa00"), [actor])
   })
 })
