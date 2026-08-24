@@ -260,6 +260,7 @@ macro_rules! __log {
  }
 
 pub mod anonymize;
+mod author;
 mod autocommit;
 mod automerge;
 mod autoserde;
@@ -293,6 +294,7 @@ mod value;
 
 pub use crate::anonymize::AnonymizeError;
 pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
+pub use author::Author;
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
