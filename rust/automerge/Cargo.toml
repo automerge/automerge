@@ -37,7 +37,7 @@ tracing = { version = "^0.1.29" }
 unicode-segmentation = "1.10.1"
 
 # optional deps
-dot = { version = "0.1.4", optional = true }
+dot = { version = "0.2.0", optional = true }
 js-sys = { version = "^0.3", optional = true }
 rand = { version = "^0.10", optional = false }
 wasm-bindgen = { version = "^0.2", optional = true }
