@@ -36,6 +36,8 @@ export type PatchSource =
   | "merge"
   | "loadIncremental"
   | "applyChanges"
+  | "revoke"
+  | "unrevoke"
   | "addCommits"
   | "addFragments"
   | "receiveSyncMessage"

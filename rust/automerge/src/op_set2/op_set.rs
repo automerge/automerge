@@ -92,11 +92,17 @@ impl OpSet {
         self.cols.dump();
     }
 
-    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
+    pub(crate) fn parents<'a>(
+        &'a self,
+        obj: ObjId,
+        clock: Option<Clock>,
+        revocations: Option<&'a Clock>,
+    ) -> Parents<'a> {
         Parents {
             obj,
             ops: self,
             clock,
+            revocations,
         }
     }
 
@@ -274,7 +280,7 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
+            if !i.revoked && i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
                 self.cols.index.top.splice(i.pos, 1, [false]);
@@ -303,7 +309,9 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
+            if i.revoked {
+                undo.push(SuccUndo::new(*i, None, None, None));
+            } else if i.inc.is_none() {
                 delete = true;
                 let visible = self.cols.index.visible.get(i.pos);
                 let text = self.cols.index.text.values().get(i.pos);
@@ -350,8 +358,13 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn parent_object(&self, child: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
-        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock)?;
+    pub(crate) fn parent_object(
+        &self,
+        child: &ObjId,
+        clock: Option<&Clock>,
+        revocations: Option<&Clock>,
+    ) -> Option<Parent> {
+        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock, revocations)?;
         let obj = op.obj;
         let typ = self.object_type(&obj)?;
         let prop = match op.key {
@@ -362,7 +375,9 @@ impl OpSet {
                     ObjType::Text => SequenceType::Text,
                     _ => panic!("unexpected object type {:?} for seq key {:?}", typ, op.key),
                 };
-                let index = self.seek_list_opid(&op.obj, op.id, seq_type, clock)?.index;
+                let index = self
+                    .seek_list_opid(&op.obj, op.id, seq_type, clock, revocations)?
+                    .index;
                 Prop::Seq(index)
             }
         };
@@ -374,7 +389,7 @@ impl OpSet {
         })
     }
 
-    pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
+    pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Cow<'a, Clock>>) -> Keys<'a> {
         Keys::new(self, self.top_ops(obj, clock))
     }
 
@@ -571,7 +586,11 @@ impl OpSet {
         obj: &ObjId,
         index: usize,
         seq_type: SequenceType,
-        clock: Option<Clock>,
+        clock: Option<&Clock>,
+        // See `seek_ops_by_index` for the meaning of `revocations`. Used only
+        // by the slow_path debug-assert below to verify the index-based fast
+        // path filters revoked ops the same way a slow walk would.
+        #[cfg_attr(not(debug_assertions), allow(unused_variables))] revocations: Option<&Clock>,
     ) -> Result<QueryNth, AutomergeError> {
         if clock.is_none() && index > 0 {
             let index = NonZeroUsize::new(index).unwrap();
@@ -588,7 +607,7 @@ impl OpSet {
                         index.get(),
                         seq_type,
                         self.text_encoding,
-                        clock,
+                        revocations,
                         Default::default()
                     )
                     .resolve(0)
@@ -635,6 +654,11 @@ impl OpSet {
         index: usize,
         seq_type: SequenceType,
         clock: Option<&Clock>,
+        // Used only by slow_path_assertions to verify the fast (index-based)
+        // path. The fast path's index already accounts for revocations; the
+        // slow walk needs the revocation clock to filter equivalently.
+        #[cfg_attr(not(feature = "slow_path_assertions"), allow(unused_variables))]
+        revocations: Option<&Clock>,
     ) -> OpsFound<'a> {
         if clock.is_none() {
             let found = if seq_type == SequenceType::List {
@@ -644,7 +668,7 @@ impl OpSet {
             };
             #[cfg(feature = "slow_path_assertions")]
             {
-                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
+                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, revocations);
                 assert_eq!(found, slow, "fast != slow");
             }
             found
@@ -840,10 +864,17 @@ impl OpSet {
         opid: OpId,
         seq_type: SequenceType,
         clock: Option<&Clock>,
+        // See `seek_ops_by_index` for the meaning of `revocations`.
+        #[cfg_attr(not(feature = "slow_path_assertions"), allow(unused_variables))]
+        revocations: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
         if clock.is_none() {
             let found = self.seek_list_opid_fast(obj, opid, seq_type);
-            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, seq_type, clock));
+            #[cfg(feature = "slow_path_assertions")]
+            debug_assert_eq!(
+                found,
+                self.seek_list_opid_slow(obj, opid, seq_type, revocations)
+            );
             found
         } else {
             self.seek_list_opid_slow(obj, opid, seq_type, clock)
@@ -1067,8 +1098,9 @@ impl OpSet {
         })
     }
 
-    pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
+    pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Cow<'a, Clock>>) -> TopOps<'a> {
         let range = self.scope_to_obj(obj);
+        let clock = clock.map(Cow::into_owned);
         let fast = TopOps::new(self, clock.clone(), range);
         #[cfg(feature = "slow_path_assertions")]
         top_op::assert_matches_slow(self, obj, clock, fast.clone());
@@ -1086,10 +1118,14 @@ impl OpSet {
         &self,
         id: &OpId,
         clock: Option<&Clock>,
+        // See `seek_ops_by_index` for the meaning of `revocations`.
+        #[cfg_attr(not(feature = "slow_path_assertions"), allow(unused_variables))]
+        revocations: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
         if clock.is_none() {
             let result = self.find_op_by_id_and_vis_fast(id);
-            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, clock));
+            #[cfg(feature = "slow_path_assertions")]
+            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, revocations));
             result
         } else {
             self.find_op_by_id_and_vis_slow(id, clock)
@@ -1122,6 +1158,19 @@ impl OpSet {
             }
         }
         Some((o1, vis))
+    }
+
+    fn get_succ_for_pos(&self, pos: usize) -> Option<SuccCursors<'_>> {
+        let succ = self.cols.succ_count.get(pos)?;
+        let start = succ.prefix() as usize;
+        let len = succ.value as usize;
+        let end = succ.total() as usize;
+        Some(SuccCursors {
+            len,
+            succ_actor: self.cols.succ_actor.iter_range(start..end),
+            succ_counter: self.cols.succ_ctr.iter_range(start..end),
+            inc_values: self.cols.index.inc.iter_range(start..end),
+        })
     }
 
     pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
@@ -1279,6 +1328,23 @@ impl OpSet {
             self.cols.mark_name.iter_range(range.clone()),
             self.cols.expand.iter_range(range.clone()),
         )
+    }
+
+    pub(crate) fn recompute_indexes(&mut self, clock: &Clock) {
+        let mut builder = self.index_builder();
+        let mut last = None;
+        for op in self.iter() {
+            let next = Some((op.obj, op.elemid_or_key()));
+
+            if last != next {
+                builder.flush();
+                last = next;
+            }
+
+            builder.process_masked_op(&op, clock);
+        }
+        let (indexes, _) = builder.finish();
+        self.set_indexes(indexes);
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -1997,7 +2063,7 @@ mod tests {
 
             let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
             let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), Some(clock.clone()))
+                .top_ops(&ObjId(OpId::new(1, 1)), Some(Cow::Owned((clock.clone()))))
                 .collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
@@ -2035,7 +2101,7 @@ mod tests {
             assert!(key4.is_none());
 
             let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), Some(clock))
+                .top_ops(&ObjId(OpId::new(1, 1)), Some(Cow::Owned(clock)))
                 .collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);

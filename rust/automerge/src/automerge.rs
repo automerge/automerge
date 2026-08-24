@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
@@ -372,7 +373,23 @@ impl Automerge {
         self
     }
 
-    /// Set the actor id for this document.
+    /// Set the revocations for this document.
+    pub fn with_revocations(
+        mut self,
+        revocations: HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) -> Self {
+        self.set_revocations(revocations);
+        self
+    }
+
+    pub fn set_revocations(&mut self, revocations: HashMap<Author<'static>, Vec<ChangeHash>>) {
+        self.change_graph
+            .set_revocations(revocations, &self.authors);
+        let clock = self.change_graph.clock_at(&self.get_heads());
+        self.ops.recompute_indexes(&clock);
+    }
+
+    /// Set the author for this document.
     pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
         self.set_author(author);
         self
@@ -389,7 +406,6 @@ impl Automerge {
     pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
         if author.as_ref() != self.get_author() {
             self.author = author;
-            // TODO: re-use old actors
             self.actor = Actor::Unused(ActorId::random());
         }
         self
@@ -398,6 +414,38 @@ impl Automerge {
     /// Get the current author of this document.
     pub fn get_author(&self) -> Option<&Author<'static>> {
         self.author.as_ref()
+    }
+
+    /// Revoke all changes made by author after heads
+    /// Errors if given a heads not in the document yet
+    pub fn revoke(
+        &mut self,
+        author: &Author<'static>,
+        from: &[ChangeHash],
+        patch_log: &mut PatchLog,
+    ) {
+        let heads = self.get_heads();
+        let before = self.change_graph.clock_at(&heads);
+        self.change_graph
+            .revoke(author.clone(), from.to_vec(), &self.authors);
+        let after = self.change_graph.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    }
+
+    pub fn unrevoke(&mut self, author: &Author<'static>, patch_log: &mut PatchLog) {
+        let heads = self.get_heads();
+        let before = self.change_graph.clock_at(&heads);
+        self.change_graph.unrevoke(author, &self.authors);
+        let after = self.change_graph.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    }
+
+    pub fn get_revocations(&self) -> HashMap<Author<'static>, Vec<ChangeHash>> {
+        self.change_graph.get_revocations().clone()
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
@@ -414,6 +462,15 @@ impl Automerge {
     pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
         let actor_index = self.ops.actors.binary_search(actor).ok()?;
         self.authors.get_author_for_actor(actor_index)
+    }
+
+    /// See [`Authors::assign_author`].
+    ///
+    /// If the `author` is revoked, then the `actor` will be added to the
+    /// revocation point.
+    pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
+        self.change_graph.revoke_new_actor(&author, actor);
+        self.authors.assign_author(author, actor);
     }
 
     /// Get the current actor id of this document.
@@ -996,6 +1053,7 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
+
         Ok(am.with_author(options.author))
     }
 
@@ -1041,9 +1099,14 @@ impl Automerge {
                 LoadOptions::new()
                     .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
-                    .verification_mode(VerificationMode::Check),
+                    .verification_mode(VerificationMode::Check)
+                    .text_encoding(self.text_encoding()),
             )?;
-            doc = doc.with_actor(self.actor_id().clone());
+            // because we replace the *self here its important that all state not
+            // in the file to be loaded is copied here
+            doc.set_actor(self.actor_id().clone());
+            doc.set_author(self.author.clone());
+            doc.set_revocations(self.get_revocations());
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
@@ -1571,6 +1634,15 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
+        // This function uses the slow path, but it still needs to filter out
+        // revoked / not-yet-visible ops. When the caller passed an explicit
+        // clock, it already has revocations folded in; otherwise consult the
+        // change graph for the active revocation clock.
+        let clock = clock.map(Cow::Owned).or_else(|| {
+            self.change_graph
+                .active_revocation_clock()
+                .map(Cow::Borrowed)
+        });
         let obj = self.exid_to_obj(obj.as_ref())?;
 
         let Some(seq_type) = obj.typ.as_sequence_type() else {
@@ -1592,7 +1664,7 @@ impl Automerge {
             return Ok(fast);
         }
 
-        Ok(self.calculate_marks_slow(&obj, clock, seq_type))
+        Ok(self.calculate_marks_slow(&obj, clock.map(Cow::into_owned), seq_type))
     }
 
     fn calculate_marks_slow(
@@ -1601,7 +1673,7 @@ impl Automerge {
         clock: Option<Clock>,
         seq_type: SequenceType,
     ) -> Vec<Mark> {
-        let mut top_ops = self.ops().top_ops(&obj.id, clock).marks();
+        let mut top_ops = self.ops().top_ops(&obj.id, clock.map(Cow::Owned)).marks();
 
         let mut index = 0;
         let mut acc = MarkAccumulator::default();
@@ -1655,11 +1727,21 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
+        let revocations = self.change_graph.active_revocation_clock();
         // FIXME - now that we have blocks a correct text_rep is relevent
-        Ok(self.ops.parents(obj.id, clock))
+        Ok(self.ops.parents(obj.id, clock, revocations))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
+        // `ops.keys` always uses the slow path (no index for keys), so it must
+        // filter revoked ops itself. An explicit clock already has revocations
+        // folded in via `clock_at`; otherwise fall through to the change
+        // graph's active revocation clock.
+        let clock = clock.map(Cow::Owned).or_else(|| {
+            self.change_graph
+                .active_revocation_clock()
+                .map(Cow::Borrowed)
+        });
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.keys(&obj.id, clock))
@@ -1698,9 +1780,14 @@ impl Automerge {
     }
 
     pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
+        let clock = clock.map(Cow::Owned).or_else(|| {
+            self.change_graph
+                .active_revocation_clock()
+                .map(Cow::Borrowed)
+        });
         self.exid_to_obj(obj)
             .ok()
-            .map(|obj| Values::new(&self.ops, self.ops.top_ops(&obj.id, clock.clone()), clock))
+            .map(|obj| Values::new(&self.ops, self.ops.top_ops(&obj.id, clock)))
             .unwrap_or_default()
     }
 
@@ -1744,9 +1831,13 @@ impl Automerge {
             CursorPosition::Start => Ok(Cursor::Start),
             CursorPosition::End => Ok(Cursor::End),
             CursorPosition::Index(i) => {
-                let found = self
-                    .ops
-                    .seek_ops_by_index(&obj.id, i, seq_type, clock.as_ref());
+                let found = self.ops.seek_ops_by_index(
+                    &obj.id,
+                    i,
+                    seq_type,
+                    clock.as_ref(),
+                    self.change_graph.active_revocation_clock(),
+                );
 
                 if let Some(op) = found.ops.last() {
                     Ok(Cursor::Op(OpCursor::new(op.id, &self.ops, move_cursor)))
@@ -1777,7 +1868,13 @@ impl Automerge {
 
                 let found = self
                     .ops
-                    .seek_list_opid(&obj_meta.id, opid, seq_type, clock.as_ref())
+                    .seek_list_opid(
+                        &obj_meta.id,
+                        opid,
+                        seq_type,
+                        clock.as_ref(),
+                        self.change_graph.active_revocation_clock(),
+                    )
                     .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
 
                 match op.move_cursor {
@@ -1820,6 +1917,7 @@ impl Automerge {
                                     key,
                                     seq_type,
                                     clock.as_ref(),
+                                    self.change_graph.active_revocation_clock(),
                                 );
 
                                 match f {
@@ -1863,10 +1961,13 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
+        let effective_clock = clock
+            .as_ref()
+            .or_else(|| self.change_graph.active_revocation_clock());
         let op = match (obj.typ, prop) {
             (ObjType::Map | ObjType::Table, Prop::Map(key)) => self
                 .ops
-                .seek_ops_by_map_key(&obj.id, &key, clock.as_ref())
+                .seek_ops_by_map_key(&obj.id, &key, effective_clock)
                 .ops
                 .into_iter()
                 .next_back()
@@ -1877,7 +1978,13 @@ impl Automerge {
                     .as_sequence_type()
                     .expect("list and text must have a sequence type");
                 self.ops
-                    .seek_ops_by_index(&obj.id, i, seq_type, clock.as_ref())
+                    .seek_ops_by_index(
+                        &obj.id,
+                        i,
+                        seq_type,
+                        effective_clock,
+                        self.change_graph.active_revocation_clock(),
+                    )
                     .ops
                     .into_iter()
                     .next_back()
@@ -1896,10 +2003,13 @@ impl Automerge {
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
+        let effective_clock = clock
+            .as_ref()
+            .or_else(|| self.change_graph.active_revocation_clock());
         let values = match (obj.typ, prop) {
             (ObjType::Map | ObjType::Table, Prop::Map(key)) => self
                 .ops
-                .seek_ops_by_map_key(&obj.id, &key, clock.as_ref())
+                .seek_ops_by_map_key(&obj.id, &key, effective_clock)
                 .ops
                 .into_iter()
                 .map(|op| op.tagged_value(self.ops()))
@@ -1910,7 +2020,13 @@ impl Automerge {
                     .as_sequence_type()
                     .expect("list and text must have a sequence type");
                 self.ops
-                    .seek_ops_by_index(&obj.id, i, seq_type, clock.as_ref())
+                    .seek_ops_by_index(
+                        &obj.id,
+                        i,
+                        seq_type,
+                        effective_clock,
+                        self.change_graph.active_revocation_clock(),
+                    )
                     .ops
                     .into_iter()
                     .map(|op| op.tagged_value(self.ops()))
@@ -1932,8 +2048,13 @@ impl Automerge {
         index: usize,
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
+        // This function uses the slow path, but it still needs to filter out
+        // revoked / not-yet-visible ops. When the caller passed an explicit
+        // clock, it already has revocations folded in; otherwise consult the
+        // change graph for the active revocation clock.
+        let clock = clock.or_else(|| self.change_graph.active_revocation_clock().cloned());
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self.ops.top_ops(&obj.id, clock).marks();
+        let mut iter = self.ops.top_ops(&obj.id, clock.map(Cow::Owned)).marks();
         iter.nth(index);
         match iter.get_marks() {
             Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),
@@ -1964,6 +2085,7 @@ impl Automerge {
                                         op.id,
                                         SequenceType::List,
                                         None,
+                                        self.change_graph.active_revocation_clock(),
                                     ) else {
                                         continue;
                                     };
