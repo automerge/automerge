@@ -1052,12 +1052,16 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
+        let mut actor_author: HashSet<ActorId> = HashSet::new();
 
         for change in self.queue.iter() {
             actor_seqs
                 .entry(change.actor_id().clone())
                 .or_default()
                 .insert(change.seq());
+            if change.author().is_some() {
+                actor_author.insert(change.actor_id().clone());
+            }
         }
 
         let mut incoming = ChangeBatch::new();
@@ -1077,12 +1081,22 @@ impl Automerge {
             {
                 return Err(AutomergeError::duplicate_seq(&change));
             }
+            // TODO(finto): Refactor with BatchBuilder pattern
+            if change.author().is_some()
+                && (self.get_author_for_actor(change.actor_id()).is_some()
+                    || actor_author.contains(change.actor_id()))
+            {
+                return Err(AutomergeError::duplicate_author(&change));
+            }
 
             seen.insert(hash);
             actor_seqs
                 .entry(change.actor_id().clone())
                 .or_default()
                 .insert(change.seq());
+            if change.author().is_some() {
+                actor_author.insert(change.actor_id().clone());
+            }
             incoming.push(change)?;
         }
 

@@ -1,3 +1,4 @@
+use crate::author::Author;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
@@ -16,6 +17,8 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
+    DuplicateAuthor(Author<'static>, ActorId, u64),
     #[error("duplicate actor {0}: possible document clone")]
     DuplicateActorId(ActorId),
     #[error("general failure")]
@@ -82,6 +85,15 @@ impl AutomergeError {
 
     pub(crate) fn duplicate_seq(c: &Change) -> Self {
         Self::DuplicateSeqNumber(c.seq(), c.actor_id().clone())
+    }
+
+    pub(crate) fn duplicate_author(c: &Change) -> Self {
+        Self::DuplicateAuthor(
+            c.author()
+                .map_or(Author::from(vec![]), |author| author.into_owned()),
+            c.actor_id().clone(),
+            c.seq(),
+        )
     }
 }
 

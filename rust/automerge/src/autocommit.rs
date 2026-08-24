@@ -1,5 +1,6 @@
 use std::ops::RangeBounds;
 
+use crate::author::Author;
 use crate::automerge::SaveOptions;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
@@ -12,8 +13,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
-use crate::Fragment;
-use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
+use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -394,8 +394,36 @@ impl AutoCommit {
         self
     }
 
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
+        self.doc.get_actors_for_author(author)
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
+        self.doc.get_author_for_actor(actor)
+    }
+
+    pub fn get_author(&self) -> Option<&Author<'static>> {
+        self.doc.get_author()
+    }
+
+    pub fn get_authors(&self) -> &[Author<'static>] {
+        self.doc.get_authors()
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
