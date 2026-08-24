@@ -67,7 +67,13 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
             .as_deref()
             .map(JsValue::from)
             .unwrap_or(JsValue::NULL);
+        let author = c
+            .author
+            .as_ref()
+            .map(|a| JsValue::from(a.to_string()))
+            .unwrap_or(JsValue::NULL);
         js_set(&change, "actor", c.actor.to_string()).unwrap();
+        js_set(&change, "author", author).unwrap();
         js_set(&change, "seq", c.seq as f64).unwrap();
         js_set(&change, "startOp", c.start_op as f64).unwrap();
         js_set(&change, "maxOp", c.max_op as f64).unwrap();
@@ -75,6 +81,9 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
         js_set(&change, "message", message).unwrap();
         js_set(&change, "deps", AR::from(c.deps.as_slice())).unwrap();
         js_set(&change, "hash", c.hash.to_string()).unwrap();
+        if !c.extra.is_empty() {
+            js_set(&change, "extraBytes", hex::encode(&c.extra)).unwrap();
+        }
         JS(change.into())
     }
 }
