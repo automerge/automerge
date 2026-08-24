@@ -108,7 +108,7 @@ impl OwnedTransaction {
             // a transaction is in flight: its pending ops are in the op set
             // but not under the graph's heads, so the current-heads
             // shortcut in `scope_at` would wrongly expose them
-            Some(self.doc.change_graph.clock_at(h))
+            Some(self.doc.clock_at_heads(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }

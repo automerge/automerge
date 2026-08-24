@@ -5,10 +5,12 @@ use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
 
+use crate::revocation::Revocations;
 use crate::storage::BundleMetadata;
+use crate::Author;
 use crate::{
     author::Authors,
-    clock::{Clock, SeqClock},
+    clock::{Clock as OpClock, SeqClock},
     error::AutomergeError,
     op_set2::{change::BuildChangeMetadata, ActorIdx, ValueMeta},
     storage::columns::compression::Uncompressed,
@@ -29,8 +31,11 @@ pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
     actors: Vec<ActorIdx>,
+    revocation_cached_clock: OpClock,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
+    /// A mapping from a [`NodeIdx`] to the maximum op-counter in a given
+    /// commit.
     max_ops: Vec<u32>,
     max_op: u32,
     num_ops: hexane::Column<u64>,
@@ -88,6 +93,7 @@ impl ChangeGraph {
             nodes_by_hash: HashMap::new(),
             hashes: Vec::new(),
             actors: Vec::new(),
+            revocation_cached_clock: OpClock(vec![u32::MAX; num_actors]),
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: hexane::Column::new(),
@@ -148,6 +154,76 @@ impl ChangeGraph {
         self.seq_index.len()
     }
 
+    pub(crate) fn missing_hashes<'a, 'b>(
+        &'a self,
+        heads: &'b [ChangeHash],
+    ) -> impl Iterator<Item = ChangeHash> + 'a
+    where
+        'b: 'a,
+    {
+        heads
+            .iter()
+            .filter(|h| !self.nodes_by_hash.contains_key(h))
+            .copied()
+    }
+
+    fn recomp_revocations(&mut self, authors: &Authors, revocations: &mut Revocations) {
+        revocations.recompute_revocations(authors, |heads| self.clock_for_heads(heads));
+        self.rebuild_revocation_clock(revocations);
+    }
+
+    /// (Re)compute the revocation mask for a newly-assigned `actor` when its
+    /// `author` is already revoked.
+    ///
+    /// Revocations are keyed by [`Author`], not actor, so an actor that first
+    /// becomes known *after* its author was revoked would otherwise never be
+    /// masked. This must run before the actor's ops are imported so that the
+    /// per-op `revoked` flag (and any logged patches) respect the revocation.
+    pub(crate) fn revoke_new_actor(
+        &mut self,
+        author: &Author<'static>,
+        actor: usize,
+        revocations: &mut Revocations,
+    ) {
+        let Some(heads) = revocations.get_revocations_for_author(author) else {
+            return;
+        };
+        let clock = self.calculate_clock(self.heads_to_nodes(heads).collect());
+        revocations.insert_mask_for(actor.into(), clock.get_for_actor(&actor));
+        self.rebuild_revocation_clock(revocations);
+    }
+
+    /// The clock used to filter revoked ops on slow paths that bypass the
+    /// op-set index (e.g. `visible_slow`). `None` when no actors are
+    /// currently revoked — in which case slow paths can skip clock-based
+    /// filtering. Borrowed callers do not have to copy the clock.
+    pub(crate) fn active_revocation_clock(&self, revocations: &Revocations) -> Option<&OpClock> {
+        (!revocations.is_empty()).then_some(&self.revocation_cached_clock)
+    }
+
+    pub(crate) fn rebuild_revocation_clock(&mut self, revocations: &Revocations) {
+        // `revocations_mask` is keyed by actor and holds the largest unrevoked
+        // *seq* for each actor. The cached clock indexes ops by their global
+        // op counter, so we have to convert the seq into the max op counter of
+        // the change at that seq (just like `to_op_clock` does).
+        self.revocation_cached_clock = (0_u32..self.num_actors() as u32)
+            .map(|actor| {
+                let actor_usize = actor as usize;
+                if let Some(mask) = revocations.get_mask_for(&ActorIdx(actor)) {
+                    mask.and_then(|seq| {
+                        self.seq_index
+                            .get(actor_usize)
+                            .and_then(|v| v.get(seq.get() as usize - 1))
+                            .and_then(|n| self.max_ops.get(n.0 as usize))
+                            .copied()
+                    })
+                } else {
+                    Some(u32::MAX)
+                }
+            })
+            .collect();
+    }
+
     pub(crate) fn insert_actor(&mut self, idx: usize) {
         if self.seq_index.len() != idx {
             for actor_index in &mut self.actors {
@@ -163,6 +239,8 @@ impl ChangeGraph {
             f.clock.rewrite_with_new_actor(idx)
         }
         self.fragment_top.rewrite_with_new_actor(idx);
+        // Keep the cached revocation clock aligned with the actor table.
+        self.revocation_cached_clock.0.insert(idx, u32::MAX);
         self.seq_index.insert(idx, vec![]);
     }
 
@@ -175,6 +253,7 @@ impl ChangeGraph {
         if self.seq_index.get(idx).is_some() {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(idx);
+            self.revocation_cached_clock.0.remove(idx);
         }
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
@@ -546,8 +625,10 @@ impl ChangeGraph {
         &mut self,
         iter: I,
         authors: &mut Authors,
+        revocations: &mut Revocations,
     ) -> Result<(), MissingDep> {
         let node = NodeIdx(self.hashes.len() as u32);
+        let mut recomp_revocations = false;
 
         self.add_nodes(iter.clone());
 
@@ -557,12 +638,16 @@ impl ChangeGraph {
             self.max_op = std::cmp::max(self.max_op, change.max_op() as u32);
             self.hashes.push(hash);
             debug_assert!(!self.nodes_by_hash.contains_key(&hash));
+            recomp_revocations = recomp_revocations || revocations.pop_pending_revocation(&hash);
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
 
             if let Some(author) = change.author() {
+                // This is validated in Automerge::apply_changes_batch_log_patches
                 assert!(change.seq() == 1);
-                authors.assign_author(author.into_owned(), actor)
+                if change.seq() == 1 {
+                    authors.assign_author(author.into_owned(), actor)
+                }
             }
 
             assert!(actor < self.seq_index.len());
@@ -579,6 +664,11 @@ impl ChangeGraph {
 
             self.cache_fragment(node_idx);
         }
+
+        if recomp_revocations {
+            self.recomp_revocations(authors, revocations);
+        }
+
         Ok(())
     }
 
@@ -710,6 +800,7 @@ impl ChangeGraph {
         change: &Change,
         actor: usize,
         authors: &mut Authors,
+        revocations: &mut Revocations,
     ) -> Result<(), MissingDep> {
         let hash = change.hash();
 
@@ -723,7 +814,7 @@ impl ChangeGraph {
             }
         }
 
-        self.add_changes([(change, actor)].into_iter(), authors)
+        self.add_changes([(change, actor)].into_iter(), authors, revocations)
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
@@ -791,10 +882,17 @@ impl ChangeGraph {
             .copied()
     }
 
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash], revocations: &Revocations) -> OpClock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes.collect())
-            .iter()
+        let mut clock = self.calculate_clock(nodes.collect());
+        for (actor, seq) in revocations.get_revocation_mask().iter() {
+            clock.mask(usize::from(*actor), *seq);
+        }
+        self.to_op_clock(clock)
+    }
+
+    fn to_op_clock(&self, c: SeqClock) -> OpClock {
+        c.iter()
             .map(|(actor, seq)| {
                 self.seq_index
                     .get(actor)
@@ -805,13 +903,17 @@ impl ChangeGraph {
             .collect()
     }
 
-    pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
+    fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes.collect())
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
         Some(*self.seq.get(idx.0 as usize)?)
+    }
+
+    pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
+        self.calculate_clock(self.heads_to_nodes(heads).collect())
     }
 
     fn calculate_clock(&self, mut to_visit: BTreeSet<NodeIdx>) -> SeqClock {
@@ -908,7 +1010,12 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
             if let Some(author) = c.author() {
-                authors.assign_author(author.into_owned(), graph.actors[idx].into());
+                // Saved documents written by an honest encoder only carry the
+                // author footer on seq=1. Skip rather than panic on bad data
+                // — any further validation is the apply path's job.
+                if c.seq() == 1 {
+                    authors.assign_author(author.into_owned(), graph.actors[idx].into());
+                }
             }
         }
 
@@ -1026,11 +1133,13 @@ impl ChangeGraphCols {
         let nodes_by_hash = HashMap::new();
         let fragments = vec![];
         let fragment_top = SeqClock::new(num_actors);
+        let revocation_cached_clock = OpClock(vec![u32::MAX; num_actors]);
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
             hashes,
             actors,
+            revocation_cached_clock,
             parents,
             seq,
             max_ops,
@@ -1156,6 +1265,7 @@ mod tests {
             parents: &[ChangeHash],
         ) -> ChangeHash {
             let mut authors = Authors::default();
+            let mut revocations = Revocations::default();
             let osd = OpSet::from_actors(self.actors.clone(), TextEncoding::platform_default());
 
             let start_op = parents
@@ -1208,7 +1318,7 @@ mod tests {
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
             self.graph
-                .add_change(&change, actor_idx, &mut authors)
+                .add_change(&change, actor_idx, &mut authors, &mut revocations)
                 .unwrap();
             self.changes.push(change);
             hash
@@ -1216,10 +1326,13 @@ mod tests {
 
         fn build(&self) -> ChangeGraph {
             let mut authors = Authors::with_actors(self.actors.len());
+            let mut revocations = Revocations::new();
             let mut graph = ChangeGraph::new(self.actors.len());
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
-                graph.add_change(change, actor_idx, &mut authors).unwrap();
+                graph
+                    .add_change(change, actor_idx, &mut authors, &mut revocations)
+                    .unwrap();
             }
             graph
         }

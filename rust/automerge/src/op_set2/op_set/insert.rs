@@ -15,7 +15,7 @@ pub(crate) struct InsertQuery<'a> {
     marks: RichTextQueryState<'a>,
     seq_type: SequenceType,
     text_encoding: TextEncoding,
-    clock: Option<Clock>,
+    clock: Option<&'a Clock>,
     candidates: Vec<Loc>,
     last_visible_cursor: Option<ElemId>,
     target: usize,
@@ -27,7 +27,7 @@ impl<'a> InsertQuery<'a> {
         target: usize,
         seq_type: SequenceType,
         text_encoding: TextEncoding,
-        clock: Option<Clock>,
+        clock: Option<&'a Clock>,
         marks: RichTextQueryState<'a>,
     ) -> Self {
         let mut candidates = vec![];
@@ -99,7 +99,7 @@ impl<'a> InsertQuery<'a> {
             if op.is_inc() {
                 continue;
             }
-            let visible = op.scope_to_clock(self.clock.as_ref());
+            let visible = op.scope_to_clock(self.clock);
             if op.insert {
                 // this is the one place where we need non-visible ops
                 if let Some(last) = last_width.take() {

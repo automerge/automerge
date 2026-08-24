@@ -82,8 +82,9 @@ pub(super) fn assert_matches_slow(
     mut fast: TopOps<'_>,
 ) {
     use super::OpQuery;
+    use std::borrow::Cow;
 
-    let mut slow = SlowTopOpIter::new(op_set.iter_obj(obj).visible_slow(clock));
+    let mut slow = SlowTopOpIter::new(op_set.iter_obj(obj).visible_slow(clock.map(Cow::Owned)));
     let mut index = 0;
     loop {
         match (fast.next(), slow.next()) {
