@@ -356,7 +356,6 @@ mod tests {
         }
     }
 
-
     /// One step of an op sequence, applied by `apply` to the `Authors`
     /// under test and the model in lock-step.
     ///
