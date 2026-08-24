@@ -98,6 +98,10 @@ impl From<AutomergeError> for wasm_bindgen::JsValue {
 #[error("Invalid actor ID: {0}")]
 pub struct InvalidActorId(pub String);
 
+#[derive(Error, Debug)]
+#[error("Invalid author: {0}")]
+pub struct InvalidAuthor(pub String);
+
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid scalar value, expected {expected} but received {unexpected}")]
 pub(crate) struct InvalidScalarValue {
