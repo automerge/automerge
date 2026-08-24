@@ -1,3 +1,4 @@
+use crate::clock::Clock;
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 // hexane::Encoder was used here instead of Vec<>
 
 pub(crate) struct IndexBuilder {
-    counters: HashMap<OpId, Vec<(usize, usize)>>,
+    counter_map: HashMap<OpId, Vec<(usize, usize)>>,
     succ: Vec<u32>,
     top: Vec<bool>,
     widths: Vec<u64>,
@@ -159,7 +160,7 @@ pub(crate) struct Indexes {
 impl IndexBuilder {
     pub(crate) fn new(op_set: &OpSet, encoding: TextEncoding) -> Self {
         Self {
-            counters: HashMap::new(),
+            counter_map: HashMap::new(),
             succ: Vec::with_capacity(op_set.len()),
             top: Vec::with_capacity(op_set.len()),
             widths: Vec::with_capacity(op_set.len()),
@@ -182,6 +183,41 @@ impl IndexBuilder {
         }
         self.last_flush = len;
     }
+
+    pub(crate) fn process_masked_op(&mut self, op: &Op<'_>, clock: &Clock) {
+        let visible = clock.covers(&op.id);
+
+        if visible {
+            self.marks.push(op.mark_index());
+        } else {
+            self.marks.push(None);
+        }
+
+        self.succ.push(masked_vis_num(op, clock));
+        self.top.push(false);
+        self.widths
+            .push(op.width(SequenceType::Text, self.text_encoding) as u64);
+
+        let count = self.counter_map.remove(&op.id);
+
+        if let Some(i) = op.get_increment_value() {
+            for (succ_idx, op_idx) in count.into_iter().flatten() {
+                self.incs[succ_idx] = Some(i);
+                if visible {
+                    self.succ[op_idx] -= 1;
+                }
+            }
+        }
+
+        if let Some(obj_info) = op.obj_info() {
+            self.obj_info.insert(op.id, obj_info);
+        }
+
+        for succ_id in op.succ() {
+            self.process_succ(op.is_counter(), succ_id);
+        }
+    }
+
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
@@ -193,7 +229,7 @@ impl IndexBuilder {
         self.widths
             .push(op.width(SequenceType::Text, self.text_encoding) as u64);
 
-        let count = self.counters.remove(&op.id);
+        let count = self.counter_map.remove(&op.id);
 
         if let Some(i) = op.get_increment_value() {
             for (succ_idx, op_idx) in count.into_iter().flatten() {
@@ -209,7 +245,7 @@ impl IndexBuilder {
 
     pub(crate) fn process_succ(&mut self, op_is_counter: bool, id: OpId) {
         if op_is_counter {
-            self.counters
+            self.counter_map
                 .entry(id)
                 .or_default()
                 .push((self.incs.len(), self.succ.len() - 1));
@@ -259,5 +295,13 @@ fn vis_num(op: &Op<'_>) -> u32 {
         u32::MAX
     } else {
         op.succ().len() as u32
+    }
+}
+
+fn masked_vis_num(op: &Op<'_>, clock: &Clock) -> u32 {
+    if op.is_inc() || !clock.covers(&op.id) {
+        u32::MAX
+    } else {
+        op.succ().filter(|id| clock.covers(id)).count() as u32
     }
 }
