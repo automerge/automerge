@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 
 use crate::storage::BundleMetadata;
 use crate::{
+    author::Authors,
     clock::{Clock, SeqClock},
     error::AutomergeError,
     op_set2::{change::BuildChangeMetadata, ActorIdx, ValueMeta},
@@ -23,7 +24,6 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
-
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
@@ -545,6 +545,7 @@ impl ChangeGraph {
     fn add_changes<'a, I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone>(
         &mut self,
         iter: I,
+        authors: &mut Authors,
     ) -> Result<(), MissingDep> {
         let node = NodeIdx(self.hashes.len() as u32);
 
@@ -558,6 +559,11 @@ impl ChangeGraph {
             debug_assert!(!self.nodes_by_hash.contains_key(&hash));
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
+
+            if let Some(author) = change.author() {
+                assert!(change.seq() == 1);
+                authors.assign_author(author.into(), actor)
+            }
 
             assert!(actor < self.seq_index.len());
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
@@ -699,7 +705,12 @@ impl ChangeGraph {
         self.fragments.push(FragmentNode { head, deps, clock });
     }
 
-    pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
+    pub(crate) fn add_change(
+        &mut self,
+        change: &Change,
+        actor: usize,
+        authors: &mut Authors,
+    ) -> Result<(), MissingDep> {
         let hash = change.hash();
 
         if self.nodes_by_hash.contains_key(&hash) {
@@ -712,7 +723,7 @@ impl ChangeGraph {
             }
         }
 
-        self.add_changes([(change, actor)].into_iter())
+        self.add_changes([(change, actor)].into_iter(), authors)
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
@@ -878,7 +889,7 @@ impl ChangeGraphCols {
         self.0.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
+    pub(crate) fn finalize(self, changes: &[Change], authors: &mut Authors) -> ChangeGraph {
         let mut graph = self.0;
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.is_empty());
@@ -891,9 +902,13 @@ impl ChangeGraphCols {
 
         for c in changes {
             let hash = c.hash();
-            let node_idx = NodeIdx(graph.hashes.len() as u32);
+            let idx = graph.hashes.len();
+            let node_idx = NodeIdx(idx as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
-            graph.hashes.push(hash)
+            graph.hashes.push(hash);
+            if let Some(author) = c.author() {
+                authors.assign_author(author.into(), graph.actors[idx].into());
+            }
         }
 
         for n in 0..(graph.len() as u32) {
@@ -1139,6 +1154,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
+            let mut authors = Authors::default();
             let osd = OpSet::from_actors(self.actors.clone(), TextEncoding::platform_default());
 
             let start_op = parents
@@ -1190,16 +1206,19 @@ mod tests {
             let change = Change::new(build_change(&ops, &meta, &self.graph, &osd.actors));
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
-            self.graph.add_change(&change, actor_idx).unwrap();
+            self.graph
+                .add_change(&change, actor_idx, &mut authors)
+                .unwrap();
             self.changes.push(change);
             hash
         }
 
         fn build(&self) -> ChangeGraph {
+            let mut authors = Authors::with_actors(self.actors.len());
             let mut graph = ChangeGraph::new(self.actors.len());
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
-                graph.add_change(change, actor_idx).unwrap();
+                graph.add_change(change, actor_idx, &mut authors).unwrap();
             }
             graph
         }

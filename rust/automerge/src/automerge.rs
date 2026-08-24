@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+use crate::author::{Author, Authors};
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -93,6 +94,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
+    author: Option<Author>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -160,6 +162,13 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    pub fn author(self, author: Author) -> Self {
+        Self {
+            author: Some(author),
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -170,6 +179,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
+            author: None,
         }
     }
 }
@@ -202,18 +212,24 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// This type implements [`crate::sync::SyncDoc`]
 ///
+/// ## Authors and Actors
+///
+/// TODO(finto): describe their interactions and intended uses.
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
+    authors: Authors,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+    /// The current author.
+    author: Option<Author>,
 }
 
 impl Automerge {
@@ -222,9 +238,11 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
+            authors: Authors::with_actors(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
@@ -260,20 +278,26 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
+            authors: Authors::with_actors(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
-    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph) -> Self {
+    // TODO(finto): document that there are various invariants on the
+    // relationships between OpSet, ChangeGraph, and Authors.
+    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph, authors: Authors) -> Self {
         let deps = change_graph.heads().collect();
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
             change_graph,
+            authors,
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         };
         doc.remove_unused_actors(false);
         doc
@@ -318,6 +342,50 @@ impl Automerge {
         self
     }
 
+    /// Set the actor id for this document.
+    pub fn with_author(mut self, author: Option<Author>) -> Self {
+        self.set_author(author);
+        self
+    }
+
+    /// Set the author for this document.
+    ///
+    /// The [`Author`] is only changed, if `author` differs from
+    /// [`Automerge::get_author`]. If the author does change then a new
+    /// [`ActorId`] is generated for that author. Notably, this could be a
+    /// different [`ActorId`] compared to previous edits for the same author.
+    ///
+    /// If you are using authors *never* manually manage the [`ActorId`].
+    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+        if author.as_ref() != self.get_author() {
+            self.author = author;
+            // TODO: re-use old actors
+            self.actor = Actor::Unused(ActorId::random());
+        }
+        self
+    }
+
+    /// Get the current author of this document.
+    pub fn get_author(&self) -> Option<&Author> {
+        self.author.as_ref()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+        self.authors
+            .get_actors_for_author(author)
+            .filter_map(|idx| self.ops.actors.get(idx).cloned())
+            .collect()
+    }
+
+    pub fn get_authors(&self) -> &[Author] {
+        self.authors.get_authors()
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        self.authors.get_author_for_actor(actor_index)
+    }
+
     /// Get the current actor id of this document.
     pub fn get_actor(&self) -> &ActorId {
         match &self.actor {
@@ -330,6 +398,7 @@ impl Automerge {
         self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
+        self.authors.remove_actor(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -466,13 +535,14 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
-
+        let author = if seq == 1 { self.author.clone() } else { None };
         TransactionArgs {
             actor_index,
             seq,
             start_op,
             deps,
             scope,
+            author,
         }
     }
 
@@ -810,7 +880,7 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new());
+            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -896,7 +966,7 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(am)
+        Ok(am.with_author(options.author))
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -1194,7 +1264,7 @@ impl Automerge {
             .expect("Change's actor not already in the document");
 
         self.change_graph
-            .add_change(change, actor_index)
+            .add_change(change, actor_index, &mut self.authors)
             .expect("Change's deps should already be in the document");
     }
 
@@ -1202,8 +1272,10 @@ impl Automerge {
         self.ops.insert_actor(index, actor);
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
+        self.authors.insert_actor(index);
         index
     }
+
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
         match self.ops.actors.binary_search(actor) {
             Ok(idx) => idx,
@@ -1211,7 +1283,7 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+    fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => idx,
             Err(idx) => self.insert_actor(idx, actor),
@@ -1412,11 +1484,16 @@ impl Automerge {
     }
 
     pub fn get_changes_meta(&self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
-        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
+        ChangeCollector::exclude_hashes_meta(
+            &self.ops,
+            &self.change_graph,
+            &self.authors,
+            have_deps,
+        )
     }
 
     pub fn get_change_meta_by_hash(&self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
-        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash])
+        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, &self.authors, [*hash])
             .ok()?
             .pop()
     }

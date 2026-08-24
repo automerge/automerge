@@ -8,6 +8,8 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::author::Author;
+use crate::change::Footer;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
@@ -28,6 +30,7 @@ pub(crate) struct TransactionInner {
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
     pending: Vec<TxOp>,
+    author: Option<Author>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,6 +61,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
+    /// The author of the change
+    pub(crate) author: Option<Author>,
 }
 
 impl TransactionInner {
@@ -69,6 +74,7 @@ impl TransactionInner {
             //checkpoint,
             deps,
             scope,
+            author,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -81,6 +87,7 @@ impl TransactionInner {
             deps,
             pending: vec![],
             scope,
+            author,
         }
     }
 
@@ -174,9 +181,23 @@ impl TransactionInner {
             max_op: self.start_op.get() + self.pending.len() as u64 - 1,
             timestamp: self.time,
             message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
-            extra: Cow::Borrowed(&[]),
+            extra: self.extra_bytes(),
             builder: 0,
             deps,
+        }
+    }
+
+    // TODO(finto): it feels strange that this is the inverse of reading the Author in StoredChange.
+    // This encodes the Author, whereas in change.rs, we are decoding.
+    fn extra_bytes<'a>(&self) -> Cow<'a, [u8]> {
+        if let Some(author) = self.author.as_ref() {
+            let mut buf = vec![];
+            leb128::write::unsigned(&mut buf, Footer::Author as u64).unwrap();
+            leb128::write::unsigned(&mut buf, author.as_bytes().len() as u64).unwrap();
+            buf.extend_from_slice(author.as_bytes());
+            Cow::Owned(buf)
+        } else {
+            Cow::Borrowed(&[])
         }
     }
 
