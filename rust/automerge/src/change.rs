@@ -1,6 +1,7 @@
 use std::{borrow::Cow, num::NonZeroU64};
 
 use crate::{
+    author::Author,
     columnar::Key as StoredKey,
     storage::{
         change::{Unverified, Verified},
@@ -42,6 +43,21 @@ impl Change {
             len,
             compression,
         })
+    }
+
+    // TODO(finto): test roundtrip of author, especially checking leb128 boundaries.
+    // We might be including id + len as part of Author.
+    //
+    // TODO(finto): Consider reading Author into Change.
+    pub fn author(&self) -> Option<&[u8]> {
+        let mut buff = self.stored.extra_bytes();
+        let id = leb128::read::unsigned(&mut buff).ok()?;
+        let len = leb128::read::unsigned(&mut buff).ok()? as usize;
+        if id == Footer::Author as u64 && buff.len() >= len {
+            Some(&buff[0..len])
+        } else {
+            None
+        }
     }
 
     pub fn actor_id(&self) -> &ActorId {
@@ -345,6 +361,7 @@ impl From<&Change> for crate::ExpandedChange {
         crate::ExpandedChange {
             operations,
             actor_id: actors.get(&0).unwrap().clone(),
+            author: c.author().map(Author::from),
             hash: Some(c.hash()),
             time: c.timestamp(),
             deps: c.deps().to_vec(),
@@ -354,4 +371,9 @@ impl From<&Change> for crate::ExpandedChange {
             message: c.message().map(|s| s.to_owned()),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Footer {
+    Author = 1,
 }
