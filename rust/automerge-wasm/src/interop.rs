@@ -9,6 +9,7 @@ use automerge::marks::{MarkSet, UpdateSpansConfig};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
+use itertools::Itertools;
 use js_sys::{Array, BigInt, Function, JsString, Number, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -1479,17 +1480,29 @@ impl Automerge {
         meta: &JsValue,
         cache: &ExportCache<'_>,
     ) -> Result<(), error::ApplyPatch> {
-        let args: Array = values
-            .into_iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, cache))
-            .collect::<Result<_, _>>()?;
-        args.unshift(&(num_del as u32).into());
-        args.unshift(&(index as u32).into());
+        // The arguments to a function invoked via `Reflect::apply` are passed
+        // on the JS engine's stack, which limits how many arguments a single
+        // call can take (~125k in V8). A consolidated insert patch can contain
+        // far more values than that, so we perform the deletion in one
+        // argument-free call and then insert the values in bounded chunks.
+        const MAX_SPLICE_ARGS: usize = 32_000;
         let method = js_get(o, "splice")?
             .0
             .dyn_into::<Function>()
             .map_err(error::Export::GetSplice)?;
-        Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        if num_del > 0 {
+            let args = Array::of2(&(index as u32).into(), &(num_del as u32).into());
+            Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        }
+        let wrapped = values
+            .into_iter()
+            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, cache));
+        for (n, chunk) in wrapped.chunks(MAX_SPLICE_ARGS).into_iter().enumerate() {
+            let args: Array = chunk.collect::<Result<_, _>>()?;
+            args.unshift(&0_u32.into());
+            args.unshift(&((index + n * MAX_SPLICE_ARGS) as u32).into());
+            Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        }
         Ok(())
     }
 

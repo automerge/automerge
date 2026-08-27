@@ -282,6 +282,33 @@ describe("Automerge", () => {
       assert.deepEqual(doc6, { list: [2, 1, 9, 100, 101, 10, 3, 11, 12] })
     })
 
+    it("can insert very large numbers of list elements in one change", function () {
+      // inserting 200k elements is slow on CI runners; the mocha default of
+      // 2s is not enough
+      this.timeout(30_000)
+      // Contiguous inserts are consolidated into a single Insert patch, which
+      // used to be applied with a single `Array.prototype.splice` call whose
+      // argument count exceeded the JS engine's stack limit (~125k args in V8),
+      // throwing "RangeError: Maximum call stack size exceeded".
+      const N = 200_000
+      const chunkSize = 10_000
+      let doc = Automerge.from<{ list: number[] }>({ list: [] })
+      doc = Automerge.change(doc, d => {
+        for (let i = 0; i < N; i += chunkSize) {
+          const chunk = Array.from({ length: chunkSize }, (_, j) => i + j)
+          Automerge.insertAt(d.list, i, ...chunk)
+        }
+      })
+      assert.equal(doc.list.length, N)
+      assert.equal(doc.list[0], 0)
+      assert.equal(doc.list[N - 1], N - 1)
+      // deleting a large range must also not overflow
+      doc = Automerge.change(doc, d => {
+        Automerge.deleteAt(d.list, 0, N - 1)
+      })
+      assert.deepEqual(doc.list, [N - 1])
+    })
+
     it("allows access to the backend", () => {
       let doc = Automerge.from({ hello: "world" })
       assert.deepEqual(Automerge.getBackend(doc).materialize(), {
