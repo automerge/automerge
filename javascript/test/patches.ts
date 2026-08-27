@@ -250,6 +250,248 @@ describe("patches", () => {
   })
 
   describe("the applyPatches function", () => {
+    describe("block marker patches", () => {
+      const textPath = ["content", 0, "text"]
+      const initialBlock = () => ({
+        type: "paragraph",
+        parents: ["blockquote", "aside"],
+        attrs: { level: 1, label: "old", keep: true },
+      })
+      const untouchedBlock = { type: "paragraph", parents: [], attrs: {} }
+
+      function sourceDoc() {
+        const doc = Automerge.from({ content: [{ text: "Hi!" }] })
+        return Automerge.change(doc, d => {
+          Automerge.splitBlock(d, textPath, 2, initialBlock())
+          Automerge.splitBlock(d, textPath, 4, untouchedBlock)
+        })
+      }
+
+      for (const inDocument of [false, true]) {
+        for (const asText of [false, true]) {
+          describe(`on ${asText ? "text" : "an array of marker objects"} ${inDocument ? "inside change()" : "in plain JS"}`, () => {
+            function targetDoc() {
+              if (inDocument && asText) return sourceDoc()
+              // This array uses text offsets: one entry per character/marker.
+              // It is not spans(), whose text runs and {type, value} wrappers
+              // do not match the paths in raw patches.
+              const text = asText
+                ? "Hi\ufffc!\ufffc"
+                : ["H", "i", initialBlock(), "!", untouchedBlock]
+              const value = { content: [{ text }] }
+              return inDocument ? Automerge.from(value) : value
+            }
+
+            function apply(
+              doc: ReturnType<typeof targetDoc>,
+              patches: Patch[],
+            ) {
+              if (inDocument) {
+                return Automerge.change(doc, d =>
+                  Automerge.applyPatches(d, patches),
+                )
+              }
+              Automerge.applyPatches(doc, patches)
+              return doc
+            }
+
+            function assertResult(
+              doc: ReturnType<typeof targetDoc>,
+              expected: ReturnType<typeof initialBlock>,
+            ) {
+              if (asText) {
+                assert.strictEqual(doc.content[0].text, "Hi\ufffc!\ufffc")
+                if (inDocument) {
+                  assert.deepStrictEqual(Automerge.spans(doc, textPath), [
+                    { type: "text", value: "Hi" },
+                    { type: "block", value: expected },
+                    { type: "text", value: "!" },
+                    { type: "block", value: untouchedBlock },
+                  ])
+                }
+              } else {
+                assert.deepStrictEqual(doc.content[0].text, [
+                  "H",
+                  "i",
+                  expected,
+                  "!",
+                  untouchedBlock,
+                ])
+              }
+            }
+
+            it("should replay patches emitted by updateBlock", () => {
+              const before = sourceDoc()
+              const expected = {
+                type: "heading",
+                parents: ["section"],
+                attrs: { level: 2, label: "new", keep: true },
+              }
+              const after = Automerge.change(before, d => {
+                Automerge.updateBlock(d, textPath, 2, expected)
+              })
+              const patches = Automerge.diff(
+                after,
+                Automerge.getHeads(before),
+                Automerge.getHeads(after),
+              )
+              // Check that this exercises updates below the marker, not just
+              // the deletion/insertion which replaces the marker itself.
+              assert.ok(patches.some(p => p.path.length > textPath.length + 1))
+              const doc = apply(targetDoc(), patches)
+              assertResult(doc, expected)
+            })
+
+            it("should apply nested edits without replacing unrelated fields or markers", () => {
+              const blockPath = [...textPath, 2]
+              const patches: Patch[] = [
+                {
+                  action: "put",
+                  path: [...blockPath, "attrs", "level"],
+                  value: 3,
+                },
+                { action: "del", path: [...blockPath, "parents", 0] },
+                {
+                  action: "insert",
+                  path: [...blockPath, "parents", 1],
+                  values: ["section"],
+                },
+                {
+                  action: "del",
+                  path: [...blockPath, "attrs", "label", 0],
+                  length: 3,
+                },
+                {
+                  action: "splice",
+                  path: [...blockPath, "attrs", "label", 0],
+                  value: "new",
+                },
+              ]
+              const doc = apply(targetDoc(), patches)
+              assertResult(doc, {
+                type: "paragraph",
+                parents: ["aside", "section"],
+                attrs: { level: 3, label: "new", keep: true },
+              })
+            })
+          })
+        }
+      }
+
+      it("should return a detached block which must be written back explicitly", () => {
+        const before = sourceDoc()
+        const after = Automerge.change(before, d => {
+          const value = Automerge.block(d, textPath, 2)!
+          assert.strictEqual(Automerge.isAutomerge(value), false)
+          Automerge.applyPatch(value, {
+            action: "put",
+            path: ["attrs", "level"],
+            value: 3,
+          })
+          assert.deepStrictEqual(
+            Automerge.block(d, textPath, 2),
+            initialBlock(),
+          )
+          Automerge.updateBlock(d, textPath, 2, value)
+        })
+        assert.deepStrictEqual(Automerge.block(after, textPath, 2), {
+          ...initialBlock(),
+          attrs: { ...initialBlock().attrs, level: 3 },
+        })
+        assert.deepStrictEqual(Automerge.spans(before, textPath), [
+          { type: "text", value: "Hi" },
+          { type: "block", value: initialBlock() },
+          { type: "text", value: "!" },
+          { type: "block", value: untouchedBlock },
+        ])
+      })
+
+      it("should reject a path through text which does not point to a block", () => {
+        assert.throws(
+          () =>
+            Automerge.change(sourceDoc(), d => {
+              Automerge.applyPatch(d, {
+                action: "put",
+                path: [...textPath, 1, "type"],
+                value: "heading",
+              })
+            }),
+          /Invalid block path/,
+        )
+      })
+
+      for (const text of [null, 123]) {
+        it(`should reject a block update path through ${text}`, () => {
+          const patch: Patch = {
+            action: "put",
+            path: ["text", 0, "type"],
+            value: "heading",
+          }
+          assert.throws(
+            () => Automerge.applyPatch({ text }, patch),
+            /Invalid path/,
+          )
+          assert.throws(
+            () =>
+              Automerge.change(Automerge.from({ text }), d => {
+                Automerge.applyPatch(d, patch)
+              }),
+            /Invalid path/,
+          )
+        })
+      }
+
+      it("should insert multiple adjacent markers in text in order", () => {
+        const values = [initialBlock(), untouchedBlock]
+        const patch: Patch = { action: "insert", path: ["text", 1], values }
+        let doc = Automerge.from({ text: "ab" })
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
+          { type: "text", value: "a" },
+          ...values.map(value => ({ type: "block", value })),
+          { type: "text", value: "b" },
+        ])
+        const plain = { text: "ab" }
+        Automerge.applyPatches(plain, [patch])
+        assert.strictEqual(plain.text, "a\ufffc\ufffcb")
+      })
+
+      for (const value of [null, 1, "not a marker", []]) {
+        it(`should reject inserting ${JSON.stringify(value)} as a block marker in a document`, () => {
+          assert.throws(
+            () =>
+              Automerge.change(Automerge.from({ text: "" }), d => {
+                Automerge.applyPatch(d, {
+                  action: "insert",
+                  path: ["text", 0],
+                  values: [value],
+                })
+              }),
+            /block marker is not an object/,
+          )
+        })
+      }
+
+      it("should reject inserting into a target which is neither an array nor text", () => {
+        const patch: Patch = {
+          action: "insert",
+          path: ["text", 0],
+          values: [{}],
+        }
+        assert.throws(
+          () => Automerge.applyPatch({ text: 123 }, patch),
+          /target is not an array or string/,
+        )
+        assert.throws(
+          () =>
+            Automerge.change(Automerge.from({ text: 123 }), d => {
+              Automerge.applyPatch(d, patch)
+            }),
+          /target is not an array or string/,
+        )
+      })
+    })
+
     describe("when applying to an automerge document", () => {
       it("should apply a map update", () => {
         let doc = Automerge.from<{ foo: { bar: string } }>({
@@ -399,6 +641,81 @@ describe("patches", () => {
         const marks = Automerge.marks(doc, ["foo"])
         assert.deepStrictEqual(marks, [])
       })
+
+      it("should apply patches which insert a block marker", () => {
+        // Block markers are emitted as an `insert` of an object into the text
+        // followed by patches for the marker's attributes
+        let doc = Automerge.from<{ text: string }>({ text: "" })
+        doc = Automerge.change(doc, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+          Automerge.splitBlock(d, ["text"], 6, {
+            type: "heading",
+            parents: ["blockquote"],
+            attrs: { level: 2 },
+          })
+          Automerge.splice(d, ["text"], 7, 0, "World")
+        })
+        const twoBlocks = Automerge.spans(doc, ["text"])
+
+        // Delete the second block and its text
+        const before = Automerge.getHeads(doc)
+        doc = Automerge.change(doc, d => Automerge.splice(d, ["text"], 6, 6))
+        const after = Automerge.getHeads(doc)
+        assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
+          {
+            type: "block",
+            value: { type: "paragraph", parents: [], attrs: {} },
+          },
+          { type: "text", value: "Hello" },
+        ])
+
+        // Revert the deletion by applying the inverse diff
+        const inverse = Automerge.diff(doc, after, before)
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, inverse))
+        assert.deepStrictEqual(Automerge.spans(doc, ["text"]), twoBlocks)
+      })
+
+      it("should apply patches which update a block marker", () => {
+        let doc = Automerge.from<{ text: string }>({ text: "" })
+        doc = Automerge.change(doc, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+        })
+        const before = Automerge.getHeads(doc)
+        doc = Automerge.change(doc, d => {
+          Automerge.updateBlock(d, ["text"], 0, {
+            type: "heading",
+            parents: ["blockquote"],
+            attrs: { level: 2 },
+          })
+        })
+        const after = Automerge.getHeads(doc)
+
+        let other = Automerge.from<{ text: string }>({ text: "" })
+        other = Automerge.change(other, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+        })
+        const patches = Automerge.diff(doc, before, after)
+        other = Automerge.change(other, d => Automerge.applyPatches(d, patches))
+        assert.deepStrictEqual(
+          Automerge.spans(other, ["text"]),
+          Automerge.spans(doc, ["text"]),
+        )
+      })
     })
 
     describe("when applying to a vanilla javascript object", () => {
@@ -543,6 +860,34 @@ describe("patches", () => {
         }
         doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
         assert.deepStrictEqual(doc.foo[0].bar[0].foo, "qux")
+      })
+
+      it("should apply patches which insert a block marker", () => {
+        // A materialized document represents each block marker as a single
+        // object replacement character in the text, so applying the patches
+        // from `diff` to a vanilla object should reproduce the materialized
+        // string
+        let doc = Automerge.from<{ text: string }>({ text: "" })
+        doc = Automerge.change(doc, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+          Automerge.splitBlock(d, ["text"], 6, {
+            type: "heading",
+            parents: ["blockquote"],
+            attrs: { level: 2 },
+          })
+          Automerge.splice(d, ["text"], 7, 0, "World")
+        })
+        assert.deepStrictEqual(doc.text, "\ufffcHello\ufffcWorld")
+
+        const vanilla = {}
+        const patches = Automerge.diff(doc, [], Automerge.getHeads(doc))
+        Automerge.applyPatches(vanilla, patches)
+        assert.deepStrictEqual(vanilla, { text: doc.text })
       })
     })
   })
