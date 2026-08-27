@@ -1,16 +1,20 @@
 import {
+  block,
   Doc,
   isAutomerge,
   isCounter,
   mark,
   splice,
+  splitBlock,
   unmark,
+  updateBlock,
 } from "./implementation.js"
 import {
   DelPatch,
   IncPatch,
   InsertPatch,
   MarkPatch,
+  MaterializeValue,
   Patch,
   Prop,
   PutPatch,
@@ -19,6 +23,24 @@ import {
 } from "./wasm_types.js"
 
 export function applyPatch(doc: unknown, patch: Patch) {
+  const embeddedBlock = resolveEmbeddedBlock(doc, patch.path)
+  if (embeddedBlock === "ignore") {
+    return
+  }
+  if (embeddedBlock) {
+    applyPatch(embeddedBlock.value, {
+      ...patch,
+      path: embeddedBlock.relativePath,
+    } as Patch)
+    updateBlock(
+      doc as Doc<unknown>,
+      embeddedBlock.textPath,
+      embeddedBlock.index,
+      embeddedBlock.value,
+    )
+    return
+  }
+
   let path = resolvePath(doc, patch.path)
   if (patch.action === "put") {
     applyPutPatch(doc, path, patch)
@@ -55,15 +77,41 @@ function applyInsertPatch(
   path: ResolvedPathElem[],
   patch: InsertPatch,
 ) {
-  let { obj: parent, prop } = pathElemAt(path, -1)
+  let { obj: parent, prop, parentPath } = pathElemAt(path, -1)
 
-  if (!Array.isArray(parent)) {
-    throw new RangeError(`target is not an array for patch`)
-  }
   if (!(typeof prop === "number")) {
     throw new RangeError(`index is not a number for patch`)
   }
-  parent.splice(prop, 0, ...patch.values)
+  if (Array.isArray(parent)) {
+    parent.splice(prop, 0, ...patch.values)
+  } else if (typeof parent === "string") {
+    if (isAutomerge(doc)) {
+      let index = prop
+      for (const value of patch.values) {
+        if (
+          value == null ||
+          typeof value !== "object" ||
+          Array.isArray(value)
+        ) {
+          throw new RangeError(`block marker is not an object`)
+        }
+        splitBlock(
+          doc as Doc<unknown>,
+          parentPath,
+          index,
+          value as { [key: string]: MaterializeValue },
+        )
+        index += 1
+      }
+    } else {
+      const { obj: grandParent, prop: grandParentProp } = pathElemAt(path, -2)
+      const replacement = "\ufffc".repeat(patch.values.length)
+      grandParent[grandParentProp] =
+        parent.slice(0, prop) + replacement + parent.slice(prop)
+    }
+  } else {
+    throw new RangeError(`target is not an array or string for patch`)
+  }
 }
 
 function applyDelPatch(
@@ -187,6 +235,73 @@ export function applyPatches(doc: unknown, patches: Patch[]) {
   for (const patch of patches) {
     applyPatch(doc, patch)
   }
+}
+
+type EmbeddedBlock = {
+  textPath: Prop[]
+  index: number
+  value: { [key: string]: any }
+  relativePath: Prop[]
+}
+
+/**
+ * Find a possible target for a patch which updates a block marker in text
+ *
+ * In Automerge text can contain embedded block markers, which are maps that
+ * appear at some index in the text. When we're applying patches we have to
+ * decide what to do with these patches. What we do depends on what kind of 
+ * object we are applying patches _to_
+ *
+ * - A plain JS string - ignore this patch. The block marker is rendered as a 
+ *   unicode object replacement character. Updating it changes nothing
+ * - An object - In this case no special handling is required so we return
+ *   `null` to indicate that the caller can resolve this path like any other 
+ *   update patch.
+ * - A string _but one that is inside an automerge document_ - in this scenario
+ *   we are applying the patch to a plain string in a change() callback. This
+ *   means we can use Automerge.updateBlock to update the block marker. In 
+ *   this case we return the embedded block.
+ */
+function resolveEmbeddedBlock(
+  doc: unknown,
+  path: Prop[],
+): EmbeddedBlock | "ignore" | null {
+  let current: any = doc
+  const currentPath: Prop[] = []
+
+  for (const [pathIndex, prop] of path.entries()) {
+    if (
+      typeof current === "string" &&
+      typeof prop === "number" &&
+      pathIndex !== path.length - 1
+    ) {
+      if (!isAutomerge(doc)) {
+        // We're trying to apply an update to a block marker but the target
+        // is a plain string. Ignore the patch
+        return "ignore"
+      }
+      const value = block(doc as Doc<unknown>, currentPath, prop)
+      if (value == null) {
+        throw new Error(`Invalid block path: ${path}`)
+      }
+      return {
+        textPath: currentPath,
+        index: prop,
+        value,
+        relativePath: path.slice(pathIndex + 1),
+      }
+    }
+
+    if (pathIndex !== path.length - 1) {
+      if (current == null || typeof current !== "object") {
+        return null
+      }
+      current = current[prop]
+      currentPath.push(prop)
+    }
+  }
+
+  return null
 }
 
 type ResolvedPathElem = {
