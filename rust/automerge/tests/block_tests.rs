@@ -781,6 +781,65 @@ fn diff_emits_block_updates() {
     assert_eq!(patches, expected_patches);
 }
 
+fn rich_text_with_two_blocks() -> (AutoCommit, automerge::ObjId, usize) {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    let first = doc.split_block(&text, 0).unwrap();
+    doc.update_object(
+        &first,
+        &hydrate_map! {
+            "type" => "paragraph",
+            "parents" => hydrate_list![],
+            "attrs" => hydrate_map!{},
+        }
+        .into(),
+    )
+    .unwrap();
+    let first_text_index = doc.length(&text);
+    doc.splice_text(&text, first_text_index, 0, "Hello")
+        .unwrap();
+
+    let second_index = doc.length(&text);
+    let second = doc.split_block(&text, second_index).unwrap();
+    doc.update_object(
+        &second,
+        &hydrate_map! {
+            "type" => "heading",
+            "parents" => hydrate_list!["blockquote"],
+            "attrs" => hydrate_map! { "level" => 2 },
+        }
+        .into(),
+    )
+    .unwrap();
+    let second_text_index = doc.length(&text);
+    doc.splice_text(&text, second_text_index, 0, "World")
+        .unwrap();
+
+    (doc, text, second_index)
+}
+
+#[test]
+fn diff_exposes_rich_text_when_reversing_deletion() {
+    let (mut doc, text, _) = rich_text_with_two_blocks();
+    doc.mark(
+        &text,
+        Mark::new("bold".into(), true, 1, 6),
+        ExpandMark::None,
+    )
+    .unwrap();
+    let visible = doc.get_heads();
+    let expected = doc.diff(&[], &visible);
+
+    doc.delete(ROOT, "text").unwrap();
+    let hidden = doc.get_heads();
+
+    // The text's contents exist at both heads. Only its visibility changes,
+    // so the expose queue must emit its blocks, their contents, and marks.
+    let patches = doc.diff(&hidden, &visible);
+    assert_eq!(patches, expected);
+}
+
 #[test]
 fn merge_produces_block_insertion_diffs() {
     let mut doc = AutoCommit::new();
