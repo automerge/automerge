@@ -1692,10 +1692,10 @@ mod tests {
 
         // doc2 should have doc1's new changes
         assert_eq!(
-            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.as_str(),
             // doc2 has both values as a conflict, but the winning value depends on actor ordering;
             // just check the key exists
-            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.as_str(),
         );
         // Verify doc2 has received "new_from_doc1" somewhere in the conflicts
         let all_values: Vec<_> = doc2
