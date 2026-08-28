@@ -318,7 +318,7 @@ impl Op {
     }
 
     pub fn to_i64(&self) -> Option<i64> {
-        self.primitive_value().as_ref().and_then(|v| v.to_i64())
+        self.primitive_value().as_ref().and_then(|v| v.as_i64())
     }
 }
 

@@ -141,6 +141,8 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// If the [`Value`] is a scalar, return the [`ScalarValue`].
+    /// Returns the original value otherwise.
     pub fn into_scalar(self) -> Result<ScalarValue, Self> {
         match self {
             Self::Scalar(s) => Ok(s.into_owned()),
@@ -148,7 +150,16 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// See [`Value::as_scalar`].
+    #[deprecated(note = "Use `as_scalar` instead")]
+    #[inline]
     pub fn to_scalar(&self) -> Option<&ScalarValue> {
+        self.as_scalar()
+    }
+
+    /// If the [`Value`] is a scalar, return the [`ScalarValue`].
+    /// Returns `None` otherwise.
+    pub fn as_scalar(&self) -> Option<&ScalarValue> {
         match self {
             Self::Scalar(s) => Some(s),
             _ => None,
@@ -156,6 +167,12 @@ impl<'a> Value<'a> {
     }
 
     pub fn to_objtype(&self) -> Option<ObjType> {
+        self.as_objtype()
+    }
+
+    /// If the [`Value`] is an object, return the [`ObjType`].
+    /// Returns `None` otherwise.
+    pub fn as_objtype(&self) -> Option<ObjType> {
         match self {
             Self::Object(o) => Some(*o),
             _ => None,
@@ -178,6 +195,9 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// If the [`Value`] is a scalar, and is a set of bytes, return the
+    /// [`Vec<u8>`].
+    /// Returns the original value otherwise.
     pub fn into_bytes(self) -> Result<Vec<u8>, Self> {
         match self {
             Value::Scalar(s) => s
@@ -188,13 +208,24 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// See [`Value::as_bytes`].
+    #[deprecated(note = "Use `as_bytes` instead")]
+    #[inline]
     pub fn to_bytes(&self) -> Option<&[u8]> {
+        self.as_bytes()
+    }
+
+    /// If the [`Value`] is a set of bytes, returns the associated slice of [`u8`].
+    /// Returns `None` otherwise.
+    pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
-            Value::Scalar(s) => s.to_bytes(),
+            Value::Scalar(s) => s.as_bytes(),
             _ => None,
         }
     }
 
+    /// If the [`Value`] is a scalar, and is a string, return the [`String`].
+    /// Returns the original value otherwise.
     pub fn into_string(self) -> Result<String, Self> {
         match self {
             Value::Scalar(s) => s
@@ -205,38 +236,80 @@ impl<'a> Value<'a> {
         }
     }
 
+    /// See [`Value::as_str`].
+    #[deprecated(note = "Use `as_str` instead")]
+    #[inline]
     pub fn to_str(&self) -> Option<&str> {
+        self.as_str()
+    }
+
+    /// If the [`Value`] is a String, returns the associated [`str`].
+    /// Returns `None` otherwise.
+    pub fn as_str(&self) -> Option<&str> {
         match self {
-            Value::Scalar(val) => val.to_str(),
+            Value::Scalar(val) => val.as_str(),
             _ => None,
         }
     }
 
-    /// If this value can be coerced to an i64, return the i64 value
+    /// See [`Value::as_i64`].
+    #[deprecated(note = "Use `as_i64` instead")]
+    #[inline]
     pub fn to_i64(&self) -> Option<i64> {
+        self.as_i64()
+    }
+
+    /// If this [`Value`] is a scalar, and can be coerced to an [`i64`], return
+    /// the [`i64`] value.
+    pub fn as_i64(&self) -> Option<i64> {
         match self {
-            Value::Scalar(s) => s.to_i64(),
+            Value::Scalar(s) => s.as_i64(),
             _ => None,
         }
     }
 
+    /// See [`Value::as_u64`].
+    #[deprecated(note = "Use `as_u64` instead")]
+    #[inline]
     pub fn to_u64(&self) -> Option<u64> {
+        self.as_u64()
+    }
+
+    /// If this [`Value`] is a numeric value, and can be coerced to an
+    /// [`u64`], return the [`u64`] value.
+    pub fn as_u64(&self) -> Option<u64> {
         match self {
-            Value::Scalar(s) => s.to_u64(),
+            Value::Scalar(s) => s.as_u64(),
             _ => None,
         }
     }
 
+    /// See [`Value::as_f64`].
+    #[deprecated(note = "Use `as_f64` instead")]
+    #[inline]
     pub fn to_f64(&self) -> Option<f64> {
+        self.as_f64()
+    }
+
+    /// If this [`ScalarValue`] is a numeric value, and can be coerced to an
+    /// [`f64`], return the [`f64`] value.
+    pub fn as_f64(&self) -> Option<f64> {
         match self {
-            Value::Scalar(s) => s.to_f64(),
+            Value::Scalar(s) => s.as_f64(),
             _ => None,
         }
     }
 
+    /// See [`Value::as_bool`].
+    #[deprecated(note = "Use `as_bool` instead")]
     pub fn to_bool(&self) -> Option<bool> {
+        self.as_bool()
+    }
+
+    /// If this [`ScalarValue`] is a boolean, return the [`bool`] value.
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
-            Value::Scalar(s) => s.to_bool(),
+            Value::Scalar(s) => s.as_bool(),
             _ => None,
         }
     }
@@ -511,7 +584,7 @@ impl ScalarValue {
                 unexpected: v.to_string(),
                 datatype,
             }),
-            (DataType::Int, v) => Ok(ScalarValue::Int(v.to_i64().ok_or(
+            (DataType::Int, v) => Ok(ScalarValue::Int(v.as_i64().ok_or(
                 error::InvalidScalarValue {
                     raw_value: self.clone(),
                     expected: "an int".to_string(),
@@ -519,7 +592,7 @@ impl ScalarValue {
                     datatype,
                 },
             )?)),
-            (DataType::Uint, v) => Ok(ScalarValue::Uint(v.to_u64().ok_or(
+            (DataType::Uint, v) => Ok(ScalarValue::Uint(v.as_u64().ok_or(
                 error::InvalidScalarValue {
                     raw_value: self.clone(),
                     expected: "a uint".to_string(),
@@ -527,7 +600,7 @@ impl ScalarValue {
                     datatype,
                 },
             )?)),
-            (DataType::F64, v) => Ok(ScalarValue::F64(v.to_f64().ok_or(
+            (DataType::F64, v) => Ok(ScalarValue::F64(v.as_f64().ok_or(
                 error::InvalidScalarValue {
                     raw_value: self.clone(),
                     expected: "an f64".to_string(),
@@ -590,6 +663,8 @@ impl ScalarValue {
         matches!(self, Self::Null)
     }
 
+    /// If the [`ScalarValue`] is a set of bytes, return the [`Vec<u8>`].
+    /// Returns the original value otherwise.
     pub fn into_bytes(self) -> Result<Vec<u8>, Self> {
         match self {
             ScalarValue::Bytes(b) => Ok(b),
@@ -597,13 +672,24 @@ impl ScalarValue {
         }
     }
 
+    /// See [`ScalarValue::as_bytes`].
+    #[deprecated(note = "Use `as_bytes` instead")]
+    #[inline]
     pub fn to_bytes(&self) -> Option<&[u8]> {
+        self.as_bytes()
+    }
+
+    /// If the [`ScalarValue`] is a set of Bytes, returns the associated slice of [`u8`].
+    /// Returns `None` otherwise.
+    pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             ScalarValue::Bytes(b) => Some(b),
             _ => None,
         }
     }
 
+    /// If the [`ScalarValue`] is a string, return the [`String`].
+    /// Returns the original value otherwise.
     pub fn into_string(self) -> Result<String, Self> {
         match self {
             ScalarValue::Str(s) => Ok(s.to_string()),
@@ -611,15 +697,32 @@ impl ScalarValue {
         }
     }
 
+    /// See [`ScalarValue::as_str`].
+    #[deprecated(note = "Use `as_str` instead")]
+    #[inline]
     pub fn to_str(&self) -> Option<&str> {
+        self.as_str()
+    }
+
+    /// If the [`ScalarValue`] is a string, returns the associated [`str`].
+    /// Returns `None` otherwise.
+    pub fn as_str(&self) -> Option<&str> {
         match self {
             ScalarValue::Str(s) => Some(s),
             _ => None,
         }
     }
 
-    /// If this value can be coerced to an i64, return the i64 value
+    /// See [`ScalarValue::as_i64`].
+    #[deprecated(note = "Use `as_i64` instead")]
+    #[inline]
     pub fn to_i64(&self) -> Option<i64> {
+        self.as_i64()
+    }
+
+    /// If this [`ScalarValue`] is a numeric value, and can be coerced to an
+    /// [`i64`], return the [`i64`] value.
+    pub fn as_i64(&self) -> Option<i64> {
         match self {
             ScalarValue::Int(n) => Some(*n),
             ScalarValue::Uint(n) => Some(*n as i64),
@@ -630,6 +733,9 @@ impl ScalarValue {
         }
     }
 
+    /// See [`ScalarValue::as_u64`].
+    #[deprecated(note = "Use `as_u64` instead")]
+    #[inline]
     pub fn to_u64(&self) -> Option<u64> {
         match self {
             ScalarValue::Int(n) => Some(*n as u64),
@@ -641,7 +747,29 @@ impl ScalarValue {
         }
     }
 
+    /// If this [`ScalarValue`] is a numeric value, and can be coerced to an
+    /// [`u64`], return the [`u64`] value.
+    pub fn as_u64(&self) -> Option<u64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n as u64),
+            ScalarValue::Uint(n) => Some(*n),
+            ScalarValue::F64(n) => Some(*n as u64),
+            ScalarValue::Counter(n) => Some(n.into()),
+            ScalarValue::Timestamp(n) => Some(*n as u64),
+            _ => None,
+        }
+    }
+
+    /// See [`ScalarValue::as_f64`].
+    #[deprecated(note = "Use `as_f64` instead")]
+    #[inline]
     pub fn to_f64(&self) -> Option<f64> {
+        self.as_f64()
+    }
+
+    /// If this [`ScalarValue`] is a numeric value, and can be coerced to an
+    /// [`f64`], return the [`f64`] value.
+    pub fn as_f64(&self) -> Option<f64> {
         match self {
             ScalarValue::Int(n) => Some(*n as f64),
             ScalarValue::Uint(n) => Some(*n as f64),
@@ -652,18 +780,31 @@ impl ScalarValue {
         }
     }
 
+    /// See [`ScalarValue::as_bool`].
+    #[deprecated(note = "Use `as_bool` instead")]
+    #[inline]
     pub fn to_bool(&self) -> Option<bool> {
+        self.as_bool()
+    }
+
+    /// If this [`ScalarValue`] is a boolean, return the [`bool`] value.
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
             ScalarValue::Boolean(b) => Some(*b),
             _ => None,
         }
     }
 
+    /// Construct a [`ScalarValue::Counter`] starting with the given [`i64`] value.
     pub fn counter(n: i64) -> ScalarValue {
         ScalarValue::Counter(n.into())
     }
 
-    pub(crate) fn as_i64(&self) -> i64 {
+    /// If the [`ScalarValue`] is numeric, except for [`ScalarValue::F64`],
+    /// return the [`i64`] value.
+    ///
+    /// Return `0`, otherwise.
+    pub(crate) fn as_i64_or_default(&self) -> i64 {
         match self {
             Self::Int(i) | Self::Timestamp(i) => *i,
             Self::Counter(c) => c.current,
