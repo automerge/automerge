@@ -794,7 +794,7 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
     let mut run_index = 0;
     let mut value = false;
     let mut segments = 0;
-    let mut len = 0;
+    let mut len: usize = 0;
     let mut last_cb: u8 = 0;
 
     while byte_pos < slab.len() {
@@ -814,7 +814,10 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
         }
 
         segments += 1;
-        len += count;
+        // untrusted count
+        len = len
+            .checked_add(count)
+            .ok_or(PackError::InvalidValue("length overflows usize".into()))?;
         last_cb = cb as u8;
 
         byte_pos = next_pos;
@@ -1001,7 +1004,11 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             let value = !self.run_index.is_multiple_of(2);
             self.pos = next_pos;
             self.run_index += 1;
-            self.slab_items += count;
+            // untrusted count
+            self.slab_items = self
+                .slab_items
+                .checked_add(count)
+                .ok_or(PackError::BadFormat)?;
             self.slab_segs += 1;
             // Cut after target_segments — always even, so the next slab
             // starts on a false run and can be memcpy'd as-is.

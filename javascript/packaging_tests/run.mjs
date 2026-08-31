@@ -353,7 +353,9 @@ async function pack() {
   consola.info("running npm pack")
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "automerge-packaging-test-tarball"))
   const { stdout } = await exec(`npm pack --pack-destination ${tempDir} --json`, { cwd: projectRoot})
-  const filename = JSON.parse(stdout)[0].filename
+  // npm <= 11 reports an array, npm >= 12 an object keyed by package name
+  const packed = JSON.parse(stdout)
+  const { filename } = Array.isArray(packed) ? packed[0] : Object.values(packed)[0]
   return path.join(tempDir, filename)
 }
 

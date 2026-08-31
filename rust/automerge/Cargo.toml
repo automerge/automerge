@@ -1,6 +1,6 @@
 [package]
 name = "automerge"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -20,29 +20,28 @@ slow_path_assertions = ["hexane/slow_path_assertions"]
 deep_fuzz = ["hexane/deep_fuzz"]
 
 [dependencies]
-hexane = { version = "1.0.0-alpha.2", path = "../hexane" }
-hex = "^0.4.3"
-leb128 = "^0.2.5"
-sha2 = "^0.11.0-rc.5"
-thiserror = "^2.0.12"
-itertools = "0.14.0"
+cfg-if = "1.0"
 # zlib-rs backend: pure Rust (works on wasm), ~25% faster inflate than the
 # default miniz_oxide backend natively and ~2x faster on wasm
 flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
-smol_str = { version = "0.3", features = ["serde"] }
-tracing = { version = "^0.1.29" }
+getrandom = "0.4"
+hex = "^0.4.3"
+hexane = { version = "1.0.0-alpha.5", path = "../hexane" }
+itertools = "0.15.0"
+leb128 = "^0.2.5"
 rustc-hash = "^2.1.1"
 serde = { version = "^1.0", features = ["derive"] }
-cfg-if = "1.0"
-getrandom = "0.4"
+sha2 = "^0.11.0-rc.5"
+smol_str = { version = "0.3", features = ["serde"] }
+thiserror = "^2.0.12"
+tracing = { version = "^0.1.29" }
+unicode-segmentation = "1.10.1"
 
 # optional deps
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
-wasm-bindgen = { version = "^0.2", optional = true }
 rand = { version = "^0.10", optional = false }
-
-unicode-segmentation = "1.10.1"
+wasm-bindgen = { version = "^0.2", optional = true }
 
 [dependencies.web-sys]
 version = "^0.3.55"
@@ -54,17 +53,12 @@ optional = true
 # automerge's own tests and benches drive it. Cargo allows this because
 # dev-dependencies are not used to build the library itself.
 automerge-sync = { path = "../automerge-sync" }
-pretty_assertions = "1.0.0"
-sha2 = "0.11.0"
-proptest = { version = "^1.7.0", default-features = false, features = ["std"] }
-serde_json = { version = "^1.0.73", features = [
-    "float_roundtrip",
-], default-features = true }
-maplit = { version = "^1.0" }
-test-log = { version = "0.2.10", features = [
-    "trace",
-], default-features = false }
-tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
+maplit = { version = "^1.0" }
+pretty_assertions = "1.0.0"
 prettytable = "0.10.0"
-
+proptest = { version = "^1.7.0", default-features = false, features = ["std"] }
+serde_json = { version = "^1.0.73", features = ["float_roundtrip"], default-features = true }
+sha2 = "0.11.0"
+test-log = { version = "0.2.10", features = ["trace"], default-features = false }
+tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }

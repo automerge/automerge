@@ -607,7 +607,7 @@ where
             return 0;
         }
         if self.col.is_empty() {
-            return 0;
+            return self.col.len() + 1;
         }
 
         let (si, prefix_before, items_before) = self.col.index.find_slab_at_prefix(target);

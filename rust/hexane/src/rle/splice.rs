@@ -157,14 +157,12 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
             if is_lit {
                 let count = item_pos - lit_start_item;
-                let bytes = base + decoder.byte_pos - byte_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else if is_null {
                 prefix.state = RleState::Null(k);
             } else if k == 1 && !is_lit && was_lit {
                 let count = segments - lit_segments_before;
-                let bytes = base + decoder.byte_pos - byte_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else {
                 prefix.state = RleState::make_run(k, RleCow::Ref(run.value));
             }
@@ -339,118 +337,6 @@ impl<'a, T: RleValue> Postfix<'a, T> {
                 lit,
                 segments,
             },
-        }
-    }
-}
-
-/// [`build_splice_buf`] on top of [`SpliceWriter`](crate::rle::writer::SpliceWriter).
-///
-/// Held to byte-identity with the original by `writer_matches_v1`; the
-/// original stays as the reference implementation until this replaces it
-/// everywhere.
-#[allow(dead_code)]
-pub(crate) fn build_splice_buf_v2<T: RleValue, V: AsColumnRef<T>, C: Codec>(
-    slab: &Slab,
-    index: usize,
-    del: usize,
-    values: impl Iterator<Item = (V, usize)>,
-    max_segments: usize,
-) -> crate::rle::writer::Rebuilt {
-    use crate::rle::writer::SpliceWriter;
-    assert!(slab.segments <= max_segments);
-    let p = find_partition::<T, T, C>(slab, index..index + del);
-    let tail_bytes = &slab.data[p.outer.end..];
-    let mut w = SpliceWriter::<T, C>::empty();
-    w.reset(
-        p.prefix.state.into_owned(),
-        p.prefix.segments,
-        index,
-        p.outer.clone(),
-        max_segments,
-    );
-    for (value, count) in values {
-        w.push(value, count);
-    }
-    w.finish(
-        p.postfix.map(|x| x.into_owned()),
-        slab.len - index - del,
-        tail_bytes,
-        slab.data.len(),
-        slab.tail,
-    )
-}
-
-#[cfg(test)]
-mod writer_tests {
-    use super::*;
-    use crate::codec::Leb128;
-    use crate::encoding::EncoderApi;
-    use crate::Encoder;
-
-    fn slab_of(vals: &[u64]) -> Slab {
-        Encoder::<u64>::encode_slab(vals.iter().copied())
-    }
-
-    /// The writer must reproduce the original builder byte for byte, on
-    /// every splice shape and at budgets that force overflow.
-    #[test]
-    fn writer_matches_v1() {
-        let shapes: Vec<Vec<u64>> = vec![
-            vec![7; 20],
-            (0..20u64).collect(),
-            vec![1, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 7, 8, 8],
-            (0..30u64).map(|i| i / 7).collect(),
-        ];
-        let inserts: Vec<Vec<u64>> = vec![
-            vec![],
-            vec![9],
-            vec![9, 9],
-            vec![7, 7, 7],
-            (100..140u64).collect(),
-        ];
-        for vals in &shapes {
-            for max_segments in [4usize, 8, 64, usize::MAX] {
-                // v1 asserts the slab already fits the budget
-                let slab = slab_of(vals);
-                if slab.segments > max_segments {
-                    continue;
-                }
-                for index in 0..=vals.len() {
-                    for del in 0..=(vals.len() - index).min(3) {
-                        for ins in &inserts {
-                            let a = build_splice_buf::<u64, u64, Leb128>(
-                                &slab,
-                                index,
-                                del,
-                                ins.iter().map(|v| (*v, 1)),
-                                max_segments,
-                            );
-                            let b = build_splice_buf_v2::<u64, u64, Leb128>(
-                                &slab,
-                                index,
-                                del,
-                                ins.iter().map(|v| (*v, 1)),
-                                max_segments,
-                            );
-                            let ctx = format!(
-                                "max={max_segments} index={index} del={del} ins={ins:?} vals={vals:?}"
-                            );
-                            assert_eq!(a.bytes, b.bytes, "bytes {ctx}");
-                            assert_eq!(a.range, b.range, "range {ctx}");
-                            assert_eq!(a.len, b.len, "len {ctx}");
-                            assert_eq!(a.segments, b.segments, "segments {ctx}");
-                            assert_eq!(a.wpos, b.wpos, "wpos {ctx}");
-                            assert_eq!(a.rewrite.is_some(), b.rewrite.is_some(), "rewrite {ctx}");
-                            assert_eq!(a.overflow.len(), b.overflow.len(), "overflow count {ctx}");
-                            for (i, (x, y)) in a.overflow.iter().zip(&b.overflow).enumerate() {
-                                assert_eq!(x.data, y.data, "overflow {i} data {ctx}");
-                                assert_eq!(x.len, y.len, "overflow {i} len {ctx}");
-                                assert_eq!(x.segments, y.segments, "overflow {i} segments {ctx}");
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -1177,9 +1063,9 @@ pub(crate) fn tail<T: RleValue, C: Codec>(
             let state = RleState::Lit {
                 count,
                 local: 0,
+                bytes: None,
                 current,
                 header_pos,
-                bytes,
             };
             (state, value_pos, 1)
         }

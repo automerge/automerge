@@ -2,7 +2,6 @@ use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
 use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
-use hexane::PackError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -68,8 +67,8 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
-    #[error(transparent)]
-    EncodingError(#[from] PackError),
+    #[error("{0}")]
+    EncodingError(String),
     #[error("failed to decode change set: {0}")]
     DecodeChangeSet(Box<dyn std::error::Error + Send + Sync + 'static>),
     /// A caller-supplied [`crate::Fragment`] names history this document
@@ -80,6 +79,12 @@ pub enum AutomergeError {
     /// contents — i.e. the sender's bytes are malformed or forged.
     #[error("malformed change set: {0}")]
     MalformedChangeSet(&'static str),
+}
+
+impl AutomergeError {
+    pub(crate) fn encoding(error: impl std::fmt::Display) -> Self {
+        Self::EncodingError(error.to_string())
+    }
 }
 
 impl PartialEq for AutomergeError {

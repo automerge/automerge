@@ -1831,16 +1831,34 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
                 1
             } else if d > 0 {
                 // increasing: first j at or above lo
-                ((lo - running) + d - 1).div_euclid(d).max(1)
+                match lo.checked_sub(running) {
+                    // overflow means further than `count` steps, not one
+                    Some(gap) => gap
+                        .checked_add(d - 1)
+                        .map_or(count as i64, |n| n.div_euclid(d))
+                        .max(1),
+                    None if lo > running => return None,
+                    None => 1,
+                }
             } else {
-                // decreasing: first j at or below hi
-                let d = -d;
-                ((running - hi) + d - 1).div_euclid(d).max(1)
+                // decreasing: first j at or below hi. `-i64::MIN` has no
+                // negation, and admits only `j == 1` anyway.
+                match d.checked_neg() {
+                    None => 1,
+                    Some(d) => match running.checked_sub(hi) {
+                        Some(gap) => gap
+                            .checked_add(d - 1)
+                            .map_or(count as i64, |n| n.div_euclid(d))
+                            .max(1),
+                        None if hi > running => 1,
+                        None => return None,
+                    },
+                }
             };
             if j as usize > count {
                 return None;
             }
-            let v = running + d * j;
+            let v = d.checked_mul(j).and_then(|o| running.checked_add(o))?;
             (lo <= v && v <= hi).then_some(j as usize)
         }
 

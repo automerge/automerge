@@ -233,7 +233,8 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>, C: Codec = Leb128> 
         count: usize,
         local: usize,
         header_pos: usize,
-        bytes: usize,
+        /// Width of the last value written locally; `None` until one is.
+        bytes: Option<std::num::NonZeroUsize>,
         current: RleCow<'a, T, V>,
     },
     Null(usize),
@@ -384,7 +385,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                 } else {
                     flushed.rewrite = Some(RewriteHeader::new(*count, *header_pos));
                 }
-                flushed.wpos = WPos::trunc(*count, *header_pos, *bytes, *local == *count);
+                flushed.wpos = WPos::trunc(
+                    *count,
+                    *header_pos,
+                    bytes.map_or(0, |b| b.get()),
+                    *local == *count,
+                );
                 flushed.segments = *local;
                 Some(RleState::Run(n + 1, value))
             }
@@ -395,7 +401,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                 bytes,
                 ..
             } if n == 1 => {
-                *bytes = current.pack::<C>(buf);
+                *bytes = std::num::NonZeroUsize::new(current.pack::<C>(buf));
                 *count += 1;
                 *local += 1;
                 *current = value;
@@ -427,7 +433,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                     count: 1,
                     local: 1,
                     header_pos,
-                    bytes,
+                    bytes: std::num::NonZeroUsize::new(bytes),
                     current: value,
                 })
             }
@@ -454,7 +460,8 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         flushed
     }
 
-    pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize, bytes: usize) -> Self {
+    /// A literal run imported from a slab; nothing written locally yet.
+    pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize) -> Self {
         if count == 0 {
             Self::Lone(current)
         } else {
@@ -463,7 +470,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
                 local: 0,
                 current,
                 header_pos,
-                bytes,
+                bytes: None,
             }
         }
     }

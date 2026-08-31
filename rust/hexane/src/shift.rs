@@ -283,8 +283,12 @@ impl<T: Iterator> Iterator for Unshift<T> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let mut next = self.inner.nth(n);
-        std::mem::swap(&mut next, &mut self.next);
-        next
+        if n == 0 {
+            return self.next();
+        }
+        // the lookahead is item 0, so item `n` is the inner's `n - 1`
+        let out = self.inner.nth(n - 1);
+        self.next = self.inner.next();
+        out
     }
 }

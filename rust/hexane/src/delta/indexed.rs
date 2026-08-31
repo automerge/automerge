@@ -112,11 +112,17 @@ fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
                 max_off = max_off.max(partial);
             }
             Some(v) => {
-                let first = partial + v;
-                let last = partial + v * run.count as i64;
+                // the loader rejects these
+                let span = v
+                    .checked_mul(run.count as i64)
+                    .expect("delta run overflows i64");
+                let first = partial.checked_add(v).expect("delta value overflows i64");
+                let last = partial
+                    .checked_add(span)
+                    .expect("delta value overflows i64");
                 min_off = min_off.min(first.min(last));
                 max_off = max_off.max(first.max(last));
-                partial += v * run.count as i64;
+                partial = last;
             }
         }
     }

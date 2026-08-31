@@ -2,6 +2,12 @@ use crate::types::OpId;
 
 use std::num::NonZeroU32;
 
+/// A [`Clock`] is a vector clock for a set of actors.
+///
+/// Each index of the vector represents that actors counter.
+///
+/// For example, given an [`OpId`], one can use [`OpId::actor`] to find the
+/// currently stored counter of the actor in the [`Clock`].
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct Clock(pub(crate) Vec<u32>);
 
@@ -128,6 +134,16 @@ impl Clock {
         self.0[actor_index] = u32::MAX
     }
 
+    /// An [`OpId`] is covered by a [`Clock`] if the operation happened within
+    /// the timeframe of this [`Clock`].
+    ///
+    /// The [`OpId::actor`] is looked up in the vector clock, and checks if it
+    /// is greater than or equal to the [`OpId::counter`].
+    ///
+    /// # Panics
+    ///
+    /// If the [`OpId::actor`] is an index that is greater than the length of
+    /// the vector, i.e. the actor does not exist in the [`Clock`].
     pub(crate) fn covers(&self, id: &OpId) -> bool {
         self.0[id.actor()] as u64 >= id.counter()
     }

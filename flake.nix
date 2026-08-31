@@ -31,6 +31,7 @@
         pkgs = import nixpkgs {inherit system overlays;};
         unstable = import nixos-unstable {inherit system overlays;};
 
+        nodejs = pkgs.nodejs_26;
         rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
           extensions = [
             "cargo"
@@ -50,6 +51,38 @@
 
             "wasm32-unknown-unknown"
           ];
+        };
+
+        # Pinned nightly for the wasm build (must match WASM_TOOLCHAIN in CI).
+        # `-Zbuild-std` needs a nightly cargo/rustc plus the rust-src component.
+        wasm-rust-toolchain = pkgs.rust-bin.nightly."2026-04-25".minimal.override {
+          extensions = ["rust-src"];
+          targets = ["wasm32-unknown-unknown"];
+        };
+
+        # rustup-style `cargo +nightly` doesn't work without rustup, so expose
+        # the nightly toolchain behind a wrapper that javascript/scripts/build.mjs
+        # can use via WASM_CARGO. PATH is prepended so nightly cargo also picks
+        # up nightly rustc rather than the stable one from the devshell.
+        wasm-cargo = pkgs.writeShellScriptBin "wasm-cargo" ''
+          export PATH=${wasm-rust-toolchain}/bin:$PATH
+          exec cargo "$@"
+        '';
+
+        # CI pins wasm-bindgen-cli 0.2.127 (see .github/workflows/ci.yaml);
+        # the CLI version must match the `wasm-bindgen` crate in rust/Cargo.lock.
+        wasm-bindgen-cli = unstable.buildWasmBindgenCli rec {
+          src = pkgs.fetchCrate {
+            pname = "wasm-bindgen-cli";
+            version = "0.2.127";
+            hash = "sha256-di+qBAdd7pENLiIB9CoZoab+W5xeDoByMREcCGTSzWo=";
+          };
+
+          cargoDeps = unstable.rustPlatform.fetchCargoVendor {
+            inherit src;
+            inherit (src) pname version;
+            hash = "sha256-FTv2GZIAQs0ePdIZXIXil7JbZ6kIT05VG6vqC1qNFxQ=";
+          };
         };
 
         format-pkgs = with pkgs; [
@@ -75,7 +108,7 @@
           cargo-watch
           # llvmPackages.bintools
           twiggy
-          unstable.wasm-bindgen-cli
+          wasm-bindgen-cli
           wasm-tools
         ];
 
@@ -84,7 +117,7 @@
         node = "${unstable.nodejs_20}/bin/node";
         wasm-opt = "${pkgs.binaryen}/bin/wasm-opt";
         wasm-pack = "${unstable.wasm-pack}/bin/wasm-pack";
-        npm = "${pkgs.nodejs_22}/bin/npm";
+        npm = "${nodejs}/bin/npm";
 
         cmd = command-utils.cmd.${system};
 
@@ -244,6 +277,7 @@
               cargo-fuzz
               cargo-watch
               rust-toolchain
+              wasm-cargo
               unstable.irust
 
               # Wasm
@@ -252,8 +286,9 @@
 
               # JS
               chromedriver
+              chromium
               unstable.deno
-              nodejs_22 # Current LTS
+              nodejs # Current LTS
 
               # Clang
               cmake
@@ -273,6 +308,13 @@
             ++ format-pkgs
             ++ cargo-installs
             ++ lib.optionals stdenv.isDarwin darwin-installs;
+
+          WASM_CARGO = "wasm-cargo";
+
+          # Use the Nix-provided Chromium for the JS packaging tests; the
+          # Chrome that Puppeteer downloads does not run on NixOS.
+          PUPPETEER_SKIP_DOWNLOAD = "1";
+          PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
 
           shellHook = "menu";
         };

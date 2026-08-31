@@ -247,12 +247,11 @@ impl<'a, I: OpQueryTerm<'a> + Clone> VisibleOpIter<'a, I> {
     }
 }
 
+/// Returns `true` if the [`OpId`] is covered by the [`Clock`] (see [`Clock::covers`]).
+///
+/// If no [`Clock`] is provided, then this will always return `true`.
 fn vis(clock: Option<&Clock>, id: &OpId) -> bool {
-    if let Some(c) = clock {
-        c.covers(id)
-    } else {
-        true
-    }
+    clock.is_none_or(|c| c.covers(id))
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for VisibleOpIter<'a, I> {
@@ -277,7 +276,7 @@ impl<'a> Op<'a> {
         &self,
         counter: i64,
         clock: Option<&Clock>,
-    ) -> (bool, Option<ScalarValue<'a>>) {
+    ) -> (bool, Option<i64>) {
         let mut inc = 0;
         let mut deleted = false;
         for (i, val) in self.succ_inc() {
@@ -289,47 +288,56 @@ impl<'a> Op<'a> {
                 }
             }
         }
-        (deleted, Some(ScalarValue::Counter(counter + inc)))
+        (deleted, Some(counter + inc))
     }
 
     pub(crate) fn scope_to_clock(&mut self, clock: Option<&Clock>) -> bool {
         let visibility = self.maybe_scope_to_clock(clock);
         let result = visibility.visible();
-        if let Some(v) = visibility.value {
-            self.value = v;
+        if let Some(v) = visibility.counter_value {
+            self.value = ScalarValue::Counter(v);
         }
         result
     }
 
-    fn maybe_scope_to_clock(&mut self, clock: Option<&Clock>) -> Visibility<'a> {
+    fn maybe_scope_to_clock(&mut self, clock: Option<&Clock>) -> Visibility {
         let predates = vis(clock, &self.id);
         if let ScalarValue::Counter(n) = self.value {
-            let (deleted, value) = self.maybe_scope_counter_to_clock(n, clock);
+            let (deleted, counter_value) = self.maybe_scope_counter_to_clock(n, clock);
             Visibility {
                 predates,
                 deleted,
-                value,
+                counter_value,
             }
         } else {
             let deleted = self.succ().any(|i| vis(clock, &i));
-            let value = None;
+            let counter_value = None;
             Visibility {
                 predates,
                 deleted,
-                value,
+                counter_value,
             }
         }
     }
 }
 
+/// Track if an [`Op`] is considered visible, usually in relation to a
+/// [`Clock`], if one is given.
+///
+/// The [`Op`] is considered visible if it predates the given [`Clock`], and is
+/// not considered deleted within the given [`Clock`] timeframe.
 #[derive(Debug)]
-struct Visibility<'a> {
+struct Visibility {
     predates: bool,
     deleted: bool,
-    value: Option<ScalarValue<'a>>,
+    /// If the [`Op`] is a [`Counter`] value, the increments are kept track of
+    /// to update the [`Op::value`].
+    ///
+    /// [`Counter`]: ScalarValue::Counter
+    counter_value: Option<i64>,
 }
 
-impl Visibility<'_> {
+impl Visibility {
     fn visible(&self) -> bool {
         self.predates && !self.deleted
     }

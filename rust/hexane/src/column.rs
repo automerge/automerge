@@ -545,7 +545,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     }
 
     pub fn advance_by(&mut self, amount: usize) {
-        self.advance_to(self.pos + amount)
+        self.advance_to(self.pos.saturating_add(amount))
     }
 
     /// Returns the next run of identical values, merging across slab boundaries.
@@ -640,6 +640,9 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
             self.slab_idx = si;
             self.pos = pos;
             self.items_left = 0;
+            // else a later re-extend decodes items already passed
+            self.slab_remaining = 0;
+            self.decoder = T::Encoding::<C>::decoder(&[]);
             false
         } else {
             debug_assert!(pos >= self.pos);
@@ -1008,18 +1011,6 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 // over the old BIT-backed Column (now deleted); this is the equivalent for
 // the B-tree path, mutating via the `ColumnIndex` trait.
 
-/// Where the last write left off, so the next edit near it can skip the
-/// index lookup. `slab`/`in_slab` are only meaningful while `counter`
-/// still matches the column's; the default is the front of the column,
-/// which is a valid cursor for any column.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LastEdit {
-    pub(crate) counter: usize,
-    pub(crate) pos: usize,
-    pub(crate) slab: usize,
-    pub(crate) in_slab: usize,
-}
-
 /// A typed column of RLE- or bool-encoded values with O(log S) random
 /// access and in-place splice.
 ///
@@ -1042,7 +1033,6 @@ pub struct Column<
     pub(crate) total_len: usize,
     pub(crate) max_segments: usize,
     pub(crate) counter: usize,
-    pub(crate) last: LastEdit,
     #[allow(clippy::type_complexity)]
     _phantom: PhantomData<fn() -> (T, C, WF)>,
 }
@@ -1061,7 +1051,6 @@ where
             total_len: self.total_len,
             max_segments: self.max_segments,
             counter: self.counter,
-            last: self.last,
             _phantom: PhantomData,
         }
     }
@@ -1141,7 +1130,6 @@ where
             total_len: 0,
             max_segments,
             counter: 0,
-            last: LastEdit::default(),
             _phantom: PhantomData,
         }
     }
@@ -1231,13 +1219,16 @@ where
             total_len,
             max_segments,
             counter: 0,
-            last: LastEdit::default(),
             _phantom: PhantomData,
         }
     }
 
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
+        assert!(
+            len <= i64::MAX as usize,
+            "fill length {len} is not encodable"
+        );
         if len == 0 {
             return Self::new();
         }
@@ -1249,7 +1240,6 @@ where
             total_len: len,
             max_segments: DEFAULT_MAX_SEG,
             counter: 0,
-            last: LastEdit::default(),
             _phantom: PhantomData,
         }
     }
@@ -1260,33 +1250,6 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.total_len == 0
-    }
-
-    /// `(slab, offset)` for `index` from the cached cursor, when the last
-    /// write left one in a slab that still covers `index`. Pure
-    /// arithmetic: `in_slab` is an item offset, so landing before or
-    /// after the cursor inside its slab costs the same.
-    pub(crate) fn resume_at(&self, index: usize) -> Option<(usize, usize)> {
-        let last = self.last;
-        if last.counter != self.counter || last.slab >= self.slabs.len() {
-            return None;
-        }
-        let start = last.pos.checked_sub(last.in_slab)?;
-        let end = start + self.slabs[last.slab].len;
-        // exclusive: `index == end` is the next slab's item 0, which is
-        // where `find_slab` puts it — claiming it here as `(slab, len)`
-        // is a different cursor and the rebuild reads it differently
-        let hit = (index >= start && index < end).then(|| (last.slab, index - start));
-        #[cfg(feature = "slow_path_assertions")]
-        if let Some(h) = hit {
-            let truth = self.find_slab(index);
-            assert_eq!(
-                h, truth,
-                "resume_at disagrees at index={index}: last={last:?} slab_len={}",
-                self.slabs[last.slab].len
-            );
-        }
-        hit
     }
 
     pub fn slab_count(&self) -> usize {
@@ -2002,7 +1965,6 @@ where
             total_len,
             max_segments: self.max_segments,
             counter: 0,
-            last: LastEdit::default(),
             _phantom: PhantomData,
         })
     }
