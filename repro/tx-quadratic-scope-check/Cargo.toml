@@ -1,0 +1,17 @@
+# Standalone on purpose: this crate is not a member of the `rust/` workspace so that the same
+# source can be built against any version of automerge by repointing the path dependency below.
+[workspace]
+
+[package]
+name = "tx-quadratic-scope-check"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Point this at whichever automerge checkout you want to measure.
+# See README.md for the A/B procedure against a 0.9.0 snapshot.
+automerge = { path = "../../rust/automerge" }
+
+[profile.release]
+debug = true
