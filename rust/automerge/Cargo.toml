@@ -21,7 +21,7 @@ slow_path_assertions = ["hexane/slow_path_assertions"]
 cfg-if = "1.0"
 # zlib-rs backend: pure Rust (works on wasm), ~25% faster inflate than the
 # default miniz_oxide backend natively and ~2x faster on wasm
-flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
+flate2 = { version = "^1.1.10", default-features = false, features = ["zlib-rs"] }
 getrandom = "0.4"
 hex = "^0.4.3"
 hexane = { version = "1.0.0-alpha.5", path = "../hexane" }
