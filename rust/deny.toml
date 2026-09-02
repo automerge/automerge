@@ -156,7 +156,6 @@ skip = [
     { crate = "itertools@0.13.0", reason = "this is brought in by criterion-plot, which we only use in benchmarks" },
     { crate = "winnow@0.7.15", reason = "brought in by toml via cbindgen; 1.0.0 brought in by toml_parser via the same path" },
     { crate = "syn@2.0.119", reason = "pulled in by cbindgen, divan, test-log and thiserror 1.0 (via prettytable); the rest of the tree uses syn 3.0" },
-    { crate = "wit-bindgen@0.57.1", reason = "pulled in by wasip2 via getrandom 0.3 (only present with older lockfiles; newer getrandom uses wasip3 with wit-bindgen 0.51)" },
     # usvg depends on roxmltree 0.21 while its fontconfig-parser dependency
     # is still on roxmltree 0.20; both come from resvg, used by
     # benchmark-battery to render benchmark graphs
