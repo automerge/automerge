@@ -682,7 +682,7 @@ impl ChangeGraph {
         }
         let mut deps = vec![];
         let mut supercede = vec![];
-        let clock = self.calculate_clock(vec![head]);
+        let clock = self.calculate_clock([head].into());
         for (i, f) in self.fragments.iter().enumerate().rev() {
             if clock.covers(&f.clock) {
                 if self.hashes[f.head.0 as usize].fragment_level() >= level {
@@ -770,17 +770,19 @@ impl ChangeGraph {
         })
     }
 
-    fn heads_to_nodes(&self, heads: &[ChangeHash]) -> Vec<NodeIdx> {
+    fn heads_to_nodes<'a>(
+        &self,
+        heads: &'a [ChangeHash],
+    ) -> impl Iterator<Item = NodeIdx> + use<'a, '_> {
         heads
             .iter()
             .filter_map(|h| self.nodes_by_hash.get(h))
             .copied()
-            .collect()
     }
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes)
+        self.calculate_clock(nodes.collect())
             .iter()
             .map(|(actor, seq)| {
                 self.seq_index
@@ -794,16 +796,15 @@ impl ChangeGraph {
 
     pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes)
+        self.calculate_clock(nodes.collect())
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
         Some(*self.seq.get(idx.0 as usize)?)
     }
 
-    fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> SeqClock {
+    fn calculate_clock(&self, mut to_visit: BTreeSet<NodeIdx>) -> SeqClock {
         let mut clock = SeqClock::new(self.num_actors());
-        let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, usize::MAX);
 
@@ -846,7 +847,7 @@ impl ChangeGraph {
         heads: &[ChangeHash],
     ) {
         let nodes = self.heads_to_nodes(heads);
-        self.traverse_ancestors(nodes, |idx| {
+        self.traverse_ancestors(nodes.collect(), |idx| {
             let hash = &self.hashes[idx.0 as usize];
             changes.remove(hash);
             true
@@ -1636,7 +1637,7 @@ impl FragmentNode {
             .iter()
             .map(|d| graph.hashes[d.0 as usize])
             .collect();
-        let clock = graph.calculate_clock(self.deps.clone());
+        let clock = graph.calculate_clock(self.deps.clone().into_iter().collect());
         let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
         let checkpoints = members
             .iter()
