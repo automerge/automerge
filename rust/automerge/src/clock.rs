@@ -118,7 +118,7 @@ impl ClockRange {
 
 impl Clock {
     pub(crate) fn isolate(&mut self, actor_index: usize) {
-        self.0[actor_index] = u32::MAX
+        self.set_counter_of(actor_index, u32::MAX);
     }
 
     /// An [`OpId`] is covered by a [`Clock`] if the operation happened within
@@ -132,7 +132,27 @@ impl Clock {
     /// If the [`OpId::actor`] is an index that is greater than the length of
     /// the vector, i.e. the actor does not exist in the [`Clock`].
     pub(crate) fn covers(&self, id: &OpId) -> bool {
-        self.0[id.actor()] as u64 >= id.counter()
+        self.counter_of(id.actor()) as u64 >= id.counter()
+    }
+
+    /// Get the `u32` counter value for the given `actor`.
+    ///
+    /// # Panics
+    ///
+    /// If the `actor` index is out of bounds of the internal vector.
+    #[inline]
+    fn counter_of(&self, actor: usize) -> u32 {
+        self.0[actor]
+    }
+
+    /// Set the `actor`'s counter to the given `counter` value.
+    ///
+    /// # Panics
+    ///
+    /// If the `actor` index is out of bounds of the internal vector.
+    #[inline]
+    fn set_counter_of(&mut self, actor: usize, counter: u32) {
+        self.0[actor] = counter;
     }
 }
 
