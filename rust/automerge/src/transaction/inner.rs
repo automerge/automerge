@@ -100,7 +100,9 @@ impl TransactionInner {
 
     fn exid_to_obj(&self, doc: &Automerge, id: &ExId) -> Result<ObjMeta, AutomergeError> {
         let obj = doc.exid_to_obj(id)?;
-        let created_in_transaction = self.pending.iter().any(|op| op.id() == obj.id.0);
+        let created_in_transaction = obj.id.0.actor() == self.actor
+            && obj.id.0.counter() >= self.start_op.get()
+            && obj.id.0.counter() < self.start_op.get() + self.pending_ops() as u64;
         if !obj.id.is_root()
             && !created_in_transaction
             && self
