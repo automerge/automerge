@@ -73,6 +73,16 @@ function applyDelPatch(
 ) {
   let { obj: parent, prop, parentPath } = pathElemAt(path, -1)
 
+  if (
+    parent != null &&
+    typeof parent === "object" &&
+    !Array.isArray(parent) &&
+    typeof prop === "string"
+  ) {
+    // Deleting a key from a map
+    delete parent[prop]
+    return
+  }
   if (!(typeof prop === "number")) {
     throw new RangeError(`index is not a number for patch`)
   }

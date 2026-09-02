@@ -311,6 +311,28 @@ describe("patches", () => {
         assert.deepStrictEqual(doc.foo, ["qux"])
       })
 
+      it("should apply a map deletion patch", () => {
+        let doc = Automerge.from<{ foo: { bar?: string; baz: string } }>({
+          foo: { bar: "qux", baz: "quux" },
+        })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", "bar"],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, { baz: "quux" })
+      })
+
+      it("should apply a map deletion patch for a numeric key", () => {
+        let doc = Automerge.from<{ [key: string]: number }>({ 0: 1, 1: 2 })
+        const patch: Patch = {
+          action: "del",
+          path: ["0"],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc, { 1: 2 })
+      })
+
       it("should apply a text splice patch", () => {
         let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
         const patch: Patch = {
@@ -458,6 +480,42 @@ describe("patches", () => {
         }
         Automerge.applyPatches(doc, [patch])
         assert.deepStrictEqual(doc.foo, ["qux"])
+      })
+
+      it("should apply a map deletion patch", () => {
+        let doc: { foo: { bar?: string; baz: string } } = {
+          foo: { bar: "qux", baz: "quux" },
+        }
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", "bar"],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, { baz: "quux" })
+      })
+
+      it("should apply a map deletion patch for a numeric key", () => {
+        let doc: { [key: string]: number } = { 0: 1, 1: 2 }
+        const patch: Patch = {
+          action: "del",
+          path: ["0"],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc, { 1: 2 })
+      })
+
+      it("should apply the patches from diffing a map deletion", () => {
+        let doc = Automerge.from<{ [key: string]: number }>({ 0: 1, 1: 2 })
+        const target = Automerge.clone(doc)
+        const before = Automerge.getHeads(doc)
+        doc = Automerge.change(doc, d => {
+          delete d["0"]
+        })
+        const patches = Automerge.diff(doc, before, Automerge.getHeads(doc))
+        const result = Automerge.change(target, d =>
+          Automerge.applyPatches(d, patches),
+        )
+        assert.deepStrictEqual(result, { 1: 2 })
       })
 
       it("should apply a text splice patch", () => {
