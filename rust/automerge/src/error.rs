@@ -1,7 +1,7 @@
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
+use crate::{Change, ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +78,10 @@ pub enum AutomergeError {
 impl AutomergeError {
     pub(crate) fn encoding(error: impl std::fmt::Display) -> Self {
         Self::EncodingError(error.to_string())
+    }
+
+    pub(crate) fn duplicate_seq(c: &Change) -> Self {
+        Self::DuplicateSeqNumber(c.seq(), c.actor_id().clone())
     }
 }
 

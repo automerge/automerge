@@ -23,8 +23,6 @@ type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
-    actor_seq: HashMap<ActorId, HashSet<u64>>,
-    hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
 }
@@ -841,30 +839,13 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 }
 
 impl BatchApply {
-    fn push(&mut self, c: Change) {
-        assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
-
-        assert!(!self.hashes.contains(&c.hash()));
-        self.hashes.insert(c.hash());
-
-        self.changes.push(c);
-    }
-
-    fn record_actor_seq(&mut self, c: &Change) {
-        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
-            set.insert(c.seq());
-        } else {
-            self.actor_seq
-                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
+    fn new(changes: Vec<Change>) -> Self {
+        Self {
+            ops: Vec::default(),
+            changes,
+            pred: PredCache::default(),
+            obj_spans: Vec::default(),
         }
-    }
-
-    fn has_actor_seq(&self, c: &Change) -> bool {
-        self.actor_seq
-            .get(c.actor_id())
-            .map(|set| set.contains(&c.seq()))
-            .unwrap_or(false)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -1069,43 +1050,45 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        // Add new changes, deduplicating and checking for duplicate seq numbers.
-        let mut batch = ChangeBatch::new();
-        // Skip any changes that are already in the change graph or in the queue.
-        let changes = changes.into_iter().filter(|c| {
-            let hash = c.hash();
-            !(self.change_graph.has_change(&hash) || self.queue.has_hash(&hash))
-        });
-        for c in changes {
-            if self.has_actor_seq(&c) {
+        let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
+        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
+
+        for change in self.queue.iter() {
+            actor_seqs
+                .entry(change.actor_id().clone())
+                .or_default()
+                .insert(change.seq());
+        }
+
+        let mut incoming = ChangeBatch::new();
+        for change in changes {
+            let hash = change.hash();
+            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
+                continue;
+            }
+            if self.has_actor_seq(&change) {
                 self.queue
-                    .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
-                return Err(AutomergeError::DuplicateSeqNumber(
-                    c.seq(),
-                    c.actor_id().clone(),
-                ));
+                    .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
+                return Err(AutomergeError::duplicate_seq(&change));
             }
-            if self.queue.has_actor_seq(&c) {
-                return Err(AutomergeError::DuplicateSeqNumber(
-                    c.seq(),
-                    c.actor_id().clone(),
-                ));
+            if actor_seqs
+                .get(change.actor_id())
+                .is_some_and(|seqs| seqs.contains(&change.seq()))
+            {
+                return Err(AutomergeError::duplicate_seq(&change));
             }
-            batch.push(c)?;
+
+            seen.insert(hash);
+            actor_seqs
+                .entry(change.actor_id().clone())
+                .or_default()
+                .insert(change.seq());
+            incoming.push(change)?;
         }
 
-        self.queue.extend(batch);
-
-        if self.queue.is_empty() {
-            return Ok(());
-        }
-
-        let mut chap = BatchApply::default();
-        for c in self.queue.pop_topo_sorted_ready(&self.change_graph) {
-            chap.push(c);
-        }
-
-        Ok(chap.apply(self, log)?)
+        self.queue.extend(incoming);
+        let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
+        Ok(BatchApply::new(changes).apply(self, log)?)
     }
 
     fn import_ops_to(
