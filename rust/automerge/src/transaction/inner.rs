@@ -9,7 +9,6 @@ use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
-use crate::change::Footer;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
@@ -190,15 +189,7 @@ impl TransactionInner {
     // TODO(finto): it feels strange that this is the inverse of reading the Author in StoredChange.
     // This encodes the Author, whereas in change.rs, we are decoding.
     fn extra_bytes<'a>(&self) -> Cow<'a, [u8]> {
-        if let Some(author) = self.author.as_ref() {
-            let mut buf = vec![];
-            leb128::write::unsigned(&mut buf, Footer::Author as u64).unwrap();
-            leb128::write::unsigned(&mut buf, author.as_bytes().len() as u64).unwrap();
-            buf.extend_from_slice(author.as_bytes());
-            Cow::Owned(buf)
-        } else {
-            Cow::Borrowed(&[])
-        }
+        crate::change::encode_author_footer(&self.author)
     }
 
     pub(crate) fn export(mut self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
