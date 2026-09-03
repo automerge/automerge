@@ -45,7 +45,7 @@ impl Change {
         })
     }
 
-    pub fn author(&self) -> Option<&[u8]> {
+    pub fn author<'a>(&'a self) -> Option<Author<'a>> {
         decode_author_footer(self.stored.extra_bytes())
     }
 
@@ -350,7 +350,7 @@ impl From<&Change> for crate::ExpandedChange {
         crate::ExpandedChange {
             operations,
             actor_id: actors.get(&0).unwrap().clone(),
-            author: c.author().map(Author::from),
+            author: c.author().map(Author::into_owned),
             hash: Some(c.hash()),
             time: c.timestamp(),
             deps: c.deps().to_vec(),
@@ -373,7 +373,7 @@ pub(crate) enum Footer {
 ///
 /// The first byte is the [`Footer::Author`], followed by the length of the
 /// [`Author`] bytes, finalized with the [`Author`] bytes themselves.
-pub(crate) fn encode_author_footer<'a>(author: &Option<Author>) -> Cow<'a, [u8]> {
+pub(crate) fn encode_author_footer<'a>(author: &Option<Author<'_>>) -> Cow<'a, [u8]> {
     if let Some(author) = author.as_ref() {
         let mut buf = vec![];
         leb128::write::unsigned(&mut buf, Footer::Author as u64).unwrap();
@@ -392,11 +392,11 @@ pub(crate) fn encode_author_footer<'a>(author: &Option<Author>) -> Cow<'a, [u8]>
 /// Read the footer identifier, expected to be [`Footer::Author`], followed by
 /// the expected length of the author bytes. The resulting bytes are the
 /// [`Author`].
-fn decode_author_footer(mut buff: &[u8]) -> Option<&[u8]> {
+fn decode_author_footer<'a>(mut buff: &'a [u8]) -> Option<Author<'a>> {
     let id = leb128::read::unsigned(&mut buff).ok()?;
     let len = leb128::read::unsigned(&mut buff).ok()? as usize;
     if id == Footer::Author as u64 && buff.len() >= len {
-        Some(&buff[0..len])
+        Some(Author::from(&buff[0..len]))
     } else {
         None
     }
@@ -410,7 +410,7 @@ mod tests {
 
     /// Author byte lengths that cross the leb128 single-byte boundary
     /// (127/128), so the length prefix is sometimes multi-byte.
-    fn gen_author() -> impl Strategy<Value = Author> {
+    fn gen_author() -> impl Strategy<Value = Author<'static>> {
         proptest::collection::vec(any::<u8>(), 0..=300).prop_map(Author::from)
     }
 
@@ -422,7 +422,7 @@ mod tests {
         fn author_footer_roundtrip(author in gen_author()) {
             let encoded = encode_author_footer(&Some(author.clone()));
             let decoded = decode_author_footer(&encoded);
-            prop_assert_eq!(decoded, Some(author.as_bytes()));
+            prop_assert_eq!(decoded, Some(author));
         }
     }
 }

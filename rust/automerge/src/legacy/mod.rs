@@ -349,7 +349,7 @@ pub struct Change {
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none", default = "Default::default")]
-    pub author: Option<Author>,
+    pub author: Option<Author<'static>>,
 }
 
 impl PartialEq for Change {

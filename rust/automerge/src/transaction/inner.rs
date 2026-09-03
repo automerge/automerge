@@ -29,7 +29,7 @@ pub(crate) struct TransactionInner {
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
     pending: Vec<TxOp>,
-    author: Option<Author>,
+    author: Option<Author<'static>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,7 +61,7 @@ pub(crate) struct TransactionArgs {
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
     /// The author of the change
-    pub(crate) author: Option<Author>,
+    pub(crate) author: Option<Author<'static>>,
 }
 
 impl TransactionInner {

@@ -394,13 +394,13 @@ impl AutoCommit {
         self
     }
 
-    pub fn with_author(mut self, author: Option<Author>) -> Self {
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
         self.ensure_transaction_closed();
         self.doc.set_author(author);
         self
     }
 
-    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
         self.ensure_transaction_closed();
         self.doc.set_author(author);
         self
@@ -410,19 +410,19 @@ impl AutoCommit {
         self.doc.get_actor()
     }
 
-    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
         self.doc.get_actors_for_author(author)
     }
 
-    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author<'static>> {
         self.doc.get_author_for_actor(actor)
     }
 
-    pub fn get_author(&self) -> Option<&Author> {
+    pub fn get_author(&self) -> Option<&Author<'static>> {
         self.doc.get_author()
     }
 
-    pub fn get_authors(&self) -> &[Author] {
+    pub fn get_authors(&self) -> &[Author<'static>] {
         self.doc.get_authors()
     }
 

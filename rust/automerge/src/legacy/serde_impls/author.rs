@@ -4,7 +4,7 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::author::Author;
 
-impl<'de> Deserialize<'de> for Author {
+impl<'de> Deserialize<'de> for Author<'static> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -15,7 +15,7 @@ impl<'de> Deserialize<'de> for Author {
     }
 }
 
-impl Serialize for Author {
+impl Serialize for Author<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

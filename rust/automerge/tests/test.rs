@@ -3476,7 +3476,7 @@ fn authorship() {
     doc1.put(ROOT, "key", "value2").unwrap();
     let change = doc1.get_last_local_change().unwrap();
     assert_eq!(change.seq(), 1);
-    assert_eq!(change.author(), Some(author1.as_bytes()));
+    assert_eq!(change.author(), Some(author1.clone()));
     assert_eq!(change.extra_bytes(), &[1, 3, 1, 1, 1]);
 
     doc1.put(ROOT, "key", "value3").unwrap();
@@ -3488,7 +3488,7 @@ fn authorship() {
     doc2.put(ROOT, "key", "value4").unwrap();
     let change = doc2.get_last_local_change().unwrap();
     assert_eq!(change.seq(), 1);
-    assert_eq!(change.author(), Some(author2.as_bytes()));
+    assert_eq!(change.author(), Some(author2.clone()));
     assert_eq!(change.extra_bytes(), &[1, 3, 2, 2, 2]);
 
     doc1.merge(&mut doc2).unwrap();

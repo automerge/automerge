@@ -94,7 +94,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
-    author: Option<Author>,
+    author: Option<Author<'static>>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -163,7 +163,7 @@ impl<'a> LoadOptions<'a> {
         }
     }
 
-    pub fn author(self, author: Author) -> Self {
+    pub fn author(self, author: Author<'static>) -> Self {
         Self {
             author: Some(author),
             ..self
@@ -229,7 +229,7 @@ pub struct Automerge {
     /// The current actor.
     actor: Actor,
     /// The current author.
-    author: Option<Author>,
+    author: Option<Author<'static>>,
 }
 
 impl Automerge {
@@ -343,7 +343,7 @@ impl Automerge {
     }
 
     /// Set the actor id for this document.
-    pub fn with_author(mut self, author: Option<Author>) -> Self {
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
         self.set_author(author);
         self
     }
@@ -356,7 +356,7 @@ impl Automerge {
     /// different [`ActorId`] compared to previous edits for the same author.
     ///
     /// If you are using authors *never* manually manage the [`ActorId`].
-    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
         if author.as_ref() != self.get_author() {
             self.author = author;
             // TODO: re-use old actors
@@ -366,22 +366,22 @@ impl Automerge {
     }
 
     /// Get the current author of this document.
-    pub fn get_author(&self) -> Option<&Author> {
+    pub fn get_author(&self) -> Option<&Author<'static>> {
         self.author.as_ref()
     }
 
-    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
         self.authors
             .get_actors_for_author(author)
             .filter_map(|idx| self.ops.actors.get(idx).cloned())
             .collect()
     }
 
-    pub fn get_authors(&self) -> &[Author] {
+    pub fn get_authors(&self) -> &[Author<'static>] {
         self.authors.get_authors()
     }
 
-    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author<'static>> {
         let actor_index = self.ops.actors.binary_search(actor).ok()?;
         self.authors.get_author_for_actor(actor_index)
     }

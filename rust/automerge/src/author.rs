@@ -1,4 +1,5 @@
 use core::fmt;
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use crate::error;
@@ -25,7 +26,7 @@ pub(crate) struct Authors {
     ///
     /// Each [`Author`] will have one or more [`ActorId`]s related to it, since
     /// a new [`ActorId`] is produced when an [`Author`] changes on a document.
-    authors: Vec<Author>,
+    authors: Vec<Author<'static>>,
     // TODO(finto): This is never actually used. It's set to `None` and
     // re-assigned in `put_author`.
     /// The current [`Author`] acting on the document.
@@ -51,12 +52,12 @@ impl Authors {
     }
 
     /// Return the set of previously recorded [`Author`]s.
-    pub(crate) fn get_authors(&self) -> &[Author] {
+    pub(crate) fn get_authors(&self) -> &[Author<'static>] {
         &self.authors
     }
 
     /// Return the [`Author`] that is associated with the given `actor`.
-    pub(crate) fn get_author_for_actor(&self, actor: usize) -> Option<&Author> {
+    pub(crate) fn get_author_for_actor(&self, actor: usize) -> Option<&Author<'static>> {
         let author = self.actor_to_author.get(actor)?.as_ref()?.as_usize();
         self.authors.get(author)
     }
@@ -67,7 +68,7 @@ impl Authors {
     /// iterator. Otherwise, the iterator will be empty.
     pub(crate) fn get_actors_for_author(
         &self,
-        author: &Author,
+        author: &Author<'_>,
     ) -> impl Iterator<Item = usize> + '_ {
         self.authors
             .binary_search(author)
@@ -84,7 +85,7 @@ impl Authors {
     }
 
     /// Assign the given `actor` to the given `author`.
-    pub(crate) fn assign_author(&mut self, author: Author, actor: usize) {
+    pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
         let author_id = self.put_author(author);
         self.actor_to_author[actor] = Some(author_id);
     }
@@ -109,7 +110,7 @@ impl Authors {
     ///
     /// When a new [`Author`] is being inserted, this function re-indexes.
     #[must_use]
-    fn put_author(&mut self, author: Author) -> AuthorIdx {
+    fn put_author(&mut self, author: Author<'static>) -> AuthorIdx {
         match self.authors.binary_search(&author) {
             Err(index) => {
                 self.authors.insert(index, author);
@@ -137,12 +138,17 @@ impl Authors {
 ///
 /// The author is formatted as a hexadecimal string (see [`hex::encode`]).
 #[derive(PartialEq, Hash, Clone, Ord, Eq, PartialOrd)]
-pub struct Author(Vec<u8>);
+pub struct Author<'a>(Cow<'a, [u8]>);
 
-impl Author {
+impl<'a> Author<'a> {
+    /// Clone the [`Author`] into an owned [`Author`] with a `static` lifetime.
+    pub fn into_owned(self) -> Author<'static> {
+        Author::from(self.0.clone().into_owned())
+    }
+
     /// Return the raw bytes of the [`Author`].
     pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_slice()
+        self.0.as_ref()
     }
 
     /// Encode the [`Author`] to a hexadecimal string (see [`hex::encode`]).
@@ -151,25 +157,25 @@ impl Author {
     }
 }
 
-impl fmt::Display for Author {
+impl<'a> fmt::Display for Author<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_hex_string())
     }
 }
 
-impl From<Vec<u8>> for Author {
+impl<'a> From<Vec<u8>> for Author<'a> {
     fn from(v: Vec<u8>) -> Self {
-        Author(v)
+        Author(Cow::Owned(v))
     }
 }
 
-impl<'a> From<&'a [u8]> for Author {
+impl<'a> From<&'a [u8]> for Author<'a> {
     fn from(s: &'a [u8]) -> Self {
-        Author(s.to_vec())
+        Author(Cow::Borrowed(s))
     }
 }
 
-impl fmt::Debug for Author {
+impl<'a> fmt::Debug for Author<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Author")
             .field(&hex::encode(&self.0))
@@ -177,7 +183,7 @@ impl fmt::Debug for Author {
     }
 }
 
-impl TryFrom<&str> for Author {
+impl<'a> TryFrom<&str> for Author<'a> {
     type Error = error::InvalidAuthor;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
@@ -187,7 +193,7 @@ impl TryFrom<&str> for Author {
     }
 }
 
-impl TryFrom<String> for Author {
+impl<'a> TryFrom<String> for Author<'a> {
     type Error = error::InvalidAuthor;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
@@ -197,7 +203,7 @@ impl TryFrom<String> for Author {
     }
 }
 
-impl FromStr for Author {
+impl<'a> FromStr for Author<'a> {
     type Err = error::InvalidAuthor;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -238,7 +244,7 @@ mod tests {
         proptest::collection::vec(any::<u8>(), 0..64)
     }
 
-    fn gen_author() -> impl Strategy<Value = Author> {
+    fn gen_author() -> impl Strategy<Value = Author<'static>> {
         gen_bytes().prop_map(Author::from)
     }
 
@@ -246,7 +252,7 @@ mod tests {
     /// sequences frequently re-use the same author and frequently insert
     /// authors that sort before existing ones. This exercises both branches
     /// of `Authors::put_author` and the `AuthorIdx` re-indexing.
-    fn gen_small_author() -> impl Strategy<Value = Author> {
+    fn gen_small_author() -> impl Strategy<Value = Author<'static>> {
         proptest::collection::vec(0u8..4, 0..3).prop_map(Author::from)
     }
 
@@ -283,7 +289,7 @@ mod tests {
         fn display_is_hex_and_fromstr_roundtrips(author in gen_author()) {
             let displayed = format!("{}", author);
             prop_assert_eq!(&displayed, &author.to_hex_string());
-            prop_assert_eq!(displayed.parse::<Author>().unwrap(), author);
+            prop_assert_eq!(displayed.parse::<Author<'static>>().unwrap(), author);
         }
 
         /// Every even-length hex string parses; the bytes are its decoding
@@ -335,7 +341,7 @@ mod tests {
         fn serde_roundtrip_via_hex_string(author in gen_author()) {
             let value = serde_json::to_value(&author).unwrap();
             prop_assert_eq!(&value, &serde_json::Value::String(author.to_hex_string()));
-            prop_assert_eq!(serde_json::from_value::<Author>(value).unwrap(), author);
+            prop_assert_eq!(serde_json::from_value::<Author<'static>>(value).unwrap(), author);
         }
 
         /// For all byte vectors `x` and `y`: `Author(x) <= Author(y)` if
@@ -358,9 +364,16 @@ mod tests {
     /// to valid slots.
     #[derive(Debug, Clone)]
     enum Op {
-        Assign { author: Author, actor: usize },
-        InsertActor { at: usize },
-        RemoveActor { at: usize },
+        Assign {
+            author: Author<'static>,
+            actor: usize,
+        },
+        InsertActor {
+            at: usize,
+        },
+        RemoveActor {
+            at: usize,
+        },
     }
 
     fn gen_ops() -> impl Strategy<Value = Vec<Op>> {
@@ -383,9 +396,9 @@ mod tests {
     /// actor slot to its author. The real implementation maintains a sorted,
     /// deduplicated author list with re-indexed pointers into it; the model
     /// does none of that, so any re-indexing bug shows up as a divergence.
-    fn apply(init_actors: usize, ops: &[Op]) -> (Authors, Vec<Option<Author>>) {
+    fn apply(init_actors: usize, ops: &[Op]) -> (Authors, Vec<Option<Author<'static>>>) {
         let mut authors = Authors::with_actors(init_actors);
-        let mut model: Vec<Option<Author>> = vec![None; init_actors];
+        let mut model: Vec<Option<Author<'static>>> = vec![None; init_actors];
         for op in ops {
             match op {
                 Op::Assign { author, actor } => {
@@ -415,7 +428,10 @@ mod tests {
     }
 
     /// The observable state of an `Authors`, given `slots` actor slots.
-    fn observe(authors: &Authors, slots: usize) -> (Vec<Author>, Vec<Option<Author>>) {
+    fn observe(
+        authors: &Authors,
+        slots: usize,
+    ) -> (Vec<Author<'static>>, Vec<Option<Author<'static>>>) {
         (
             authors.get_authors().to_vec(),
             (0..slots)

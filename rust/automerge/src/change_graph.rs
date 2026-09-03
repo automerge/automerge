@@ -562,7 +562,7 @@ impl ChangeGraph {
 
             if let Some(author) = change.author() {
                 assert!(change.seq() == 1);
-                authors.assign_author(author.into(), actor)
+                authors.assign_author(author.into_owned(), actor)
             }
 
             assert!(actor < self.seq_index.len());
@@ -907,7 +907,7 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
             if let Some(author) = c.author() {
-                authors.assign_author(author.into(), graph.actors[idx].into());
+                authors.assign_author(author.into_owned(), graph.actors[idx].into());
             }
         }
 

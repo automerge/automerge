@@ -748,7 +748,7 @@ impl hexane::RleValue for Action {
 #[derive(PartialEq, Debug, Clone)]
 pub struct ChangeMetadata<'a> {
     pub actor: Cow<'a, ActorId>,
-    pub author: Option<Cow<'a, Author>>,
+    pub author: Option<Cow<'a, Author<'static>>>,
     pub seq: u64,
     pub start_op: u64,
     pub max_op: u64,
