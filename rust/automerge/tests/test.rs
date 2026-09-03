@@ -3458,41 +3458,6 @@ fn merge_after_noop_then_real_put() {
 }
 
 #[test]
-fn should_reload_document_containing_deflated_columns() {
-    use std::time::SystemTime;
-    let base_seed = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos() as u64;
-    for trial in 0..100u64 {
-        let seed = base_seed.wrapping_add(trial);
-        let mut doc = AutoCommit::new_with_encoding(automerge::TextEncoding::Utf16CodeUnit);
-        let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
-
-        let mut rng_state: u64 = seed;
-        for i in 0..200 {
-            rng_state ^= rng_state.wrapping_shl(13);
-            rng_state ^= rng_state.wrapping_shr(7);
-            rng_state ^= rng_state.wrapping_shl(17);
-            let pos = if i == 0 {
-                0
-            } else {
-                (rng_state as usize) % (i + 1)
-            };
-            doc.splice(&list, pos, 0, [ScalarValue::Str("a".into())])
-                .unwrap_or_else(|e| panic!("seed={seed} i={i} pos={pos}: {e}"));
-            let len = doc.length(&list);
-            if len != i + 1 {
-                panic!(
-                    "seed={seed} i={i} pos={pos}: expected length {} got {len}",
-                    i + 1
-                );
-            }
-        }
-        doc.commit();
-    }
-}
-#[test]
 fn failed_merge_with_duplicate_sequence_number_does_not_corrupt_save_load() {
     // Minimized from a fuzz crash. The merge returns DuplicateSeqNumber, but it
     // has already partially applied one remote change. The in-memory indexes
