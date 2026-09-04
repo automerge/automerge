@@ -786,5 +786,60 @@ mod tests {
                 }
             }
         }
+
+        /// `recompute_revocations` is a fixpoint: running it twice with
+        /// the same clocks equals running it once, and afterwards the mask
+        /// is exactly the mask derived from (revocations, clocks).
+        #[test]
+        fn recompute_is_a_fixpoint(ops in gen_ops()) {
+            let mut h = reach(&ops);
+            h.apply(&Op::Recompute);
+            let once = h.real.clone();
+            h.apply(&Op::Recompute);
+            assert_same_visible_state(&h.real, &once)?;
+            h.check_mask_matches_model()?;
+        }
+
+        /// The pending set has set semantics: each distinct extended hash
+        /// pops `true` exactly once and `false` thereafter; duplicates in
+        /// the input collapse; unknown hashes pop `false`.
+        #[test]
+        fn pending_revocations_behave_as_a_set(
+            hashes in proptest::collection::vec(any::<u8>(), 0..8),
+            unknown in any::<u8>(),
+        ) {
+            let mut r = Revocations::new();
+            r.extend_pending_revocations(hashes.iter().map(|h| hash(*h)));
+            let distinct: HashSet<u8> = hashes.iter().copied().collect();
+            for h in &distinct {
+                prop_assert!(r.pop_pending_revocation(&hash(*h)));
+                prop_assert!(!r.pop_pending_revocation(&hash(*h)));
+            }
+            if !distinct.contains(&unknown) {
+                prop_assert!(!r.pop_pending_revocation(&hash(unknown)));
+            }
+        }
+
+        /// After `clear()`: empty revocations, empty mask, empty pending
+        /// set, and no actor is revoked at any seq.
+        #[test]
+        fn clear_resets_all_state(
+            ops in gen_ops(),
+            pending in proptest::collection::vec(any::<u8>(), 0..4),
+        ) {
+            let mut h = reach(&ops);
+            h.apply(&Op::ExtendPending { hashes: pending.clone() });
+            h.apply(&Op::Clear);
+            prop_assert!(h.real.is_empty());
+            prop_assert!(h.real.get_revocation_mask().is_empty());
+            for idx in 0..h.positions.len() {
+                for seq in probe_seqs() {
+                    prop_assert!(!h.real.is_revoked(ActorIdx::from(idx), seq));
+                }
+            }
+            for p in pending {
+                prop_assert!(!h.real.pop_pending_revocation(&hash(p)));
+            }
+        }
     }
 }
