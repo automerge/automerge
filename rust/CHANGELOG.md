@@ -1,3 +1,10 @@
+## Unreleased
+
+### Added
+
+* It is now possible to set an "Author ID" for a document. The author ID is an
+  opaque byte array that can be examined to see the author ID of any change.
+
 ## 0.11.0
 
 ### Breaking Changes
