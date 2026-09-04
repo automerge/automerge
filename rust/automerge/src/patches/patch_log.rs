@@ -245,6 +245,7 @@ impl PatchLog {
         Self::new(false)
     }
 
+    /// An alternative name for [`PatchLog::inactive`].
     pub fn null() -> Self {
         Self::new(false)
     }
@@ -264,8 +265,24 @@ impl PatchLog {
         self.active
     }
 
+    /// Record an [`Event`] in the [`PatchLog`] with the given [`ObjId`].
+    ///
+    /// All events should be recorded using [`PatchLog::push_event`] since it
+    /// checks for [`PatchLog::is_active`].
     fn push_event(&mut self, obj: ObjId, event: Event) {
-        self.events.push((obj, event));
+        if self.is_active() {
+            self.events.push((obj, event));
+        }
+    }
+
+    /// Record an [`OpId`] in the [`PatchLog`] to be in the exposed set.
+    ///
+    /// All exposed operations should be recorded using [`PatchLog::push_expose`]
+    /// since it checks for [`PatchLog::is_active`].
+    fn push_expose(&mut self, id: OpId) {
+        if self.is_active() {
+            self.expose.insert(id);
+        }
     }
 
     fn events_len(&self) -> usize {
@@ -317,14 +334,14 @@ impl PatchLog {
     }
 
     pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
-        self.events.push((
+        self.push_event(
             obj,
             Event::IncrementMap {
                 key: key.into(),
                 n,
                 id,
             },
-        ))
+        )
     }
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
@@ -371,9 +388,9 @@ impl PatchLog {
         expose: bool,
     ) {
         if expose && value.is_object() {
-            self.expose.insert(id);
+            self.push_expose(id);
         }
-        self.events.push((
+        self.push_event(
             obj,
             Event::PutMap {
                 key: key.into(),
@@ -381,7 +398,7 @@ impl PatchLog {
                 id,
                 conflict,
             },
-        ))
+        )
     }
 
     pub(crate) fn put_seq(
@@ -394,9 +411,9 @@ impl PatchLog {
         expose: bool,
     ) {
         if expose && value.is_object() {
-            self.expose.insert(id);
+            self.push_expose(id);
         }
-        self.events.push((
+        self.push_event(
             obj,
             Event::PutSeq {
                 index,
@@ -404,7 +421,7 @@ impl PatchLog {
                 id,
                 conflict,
             },
-        ))
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -441,14 +458,14 @@ impl PatchLog {
         text: &str,
         marks: Option<Arc<MarkSet>>,
     ) {
-        self.events.push((
+        self.push_event(
             obj,
             Event::Splice {
                 index,
                 text: text.to_string(),
                 marks,
             },
-        ))
+        )
     }
 
     pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
@@ -471,7 +488,7 @@ impl PatchLog {
         expose: bool,
     ) {
         if expose && value.is_object() {
-            self.expose.insert(id);
+            self.push_expose(id);
         }
         self.insert(obj, index, value, id, conflict)
     }
@@ -624,6 +641,26 @@ impl PatchLog {
         debug_assert_eq!(self.actors.as_slice(), doc_actors);
     }
 
+    /// Record the actor table that subsequently logged events will be indexed
+    /// against.
+    ///
+    /// This must be called before events are logged into a patch log which can
+    /// outlive changes to the document's actor table (e.g. `AutoCommit`'s
+    /// internal log, or a caller-held log passed to
+    /// `load_incremental_log_patches`). Without a baseline,
+    /// [`Self::migrate_actors`] cannot re-index buffered events when a new
+    /// actor is inserted before existing ones, producing corrupted patches
+    /// (issue #1270).
+    ///
+    /// Logs which are filled and drained against a single document state
+    /// (e.g. `Automerge::diff`) never migrate and do not need a baseline,
+    /// though seeding them is harmless.
+    pub(crate) fn seed_actors(&mut self, actors: &[ActorId]) {
+        if self.is_active() && self.actors.is_empty() {
+            self.actors = actors.to_vec();
+        }
+    }
+
     // Re-align this patch log's actor list (and the event indices into it) with the document's
     // actor list (`others`).
     //
@@ -638,6 +675,18 @@ impl PatchLog {
             return Ok(());
         }
         if self.actors.is_empty() {
+            // An empty baseline together with buffered events is
+            // unmigratable: we no longer know which actor table the events'
+            // indices refer to, so adopting `others` silently corrupts any
+            // event whose actor index was shifted (issue #1270). Every
+            // ingestion path must establish the baseline (see
+            // [`Self::seed_actors`]) before logging events.
+            debug_assert!(
+                self.events.is_empty() && self.expose.is_empty(),
+                "patch log has buffered events but no actor baseline; \
+                 events were logged without seeding the baseline first \
+                 (see issue #1270)"
+            );
             self.actors = others.to_vec();
             return Ok(());
         }
@@ -658,14 +707,31 @@ impl PatchLog {
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
-        self.completed_patches.extend(other.completed_patches);
-        self.events.extend(other.events);
-        self.expose.extend(other.expose);
+        // The usage of `merge` has always been through the path of first
+        // branching (see [`Self::branch`]) the `PatchLog`, which inherits the
+        // `active` flag.
+        // The flag cannot change, since doings closes the transaction first.
+        // This means that the flags should always agree.
+        debug_assert_eq!(
+            self.active, other.active,
+            "merging a patch log branch whose active flag disagrees with its parent"
+        );
+        if self.active {
+            self.completed_patches.extend(other.completed_patches);
+            self.events.extend(other.events);
+            self.expose.extend(other.expose);
+        }
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
-        self.path_map = hint;
-        self.path_hint = self.events_len();
+        // An inactive log accumulates no state (see [`Self::push_event`]).
+        // Note a stored path map would survive `get_path_map`'s staleness
+        // check in an inactive log (0 events == 0 hint), so this gate is
+        // load-bearing, not just tidiness.
+        if self.active {
+            self.path_map = hint;
+            self.path_hint = self.events_len();
+        }
     }
 }
 
