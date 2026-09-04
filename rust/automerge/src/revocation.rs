@@ -731,5 +731,60 @@ mod tests {
             h.real.unrevoke(&author(a), &h.authors);
             assert_same_visible_state(&h.real, &before)?;
         }
+
+        /// `remove_actor(i)` directly after `insert_actor(i)` leaves the
+        /// mask unchanged (raw calls, without the new-actor protocol).
+        #[test]
+        fn remove_after_insert_is_mask_identity(
+            ops in gen_ops(),
+            pos in any::<usize>(),
+        ) {
+            let h = reach(&ops);
+            let mut r = h.real.clone();
+            let before = r.get_revocation_mask().clone();
+            let pos = pos % (h.positions.len() + 1);
+            r.insert_actor(pos);
+            r.remove_actor(pos);
+            prop_assert_eq!(r.get_revocation_mask(), &before);
+        }
+
+        /// Index shifts preserve every surviving actor's `is_revoked`
+        /// answers: entries move to the remapped index with their value
+        /// intact. Actors are tracked across the shift by stable id.
+        #[test]
+        fn shifts_preserve_is_revoked_per_actor(
+            ops in gen_ops(),
+            pos in any::<usize>(),
+            insert in any::<bool>(),
+        ) {
+            let mut h = reach(&ops);
+            let before: Vec<(StableId, Vec<bool>)> = h
+                .positions
+                .iter()
+                .enumerate()
+                .map(|(idx, id)| {
+                    let answers = probe_seqs()
+                        .map(|s| h.real.is_revoked(ActorIdx::from(idx), s))
+                        .collect();
+                    (*id, answers)
+                })
+                .collect();
+            if insert {
+                h.apply(&Op::InsertActor { pos, author: 0 });
+            } else {
+                h.apply(&Op::RemoveActor { pos });
+            }
+            for (id, answers) in before {
+                if let Some(idx) = h.positions.iter().position(|p| *p == id) {
+                    let after: Vec<bool> = probe_seqs()
+                        .map(|s| h.real.is_revoked(ActorIdx::from(idx), s))
+                        .collect();
+                    prop_assert_eq!(
+                        after, answers,
+                        "answers changed for surviving actor now at index {}", idx
+                    );
+                }
+            }
+        }
     }
 }
