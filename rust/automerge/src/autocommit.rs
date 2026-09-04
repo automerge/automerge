@@ -56,6 +56,10 @@ use crate::{LoadOptions, VerificationMode};
 /// representation of the heads of the document last time you called [`Self::diff_incremental()`]
 /// but you can also manage it directly using [`Self::update_diff_cursor()`] and
 /// [`Self::reset_diff_cursor()`].
+///
+/// ## Authors and Actors
+///
+/// See the ["Authors and Actors"](`Automerge#authors-and-actors`) docs.
 #[derive(Debug, Clone)]
 pub struct AutoCommit {
     pub(crate) doc: Automerge,

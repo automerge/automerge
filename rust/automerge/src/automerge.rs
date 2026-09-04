@@ -214,7 +214,37 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// ## Authors and Actors
 ///
-/// TODO(finto): describe their interactions and intended uses.
+/// It's often useful to be able to know who made some change. For this purpose Automerge has the
+/// concept of an "author ID". An author ID is an opaque byte array which can be associated with a
+/// change. This author ID will become part of the document history so you can later examine the
+/// changes in a document and see which author made the change.
+///
+/// Author IDs are set on document construction. If you don't set an author then changes produced
+/// by the document will have no author ([`Change::author`] will return `None`).
+///
+/// ### Example
+///
+/// ```rust
+/// # use automerge::{Author, Automerge, AutomergeError, ROOT, transaction::Transactable};
+/// let author = Author::from(vec![1,2,3]);
+/// let mut doc = Automerge::new().with_author(Some(author.clone()));
+/// doc.transact(|tx| {
+///     tx.put(ROOT, "foo", "bar")?;
+///     Ok::<_, AutomergeError>(())
+/// }).unwrap();
+/// let change = doc.get_last_local_change().unwrap();
+/// assert_eq!(change.author().unwrap(), author);
+/// ```
+///
+/// ### Relationship to Actor IDs
+///
+/// Every automerge commit has an "actor ID", which represents a sequential execution. Actor IDs
+/// should be considered a low level implementation detail and as much as possible should be left
+/// to automerge to manage.
+///
+/// Prior to the introduction of author IDs, actor IDs were often used in applications to determine
+/// authorship. New code should migrate to using author IDs. If you do need to map from an actor ID
+/// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
