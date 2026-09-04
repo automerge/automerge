@@ -145,8 +145,6 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
     use std::num::NonZeroU32;
 
-    // `allow(dead_code)` on items below marks harness pieces consumed by
-    // later property tests; remove each allow once its item is in use.
     const MAX_AUTHORS: usize = 4;
     const MAX_ACTORS: usize = 8;
     const MAX_SEQ: u32 = 8;
@@ -477,7 +475,6 @@ mod tests {
     }
 
     /// Build a harness in a reachable state by applying `ops`.
-    #[allow(dead_code)]
     fn reach(ops: &[Op]) -> Harness {
         let mut h = Harness::new();
         for op in ops {
@@ -489,7 +486,6 @@ mod tests {
     /// Two `Revocations` agree on their externally visible revocation
     /// state. The pending set has no accessor and is intentionally not
     /// compared here; it is covered by its own tests.
-    #[allow(dead_code)]
     fn assert_same_visible_state(
         a: &Revocations,
         b: &Revocations,
@@ -637,6 +633,103 @@ mod tests {
                     }
                 }
             }
+        }
+
+        /// For an author that is not revoked, revoke followed by unrevoke
+        /// restores the prior visible state.
+        #[test]
+        fn revoke_then_unrevoke_restores_prior_state(
+            ops in gen_ops(),
+            a in 0..MAX_AUTHORS,
+            heads in proptest::collection::vec(any::<u8>(), 1..3),
+            seed in gen_clock_seed(),
+        ) {
+            let mut h = reach(&ops);
+            h.apply(&Op::Unrevoke { author: a });
+            let before = h.real.clone();
+            h.apply(&Op::Revoke { author: a, heads, clock_seed: seed });
+            h.apply(&Op::Unrevoke { author: a });
+            assert_same_visible_state(&h.real, &before)?;
+        }
+
+        /// Revoking with identical arguments twice equals revoking once.
+        #[test]
+        fn revoke_twice_with_same_args_equals_once(
+            ops in gen_ops(),
+            a in 0..MAX_AUTHORS,
+            heads in proptest::collection::vec(any::<u8>(), 1..3),
+            seed in gen_clock_seed(),
+        ) {
+            let mut h = reach(&ops);
+            h.apply(&Op::Revoke {
+                author: a,
+                heads: heads.clone(),
+                clock_seed: seed.clone(),
+            });
+            let once = h.real.clone();
+            h.apply(&Op::Revoke { author: a, heads, clock_seed: seed });
+            assert_same_visible_state(&h.real, &once)?;
+        }
+
+        /// Two revocations of the same author: the second alone determines
+        /// the state (last write wins).
+        #[test]
+        fn second_revoke_of_same_author_wins(
+            ops in gen_ops(),
+            a in 0..MAX_AUTHORS,
+            heads1 in proptest::collection::vec(any::<u8>(), 1..3),
+            seed1 in gen_clock_seed(),
+            heads2 in proptest::collection::vec(any::<u8>(), 1..3),
+            seed2 in gen_clock_seed(),
+        ) {
+            let h = reach(&ops);
+            let clock1 = h.seq_clock(&seed1);
+            let clock2 = h.seq_clock(&seed2);
+            let mut both = h.real.clone();
+            both.revoke(author(a), to_hashes(&heads1), &clock1, &h.authors);
+            both.revoke(author(a), to_hashes(&heads2), &clock2, &h.authors);
+            let mut second_only = h.real.clone();
+            second_only.revoke(author(a), to_hashes(&heads2), &clock2, &h.authors);
+            assert_same_visible_state(&both, &second_only)?;
+        }
+
+        /// Revocations of distinct authors commute. Sound because the
+        /// author->actor mapping is a partition: distinct authors never
+        /// share an actor.
+        #[test]
+        fn revocations_of_distinct_authors_commute(
+            ops in gen_ops(),
+            a in 0..MAX_AUTHORS,
+            b in 0..MAX_AUTHORS,
+            heads_a in proptest::collection::vec(any::<u8>(), 1..3),
+            seed_a in gen_clock_seed(),
+            heads_b in proptest::collection::vec(any::<u8>(), 1..3),
+            seed_b in gen_clock_seed(),
+        ) {
+            prop_assume!(a != b);
+            let h = reach(&ops);
+            let ca = h.seq_clock(&seed_a);
+            let cb = h.seq_clock(&seed_b);
+            let mut ab = h.real.clone();
+            ab.revoke(author(a), to_hashes(&heads_a), &ca, &h.authors);
+            ab.revoke(author(b), to_hashes(&heads_b), &cb, &h.authors);
+            let mut ba = h.real.clone();
+            ba.revoke(author(b), to_hashes(&heads_b), &cb, &h.authors);
+            ba.revoke(author(a), to_hashes(&heads_a), &ca, &h.authors);
+            assert_same_visible_state(&ab, &ba)?;
+        }
+
+        /// Unrevoking an author that is not revoked changes nothing.
+        #[test]
+        fn unrevoke_of_unrevoked_author_is_noop(
+            ops in gen_ops(),
+            a in 0..MAX_AUTHORS,
+        ) {
+            let mut h = reach(&ops);
+            h.apply(&Op::Unrevoke { author: a });
+            let before = h.real.clone();
+            h.real.unrevoke(&author(a), &h.authors);
+            assert_same_visible_state(&h.real, &before)?;
         }
     }
 }
