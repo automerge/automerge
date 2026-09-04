@@ -381,7 +381,7 @@ impl TransactionInner {
             index,
             seq_type,
             self.scope.as_ref(),
-            doc.change_graph.active_revocation_clock(),
+            doc.active_revocation_clock(),
         )?;
 
         let marks = query.marks;
@@ -513,7 +513,7 @@ impl TransactionInner {
             index,
             seq_type,
             self.scope.as_ref(),
-            doc.change_graph.active_revocation_clock(),
+            doc.active_revocation_clock(),
         );
         let id = self.next_id();
         let eid = query
@@ -707,7 +707,7 @@ impl TransactionInner {
                 index,
                 seq_type,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.active_revocation_clock(),
             )?;
 
             index = query.index;
@@ -777,7 +777,7 @@ impl TransactionInner {
                 delete_index,
                 seq_type,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.active_revocation_clock(),
             );
 
             let step = if let Some(op) = query.ops.last() {
@@ -862,7 +862,7 @@ impl TransactionInner {
                     mark.end,
                     SequenceType::Text,
                     self.scope.as_ref(),
-                    doc.change_graph.active_revocation_clock(),
+                    doc.active_revocation_clock(),
                 )?
                 .pos;
             if end_pos > begin.pos {
@@ -930,7 +930,7 @@ impl TransactionInner {
             index,
             SequenceType::Text,
             self.scope.as_ref(),
-            doc.change_graph.active_revocation_clock(),
+            doc.active_revocation_clock(),
         )?;
 
         let pos = query.pos;
@@ -980,7 +980,7 @@ impl TransactionInner {
                 index,
                 SequenceType::Text,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.active_revocation_clock(),
             )
             .ops
             .into_iter()
@@ -998,7 +998,7 @@ impl TransactionInner {
                 block_id,
                 SequenceType::Text,
                 self.scope.as_ref(),
-                doc.change_graph.active_revocation_clock(),
+                doc.active_revocation_clock(),
             )
             .unwrap();
 

@@ -1160,19 +1160,6 @@ impl OpSet {
         Some((o1, vis))
     }
 
-    fn get_succ_for_pos(&self, pos: usize) -> Option<SuccCursors<'_>> {
-        let succ = self.cols.succ_count.get(pos)?;
-        let start = succ.prefix() as usize;
-        let len = succ.value as usize;
-        let end = succ.total() as usize;
-        Some(SuccCursors {
-            len,
-            succ_actor: self.cols.succ_actor.iter_range(start..end),
-            succ_counter: self.cols.succ_ctr.iter_range(start..end),
-            inc_values: self.cols.index.inc.iter_range(start..end),
-        })
-    }
-
     pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
         if let Some(sc) = self.cols.succ_count.get(pos) {
             let start = sc.prefix() as usize;
@@ -2063,7 +2050,7 @@ mod tests {
 
             let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
             let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), Some(Cow::Owned((clock.clone()))))
+                .top_ops(&ObjId(OpId::new(1, 1)), Some(Cow::Owned(clock.clone())))
                 .collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);

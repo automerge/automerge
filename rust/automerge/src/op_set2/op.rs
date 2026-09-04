@@ -1361,9 +1361,6 @@ pub(crate) trait OpLike: Debug {
     fn expand(op: &Self) -> bool;
     fn succ(&self) -> Self::SuccIter<'_>;
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
-    fn counter(op: &Self) -> i64 {
-        Self::succ_inc(op).map(|i| i.unwrap_or(0)).sum()
-    }
     fn mark_name(op: &Self) -> Option<&str>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64;

@@ -63,18 +63,8 @@ impl ChangeQueue {
         self.changes.is_empty()
     }
 
-    /// O(1) check whether a change with this hash is in the queue.
-    pub(crate) fn has_hash(&self, hash: &ChangeHash) -> bool {
-        self.hashes.contains(hash)
-    }
-
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Change> {
         self.changes.iter()
-    }
-
-    pub(crate) fn has_actor_seq(&self, c: &Change) -> bool {
-        self.incoming_actor_seqs
-            .contains(&(c.actor_id().clone(), c.seq()))
     }
 
     /// Remove queued changes at or after an incompatible actor sequence,

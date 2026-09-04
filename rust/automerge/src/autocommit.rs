@@ -426,7 +426,7 @@ impl AutoCommit {
         self.doc.get_authors()
     }
 
-    pub fn revoke(&mut self, author: &Author<'static>, heads: &[ChangeHash]) -> Vec<Patch> {
+    pub fn revoke(&mut self, author: Author<'static>, heads: &[ChangeHash]) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let mut patch_log = PatchLog::active();
         self.doc.revoke(author, heads, &mut patch_log);
@@ -810,7 +810,7 @@ impl AutoCommit {
             return if self.transaction.is_none() {
                 self.doc.clock_at(h)
             } else {
-                Some(self.doc.change_graph.clock_at(h))
+                Some(self.doc.clock_at_heads(h))
             };
         }
         match (&self.isolation, &self.transaction) {

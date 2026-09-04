@@ -102,10 +102,6 @@ impl ClockRange {
         Self::Current(clock)
     }
 
-    pub(crate) fn is_head(&self) -> bool {
-        matches!(self, Self::Current(None))
-    }
-
     pub(crate) fn after(&self) -> Option<&Clock> {
         match self {
             Self::Diff(_, after) => Some(after),

@@ -1132,7 +1132,7 @@ impl Automerge {
             .map(|a| self.ops.lookup_actor(a).unwrap())
             .collect();
 
-        let revoked = self.change_graph.is_revoked(actors[0].into(), change.seq());
+        let revoked = self.is_revoked(actors[0].into(), change.seq());
 
         change
             .iter_ops()

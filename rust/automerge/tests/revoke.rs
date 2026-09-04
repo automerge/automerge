@@ -32,7 +32,7 @@ fn revoke_apply_changes() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoc);
+    remote.revoke(bad, &epoc);
     remote.update_diff_cursor();
 
     doc.increment(ROOT, "counter", 8).unwrap();
@@ -114,7 +114,7 @@ fn unrevoke_restores_changes() {
     doc.merge(&mut fork).unwrap();
 
     // Revoke bad author
-    doc.revoke(&bad, &epoch);
+    doc.revoke(bad.clone(), &epoch);
     // The revoke should undo the post-epoch put
     assert!(doc.get(ROOT, "new_key").unwrap().is_none());
     // value2 was set before epoch so it should still be there
@@ -170,7 +170,7 @@ fn revoke_list_insert_delete() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
 
     // Bad's insert of 99 should be revoked, bad's delete of 3 should be revoked
     assert_eq!(remote.length(&list), 4);
@@ -201,7 +201,7 @@ fn revoke_map_put_conflict() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
 
     // Good author's value should win since bad's is revoked
     assert_eq!(
@@ -235,7 +235,7 @@ fn revoke_text_splice() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
 
     // Bad's splice should be revoked: the delete of " world" and insert of " everyone"
     // Good's "say " prefix should remain
@@ -276,7 +276,7 @@ fn revoke_text_mark() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    let patches = remote.revoke(&bad, &epoch);
+    let patches = remote.revoke(bad, &epoch);
 
     // Patches should reflect the removal of bad's bold mark but not italic
     let mark_patches: Vec<_> = patches
@@ -351,7 +351,7 @@ fn revoke_counter_increment() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
 
     // Only good's increment should count: 10 + 5 = 15
     assert_eq!(
@@ -382,7 +382,7 @@ fn revoke_valid_put_in_revoked_object() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
 
     // The bad_map itself was created by bad, so it should be revoked
     // Good author's put into it won't be visible since the parent is gone
@@ -413,7 +413,7 @@ fn revoke_valid_insert_after_revoked_insert() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
 
     // Bad's insert should be gone, good's should remain
     assert_eq!(remote.length(&list), 2);
@@ -448,7 +448,7 @@ fn revoke_valid_delete_of_insert() {
     doc.insert(&list, 0, "zero").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
     remote.merge(&mut doc).unwrap();
 
     // Both the insert and delete target the same element; result should be just "first"
@@ -480,7 +480,7 @@ fn revoke_with_new_actor_same_author() {
     doc.merge(&mut fork).unwrap();
 
     let mut remote = AutoCommit::new();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
     remote.merge(&mut doc).unwrap();
 
     // new actor already revoked
@@ -530,7 +530,7 @@ fn revoke_only_after_epoch() {
     fork.put(ROOT, "after_epoch", "revoked").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    doc.revoke(&bad, &epoch);
+    doc.revoke(bad, &epoch);
 
     // Pre-epoch changes should remain
     assert_eq!(
@@ -562,7 +562,7 @@ fn revoke_patches_reflect_undo() {
         "bad_override".into()
     );
 
-    let patches = doc.revoke(&bad, &epoch);
+    let patches = doc.revoke(bad, &epoch);
 
     // Should get a patch restoring "original"
     assert!(!patches.is_empty());
@@ -588,7 +588,7 @@ fn revoke_then_load_incremental() {
     fork.put(ROOT, "post_epoch", "post_val").unwrap();
 
     let mut remote = AutoCommit::new();
-    remote.revoke(&bad, &epoch);
+    remote.revoke(bad, &epoch);
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
@@ -701,7 +701,7 @@ fn revocation_cached_clock_handles_multi_op_changes() {
 
     // Revoke at heads after the multi-op change, so k1/k2/k3 stay; post_revoke
     // goes.
-    doc.revoke(&bad, &pre_revoke_heads);
+    doc.revoke(bad, &pre_revoke_heads);
 
     // Sanity check: the indexed fast path correctly preserves k1/k2/k3.
     assert_eq!(doc.get(ROOT, "k1").unwrap().unwrap().0, "v1".into());
@@ -775,7 +775,7 @@ fn revocation_mask_survives_actor_reordering() {
 
     // Revoke bad at `pre_change` — bad has no pre-change history, so all of
     // bad's changes (current and future) should be revoked.
-    doc.revoke(&bad, &pre_change);
+    doc.revoke(bad.clone(), &pre_change);
 
     // Sanity check: the late-actor key is correctly hidden.
     assert!(doc.get(ROOT, "late_actor_key").unwrap().is_none());
@@ -838,7 +838,7 @@ fn values_filters_revoked_ops() {
     fork.put(ROOT, "bad_key", "bad_val").unwrap();
     doc.merge(&mut fork).unwrap();
 
-    doc.revoke(&bad, &pre_change);
+    doc.revoke(bad, &pre_change);
 
     // get() and keys() correctly hide the revoked op.
     assert!(doc.get(ROOT, "bad_key").unwrap().is_none());
@@ -870,7 +870,7 @@ fn revoke_author_with_new_actor_hidden() {
     doc.put(ROOT, "foo", "bar").unwrap();
 
     let mut doc2 = doc.fork().with_author(Some(good));
-    doc2.revoke(&bad, &doc.get_heads());
+    doc2.revoke(bad.clone(), &doc.get_heads());
 
     let mut doc3 = doc.fork().with_author(Some(bad));
     doc3.put(ROOT, "foo", "baz").unwrap();
