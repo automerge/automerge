@@ -147,10 +147,8 @@ mod tests {
 
     // `allow(dead_code)` on items below marks harness pieces consumed by
     // later property tests; remove each allow once its item is in use.
-    #[allow(dead_code)]
     const MAX_AUTHORS: usize = 4;
     const MAX_ACTORS: usize = 8;
-    #[allow(dead_code)]
     const MAX_SEQ: u32 = 8;
 
     /// A stable identity for an actor, unaffected by index shifts.
@@ -180,7 +178,6 @@ mod tests {
     /// author; actor positions and clock values are reduced modulo the live
     /// state at execution time.
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
     enum Op {
         Revoke {
             author: usize,
@@ -212,12 +209,10 @@ mod tests {
         },
     }
 
-    #[allow(dead_code)]
     fn gen_clock_seed() -> impl Strategy<Value = Vec<Option<u32>>> {
         proptest::collection::vec(proptest::option::of(1u32..MAX_SEQ), MAX_ACTORS)
     }
 
-    #[allow(dead_code)]
     fn gen_op() -> impl Strategy<Value = Op> {
         prop_oneof![
             (
@@ -242,7 +237,6 @@ mod tests {
         ]
     }
 
-    #[allow(dead_code)]
     fn gen_ops() -> impl Strategy<Value = Vec<Op>> {
         proptest::collection::vec(gen_op(), 0..40)
     }
@@ -443,6 +437,44 @@ mod tests {
                 }
             }
         }
+
+        /// The real mask must contain exactly one entry per model-mask
+        /// entry, at the correctly remapped index, with the same bound.
+        /// Equality of the maps also proves uniqueness: no entries have
+        /// collided onto one index or been lost across shifts.
+        fn check_mask_matches_model(&self) -> Result<(), TestCaseError> {
+            let expected: BTreeMap<u32, Option<NonZeroU32>> = self
+                .model_mask()
+                .iter()
+                .filter_map(|(id, bound)| {
+                    let idx = self.positions.iter().position(|p| p == id)?;
+                    Some((idx as u32, *bound))
+                })
+                .collect();
+            let actual: BTreeMap<u32, Option<NonZeroU32>> = self
+                .real
+                .get_revocation_mask()
+                .iter()
+                .map(|(a, v)| (a.0, *v))
+                .collect();
+            prop_assert_eq!(actual, expected);
+            Ok(())
+        }
+
+        /// `is_empty()` agrees with "no author is revoked", and an empty
+        /// state has an empty mask — `active_revocation_clock` relies on
+        /// `is_empty()` to skip filtering, so a stale mask entry while
+        /// `is_empty()` is true would silently disable revocation.
+        fn check_is_empty_consistency(&self) -> Result<(), TestCaseError> {
+            prop_assert_eq!(self.real.is_empty(), self.revoked.is_empty());
+            if self.real.is_empty() {
+                prop_assert!(
+                    self.real.get_revocation_mask().is_empty(),
+                    "is_empty() is true but the revocation mask is not empty"
+                );
+            }
+            Ok(())
+        }
     }
 
     /// Build a harness in a reachable state by applying `ops`.
@@ -491,5 +523,32 @@ mod tests {
         h.apply(&Op::Unrevoke { author: 0 });
         assert!(h.real.is_empty());
         assert!(!h.real.is_revoked(ActorIdx::from(0usize), 4));
+    }
+
+    proptest! {
+        /// After every operation, the mask's keys are exactly the actors
+        /// of currently revoked authors, each mapped to the bound captured
+        /// at revocation time. Tests the mask/revocations coupling
+        /// hypothesis; a failure here is a finding to report, not a test
+        /// to fix.
+        #[test]
+        fn mask_keys_match_actors_of_revoked_authors(ops in gen_ops()) {
+            let mut h = Harness::new();
+            for op in &ops {
+                h.apply(op);
+                h.check_mask_matches_model()?;
+            }
+        }
+
+        /// After every operation, `is_empty()` means no author is revoked,
+        /// and implies the mask is empty.
+        #[test]
+        fn is_empty_agrees_with_revocations_and_mask(ops in gen_ops()) {
+            let mut h = Harness::new();
+            for op in &ops {
+                h.apply(op);
+                h.check_is_empty_consistency()?;
+            }
+        }
     }
 }
