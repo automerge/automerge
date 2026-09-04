@@ -168,7 +168,6 @@ mod tests {
 
     /// Seqs probed for every actor after every step: all values around the
     /// generated clock range plus extremes, ascending.
-    #[allow(dead_code)]
     fn probe_seqs() -> impl Iterator<Item = u64> {
         (0..=(MAX_SEQ as u64 + 1)).chain([u64::MAX])
     }
@@ -548,6 +547,95 @@ mod tests {
             for op in &ops {
                 h.apply(op);
                 h.check_is_empty_consistency()?;
+            }
+        }
+
+        /// `is_revoked` agrees with the reference model for every live
+        /// actor and every probed seq, after every operation.
+        #[test]
+        fn is_revoked_matches_reference_model(ops in gen_ops()) {
+            let mut h = Harness::new();
+            for op in &ops {
+                h.apply(op);
+                for idx in 0..h.positions.len() {
+                    for seq in probe_seqs() {
+                        prop_assert_eq!(
+                            h.real.is_revoked(ActorIdx::from(idx), seq),
+                            h.model_is_revoked(idx, seq),
+                            "divergence at actor index {} seq {}", idx, seq
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Once an actor is revoked at some seq, it is revoked at every
+        /// greater seq.
+        #[test]
+        fn is_revoked_is_monotonic_in_seq(ops in gen_ops()) {
+            let mut h = Harness::new();
+            for op in &ops {
+                h.apply(op);
+                for idx in 0..h.positions.len() {
+                    let mut seen_revoked = false;
+                    for seq in probe_seqs() {
+                        let r = h.real.is_revoked(ActorIdx::from(idx), seq);
+                        prop_assert!(
+                            r || !seen_revoked,
+                            "revocation not monotonic at actor index {} seq {}",
+                            idx, seq
+                        );
+                        seen_revoked = seen_revoked || r;
+                    }
+                }
+            }
+        }
+
+        /// The mask entry determines `is_revoked` exactly: no entry means
+        /// never revoked; a `None` bound means revoked at every seq; a
+        /// bound `v` means revoked iff `seq > v`.
+        #[test]
+        fn mask_boundary_is_exact(ops in gen_ops()) {
+            let mut h = Harness::new();
+            for op in &ops {
+                h.apply(op);
+                for idx in 0..h.positions.len() {
+                    let mask = h.real.get_mask_for(&ActorIdx::from(idx)).copied();
+                    for seq in probe_seqs() {
+                        let expected = match mask {
+                            None => false,
+                            Some(None) => true,
+                            Some(Some(v)) => seq > v.get() as u64,
+                        };
+                        prop_assert_eq!(
+                            h.real.is_revoked(ActorIdx::from(idx), seq),
+                            expected,
+                            "boundary mismatch at actor index {} seq {}", idx, seq
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Safety: an actor whose author is never revoked during the run
+        /// is never reported revoked, at any seq, at any point.
+        #[test]
+        fn actors_of_never_revoked_authors_are_never_revoked(ops in gen_ops()) {
+            let mut h = Harness::new();
+            for op in &ops {
+                h.apply(op);
+                for (idx, id) in h.positions.iter().enumerate() {
+                    if !h.ever_revoked.contains(&h.author_of[id]) {
+                        for seq in probe_seqs() {
+                            prop_assert!(
+                                !h.real.is_revoked(ActorIdx::from(idx), seq),
+                                "actor index {} of never-revoked author {} \
+                                 reported revoked at seq {}",
+                                idx, h.author_of[id], seq
+                            );
+                        }
+                    }
+                }
             }
         }
     }
