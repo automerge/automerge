@@ -282,6 +282,33 @@ describe("Automerge", () => {
       assert.deepEqual(doc6, { list: [2, 1, 9, 100, 101, 10, 3, 11, 12] })
     })
 
+    it("can insert very large numbers of list elements in one change", function () {
+      // inserting 200k elements is slow on CI runners; the mocha default of
+      // 2s is not enough
+      this.timeout(30_000)
+      // Contiguous inserts are consolidated into a single Insert patch, which
+      // used to be applied with a single `Array.prototype.splice` call whose
+      // argument count exceeded the JS engine's stack limit (~125k args in V8),
+      // throwing "RangeError: Maximum call stack size exceeded".
+      const N = 200_000
+      const chunkSize = 10_000
+      let doc = Automerge.from<{ list: number[] }>({ list: [] })
+      doc = Automerge.change(doc, d => {
+        for (let i = 0; i < N; i += chunkSize) {
+          const chunk = Array.from({ length: chunkSize }, (_, j) => i + j)
+          Automerge.insertAt(d.list, i, ...chunk)
+        }
+      })
+      assert.equal(doc.list.length, N)
+      assert.equal(doc.list[0], 0)
+      assert.equal(doc.list[N - 1], N - 1)
+      // deleting a large range must also not overflow
+      doc = Automerge.change(doc, d => {
+        Automerge.deleteAt(d.list, 0, N - 1)
+      })
+      assert.deepEqual(doc.list, [N - 1])
+    })
+
     it("allows access to the backend", () => {
       let doc = Automerge.from({ hello: "world" })
       assert.deepEqual(Automerge.getBackend(doc).materialize(), {
@@ -319,6 +346,23 @@ describe("Automerge", () => {
         assert.equal(changes[i].time, meta[i].time)
         assert.deepEqual(changes[i].deps, meta[i].deps)
         assert.deepEqual(changes[i].startOp, meta[i].startOp)
+        assert.equal(meta[i].author, null)
+      }
+    })
+    it("get change metadata includes the author when set", () => {
+      const author = "ab".repeat(32)
+      let doc = Automerge.init<any>({ author })
+      let heads = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.foo = "bar"
+      })
+      doc = Automerge.change(doc, d => {
+        d.zip = "zop"
+      })
+      const meta = Automerge.getChangesMetaSince(doc, heads)
+      assert.equal(meta.length, 2)
+      for (const m of meta) {
+        assert.equal(m.author, author)
       }
     })
   })
@@ -879,5 +923,22 @@ describe("Automerge", () => {
     assert.throws(() => {
       let doc4 = Automerge.from<any>({ bad: imin - BigInt("1") })
     }, /smaller than/)
+  })
+  it("it should be able to handle authors", () => {
+    let doc1 = Automerge.from<any>({ hello: "world" })
+    assert.equal(Automerge.getAuthor(doc1), null)
+    let doc2 = Automerge.from<any>({ hello: "world" }, { author: "aabbcc" })
+    assert.equal(Automerge.getAuthor(doc2), "aabbcc")
+    let doc3 = Automerge.init({ author: "ff00ff" })
+    assert.equal(Automerge.getAuthor(doc3), "ff00ff")
+    let doc4 = Automerge.clone(doc2, { author: "ffaa00" })
+    assert.equal(Automerge.getAuthor(doc4), "ffaa00")
+    let doc5 = Automerge.change(doc4, d => (d.foo = "bar"))
+    let doc6 = Automerge.merge(doc5,doc2)
+    assert.equal(Automerge.getAuthor(doc6), "ffaa00")
+    assert.deepEqual(Automerge.getAuthors(doc6), ["aabbcc", "ffaa00"])
+    let actor = Automerge.getActorId(doc6);
+    assert.equal(Automerge.getAuthorForActor(doc6, actor), "ffaa00")
+    assert.deepEqual(Automerge.getActorsForAuthor(doc6, "ffaa00"), [actor])
   })
 })

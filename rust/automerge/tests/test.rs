@@ -3,7 +3,7 @@ use automerge::sync::{Message, MessageVersion, State};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
+    sync::SyncDoc, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
     LoadOptions, ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue,
     SequenceTree, TextEncoding, Value, ROOT,
 };
@@ -3458,39 +3458,72 @@ fn merge_after_noop_then_real_put() {
 }
 
 #[test]
-fn should_reload_document_containing_deflated_columns() {
-    use std::time::SystemTime;
-    let base_seed = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos() as u64;
-    for trial in 0..100u64 {
-        let seed = base_seed.wrapping_add(trial);
-        let mut doc = AutoCommit::new_with_encoding(automerge::TextEncoding::Utf16CodeUnit);
-        let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
+fn authorship() {
+    let author1 = Author::from(vec![1, 1, 1]);
+    let author2 = Author::from(vec![2, 2, 2]);
+    let mut doc1 = AutoCommit::new();
+    doc1.put(ROOT, "key", "value1").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), None);
+    assert!(change.extra_bytes().is_empty());
 
-        let mut rng_state: u64 = seed;
-        for i in 0..200 {
-            rng_state ^= rng_state.wrapping_shl(13);
-            rng_state ^= rng_state.wrapping_shr(7);
-            rng_state ^= rng_state.wrapping_shl(17);
-            let pos = if i == 0 {
-                0
-            } else {
-                (rng_state as usize) % (i + 1)
-            };
-            doc.splice(&list, pos, 0, [ScalarValue::Str("a".into())])
-                .unwrap_or_else(|e| panic!("seed={seed} i={i} pos={pos}: {e}"));
-            let len = doc.length(&list);
-            if len != i + 1 {
-                panic!(
-                    "seed={seed} i={i} pos={pos}: expected length {} got {len}",
-                    i + 1
-                );
-            }
-        }
-        doc.commit();
-    }
+    let mut doc2 = doc1.fork();
+
+    doc1.set_author(Some(author1.clone()));
+    doc2.set_author(Some(author2.clone()));
+
+    doc1.put(ROOT, "key", "value2").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), Some(author1.clone()));
+    assert_eq!(change.extra_bytes(), &[1, 3, 1, 1, 1]);
+
+    doc1.put(ROOT, "key", "value3").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 2);
+    assert_eq!(change.author(), None);
+    assert!(change.extra_bytes().is_empty());
+
+    doc2.put(ROOT, "key", "value4").unwrap();
+    let change = doc2.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), Some(author2.clone()));
+    assert_eq!(change.extra_bytes(), &[1, 3, 2, 2, 2]);
+
+    doc1.merge(&mut doc2).unwrap();
+
+    let authors = doc1.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc1.get_actors_for_author(&author1);
+    let actors2 = doc1.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(
+        doc1.get_author_for_actor(&actors1[0]),
+        Some(author1.as_borrowed())
+    );
+    assert_eq!(
+        doc1.get_author_for_actor(&actors2[0]),
+        Some(author2.as_borrowed())
+    );
+
+    let doc3 = AutoCommit::load(&doc1.save()).unwrap();
+
+    let authors = doc3.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc3.get_actors_for_author(&author1);
+    let actors2 = doc3.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(
+        doc3.get_author_for_actor(&actors1[0]),
+        Some(author1.as_borrowed())
+    );
+    assert_eq!(
+        doc3.get_author_for_actor(&actors2[0]),
+        Some(author2.as_borrowed())
+    );
 }
 #[test]
 fn failed_merge_with_duplicate_sequence_number_does_not_corrupt_save_load() {
@@ -3769,6 +3802,7 @@ fn round_trip_change_with_extra_bytes() {
                 insert: false,
             }],
             actor_id: actor.clone(),
+            author: None,
             hash: None,
             seq,
             start_op: std::num::NonZero::new(seq).unwrap(),

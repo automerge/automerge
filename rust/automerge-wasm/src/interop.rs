@@ -9,6 +9,7 @@ use automerge::marks::{MarkSet, UpdateSpansConfig};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
+use itertools::Itertools;
 use js_sys::{Array, BigInt, Function, JsString, Number, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -66,7 +67,13 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
             .as_deref()
             .map(JsValue::from)
             .unwrap_or(JsValue::NULL);
+        let author = c
+            .author
+            .as_ref()
+            .map(|a| JsValue::from(a.to_string()))
+            .unwrap_or(JsValue::NULL);
         js_set(&change, "actor", c.actor.to_string()).unwrap();
+        js_set(&change, "author", author).unwrap();
         js_set(&change, "seq", c.seq as f64).unwrap();
         js_set(&change, "startOp", c.start_op as f64).unwrap();
         js_set(&change, "maxOp", c.max_op as f64).unwrap();
@@ -74,6 +81,9 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
         js_set(&change, "message", message).unwrap();
         js_set(&change, "deps", AR::from(c.deps.as_slice())).unwrap();
         js_set(&change, "hash", c.hash.to_string()).unwrap();
+        if !c.extra.is_empty() {
+            js_set(&change, "extraBytes", hex::encode(&c.extra)).unwrap();
+        }
         JS(change.into())
     }
 }
@@ -1479,17 +1489,29 @@ impl Automerge {
         meta: &JsValue,
         cache: &ExportCache<'_>,
     ) -> Result<(), error::ApplyPatch> {
-        let args: Array = values
-            .into_iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, cache))
-            .collect::<Result<_, _>>()?;
-        args.unshift(&(num_del as u32).into());
-        args.unshift(&(index as u32).into());
+        // The arguments to a function invoked via `Reflect::apply` are passed
+        // on the JS engine's stack, which limits how many arguments a single
+        // call can take (~125k in V8). A consolidated insert patch can contain
+        // far more values than that, so we perform the deletion in one
+        // argument-free call and then insert the values in bounded chunks.
+        const MAX_SPLICE_ARGS: usize = 32_000;
         let method = js_get(o, "splice")?
             .0
             .dyn_into::<Function>()
             .map_err(error::Export::GetSplice)?;
-        Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        if num_del > 0 {
+            let args = Array::of2(&(index as u32).into(), &(num_del as u32).into());
+            Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        }
+        let wrapped = values
+            .into_iter()
+            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, cache));
+        for (n, chunk) in wrapped.chunks(MAX_SPLICE_ARGS).into_iter().enumerate() {
+            let args: Array = chunk.collect::<Result<_, _>>()?;
+            args.unshift(&0_u32.into());
+            args.unshift(&((index + n * MAX_SPLICE_ARGS) as u32).into());
+            Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        }
         Ok(())
     }
 

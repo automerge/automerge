@@ -4,6 +4,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
+use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
@@ -342,13 +343,14 @@ impl<'a> Document<'a> {
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
-        let change_graph = change_cols.finalize(&changes.changes);
+        let mut authors = Authors::with_actors(change_cols.len());
+        let change_graph = change_cols.finalize(&changes.changes, &mut authors);
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
         debug_assert!(op_set.validate_top_index());
 
-        let doc = Automerge::from_parts(op_set, change_graph);
+        let doc = Automerge::from_parts(op_set, change_graph, authors);
 
         if let Some(err) = mark_order_validator.take_error() {
             Err(ReconstructError::InvalidMarkOrderDoc {

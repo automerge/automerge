@@ -1,4 +1,3 @@
-use crate::btree::SlabAggregate;
 use crate::column;
 use crate::column::{Column, Slab, WeightFn};
 use crate::index::ColumnIndex;
@@ -71,7 +70,6 @@ pub trait ColumnEncoding: Default {
     ) -> Column<Self::Value, Self::Codec, WF, Idx>
     where
         WF: WeightFn<Self::Value, Self::Codec>,
-        WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
     {
@@ -98,6 +96,28 @@ pub trait ColumnEncoding: Default {
 
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
+
+    /// A [`Decoder`](Self::Decoder)'s position, detached from the bytes
+    /// it was reading.
+    ///
+    /// Holding no borrow is the point: a caller can keep one beside a
+    /// `&mut` to the column the slab belongs to, which is what lets a
+    /// cursor carry its reader across writes.
+    type State: Clone;
+
+    /// A reader at item `at`, read from the slab's start — O(runs before
+    /// `at`), and free at `at == 0`. The fallback for a reader that has
+    /// lost its place, never the way to walk.
+    fn state_at(slab: &Slab<Self::Tail>, at: usize) -> Self::State;
+
+    /// The value at the reader, without moving it.
+    fn state_peek<'s>(
+        slab: &'s Slab<Self::Tail>,
+        state: &Self::State,
+    ) -> Option<<Self::Value as ColumnValueRef>::Get<'s>>;
+
+    /// Move the reader forward `n` items — O(runs crossed).
+    fn state_advance(slab: &Slab<Self::Tail>, state: &mut Self::State, n: usize);
 
     /// Streaming encoder for building encoded bytes from a sequence of values.
     type Encoder<'a>: EncoderApi<'a, Self::Value, Self::Codec>;
@@ -226,7 +246,6 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     fn into_column<WF, Idx>(self) -> Column<T, C, WF, Idx>
     where
         WF: WeightFn<T, C>,
-        WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
     {
         Column::load(&self.save()).unwrap()
@@ -307,6 +326,16 @@ pub trait RunDecoder: Iterator {
     /// from repeat/null runs.  The remaining items stay in the decoder
     /// for subsequent calls.
     fn next_run_max(&mut self, max: usize) -> Option<Run<Self::Item>>;
+
+    /// Advance past `n` items in O(runs skipped), decoding no values.
+    ///
+    /// Stops at the end of the column rather than panicking when it
+    /// holds fewer than `n`.
+    fn advance_by(&mut self, n: usize) {
+        if n > 0 {
+            self.nth(n - 1);
+        }
+    }
 
     /// Scan forward for `target`, assuming runs are sorted ascending.
     ///

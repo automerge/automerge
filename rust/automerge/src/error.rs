@@ -1,8 +1,8 @@
+use crate::author::Author;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
-use hexane::PackError;
+use crate::{Change, ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +17,8 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
+    DuplicateAuthor(Author<'static>, ActorId, u64),
     #[error("duplicate actor {0}: possible document clone")]
     DuplicateActorId(ActorId),
     #[error("general failure")]
@@ -70,10 +72,29 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error(transparent)]
     PatchLogMismatch(#[from] PatchLogMismatch),
-    #[error(transparent)]
-    EncodingError(#[from] PackError),
+    #[error("{0}")]
+    EncodingError(String),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl AutomergeError {
+    pub(crate) fn encoding(error: impl std::fmt::Display) -> Self {
+        Self::EncodingError(error.to_string())
+    }
+
+    pub(crate) fn duplicate_seq(c: &Change) -> Self {
+        Self::DuplicateSeqNumber(c.seq(), c.actor_id().clone())
+    }
+
+    pub(crate) fn duplicate_author(c: &Change) -> Self {
+        Self::DuplicateAuthor(
+            c.author()
+                .map_or(Author::from(vec![]), |author| author.into_owned()),
+            c.actor_id().clone(),
+            c.seq(),
+        )
+    }
 }
 
 impl PartialEq for AutomergeError {
@@ -92,6 +113,10 @@ impl From<AutomergeError> for wasm_bindgen::JsValue {
 #[derive(Error, Debug)]
 #[error("Invalid actor ID: {0}")]
 pub struct InvalidActorId(pub String);
+
+#[derive(Error, Debug)]
+#[error("Invalid author: {0}")]
+pub struct InvalidAuthor(pub String);
 
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid scalar value, expected {expected} but received {unexpected}")]

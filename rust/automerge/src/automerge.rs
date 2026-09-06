@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+use crate::author::{Author, Authors};
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -93,6 +94,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
+    author: Option<Author<'static>>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -160,6 +162,13 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    pub fn author(self, author: Author<'static>) -> Self {
+        Self {
+            author: Some(author),
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -170,6 +179,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
+            author: None,
         }
     }
 }
@@ -202,18 +212,54 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// This type implements [`crate::sync::SyncDoc`]
 ///
+/// ## Authors and Actors
+///
+/// It's often useful to be able to know who made some change. For this purpose Automerge has the
+/// concept of an "author ID". An author ID is an opaque byte array which can be associated with a
+/// change. This author ID will become part of the document history so you can later examine the
+/// changes in a document and see which author made the change.
+///
+/// Author IDs are set on document construction. If you don't set an author then changes produced
+/// by the document will have no author ([`Change::author`] will return `None`).
+///
+/// ### Example
+///
+/// ```rust
+/// # use automerge::{Author, Automerge, AutomergeError, ROOT, transaction::Transactable};
+/// let author = Author::from(vec![1,2,3]);
+/// let mut doc = Automerge::new().with_author(Some(author.clone()));
+/// doc.transact(|tx| {
+///     tx.put(ROOT, "foo", "bar")?;
+///     Ok::<_, AutomergeError>(())
+/// }).unwrap();
+/// let change = doc.get_last_local_change().unwrap();
+/// assert_eq!(change.author().unwrap(), author);
+/// ```
+///
+/// ### Relationship to Actor IDs
+///
+/// Every automerge commit has an "actor ID", which represents a sequential execution. Actor IDs
+/// should be considered a low level implementation detail and as much as possible should be left
+/// to automerge to manage.
+///
+/// Prior to the introduction of author IDs, actor IDs were often used in applications to determine
+/// authorship. New code should migrate to using author IDs. If you do need to map from an actor ID
+/// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
+    authors: Authors,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+    /// The current author.
+    author: Option<Author<'static>>,
 }
 
 impl Automerge {
@@ -222,10 +268,29 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
+            authors: Authors::with_actors(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
+    }
+
+    /// Return a copy of this document with its data anonymized using a fresh random seed.
+    ///
+    // Anonymization replaces actor IDs, map keys, mark names, scalar values, change metadata, and
+    // extra bytes. It retains the change graph, operation and object types, sequence positions,
+    // scalar string and byte-value lengths, and the UTF-8/UTF-16 width of each character. The
+    // intention is to make a document that has very similar performance characteristics to the
+    // original. This makes it useful when you want to send a document which is causing performance
+    // problems to someone to diagnose.
+    //
+    // That said, the data scrubbing here is best-effort. The anonymized document still reveals
+    // a bunch of information about editing patterns. A determined adversary could probably still
+    // learn a great deal from such a document. The intended use is really for sending documents
+    // to mostly trusted parties who are helping with bug fixing (e.g. library maintainers).
+    pub fn anonymize(&self) -> Result<Self, crate::AnonymizeError> {
+        crate::anonymize::anonymize(self)
     }
 
     /// Overwrite the keys of the root object with the values from `value`
@@ -243,20 +308,26 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
+            authors: Authors::with_actors(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
-    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph) -> Self {
+    // TODO(finto): document that there are various invariants on the
+    // relationships between OpSet, ChangeGraph, and Authors.
+    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph, authors: Authors) -> Self {
         let deps = change_graph.heads().collect();
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
             change_graph,
+            authors,
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         };
         doc.remove_unused_actors(false);
         doc
@@ -301,6 +372,50 @@ impl Automerge {
         self
     }
 
+    /// Set the actor id for this document.
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
+        self.set_author(author);
+        self
+    }
+
+    /// Set the author for this document.
+    ///
+    /// The [`Author`] is only changed, if `author` differs from
+    /// [`Automerge::get_author`]. If the author does change then a new
+    /// [`ActorId`] is generated for that author. Notably, this could be a
+    /// different [`ActorId`] compared to previous edits for the same author.
+    ///
+    /// If you are using authors *never* manually manage the [`ActorId`].
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
+        if author.as_ref() != self.get_author() {
+            self.author = author;
+            // TODO: re-use old actors
+            self.actor = Actor::Unused(ActorId::random());
+        }
+        self
+    }
+
+    /// Get the current author of this document.
+    pub fn get_author(&self) -> Option<&Author<'static>> {
+        self.author.as_ref()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
+        self.authors
+            .get_actors_for_author(author)
+            .filter_map(|idx| self.ops.actors.get(idx).cloned())
+            .collect()
+    }
+
+    pub fn get_authors(&self) -> &[Author<'static>] {
+        self.authors.get_authors()
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
+        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        self.authors.get_author_for_actor(actor_index)
+    }
+
     /// Get the current actor id of this document.
     pub fn get_actor(&self) -> &ActorId {
         match &self.actor {
@@ -313,6 +428,7 @@ impl Automerge {
         self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
+        self.authors.remove_actor(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -449,13 +565,14 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
-
+        let author = if seq == 1 { self.author.clone() } else { None };
         TransactionArgs {
             actor_index,
             seq,
             start_op,
             deps,
             scope,
+            author,
         }
     }
 
@@ -793,7 +910,7 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new());
+            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -879,7 +996,7 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(am)
+        Ok(am.with_author(options.author))
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -1177,7 +1294,7 @@ impl Automerge {
             .expect("Change's actor not already in the document");
 
         self.change_graph
-            .add_change(change, actor_index)
+            .add_change(change, actor_index, &mut self.authors)
             .expect("Change's deps should already be in the document");
     }
 
@@ -1185,8 +1302,10 @@ impl Automerge {
         self.ops.insert_actor(index, actor);
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
+        self.authors.insert_actor(index);
         index
     }
+
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
         match self.ops.actors.binary_search(actor) {
             Ok(idx) => idx,
@@ -1194,7 +1313,7 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+    fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => idx,
             Err(idx) => self.insert_actor(idx, actor),
@@ -1395,11 +1514,16 @@ impl Automerge {
     }
 
     pub fn get_changes_meta(&self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
-        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
+        ChangeCollector::exclude_hashes_meta(
+            &self.ops,
+            &self.change_graph,
+            &self.authors,
+            have_deps,
+        )
     }
 
     pub fn get_change_meta_by_hash(&self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
-        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash])
+        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, &self.authors, [*hash])
             .ok()?
             .pop()
     }

@@ -101,7 +101,7 @@ assert.deepEqual(doc2, {
 
 ## Development
 
-See [HACKING.md](./HACKING.md)
+See [HACKING.md](../javascript/HACKING.md)
 
 ## Meta
 

@@ -29,6 +29,10 @@ macro_rules! __log {
      }
  }
 
+pub mod edit;
+
+#[cfg(test)]
+mod edit_fuzz;
 mod error;
 pub use error::PackError;
 
@@ -171,6 +175,8 @@ mod sealed {
 }
 
 #[cfg(test)]
+mod splice_fuzz;
+#[cfg(test)]
 mod tests;
 
 pub use bool::BoolEncoding;
@@ -212,7 +218,8 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
     /// The encoding strategy for this value type, parameterized by the
     /// varint codec `C` (see [`Codec`]).  `Column<T>` uses
     /// `T::Encoding<Leb128>`; `Column<T, C>` uses `T::Encoding<C>`.
-    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>;
+    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>
+        + crate::edit::SlabEdit<Value = Self>;
 
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
@@ -284,7 +291,8 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
 /// ```
 pub trait ColumnValue: Copy + PartialEq + Debug + 'static {
     /// The encoding strategy — always `RleEncoding<Self, C>` for RLE types.
-    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>;
+    type Encoding<C: Codec>: ColumnEncoding<Value = Self, Codec = C>
+        + crate::edit::SlabEdit<Value = Self>;
 }
 
 impl<T: ColumnValue> ColumnValueRef for T {
@@ -605,6 +613,25 @@ impl RleValue for u32 {
     }
     fn pack<C: Codec>(value: u32, out: &mut Vec<u8>) -> bool {
         out.extend(C::encode_unsigned(value as u64));
+        true
+    }
+}
+
+impl ColumnValue for i32 {
+    type Encoding<C: Codec> = RleEncoding<i32, C>;
+}
+
+impl RleValue for i32 {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, i32), PackError> {
+        let (n, v) = C::try_read_signed(data)?;
+        let v = i32::try_from(v).map_err(|_| PackError::InvalidValue("i32 overflow".into()))?;
+        Ok((n, v))
+    }
+    fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
+        C::signed_len(data)
+    }
+    fn pack<C: Codec>(value: i32, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_signed(value.into()));
         true
     }
 }

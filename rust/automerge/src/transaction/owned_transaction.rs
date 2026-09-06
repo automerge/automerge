@@ -131,7 +131,7 @@ mod tests {
         let (doc, hash, _) = tx.commit();
         assert!(hash.is_some());
         assert_eq!(
-            doc.get(ROOT, "key").unwrap().unwrap().0.to_str().unwrap(),
+            doc.get(ROOT, "key").unwrap().unwrap().0.as_str().unwrap(),
             "value"
         );
     }
@@ -143,7 +143,7 @@ mod tests {
         tx.put(ROOT, "a", "1").unwrap();
         // ReadDoc works on the transaction itself
         let (val, _) = tx.get(ROOT, "a").unwrap().unwrap();
-        assert_eq!(val.to_str().unwrap(), "1");
+        assert_eq!(val.as_str().unwrap(), "1");
         tx.commit();
     }
 
@@ -183,7 +183,7 @@ mod tests {
         let (doc, cancelled) = doc.rollback();
         assert_eq!(cancelled, 0);
         assert_eq!(
-            doc.get(ROOT, "keep").unwrap().unwrap().0.to_str().unwrap(),
+            doc.get(ROOT, "keep").unwrap().unwrap().0.as_str().unwrap(),
             "yes"
         );
     }
@@ -217,7 +217,7 @@ mod tests {
         let mut tx = doc.into_transaction(None, Some(&heads_v1)).unwrap();
         // Should see v=1, not v=2
         let (val, _) = tx.get(ROOT, "v").unwrap().unwrap();
-        assert_eq!(val.to_i64().unwrap(), 1);
+        assert_eq!(val.as_i64().unwrap(), 1);
 
         tx.put(ROOT, "from_v1", true).unwrap();
         let (doc, hash, _) = tx.commit();

@@ -8,6 +8,7 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::author::Author;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
@@ -27,8 +28,8 @@ pub(crate) struct TransactionInner {
     message: Option<String>,
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
-    //checkpoint: OpSetCheckpoint,
     pending: Vec<TxOp>,
+    author: Option<Author<'static>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -59,6 +60,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
+    /// The author of the change
+    pub(crate) author: Option<Author<'static>>,
 }
 
 impl TransactionInner {
@@ -70,6 +73,7 @@ impl TransactionInner {
             //checkpoint,
             deps,
             scope,
+            author,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -82,6 +86,7 @@ impl TransactionInner {
             deps,
             pending: vec![],
             scope,
+            author,
         }
     }
 
@@ -101,7 +106,9 @@ impl TransactionInner {
 
     fn exid_to_obj(&self, doc: &Automerge, id: &ExId) -> Result<ObjMeta, AutomergeError> {
         let obj = doc.exid_to_obj(id)?;
-        let created_in_transaction = self.pending.iter().any(|op| op.id() == obj.id.0);
+        let created_in_transaction = obj.id.0.actor() == self.actor
+            && obj.id.0.counter() >= self.start_op.get()
+            && obj.id.0.counter() < self.start_op.get() + self.pending_ops() as u64;
         if !obj.id.is_root()
             && !created_in_transaction
             && self
@@ -175,10 +182,16 @@ impl TransactionInner {
             max_op: self.start_op.get() + self.pending.len() as u64 - 1,
             timestamp: self.time,
             message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
-            extra: Cow::Borrowed(&[]),
+            extra: self.extra_bytes(),
             builder: 0,
             deps,
         }
+    }
+
+    // TODO(finto): it feels strange that this is the inverse of reading the Author in StoredChange.
+    // This encodes the Author, whereas in change.rs, we are decoding.
+    fn extra_bytes<'a>(&self) -> Cow<'a, [u8]> {
+        crate::change::encode_author_footer(&self.author)
     }
 
     pub(crate) fn export(mut self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {

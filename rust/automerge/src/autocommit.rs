@@ -1,5 +1,6 @@
 use std::ops::RangeBounds;
 
+use crate::author::Author;
 use crate::automerge::SaveOptions;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
@@ -12,8 +13,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
-use crate::Fragment;
-use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
+use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -56,6 +56,10 @@ use crate::{LoadOptions, VerificationMode};
 /// representation of the heads of the document last time you called [`Self::diff_incremental()`]
 /// but you can also manage it directly using [`Self::update_diff_cursor()`] and
 /// [`Self::reset_diff_cursor()`].
+///
+/// ## Authors and Actors
+///
+/// See the ["Authors and Actors"](`Automerge#authors-and-actors`) docs.
 #[derive(Debug, Clone)]
 pub struct AutoCommit {
     pub(crate) doc: Automerge,
@@ -104,6 +108,20 @@ impl AutoCommit {
             save_cursor: Vec::new(),
             isolation: None,
         }
+    }
+
+    /// Return a copy of this document with its data anonymized.
+    pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
+        self.ensure_transaction_closed();
+        Ok(Self {
+            doc: self.doc.anonymize()?,
+            transaction: None,
+            patch_log: PatchLog::inactive(),
+            diff_cursor: Vec::new(),
+            diff_cache: None,
+            save_cursor: Vec::new(),
+            isolation: None,
+        })
     }
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
@@ -380,8 +398,36 @@ impl AutoCommit {
         self
     }
 
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
+        self.doc.get_actors_for_author(author)
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
+        self.doc.get_author_for_actor(actor)
+    }
+
+    pub fn get_author(&self) -> Option<&Author<'static>> {
+        self.doc.get_author()
+    }
+
+    pub fn get_authors(&self) -> &[Author<'static>] {
+        self.doc.get_authors()
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {

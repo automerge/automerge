@@ -1,4 +1,9 @@
-use std::{fs::File, io::IsTerminal, path::PathBuf, str::FromStr};
+use std::{
+    fs::File,
+    io::{IsTerminal, Write},
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use anyhow::{anyhow, Result};
 use clap::{
@@ -6,6 +11,7 @@ use clap::{
     Parser,
 };
 
+mod anonymize;
 mod color_json;
 mod examine;
 mod examine_sync;
@@ -120,6 +126,16 @@ enum Command {
     /// Read an automerge sync messaage and print a JSON representation of it
     ExamineSync { input_file: Option<PathBuf> },
 
+    /// Replace private document data while retaining history and structural shape
+    Anonymize {
+        /// The Automerge document to anonymize. If omitted, reads from stdin
+        input_file: Option<PathBuf>,
+
+        /// The file to write to. If omitted, writes to stdout
+        #[clap(long("out"), short('o'))]
+        output_file: Option<PathBuf>,
+    },
+
     /// Read one or more automerge documents and output a merged, compacted version of them
     Merge {
         /// The file to write to. If omitted assumes stdout
@@ -132,29 +148,29 @@ enum Command {
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
-    if std::io::stdin().is_terminal() {
-        if let Some(path) = maybe_path {
-            Ok(Box::new(File::open(path).unwrap()))
-        } else {
-            Err(anyhow!(
-                "Must provide file path if not providing input via stdin"
-            ))
-        }
+    if let Some(path) = maybe_path {
+        Ok(Box::new(File::open(path)?))
+    } else if std::io::stdin().is_terminal() {
+        Err(anyhow!(
+            "Must provide file path if not providing input via stdin"
+        ))
     } else {
         Ok(Box::new(std::io::stdin()))
     }
 }
 
 fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Write>> {
-    if std::io::stdout().is_terminal() {
-        if let Some(path) = maybe_path {
-            Ok(Box::new(File::create(path).unwrap()))
-        } else {
-            Err(anyhow!("Must provide file path if not piping to stdout"))
-        }
+    if let Some(path) = maybe_path {
+        Ok(Box::new(File::create(path)?))
+    } else if std::io::stdout().is_terminal() {
+        Err(anyhow!("Must provide file path if not piping to stdout"))
     } else {
         Ok(Box::new(std::io::stdout()))
     }
+}
+
+fn paths_refer_to_same_file(input: &Path, output: &Path) -> Result<bool> {
+    Ok(input == output || (output.exists() && input.canonicalize()? == output.canonicalize()?))
 }
 
 fn main() -> Result<()> {
@@ -226,6 +242,32 @@ fn main() -> Result<()> {
                     eprintln!("Error: {:?}", e);
                 }
             }
+            Ok(())
+        }
+        Command::Anonymize {
+            input_file,
+            output_file,
+        } => {
+            if let (Some(input), Some(output)) = (&input_file, &output_file) {
+                if paths_refer_to_same_file(input, output)? {
+                    return Err(anyhow!("input and output paths must differ"));
+                }
+            }
+
+            let input = open_file_or_stdin(input_file)?;
+            // Do not truncate an existing output until the input has loaded and anonymization has
+            // succeeded.
+            let anonymized = anonymize::anonymize(input)?;
+            let mut output = create_file_or_stdout(output_file)?;
+            output.write_all(&anonymized.bytes)?;
+            output.flush()?;
+            eprintln!(
+                "anonymized {} change(s), {} operation(s), and {} actor(s)",
+                anonymized.change_count, anonymized.operation_count, anonymized.actor_count
+            );
+            eprintln!(
+                "review the output before publishing; document structure and lengths are retained"
+            );
             Ok(())
         }
         Command::Merge { input, output_file } => {

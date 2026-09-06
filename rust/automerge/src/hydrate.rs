@@ -128,7 +128,7 @@ impl Value {
 
     pub fn as_i64(&self) -> i64 {
         match self {
-            Value::Scalar(s) => s.as_i64(),
+            Value::Scalar(s) => s.as_i64_or_default(),
             _ => 0,
         }
     }

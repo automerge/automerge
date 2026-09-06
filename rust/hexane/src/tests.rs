@@ -532,22 +532,22 @@ fn scan_to_value_on_rle_columns() {
 }
 
 #[test]
-fn scan_to_pos_consumes_through() {
+fn scan_to_consumes_through() {
     use crate::Shiftable;
     let col = Column::<u64>::from_values((0..100).collect());
     let mut it = col.iter();
-    assert_eq!(it.scan_to_pos(10), Some(10));
+    assert_eq!(it.seek_to(10), Some(10));
     assert_eq!(it.next(), Some(11));
-    assert_eq!(it.scan_to_pos(50), Some(50));
+    assert_eq!(it.seek_to(50), Some(50));
 
     let col = DeltaColumn::<u64>::from_values((0..100).collect());
     let mut it = col.iter();
-    assert_eq!(it.scan_to_pos(7), Some(7));
+    assert_eq!(it.seek_to(7), Some(7));
     assert_eq!(it.next(), Some(8));
 
     let col = PrefixColumn::<u64>::from_values((0..100).collect());
     let mut it = col.iter();
-    assert_eq!(it.scan_to_pos(5).map(|pv| pv.value), Some(5));
+    assert_eq!(it.seek_to(5).map(|pv| pv.value), Some(5));
 }
 
 #[test]
@@ -2884,8 +2884,24 @@ fn fuzz_bool_splice_exhaustive() {
             let mut c = col.clone();
             let new_vals: Vec<bool> = (0..ins_count).map(|_| r.random()).collect();
             let del = del_count.min(c.len() - pos);
-            c.splice(pos, del, new_vals);
+            c.splice(pos, del, new_vals.iter().copied());
             validate_bool_column(&c);
+            // Self-consistency is not correctness: a slab that duplicated
+            // a run is entirely self-consistent. Compare to a model.
+            let mut model = initial.clone();
+            model.splice(pos..pos + del, new_vals.iter().copied());
+            assert_eq!(
+                c.len(),
+                model.len(),
+                "len after splice(pos={pos}, del={del}, ins={})",
+                new_vals.len()
+            );
+            assert_eq!(
+                c.iter().collect::<Vec<_>>(),
+                model,
+                "contents after splice(pos={pos}, del={del}, ins={})",
+                new_vals.len()
+            );
         }
     }
 }
@@ -2929,9 +2945,14 @@ fn fuzz_option_u64_splice_exhaustive() {
                 .map(|_| choices[r.random_range(0..choices.len())])
                 .collect();
             let del = del_count.min(c.len() - pos);
+            let mut model = initial.clone();
+            model.splice(pos..pos + del, new_vals.iter().copied());
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 c.splice(pos, del, new_vals.clone());
                 validate_rle_column(&c);
+                // Self-consistency is not correctness — compare to a model.
+                assert_eq!(c.len(), model.len(), "len");
+                assert_eq!(c.iter().collect::<Vec<_>>(), model, "contents");
             }));
             if result.is_err() {
                 panic!(
@@ -4074,6 +4095,10 @@ fn xorshift(state: &mut u64) -> u64 {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_delta_column() {
     let mut rng: u64 = 11111;
 
@@ -4159,6 +4184,10 @@ fn fuzz_delta_column() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_delta_column_nullable() {
     let mut rng: u64 = 22222;
 
@@ -4190,6 +4219,10 @@ fn fuzz_delta_column_nullable() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "deep_fuzz"),
+    ignore = "deep fuzz: run with --features deep_fuzz"
+)]
 fn fuzz_prefix_column() {
     let mut rng: u64 = 33333;
 
@@ -5706,4 +5739,32 @@ mod codec_modules {
         let _: crate::Column<u64, crate::Bijou64> =
             crate::bijou::Column::<u64>::load(&bij).unwrap();
     }
+}
+
+/// A write must invalidate suspended iterators. `IterState::try_resume`
+/// also compares slab counts, so the case that needs the counter is a
+/// splice that leaves the slab count alone.
+#[test]
+fn splice_invalidates_a_suspended_iter() {
+    let mut col = Column::<u64>::from_values((0..100).collect());
+    let mut it = col.iter();
+    it.next();
+    let state = it.suspend();
+    assert!(
+        state.try_resume(&col).is_ok(),
+        "unmutated column should resume"
+    );
+
+    let slabs_before = col.slabs.len();
+    col.splice(50, 1, std::iter::once(999u64));
+    assert_eq!(
+        slabs_before,
+        col.slabs.len(),
+        "test needs a slab-count-preserving splice"
+    );
+
+    assert!(
+        state.try_resume(&col).is_err(),
+        "resume across a write must fail",
+    );
 }
