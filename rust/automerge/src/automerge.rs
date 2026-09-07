@@ -265,6 +265,7 @@ pub struct Automerge {
     pub(crate) change_graph: ChangeGraph,
     authors: Authors,
     revocations: Revocations,
+    cached_revocation_clock: RevocationClock,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
@@ -283,6 +284,7 @@ impl Automerge {
             change_graph: ChangeGraph::new(0),
             authors: Authors::with_actors(0),
             revocations: Revocations::new(),
+            cached_revocation_clock: RevocationClock::intialize(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
@@ -324,6 +326,7 @@ impl Automerge {
             change_graph: ChangeGraph::new(0),
             authors: Authors::with_actors(0),
             revocations: Revocations::new(),
+            cached_revocation_clock: RevocationClock::intialize(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
@@ -345,12 +348,14 @@ impl Automerge {
             change_graph,
             authors,
             revocations: Revocations::new(),
+            cached_revocation_clock: RevocationClock::intialize(0),
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
         };
         doc.set_revocations(revocations);
+        doc.rebuild_revocation_clock();
         doc.remove_unused_actors(false);
         doc
     }
@@ -472,8 +477,7 @@ impl Automerge {
             self.revocations
                 .revoke(author.clone(), from.to_vec(), &seq_clock, &self.authors);
         }
-        self.change_graph
-            .rebuild_revocation_clock(&self.revocations);
+        self.rebuild_revocation_clock();
         let after = self.clock_at_heads(&heads);
         self.ops.recompute_indexes(&after);
         let clock = ClockRange::Diff(before, after);
@@ -484,8 +488,7 @@ impl Automerge {
         let heads = self.get_heads();
         let before = self.clock_at_heads(&heads);
         self.revocations.unrevoke(author, &self.authors);
-        self.change_graph
-            .rebuild_revocation_clock(&self.revocations);
+        self.rebuild_revocation_clock();
         let after = self.clock_at_heads(&heads);
         self.ops.recompute_indexes(&after);
         let clock = ClockRange::Diff(before, after);
@@ -518,8 +521,13 @@ impl Automerge {
     /// If the `author` is revoked, then the `actor` will be added to the
     /// revocation point.
     pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
-        self.change_graph
-            .revoke_new_actor(&author, actor, &mut self.revocations);
+        let Some(heads) = self.revocations.get_revocations_for_author(&author) else {
+            return;
+        };
+        let clock = self.change_graph.clock_for_heads(heads);
+        self.revocations
+            .insert_mask_for(actor.into(), clock.get_for_actor(&actor));
+        self.rebuild_revocation_clock();
         self.authors.assign_author(author, actor);
     }
 
@@ -535,6 +543,7 @@ impl Automerge {
         self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
         self.revocations.remove_actor(actor);
+        self.cached_revocation_clock.remove_actor(actor);
         self.change_graph.remove_actor(actor);
         self.authors.remove_actor(actor);
     }
@@ -1422,14 +1431,18 @@ impl Automerge {
             .binary_search(change.actor_id())
             .expect("Change's actor not already in the document");
 
-        self.change_graph
-            .add_change(
-                change,
-                actor_index,
-                &mut self.authors,
-                &mut self.revocations,
-            )
+        let head = self
+            .change_graph
+            .add_change(change, actor_index, &mut self.authors)
             .expect("Change's deps should already be in the document");
+
+        if self.revocations.pop_pending_revocation(&head) {
+            self.revocations
+                .recompute_revocations(&self.authors, |heads| {
+                    self.change_graph.clock_for_heads(heads)
+                });
+            self.rebuild_revocation_clock();
+        }
     }
 
     fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
@@ -1437,6 +1450,7 @@ impl Automerge {
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
         self.revocations.insert_actor(index);
+        self.cached_revocation_clock.insert_actor(index);
         self.authors.insert_actor(index);
         index
     }
@@ -2233,12 +2247,21 @@ impl Automerge {
         self.ops.text_encoding
     }
 
+    /// The clock used to filter revoked ops on slow paths that bypass the
+    /// op-set index (e.g. `visible_slow`). `None` when no actors are
+    /// currently revoked — in which case slow paths can skip clock-based
+    /// filtering. Borrowed callers do not have to copy the clock.
     pub(crate) fn active_revocation_clock(&self) -> Option<&Clock> {
-        self.change_graph.active_revocation_clock(&self.revocations)
+        self.cached_revocation_clock.active(&self.revocations)
     }
 
     pub(crate) fn clock_at_heads(&self, heads: &[ChangeHash]) -> Clock {
         self.change_graph.clock_at(heads, &self.revocations)
+    }
+
+    fn rebuild_revocation_clock(&mut self) {
+        self.cached_revocation_clock
+            .rebuild(&self.change_graph, &self.revocations);
     }
 }
 
@@ -2530,4 +2553,58 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: Clock,
+}
+
+/// Maintain a cached version of the revocation clock for [`Automerge`].
+///
+/// [`RevocationClock::active`] returns the inner [`Clock`].
+///
+/// Use [`RevocationClock::rebuild`] to recalculate the inner [`Clock`] whenever
+/// [`Automerge::revocations`] is modified.
+#[derive(Default, Debug, Clone, PartialEq)]
+struct RevocationClock {
+    inner: Clock,
+}
+
+impl RevocationClock {
+    /// Initialize the [`RevocationClock`] with the number of `actors` given.
+    fn intialize(actors: usize) -> Self {
+        Self {
+            inner: Clock(vec![u32::MAX; actors]),
+        }
+    }
+
+    /// The clock used to filter revoked ops on slow paths that bypass the
+    /// op-set index (e.g. `visible_slow`). `None` when no actors are
+    /// currently revoked — in which case slow paths can skip clock-based
+    /// filtering. Borrowed callers do not have to copy the clock.
+    fn active(&self, revocations: &Revocations) -> Option<&Clock> {
+        (!revocations.is_empty()).then_some(&self.inner)
+    }
+
+    /// Rebuild the inner [`Clock`] using the provided [`ChangeGraph`] and [`Revocations`].
+    fn rebuild(&mut self, change_graph: &ChangeGraph, revocations: &Revocations) {
+        let clock = (0_u32..change_graph.num_actors() as u32)
+            .map(|actor| {
+                let actor_usize = actor as usize;
+                let actor_idx = ActorIdx(actor);
+                if let Some(mask) = revocations.get_mask_for(&actor_idx) {
+                    mask.and_then(|seq| change_graph.max_op_for_seq(actor_usize, seq))
+                } else {
+                    Some(u32::MAX)
+                }
+            })
+            .collect();
+        self.inner = clock;
+    }
+
+    /// Insert the `actor` into the inner [`Clock`].
+    fn insert_actor(&mut self, actor: usize) {
+        self.inner.0.insert(actor, u32::MAX);
+    }
+
+    /// Remove the `actor` from the inner [`Clock`].
+    fn remove_actor(&mut self, actor: usize) {
+        self.inner.0.remove(actor);
+    }
 }
