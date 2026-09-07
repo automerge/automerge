@@ -860,6 +860,72 @@ export function save<T>(doc: Doc<T>): Uint8Array {
   return _state(doc).handle.save()
 }
 
+export type RevocationOptions<T> = { patchCallback?: PatchCallback<T> }
+
+/** Revoke all changes by `author` after `heads` from the document view. */
+export function revoke<T>(
+  doc: Doc<T>,
+  author: string,
+  heads: Heads,
+  opts: RevocationOptions<T> = {},
+): Doc<T> {
+  return applyVisibilityMutation(doc, "revoke", opts, handle =>
+    handle.revoke(author, heads),
+  )
+}
+
+/** Remove a view-local revocation for `author`. */
+export function unrevoke<T>(
+  doc: Doc<T>,
+  author: string,
+  opts: RevocationOptions<T> = {},
+): Doc<T> {
+  return applyVisibilityMutation(doc, "unrevoke", opts, handle =>
+    handle.unrevoke(author),
+  )
+}
+
+function applyVisibilityMutation<T>(
+  doc: Doc<T>,
+  source: "revoke" | "unrevoke",
+  opts: RevocationOptions<T>,
+  mutate: (handle: Automerge) => Patch[],
+): Doc<T> {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+
+  const heads = state.handle.getHeads()
+  const patches = mutate(state.handle)
+  if (patches.length === 0) {
+    return doc
+  }
+
+  const nextDoc = state.handle.materialize("/", undefined, {
+    ...state,
+    heads: undefined,
+  }) as Doc<T>
+
+  const callback = opts.patchCallback || state.patchCallback
+  if (callback != null)
+    callback(patches, { before: doc, after: nextDoc, source })
+
+  _state(nextDoc).mostRecentPatch = {
+    before: _state(doc).heads,
+    after: _state(nextDoc).handle.getHeads(),
+    patches,
+  }
+
+  state.heads = heads
+  return nextDoc
+}
+
 /**
  * Merge `remote` into `local`
  * @typeParam T - The type of values contained in each document
