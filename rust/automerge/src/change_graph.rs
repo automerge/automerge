@@ -1231,7 +1231,7 @@ mod tests {
                 seq: *seq,
                 max_op: start_op + ops.len() as u64 - 1,
                 start_op,
-                timestamp,
+                timestamp: 0,
                 message: None,
                 extra: Cow::Owned(vec![]),
             };
@@ -1479,8 +1479,9 @@ mod tests {
 
     #[test]
     fn fragments_filtered_by_levels() {
-        // 5000 changes gives ~20 expected level-1 fragments (1 hash in 256)
-        // so seeing zero cached fragments would be extraordinarily unlikely.
+        // This deterministic chain includes cached fragments and a loose tail.
+        // A random chain can end exactly at a cached fragment boundary, in
+        // which case having no loose fragments is valid.
         let mut builder = TestGraphBuilder::new();
         let actor = builder.actor();
         let mut prev = vec![];
@@ -1516,6 +1517,11 @@ mod tests {
         for f in &cached {
             assert!(f.level >= 1, "1.. returned a level-0 fragment");
         }
+
+        // Ending at a cached fragment boundary legitimately leaves no loose
+        // fragments. The previous random fixture occasionally hit this case.
+        let cached_heads = [cached[0].head];
+        assert_eq!(graph.fragments(&cached_heads, 0..=0).count(), 0);
 
         // empty range yields nothing
         assert_eq!(graph.fragments(&heads, 0..0).count(), 0);
