@@ -1524,21 +1524,19 @@ impl Automerge {
         Some(self.doc.get_author()?.to_string())
     }
 
-    #[wasm_bindgen(js_name = revoke, unchecked_return_type="Patch[]")]
-    pub fn revoke(&mut self, author: String, heads: JsValue) -> Result<Array, JsValue> {
+    #[wasm_bindgen(js_name = revoke)]
+    pub fn revoke(&mut self, author: String, heads: JsValue) -> Result<(), JsValue> {
         let heads = get_heads(heads)?.unwrap_or_default();
         let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
-        let patches = self.doc.revoke(author, &heads);
-        let result = interop::export_patches(&self.external_types, patches)?;
-        Ok(result)
+        self.doc.revoke(author, &heads);
+        Ok(())
     }
 
-    #[wasm_bindgen(js_name = unrevoke, unchecked_return_type="Patch[]")]
-    pub fn unrevoke(&mut self, author: String) -> Result<Array, JsValue> {
+    #[wasm_bindgen(js_name = unrevoke)]
+    pub fn unrevoke(&mut self, author: String) -> Result<(), JsValue> {
         let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
-        let patches = self.doc.unrevoke(&author);
-        let result = interop::export_patches(&self.external_types, patches)?;
-        Ok(result)
+        self.doc.unrevoke(&author);
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = getAuthors, unchecked_return_type="Author[]")]

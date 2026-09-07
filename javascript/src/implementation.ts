@@ -889,7 +889,7 @@ function applyVisibilityMutation<T>(
   doc: Doc<T>,
   source: "revoke" | "unrevoke",
   opts: RevocationOptions<T>,
-  mutate: (handle: Automerge) => Patch[],
+  mutate: (handle: Automerge) => void,
 ): Doc<T> {
   const state = _state(doc)
   if (state.heads) {
@@ -902,28 +902,13 @@ function applyVisibilityMutation<T>(
   }
 
   const heads = state.handle.getHeads()
-  const patches = mutate(state.handle)
-  if (patches.length === 0) {
-    return doc
-  }
-
-  const nextDoc = state.handle.materialize("/", undefined, {
-    ...state,
-    heads: undefined,
-  }) as Doc<T>
-
-  const callback = opts.patchCallback || state.patchCallback
-  if (callback != null)
-    callback(patches, { before: doc, after: nextDoc, source })
-
-  _state(nextDoc).mostRecentPatch = {
-    before: _state(doc).heads,
-    after: _state(nextDoc).handle.getHeads(),
-    patches,
-  }
-
-  state.heads = heads
-  return nextDoc
+  mutate(state.handle)
+  return progressDocument(
+    doc,
+    source,
+    heads,
+    opts.patchCallback || state.patchCallback,
+  )
 }
 
 /**

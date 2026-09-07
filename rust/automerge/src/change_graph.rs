@@ -1090,10 +1090,7 @@ pub struct MissingDep(ChangeHash);
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::BTreeMap,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::BTreeMap;
 
     use crate::{
         make_rng,
@@ -1169,7 +1166,9 @@ mod tests {
         }
 
         fn actor(&mut self) -> ActorId {
-            let actor = ActorId::random();
+            // Fragment boundaries depend on hashes, so keep graph fixtures
+            // reproducible rather than using random actors or timestamps.
+            let actor = ActorId::from((self.actors.len() as u64).to_be_bytes().to_vec());
             self.graph.insert_actor(self.actors.len());
             self.actors.push(actor.clone());
             actor
@@ -1219,10 +1218,6 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
             let meta = BuildChangeMetadata {
                 actor: actor_idx,
@@ -1234,7 +1229,7 @@ mod tests {
                 seq: *seq,
                 max_op: start_op + ops.len() as u64 - 1,
                 start_op,
-                timestamp,
+                timestamp: 0,
                 message: None,
                 extra: Cow::Owned(vec![]),
             };
@@ -1438,8 +1433,9 @@ mod tests {
 
     #[test]
     fn fragments_filtered_by_levels() {
-        // 5000 changes gives ~20 expected level-1 fragments (1 hash in 256)
-        // so seeing zero cached fragments would be extraordinarily unlikely.
+        // This deterministic chain includes cached fragments and a loose tail.
+        // A random chain can end exactly at a cached fragment boundary, in
+        // which case having no loose fragments is valid.
         let mut builder = TestGraphBuilder::new();
         let actor = builder.actor();
         let mut prev = vec![];
@@ -1468,6 +1464,11 @@ mod tests {
         for f in &cached {
             assert!(f.level >= 1, "1.. returned a level-0 fragment");
         }
+
+        // Ending at a cached fragment boundary legitimately leaves no loose
+        // fragments. The previous random fixture occasionally hit this case.
+        let cached_heads = [cached[0].head];
+        assert_eq!(graph.fragments(&cached_heads, 0..=0).count(), 0);
 
         // empty range yields nothing
         assert_eq!(graph.fragments(&heads, 0..0).count(), 0);

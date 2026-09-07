@@ -2,7 +2,7 @@ use std::ops::RangeBounds;
 
 use crate::author::Author;
 use crate::automerge::SaveOptions;
-use crate::clock::Clock;
+use crate::clock::{Clock, ClockRange};
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
@@ -186,6 +186,7 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         self.patch_log = PatchLog::inactive();
         self.diff_cursor = Vec::new();
+        self.diff_cache = None;
     }
 
     /// Sets the [`Self::diff_cursor()`] to current heads of the document and will begin
@@ -198,6 +199,7 @@ impl AutoCommit {
     /// [`Self::reset_diff_cursor()`]
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
+        self.diff_cache = None;
         let heads = self.get_heads();
         if !heads.is_empty() {
             self.patch_log.set_active(true);
@@ -430,18 +432,53 @@ impl AutoCommit {
         self.doc.get_authors()
     }
 
-    pub fn revoke(&mut self, author: Author<'static>, heads: &[ChangeHash]) -> Vec<Patch> {
-        self.ensure_transaction_closed();
-        let mut patch_log = PatchLog::active();
-        self.doc.revoke(author, heads, &mut patch_log);
-        patch_log.make_patches(&self.doc)
+    /// Revoke all changes made by `author` after `heads`.
+    ///
+    /// Use [`Self::update_diff_cursor()`] before revoking to track the resulting
+    /// patches, then retrieve them with [`Self::diff_incremental()`].
+    pub fn revoke(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
+        self.update_revocations(|doc, patch_log| doc.revoke(author, heads, patch_log))
     }
 
-    pub fn unrevoke(&mut self, author: &Author<'static>) -> Vec<Patch> {
+    /// Remove the revocation for `author`.
+    ///
+    /// Use [`Self::update_diff_cursor()`] before unrevoking to track the resulting
+    /// patches, then retrieve them with [`Self::diff_incremental()`].
+    pub fn unrevoke(&mut self, author: &Author<'static>) {
+        self.update_revocations(|doc, patch_log| doc.unrevoke(author, patch_log))
+    }
+
+    fn update_revocations(&mut self, update: impl FnOnce(&mut Automerge, &mut PatchLog)) {
         self.ensure_transaction_closed();
-        let mut patch_log = PatchLog::active();
-        self.doc.unrevoke(author, &mut patch_log);
-        patch_log.make_patches(&self.doc)
+        // Revocation changes visibility without changing the heads used as keys.
+        self.diff_cache = None;
+        if !self.patch_log.is_active() {
+            update(&mut self.doc, &mut PatchLog::inactive());
+            return;
+        }
+
+        let heads = self.get_heads();
+        // Resolve pending paths before revocation can remove objects or move
+        // their list positions, and preserve transition ordering.
+        self.patch_log.finish_current_view(&self.doc, &heads);
+        if self.isolation.is_some() {
+            // Record changes to the isolated view, not the full document.
+            let before = self.doc.clock_at_heads(&heads);
+            update(&mut self.doc, &mut PatchLog::inactive());
+            let after = self.doc.clock_at_heads(&heads);
+            DiffIter::log(
+                &self.doc,
+                ObjMeta::root(),
+                ClockRange::Diff(before, after),
+                &mut self.patch_log,
+                true,
+            );
+        } else {
+            update(&mut self.doc, &mut self.patch_log);
+        }
+        // Resolve this transition's paths before subsequent edits or revocations
+        // can change them, and keep the patches in chronological order.
+        self.patch_log.finish_current_view(&self.doc, &heads);
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {

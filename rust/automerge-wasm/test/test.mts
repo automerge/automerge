@@ -2739,10 +2739,14 @@ describe("Automerge", () => {
       let heads1 = doc.getHeads();
       doc.put("/", "key3", "val3");
 
-      let patches1 = doc.revoke("aaaa", heads1);
+      doc.updateDiffCursor();
+      assert.equal(doc.revoke("aaaa", heads1), undefined);
+      let patches1 = doc.diffIncremental();
       assert.deepEqual(patches1, [{action:'del',path:['key3']}]);
+      assert.deepEqual(doc.diffIncremental(), []);
 
-      let patches2 = doc.unrevoke("aaaa");
+      assert.equal(doc.unrevoke("aaaa"), undefined);
+      let patches2 = doc.diffIncremental();
       assert.deepEqual(patches2, [{action:'put',path:['key3'],value:'val3'}])
 
       let heads2 = doc.getHeads();
@@ -2750,17 +2754,22 @@ describe("Automerge", () => {
       doc.put("/", "key2", "val2a");
       doc.put("/", "key3", "val3a");
 
-      let patches3 = doc.revoke("aaaa", heads1);
+      doc.updateDiffCursor();
+      doc.revoke("aaaa", heads1);
+      let patches3 = doc.diffIncremental();
       assert.deepEqual(patches3, []);
 
-      let patches4 = doc.unrevoke("aaaa");
+      doc.unrevoke("aaaa");
+      let patches4 = doc.diffIncremental();
       assert.deepEqual(patches4, [])
 
-      let patches5 = doc.revoke("bbbb", heads2);
+      doc.revoke("bbbb", heads2);
+      let patches5 = doc.diffIncremental();
       assert.deepEqual(patches5, [{action:'put',path:['key2'],value:'val2'},
                                   {action:'put',path:['key3'],value:'val3'}]);
 
-      let patches6 = doc.unrevoke("bbbb");
+      doc.unrevoke("bbbb");
+      let patches6 = doc.diffIncremental();
       assert.deepEqual(patches6, [{action:'put',path:['key2'],value:'val2a'},
                                   {action:'put',path:['key3'],value:'val3a'}]);
     })
@@ -2792,10 +2801,10 @@ describe("Automerge", () => {
 
       assert.deepEqual(doc.materialize(), d2);
 
-      let patches1 = doc.revoke("aaaa", heads1);
+      doc.revoke("aaaa", heads1);
       assert.deepEqual(doc.materialize(), d1);
 
-      let patches2 = doc.unrevoke("aaaa");
+      doc.unrevoke("aaaa");
       assert.deepEqual(doc.materialize(), d2);
     })
   });

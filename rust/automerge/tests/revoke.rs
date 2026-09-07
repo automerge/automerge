@@ -1,7 +1,7 @@
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    ActorId, Author, AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, ROOT,
+    ActorId, Author, AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, TextEncoding, ROOT,
 };
 
 #[test]
@@ -96,6 +96,163 @@ fn revoke_apply_changes() {
 }
 
 #[test]
+fn revoke_is_included_in_incremental_diff() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(good));
+    doc.put(ROOT, "key", "original").unwrap();
+    let epoch = doc.get_heads();
+
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.put(ROOT, "key", "replacement").unwrap();
+    doc.merge(&mut fork).unwrap();
+    doc.update_diff_cursor();
+    let heads = doc.get_heads();
+
+    doc.revoke(bad, &epoch);
+    // Revocation changes the visible state without advancing the heads, but
+    // incremental diffs must still include the transition.
+    let patches = doc.diff_incremental();
+    assert_eq!(doc.get_heads(), heads);
+    assert_eq!(doc.get(ROOT, "key").unwrap().unwrap().0, "original".into());
+    assert_eq!(patches.len(), 1);
+    assert!(matches!(
+        &patches[0].action,
+        PatchAction::PutMap { key, value, .. }
+            if key == "key" && value.0 == "original".into()
+    ));
+
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn unrevoke_is_included_in_incremental_diff() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(good));
+    doc.put(ROOT, "key", "original").unwrap();
+    let epoch = doc.get_heads();
+
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.put(ROOT, "key", "replacement").unwrap();
+    doc.merge(&mut fork).unwrap();
+    doc.revoke(bad.clone(), &epoch);
+    assert_eq!(doc.get(ROOT, "key").unwrap().unwrap().0, "original".into());
+    doc.update_diff_cursor();
+    let heads = doc.get_heads();
+
+    doc.unrevoke(&bad);
+    let patches = doc.diff_incremental();
+    assert_eq!(doc.get_heads(), heads);
+    assert_eq!(
+        doc.get(ROOT, "key").unwrap().unwrap().0,
+        "replacement".into()
+    );
+    assert_eq!(patches.len(), 1);
+    assert!(matches!(
+        &patches[0].action,
+        PatchAction::PutMap { key, value, .. }
+            if key == "key" && value.0 == "replacement".into()
+    ));
+
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn revocation_invalidates_cached_diffs() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(good));
+    doc.put(ROOT, "key", "original").unwrap();
+    let epoch = doc.get_heads();
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.put(ROOT, "key", "replacement").unwrap();
+    doc.merge(&mut fork).unwrap();
+    let heads = doc.get_heads();
+
+    // Neither the indexed nor the unindexed diff cache can use heads alone to
+    // detect changes in revocation state.
+    let original = doc.diff(&[], &heads);
+    doc.revoke(bad.clone(), &epoch);
+    let revoked = doc.diff(&[], &heads);
+    assert_ne!(revoked, original);
+    doc.unrevoke(&bad);
+    assert_eq!(doc.diff(&[], &heads), original);
+
+    doc.update_diff_cursor();
+    assert!(doc.diff(&heads, &heads).is_empty());
+    doc.revoke(bad.clone(), &epoch);
+    assert_eq!(doc.diff_incremental(), revoked);
+    assert!(doc.diff_incremental().is_empty());
+    doc.unrevoke(&bad);
+    assert_eq!(doc.diff_incremental(), original);
+    assert!(doc.diff_incremental().is_empty());
+
+    // Resetting the cursor must also discard cached, cursor-relative patches.
+    doc.revoke(bad, &epoch);
+    assert!(!doc.diff(&heads, &heads).is_empty());
+    doc.reset_diff_cursor();
+    assert!(doc.diff(&heads, &heads).is_empty());
+}
+
+#[test]
+fn revocation_preserves_pending_patch_paths_and_order() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(good));
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    let good_map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
+    doc.put(&good_map, "value", "initial").unwrap();
+    let epoch = doc.get_heads();
+
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let bad_map = fork.insert_object(&list, 0, ObjType::Map).unwrap();
+    fork.put(&bad_map, "bad", true).unwrap();
+    doc.merge(&mut fork).unwrap();
+    let mut view = doc.hydrate(&ROOT, None).unwrap();
+    doc.update_diff_cursor();
+
+    // The same object's path moves from list[1] to list[0] and back. Keep
+    // edits pending across both transitions to exercise path resolution and
+    // ordering.
+    doc.put(&good_map, "value", "before revoke").unwrap();
+    doc.revoke(bad.clone(), &epoch);
+    doc.put(&good_map, "value", "before unrevoke").unwrap();
+    doc.unrevoke(&bad);
+    doc.put(&good_map, "value", "after unrevoke").unwrap();
+
+    view.apply_patches(TextEncoding::UnicodeCodePoint, doc.diff_incremental())
+        .unwrap();
+    assert_eq!(view, doc.hydrate(&ROOT, None).unwrap());
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn revocation_tracks_the_isolated_view() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(good));
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, 1).unwrap();
+    let epoch = doc.get_heads();
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.insert(&list, 0, 2).unwrap();
+    doc.merge(&mut fork).unwrap();
+
+    doc.isolate(&epoch);
+    let mut view = doc.hydrate(&ROOT, Some(&epoch)).unwrap();
+    doc.update_diff_cursor();
+    // Neither transition changes the isolated view. Only integration should
+    // produce the insertion patch in the internal log.
+    doc.revoke(bad.clone(), &epoch);
+    doc.unrevoke(&bad);
+    doc.integrate();
+    view.apply_patches(TextEncoding::UnicodeCodePoint, doc.diff_incremental())
+        .unwrap();
+    assert_eq!(view, doc.hydrate(&ROOT, None).unwrap());
+}
+
+#[test]
 fn unrevoke_restores_changes() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
@@ -129,7 +286,9 @@ fn unrevoke_restores_changes() {
     assert!(!iter_keys.contains(&"new_key".to_string()));
 
     // Unrevoke should restore it
-    let patches = doc.unrevoke(&bad);
+    doc.update_diff_cursor();
+    doc.unrevoke(&bad);
+    let patches = doc.diff_incremental();
     assert_eq!(
         doc.get(ROOT, "new_key").unwrap().unwrap().0,
         "new_bad_value".into()
@@ -276,7 +435,9 @@ fn revoke_text_mark() {
     remote
         .load_incremental(&[doc.save(), fork.save()].concat())
         .unwrap();
-    let patches = remote.revoke(bad, &epoch);
+    remote.update_diff_cursor();
+    remote.revoke(bad, &epoch);
+    let patches = remote.diff_incremental();
 
     // Patches should reflect the removal of bad's bold mark but not italic
     let mark_patches: Vec<_> = patches
@@ -562,7 +723,9 @@ fn revoke_patches_reflect_undo() {
         "bad_override".into()
     );
 
-    let patches = doc.revoke(bad, &epoch);
+    doc.update_diff_cursor();
+    doc.revoke(bad, &epoch);
+    let patches = doc.diff_incremental();
 
     // Should get a patch restoring "original"
     assert!(!patches.is_empty());
