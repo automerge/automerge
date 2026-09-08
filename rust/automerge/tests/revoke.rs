@@ -159,7 +159,7 @@ fn unrevoke_is_included_in_incremental_diff() {
 }
 
 #[test]
-fn revocation_invalidates_cached_diffs() {
+fn historical_diff_reflects_current_revocation_state() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
     let mut doc = AutoCommit::new().with_author(Some(good));
@@ -170,8 +170,8 @@ fn revocation_invalidates_cached_diffs() {
     doc.merge(&mut fork).unwrap();
     let heads = doc.get_heads();
 
-    // Neither the indexed nor the unindexed diff cache can use heads alone to
-    // detect changes in revocation state.
+    // Repeating a historical diff reflects changes in revocation state even
+    // though the heads have not changed.
     let original = doc.diff(&[], &heads);
     doc.revoke(bad.clone(), &epoch);
     let revoked = doc.diff(&[], &heads);
@@ -188,11 +188,15 @@ fn revocation_invalidates_cached_diffs() {
     assert_eq!(doc.diff_incremental(), original);
     assert!(doc.diff_incremental().is_empty());
 
-    // Resetting the cursor must also discard cached, cursor-relative patches.
+    // Historical diffs never return cursor-relative visibility transitions.
+    // Resetting the cursor discards those transitions, so the next incremental
+    // diff instead returns the current state from the empty document.
     doc.revoke(bad, &epoch);
-    assert!(!doc.diff(&heads, &heads).is_empty());
+    assert!(doc.diff(&heads, &heads).is_empty());
     doc.reset_diff_cursor();
     assert!(doc.diff(&heads, &heads).is_empty());
+    assert_eq!(doc.diff_incremental(), revoked);
+    assert!(doc.diff_incremental().is_empty());
 }
 
 #[test]

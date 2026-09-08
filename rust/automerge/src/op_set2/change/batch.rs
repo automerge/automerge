@@ -1,13 +1,13 @@
 use crate::change_queue::ChangeBatch;
+use crate::clock::{Clock, ClockRange};
 use crate::hydrate::Value;
+use crate::iter::DiffIter;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjMeta, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
-use crate::clock::{Clock, ClockRange};
-use crate::iter::DiffIter;
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
 
@@ -468,12 +468,8 @@ impl<'a, 'b> MapWalker<'a, 'b> {
                 Some(Ordering::Greater) => break,
                 Some(Ordering::Equal) if d.id > ops[pos].id() => break,
                 _ => {
-                    let (deleted, revoked) = process_pred(
-                        self.doc_op.as_ref(),
-                        self.pred,
-                        self.succ,
-                        self.revocations,
-                    );
+                    let (deleted, revoked) =
+                        process_pred(self.doc_op.as_ref(), self.pred, self.succ, self.revocations);
                     if d.prop() != self.value.key {
                         self.value.map_flush(self.log);
                         self.value.key = d.prop();

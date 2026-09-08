@@ -256,10 +256,6 @@ impl PatchLog {
         Self::new(true)
     }
 
-    pub(crate) fn set_active(&mut self, setting: bool) {
-        self.active = setting
-    }
-
     pub(crate) fn is_active(&self) -> bool {
         self.active
     }
