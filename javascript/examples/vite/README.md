@@ -9,7 +9,6 @@ There are three things you need to do to get WASM packaging working with vite:
 First, install the packages we need:
 
 ```bash
-npm install vite-plugin-top-level-await
 npm install vite-plugin-wasm
 ```
 
@@ -18,16 +17,15 @@ In `vite.config.js`
 ```javascript
 import { defineConfig } from "vite"
 import wasm from "vite-plugin-wasm"
-import topLevelAwait from "vite-plugin-top-level-await"
 
 export default defineConfig({
-  plugins: [topLevelAwait(), wasm()],
+  plugins: [wasm()],
 
   // This is only necessary if you are using `SharedWorker` or `WebWorker`, as
   // documented in https://vitejs.dev/guide/features.html#import-with-constructors
   worker: {
     format: "es",
-    plugins: [topLevelAwait(), wasm()],
+    plugins: () => [wasm()],
   },
 
   optimizeDeps: {

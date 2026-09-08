@@ -1,15 +1,14 @@
 import { defineConfig } from "vite"
 import wasm from "vite-plugin-wasm"
-import topLevelAwait from "vite-plugin-top-level-await"
 
 export default defineConfig({
-  plugins: [topLevelAwait(), wasm()],
+  plugins: [wasm()],
 
   // This is only necessary if you are using `SharedWorker` or `WebWorker`, as
   // documented in https://vitejs.dev/guide/features.html#import-with-constructors
   worker: {
     format: "es",
-    plugins: [topLevelAwait(), wasm()],
+    plugins: () => [wasm()],
   },
 
   optimizeDeps: {
