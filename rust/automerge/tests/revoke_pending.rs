@@ -128,18 +128,21 @@ fn restores_existing_values(mode: Import) {
     assert!(case.doc.diff_incremental().is_empty());
 }
 
-fn invalidates_historical_diff_cache(mode: Import) {
+fn historical_diff_reflects_resolved_revocation(mode: Import) {
     let mut case = PendingRevocation::new();
     assert!(case.doc.diff(&[], &case.original_heads).is_empty());
     case.import_boundary(mode);
 
     // Both arguments still identify the same historical heads, but their
-    // visible state has changed. Compare the cached result with a fresh diff.
-    let cached = case.doc.diff(&[], &case.original_heads);
-    case.doc.reset_diff_cursor();
-    let fresh = case.doc.diff(&[], &case.original_heads);
-    assert!(puts_x(&fresh), "historical view must now include x");
-    assert_eq!(cached, fresh);
+    // visible state has changed. Repeating the diff must reflect that change.
+    let patches = case.doc.diff(&[], &case.original_heads);
+    assert!(puts_x(&patches), "historical view must now include x");
+    let mut view = case.doc.hydrate(ROOT, Some(&[])).unwrap();
+    view.apply_patches(ENCODING, patches).unwrap();
+    assert_eq!(
+        view,
+        case.doc.hydrate(ROOT, Some(&case.original_heads)).unwrap()
+    );
 }
 
 fn records_isolated_visibility_changes(mode: Import) {
@@ -153,6 +156,17 @@ fn records_isolated_visibility_changes(mode: Import) {
     // revocation boundary is different: visibility at those same heads changes.
     assert_eq!(case.doc.get_heads(), case.original_heads);
     assert_eq!(case.doc.get(ROOT, "x").unwrap().unwrap().0, 1.into());
+    // A historical comparison uses the resolved revocation state on both
+    // sides, and must neither return nor consume the recorded restoration.
+    assert!(case
+        .doc
+        .diff(&case.original_heads, &case.original_heads)
+        .is_empty());
+    assert!(case
+        .doc
+        .diff_obj(&ROOT, &case.original_heads, &case.original_heads, true)
+        .unwrap()
+        .is_empty());
     let patches = case.doc.diff_incremental();
     assert!(
         puts_x(&patches),
@@ -179,8 +193,8 @@ macro_rules! pending_import_tests {
             }
 
             #[test]
-            fn invalidates_historical_diff_cache() {
-                super::invalidates_historical_diff_cache($mode);
+            fn historical_diff_reflects_resolved_revocation() {
+                super::historical_diff_reflects_resolved_revocation($mode);
             }
 
             #[test]
@@ -204,8 +218,8 @@ fn pending_resolution_updates_current_state_indexes() {
     case.doc.reset_diff_cursor();
     let heads = case.doc.get_heads();
 
-    // This uses the current-state fast path, with neither a cached diff nor
-    // pending patch events. Its view must agree with the revocation-aware reads.
+    // This uses the current-state fast path without pending patch events.
+    // Its view must agree with the revocation-aware reads.
     let patches = case.doc.diff(&[], &heads);
     assert!(puts_x(&patches), "stale current-state indexes: {patches:?}");
 }
