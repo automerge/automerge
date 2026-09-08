@@ -66,7 +66,7 @@ pub struct AutoCommit {
     transaction: Option<(PatchLog, TransactionInner)>,
     patch_log: PatchLog,
     diff_cursor: Vec<ChangeHash>,
-    diff_cache: Option<(OpRange, ObjId, bool, Vec<Patch>)>,
+    diff_cache: Option<(OpRange, ObjId, bool, Option<Clock>, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
 }
@@ -267,8 +267,13 @@ impl AutoCommit {
     ) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let range = OpRange::new(before, after);
-        if let Some((r, id, rec, patches)) = &self.diff_cache {
-            if r == &range && id == &obj.id && *rec == recursive {
+        // Revocation resolution changes historical visibility without changing
+        // the heads used as the cache key, so a cached diff is only valid while
+        // the active revocation clock is unchanged. `None` (no revocations)
+        // compares equal across normal applies, preserving the cache.
+        let revocation = self.doc.active_revocation_clock().cloned();
+        if let Some((r, id, rec, rev, patches)) = &self.diff_cache {
+            if r == &range && id == &obj.id && *rec == recursive && rev == &revocation {
                 // we could skip this clone and return &[Patch]
                 return patches.clone();
             }
@@ -302,7 +307,7 @@ impl AutoCommit {
             DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         };
-        self.diff_cache = Some((range, obj.id, recursive, patches.clone()));
+        self.diff_cache = Some((range, obj.id, recursive, revocation, patches.clone()));
         patches
     }
 
