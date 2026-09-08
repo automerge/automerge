@@ -182,9 +182,9 @@ impl<'a> Untangler<'a> {
         op.subsort = self.count;
         self.count += 1;
 
-        if op.is_set_or_make() && !op.has_succ() {
+        if op.is_set_or_make() && !op.has_succ() && !op.revoked {
             vis = Some(pos);
-        } else if op.action() == Action::Mark {
+        } else if op.action() == Action::Mark && !op.revoked {
             self.value.process_mark(op.id(), op.mark_data());
         }
 
@@ -206,7 +206,7 @@ impl<'a> Untangler<'a> {
                 next_op.subsort = self.count;
                 self.count += 1;
 
-                next_op.is_set_or_make() && !next_op.has_succ()
+                next_op.is_set_or_make() && !next_op.has_succ() && !next_op.revoked
             };
 
             if next_vis {
@@ -222,28 +222,24 @@ impl<'a> Untangler<'a> {
         if let Some(p) = vis {
             let op = &mut self.change_ops[p];
             if self.seq_type == SequenceType::List {
-                if !op.revoked {
-                    let value = op.hydrate_value_and_fix_counters(self.text_encoding);
-                    log.insert(op.bld.obj, self.index, value, op.id(), conflict);
-                }
+                let value = op.hydrate_value_and_fix_counters(self.text_encoding);
+                log.insert(op.bld.obj, self.index, value, op.id(), conflict);
                 self.index += 1;
             } else {
-                if !op.revoked {
-                    let marks = self.value.marks.after.current().cloned();
-                    match op.bld.action {
-                        Action::MakeMap => {
-                            // Block markers
-                            log.insert(
-                                op.bld.obj,
-                                self.index,
-                                Value::map(),
-                                op.bld.id,
-                                op.conflicted,
-                            );
-                        }
-                        _ => {
-                            log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
-                        }
+                let marks = self.value.marks.after.current().cloned();
+                match op.bld.action {
+                    Action::MakeMap => {
+                        // Block markers
+                        log.insert(
+                            op.bld.obj,
+                            self.index,
+                            Value::map(),
+                            op.bld.id,
+                            op.conflicted,
+                        );
+                    }
+                    _ => {
+                        log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
                     }
                 }
                 self.index += op.width(self.seq_type, self.text_encoding);
@@ -653,8 +649,10 @@ impl<'a> ValueState<'a> {
     }
 
     fn process_change_op(&mut self, op: &ChangeOp) {
+        if op.revoked { 
+            return;
+        }
         match op.action() {
-            _ if op.revoked => {}
             Action::Delete => {}
             Action::Increment => self.do_increment(op),
             Action::Mark => self.process_mark(op.id(), op.mark_data()),
