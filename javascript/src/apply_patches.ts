@@ -57,13 +57,16 @@ function applyInsertPatch(
 ) {
   let { obj: parent, prop } = pathElemAt(path, -1)
 
-  if (!Array.isArray(parent)) {
-    throw new RangeError(`target is not an array for patch`)
+  if (Array.isArray(parent)) {
+    if (!(typeof prop === "number")) {
+      throw new RangeError(`index is not a number for patch`)
+    }
+    parent.splice(prop, 0, ...patch.values)
+  } else if (typeof parent === "object" && parent !== null) {
+    parent[prop] = patch.values[0]
+  } else {
+    throw new RangeError(`target is not an array or object for patch`)
   }
-  if (!(typeof prop === "number")) {
-    throw new RangeError(`index is not a number for patch`)
-  }
-  parent.splice(prop, 0, ...patch.values)
 }
 
 function applyDelPatch(
@@ -73,10 +76,11 @@ function applyDelPatch(
 ) {
   let { obj: parent, prop, parentPath } = pathElemAt(path, -1)
 
-  if (!(typeof prop === "number")) {
+  if (typeof prop === "string" && typeof parent === "object" && parent !== null && !Array.isArray(parent)) {
+    delete parent[prop]
+  } else if (!(typeof prop === "number")) {
     throw new RangeError(`index is not a number for patch`)
-  }
-  if (Array.isArray(parent)) {
+  } else if (Array.isArray(parent)) {
     parent.splice(prop, patch.length || 1)
   } else if (typeof parent === "string") {
     if (isAutomerge(doc)) {
