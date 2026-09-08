@@ -31,8 +31,9 @@
         pkgs = import nixpkgs {inherit system overlays;};
         unstable = import nixos-unstable {inherit system overlays;};
 
-        nodejs = pkgs.nodejs_24;
-        ci-nodejs = nodejs;
+        nodejs = pkgs.nodejs_26;
+        ci-nodejs = pkgs.nodejs_24;
+        release-nodejs = pkgs.nodejs_22;
 
         ci-rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
           extensions = ["clippy" "rustfmt"];
@@ -324,7 +325,7 @@
           ]
           ++ native-ci-inputs;
 
-        ci-wasm-tests = mk-ci-command "ci-wasm-tests" ([ci-nodejs] ++ wasm-ci-inputs) ''
+        ci-wasm-tests = mk-ci-command "ci-wasm-tests" ([release-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           exec ./scripts/ci/wasm_tests
@@ -340,7 +341,7 @@
           exec ./scripts/ci/js_tests
         '';
 
-        release-js-build = mk-ci-command "release-js-build" ([ci-nodejs] ++ wasm-ci-inputs) ''
+        release-js-build = mk-ci-command "release-js-build" ([release-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           cd ./javascript
@@ -348,7 +349,7 @@
           exec node ./scripts/build.mjs
         '';
 
-        release-js-docs = mk-ci-command "release-js-docs" ([ci-nodejs] ++ wasm-ci-inputs) ''
+        release-js-docs = mk-ci-command "release-js-docs" ([release-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           cd ./javascript
@@ -357,7 +358,7 @@
           exec npm exec -- typedoc --out api-docs
         '';
 
-        release-js-publish = mk-ci-command "release-js-publish" [ci-nodejs] ''
+        release-js-publish = mk-ci-command "release-js-publish" [release-nodejs] ''
           cd ./javascript
           exec npm publish "$@"
         '';
