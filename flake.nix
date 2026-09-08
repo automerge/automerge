@@ -3,8 +3,6 @@
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-26.05";
-    # Retain Node 18 for compatibility tests and Node 20 for release builds.
-    nixpkgs-node18.url = "nixpkgs/nixos-23.11";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
     command-utils.url = "github:expede/nix-command-utils";
@@ -19,7 +17,6 @@
   outputs = {
     self,
     nixpkgs,
-    nixpkgs-node18,
     nixos-unstable,
     command-utils,
     flake-utils,
@@ -32,20 +29,10 @@
         ];
 
         pkgs = import nixpkgs {inherit system overlays;};
-        node18-pkgs = import nixpkgs-node18 {
-          inherit system;
-          # This package is deliberately used to exercise the supported Node 18
-          # compatibility path, even though Node 18 itself is end-of-life.
-          config.allowInsecurePredicate = package:
-            pkgs.lib.hasPrefix "nodejs-18" (pkgs.lib.getName package);
-        };
         unstable = import nixos-unstable {inherit system overlays;};
 
-        nodejs = pkgs.nodejs_26;
-        ci-nodejs = pkgs.nodejs_24;
-        nodejs-18 = node18-pkgs.nodejs_18;
-        # Node 20 is also retained to preserve the release build's runtime.
-        release-nodejs = node18-pkgs.nodejs_20;
+        nodejs = pkgs.nodejs_24;
+        ci-nodejs = nodejs;
 
         ci-rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
           extensions = ["clippy" "rustfmt"];
@@ -133,7 +120,7 @@
 
         cargo = "${pkgs.cargo}/bin/cargo";
         deno = "${unstable.deno}/bin/deno";
-        node = "${unstable.nodejs_20}/bin/node";
+        node = "${nodejs}/bin/node";
         wasm-opt = "${pkgs.binaryen}/bin/wasm-opt";
         wasm-pack = "${unstable.wasm-pack}/bin/wasm-pack";
         npm = "${nodejs}/bin/npm";
@@ -337,7 +324,7 @@
           ]
           ++ native-ci-inputs;
 
-        ci-wasm-tests = mk-ci-command "ci-wasm-tests" ([release-nodejs] ++ wasm-ci-inputs) ''
+        ci-wasm-tests = mk-ci-command "ci-wasm-tests" ([ci-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           exec ./scripts/ci/wasm_tests
@@ -353,13 +340,7 @@
           exec ./scripts/ci/js_tests
         '';
 
-        ci-node18-packaging-test = mk-ci-command "ci-node18-packaging-test" ([nodejs-18] ++ wasm-ci-inputs) ''
-          export WASM_CARGO=wasm-cargo
-          export PUPPETEER_SKIP_DOWNLOAD=1
-          exec ./scripts/ci/node_18_packaging_test
-        '';
-
-        release-js-build = mk-ci-command "release-js-build" ([release-nodejs] ++ wasm-ci-inputs) ''
+        release-js-build = mk-ci-command "release-js-build" ([ci-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           cd ./javascript
@@ -367,7 +348,7 @@
           exec node ./scripts/build.mjs
         '';
 
-        release-js-docs = mk-ci-command "release-js-docs" ([release-nodejs] ++ wasm-ci-inputs) ''
+        release-js-docs = mk-ci-command "release-js-docs" ([ci-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           cd ./javascript
@@ -376,7 +357,7 @@
           exec npm exec -- typedoc --out api-docs
         '';
 
-        release-js-publish = mk-ci-command "release-js-publish" [release-nodejs] ''
+        release-js-publish = mk-ci-command "release-js-publish" [ci-nodejs] ''
           cd ./javascript
           exec npm publish "$@"
         '';
@@ -390,7 +371,6 @@
             ci-build-test
             ci-wasm-tests
             ci-js-tests
-            ci-node18-packaging-test
           ] ''
             ci-fmt
             ci-lint
@@ -402,7 +382,6 @@
             ci-build-test
             ci-wasm-tests
             ci-js-tests
-            ci-node18-packaging-test
           '';
 
         ci-host = mk-ci-command "ci" [ci-build-test] ''
@@ -420,7 +399,6 @@
             ci-fmt
             ci-js-tests
             ci-lint
-            ci-node18-packaging-test
             ci-rust-docs
             ci-wasm-tests
             release-js-build

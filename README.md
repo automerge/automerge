@@ -179,7 +179,6 @@ Individual jobs can be run while iterating, for example:
 $ nix run .#ci-fmt
 $ nix run .#ci-lint
 $ nix run .#ci-js-tests
-$ nix run .#ci-node18-packaging-test
 ```
 
 On macOS, `nix run .#ci` runs the native host test used by the macOS CI job.
