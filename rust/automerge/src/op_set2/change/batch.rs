@@ -4,9 +4,10 @@ use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
+    ActorId, ElemId, ObjId, ObjMeta, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
-use crate::clock::Clock;
+use crate::clock::{Clock, ClockRange};
+use crate::iter::DiffIter;
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
 
@@ -929,6 +930,18 @@ impl BatchApply {
 
         log.migrate_actors(&doc.ops().actors)?;
 
+        // A change in this batch may witness a pending revocation boundary,
+        // changing the visibility of ops that predate it. Snapshot the
+        // pre-resolution visibility here: `insert_new_actors` has already added
+        // every incoming actor, so this clock has stable indexing, while
+        // `import_ops` (which resolves pending boundaries) has not run yet.
+        // Skipped entirely when no author is revoked.
+        let restoration = doc.active_revocation_clock().is_some().then(|| {
+            let heads = doc.get_heads();
+            let before = doc.clock_at_heads(&heads);
+            (heads, before)
+        });
+
         self.import_ops(doc);
 
         let mut obj_info = doc.ops().obj_info.clone();
@@ -1011,6 +1024,27 @@ impl BatchApply {
         doc.ops.add_succ(&succ);
 
         self.insert_runs_of_ops(doc);
+
+        if let Some((pre_heads, before)) = restoration {
+            let after = doc.clock_at_heads(&pre_heads);
+            // `after` uses the same heads as `before`; only a resolved
+            // revocation boundary can make them differ.
+            if before != after {
+                // Rebuild indexes so current-state reads reflect restored ops.
+                let current = doc.clock_at_heads(&doc.get_heads());
+                doc.ops.recompute_indexes(&current);
+                // Log the visibility delta at the pre-import heads: new ops are
+                // not covered there, so the batch walk owns them and they are
+                // not double-logged.
+                DiffIter::log(
+                    doc,
+                    ObjMeta::root(),
+                    ClockRange::Diff(before, after),
+                    log,
+                    true,
+                );
+            }
+        }
 
         debug_assert!(doc.ops.validate_op_order());
         Ok(())
