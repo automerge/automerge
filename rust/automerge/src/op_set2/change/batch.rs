@@ -912,8 +912,10 @@ impl BatchApply {
 
     fn import_ops(&mut self, doc: &mut Automerge) {
         for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops).unwrap();
+            // Updating history before import ops in order for revocations to
+            // take effect.
             doc.update_history(c);
+            doc.import_ops_to(c, &mut self.ops).unwrap();
         }
         doc.remove_unused_actors(true);
     }
