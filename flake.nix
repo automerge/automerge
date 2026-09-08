@@ -88,19 +88,19 @@
           exec cargo "$@"
         '';
 
-        # CI pins wasm-bindgen-cli 0.2.127 (see .github/workflows/ci.yaml);
+        # CI pins wasm-bindgen-cli 0.2.128 (see .github/workflows/ci.yaml);
         # the CLI version must match the `wasm-bindgen` crate in rust/Cargo.lock.
         wasm-bindgen-cli = unstable.buildWasmBindgenCli rec {
           src = pkgs.fetchCrate {
             pname = "wasm-bindgen-cli";
-            version = "0.2.127";
-            hash = "sha256-di+qBAdd7pENLiIB9CoZoab+W5xeDoByMREcCGTSzWo=";
+            version = "0.2.128";
+            hash = "sha256-a7lcXJnnZkYReja+iUO7NqqrWyv3toxnUgQb8s4IS5s=";
           };
 
           cargoDeps = unstable.rustPlatform.fetchCargoVendor {
             inherit src;
             inherit (src) pname version;
-            hash = "sha256-FTv2GZIAQs0ePdIZXIXil7JbZ6kIT05VG6vqC1qNFxQ=";
+            hash = "sha256-R1Tas33Ursy8kqsxguAkG0ZhNed2n5uFTAhw1l2qlLY=";
           };
         };
 
