@@ -24,6 +24,28 @@ describe("revocations", () => {
     assert.equal(unrevoked.value, "visible")
   })
 
+  it("invalidates cached historical patches even when the current view is unchanged", () => {
+    let doc = Automerge.init<{ x?: number }>({ author })
+    doc = Automerge.change(doc, d => {
+      d.x = 1
+    })
+    const before = Automerge.getHeads(doc)
+    doc = Automerge.change(doc, d => {
+      delete d.x
+    })
+    const after = Automerge.getHeads(doc)
+    assert.deepEqual(Automerge.diff(doc, before, after), [
+      { action: "del", path: ["x"] },
+    ])
+
+    // There are no current-view patches, but both historical states become
+    // empty. The mostRecentPatch cache must not retain the earlier deletion.
+    doc = Automerge.revoke(doc, author, [])
+    assert.deepEqual(doc, {})
+    assert.deepEqual(Automerge.getHeads(doc), after)
+    assert.deepEqual(Automerge.diff(doc, before, after), [])
+  })
+
   it("uses incremental patches for callbacks and subsequent changes", () => {
     type Doc = { list: number[]; stable: { value: number } }
     const callbacks: { patches: Automerge.Patch[]; source: string }[] = []
