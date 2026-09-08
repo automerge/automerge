@@ -9,9 +9,9 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "html-webpack-plugin": "^5.6.0",
-    "webpack": "^5.105.2",
-    "webpack-cli": "^6.0.1",
-    "webpack-dev-server": "^5.2.6"
+    "html-webpack-plugin": "^5.6.8",
+    "webpack": "^5.110.3",
+    "webpack-cli": "^7.2.3",
+    "webpack-dev-server": "^6.0.0"
   }
 }
