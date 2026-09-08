@@ -6,6 +6,7 @@ use crate::op_set2::SuccInsert;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
+use crate::clock::Clock;
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
 
@@ -50,6 +51,10 @@ struct Untangler<'a> {
     value: ValueState<'a>,
     seq_type: SequenceType,
     text_encoding: TextEncoding,
+    // Revocation is never stored on a doc `Op`; the active revocation clock
+    // projects visibility while walking pre-existing doc ops. `None` when no
+    // author is currently revoked.
+    revocations: Option<&'a Clock>,
     count: usize,
     index: usize,
     max: usize,
@@ -79,11 +84,15 @@ impl<'a> Untangler<'a> {
             self.value.key = Some(PropRef::Seq(self.index));
         }
 
-        if doc_op.visible() && !deleted {
+        let revoked = op_revoked(doc_op, self.revocations);
+        // A revoked doc op is invisible: it occupies no width in the patch
+        // index and takes no part in top/conflict tracking.
+        if doc_op.visible() && !deleted && !revoked {
             self.width = doc_op.width(self.seq_type, self.text_encoding);
         }
-        self.value.process_doc_op(doc_op, deleted);
-        self.top.process_doc_op(self.change_ops, doc_op, deleted);
+        self.value.process_doc_op(doc_op, deleted, revoked);
+        self.top
+            .process_doc_op(self.change_ops, doc_op, deleted, revoked);
     }
 
     fn element_update(&mut self, doc_op: &Op<'_>) {
@@ -253,6 +262,7 @@ impl<'a> Untangler<'a> {
         obj: ObjId,
         encoding: SequenceType,
         text_encoding: TextEncoding,
+        revocations: Option<&'a Clock>,
         conflicts: &'a mut Vec<Adjust>,
         change_ops: &'a mut [ChangeOp],
         pred: &'a mut PredCache,
@@ -300,6 +310,7 @@ impl<'a> Untangler<'a> {
             updates,
             seq_type: encoding,
             text_encoding,
+            revocations,
             conflicts,
             updates_stack,
             top: Top::Nothing,
@@ -341,6 +352,8 @@ struct MapWalker<'a, 'b> {
     doc_op: Option<Op<'a>>,
     conflicts: &'b mut Vec<Adjust>,
     top: Top,
+    // See `Untangler::revocations`.
+    revocations: Option<&'a Clock>,
 }
 
 #[derive(Debug, Clone)]
@@ -365,8 +378,8 @@ impl Top {
         *self = Top::Nothing;
     }
 
-    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool) {
-        if d.visible() {
+    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool, revoked: bool) {
+        if d.visible() && !revoked {
             if deleted {
                 if let Top::Doc(i) = self {
                     *self = Top::Expose(*i)
@@ -401,6 +414,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
         succ: &'b mut Vec<SuccInsert>,
         log: &'b mut PatchLog,
         conflicts: &'b mut Vec<Adjust>,
+        revocations: Option<&'a Clock>,
     ) -> Self {
         let pos = ops.pos();
         let doc_op = ops.next();
@@ -416,6 +430,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
             value,
             conflicts,
             top,
+            revocations,
         }
     }
 
@@ -452,14 +467,19 @@ impl<'a, 'b> MapWalker<'a, 'b> {
                 Some(Ordering::Greater) => break,
                 Some(Ordering::Equal) if d.id > ops[pos].id() => break,
                 _ => {
-                    let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
+                    let (deleted, revoked) = process_pred(
+                        self.doc_op.as_ref(),
+                        self.pred,
+                        self.succ,
+                        self.revocations,
+                    );
                     if d.prop() != self.value.key {
                         self.value.map_flush(self.log);
                         self.value.key = d.prop();
                         self.top.reset(self.conflicts);
                     }
-                    self.value.process_doc_op(d, deleted);
-                    self.top.process_doc_op(ops, d, deleted);
+                    self.value.process_doc_op(d, deleted, revoked);
+                    self.top.process_doc_op(ops, d, deleted, revoked);
                 }
             }
             self.next_doc_op();
@@ -468,10 +488,11 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 
     fn finish(&mut self, ops: &mut [ChangeOp]) {
         while let Some(d) = self.doc_op.as_ref() {
-            let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
+            let (deleted, revoked) =
+                process_pred(self.doc_op.as_ref(), self.pred, self.succ, self.revocations);
             if d.prop() == self.value.key {
-                self.top.process_doc_op(ops, d, deleted);
-                self.value.process_doc_op(d, deleted);
+                self.top.process_doc_op(ops, d, deleted, revoked);
+                self.value.process_doc_op(d, deleted, revoked);
                 self.next_doc_op();
             } else {
                 break;
@@ -494,7 +515,12 @@ fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Opt
     }
 }
 
-fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
+fn process_pred(
+    doc_op: Option<&Op<'_>>,
+    pred: &mut PredCache,
+    succ: &mut Vec<SuccInsert>,
+    revocations: Option<&Clock>,
+) -> (bool, bool) {
     if let Some(d) = doc_op {
         let mut deleted = false;
         if let Some(mut successors) = pred.remove(&d.id) {
@@ -504,10 +530,22 @@ fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<Su
                 succ.push(d.add_succ_with_revocation(id, inc, rev));
             }
         }
-        deleted
+        (deleted, op_revoked(d, revocations))
     } else {
-        false
+        (false, false)
     }
+}
+
+/// Whether a pre-existing doc op is revoked under the active revocation clock.
+///
+/// Revocation is never recorded on a doc [`Op`]; visibility is projected at
+/// materialization time by the revocation [`Clock`]. A doc op is revoked when
+/// the clock does not cover its [`OpId`]. With no active revocations the clock
+/// is absent and no doc op is revoked. This is distinct from the per-successor
+/// `revoked` flag carried in the predecessor cache, which reports whether an
+/// overwriting change op is itself revoked.
+fn op_revoked(doc_op: &Op<'_>, revocations: Option<&Clock>) -> bool {
+    revocations.is_some_and(|clock| !clock.covers(&doc_op.id))
 }
 
 #[derive(Debug, Clone)]
@@ -526,6 +564,7 @@ struct OpValue {
     id: OpId,
     value: Value,
     deleted: bool,
+    revoked: bool,
     conflict: bool,
     expose: bool,
     replaced: Option<Value>,
@@ -554,7 +593,7 @@ impl OpValueOption {
         }
     }
 
-    fn set(&mut self, value: Value, id: OpId, deleted: bool) {
+    fn set(&mut self, value: Value, id: OpId, deleted: bool, revoked: bool) {
         if deleted && self.is_visible() {
             self.expose(value);
         } else {
@@ -565,6 +604,7 @@ impl OpValueOption {
                 id,
                 conflict,
                 deleted,
+                revoked,
                 expose,
                 replaced: None,
             }));
@@ -580,7 +620,9 @@ impl OpValueOption {
     }
 
     fn is_visible(&self) -> bool {
-        self.value().map(|o| !o.deleted).unwrap_or(false)
+        self.value()
+            .map(|o| !o.deleted && !o.revoked)
+            .unwrap_or(false)
     }
 
     fn is_deleted(&self) -> bool {
@@ -609,17 +651,25 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool) {
+    fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool, revoked: bool) {
         match doc_op.action {
             Action::Increment => {}
             Action::Mark => {
-                self.marks.before.process(doc_op.id, doc_op.action());
-                self.marks.after.process(doc_op.id, doc_op.action());
+                // A revoked mark is invisible before and after the batch, so it
+                // must not enter the rich-text diff and leak into patches.
+                if !revoked {
+                    self.marks.before.process(doc_op.id, doc_op.action());
+                    self.marks.after.process(doc_op.id, doc_op.action());
+                }
             }
             _ => {
                 if doc_op.visible() {
-                    self.doc
-                        .set(doc_op.hydrate_value(self.text_encoding), doc_op.id, deleted);
+                    self.doc.set(
+                        doc_op.hydrate_value(self.text_encoding),
+                        doc_op.id,
+                        deleted,
+                        revoked,
+                    );
                 }
             }
         }
@@ -649,7 +699,7 @@ impl<'a> ValueState<'a> {
     }
 
     fn process_change_op(&mut self, op: &ChangeOp) {
-        if op.revoked { 
+        if op.revoked {
             return;
         }
         match op.action() {
@@ -659,7 +709,7 @@ impl<'a> ValueState<'a> {
             _ => {
                 if op.visible() {
                     self.change
-                        .set(op.hydrate_value(self.text_encoding), op.id(), false);
+                        .set(op.hydrate_value(self.text_encoding), op.id(), false, false);
                 }
             }
         }
@@ -885,6 +935,12 @@ impl BatchApply {
 
         let mut succ = vec![];
 
+        // Revocation is never stored on a doc op; the active revocation clock
+        // projects visibility. Capture it after `import_ops` so a boundary
+        // resolved by this batch is reflected, and clone it so the borrow does
+        // not conflict with the mutable index updates after the walk.
+        let rev_clock = doc.active_revocation_clock().cloned();
+
         let mut walker = ObjWalker::new(doc.ops());
 
         let mut conflicts = vec![];
@@ -902,6 +958,7 @@ impl BatchApply {
                         &mut succ,
                         log,
                         &mut conflicts,
+                        rev_clock.as_ref(),
                     );
                     let change_ops = &mut self.ops[os.span.clone()];
                     walk_map(&mut walker, change_ops);
@@ -916,6 +973,7 @@ impl BatchApply {
                         os.obj,
                         sequence_type,
                         doc.text_encoding(),
+                        rev_clock.as_ref(),
                         &mut conflicts,
                         &mut self.ops[os.span.clone()],
                         &mut self.pred,
