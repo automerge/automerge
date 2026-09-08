@@ -278,7 +278,19 @@ impl AutoCommit {
                 return patches.clone();
             }
         }
-        let heads = self.doc.get_heads();
+        // For a degenerate range (before == after) the heads-based diff is
+        // necessarily empty, so consult the accumulated patch log. This is how
+        // a revocation resolved under isolation surfaces its restoration: it
+        // changes visibility at the pinned view heads without moving them, so
+        // the view heads (not the underlying document heads) are the ones the
+        // patch log was accumulated against. For a non-degenerate range compare
+        // against the real document heads so an isolated *historical* diff
+        // still recomputes from scratch rather than trusting a stale log.
+        let heads = if before == after {
+            self.base_heads()
+        } else {
+            self.doc.get_heads()
+        };
         let patches = if range.after() == heads
             && range.before() == self.diff_cursor
             && self.patch_log.is_active()
@@ -486,6 +498,40 @@ impl AutoCommit {
         self.patch_log.finish_current_view(&self.doc, &heads);
     }
 
+    /// After an import, surface a revocation restoration that the core
+    /// suppressed because this document is isolated.
+    ///
+    /// The core logs the restoration delta into the walk's patch log, but an
+    /// isolated import passes a null walk log, so the delta must be re-logged
+    /// against the isolated view here. For a non-isolated import the core has
+    /// already logged it, so the delta is simply drained and discarded. Also
+    /// invalidates the historical diff cache, since visibility changed.
+    fn drain_restoration_under_isolation(&mut self) {
+        let restoration = self.doc.take_pending_restoration_diff();
+        if restoration.is_some() {
+            self.diff_cache = None;
+        }
+        if self.isolation.is_none() || !self.patch_log.is_active() {
+            return;
+        }
+        let Some((before, after)) = restoration else {
+            return;
+        };
+        // The isolated import migrated only the null walk log, so bring
+        // `self.patch_log` in line with the document's actor table before
+        // logging against it.
+        self.patch_log
+            .migrate_actors(&self.doc.ops().actors)
+            .expect("AutoCommit's patch log always belongs to its document");
+        DiffIter::log(
+            &self.doc,
+            ObjMeta::root(),
+            ClockRange::Diff(before, after),
+            &mut self.patch_log,
+            true,
+        );
+    }
+
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
         self.patch_to(heads);
@@ -532,13 +578,15 @@ impl AutoCommit {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
+        let result = if self.isolation.is_some() {
             self.doc
                 .load_incremental_log_patches(data, &mut PatchLog::null())
         } else {
             self.doc
                 .load_incremental_log_patches(data, &mut self.patch_log)
-        }
+        };
+        self.drain_restoration_under_isolation();
+        result
     }
 
     pub fn apply_changes(
@@ -546,13 +594,15 @@ impl AutoCommit {
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
+        let result = if self.isolation.is_some() {
             self.doc
                 .apply_changes_log_patches(changes, &mut PatchLog::null())
         } else {
             self.doc
                 .apply_changes_log_patches(changes, &mut self.patch_log)
-        }
+        };
+        self.drain_restoration_under_isolation();
+        result
     }
 
     pub fn apply_changes_batch(
@@ -560,26 +610,30 @@ impl AutoCommit {
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
+        let result = if self.isolation.is_some() {
             self.doc
                 .apply_changes_batch_log_patches(changes, &mut PatchLog::null())
         } else {
             self.doc
                 .apply_changes_batch_log_patches(changes, &mut self.patch_log)
-        }
+        };
+        self.drain_restoration_under_isolation();
+        result
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        if self.isolation.is_some() {
+        let result = if self.isolation.is_some() {
             self.doc
                 .merge_and_log_patches(&mut other.doc, &mut PatchLog::null())
         } else {
             self.doc
                 .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
-        }
+        };
+        self.drain_restoration_under_isolation();
+        result
     }
 
     /// Save the entirety of this document in a compact form.
@@ -1370,7 +1424,7 @@ impl SyncDoc for SyncWrapper<'_> {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.inner.ensure_transaction_closed();
-        if self.inner.isolation.is_some() {
+        let result = if self.inner.isolation.is_some() {
             self.inner.doc.receive_sync_message_log_patches(
                 sync_state,
                 message,
@@ -1382,7 +1436,9 @@ impl SyncDoc for SyncWrapper<'_> {
                 message,
                 &mut self.inner.patch_log,
             )
-        }
+        };
+        self.inner.drain_restoration_under_isolation();
+        result
     }
 
     // I dont like this function - it makes sense on automerge but not autocommit

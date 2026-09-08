@@ -266,6 +266,12 @@ pub struct Automerge {
     authors: Authors,
     revocations: Revocations,
     cached_revocation_clock: RevocationClock,
+    /// Set by an import that resolves a pending revocation boundary: the
+    /// (before, after) visibility clocks at the pre-import heads. The core
+    /// logs this delta into the walk's patch log, but an isolated caller
+    /// suppresses that log and must re-log the delta against its isolated
+    /// view, so the clocks are surfaced here for it to drain.
+    pending_restoration_diff: Option<(Clock, Clock)>,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
@@ -289,6 +295,7 @@ impl Automerge {
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
+            pending_restoration_diff: None,
         }
     }
 
@@ -331,6 +338,7 @@ impl Automerge {
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
+            pending_restoration_diff: None,
         }
     }
 
@@ -353,6 +361,7 @@ impl Automerge {
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
+            pending_restoration_diff: None,
         };
         doc.set_revocations(revocations);
         doc.rebuild_revocation_clock();
@@ -2257,6 +2266,18 @@ impl Automerge {
 
     pub(crate) fn clock_at_heads(&self, heads: &[ChangeHash]) -> Clock {
         self.change_graph.clock_at(heads, &self.revocations)
+    }
+
+    /// Record the (before, after) visibility delta produced by resolving a
+    /// pending revocation boundary during import. See
+    /// [`Automerge::pending_restoration_diff`].
+    pub(crate) fn set_pending_restoration_diff(&mut self, before: Clock, after: Clock) {
+        self.pending_restoration_diff = Some((before, after));
+    }
+
+    /// Take the pending restoration delta recorded by the last import, if any.
+    pub(crate) fn take_pending_restoration_diff(&mut self) -> Option<(Clock, Clock)> {
+        self.pending_restoration_diff.take()
     }
 
     fn rebuild_revocation_clock(&mut self) {

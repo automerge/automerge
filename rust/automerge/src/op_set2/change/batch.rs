@@ -1033,9 +1033,13 @@ impl BatchApply {
                 // Rebuild indexes so current-state reads reflect restored ops.
                 let current = doc.clock_at_heads(&doc.get_heads());
                 doc.ops.recompute_indexes(&current);
+                // Surface the delta so an isolated caller (which suppresses the
+                // walk log below) can re-log it against its isolated view.
+                doc.set_pending_restoration_diff(before.clone(), after.clone());
                 // Log the visibility delta at the pre-import heads: new ops are
                 // not covered there, so the batch walk owns them and they are
-                // not double-logged.
+                // not double-logged. For an isolated import `log` is a null
+                // log, so this is a no-op and the caller drains the delta.
                 DiffIter::log(
                     doc,
                     ObjMeta::root(),
