@@ -341,6 +341,12 @@
           exec ./scripts/ci/js_tests
         '';
 
+        ci-node22-packaging-test = mk-ci-command "ci-node22-packaging-test" ([release-nodejs] ++ wasm-ci-inputs) ''
+          export WASM_CARGO=wasm-cargo
+          export PUPPETEER_SKIP_DOWNLOAD=1
+          exec ./scripts/ci/node_22_packaging_test
+        '';
+
         release-js-build = mk-ci-command "release-js-build" ([release-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
@@ -372,6 +378,7 @@
             ci-build-test
             ci-wasm-tests
             ci-js-tests
+            ci-node22-packaging-test
           ] ''
             ci-fmt
             ci-lint
@@ -383,6 +390,7 @@
             ci-build-test
             ci-wasm-tests
             ci-js-tests
+            ci-node22-packaging-test
           '';
 
         ci-host = mk-ci-command "ci" [ci-build-test] ''
@@ -399,6 +407,7 @@
             ci-cargo-deny
             ci-fmt
             ci-js-tests
+            ci-node22-packaging-test
             ci-lint
             ci-rust-docs
             ci-wasm-tests
