@@ -4,7 +4,13 @@ import tsPlugin from "@typescript-eslint/eslint-plugin"
 
 export default [
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "src/wasm_bindgen_output/**"],
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "examples/**",
+      "packaging_tests/**",
+      "src/wasm_bindgen_output/**",
+    ],
   },
   eslint.configs.recommended,
   {
