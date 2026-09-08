@@ -18,6 +18,5 @@ doc = false
 bench = false
 
 [[bench]]
-debug = true
 name = "main"
 harness = false
