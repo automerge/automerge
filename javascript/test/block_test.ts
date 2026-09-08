@@ -1,7 +1,7 @@
 import * as assert from "assert"
 import * as Automerge from "../src/index.js"
 import { mismatched_heads } from "./helpers.js"
-import { PatchSource } from "../src/types.js"
+import { type PatchSource } from "../src/types.js"
 import { inspect } from "util"
 import { ImmutableString } from "../src/immutable_string.js"
 

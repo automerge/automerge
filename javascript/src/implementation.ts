@@ -1,5 +1,4 @@
 import {
-  isCounter,
   isImmutableString,
   rootProxy,
   validateForBatchInsert,
@@ -9,13 +8,10 @@ import { STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
-  type ConflictPatch,
   Counter,
   type Cursor,
   type CursorPosition,
   type Mark,
-  type MarkPatch,
-  type UnmarkPatch,
   type MarkSet,
   type MarkRange,
   type MarkValue,
@@ -161,7 +157,6 @@ export function insertAt<T>(list: T[], index: number, ...values: T[]) {
   if (!_is_proxy(list)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
-  //eslint-disable-next-line no-extra-semi
   ;(list as List<T>).insertAt(index, ...values)
 }
 
@@ -176,7 +171,6 @@ export function deleteAt<T>(list: T[], index: number, numDelete?: number) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
 
-  //eslint-disable-next-line no-extra-semi
   ;(list as List<T>).deleteAt(index, numDelete)
 }
 
@@ -419,8 +413,6 @@ export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
   _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
-  const opts = importOpts(_opts)
-
   if (typeof initialState !== "object" || Array.isArray(initialState)) {
     initialState = Object.assign({}, initialState)
   }
@@ -1558,7 +1550,7 @@ export function splice<T>(
   try {
     return state.handle.splice(objPath, index, del, newText)
   } catch (e) {
-    throw new RangeError(`Cannot splice: ${e}`)
+    throw new RangeError(`Cannot splice: ${e}`, { cause: e })
   }
 }
 
@@ -1592,7 +1584,7 @@ export function updateText(doc: Doc<unknown>, path: Prop[], newText: string) {
   try {
     return state.handle.updateText(objPath, newText)
   } catch (e) {
-    throw new RangeError(`Cannot updateText: ${e}`)
+    throw new RangeError(`Cannot updateText: ${e}`, { cause: e })
   }
 }
 
@@ -1613,7 +1605,7 @@ export function spans<T>(doc: Doc<T>, path: Prop[]): Span[] {
   try {
     return state.handle.spans(objPath, state.heads)
   } catch (e) {
-    throw new RangeError(`Cannot splice: ${e}`)
+    throw new RangeError(`Cannot splice: ${e}`, { cause: e })
   }
 }
 
@@ -1629,7 +1621,7 @@ export function block<T>(doc: Doc<T>, path: Prop[], index: number | Cursor) {
   try {
     return state.handle.getBlock(objPath, index)
   } catch (e) {
-    throw new RangeError(`Cannot get block: ${e}`)
+    throw new RangeError(`Cannot get block: ${e}`, { cause: e })
   }
 }
 
@@ -1654,7 +1646,7 @@ export function splitBlock<T>(
   try {
     state.handle.splitBlock(objPath, index, block)
   } catch (e) {
-    throw new RangeError(`Cannot splice: ${e}`)
+    throw new RangeError(`Cannot splice: ${e}`, { cause: e })
   }
 }
 
@@ -1678,7 +1670,7 @@ export function joinBlock<T>(
   try {
     state.handle.joinBlock(objPath, index)
   } catch (e) {
-    throw new RangeError(`Cannot joinBlock: ${e}`)
+    throw new RangeError(`Cannot joinBlock: ${e}`, { cause: e })
   }
 }
 
@@ -1703,7 +1695,7 @@ export function updateBlock<T>(
   try {
     state.handle.updateBlock(objPath, index, block)
   } catch (e) {
-    throw new RangeError(`Cannot updateBlock: ${e}`)
+    throw new RangeError(`Cannot updateBlock: ${e}`, { cause: e })
   }
 }
 
@@ -1739,7 +1731,7 @@ export function updateSpans<T>(
   try {
     state.handle.updateSpans(objPath, newSpans, config)
   } catch (e) {
-    throw new RangeError(`Cannot updateSpans: ${e}`)
+    throw new RangeError(`Cannot updateSpans: ${e}`, { cause: e })
   }
 }
 
@@ -1789,7 +1781,7 @@ export function getCursor<T>(
   try {
     return state.handle.getCursor(objPath, position, state.heads, move)
   } catch (e) {
-    throw new RangeError(`Cannot getCursor: ${e}`)
+    throw new RangeError(`Cannot getCursor: ${e}`, { cause: e })
   }
 }
 
@@ -1813,7 +1805,7 @@ export function getCursorPosition<T>(
   try {
     return state.handle.getCursorPosition(objPath, cursor, state.heads)
   } catch (e) {
-    throw new RangeError(`Cannot getCursorPosition: ${e}`)
+    throw new RangeError(`Cannot getCursorPosition: ${e}`, { cause: e })
   }
 }
 
@@ -1833,7 +1825,7 @@ export function mark<T>(
   try {
     return state.handle.mark(objPath, range, name, value)
   } catch (e) {
-    throw new RangeError(`Cannot mark: ${e}`)
+    throw new RangeError(`Cannot mark: ${e}`, { cause: e })
   }
 }
 
@@ -1852,7 +1844,7 @@ export function unmark<T>(
   try {
     return state.handle.unmark(objPath, range, name)
   } catch (e) {
-    throw new RangeError(`Cannot unmark: ${e}`)
+    throw new RangeError(`Cannot unmark: ${e}`, { cause: e })
   }
 }
 
@@ -1863,7 +1855,7 @@ export function marks<T>(doc: Doc<T>, path: Prop[]): Mark[] {
   try {
     return state.handle.marks(objPath)
   } catch (e) {
-    throw new RangeError(`Cannot call marks(): ${e}`)
+    throw new RangeError(`Cannot call marks(): ${e}`, { cause: e })
   }
 }
 
@@ -1873,7 +1865,7 @@ export function marksAt<T>(doc: Doc<T>, path: Prop[], index: number): MarkSet {
   try {
     return state.handle.marksAt(objPath, index)
   } catch (e) {
-    throw new RangeError(`Cannot call marksAt(): ${e}`)
+    throw new RangeError(`Cannot call marksAt(): ${e}`, { cause: e })
   }
 }
 

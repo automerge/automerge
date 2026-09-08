@@ -12,10 +12,6 @@ import type {
   InitOptions,
   DecodedBundle,
   WasmReleaseInfo,
-  FragmentMeta,
-  Commit,
-  Fragment,
-  FragmentLevelRange,
 } from "./wasm_types.js"
 export type {
   ChangeToEncode,
@@ -32,7 +28,8 @@ let _initializeListeners: (() => void)[] = []
 
 export function UseApi(api: API) {
   for (const k in api) {
-    // eslint-disable-next-line no-extra-semi
+    // The generated WASM API is structurally assigned at runtime.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(ApiHandler as any)[k] = (api as any)[k]
   }
   _initialized = true
