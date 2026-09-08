@@ -68,6 +68,56 @@ fn revoked_incoming_list_insert_does_not_advance_patch_index() {
 }
 
 #[test]
+fn revoked_existing_list_insert_does_not_advance_patch_index() {
+    // Sibling of `revoked_incoming_list_insert_does_not_advance_patch_index`,
+    // but the revoked "X" is *already imported* as a doc op before the batch
+    // arrives. There is no incoming ChangeOp carrying a `revoked` flag for X;
+    // its invisibility can only come from the active revocation clock while the
+    // untangler walks the pre-existing doc ops. This is the case that a naive
+    // fix (treating every doc op as unrevoked) would silently get wrong while
+    // the incoming-op test still passes.
+    let mut source = source_doc();
+    let list = source.put_object(ROOT, "list", ObjType::List).unwrap();
+    source.insert(&list, 0, "R").unwrap(); // R  (good author)
+    let base = source.get_heads();
+
+    // The revoked author inserts X ahead of R.
+    source = source
+        .with_author(Some(revoked_author()))
+        .with_actor(ActorId::from(vec![0x20]));
+    source.insert(&list, 0, "X").unwrap(); // XR
+    source.commit();
+    let with_x = source.get_heads();
+
+    // Clone *after* X is committed: the target holds X as a doc op, then hides
+    // it by revoking the author at the boundary just before X.
+    let mut target = source.clone();
+    target.revoke(revoked_author(), &base);
+    assert_eq!(target.length(&list), 1);
+    assert_eq!(target.get(&list, 0).unwrap().unwrap().0, "R".into());
+
+    // A later good-authored insert, anchored after the (hidden) X, arrives in
+    // the batch on its own. X occupies no space in the receiver's view.
+    source = source
+        .with_author(Some(good_author()))
+        .with_actor(ActorId::from(vec![0x30]));
+    source.insert(&list, 1, "Y").unwrap(); // XYR
+    source.commit();
+
+    let view = target.hydrate(&ROOT, None).unwrap();
+    target.update_diff_cursor();
+    target
+        .apply_changes_batch(source.get_changes(&with_x))
+        .unwrap();
+
+    assert_eq!(target.length(&list), 2);
+    assert_eq!(target.get(&list, 0).unwrap().unwrap().0, "Y".into());
+    assert_eq!(target.get(&list, 1).unwrap().unwrap().0, "R".into());
+    let patches = target.diff_incremental();
+    assert_patches_reproduce_doc(view, &target, &patches);
+}
+
+#[test]
 fn revoked_incoming_text_insert_does_not_advance_patch_index() {
     let mut source = source_doc();
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
