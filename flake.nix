@@ -88,7 +88,7 @@
           exec cargo "$@"
         '';
 
-        # CI pins wasm-bindgen-cli 0.2.128 (see .github/workflows/ci.yaml);
+        # CI uses wasm-bindgen-cli 0.2.128 from this flake;
         # the CLI version must match the `wasm-bindgen` crate in rust/Cargo.lock.
         wasm-bindgen-cli = unstable.buildWasmBindgenCli rec {
           src = pkgs.fetchCrate {
