@@ -460,8 +460,8 @@ Under the hood `npm run release` invokes
 `cargo +nightly build … -Zbuild-std=std,panic_unwind` with
 `RUSTFLAGS="-C panic=unwind -C llvm-args=-wasm-use-legacy-eh"`. Current
 nightlies otherwise emit modern (`exnref`) exception handling. Forcing legacy
-EH lets wasm-bindgen provide its `WebAssembly.JSTag` polyfill on runtimes such
-as Node 20 that do not provide `JSTag` natively. `WASM_TOOLCHAIN` can select a
+EH lets wasm-bindgen provide its `WebAssembly.JSTag` polyfill on runtimes that
+do not provide `JSTag` natively. `WASM_TOOLCHAIN` can select a
 specific nightly for reproducible builds. The rest of the workspace still
 builds with the pinned stable toolchain in `rust/rust-toolchain.toml`; nightly
 is only used for this wasm build. Environments without rustup can set

@@ -30,9 +30,6 @@ proptest = { version = "^1.7", default-features = false, features = ["std"] }
 rand = { version = "^0.10", optional = false }
 divan = "0.1.15"
 
-[profile.release]
-debug = true
-
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]

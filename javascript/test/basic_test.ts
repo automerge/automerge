@@ -1,7 +1,7 @@
 import { default as assert } from "assert"
 import * as Automerge from "../src/entrypoints/fullfat_node.js"
 import { mismatched_heads } from "./helpers.js"
-import { PatchSource } from "../src/types.js"
+import { type PatchSource } from "../src/types.js"
 import { IMMUTABLE_STRING } from "../src/constants.js"
 import { readFile } from "fs/promises"
 import { join } from "path"

@@ -105,13 +105,13 @@ function applySplicePatch(
   patch: SpliceTextPatch,
 ) {
   if (isAutomerge(doc)) {
-    let { obj: parent, prop, parentPath } = pathElemAt(path, -1)
+    let { prop, parentPath } = pathElemAt(path, -1)
     if (!(typeof prop === "number")) {
       throw new RangeError(`index is not a number for patch`)
     }
     splice(doc as Doc<unknown>, parentPath, prop, 0, patch.value)
   } else {
-    let { obj: parent, prop } = pathElemAt(path, -1)
+    let { prop } = pathElemAt(path, -1)
     let { obj: grandParent, prop: grandParentProp } = pathElemAt(path, -2)
     if (typeof prop !== "number") {
       throw new RangeError(`index is not a number for patch`)
@@ -150,7 +150,6 @@ function applyMarkPatch(
   path: ResolvedPathElem[],
   patch: MarkPatch,
 ) {
-  let { obj: parent, prop } = pathElemAt(path, -1)
   if (!isAutomerge(doc)) {
     return
   }
@@ -190,6 +189,8 @@ export function applyPatches(doc: unknown, patches: Patch[]) {
 }
 
 type ResolvedPathElem = {
+  // Patch application traverses arbitrary user documents.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   obj: any
   prop: Prop
   parentPath: Prop[]
@@ -264,8 +265,4 @@ function pathElemAt(
     throw new Error("invalid path")
   }
   return result
-}
-
-function reversed<T>(array: T[]): T[] {
-  return array.slice().reverse()
 }

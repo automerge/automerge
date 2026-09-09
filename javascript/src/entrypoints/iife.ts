@@ -5,5 +5,5 @@ UseApi(api)
 import * as Automerge from "../index.js"
 
 if (typeof window !== "undefined") {
-  ;(window as any).Automerge = Automerge
+  ;(window as unknown as Window & { Automerge: typeof Automerge }).Automerge = Automerge
 }

@@ -81,7 +81,7 @@ function reifyFullValue(
   fullValue: FullValue,
 ): AutomergeValue {
   switch (fullValue[0]) {
-    case "map":
+    case "map": {
       const mapResult = {}
       for (const key of context.keys(fullValue[1])) {
         let subVal = context.getWithType(fullValue[1], key)
@@ -91,7 +91,8 @@ function reifyFullValue(
         mapResult[key] = reifyFullValue(context, subVal)
       }
       return Object.freeze(mapResult)
-    case "list":
+    }
+    case "list": {
       const listResult: AutomergeValue[] = []
       const length = context.length(fullValue[1])
       for (let i = 0; i < length; i++) {
@@ -102,6 +103,7 @@ function reifyFullValue(
         listResult.push(reifyFullValue(context, subVal))
       }
       return Object.freeze(listResult) as AutomergeValue
+    }
     case "text":
       return context.text(fullValue[1])
     case "str":

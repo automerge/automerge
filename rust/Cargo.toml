@@ -15,5 +15,8 @@ resolver = "2"
 lto = true
 codegen-units = 1
 
+[profile.release.package.hexane]
+debug = true
+
 [profile.bench]
 debug = true

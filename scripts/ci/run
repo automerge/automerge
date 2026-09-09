@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -eou pipefail
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  exec ./scripts/ci/build-test
+fi
+
 ./scripts/ci/fmt
 ./scripts/ci/fmt_js
 ./scripts/ci/lint
@@ -10,4 +14,6 @@ set -eou pipefail
 ./scripts/ci/wasm_tests
 ./scripts/ci/js_tests
 ./scripts/ci/node_18_packaging_test
+./scripts/ci/node_20_packaging_test
+./scripts/ci/node_22_packaging_test
 ./scripts/ci/cmake-build Release static

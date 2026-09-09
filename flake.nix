@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-26.05";
-    # Retain Node 18 for compatibility tests and Node 20 for release builds.
+    # Keep the older snapshot only for the Node 18 and 20 compatibility jobs.
     nixpkgs-node18.url = "nixpkgs/nixos-23.11";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
@@ -34,8 +34,7 @@
         pkgs = import nixpkgs {inherit system overlays;};
         node18-pkgs = import nixpkgs-node18 {
           inherit system;
-          # This package is deliberately used to exercise the supported Node 18
-          # compatibility path, even though Node 18 itself is end-of-life.
+          # Both Node 18 and 20 use this snapshot for compatibility coverage.
           config.allowInsecurePredicate = package:
             pkgs.lib.hasPrefix "nodejs-18" (pkgs.lib.getName package);
         };
@@ -44,8 +43,8 @@
         nodejs = pkgs.nodejs_26;
         ci-nodejs = pkgs.nodejs_24;
         nodejs-18 = node18-pkgs.nodejs_18;
-        # Node 20 is also retained to preserve the release build's runtime.
-        release-nodejs = node18-pkgs.nodejs_20;
+        nodejs-20 = node18-pkgs.nodejs_20;
+        release-nodejs = pkgs.nodejs_22;
 
         ci-rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
           extensions = ["clippy" "rustfmt"];
@@ -72,9 +71,9 @@
           ];
         };
 
-        # Pinned nightly for the wasm build (must match WASM_TOOLCHAIN in CI).
+        # Pinned nightly for reproducible Nix WASM builds.
         # `-Zbuild-std` needs a nightly cargo/rustc plus the rust-src component.
-        wasm-rust-toolchain = pkgs.rust-bin.nightly."2026-04-25".minimal.override {
+        wasm-rust-toolchain = pkgs.rust-bin.nightly."2026-07-22".minimal.override {
           extensions = ["rust-src"];
           targets = ["wasm32-unknown-unknown"];
         };
@@ -88,19 +87,19 @@
           exec cargo "$@"
         '';
 
-        # CI pins wasm-bindgen-cli 0.2.127 (see .github/workflows/ci.yaml);
+        # CI uses wasm-bindgen-cli 0.2.128 from this flake;
         # the CLI version must match the `wasm-bindgen` crate in rust/Cargo.lock.
         wasm-bindgen-cli = unstable.buildWasmBindgenCli rec {
           src = pkgs.fetchCrate {
             pname = "wasm-bindgen-cli";
-            version = "0.2.127";
-            hash = "sha256-di+qBAdd7pENLiIB9CoZoab+W5xeDoByMREcCGTSzWo=";
+            version = "0.2.128";
+            hash = "sha256-a7lcXJnnZkYReja+iUO7NqqrWyv3toxnUgQb8s4IS5s=";
           };
 
           cargoDeps = unstable.rustPlatform.fetchCargoVendor {
             inherit src;
             inherit (src) pname version;
-            hash = "sha256-FTv2GZIAQs0ePdIZXIXil7JbZ6kIT05VG6vqC1qNFxQ=";
+            hash = "sha256-R1Tas33Ursy8kqsxguAkG0ZhNed2n5uFTAhw1l2qlLY=";
           };
         };
 
@@ -133,7 +132,7 @@
 
         cargo = "${pkgs.cargo}/bin/cargo";
         deno = "${unstable.deno}/bin/deno";
-        node = "${unstable.nodejs_20}/bin/node";
+        node = "${nodejs}/bin/node";
         wasm-opt = "${pkgs.binaryen}/bin/wasm-opt";
         wasm-pack = "${unstable.wasm-pack}/bin/wasm-pack";
         npm = "${nodejs}/bin/npm";
@@ -343,20 +342,38 @@
           exec ./scripts/ci/wasm_tests
         '';
 
-        ci-js-tests = mk-ci-command "ci-js-tests" ([ci-nodejs pkgs.chromium] ++ wasm-ci-inputs) ''
-          export WASM_CARGO=wasm-cargo
-          export PUPPETEER_SKIP_DOWNLOAD=1
-          export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
-          # Chromium's crash handler requires a writable configuration home.
-          export XDG_CONFIG_HOME="$repo_root/target/ci-xdg-config"
-          mkdir -p "$XDG_CONFIG_HOME"
-          exec ./scripts/ci/js_tests
-        '';
+        ci-js-tests =
+          if pkgs.stdenv.isDarwin
+          then mk-ci-command "ci-js-tests" [] ''
+            echo "ci-js-tests requires the Linux Chromium package and is unavailable on Darwin" >&2
+            exit 2
+          ''
+          else mk-ci-command "ci-js-tests" ([ci-nodejs pkgs.chromium] ++ wasm-ci-inputs) ''
+            export WASM_CARGO=wasm-cargo
+            export PUPPETEER_SKIP_DOWNLOAD=1
+            export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+            # Chromium's crash handler requires a writable configuration home.
+            export XDG_CONFIG_HOME="$repo_root/target/ci-xdg-config"
+            mkdir -p "$XDG_CONFIG_HOME"
+            exec ./scripts/ci/js_tests
+          '';
 
         ci-node18-packaging-test = mk-ci-command "ci-node18-packaging-test" ([nodejs-18] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
           exec ./scripts/ci/node_18_packaging_test
+        '';
+
+        ci-node20-packaging-test = mk-ci-command "ci-node20-packaging-test" ([nodejs-20] ++ wasm-ci-inputs) ''
+          export WASM_CARGO=wasm-cargo
+          export PUPPETEER_SKIP_DOWNLOAD=1
+          exec ./scripts/ci/node_20_packaging_test
+        '';
+
+        ci-node22-packaging-test = mk-ci-command "ci-node22-packaging-test" ([release-nodejs] ++ wasm-ci-inputs) ''
+          export WASM_CARGO=wasm-cargo
+          export PUPPETEER_SKIP_DOWNLOAD=1
+          exec ./scripts/ci/node_22_packaging_test
         '';
 
         release-js-build = mk-ci-command "release-js-build" ([release-nodejs] ++ wasm-ci-inputs) ''
@@ -391,6 +408,8 @@
             ci-wasm-tests
             ci-js-tests
             ci-node18-packaging-test
+            ci-node20-packaging-test
+            ci-node22-packaging-test
           ] ''
             ci-fmt
             ci-lint
@@ -403,6 +422,8 @@
             ci-wasm-tests
             ci-js-tests
             ci-node18-packaging-test
+            ci-node20-packaging-test
+            ci-node22-packaging-test
           '';
 
         ci-host = mk-ci-command "ci" [ci-build-test] ''
@@ -419,8 +440,10 @@
             ci-cargo-deny
             ci-fmt
             ci-js-tests
-            ci-lint
             ci-node18-packaging-test
+            ci-node20-packaging-test
+            ci-node22-packaging-test
+            ci-lint
             ci-rust-docs
             ci-wasm-tests
             release-js-build
@@ -452,7 +475,6 @@
 
               # JS
               chromedriver
-              chromium
               unstable.deno
               nodejs # Current LTS
 
@@ -473,14 +495,14 @@
             ++ command_menu
             ++ format-pkgs
             ++ cargo-installs
+            ++ lib.optional stdenv.isLinux chromium
             ++ lib.optionals stdenv.isDarwin darwin-installs;
 
           WASM_CARGO = "wasm-cargo";
 
-          # Use the Nix-provided Chromium for the JS packaging tests; the
-          # Chrome that Puppeteer downloads does not run on NixOS.
-          PUPPETEER_SKIP_DOWNLOAD = "1";
-          PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
+          # Use Nix-provided Chromium for JS packaging tests on Linux.
+          PUPPETEER_SKIP_DOWNLOAD = pkgs.lib.optionalString pkgs.stdenv.isLinux "1";
+          PUPPETEER_EXECUTABLE_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.chromium}/bin/chromium";
 
           shellHook = "menu";
         };

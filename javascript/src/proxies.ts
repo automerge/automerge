@@ -59,7 +59,6 @@ import {
   UINT,
   F64,
   IMMUTABLE_STRING,
-  TEXT,
 } from "./constants.js"
 import { ImmutableString } from "./immutable_string.js"
 
@@ -494,7 +493,6 @@ export function listProxy(
 }
 
 export function rootProxy<T>(context: Automerge): T {
-  /* eslint-disable-next-line */
   return <any>mapProxy(context, "_root", [])
 }
 
@@ -633,7 +631,9 @@ function listMethods(target: Target) {
           validateForBatchInsert(vals[i], context, [...path, index + i])
         } catch (e) {
           if (e instanceof RangeError) {
-            throw new RangeError(`${e.message} (at index ${i} in the input)`)
+            throw new RangeError(`${e.message} (at index ${i} in the input)`, {
+              cause: e,
+            })
           } else {
             throw e
           }
@@ -818,57 +818,6 @@ function listMethods(target: Target) {
         yield value
         i += 1
         value = valueAt(target, i)
-      }
-    },
-  }
-  return methods
-}
-
-function textMethods(target: Target) {
-  const { context, objectId } = target
-  const methods = {
-    set(index: number, value: any) {
-      return (this[index] = value)
-    },
-    get(index: number): AutomergeValue {
-      return this[index]
-    },
-    toString(): string {
-      return context.text(objectId).replace(/￼/g, "")
-    },
-    toSpans(): AutomergeValue[] {
-      const spans: AutomergeValue[] = []
-      let chars = ""
-      const length = context.length(objectId)
-      for (let i = 0; i < length; i++) {
-        const value = this[i]
-        if (typeof value === "string") {
-          chars += value
-        } else {
-          if (chars.length > 0) {
-            spans.push(chars)
-            chars = ""
-          }
-          spans.push(value)
-        }
-      }
-      if (chars.length > 0) {
-        spans.push(chars)
-      }
-      return spans
-    },
-    toJSON(): string {
-      return this.toString()
-    },
-    indexOf(o: any, start = 0) {
-      const text = context.text(objectId)
-      return text.indexOf(o, start)
-    },
-    insertAt(index: number, ...values: any[]) {
-      if (values.every(v => typeof v === "string")) {
-        context.splice(objectId, index, 0, values.join(""))
-      } else {
-        listMethods(target).insertAt(index, ...values)
       }
     },
   }

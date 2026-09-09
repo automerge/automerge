@@ -9,12 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@automerge/automerge": "2.1.0-alpha.11"
+    "@automerge/automerge": "3.4.1"
   },
   "devDependencies": {
-    "typescript": "^4.6.4",
-    "vite": "^3.1.0",
-    "vite-plugin-top-level-await": "^1.1.1",
-    "vite-plugin-wasm": "^2.1.0"
+    "typescript": "^7.0.2",
+    "rollup": "^4.63.1",
+    "vite": "^8.2.2",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }

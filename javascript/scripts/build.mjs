@@ -119,7 +119,7 @@ function buildWasm(outputDir, gitHead) {
   // a nightly toolchain (for -Zbuild-std) and the `rust-src` rustup component.
   // Current nightlies emit modern (exnref) Wasm exception handling by default.
   // Force legacy EH so wasm-bindgen can provide its WebAssembly.JSTag polyfill
-  // for runtimes without a native JSTag implementation (notably Node 20).
+  // for runtimes without a native JSTag implementation.
   const wasmRustflags = [
     process.env.RUSTFLAGS,
     "-C panic=unwind",

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+THIS_SCRIPT="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd -P)"
+JS_PROJECT="$THIS_SCRIPT/../../javascript"
+
+# Exercise the packaged full-fat CommonJS entry point under Node 22.
+npm --prefix "$JS_PROJECT" install
+node "$JS_PROJECT/scripts/build.mjs"
+npm --prefix "$JS_PROJECT" run packaging-tests -- node_cjs_fullfat

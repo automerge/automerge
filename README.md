@@ -87,8 +87,8 @@ You will also need to install the following with `cargo install`
 And ensure you have added the `wasm32-unknown-unknown` target for rust cross-compilation. The wasm build also requires the nightly toolchain and the `rust-src` component (see the macOS instructions below for the exact commands); these are used by `automerge-wasm` and the JS package to build std with `panic=unwind` so panics surface as JS exceptions.
 
 The various subprojects (the rust code, the wrapper projects) have their own
-build instructions, but to run the tests that will be run in CI you can run
-`./scripts/ci/run`.
+build instructions. The platform-aware CI entry points are documented below;
+`./scripts/ci/run` is the native local runner.
 
 ### For macOS
 
@@ -166,23 +166,26 @@ $ rustc --version
 rustc 1.82.0 (f6e511eec 2024-10-15) # latest at time of writing
 ```
 
-CI entry points are also exposed by the flake. GitHub Actions invokes these
-same commands, so on Linux the complete non-Windows CI suite can be run with:
+CI entry points are also exposed by the flake. Use the platform-aware aggregate
+command below to mirror the host CI jobs: Linux runs the complete non-Windows
+suite, while macOS runs the native host test.
 
 ```console
 $ nix run .#ci
 ```
 
-Individual jobs can be run while iterating, for example:
+The native runner follows the same split: `./scripts/ci/run` runs the full suite
+on Linux and `./scripts/ci/build-test` on macOS. Browser and Node compatibility
+jobs are Linux-only because Nixpkgs does not provide the required Chromium
+package on Darwin. Individual jobs can be run while iterating, for example:
 
 ```console
 $ nix run .#ci-fmt
 $ nix run .#ci-lint
+# Linux only
 $ nix run .#ci-js-tests
-$ nix run .#ci-node18-packaging-test
 ```
 
-On macOS, `nix run .#ci` runs the native host test used by the macOS CI job.
 The native Windows job remains separate because Nix under WSL would test Linux
 rather than Windows.
 

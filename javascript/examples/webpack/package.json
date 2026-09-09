@@ -10,13 +10,13 @@
   },
   "author": "",
   "dependencies": {
-    "@automerge/automerge": "2.1.0-alpha.11"
+    "@automerge/automerge": "3.4.1"
   },
   "devDependencies": {
-    "serve": "^13.0.2",
-    "webpack": "^5.72.1",
-    "webpack-cli": "^4.9.2",
-    "webpack-dev-server": "^4.11.1",
+    "serve": "^14.2.6",
+    "webpack": "^5.110.3",
+    "webpack-cli": "^7.2.3",
+    "webpack-dev-server": "^6.0.0",
     "webpack-node-externals": "^3.0.0"
   }
 }
