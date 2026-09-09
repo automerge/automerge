@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+THIS_SCRIPT="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd -P)"
+JS_PROJECT="$THIS_SCRIPT/../../javascript"
+USE_FNM=false
+
+# Exercise the packaged full-fat CommonJS entry point under Node 18.
+if node --version | grep -q "^v18"; then
+    echo "Running tests in Node 18 environment"
+elif command -v fnm >/dev/null 2>&1; then
+    USE_FNM=true
+else
+    echo "Warning: Node 18 packaging test skipped because Node 18 and fnm are unavailable."
+    exit 0
+fi
+
+npm --prefix "$JS_PROJECT" install
+node "$JS_PROJECT/scripts/build.mjs"
+
+if [ "$USE_FNM" = true ]; then
+    fnm exec --using 18 -- node "$JS_PROJECT/packaging_tests/run.mjs" node_cjs_fullfat
+else
+    node "$JS_PROJECT/packaging_tests/run.mjs" node_cjs_fullfat
+fi

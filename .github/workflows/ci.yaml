@@ -60,6 +60,27 @@ jobs:
       - name: Run JS tests
         run: nix run .#ci-js-tests
 
+  # This test verifies the Node 18 webcrypto compatibility path.
+  node_18_packaging_test:
+    runs-on: ubuntu-latest
+    needs:
+      - build_wasm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Run Node 18 packaging test
+        run: nix run .#ci-node18-packaging-test
+
+  node_20_packaging_test:
+    runs-on: ubuntu-latest
+    needs:
+      - build_wasm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Run Node 20 packaging test
+        run: nix run .#ci-node20-packaging-test
+
   node_22_packaging_test:
     runs-on: ubuntu-latest
     needs:

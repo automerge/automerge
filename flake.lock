@@ -103,6 +103,7 @@
         "flake-utils": "flake-utils_2",
         "nixos-unstable": "nixos-unstable",
         "nixpkgs": "nixpkgs_2",
+        "nixpkgs-node18": "nixpkgs",
         "rust-overlay": "rust-overlay"
       }
     },

@@ -3,6 +3,8 @@
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-26.05";
+    # Retain the older snapshot for Node 18 and 20 compatibility tests.
+    nixpkgs-node18.url = "nixpkgs/nixos-23.11";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
     command-utils.url = "github:expede/nix-command-utils";
@@ -17,6 +19,7 @@
   outputs = {
     self,
     nixpkgs,
+    nixpkgs-node18,
     nixos-unstable,
     command-utils,
     flake-utils,
@@ -29,10 +32,18 @@
         ];
 
         pkgs = import nixpkgs {inherit system overlays;};
+        node18-pkgs = import nixpkgs-node18 {
+          inherit system;
+          # Node 18 is retained only for compatibility coverage.
+          config.allowInsecurePredicate = package:
+            pkgs.lib.hasPrefix "nodejs-18" (pkgs.lib.getName package);
+        };
         unstable = import nixos-unstable {inherit system overlays;};
 
         nodejs = pkgs.nodejs_26;
         ci-nodejs = pkgs.nodejs_24;
+        nodejs-18 = node18-pkgs.nodejs_18;
+        nodejs-20 = node18-pkgs.nodejs_20;
         release-nodejs = pkgs.nodejs_22;
 
         ci-rust-toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust/rust-toolchain.toml).override {
@@ -341,6 +352,18 @@
           exec ./scripts/ci/js_tests
         '';
 
+        ci-node18-packaging-test = mk-ci-command "ci-node18-packaging-test" ([nodejs-18] ++ wasm-ci-inputs) ''
+          export WASM_CARGO=wasm-cargo
+          export PUPPETEER_SKIP_DOWNLOAD=1
+          exec ./scripts/ci/node_18_packaging_test
+        '';
+
+        ci-node20-packaging-test = mk-ci-command "ci-node20-packaging-test" ([nodejs-20] ++ wasm-ci-inputs) ''
+          export WASM_CARGO=wasm-cargo
+          export PUPPETEER_SKIP_DOWNLOAD=1
+          exec ./scripts/ci/node_20_packaging_test
+        '';
+
         ci-node22-packaging-test = mk-ci-command "ci-node22-packaging-test" ([release-nodejs] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
@@ -378,6 +401,8 @@
             ci-build-test
             ci-wasm-tests
             ci-js-tests
+            ci-node18-packaging-test
+            ci-node20-packaging-test
             ci-node22-packaging-test
           ] ''
             ci-fmt
@@ -390,6 +415,8 @@
             ci-build-test
             ci-wasm-tests
             ci-js-tests
+            ci-node18-packaging-test
+            ci-node20-packaging-test
             ci-node22-packaging-test
           '';
 
@@ -407,6 +434,8 @@
             ci-cargo-deny
             ci-fmt
             ci-js-tests
+            ci-node18-packaging-test
+            ci-node20-packaging-test
             ci-node22-packaging-test
             ci-lint
             ci-rust-docs
