@@ -394,34 +394,32 @@ impl AutoCommit {
         self.update_revocations(|doc, patch_log| doc.unrevoke(author, patch_log))
     }
 
-    fn update_revocations(&mut self, update: impl FnOnce(&mut Automerge, &mut PatchLog)) {
+    fn update_revocations(
+        &mut self,
+        update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<(), crate::PatchLogMismatch>,
+    ) {
         self.ensure_transaction_closed();
-        if !self.patch_log.is_active() {
-            update(&mut self.doc, &mut PatchLog::inactive());
+        if self.isolation.is_none() || !self.patch_log.is_active() {
+            // The core finalizes transitions for the full document view.
+            update(&mut self.doc, &mut self.patch_log)
+                .expect("AutoCommit's patch log always belongs to its document");
             return;
         }
 
         let heads = self.get_heads();
-        // Resolve pending paths before revocation can remove objects or move
-        // their list positions, and preserve transition ordering.
+        // Record and finalize changes to the isolated view, not the full document.
         self.patch_log.finish_current_view(&self.doc, &heads);
-        if self.isolation.is_some() {
-            // Record changes to the isolated view, not the full document.
-            let before = self.doc.clock_at_heads(&heads);
-            update(&mut self.doc, &mut PatchLog::inactive());
-            let after = self.doc.clock_at_heads(&heads);
-            DiffIter::log(
-                &self.doc,
-                ObjMeta::root(),
-                ClockRange::Diff(before, after),
-                &mut self.patch_log,
-                true,
-            );
-        } else {
-            update(&mut self.doc, &mut self.patch_log);
-        }
-        // Resolve this transition's paths before subsequent edits or revocations
-        // can change them, and keep the patches in chronological order.
+        let before = self.doc.clock_at_heads(&heads);
+        update(&mut self.doc, &mut PatchLog::inactive())
+            .expect("a fresh patch log belongs to any document");
+        let after = self.doc.clock_at_heads(&heads);
+        DiffIter::log(
+            &self.doc,
+            ObjMeta::root(),
+            ClockRange::Diff(before, after),
+            &mut self.patch_log,
+            true,
+        );
         self.patch_log.finish_current_view(&self.doc, &heads);
     }
 

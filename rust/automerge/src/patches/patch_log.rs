@@ -273,10 +273,9 @@ impl PatchLog {
     ///
     /// Patch log events normally move forward through history, which makes it
     /// safe for `make_current_patches` to sort them by object. This method is
-    /// only needed when the next view may be at heads that happen before the
-    /// current heads, as when isolating a document to an earlier state. In that
-    /// case, sorting events from both sides of the transition together would
-    /// reorder changes that must remain chronological.
+    /// needed when moving backwards in history or changing revocation visibility,
+    /// even at unchanged heads. Sorting events from both sides of such a
+    /// transition together would reorder changes that must remain chronological.
     ///
     /// Paths must also be resolved while this view is still current: list
     /// indexes may identify different objects after the transition. Finalizing
@@ -285,7 +284,7 @@ impl PatchLog {
     pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
         if !self.events.is_empty() || !self.expose.is_empty() {
             self.migrate_actors(&doc.ops.actors)
-                .expect("AutoCommit's patch log always belongs to its document");
+                .expect("patch log actors must be validated before finalizing a view");
             let previous_heads = self.heads.replace(heads.to_vec());
             let patches = self.make_current_patches(doc);
             self.heads = previous_heads;
@@ -636,6 +635,17 @@ impl PatchLog {
         if self.actors.is_empty() {
             self.actors = others.to_vec();
             return Ok(());
+        }
+        // Every old actor must still exist. Check before mutating the log so a
+        // mismatch (including a missing trailing actor) leaves it usable with
+        // its original document.
+        let mut remaining = others.iter();
+        if !self
+            .actors
+            .iter()
+            .all(|actor| remaining.any(|other| other == actor))
+        {
+            return Err(crate::PatchLogMismatch);
         }
         for i in 0..others.len() {
             match (self.actors.get(i), others.get(i)) {

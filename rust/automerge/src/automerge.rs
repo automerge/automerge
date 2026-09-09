@@ -423,7 +423,8 @@ impl Automerge {
     /// This clears all previous revocation state.
     pub fn set_revocations(&mut self, revocations: HashMap<Author<'static>, Vec<ChangeHash>>) {
         self.revocations.clear();
-        self.revoke_batch(revocations.into_iter(), &mut PatchLog::inactive());
+        self.revoke_batch(revocations.into_iter(), &mut PatchLog::inactive())
+            .expect("a fresh patch log belongs to any document");
     }
 
     /// Set the author for this document.
@@ -462,46 +463,73 @@ impl Automerge {
     ///
     /// Heads not yet present in the document are recorded as pending and
     /// applied once the corresponding change is witnessed.
+    ///
+    /// Pending patches are finalized before and after the visibility transition.
+    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if the log's actors
+    /// are incompatible with this document, without changing revocations.
     pub fn revoke(
         &mut self,
         author: Author<'static>,
         from: &[ChangeHash],
         patch_log: &mut PatchLog,
-    ) {
-        self.revoke_batch([(author, from)].into_iter(), patch_log);
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.revoke_batch([(author, from)].into_iter(), patch_log)
     }
 
     fn revoke_batch<C: AsRef<[ChangeHash]>>(
         &mut self,
         revocations: impl Iterator<Item = (Author<'static>, C)>,
         patch_log: &mut PatchLog,
-    ) {
-        let heads = self.get_heads();
-        let before = self.clock_at_heads(&heads);
-        for (author, from) in revocations {
-            let from = from.as_ref();
-            let seq_clock = self.change_graph.clock_for_heads(from);
-            self.revocations
-                .extend_pending_revocations(self.change_graph.missing_hashes(from));
-            self.revocations
-                .revoke(author.clone(), from.to_vec(), &seq_clock, &self.authors);
-        }
-        self.rebuild_revocation_clock();
-        let after = self.clock_at_heads(&heads);
-        self.ops.recompute_indexes(&after);
-        let clock = ClockRange::Diff(before, after);
-        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.update_revocations(patch_log, |doc| {
+            for (author, from) in revocations {
+                let from = from.as_ref();
+                let seq_clock = doc.change_graph.clock_for_heads(from);
+                doc.revocations
+                    .extend_pending_revocations(doc.change_graph.missing_hashes(from));
+                doc.revocations
+                    .revoke(author, from.to_vec(), &seq_clock, &doc.authors);
+            }
+        })
     }
 
-    pub fn unrevoke(&mut self, author: &Author<'static>, patch_log: &mut PatchLog) {
+    /// Remove the revocation for `author`, recording the visibility transition.
+    ///
+    /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if the log's actors
+    /// are incompatible with this document, without changing revocations.
+    pub fn unrevoke(
+        &mut self,
+        author: &Author<'static>,
+        patch_log: &mut PatchLog,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.update_revocations(patch_log, |doc| {
+            doc.revocations.unrevoke(author, &doc.authors);
+        })
+    }
+
+    fn update_revocations(
+        &mut self,
+        patch_log: &mut PatchLog,
+        update: impl FnOnce(&mut Self),
+    ) -> Result<(), crate::PatchLogMismatch> {
+        // Even a fresh log must remember which actor table its events use.
+        // Validate before changing visibility or resolving any pending paths.
+        patch_log.migrate_actors(&self.ops.actors)?;
         let heads = self.get_heads();
+        patch_log.finish_current_view(self, &heads);
         let before = self.clock_at_heads(&heads);
-        self.revocations.unrevoke(author, &self.authors);
+        update(self);
         self.rebuild_revocation_clock();
         let after = self.clock_at_heads(&heads);
         self.ops.recompute_indexes(&after);
-        let clock = ClockRange::Diff(before, after);
-        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+        if patch_log.is_active() {
+            let clock = ClockRange::Diff(before, after);
+            DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+            // Do not sort this transition together with subsequent edits or
+            // revocations. Resolve its paths while this view is still current.
+            patch_log.finish_current_view(self, &heads);
+        }
+        Ok(())
     }
 
     /// Return the set of revocations, per [`Author`].
