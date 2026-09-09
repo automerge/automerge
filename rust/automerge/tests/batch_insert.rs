@@ -1,3 +1,4 @@
+use automerge::marks::{ExpandMark, Mark};
 use automerge::transaction::Transactable;
 use automerge::{AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, Value, ROOT};
 use std::borrow::Cow;
@@ -1031,4 +1032,34 @@ fn splice_merges_correctly() {
         doc1.get(&list_id, 0).unwrap().unwrap().0,
         Value::str("shared")
     );
+}
+
+#[test]
+fn batch_create_object_rejects_map_key_in_text() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "k0", ObjType::Text).unwrap();
+    doc.commit();
+
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), ScalarValue::Null, 0, 0),
+        ExpandMark::After,
+    )
+    .unwrap();
+    doc.commit();
+
+    let value = hydrate::Value::Map(hydrate_map! {
+        "m0" => -128,
+    });
+    // This used to create a map-key operation inside a text object, leaving the
+    // document op set in an invalid order that later panicked during
+    // merge/sync.
+    let err = doc
+        .batch_create_object(&text, "k0", &value, false)
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        automerge::AutomergeError::InvalidOp(ObjType::Text)
+    ));
 }

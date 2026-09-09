@@ -4,8 +4,10 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
+use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
+use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
@@ -338,15 +340,26 @@ impl<'a> Document<'a> {
 
         self.verify_changes(&changes, mode)?;
 
-        op_set.set_indexes(index);
+        let (indexes, mut mark_order_validator) = index.finish();
+        op_set.set_indexes(indexes);
 
-        let change_graph = change_cols.finalize(&changes.changes);
+        let mut authors = Authors::with_actors(change_cols.len());
+        let change_graph = change_cols.finalize(&changes.changes, &mut authors);
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
         debug_assert!(op_set.validate_top_index());
 
-        Ok(Automerge::from_parts(op_set, change_graph))
+        let doc = Automerge::from_parts(op_set, change_graph, authors);
+
+        if let Some(err) = mark_order_validator.take_error() {
+            Err(ReconstructError::InvalidMarkOrderDoc {
+                doc: Box::new(doc),
+                error_message: err,
+            })
+        } else {
+            Ok(doc)
+        }
     }
 
     pub(crate) fn reconstruct_changes(
@@ -356,11 +369,17 @@ impl<'a> Document<'a> {
         let op_set = OpSet::load(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
 
+        let mut mark_order = MarkOrderValidator::default();
         let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
-
-        change_collector.process_ops(&op_set)?;
-
-        Ok(change_collector.collect(&op_set)?.changes)
+        change_collector.process_ops(&op_set, &mut mark_order)?;
+        let changes = change_collector.collect(&op_set)?.changes;
+        if let Some(err) = mark_order.take_error() {
+            return Err(ReconstructError::InvalidMarkOrderChanges {
+                changes,
+                error_message: err,
+            });
+        }
+        Ok(changes)
     }
 }
 
@@ -388,6 +407,16 @@ pub(crate) enum ReconstructError {
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]
     InvalidMaxOp,
+    #[error("invalid mark operation order: {error_message}")]
+    InvalidMarkOrderDoc {
+        doc: Box<Automerge>,
+        error_message: String,
+    },
+    #[error("invalid mark operation order: {error_message}")]
+    InvalidMarkOrderChanges {
+        changes: Vec<Change>,
+        error_message: String,
+    },
     #[error(transparent)]
     OutOfMemory(#[from] OutOfMemory),
 }

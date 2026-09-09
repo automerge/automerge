@@ -36,6 +36,18 @@ impl RawColumn<compression::Uncompressed> {
             _phantom: PhantomData,
         }
     }
+
+    pub(crate) fn try_new(spec: ColumnSpec, data: Range<usize>) -> Option<Self> {
+        if data.is_empty() {
+            None
+        } else {
+            Some(Self {
+                spec: ColumnSpec::new(spec.id(), spec.col_type(), false),
+                data,
+                _phantom: PhantomData,
+            })
+        }
+    }
 }
 
 impl<T: compression::ColumnCompression> RawColumn<T> {

@@ -233,8 +233,8 @@ impl<O: OpReadState> Change<'_, O> {
         self.start_op
     }
 
-    pub(crate) fn message(&self) -> &Option<String> {
-        &self.message
+    pub(crate) fn message(&self) -> Option<&str> {
+        self.message.as_deref()
     }
 
     pub(crate) fn dependencies(&self) -> &[ChangeHash] {

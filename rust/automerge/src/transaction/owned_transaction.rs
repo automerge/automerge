@@ -69,8 +69,12 @@ impl OwnedTransaction {
     /// Unlike [`super::Transaction::commit`], no `PatchLog` clone is needed — it is moved out.
     pub fn commit(mut self) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(&mut self.doc, None, None);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash = super::commit_transaction(
+            tx,
+            &mut self.doc,
+            &mut self.patch_log,
+            CommitOptions::default(),
+        );
         (self.doc, hash, self.patch_log)
     }
 
@@ -80,8 +84,7 @@ impl OwnedTransaction {
         options: CommitOptions,
     ) -> (Automerge, Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(&mut self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash = super::commit_transaction(tx, &mut self.doc, &mut self.patch_log, options);
         (self.doc, hash, self.patch_log)
     }
 
@@ -102,7 +105,10 @@ impl OwnedTransaction {
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
         if let Some(h) = heads {
-            Some(self.doc.clock_at(h))
+            // a transaction is in flight: its pending ops are in the op set
+            // but not under the graph's heads, so the current-heads
+            // shortcut in `scope_at` would wrongly expose them
+            Some(self.doc.change_graph.clock_at(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }
@@ -125,7 +131,7 @@ mod tests {
         let (doc, hash, _) = tx.commit();
         assert!(hash.is_some());
         assert_eq!(
-            doc.get(ROOT, "key").unwrap().unwrap().0.to_str().unwrap(),
+            doc.get(ROOT, "key").unwrap().unwrap().0.as_str().unwrap(),
             "value"
         );
     }
@@ -137,7 +143,7 @@ mod tests {
         tx.put(ROOT, "a", "1").unwrap();
         // ReadDoc works on the transaction itself
         let (val, _) = tx.get(ROOT, "a").unwrap().unwrap();
-        assert_eq!(val.to_str().unwrap(), "1");
+        assert_eq!(val.as_str().unwrap(), "1");
         tx.commit();
     }
 
@@ -161,7 +167,7 @@ mod tests {
         let (doc, hash, _) = tx.commit_with(CommitOptions::default().with_message("test commit"));
         assert!(hash.is_some());
         let change = doc.get_change_by_hash(&hash.unwrap()).unwrap();
-        assert_eq!(change.message().map(|s| s.as_str()), Some("test commit"));
+        assert_eq!(change.message(), Some("test commit"));
     }
 
     #[test]
@@ -177,7 +183,7 @@ mod tests {
         let (doc, cancelled) = doc.rollback();
         assert_eq!(cancelled, 0);
         assert_eq!(
-            doc.get(ROOT, "keep").unwrap().unwrap().0.to_str().unwrap(),
+            doc.get(ROOT, "keep").unwrap().unwrap().0.as_str().unwrap(),
             "yes"
         );
     }
@@ -211,7 +217,7 @@ mod tests {
         let mut tx = doc.into_transaction(None, Some(&heads_v1)).unwrap();
         // Should see v=1, not v=2
         let (val, _) = tx.get(ROOT, "v").unwrap().unwrap();
-        assert_eq!(val.to_i64().unwrap(), 1);
+        assert_eq!(val.as_i64().unwrap(), 1);
 
         tx.put(ROOT, "from_v1", true).unwrap();
         let (doc, hash, _) = tx.commit();

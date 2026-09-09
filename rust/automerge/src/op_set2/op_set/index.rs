@@ -1,7 +1,6 @@
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
-use hexane::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
 
 // TODO : this could be faster and use less memory if
@@ -17,6 +16,62 @@ pub(crate) struct IndexBuilder {
     obj_info: ObjIndex,
     last_flush: usize,
     text_encoding: TextEncoding,
+    mark_order: MarkOrderValidator,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct MarkOrderValidator {
+    begins: HashMap<OpId, ObjId>,
+    error: Option<String>,
+}
+
+impl MarkOrderValidator {
+    pub(crate) fn process_op(&mut self, op: &Op<'_>) {
+        let mark_index = op.mark_index();
+        self.process_mark_index(op, &mark_index);
+    }
+
+    pub(crate) fn process_mark_index(
+        &mut self,
+        op: &Op<'_>,
+        mark_index: &Option<MarkIndexBuilder>,
+    ) {
+        if self.error.is_some() {
+            return;
+        }
+        self.check_mark_op(op, mark_index);
+    }
+
+    pub(crate) fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+
+    /// Check that mark ops:
+    /// * Always start and end in the same object
+    /// * Have the start op appear before the end op
+    fn check_mark_op(&mut self, op: &Op<'_>, mark_index: &Option<MarkIndexBuilder>) {
+        match mark_index {
+            Some(MarkIndexBuilder::Start(id, _)) => {
+                self.begins.insert(*id, op.obj);
+            }
+            Some(MarkIndexBuilder::End(begin)) => match self.begins.get(begin) {
+                Some(obj) if *obj == op.obj => {}
+                Some(_) => {
+                    self.error = Some(format!(
+                        "mark end {:?} references mark begin {:?} in a different object",
+                        op.id, begin
+                    ));
+                }
+                None => {
+                    self.error = Some(format!(
+                        "mark end {:?} occurs before mark begin {:?}",
+                        op.id, begin
+                    ));
+                }
+            },
+            None => {}
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -41,6 +96,10 @@ impl ObjIndex {
 
     pub(crate) fn insert(&mut self, id: OpId, obj_info: ObjInfo) {
         self.0.insert(id, obj_info);
+    }
+
+    pub(crate) fn remove(&mut self, id: OpId) {
+        self.0.remove(&id);
     }
 }
 
@@ -89,10 +148,10 @@ impl OpBuilder<'_> {
 }
 
 pub(crate) struct Indexes {
-    pub(crate) text: ColumnData<UIntCursor>,
-    pub(crate) top: ColumnData<BooleanCursor>,
-    pub(crate) visible: ColumnData<BooleanCursor>,
-    pub(crate) inc: ColumnData<IntCursor>,
+    pub(crate) text: hexane::PrefixColumn<Option<u32>>,
+    pub(crate) top: hexane::PrefixColumn<bool>,
+    pub(crate) visible: hexane::Column<bool>,
+    pub(crate) inc: hexane::Column<Option<i64>>,
     pub(crate) mark: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
 }
@@ -109,6 +168,7 @@ impl IndexBuilder {
             obj_info: ObjIndex::default(),
             last_flush: 0,
             text_encoding: encoding,
+            mark_order: MarkOrderValidator::default(),
         }
     }
 
@@ -123,7 +183,9 @@ impl IndexBuilder {
         self.last_flush = len;
     }
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
-        self.marks.push(op.mark_index());
+        let mark_index = op.mark_index();
+        self.mark_order.process_mark_index(op, &mark_index);
+        self.marks.push(mark_index);
 
         self.succ.push(vis_num(op));
         self.top.push(false);
@@ -155,36 +217,40 @@ impl IndexBuilder {
         self.incs.push(None); // will update later
     }
 
-    pub(crate) fn finish(mut self) -> Indexes {
+    pub(crate) fn finish(mut self) -> (Indexes, MarkOrderValidator) {
         self.flush();
 
         let text = self
             .widths
             .iter()
-            .zip(self.succ.iter())
-            .map(|(w, t)| if *t == 0 { Some(*w) } else { None })
+            .zip(self.top.iter())
+            .map(|(w, t)| if *t { Some(*w as u32) } else { None })
             .collect();
 
-        let visible = self.succ.iter().map(|&n| n == 0).collect();
+        let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();
+        let visible = hexane::Column::from_values(visible);
 
-        let top = self.top.iter().collect();
+        let top: Vec<bool> = self.top.to_vec();
+        let top = hexane::PrefixColumn::from_values(top);
 
-        let mut inc = ColumnData::new();
-        inc.splice(0, 0, self.incs);
+        let inc = hexane::Column::from_values(self.incs);
 
         let mut mark = MarkIndexColumn::new();
-        mark.splice(0, 0, self.marks);
+        mark.extend(0, self.marks);
 
         let obj_info = self.obj_info;
 
-        Indexes {
-            text,
-            top,
-            visible,
-            inc,
-            mark,
-            obj_info,
-        }
+        (
+            Indexes {
+                text,
+                top,
+                visible,
+                inc,
+                mark,
+                obj_info,
+            },
+            self.mark_order,
+        )
     }
 }
 

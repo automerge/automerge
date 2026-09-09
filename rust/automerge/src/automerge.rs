@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+use crate::author::{Author, Authors};
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -21,6 +22,7 @@ use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
+use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
@@ -30,13 +32,16 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
+use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 
 pub(crate) mod current_state;
 
 // FIXME
 //#[cfg(test)]
 //mod tests;
+
+#[cfg(test)]
+mod rollback_tests;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
@@ -89,6 +94,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
+    author: Option<Author<'static>>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -156,6 +162,13 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    pub fn author(self, author: Author<'static>) -> Self {
+        Self {
+            author: Some(author),
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -166,6 +179,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
+            author: None,
         }
     }
 }
@@ -198,18 +212,54 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// This type implements [`crate::sync::SyncDoc`]
 ///
+/// ## Authors and Actors
+///
+/// It's often useful to be able to know who made some change. For this purpose Automerge has the
+/// concept of an "author ID". An author ID is an opaque byte array which can be associated with a
+/// change. This author ID will become part of the document history so you can later examine the
+/// changes in a document and see which author made the change.
+///
+/// Author IDs are set on document construction. If you don't set an author then changes produced
+/// by the document will have no author ([`Change::author`] will return `None`).
+///
+/// ### Example
+///
+/// ```rust
+/// # use automerge::{Author, Automerge, AutomergeError, ROOT, transaction::Transactable};
+/// let author = Author::from(vec![1,2,3]);
+/// let mut doc = Automerge::new().with_author(Some(author.clone()));
+/// doc.transact(|tx| {
+///     tx.put(ROOT, "foo", "bar")?;
+///     Ok::<_, AutomergeError>(())
+/// }).unwrap();
+/// let change = doc.get_last_local_change().unwrap();
+/// assert_eq!(change.author().unwrap(), author);
+/// ```
+///
+/// ### Relationship to Actor IDs
+///
+/// Every automerge commit has an "actor ID", which represents a sequential execution. Actor IDs
+/// should be considered a low level implementation detail and as much as possible should be left
+/// to automerge to manage.
+///
+/// Prior to the introduction of author IDs, actor IDs were often used in applications to determine
+/// authorship. New code should migrate to using author IDs. If you do need to map from an actor ID
+/// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
+    authors: Authors,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+    /// The current author.
+    author: Option<Author<'static>>,
 }
 
 impl Automerge {
@@ -218,10 +268,29 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
+            authors: Authors::with_actors(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
+    }
+
+    /// Return a copy of this document with its data anonymized using a fresh random seed.
+    ///
+    // Anonymization replaces actor IDs, map keys, mark names, scalar values, change metadata, and
+    // extra bytes. It retains the change graph, operation and object types, sequence positions,
+    // scalar string and byte-value lengths, and the UTF-8/UTF-16 width of each character. The
+    // intention is to make a document that has very similar performance characteristics to the
+    // original. This makes it useful when you want to send a document which is causing performance
+    // problems to someone to diagnose.
+    //
+    // That said, the data scrubbing here is best-effort. The anonymized document still reveals
+    // a bunch of information about editing patterns. A determined adversary could probably still
+    // learn a great deal from such a document. The intended use is really for sending documents
+    // to mostly trusted parties who are helping with bug fixing (e.g. library maintainers).
+    pub fn anonymize(&self) -> Result<Self, crate::AnonymizeError> {
+        crate::anonymize::anonymize(self)
     }
 
     /// Overwrite the keys of the root object with the values from `value`
@@ -239,20 +308,26 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
+            authors: Authors::with_actors(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
-    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph) -> Self {
+    // TODO(finto): document that there are various invariants on the
+    // relationships between OpSet, ChangeGraph, and Authors.
+    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph, authors: Authors) -> Self {
         let deps = change_graph.heads().collect();
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
             change_graph,
+            authors,
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         };
         doc.remove_unused_actors(false);
         doc
@@ -297,6 +372,50 @@ impl Automerge {
         self
     }
 
+    /// Set the actor id for this document.
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
+        self.set_author(author);
+        self
+    }
+
+    /// Set the author for this document.
+    ///
+    /// The [`Author`] is only changed, if `author` differs from
+    /// [`Automerge::get_author`]. If the author does change then a new
+    /// [`ActorId`] is generated for that author. Notably, this could be a
+    /// different [`ActorId`] compared to previous edits for the same author.
+    ///
+    /// If you are using authors *never* manually manage the [`ActorId`].
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
+        if author.as_ref() != self.get_author() {
+            self.author = author;
+            // TODO: re-use old actors
+            self.actor = Actor::Unused(ActorId::random());
+        }
+        self
+    }
+
+    /// Get the current author of this document.
+    pub fn get_author(&self) -> Option<&Author<'static>> {
+        self.author.as_ref()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
+        self.authors
+            .get_actors_for_author(author)
+            .filter_map(|idx| self.ops.actors.get(idx).cloned())
+            .collect()
+    }
+
+    pub fn get_authors(&self) -> &[Author<'static>] {
+        self.authors.get_authors()
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
+        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        self.authors.get_author_for_actor(actor_index)
+    }
+
     /// Get the current actor id of this document.
     pub fn get_actor(&self) -> &ActorId {
         match &self.actor {
@@ -309,6 +428,7 @@ impl Automerge {
         self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
+        self.authors.remove_actor(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -437,18 +557,28 @@ impl Automerge {
             }
         }
 
+        // A local change claims this actor sequence. Any queued change at the
+        // same or a later sequence belongs to an incompatible actor branch;
+        // retaining it would allow save() to encode duplicate sequence numbers.
+        let actor = self.ops.actors[actor_index].clone();
+        self.queue.remove_actor_branch_from(&actor, seq);
+
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
-        let checkpoint = self.ops.save_checkpoint();
-
+        let author = if seq == 1 { self.author.clone() } else { None };
         TransactionArgs {
             actor_index,
             seq,
             start_op,
             deps,
-            checkpoint,
             scope,
+            author,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
+        self.ops.save_checkpoint()
     }
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
@@ -579,22 +709,25 @@ impl Automerge {
     ///
     /// This will create a new actor ID for the forked document
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
-        let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
-        let mut heads = heads.to_vec();
+        let mut seen = HashSet::new();
+        let mut heads = heads
+            .iter()
+            .filter(|head| seen.insert(**head))
+            .copied()
+            .collect::<Vec<_>>();
         let mut hashes = vec![];
         while let Some(hash) = heads.pop() {
             if !self.change_graph.has_change(&hash) {
                 return Err(AutomergeError::InvalidHash(hash));
             }
             for dep in self.change_graph.deps_for_hash(&hash) {
-                if !seen.contains(&dep) {
+                if seen.insert(dep) {
                     heads.push(dep);
                 }
             }
             hashes.push(hash);
-            seen.insert(hash);
         }
-        let mut f = Self::new();
+        let mut f = Self::new_with_encoding(self.text_encoding());
         f.set_actor(ActorId::random());
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
@@ -691,8 +824,6 @@ impl Automerge {
                     log!(" s={:?}|{:?} ", s.id(), s.col_type());
                     log!(" {:?} ", d1);
                     log!(" {:?} ", d2);
-                    OpSet::decode(s, d1);
-                    OpSet::decode(s, d2);
                 }
             }
         }
@@ -753,9 +884,33 @@ impl Automerge {
         data: &[u8],
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
+        Self::load_with_options_and_mark_validation(
+            data,
+            options,
+            load::MarkOrderValidation::Validate,
+        )
+    }
+
+    /// Best-effort rescue for documents which fail strict loading.
+    ///
+    /// This returns only the current hydrated value and does not preserve the original change graph.
+    pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
+        Ok(Self::load_with_options_and_mark_validation(
+            data,
+            Default::default(),
+            load::MarkOrderValidation::AllowInvalid,
+        )?
+        .hydrate(None))
+    }
+
+    fn load_with_options_and_mark_validation(
+        data: &[u8],
+        options: LoadOptions<'_>,
+        mark_order: load::MarkOrderValidation,
+    ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new());
+            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -770,8 +925,14 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                d.reconstruct(options.verification_mode, options.text_encoding)
-                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?
+                match d.reconstruct(options.verification_mode, options.text_encoding) {
+                    Ok(doc) => doc,
+                    Err(ReconstructError::InvalidMarkOrderDoc {
+                        doc,
+                        error_message: _,
+                    }) if mark_order.allows_invalid() => *doc,
+                    Err(e) => return Err(load::Error::InflateDocument(Box::new(e)).into()),
+                }
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -779,7 +940,7 @@ impl Automerge {
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::Bundle(bundle) => {
                 tracing::trace!("first chunk is change chunk");
@@ -789,7 +950,7 @@ impl Automerge {
                     .to_changes()
                     .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
                 changes.extend(bundle_changes);
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
@@ -800,11 +961,16 @@ impl Automerge {
                     )
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
         };
         tracing::trace!("loading change chunks");
-        match load::load_changes(remaining.reset(), options.text_encoding, &am.change_graph) {
+        match load::load_changes(
+            remaining.reset(),
+            options.text_encoding,
+            &am.change_graph,
+            mark_order,
+        ) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(changes.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
@@ -830,7 +996,7 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(am)
+        Ok(am.with_author(options.author))
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -873,6 +1039,7 @@ impl Automerge {
             let mut doc = Self::load_with_options(
                 data,
                 LoadOptions::new()
+                    .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check),
             )?;
@@ -887,6 +1054,7 @@ impl Automerge {
             storage::parse::Input::new(data),
             self.text_encoding(),
             &self.change_graph,
+            load::MarkOrderValidation::Validate,
         ) {
             load::LoadedChanges::Complete(c) => c,
             load::LoadedChanges::Partial { error, loaded, .. } => {
@@ -1060,13 +1228,22 @@ impl Automerge {
     }
 
     pub(crate) fn clock_range(&self, before: &[ChangeHash], after: &[ChangeHash]) -> ClockRange {
-        let before = self.clock_at(before);
-        let after = self.clock_at(after);
+        let before = self.change_graph.clock_at(before);
+        let after = self.change_graph.clock_at(after);
         ClockRange::Diff(before, after)
     }
 
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
-        self.change_graph.clock_for_heads(heads)
+    /// Clock for reading the document as at `heads`.
+    ///
+    /// Returns `None` — an unscoped read of the present document — when
+    /// `heads` is exactly the current heads, so `*_at(doc.get_heads())`
+    /// takes the same indexed fast paths as the un-suffixed methods.
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Option<Clock> {
+        if self.change_graph.heads_are_current(heads) {
+            None
+        } else {
+            Some(self.change_graph.clock_at(heads))
+        }
     }
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
@@ -1081,7 +1258,7 @@ impl Automerge {
 
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.clock_at(heads);
+        let mut clock = self.change_graph.clock_at(heads);
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
@@ -1090,7 +1267,8 @@ impl Automerge {
                 break;
             }
             actor_index = self.get_isolated_actor_index(i);
-            clock = self.clock_at(heads); // need to recompute the clock b/c the actor indexes may have changed
+            // need to recompute the clock b/c the actor indexes may have changed
+            clock = self.change_graph.clock_at(heads);
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
@@ -1116,7 +1294,7 @@ impl Automerge {
             .expect("Change's actor not already in the document");
 
         self.change_graph
-            .add_change(change, actor_index)
+            .add_change(change, actor_index, &mut self.authors)
             .expect("Change's deps should already be in the document");
     }
 
@@ -1124,8 +1302,10 @@ impl Automerge {
         self.ops.insert_actor(index, actor);
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
+        self.authors.insert_actor(index);
         index
     }
+
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
         match self.ops.actors.binary_search(actor) {
             Ok(idx) => idx,
@@ -1133,7 +1313,7 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+    fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => idx,
             Err(idx) => self.insert_actor(idx, actor),
@@ -1276,6 +1456,52 @@ impl Automerge {
         Ok(patch_log.make_patches(self))
     }
 
+    /// EXPERIMENTAL: Return the fragments covering the document history at
+    /// the given levels, ordered oldest to newest.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        // these produce fragments newest to oldest
+        let mut fragments: Vec<_> = self
+            .change_graph
+            .fragments(&self.get_heads(), levels)
+            .collect();
+        // but we want to return them oldest to newest
+        fragments.reverse();
+        fragments
+    }
+
+    /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.change_graph.get_fragment(head)
+    }
+
+    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
+    /// (level-0 fragments with one member) or as a bundle.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        fragments
+            .into_iter()
+            .filter_map(|f| {
+                if f.head.fragment_level() == 0 && f.members.len() == 1 {
+                    // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
+                    Some(self.get_change_by_hash(&f.head)?.bytes().to_vec())
+                } else {
+                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
+                }
+            })
+            .collect()
+    }
+
     /// Get the heads of this document.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
@@ -1288,11 +1514,16 @@ impl Automerge {
     }
 
     pub fn get_changes_meta(&self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
-        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
+        ChangeCollector::exclude_hashes_meta(
+            &self.ops,
+            &self.change_graph,
+            &self.authors,
+            have_deps,
+        )
     }
 
     pub fn get_change_meta_by_hash(&self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
-        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash])
+        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, &self.authors, [*hash])
             .ok()?
             .pop()
     }
@@ -1341,18 +1572,36 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut top_ops = self
-            .ops()
-            .iter_obj(&obj.id)
-            .visible_slow(clock)
-            .top_ops()
-            .marks();
 
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             // Really we should return an error here but we don't in order to stay
             // compatibile with older implementations
             return Ok(Vec::new());
         };
+
+        // present-time text marks come straight from the mark and text
+        // indexes — no op materialization (the text index carries text
+        // widths, so lists still take the walk below)
+        if clock.is_none() && seq_type == SequenceType::Text {
+            let fast = self.ops().calculate_marks_fast(&obj.id);
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                let slow = self.calculate_marks_slow(&obj, None, seq_type);
+                assert_eq!(fast, slow, "indexed marks != walked marks");
+            }
+            return Ok(fast);
+        }
+
+        Ok(self.calculate_marks_slow(&obj, clock, seq_type))
+    }
+
+    fn calculate_marks_slow(
+        &self,
+        obj: &crate::types::ObjMeta,
+        clock: Option<Clock>,
+        seq_type: SequenceType,
+    ) -> Vec<Mark> {
+        let mut top_ops = self.ops().top_ops(&obj.id, clock).marks();
 
         let mut index = 0;
         let mut acc = MarkAccumulator::default();
@@ -1378,11 +1627,11 @@ impl Automerge {
             Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
             _ => (),
         }
-        Ok(acc.into_iter_no_unmark().collect())
+        acc.into_iter_no_unmark().collect()
     }
 
     pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        let clock = heads.map(|heads| self.clock_at(heads));
+        let clock = heads.and_then(|heads| self.clock_at(heads));
         self.hydrate_map(&ObjId::root(), clock.as_ref())
     }
 
@@ -1392,7 +1641,7 @@ impl Automerge {
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let clock = heads.map(|heads| self.clock_at(heads));
+        let clock = heads.and_then(|heads| self.clock_at(heads));
         Ok(match obj.typ {
             ObjType::Map | ObjType::Table => self.hydrate_map(&obj.id, clock.as_ref()),
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
@@ -1684,12 +1933,7 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self
-            .ops
-            .iter_obj(&obj.id)
-            .visible_slow(clock)
-            .top_ops()
-            .marks();
+        let mut iter = self.ops.top_ops(&obj.id, clock).marks();
         iter.nth(index);
         match iter.get_marks() {
             Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),
@@ -1759,6 +2003,39 @@ impl Automerge {
         self.change_graph.has_change(head)
     }
 
+    /// The first hash on each path back from `start` which is neither applied nor queued,
+    /// traversing through the dependencies of queued changes on the way.
+    pub(crate) fn missing_deps_from(
+        &self,
+        start: impl Iterator<Item = ChangeHash>,
+    ) -> Vec<ChangeHash> {
+        let queued_changes = self
+            .queue
+            .iter()
+            .map(|change| (change.hash(), change))
+            .collect::<HashMap<_, _>>();
+
+        let mut missing = HashSet::new();
+        let mut seen = HashSet::new();
+        let mut stack = start.collect::<Vec<_>>();
+
+        while let Some(hash) = stack.pop() {
+            if self.has_change(&hash) || !seen.insert(hash) {
+                continue;
+            }
+
+            if let Some(change) = queued_changes.get(&hash) {
+                stack.extend(change.deps().iter().copied());
+            } else {
+                missing.insert(hash);
+            }
+        }
+
+        let mut missing = missing.into_iter().collect::<Vec<_>>();
+        missing.sort();
+        missing
+    }
+
     pub fn text_encoding(&self) -> TextEncoding {
         self.ops.text_encoding
     }
@@ -1775,7 +2052,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Parents<'_>, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.parents_for(obj.as_ref(), Some(clock))
+        self.parents_for(obj.as_ref(), clock)
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
@@ -1784,12 +2061,12 @@ impl ReadDoc for Automerge {
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
         let clock = self.clock_at(heads);
-        self.keys_for(obj.as_ref(), Some(clock))
+        self.keys_for(obj.as_ref(), clock)
     }
 
     fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
         //let obj = self.exid_to_obj(obj.as_ref()).unwrap();
-        let clock = heads.map(|heads| self.clock_at(heads));
+        let clock = heads.and_then(|heads| self.clock_at(heads));
         self.iter_for(obj.as_ref(), clock)
     }
 
@@ -1808,7 +2085,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> MapRange<'a> {
         let clock = self.clock_at(heads);
-        self.map_range_for(obj.as_ref(), range, Some(clock))
+        self.map_range_for(obj.as_ref(), range, clock)
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
@@ -1822,7 +2099,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> ListRange<'_> {
         let clock = self.clock_at(heads);
-        self.list_range_for(obj.as_ref(), range, Some(clock))
+        self.list_range_for(obj.as_ref(), range, clock)
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
@@ -1831,7 +2108,7 @@ impl ReadDoc for Automerge {
 
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         let clock = self.clock_at(heads);
-        self.values_for(obj.as_ref(), Some(clock))
+        self.values_for(obj.as_ref(), clock)
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
@@ -1840,7 +2117,7 @@ impl ReadDoc for Automerge {
 
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         let clock = self.clock_at(heads);
-        self.length_for(obj.as_ref(), Some(clock))
+        self.length_for(obj.as_ref(), clock)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -1857,7 +2134,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Spans<'_>, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.spans_for(obj.as_ref(), Some(clock))
+        self.spans_for(obj.as_ref(), clock)
     }
 
     fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
@@ -1866,7 +2143,7 @@ impl ReadDoc for Automerge {
         position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.map(|heads| self.clock_at(heads));
+        let clock = at.and_then(|heads| self.clock_at(heads));
         self.get_cursor_for(obj.as_ref(), position.into(), clock, MoveCursor::After)
     }
 
@@ -1877,7 +2154,7 @@ impl ReadDoc for Automerge {
         at: Option<&[ChangeHash]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
-        let clock = at.map(|heads| self.clock_at(heads));
+        let clock = at.and_then(|heads| self.clock_at(heads));
         self.get_cursor_for(obj.as_ref(), position.into(), clock, move_cursor)
     }
 
@@ -1887,7 +2164,7 @@ impl ReadDoc for Automerge {
         cursor: &Cursor,
         at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError> {
-        let clock = at.map(|heads| self.clock_at(heads));
+        let clock = at.and_then(|heads| self.clock_at(heads));
         self.get_cursor_position_for(obj.as_ref(), cursor, clock)
     }
 
@@ -1897,7 +2174,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.text_for(obj.as_ref(), Some(clock))
+        self.text_for(obj.as_ref(), clock)
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
@@ -1910,7 +2187,7 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark>, AutomergeError> {
         let clock = self.clock_at(heads);
-        self.marks_for(obj.as_ref(), Some(clock))
+        self.marks_for(obj.as_ref(), clock)
     }
 
     fn hydrate<O: AsRef<ExId>>(
@@ -1919,7 +2196,7 @@ impl ReadDoc for Automerge {
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = heads.map(|h| self.clock_at(h));
+        let clock = heads.and_then(|h| self.clock_at(h));
         Ok(match obj.typ {
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
             ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
@@ -1933,7 +2210,7 @@ impl ReadDoc for Automerge {
         index: usize,
         heads: Option<&[ChangeHash]>,
     ) -> Result<MarkSet, AutomergeError> {
-        let clock = heads.map(|h| self.clock_at(h));
+        let clock = heads.and_then(|h| self.clock_at(h));
         self.get_marks_for(obj.as_ref(), index, clock)
     }
 
@@ -1951,7 +2228,7 @@ impl ReadDoc for Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = Some(self.clock_at(heads));
+        let clock = self.clock_at(heads);
         self.get_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -1969,7 +2246,7 @@ impl ReadDoc for Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let clock = Some(self.clock_at(heads));
+        let clock = self.clock_at(heads);
         self.get_all_for(obj.as_ref(), prop.into(), clock)
     }
 
@@ -1980,29 +2257,9 @@ impl ReadDoc for Automerge {
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    #[inline(never)]
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let mut missing = HashSet::new();
-
-        for head in self.queue.iter().flat_map(|change| change.deps()) {
-            if !self.has_change(head) {
-                missing.insert(head);
-            }
-        }
-
-        for head in heads {
-            if !self.has_change(head) {
-                missing.insert(head);
-            }
-        }
-
-        let mut missing = missing
-            .into_iter()
-            .filter(|hash| !self.queue.has_hash(hash))
-            .copied()
-            .collect::<Vec<_>>();
-        missing.sort();
-        missing
+        let queued = self.queue.iter().map(|change| change.hash());
+        self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {

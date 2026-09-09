@@ -4,7 +4,7 @@ use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
-use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
+use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
 use crate::{ChangeHash, Patch};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
@@ -41,8 +41,9 @@ use super::PatchBuilder;
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    pub(crate) events: Vec<(ObjId, Event)>,
+    events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
+    completed_patches: Vec<Patch>,
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
@@ -226,8 +227,9 @@ impl PatchLog {
     pub fn new(active: bool) -> Self {
         PatchLog {
             active,
-            expose: HashSet::default(),
-            events: vec![],
+            events: Vec::new(),
+            expose: HashSet::new(),
+            completed_patches: Vec::new(),
             heads: None,
             path_map: Default::default(),
             path_hint: 0,
@@ -262,13 +264,49 @@ impl PatchLog {
         self.active
     }
 
+    fn push_event(&mut self, obj: ObjId, event: Event) {
+        self.events.push((obj, event));
+    }
+
+    fn events_len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Finalizes the events recorded for the current view before moving the
+    /// document to another point in history.
+    ///
+    /// Patch log events normally move forward through history, which makes it
+    /// safe for `make_current_patches` to sort them by object. This method is
+    /// only needed when the next view may be at heads that happen before the
+    /// current heads, as when isolating a document to an earlier state. In that
+    /// case, sorting events from both sides of the transition together would
+    /// reorder changes that must remain chronological.
+    ///
+    /// Paths must also be resolved while this view is still current: list
+    /// indexes may identify different objects after the transition. Finalizing
+    /// concrete patches here preserves both their ordering and their paths, and
+    /// lets them be safely concatenated with patches from subsequent views.
+    pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
+        if !self.events.is_empty() || !self.expose.is_empty() {
+            self.migrate_actors(&doc.ops.actors)
+                .expect("AutoCommit's patch log always belongs to its document");
+            let previous_heads = self.heads.replace(heads.to_vec());
+            let patches = self.make_current_patches(doc);
+            self.heads = previous_heads;
+            self.completed_patches.extend(patches);
+            self.events.clear();
+            self.expose.clear();
+            self.path_hint = 0;
+            self.path_map.clear();
+        }
+    }
+
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
-        self.events.push((obj, Event::DeleteSeq { index, num }))
+        self.push_event(obj, Event::DeleteSeq { index, num })
     }
 
     pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
-        self.events
-            .push((obj, Event::DeleteMap { key: key.into() }))
+        self.push_event(obj, Event::DeleteMap { key: key.into() })
     }
 
     pub(crate) fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
@@ -290,8 +328,7 @@ impl PatchLog {
     }
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
-        self.events
-            .push((obj, Event::IncrementSeq { index, n, id }))
+        self.push_event(obj, Event::IncrementSeq { index, n, id })
     }
 
     pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
@@ -302,12 +339,11 @@ impl PatchLog {
     }
 
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
-        self.events
-            .push((obj, Event::FlagConflictMap { key: key.into() }))
+        self.push_event(obj, Event::FlagConflictMap { key: key.into() })
     }
 
     pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
-        self.events.push((obj, Event::FlagConflictSeq { index }))
+        self.push_event(obj, Event::FlagConflictSeq { index })
     }
 
     pub(crate) fn put(
@@ -371,6 +407,33 @@ impl PatchLog {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn replace_seq(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        old_value: &Value,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+        seq_type: SequenceType,
+        text_encoding: TextEncoding,
+        marks: Option<Arc<MarkSet>>,
+    ) {
+        if seq_type == SequenceType::List {
+            self.put_seq(obj, index, value, id, conflict, expose);
+            return;
+        }
+
+        self.delete_seq(obj, index, old_value.width(seq_type, text_encoding));
+        if value.is_object() {
+            self.insert_and_maybe_expose(obj, index, value, id, conflict, expose);
+        } else {
+            self.splice(obj, index, value.as_str(), marks);
+        }
+    }
+
     pub(crate) fn splice(
         &mut self,
         obj: ObjId,
@@ -395,7 +458,7 @@ impl PatchLog {
         }
         let mut acc = MarkAccumulator::default();
         acc.add(index, len, marks);
-        self.events.push((obj, Event::Mark { marks: acc }))
+        self.push_event(obj, Event::Mark { marks: acc })
     }
 
     pub(crate) fn insert_and_maybe_expose(
@@ -427,11 +490,11 @@ impl PatchLog {
             id,
             conflict,
         };
-        self.events.push((obj, event))
+        self.push_event(obj, event)
     }
 
     fn get_path_map(&mut self) -> BTreeMap<ObjId, (Prop, ObjId)> {
-        if self.path_hint != self.events.len() {
+        if self.path_hint != self.events_len() {
             self.path_hint = 0;
             self.path_map = BTreeMap::default();
         }
@@ -439,56 +502,46 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
-        let clock = self.heads.as_ref().map(|h| doc.clock_at(h));
-        let path_map = self.get_path_map();
-        let text_encoding = doc.text_encoding();
-        Self::make_patches_inner(&self.events, expose, path_map, doc, clock, text_encoding)
+        let mut patches = self.completed_patches.clone();
+        patches.extend(self.make_current_patches(doc));
+        patches
     }
 
-    fn make_patches_inner(
-        events: &[(ObjId, Event)],
-        mut expose_queue: ExposeQueue,
-        path_map: BTreeMap<ObjId, (Prop, ObjId)>,
-        doc: &Automerge,
-        clock: Option<Clock>,
-        text_encoding: TextEncoding,
-    ) -> Vec<Patch> {
+    fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
+        let clock = self.heads.as_ref().map(|h| doc.change_graph.clock_at(h));
+        let path_map = self.get_path_map();
+        let text_encoding = doc.text_encoding();
+        self.events
+            .sort_by(|(obj_a, _), (obj_b, _)| obj_a.cmp(obj_b));
+        let mut expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
-        for (obj, event) in events {
-            let exid = doc.id_to_exid(obj.0);
-            // ignore events on objects in the expose queue
-            // incremental updates are ignored and a observation
-            // of the final state is used b/c observers did not see
-            // past state changes
-            if expose_queue.should_skip(&exid) {
+        for (obj, event) in &self.events {
+            let key = doc.id_to_exid(obj.0);
+            expose.pump_queue(&key, &mut patch_builder, doc, clock.as_ref());
+            if expose.should_skip(&key) {
                 continue;
             }
-            // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
-
-            patch_builder.log_event(doc, exid, event);
+            patch_builder.log_event(doc, key, event);
         }
-        // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(&mut patch_builder, doc, clock.as_ref());
-
+        expose.flush_queue(&mut patch_builder, doc, clock.as_ref());
         patch_builder.take_patches()
     }
 
     pub(crate) fn truncate(&mut self) {
         self.active = true;
-        self.events.truncate(0);
+        self.events.clear();
+        self.expose.clear();
+        self.completed_patches.clear();
         self.path_hint = 0;
         self.path_map = Default::default();
-        self.expose.clear();
     }
 
     pub(crate) fn branch(&mut self) -> Self {
         Self {
             active: self.active,
+            events: Vec::new(),
             expose: HashSet::new(),
-            events: Default::default(),
+            completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
             heads: None,
@@ -501,9 +554,8 @@ impl PatchLog {
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
-            .map(|(o, e)| (o.with_new_actor(index), e.with_new_actor(index)))
+            .map(|(obj, event)| (obj.with_new_actor(index), event.with_new_actor(index)))
             .collect();
-
         let dirty = std::mem::take(&mut self.expose);
         self.expose = dirty
             .into_iter()
@@ -513,13 +565,13 @@ impl PatchLog {
 
     fn remove_actor(&mut self, index: usize) {
         self.actors.remove(index);
-
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
-            .filter_map(|(o, e)| Some((o.without_actor(index)?, e.without_actor(index)?)))
+            .filter_map(|(obj, event)| {
+                Some((obj.without_actor(index)?, event.without_actor(index)?))
+            })
             .collect();
-
         let dirty = std::mem::take(&mut self.expose);
         self.expose = dirty
             .into_iter()
@@ -606,12 +658,14 @@ impl PatchLog {
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
+        self.completed_patches.extend(other.completed_patches);
         self.events.extend(other.events);
+        self.expose.extend(other.expose);
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
         self.path_map = hint;
-        self.path_hint = self.events.len();
+        self.path_hint = self.events_len();
     }
 }
 

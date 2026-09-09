@@ -418,9 +418,30 @@ impl Display for Prop {
     }
 }
 
-// FIXME - isn't having ord and partial ord here dangerous?
-#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
+/// An [`OpId`] is a pair of [`OpId::counter`] and [`OpId::actor`].
+/// Subsequent operations for the same actor increase the [`OpId::counter`].
+///
+/// Notably, the actor of the [`OpId`] is not represented using [`ActorId`].
+/// Instead it uses a smaller, `u32` representation which relates to the actor's
+/// position in the [`OpSet`].
+///
+/// [`OpSet`]: crate::op_set2::OpSet
+#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(u32, u32);
+
+// ParitalOrd and Ord are implemented by hand here to ensure that total order of
+// `OpId` does not easily break from a generated `derive` implementation.
+impl PartialOrd for OpId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OpId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0).then(self.1.cmp(&other.1))
+    }
+}
 
 impl OpId {
     pub(crate) fn with_new_actor(self, idx: usize) -> Self {
@@ -675,6 +696,10 @@ impl ChangeHash {
 
     pub(crate) fn checksum(&self) -> [u8; 4] {
         [self.0[0], self.0[1], self.0[2], self.0[3]]
+    }
+
+    pub(crate) fn fragment_level(&self) -> usize {
+        self.0.iter().take_while(|&&b| b == 0).count()
     }
 }
 

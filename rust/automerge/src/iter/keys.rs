@@ -1,12 +1,12 @@
 #[cfg(test)]
 use crate::op_set2::Op;
-use crate::op_set2::{OpIter, OpSet, TopOpIter, VisibleOpIter};
+use crate::op_set2::{OpSet, TopOps};
 
 use std::fmt::Debug;
 
 #[derive(Clone, Debug, Default)]
 pub struct Keys<'a> {
-    pub(crate) iter: Option<(&'a OpSet, TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>)>,
+    pub(crate) iter: Option<(&'a OpSet, TopOps<'a>)>,
 }
 
 impl Iterator for Keys<'_> {
@@ -20,10 +20,7 @@ impl Iterator for Keys<'_> {
 }
 
 impl<'a> Keys<'a> {
-    pub(crate) fn new(
-        op_set: &'a OpSet,
-        iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>,
-    ) -> Self {
+    pub(crate) fn new(op_set: &'a OpSet, iter: TopOps<'a>) -> Self {
         Self {
             iter: Some((op_set, iter)),
         }

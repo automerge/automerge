@@ -140,7 +140,6 @@ impl PatchBuilder<'_> {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn get_path(&mut self, obj: &ExId) -> Option<Vec<(ExId, Prop)>> {
         let mut path = vec![];
         let mut obj = obj.to_internal_obj();

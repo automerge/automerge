@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::author::Author;
 use crate::error::AutomergeError;
 use crate::types;
 use crate::types::{ActorId, ChangeHash, ElemId, ObjType};
@@ -10,9 +11,7 @@ use std::cmp::Ordering;
 use std::fmt;
 
 use super::meta::{ValueMeta, ValueType};
-use hexane::{PackError, Packable, RleCursor};
-
-pub(crate) use super::meta::MetaCursor;
+use hexane::PackError;
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
@@ -60,16 +59,25 @@ pub(crate) struct MarkData<'a> {
     pub(crate) value: ScalarValue<'a>,
 }
 
+/// The description of an [`Action`] in an Automerge operation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 pub(crate) enum Action {
+    /// Create a Map value.
     #[default]
     MakeMap,
+    /// Create a List value.
     MakeList,
+    /// Create a Text value.
     MakeText,
+    /// Target a value by setting it to a new value.
     Set,
+    /// Delete a target value.
     Delete,
+    /// Increment a [`ScalarValue::Counter`].
     Increment,
+    /// Retained for backwards compatibility, tables are identical to maps.
     MakeTable,
+    /// Mark formatting spans in rich-text contexts.
     Mark,
 }
 
@@ -151,7 +159,7 @@ impl<'a> OpType<'a> {
     pub(crate) fn from_action_and_value(
         action: Action,
         value: &ScalarValue<'a>,
-        mark_name: &Option<Cow<'a, str>>,
+        mark_name: Option<&'a str>,
         expand: bool,
     ) -> OpType<'a> {
         match action {
@@ -170,7 +178,7 @@ impl<'a> OpType<'a> {
                 Some(name) => Self::MarkBegin(
                     expand,
                     MarkData {
-                        name: name.clone(),
+                        name: Cow::Borrowed(name),
                         value: value.clone(),
                     },
                 ),
@@ -303,6 +311,7 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn from_raw(
         meta: super::meta::ValueMeta,
         raw: &'a [u8],
@@ -705,43 +714,41 @@ impl<'a> ValueRef<'a> {
     }
 }
 
-impl Packable for Action {
-    fn width(item: &Action) -> usize {
-        hexane::ulebsize(u64::from(*item)) as usize
-    }
+impl hexane::ColumnValue for ActorIdx {
+    type Encoding<C: hexane::Codec> = hexane::RleEncoding<ActorIdx, C>;
+}
 
-    fn pack(item: &Action, out: &mut Vec<u8>) {
-        leb128::write::unsigned(out, u64::from(*item)).unwrap();
+impl hexane::RleValue for ActorIdx {
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, ActorIdx), PackError> {
+        let (n, v) = C::try_read_unsigned(data)?;
+        Ok((n, ActorIdx::from(v)))
     }
-
-    fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
-        let (len, result) = u64::unpack(buff)?;
-        let action = Action::try_from(*result)?;
-        Ok((len, Cow::Owned(action)))
+    fn pack<C: hexane::Codec>(value: ActorIdx, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(u64::from(value)));
+        true
     }
 }
 
-impl Packable for ActorIdx {
-    fn width(item: &ActorIdx) -> usize {
-        hexane::ulebsize(u64::from(*item)) as usize
-    }
-
-    fn pack(item: &ActorIdx, out: &mut Vec<u8>) {
-        leb128::write::unsigned(out, u64::from(*item)).unwrap();
-    }
-
-    fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
-        let (len, result) = u64::unpack(buff)?;
-        Ok((len, Cow::Owned(ActorIdx::from(*result))))
-    }
+impl hexane::ColumnValue for Action {
+    type Encoding<C: hexane::Codec> = hexane::RleEncoding<Action, C>;
 }
 
-pub(crate) type ActorCursor = RleCursor<64, ActorIdx>;
-pub(crate) type ActionCursor = RleCursor<64, Action>;
+impl hexane::RleValue for Action {
+    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, Action), PackError> {
+        let (n, v) = C::try_read_unsigned(data)?;
+        let action = Action::try_from(v)?;
+        Ok((n, action))
+    }
+    fn pack<C: hexane::Codec>(value: Action, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(u64::from(value)));
+        true
+    }
+}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct ChangeMetadata<'a> {
     pub actor: Cow<'a, ActorId>,
+    pub author: Option<Author<'a>>,
     pub seq: u64,
     pub start_op: u64,
     pub max_op: u64,
@@ -756,6 +763,7 @@ impl ChangeMetadata<'_> {
     pub fn into_owned(self) -> ChangeMetadata<'static> {
         ChangeMetadata {
             actor: Cow::Owned(self.actor.into_owned()),
+            author: self.author.map(|a| a.into_owned()),
             seq: self.seq,
             start_op: self.start_op,
             max_op: self.max_op,

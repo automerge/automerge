@@ -26,6 +26,7 @@
 use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
+use am::Author;
 use am::CursorPosition;
 use am::OnPartialLoad;
 use am::ScalarValue;
@@ -41,6 +42,7 @@ use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ops::{Bound, RangeBounds};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -58,9 +60,11 @@ use crate::interop::SubValIter;
 #[wasm_bindgen(typescript_custom_section)]
 const TS: &'static str = r#"
 export type Actor = string;
+export type Author = string;
 export type ObjID = string;
 export type Change = Uint8Array;
 export type SyncMessage = Uint8Array;
+export type FragmentLevelRange = number | { start?: number; end?: number } | null | undefined;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
@@ -146,6 +150,7 @@ export type DecodedSyncMessage = {
 
 export type DecodedChange = {
   actor: Actor;
+  author: Author | null;
   seq: number;
   startOp: number;
   time: number;
@@ -157,6 +162,7 @@ export type DecodedChange = {
 
 export type ChangeMetadata = {
   actor: Actor;
+  author: Author | null;
   seq: number;
   startOp: number;
   maxOp: number;
@@ -164,6 +170,25 @@ export type ChangeMetadata = {
   message: string | null;
   deps: Heads;
   hash: Hash;
+  extraBytes: string | null;
+};
+
+export type FragmentMeta = {
+  head: Hash;
+  level: number;
+  boundary: Heads;
+  checkpoints: Heads;
+  members: Heads;
+};
+
+export type Commit = {
+  head: Hash;
+  parents: Heads;
+  bytes: Uint8Array;
+};
+
+export type Fragment = FragmentMeta & {
+  bytes: Uint8Array;
 };
 
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
@@ -324,6 +349,12 @@ interface Automerge {
       meta?: unknown,
     ): { value: Doc; patches: Patch[] };
 
+    getFragmentMetadata(levels?: FragmentLevelRange): FragmentMeta[];
+    getFragmentMeta(head: Hash): FragmentMeta | null;
+    bundleFragmentMetadata(fragments: FragmentMeta[]): Uint8Array[];
+    addCommits(commits: Commit[]): void;
+    addFragments(fragments: Fragment[]): void;
+
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
 
     getMissingDeps(heads?: Heads): Heads;
@@ -448,6 +479,16 @@ impl Automerge {
         };
         self.doc.init_root_from_hydrate(&map)?;
         Ok(())
+    }
+
+    /// Return a copy of this document with its data anonymized while retaining its history and
+    /// structural shape.
+    pub fn anonymize(&mut self) -> Result<Automerge, error::Anonymize> {
+        Ok(Automerge {
+            doc: self.doc.anonymize()?,
+            freeze: self.freeze,
+            external_types: self.external_types.clone(),
+        })
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -1395,6 +1436,78 @@ impl Automerge {
         changes
     }
 
+    #[wasm_bindgen(js_name = getFragmentMetadata, unchecked_return_type = "FragmentMeta[]")]
+    pub fn get_fragment_metadata(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "FragmentLevelRange")] levels: JsValue,
+    ) -> Result<Array, error::Fragments> {
+        let levels = JsFragmentLevelRange::try_from(levels)?;
+        Ok(self
+            .doc
+            .fragments(levels)
+            .iter()
+            .map(fragment_to_js)
+            .collect())
+    }
+
+    #[wasm_bindgen(js_name = getFragmentMeta, unchecked_return_type = "FragmentMeta | null")]
+    pub fn get_fragment_meta(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Hash")] head: JsValue,
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
+        let head = JS(head).try_into()?;
+        Ok(self
+            .doc
+            .get_fragment(head)
+            .map(|f| fragment_to_js(&f))
+            .unwrap_or(JsValue::null()))
+    }
+
+    #[wasm_bindgen(js_name = bundleFragmentMetadata, unchecked_return_type = "Uint8Array[]")]
+    pub fn bundle_fragment_metadata(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "FragmentMeta[]")] fragments: JsValue,
+    ) -> Result<Array, error::BadJSFragments> {
+        let fragments = Vec::<am::Fragment>::try_from(JS(fragments))?;
+        Ok(self
+            .doc
+            .bundle_fragments(fragments)
+            .iter()
+            .map(|bytes| Uint8Array::from(bytes.as_slice()))
+            .collect())
+    }
+
+    #[wasm_bindgen(js_name = addCommits)]
+    pub fn add_commits(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
+    ) -> Result<(), error::AddCommits> {
+        let commits = Vec::<Commit>::try_from(JS(commits))?;
+        let changes = commits
+            .into_iter()
+            .map(|commit| commit.into_change())
+            .collect::<Result<Vec<_>, _>>()?;
+        self.doc.apply_changes(changes)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = addFragments)]
+    pub fn add_fragments(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
+    ) -> Result<(), error::AddFragments> {
+        let fragments = Vec::<FragmentInput>::try_from(JS(fragments))?;
+        let mut bytes = Vec::new();
+        for fragment in fragments {
+            // Touch the metadata so parsing validates the whole input shape even
+            // though the bundle bytes remain the authoritative representation.
+            let _metadata = fragment.fragment;
+            bytes.extend(fragment.bytes);
+        }
+        self.doc.load_incremental(&bytes)?;
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = getHeads, unchecked_return_type="Heads")]
     pub fn get_heads(&mut self) -> Array {
         let heads = self.doc.get_heads();
@@ -1404,6 +1517,47 @@ impl Automerge {
     #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
     pub fn get_actor_id(&self) -> String {
         self.doc.get_actor().to_string()
+    }
+
+    #[wasm_bindgen(js_name = getAuthor, unchecked_return_type="Author | null")]
+    pub fn get_author(&self) -> Option<String> {
+        Some(self.doc.get_author()?.to_string())
+    }
+
+    #[wasm_bindgen(js_name = getAuthors, unchecked_return_type="Author[]")]
+    pub fn get_authors(&self) -> Array {
+        self.doc
+            .get_authors()
+            .iter()
+            .map(|a| JsValue::from_str(&a.to_string()))
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = getAuthorForActor, unchecked_return_type="Author | null")]
+    pub fn get_author_for_actor(&self, actor: String) -> Result<Option<String>, JsValue> {
+        let actor = am::ActorId::from(hex::decode(actor).map_err(error::BadActorId::from)?);
+        Ok(self.doc.get_author_for_actor(&actor).map(|a| a.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = getActorsForAuthor, unchecked_return_type="Actor[]")]
+    pub fn get_actors_for_author(&self, author: String) -> Result<Array, JsValue> {
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        Ok(self
+            .doc
+            .get_actors_for_author(&author)
+            .iter()
+            .map(|a| JsValue::from(a.to_string()))
+            .collect())
+    }
+
+    #[wasm_bindgen(js_name = setAuthor)]
+    pub fn set_author(&mut self, author: Option<String>) -> Result<(), JsValue> {
+        let author = author
+            .map(Author::try_from)
+            .transpose()
+            .map_err(error::BadAuthor::from)?;
+        self.doc.set_author(author);
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
@@ -1708,11 +1862,31 @@ impl Automerge {
     }
 }
 
+// Runs once at module instantiation (wasm-bindgen's `start` function). We
+// install a console-logging hook for hard aborts (instance termination) so
+// that even when wasm traps and the module is permanently torn down, the
+// failure is visible in the console rather than just surfacing as the
+// generic "Module terminated" error on every subsequent export call.
+//
+// Recoverable Rust panics surface as `PanicError` exceptions at the JS
+// boundary thanks to the `panic=unwind` build, so we don't install
+// `console_error_panic_hook`: the panic info already reaches the caller as
+// a thrown exception and there's no need to additionally log it.
+#[wasm_bindgen(start)]
+fn on_start() {
+    fn log_abort() {
+        web_sys::console::error_1(
+            &"automerge-wasm: WASM instance aborted; subsequent calls will throw \"Module terminated\""
+                .into(),
+        );
+    }
+    let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
-    console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     Automerge::new(actor)
 }
@@ -1886,6 +2060,223 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 
 struct UpdateSpansArgs(Vec<am::iter::Span>);
 
+struct JsFragmentLevelRange {
+    start: usize,
+    end: Option<usize>,
+}
+
+impl RangeBounds<usize> for JsFragmentLevelRange {
+    fn start_bound(&self) -> Bound<&usize> {
+        Bound::Included(&self.start)
+    }
+
+    fn end_bound(&self) -> Bound<&usize> {
+        match &self.end {
+            Some(end) => Bound::Excluded(end),
+            None => Bound::Unbounded,
+        }
+    }
+}
+
+impl TryFrom<JsValue> for JsFragmentLevelRange {
+    type Error = error::BadFragmentLevelRange;
+
+    fn try_from(value: JsValue) -> Result<Self, Self::Error> {
+        if value.is_undefined() || value.is_null() {
+            return Ok(Self {
+                start: 0,
+                end: None,
+            });
+        }
+        if let Some(level) = value.as_f64() {
+            let level = js_usize(level).ok_or(error::BadFragmentLevelRange::InvalidNumber)?;
+            return Ok(Self {
+                start: level,
+                end: Some(level + 1),
+            });
+        }
+
+        let start = match js_get(&value, "start")?.0.as_f64() {
+            Some(start) => js_usize(start).ok_or(error::BadFragmentLevelRange::InvalidStart)?,
+            None => 0,
+        };
+        let end = match js_get(&value, "end")?.0.as_f64() {
+            Some(end) => Some(js_usize(end).ok_or(error::BadFragmentLevelRange::InvalidEnd)?),
+            None => None,
+        };
+        Ok(Self { start, end })
+    }
+}
+
+fn js_usize(n: f64) -> Option<usize> {
+    if n.is_finite() && n >= 0.0 && n.fract() == 0.0 {
+        Some(n as usize)
+    } else {
+        None
+    }
+}
+
+fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
+    let obj: JsValue = Object::new().into();
+    js_set(&obj, "head", fragment.head.to_string()).unwrap();
+    js_set(&obj, "level", fragment.level as f64).unwrap();
+    js_set(&obj, "boundary", AR::from(fragment.boundary.as_slice())).unwrap();
+    js_set(
+        &obj,
+        "checkpoints",
+        AR::from(fragment.checkpoints.as_slice()),
+    )
+    .unwrap();
+    js_set(&obj, "members", AR::from(fragment.members.as_slice())).unwrap();
+    obj
+}
+
+struct Commit {
+    head: am::ChangeHash,
+    parents: Vec<am::ChangeHash>,
+    bytes: Vec<u8>,
+}
+
+impl Commit {
+    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
+        let change = Change::try_from(self.bytes.as_slice())?;
+        // Validate that JS metadata lines up with the supplied bytes. This keeps
+        // Automerge's API shaped like Subduction's addCommits input while still
+        // treating the encoded change as authoritative.
+        if change.hash() != self.head {
+            return Err(error::BadCommitBytes::HeadMismatch {
+                expected: self.head.to_string(),
+                actual: change.hash().to_string(),
+            });
+        }
+        if change.deps() != self.parents.as_slice() {
+            return Err(error::BadCommitBytes::ParentsMismatch);
+        }
+        Ok(change)
+    }
+}
+
+impl TryFrom<JS> for Commit {
+    type Error = error::BadJSCommit;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let head = js_get(&value.0, "head")?
+            .try_into()
+            .map_err(error::BadJSCommit::BadHead)?;
+        let parents = js_get(&value.0, "parents")?
+            .try_into()
+            .map_err(error::BadJSCommit::BadParents)?;
+        let bytes = js_get(&value.0, "bytes")?
+            .try_into()
+            .map_err(error::BadJSCommit::BadBytes)?;
+        Ok(Self {
+            head,
+            parents,
+            bytes,
+        })
+    }
+}
+
+impl TryFrom<JS> for Vec<Commit> {
+    type Error = error::BadJSCommits;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Array>()
+            .map_err(|_| error::BadJSCommits::NotArray)?;
+        value
+            .iter()
+            .enumerate()
+            .map(|(i, v)| Commit::try_from(JS(v)).map_err(|e| error::BadJSCommits::BadElem(i, e)))
+            .collect()
+    }
+}
+
+struct FragmentInput {
+    fragment: am::Fragment,
+    bytes: Vec<u8>,
+}
+
+impl TryFrom<JS> for FragmentInput {
+    type Error = error::BadJSFragmentInput;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let fragment = am::Fragment::try_from(JS(value.0.clone()))?;
+        let bytes = js_get(&value.0, "bytes")?
+            .try_into()
+            .map_err(error::BadJSFragmentInput::BadBytes)?;
+        Ok(Self { fragment, bytes })
+    }
+}
+
+impl TryFrom<JS> for Vec<FragmentInput> {
+    type Error = error::BadJSFragmentInputs;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Array>()
+            .map_err(|_| error::BadJSFragmentInputs::NotArray)?;
+        value
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                FragmentInput::try_from(JS(v))
+                    .map_err(|e| error::BadJSFragmentInputs::BadElem(i, e))
+            })
+            .collect()
+    }
+}
+
+impl TryFrom<JS> for am::Fragment {
+    type Error = error::BadJSFragmentInput;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let head: am::ChangeHash = js_get(&value.0, "head")?
+            .try_into()
+            .map_err(error::BadJSFragmentInput::BadHead)?;
+        let level = match js_get(&value.0, "level")?.0.as_f64() {
+            Some(level) => js_usize(level).ok_or(error::BadJSFragmentInput::BadLevel)?,
+            None => return Err(error::BadJSFragmentInput::BadLevel),
+        };
+        let boundary = js_get(&value.0, "boundary")?
+            .try_into()
+            .map_err(error::BadJSFragmentInput::BadBoundary)?;
+        let checkpoints = js_get(&value.0, "checkpoints")?
+            .try_into()
+            .map_err(error::BadJSFragmentInput::BadCheckpoints)?;
+        let members = js_get(&value.0, "members")?
+            .try_into()
+            .map_err(error::BadJSFragmentInput::BadMembers)?;
+        Ok(Self {
+            head,
+            level,
+            boundary,
+            checkpoints,
+            members,
+        })
+    }
+}
+
+impl TryFrom<JS> for Vec<am::Fragment> {
+    type Error = error::BadJSFragments;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Array>()
+            .map_err(|_| error::BadJSFragments::NotArray)?;
+        value
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                am::Fragment::try_from(JS(v)).map_err(|e| error::BadJSFragments::BadElem(i, e))
+            })
+            .collect()
+    }
+}
+
 #[wasm_bindgen(js_name = "readBundle")]
 pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     let bundle_bytes = bundle.to_vec();
@@ -1918,14 +2309,24 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
 }
 
 pub mod error {
-    use automerge::{AutomergeError, ObjType};
+    use automerge::{AnonymizeError, AutomergeError, ObjType};
     use js_sys::RangeError;
     use wasm_bindgen::JsValue;
 
     use crate::interop::{
         self,
-        error::{BadChangeHashes, BadJSChanges},
+        error::{BadChangeHash, BadChangeHashes, BadJSChanges, BadUint8Array, GetProp},
     };
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct Anonymize(#[from] AnonymizeError);
+
+    impl From<Anonymize> for JsValue {
+        fn from(error: Anonymize) -> Self {
+            RangeError::new(&error.to_string()).into()
+        }
+    }
 
     #[derive(Debug, thiserror::Error)]
     #[error("could not parse Actor ID as a hex string: {0}")]
@@ -1933,6 +2334,16 @@ pub mod error {
 
     impl From<BadActorId> for JsValue {
         fn from(s: BadActorId) -> Self {
+            RangeError::new(&s.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("could not parse Actor ID as a hex string: {0}")]
+    pub struct BadAuthor(#[from] automerge::error::InvalidAuthor);
+
+    impl From<BadAuthor> for JsValue {
+        fn from(s: BadAuthor) -> Self {
             RangeError::new(&s.to_string()).into()
         }
     }
@@ -1947,6 +2358,136 @@ pub mod error {
 
     impl From<ApplyChangesError> for JsValue {
         fn from(e: ApplyChangesError) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadFragmentLevelRange {
+        #[error("bad fragment level range property: {0}")]
+        Prop(#[from] GetProp),
+        #[error("fragment level must be a non-negative integer")]
+        InvalidNumber,
+        #[error("fragment level range start must be a non-negative integer")]
+        InvalidStart,
+        #[error("fragment level range end must be a non-negative integer")]
+        InvalidEnd,
+    }
+
+    impl From<BadFragmentLevelRange> for JsValue {
+        fn from(e: BadFragmentLevelRange) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Fragments {
+        #[error(transparent)]
+        BadLevelRange(#[from] BadFragmentLevelRange),
+    }
+
+    impl From<Fragments> for JsValue {
+        fn from(e: Fragments) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSCommit {
+        #[error("bad commit input property: {0}")]
+        Prop(#[from] GetProp),
+        #[error("bad commit head: {0}")]
+        BadHead(BadChangeHash),
+        #[error("bad commit parents: {0}")]
+        BadParents(BadChangeHashes),
+        #[error("bad commit bytes: {0}")]
+        BadBytes(BadUint8Array),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSCommits {
+        #[error("commit inputs must be an array")]
+        NotArray,
+        #[error("bad commit input at index {0}: {1}")]
+        BadElem(usize, BadJSCommit),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadCommitBytes {
+        #[error("bad commit bytes: {0}")]
+        Load(#[from] automerge::LoadChangeError),
+        #[error("commit input head mismatch: expected {expected}, actual {actual}")]
+        HeadMismatch { expected: String, actual: String },
+        #[error("commit input parents do not match encoded change dependencies")]
+        ParentsMismatch,
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum AddCommits {
+        #[error(transparent)]
+        BadInputs(#[from] BadJSCommits),
+        #[error(transparent)]
+        BadBytes(#[from] BadCommitBytes),
+        #[error("error applying commits: {0}")]
+        Apply(#[from] AutomergeError),
+    }
+
+    impl From<AddCommits> for JsValue {
+        fn from(e: AddCommits) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSFragmentInput {
+        #[error("bad fragment input property: {0}")]
+        Prop(#[from] GetProp),
+        #[error("bad fragment head: {0}")]
+        BadHead(BadChangeHash),
+        #[error("bad fragment level")]
+        BadLevel,
+        #[error("bad fragment boundary: {0}")]
+        BadBoundary(BadChangeHashes),
+        #[error("bad fragment checkpoints: {0}")]
+        BadCheckpoints(BadChangeHashes),
+        #[error("bad fragment members: {0}")]
+        BadMembers(BadChangeHashes),
+        #[error("bad fragment bytes: {0}")]
+        BadBytes(BadUint8Array),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSFragmentInputs {
+        #[error("fragment inputs must be an array")]
+        NotArray,
+        #[error("bad fragment input at index {0}: {1}")]
+        BadElem(usize, BadJSFragmentInput),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadJSFragments {
+        #[error("fragments must be an array")]
+        NotArray,
+        #[error("bad fragment at index {0}: {1}")]
+        BadElem(usize, BadJSFragmentInput),
+    }
+
+    impl From<BadJSFragments> for JsValue {
+        fn from(e: BadJSFragments) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum AddFragments {
+        #[error(transparent)]
+        BadInputs(#[from] BadJSFragmentInputs),
+        #[error("error loading fragment bundles: {0}")]
+        Load(#[from] AutomergeError),
+    }
+
+    impl From<AddFragments> for JsValue {
+        fn from(e: AddFragments) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

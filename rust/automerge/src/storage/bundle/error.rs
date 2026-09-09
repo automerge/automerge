@@ -30,6 +30,10 @@ pub(crate) enum ParseError {
     Deflate(#[from] std::io::Error),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("failed to decode ID_CTR_INVERSE column")]
+    InverseDecode,
+    #[error("ID_CTR_INVERSE length does not match op count")]
+    InverseLengthMismatch,
 }
 
 impl<E: Into<ParseError>> From<parse::ParseError<E>> for ParseError {

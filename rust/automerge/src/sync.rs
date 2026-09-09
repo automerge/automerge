@@ -71,10 +71,12 @@ use itertools::Itertools;
 use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+use crate::ReadDoc;
 use crate::{
     patches::PatchLog,
     storage::{parse, ReadChangeOpError},
-    Automerge, AutomergeError, ChangeHash, ReadDoc,
+    Automerge, AutomergeError, ChangeHash,
 };
 
 mod bloom;
@@ -168,7 +170,16 @@ impl SyncDoc for Automerge {
         let our_need = if sync_state.read_only {
             vec![]
         } else {
-            self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
+            // Only request what we need to reach the peer's advertised heads. This is
+            // deliberately not `get_missing_deps`, which reports the missing dependencies of
+            // _every_ queued change: the queue can contain orphans picked up from another peer
+            // (or an interrupted sync) whose dependencies this peer does not have. Advertising
+            // those blocks the sync — this peer can never satisfy the request and, because we
+            // withhold our `have` until everything we need is in the peer's advertised heads,
+            // the peer never sends us the unrelated changes it _does_ have. We still pick the
+            // orphans' dependencies back up if we later sync with a peer whose heads depend on
+            // them.
+            self.missing_deps_from(sync_state.their_heads.iter().flatten().copied())
         };
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
@@ -296,7 +307,6 @@ impl SyncDoc for Automerge {
 }
 
 impl Automerge {
-    #[inline(never)]
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
         let hashes = self.change_graph.get_hashes(&last_sync);
         Have {
@@ -305,14 +315,18 @@ impl Automerge {
         }
     }
 
-    #[inline(never)]
     fn get_hashes_to_send(
         &self,
         have: &[Have],
         need: &[ChangeHash],
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        let need = need
+            .iter()
+            .filter(|hash| self.has_change(hash))
+            .copied()
+            .collect::<Vec<_>>();
         if have.is_empty() {
-            Ok(need.to_vec())
+            Ok(need)
         } else {
             let mut last_sync_hashes = HashSet::new();
             let mut bloom_filters = Vec::with_capacity(have.len());
@@ -355,8 +369,8 @@ impl Automerge {
 
             let mut final_hashes = Vec::with_capacity(hashes_to_send.len() + need.len());
             for hash in need {
-                if !hashes_to_send.contains(hash) {
-                    final_hashes.push(*hash);
+                if !hashes_to_send.contains(&hash) {
+                    final_hashes.push(hash);
                 }
             }
 
@@ -369,7 +383,6 @@ impl Automerge {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn receive_sync_message_inner(
         &mut self,
         sync_state: &mut State,
@@ -1679,10 +1692,10 @@ mod tests {
 
         // doc2 should have doc1's new changes
         assert_eq!(
-            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.as_str(),
             // doc2 has both values as a conflict, but the winning value depends on actor ordering;
             // just check the key exists
-            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.as_str(),
         );
         // Verify doc2 has received "new_from_doc1" somewhere in the conflicts
         let all_values: Vec<_> = doc2

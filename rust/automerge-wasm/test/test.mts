@@ -57,6 +57,20 @@ describe("Automerge", () => {
       doc.commit();
     });
 
+    it("should anonymize a document without modifying the source", () => {
+      const doc = create({ actor: "01020304" });
+      doc.put("_root", "private-key", "secret value");
+      doc.commit("private commit message", 1_700_000_000);
+
+      const anonymized = doc.anonymize();
+
+      assert.deepEqual(doc.get("_root", "private-key"), "secret value");
+      assert.deepEqual(anonymized.get("_root", "private-key"), undefined);
+      assert.equal(anonymized.keys("_root").length, 1);
+      assert.equal(anonymized.getChanges([]).length, doc.getChanges([]).length);
+      assert.doesNotThrow(() => load(anonymized.save()));
+    });
+
     it("getting a nonexistent prop does not throw an error", () => {
       const doc = create();
       const root = "_root";
@@ -2691,6 +2705,28 @@ describe("Automerge", () => {
         assert.deepEqual(changes[i].deps, meta[i].deps);
         assert.deepEqual(changes[i].startOp, meta[i].startOp);
       }
+    });
+  });
+  describe("author", () => {
+    it("author can be assigned", () => {
+      const doc = create();
+      doc.put("/", "key", "val1");
+      doc.commit();
+      const actor1 = doc.getActorId();
+      doc.setAuthor("ffff");
+      const actor2 = doc.getActorId();
+      assert.notEqual(actor1, actor2)
+      doc.put("/", "key", "val2");
+      doc.commit();
+      let change1 = decodeChange(doc.getLastLocalChange() as Uint8Array)
+      assert.equal(change1.author, "ffff");
+      doc.put("/", "key", "val3");
+      doc.commit();
+      let change2 = decodeChange(doc.getLastLocalChange() as Uint8Array)
+      assert.equal(change2.author, undefined);
+      assert.deepEqual(doc.getAuthors(),["ffff"]);
+      assert.equal(doc.getAuthorForActor(actor2),"ffff");
+      assert.deepEqual(doc.getActorsForAuthor("ffff"),[actor2]);
     });
   });
 });

@@ -102,8 +102,16 @@ impl Bundle {
             .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
     }
 
+    /// On-disk form of the bundle, with per-column DEFLATE applied where
+    /// each column is large enough to benefit. Falls back to the
+    /// uncompressed buffer for bundles whose construction predates the
+    /// per-column compression pass (or that were parsed from input with no
+    /// compressed columns).
     pub fn bytes(&self) -> &[u8] {
-        &self.storage.bytes
+        match &self.storage.compressed_bytes {
+            Some(c) => c,
+            None => &self.storage.bytes,
+        }
     }
 
     pub fn deps(&self) -> &[ChangeHash] {

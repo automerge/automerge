@@ -1,3 +1,43 @@
+## 1.0.0-alpha.2 - 7th July 2026
+
+### Breaking
+
+* The 0.2-era cursor API (`ColumnData<C>`, `UIntCursor`, `DeltaCursor`,
+  `BooleanCursor`, `Slab`/`SpanTree`, `Packable`, …) has been **removed**
+* The v1 API is promoted to the crate root: `hexane::v1::Column` is now
+  `hexane::Column`, and the `v1` module is gone
+* `PrefixColumn`/`PrefixIter` yield `PrefixedValue` (`.value`, `.prefix()`,
+  `.total()`) instead of `(prefix, value)` tuples; `PrefixSeek` is now
+  `{ pos, delta, pv }`
+* Removed `PrefixColumn::{seek, get_delta, get_value, value_iter}`
+  (use `delta`, `values().get()`, `values().iter()`);
+  `prefix_delta` is renamed `sum_range`
+* `DeltaColumn::save_to_unless` takes `T` and compares realized values
+* `Column::with_max_segments` (and `load`) reject budgets below 2
+
+### Added
+
+* `remove_n(index, n)` on all column types
+* `DeltaValue::try_to_i64`; out-of-domain `find_by_value` targets return
+  an empty iterator instead of panicking
+* Golden wire-format tests freezing the (v0-compatible) byte format
+* B-tree deletion underflow handling (empty-node removal, root collapse,
+  leaf sibling merging) with a structural invariant checker in the fuzzers
+
+### Fixed
+
+* Silent B-tree corruption on deletes exactly covering an internal node's
+  span, and O(N) full rebuilds on whole-leaf deletes (quadratic under
+  sequential deletion)
+* `BoolEncoder::into_slab` tail metadata for runs longer than 127
+* Delta columns: load-time validation of realized values for
+  `u64`/`usize`/`i32` (including running-sum overflow from hostile input),
+  and a documented 2^63 value-domain contract
+* Major performance work: memcpy-based slab splice, O(log S) `slab_start`,
+  index descents without root-aggregate merges, and direct
+  encoder-to-column slab handoff (`remap` 15-20% faster, seeks ~2x)
+
+
 ## 0.2.1 - 25th March 2026
 
 ### Added

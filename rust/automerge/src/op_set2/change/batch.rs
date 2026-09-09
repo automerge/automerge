@@ -1,6 +1,7 @@
+use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
-use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef};
+use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
@@ -13,7 +14,7 @@ use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
@@ -22,8 +23,6 @@ type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
-    actor_seq: HashMap<ActorId, HashSet<u64>>,
-    hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
 }
@@ -67,8 +66,9 @@ impl<'a> Untangler<'a> {
 
     fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
         let mut deleted = false;
-        if let Some(v) = self.pred.remove(&doc_op.id) {
-            for (id, inc) in v {
+        if let Some(mut successors) = self.pred.remove(&doc_op.id) {
+            normalize_increment_successors(doc_op.is_counter(), &mut successors);
+            for (id, inc) in successors {
                 deleted |= inc.is_none();
                 succ.push(doc_op.add_succ(id, inc));
             }
@@ -266,8 +266,10 @@ impl<'a> Untangler<'a> {
         let mut last_e = None;
         let value = ValueState::new(obj, encoding, text_encoding);
         for (i, op) in change_ops.iter_mut().enumerate() {
-            if let Some(v) = pred.remove(&op.id()) {
-                op.succ = v;
+            if let Some(mut successors) = pred.remove(&op.id()) {
+                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
+                normalize_increment_successors(is_counter, &mut successors);
+                op.succ = successors;
             }
             if let KeyRef::Seq(e) = op.key() {
                 if op.insert() {
@@ -423,8 +425,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 
     fn change_op(&mut self, ops: &mut [ChangeOp], pos: usize) {
-        if let Some(v) = self.pred.remove(&ops[pos].id()) {
-            ops[pos].succ = v
+        if let Some(mut successors) = self.pred.remove(&ops[pos].id()) {
+            let is_counter = matches!(ops[pos].bld.value, OpScalarValue::Counter(_));
+            normalize_increment_successors(is_counter, &mut successors);
+            ops[pos].succ = successors
         }
 
         self.advance_doc_op(pos, ops);
@@ -478,11 +482,24 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 }
 
+fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
+    if !is_counter {
+        for (_, increment) in successors {
+            // Increment operations preserve and update counter predecessors,
+            // but act as ordinary overwrites for non-counter predecessors.
+            if increment.is_some() {
+                *increment = None;
+            }
+        }
+    }
+}
+
 fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
     if let Some(d) = doc_op {
         let mut deleted = false;
-        if let Some(v) = pred.remove(&d.id) {
-            for (id, inc) in v {
+        if let Some(mut successors) = pred.remove(&d.id) {
+            normalize_increment_successors(d.is_counter(), &mut successors);
+            for (id, inc) in successors {
                 deleted |= inc.is_none();
                 succ.push(d.add_succ(id, inc));
             }
@@ -511,6 +528,7 @@ struct OpValue {
     deleted: bool,
     conflict: bool,
     expose: bool,
+    replaced: Option<Value>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -529,23 +547,26 @@ impl OpValueOption {
         }
     }
 
-    fn expose(&mut self) {
+    fn expose(&mut self, replaced: Value) {
         if let Self(Some(ov)) = self {
             ov.expose = true;
+            ov.replaced = Some(replaced);
         }
     }
 
     fn set(&mut self, value: Value, id: OpId, deleted: bool) {
         if deleted && self.is_visible() {
-            self.expose();
+            self.expose(value);
         } else {
             let conflict = self.is_visible();
+            let expose = !deleted && self.is_deleted();
             *self = Self(Some(OpValue {
                 value,
                 id,
                 conflict,
                 deleted,
-                expose: false,
+                expose,
+                replaced: None,
             }));
         }
     }
@@ -696,6 +717,63 @@ impl<'a> ValueState<'a> {
                         _ => log.insert(obj, index, c.value, c.id, c.conflict),
                     }
                 }
+                (Some(d), Some(c)) if d.deleted => {
+                    // A text update replaces one Automerge sequence element, but that element can
+                    // render as more than one unit in the configured text encoding. Express the
+                    // update as a deletion and insertion so materialized text removes the full
+                    // width of the old value.
+                    log.replace_seq(
+                        obj,
+                        index,
+                        &d.value,
+                        c.value,
+                        c.id,
+                        c.conflict,
+                        false,
+                        self.seq_type,
+                        self.text_encoding,
+                        self.marks.current().export(),
+                    );
+                }
+                (Some(d), Some(c)) if d.id == c.id => {
+                    // Counter increments do not change the rendered text.
+                }
+                (Some(d), Some(c)) if c.id > d.id => {
+                    let conflict = !d.deleted || c.conflict;
+                    log.replace_seq(
+                        obj,
+                        index,
+                        &d.value,
+                        c.value,
+                        c.id,
+                        conflict,
+                        false,
+                        self.seq_type,
+                        self.text_encoding,
+                        self.marks.current().export(),
+                    );
+                }
+                (Some(d), Some(_)) if !d.conflict => {
+                    log.flag_conflict(obj, &Prop::from(index));
+                }
+                (Some(d), None) if d.expose => {
+                    let replaced = d
+                        .replaced
+                        .clone()
+                        .expect("exposed value must record the value it replaces");
+                    log.replace_seq(
+                        obj,
+                        index,
+                        &replaced,
+                        d.value,
+                        d.id,
+                        d.conflict,
+                        true,
+                        self.seq_type,
+                        self.text_encoding,
+                        self.marks.current().export(),
+                    );
+                }
                 (Some(d), None) if d.deleted => {
                     let w = d.value.width(self.seq_type, self.text_encoding);
                     log.delete_seq(obj, index, w);
@@ -761,30 +839,13 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 }
 
 impl BatchApply {
-    fn push(&mut self, c: Change) {
-        assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
-
-        assert!(!self.hashes.contains(&c.hash()));
-        self.hashes.insert(c.hash());
-
-        self.changes.push(c);
-    }
-
-    fn record_actor_seq(&mut self, c: &Change) {
-        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
-            set.insert(c.seq());
-        } else {
-            self.actor_seq
-                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
+    fn new(changes: Vec<Change>) -> Self {
+        Self {
+            ops: Vec::default(),
+            changes,
+            pred: PredCache::default(),
+            obj_spans: Vec::default(),
         }
-    }
-
-    fn has_actor_seq(&self, c: &Change) -> bool {
-        self.actor_seq
-            .get(c.actor_id())
-            .map(|set| set.contains(&c.seq()))
-            .unwrap_or(false)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -989,103 +1050,59 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        // Pool all incoming changes together with any previously queued orphans.
-        let mut pool: Vec<Change> = self.queue.take();
-        let mut seen: HashSet<ChangeHash> = pool.iter().map(|c| c.hash()).collect();
+        let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
-        for c in &pool {
+        let mut actor_author: HashSet<ActorId> = HashSet::new();
+
+        for change in self.queue.iter() {
             actor_seqs
-                .entry(c.actor_id().clone())
+                .entry(change.actor_id().clone())
                 .or_default()
-                .insert(c.seq());
+                .insert(change.seq());
+            if change.author().is_some() {
+                actor_author.insert(change.actor_id().clone());
+            }
         }
 
-        // Add new changes, deduplicating and checking for duplicate seq numbers.
-        for c in changes {
-            let hash = c.hash();
+        let mut incoming = ChangeBatch::new();
+        for change in changes {
+            let hash = change.hash();
             if self.change_graph.has_change(&hash) || seen.contains(&hash) {
                 continue;
             }
-            if self.has_actor_seq(&c)
-                || actor_seqs
-                    .get(c.actor_id())
-                    .is_some_and(|s| s.contains(&c.seq()))
-            {
-                // Put pool back as queue before returning error
-                for pc in pool {
-                    self.queue.push(pc);
-                }
-                return Err(AutomergeError::DuplicateSeqNumber(
-                    c.seq(),
-                    c.actor_id().clone(),
-                ));
+            if self.has_actor_seq(&change) {
+                self.queue
+                    .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
+                return Err(AutomergeError::duplicate_seq(&change));
             }
+            if actor_seqs
+                .get(change.actor_id())
+                .is_some_and(|seqs| seqs.contains(&change.seq()))
+            {
+                return Err(AutomergeError::duplicate_seq(&change));
+            }
+            // TODO(finto): Refactor with BatchBuilder pattern
+            if change.author().is_some()
+                && (self.get_author_for_actor(change.actor_id()).is_some()
+                    || actor_author.contains(change.actor_id()))
+            {
+                return Err(AutomergeError::duplicate_author(&change));
+            }
+
             seen.insert(hash);
             actor_seqs
-                .entry(c.actor_id().clone())
+                .entry(change.actor_id().clone())
                 .or_default()
-                .insert(c.seq());
-            pool.push(c);
-        }
-
-        if pool.is_empty() {
-            return Ok(());
-        }
-
-        // Kahn's algorithm: topological sort of the pool.
-        let n = pool.len();
-        let mut unsatisfied = vec![0u32; n];
-        let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
-
-        for (i, c) in pool.iter().enumerate() {
-            for dep in c.deps() {
-                if !self.change_graph.has_change(dep) {
-                    unsatisfied[i] += 1;
-                    waiting_on.entry(*dep).or_default().push(i);
-                }
+                .insert(change.seq());
+            if change.author().is_some() {
+                actor_author.insert(change.actor_id().clone());
             }
+            incoming.push(change)?;
         }
 
-        let mut ready: VecDeque<usize> = VecDeque::new();
-        for (i, &count) in unsatisfied.iter().enumerate() {
-            if count == 0 {
-                ready.push_back(i);
-            }
-        }
-
-        let mut topo_order: Vec<usize> = Vec::new();
-        while let Some(idx) = ready.pop_front() {
-            let hash = pool[idx].hash();
-            topo_order.push(idx);
-            if let Some(dependents) = waiting_on.remove(&hash) {
-                for dep_idx in dependents {
-                    unsatisfied[dep_idx] -= 1;
-                    if unsatisfied[dep_idx] == 0 {
-                        ready.push_back(dep_idx);
-                    }
-                }
-            }
-        }
-
-        // Split pool into ready (topo-sorted) and orphaned.
-        let mut consumed = vec![false; n];
-        for &idx in &topo_order {
-            consumed[idx] = true;
-        }
-        let mut slots: Vec<Option<Change>> = pool.into_iter().map(Some).collect();
-
-        let mut chap = BatchApply::default();
-        for idx in topo_order {
-            if let Some(c) = slots[idx].take() {
-                chap.push(c);
-            }
-        }
-
-        for c in slots.into_iter().flatten() {
-            self.queue.push(c);
-        }
-
-        Ok(chap.apply(self, log)?)
+        self.queue.extend(incoming);
+        let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
+        Ok(BatchApply::new(changes).apply(self, log)?)
     }
 
     fn import_ops_to(
@@ -1120,7 +1137,7 @@ impl Automerge {
                     id,
                     obj,
                     key,
-                    action: c.action.try_into()?,
+                    action: c.action.try_into().map_err(AutomergeError::encoding)?,
                     value: c.val.into_ref(),
                     mark_name: c.mark_name.map(String::from).map(Cow::Owned),
                     expand: c.expand,
@@ -1147,7 +1164,7 @@ mod tests {
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
     use crate::types;
-    use crate::{ActorId, AutoCommit, ROOT};
+    use crate::{make_rng, ActorId, AutoCommit, ROOT};
     use rand::prelude::*;
 
     impl AutoCommit {
@@ -1360,15 +1377,6 @@ mod tests {
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
-    }
-
-    fn make_rng() -> SmallRng {
-        let seed = std::env::var("AUTOMERGE_TEST_SEED")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or_else(rand::random::<u64>);
-        log!("SEED: {}", seed);
-        SmallRng::seed_from_u64(seed)
     }
 
     #[test]

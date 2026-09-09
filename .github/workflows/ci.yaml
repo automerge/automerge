@@ -10,47 +10,24 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.89
-          default: true
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: ./scripts/ci/fmt
-        shell: bash
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix run .#ci-fmt
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.89
-          default: true
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: ./scripts/ci/lint
-        shell: bash
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix run .#ci-lint
 
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.89
-          default: true
-      - uses: Swatinem/rust-cache@v2
-      - name: Build rust docs
-        run: ./scripts/ci/rust-docs
-        shell: bash
-      - name: Install doxygen
-        run: sudo apt-get install -y doxygen
-        shell: bash
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Build Rust docs
+        run: nix run .#ci-rust-docs
 
   cargo-deny:
     runs-on: ubuntu-latest
@@ -61,45 +38,27 @@ jobs:
           - bans licenses sources
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          manifest-path: "./rust/Cargo.toml"
-          command: check ${{ matrix.checks }}
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix run .#ci-cargo-deny -- ${{ matrix.checks }}
 
   build_wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: jetli/wasm-bindgen-action@v0.2.0
-        with:
-          # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.121"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
-      - name: run tests
-        run: ./scripts/ci/wasm_tests
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Run WASM tests
+        run: nix run .#ci-wasm-tests
 
   js_tests:
     runs-on: ubuntu-latest
     needs:
       - build_wasm
-
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-      - uses: jetli/wasm-bindgen-action@v0.2.0
-        with:
-          # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.121"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
-      - name: run tests
-        run: ./scripts/ci/js_tests
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Run JS tests
+        run: nix run .#ci-js-tests
 
   # This test is necessary because we want to make sure that the webcrypto polyfill
   # for node 18 works correctly. See the notes in javascript/HACKING.md#getrandom-support
@@ -107,61 +66,33 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build_wasm
-
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "18"
-      - uses: jetli/wasm-bindgen-action@v0.2.0
-        with:
-          # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.121"
-      - name: Install wasm32 target
-        working-directory: rust
-        run: rustup target add wasm32-unknown-unknown
-      - name: run tests
-        run: ./scripts/ci/node_18_packaging_test
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Run Node 18 packaging test
+        run: nix run .#ci-node18-packaging-test
 
   linux:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        toolchain:
-          - 1.89
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.toolchain }}
-          default: true
-      - uses: Swatinem/rust-cache@v2
-      - run: ./scripts/ci/build-test
-        shell: bash
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix run .#ci-build-test
 
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.89
-          default: true
-      - uses: Swatinem/rust-cache@v2
-      - run: ./scripts/ci/build-test
-        shell: bash
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix run .#ci-build-test
 
+  # Nix does not provide a native Windows environment. Keep this job native so
+  # that it continues to test Windows rather than Linux under WSL.
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.89
-          default: true
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/ci/build-test
         shell: bash

@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 // Test that looking up by index works across diferent ways of calculating
 // the index
 //
@@ -409,7 +407,7 @@ fn split_block() {
 }
 
 #[test]
-fn patch_put_seq() {
+fn patch_put_text() {
     Scenario {
         text: "he👩‍👩‍👧‍👦llo",
         action: |doc: &mut AutoCommit, text: &ObjId, encoding: Encoding| {
@@ -422,27 +420,28 @@ fn patch_put_seq() {
             doc.update_diff_cursor();
             println!(" ENCODING = {:?}", encoding);
             doc.put(text, index, "L").unwrap();
-            let indexes = doc
-                .diff_incremental()
-                .into_iter()
-                .map(|p| match p {
-                    automerge::Patch {
-                        action: automerge::PatchAction::PutSeq { index, value, .. },
-                        ..
-                    } => {
-                        if value.0 == Value::Scalar(Cow::Owned(ScalarValue::Str("L".into()))) {
-                            Ok(index)
-                        } else {
-                            Err(format!("unexpected value {}", value.0).to_string())
-                        }
-                    }
-                    other => Err(format!("unexpected patch action {:?}", other).to_string()),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if indexes.len() != 1 {
-                return Err(format!("expected 1 patch, got {}", indexes.len()));
+            let patches = doc.diff_incremental();
+            match patches.as_slice() {
+                [automerge::Patch {
+                    action:
+                        automerge::PatchAction::DeleteSeq {
+                            index: delete_index,
+                            length: 1,
+                        },
+                    ..
+                }, automerge::Patch {
+                    action:
+                        automerge::PatchAction::SpliceText {
+                            index: splice_index,
+                            value,
+                            ..
+                        },
+                    ..
+                }] if delete_index == splice_index && value.make_string() == "L" => {
+                    Ok(*delete_index)
+                }
+                other => Err(format!("unexpected patches {other:?}")),
             }
-            Ok(indexes[0])
         },
         expected: Expected::ByEncoding {
             code_point: 9,

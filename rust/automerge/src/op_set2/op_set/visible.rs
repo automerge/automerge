@@ -5,13 +5,11 @@ use crate::op_set2::op::SuccCursors;
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::OpSet;
 
-use hexane::{BooleanCursor, ColumnDataIter};
-
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::iter::tools::{Shiftable, Skipper};
+use crate::iter::tools::{BoolColumnSkipper, Shiftable, Skipper};
 
 impl Shiftable for VisIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
@@ -39,13 +37,7 @@ impl Shiftable for ScanVisIter<'_> {
 
 impl Shiftable for IndexedVisIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
-        let val = self.iter.shift_next(range)?;
-        self.vis = 0;
-        if val.as_deref() == Some(&true) {
-            Some(0)
-        } else {
-            Some(1 + self.next().unwrap_or(0))
-        }
+        self.iter.shift_next(range)
     }
 }
 
@@ -88,14 +80,15 @@ impl Iterator for VisIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct IndexedVisIter<'a> {
-    iter: ColumnDataIter<'a, BooleanCursor>,
-    vis: usize,
+    iter: BoolColumnSkipper<'a>,
 }
 
 impl<'a> IndexedVisIter<'a> {
     fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
-        let iter = op_set.cols.index.visible.iter_range(range);
-        Self { iter, vis: 0 }
+        let iter = op_set.cols.index.visible.iter_range(range.clone());
+        Self {
+            iter: BoolColumnSkipper::new(iter, range),
+        }
     }
 }
 
@@ -103,23 +96,7 @@ impl Iterator for IndexedVisIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.vis > 0 {
-            self.vis -= 1;
-            Some(0)
-        } else {
-            let mut skip = 0;
-            // next_run can produce zero length runs so
-            // we loop
-            while let Some(run) = self.iter.next_run() {
-                if run.value.as_deref() == Some(&true) && run.count > 0 {
-                    self.vis = run.count - 1;
-                    break;
-                } else {
-                    skip += run.count;
-                }
-            }
-            Some(skip)
-        }
+        self.iter.next()
     }
 }
 
@@ -191,12 +168,11 @@ impl<'a, I: OpQueryTerm<'a> + Clone> VisibleOpIter<'a, I> {
     }
 }
 
+/// Returns `true` if the [`OpId`] is covered by the [`Clock`] (see [`Clock::covers`]).
+///
+/// If no [`Clock`] is provided, then this will always return `true`.
 fn vis(clock: Option<&Clock>, id: &OpId) -> bool {
-    if let Some(c) = clock {
-        c.covers(id)
-    } else {
-        true
-    }
+    clock.is_none_or(|c| c.covers(id))
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for VisibleOpIter<'a, I> {
@@ -221,7 +197,7 @@ impl<'a> Op<'a> {
         &self,
         counter: i64,
         clock: Option<&Clock>,
-    ) -> (bool, Option<ScalarValue<'a>>) {
+    ) -> (bool, Option<i64>) {
         let mut inc = 0;
         let mut deleted = false;
         for (i, val) in self.succ_inc() {
@@ -233,47 +209,56 @@ impl<'a> Op<'a> {
                 }
             }
         }
-        (deleted, Some(ScalarValue::Counter(counter + inc)))
+        (deleted, Some(counter + inc))
     }
 
     pub(crate) fn scope_to_clock(&mut self, clock: Option<&Clock>) -> bool {
         let visibility = self.maybe_scope_to_clock(clock);
         let result = visibility.visible();
-        if let Some(v) = visibility.value {
-            self.value = v;
+        if let Some(v) = visibility.counter_value {
+            self.value = ScalarValue::Counter(v);
         }
         result
     }
 
-    fn maybe_scope_to_clock(&mut self, clock: Option<&Clock>) -> Visibility<'a> {
+    fn maybe_scope_to_clock(&mut self, clock: Option<&Clock>) -> Visibility {
         let predates = vis(clock, &self.id);
         if let ScalarValue::Counter(n) = self.value {
-            let (deleted, value) = self.maybe_scope_counter_to_clock(n, clock);
+            let (deleted, counter_value) = self.maybe_scope_counter_to_clock(n, clock);
             Visibility {
                 predates,
                 deleted,
-                value,
+                counter_value,
             }
         } else {
             let deleted = self.succ().any(|i| vis(clock, &i));
-            let value = None;
+            let counter_value = None;
             Visibility {
                 predates,
                 deleted,
-                value,
+                counter_value,
             }
         }
     }
 }
 
+/// Track if an [`Op`] is considered visible, usually in relation to a
+/// [`Clock`], if one is given.
+///
+/// The [`Op`] is considered visible if it predates the given [`Clock`], and is
+/// not considered deleted within the given [`Clock`] timeframe.
 #[derive(Debug)]
-struct Visibility<'a> {
+struct Visibility {
     predates: bool,
     deleted: bool,
-    value: Option<ScalarValue<'a>>,
+    /// If the [`Op`] is a [`Counter`] value, the increments are kept track of
+    /// to update the [`Op::value`].
+    ///
+    /// [`Counter`]: ScalarValue::Counter
+    counter_value: Option<i64>,
 }
 
-impl Visibility<'_> {
+impl Visibility {
     fn visible(&self) -> bool {
         self.predates && !self.deleted
     }

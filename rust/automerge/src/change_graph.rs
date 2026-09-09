@@ -1,19 +1,16 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroU32;
 use std::ops::Add;
-
-use hexane::{
-    ColGroupIter, ColumnCursor, ColumnData, ColumnDataIter, DeltaCursor, PackError, StrCursor,
-    UIntCursor,
-};
+use std::ops::RangeBounds;
 
 use crate::storage::BundleMetadata;
 use crate::{
+    author::Authors,
     clock::{Clock, SeqClock},
     error::AutomergeError,
-    op_set2::{change::BuildChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
+    op_set2::{change::BuildChangeMetadata, ActorIdx, ValueMeta},
     storage::columns::compression::Uncompressed,
     storage::columns::BadColumnLayout,
     storage::document::ReconstructError as LoadError,
@@ -27,8 +24,7 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
-
-#[derive(Debug, PartialEq, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
@@ -37,15 +33,17 @@ pub(crate) struct ChangeGraph {
     seq: Vec<u32>,
     max_ops: Vec<u32>,
     max_op: u32,
-    num_ops: ColumnData<UIntCursor>,
-    timestamps: ColumnData<DeltaCursor>,
-    messages: ColumnData<StrCursor>,
-    extra_bytes_meta: ColumnData<MetaCursor>,
+    num_ops: hexane::Column<u64>,
+    timestamps: hexane::DeltaColumn<i64>,
+    messages: hexane::Column<Option<String>>,
+    extra_bytes_meta: hexane::PrefixColumn<ValueMeta>,
     extra_bytes_raw: Vec<u8>,
     heads: BTreeSet<ChangeHash>,
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
     clock_cache: HashMap<NodeIdx, SeqClock>,
     seq_index: Vec<Vec<NodeIdx>>,
+    fragment_top: SeqClock,
+    fragments: Vec<FragmentNode>,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -92,16 +90,18 @@ impl ChangeGraph {
             actors: Vec::new(),
             max_ops: Vec::new(),
             max_op: 0,
-            num_ops: ColumnData::new(),
+            num_ops: hexane::Column::new(),
             seq: Vec::new(),
             parents: Vec::new(),
-            messages: ColumnData::new(),
-            timestamps: ColumnData::new(),
-            extra_bytes_meta: ColumnData::new(),
+            messages: hexane::Column::new(),
+            timestamps: hexane::DeltaColumn::new(),
+            extra_bytes_meta: hexane::PrefixColumn::new(),
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
             seq_index: vec![vec![]; num_actors],
+            fragments: vec![],
+            fragment_top: SeqClock::new(num_actors),
         }
     }
 
@@ -127,6 +127,17 @@ impl ChangeGraph {
         self.heads.iter().cloned()
     }
 
+    /// Whether `heads` is exactly the set of current heads (order and
+    /// duplicates ignored).
+    pub(crate) fn heads_are_current(&self, heads: &[ChangeHash]) -> bool {
+        // duplicates can only shrink the set, so fewer entries than heads
+        // can never match
+        if heads.len() < self.heads.len() {
+            return false;
+        }
+        heads.iter().copied().collect::<BTreeSet<_>>() == self.heads
+    }
+
     pub(crate) fn head_indexes(&self) -> impl Iterator<Item = u64> + '_ {
         self.heads
             .iter()
@@ -148,6 +159,10 @@ impl ChangeGraph {
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
+        for f in &mut self.fragments {
+            f.clock.rewrite_with_new_actor(idx)
+        }
+        self.fragment_top.rewrite_with_new_actor(idx);
         self.seq_index.insert(idx, vec![]);
     }
 
@@ -164,6 +179,10 @@ impl ChangeGraph {
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
         }
+        for fragment in &mut self.fragments {
+            fragment.clock.remove_actor(idx)
+        }
+        self.fragment_top.remove_actor(idx);
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -215,29 +234,25 @@ impl ChangeGraph {
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
+        use hexane::EncoderApi;
         use ids::*;
 
-        let actor_iter = self.actors.iter().map(as_actor);
-        let actor = ActorCursor::encode_unless_empty(out, actor_iter);
+        let actor = hexane::Encoder::<ActorIdx>::encode_to(out, self.actors.iter().copied());
+        let seq =
+            hexane::DeltaEncoder::<usize>::encode_to(out, self.seq.iter().map(|s| *s as usize));
+        let max_op =
+            hexane::DeltaEncoder::<usize>::encode_to(out, self.max_ops.iter().map(|m| *m as usize));
+        let time_start = out.len();
+        out.extend_from_slice(&self.timestamps.save());
+        let time = time_start..out.len();
+        let message = self.messages.save_to_unless(out, None);
 
-        let seq_iter = self.seq.iter().map(as_seq);
-        let seq = DeltaCursor::encode_unless_empty(out, seq_iter);
-
-        let max_op_iter = self.max_ops.iter().map(as_max_op);
-        let max_op = DeltaCursor::encode_unless_empty(out, max_op_iter);
-
-        let time = self.timestamps.save_to_unless_empty(out);
-
-        let message = self.messages.save_to_unless_empty(out);
-
-        let num_deps_iter = self.num_deps().map(as_num_deps);
-        let num_deps = UIntCursor::encode_unless_empty(out, num_deps_iter);
-
-        let deps_iter = self.deps_iter().map(as_deps);
-        let deps = DeltaCursor::encode_unless_empty(out, deps_iter);
+        let num_deps = hexane::Encoder::<usize>::encode_to(out, self.num_deps());
+        let deps =
+            hexane::DeltaEncoder::<usize>::encode_to(out, self.deps_iter().map(|n| n.0 as usize));
 
         // FIXME - we could eliminate this column if empty but meta isnt all null
-        let meta = self.extra_bytes_meta.save_to_unless_empty(out);
+        let meta = self.extra_bytes_meta.save_to(out);
         let raw = out.len()..out.len() + self.extra_bytes_raw.len();
         out.extend(&self.extra_bytes_raw);
 
@@ -288,7 +303,7 @@ impl ChangeGraph {
         let index = actor_indices
             .binary_search_by(|n| {
                 let i = n.0 as usize;
-                let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
+                let num_ops = self.num_ops.get(i).unwrap_or_default();
                 let max_op = self.max_ops[i];
                 let start = max_op as u64 - num_ops + 1;
                 if counter < start {
@@ -335,15 +350,13 @@ impl ChangeGraph {
                 .ok_or(MissingDep(hash))?;
             let i = index.0 as usize;
             let actor = self.actors[i].into();
-            let timestamp = *self.timestamps.get(i).flatten().unwrap_or_default();
+            let timestamp = self.timestamps.get(i).unwrap_or_default();
             let max_op = self.max_ops[i] as u64;
-            let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
-            let message = self.messages.get(i).flatten();
+            let num_ops = self.num_ops.get(i).unwrap_or_default();
+            let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
-            // FIXME - this needs a test
-            let meta = self.extra_bytes_meta.get_with_acc(i).unwrap();
-            let meta_range =
-                meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+            let meta = self.extra_bytes_meta.get(i).unwrap();
+            let meta_range = meta.prefix() as usize..meta.total() as usize;
             let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
             let deps = self
@@ -397,7 +410,9 @@ impl ChangeGraph {
             num_ops: self.num_ops.iter(),
             timestamps: self.timestamps.iter(),
             messages: self.messages.iter(),
-            extra_bytes_meta: self.extra_bytes_meta.iter().with_acc(),
+            extra_bytes_meta: self
+                .extra_bytes_meta
+                .iter_range(0..self.extra_bytes_meta.len()),
             graph: self,
         }
     }
@@ -411,15 +426,13 @@ impl ChangeGraph {
             .map(|index| {
                 let i = index.0 as usize;
                 let actor = self.actors[i].into();
-                let timestamp = *self.timestamps.get(i).flatten().unwrap_or_default();
+                let timestamp = self.timestamps.get(i).unwrap_or_default();
                 let max_op = self.max_ops[i] as u64;
-                let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
-                let message = self.messages.get(i).flatten();
+                let num_ops = self.num_ops.get(i).unwrap_or_default();
+                let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
-                // FIXME - this needs a test
-                let meta = self.extra_bytes_meta.get_with_acc(i).unwrap();
-                let meta_range =
-                    meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+                let meta = self.extra_bytes_meta.get(i).unwrap();
+                let meta_range = meta.prefix() as usize..meta.total() as usize;
                 let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
                 let deps = self.parents(index).map(|p| p.0 as u64).collect::<Vec<_>>();
@@ -520,8 +533,7 @@ impl ChangeGraph {
             .extend(iter.clone().map(|(c, _)| c.len() as u64));
         self.timestamps
             .extend(iter.clone().map(|(c, _)| c.timestamp()));
-        self.messages
-            .extend(iter.clone().map(|(c, _)| c.message().cloned()));
+        self.messages.extend(iter.clone().map(|(c, _)| c.message()));
         self.extra_bytes_meta
             .extend(iter.clone().map(|(c, _)| ValueMeta::from(c.extra_bytes())));
         self.parents.extend(std::iter::repeat_n(None, iter.len()));
@@ -533,6 +545,7 @@ impl ChangeGraph {
     fn add_changes<'a, I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone>(
         &mut self,
         iter: I,
+        authors: &mut Authors,
     ) -> Result<(), MissingDep> {
         let node = NodeIdx(self.hashes.len() as u32);
 
@@ -547,6 +560,11 @@ impl ChangeGraph {
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
 
+            if let Some(author) = change.author() {
+                assert!(change.seq() == 1);
+                authors.assign_author(author.into_owned(), actor)
+            }
+
             assert!(actor < self.seq_index.len());
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
             self.seq_index[actor].push(node_idx);
@@ -555,14 +573,144 @@ impl ChangeGraph {
                 self.add_parent(node_idx, parent_hash);
             }
 
-            if (node_idx + 1).0 % CACHE_STEP == 0 {
+            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
                 self.cache_clock(node_idx);
             }
+
+            self.cache_fragment(node_idx);
         }
         Ok(())
     }
 
-    pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
+    pub(crate) fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        let n = self.nodes_by_hash.get(&head).copied()?;
+        if head.fragment_level() == 0 {
+            self.loose_commit(n)
+        } else {
+            assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
+            self.fragments
+                .binary_search_by_key(&n.0, |f| f.head.0)
+                .ok()
+                .map(|i| self.fragments[i].export(self))
+        }
+    }
+
+    fn loose_commit(&self, n: NodeIdx) -> Option<Fragment> {
+        let head = self.hashes.get(n.0 as usize).copied()?;
+        assert_eq!(head.fragment_level(), 0);
+        let boundary = self.parents(n).map(|p| self.hashes[p.0 as usize]).collect();
+        let members = vec![head];
+        let checkpoints = vec![];
+        let level = head.fragment_level();
+        Some(Fragment {
+            head,
+            level,
+            boundary,
+            checkpoints,
+            members,
+        })
+    }
+
+    pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
+        &'a self,
+        heads: &'a [ChangeHash],
+        levels: R,
+    ) -> impl Iterator<Item = Fragment> + 'a {
+        let heads = if levels.contains(&0) { heads } else { &[] };
+        self.loose_fragments(heads).chain(
+            self.fragments
+                .iter()
+                .rev()
+                .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
+                .map(|f| f.export(self)),
+        )
+    }
+
+    fn loose_fragments<'a>(
+        &'a self,
+        heads: &'a [ChangeHash],
+    ) -> impl Iterator<Item = Fragment> + 'a {
+        let nodes = heads
+            .iter()
+            .filter(|h| h.fragment_level() == 0)
+            .filter_map(|h| self.nodes_by_hash.get(h).copied());
+        self.bfs_until_clock(nodes, &self.fragment_top)
+            .filter_map(|n| self.loose_commit(n))
+    }
+
+    fn fragment_content<'a>(
+        &'a self,
+        node: NodeIdx,
+        clock: &'a SeqClock,
+    ) -> impl Iterator<Item = ChangeHash> + 'a {
+        self.bfs_until_clock([node], clock)
+            .map(|n| self.hashes[n.0 as usize])
+    }
+
+    fn bfs_until_clock<'a, I>(
+        &'a self,
+        seed: I,
+        clock: &'a SeqClock,
+    ) -> impl Iterator<Item = NodeIdx> + 'a
+    where
+        I: IntoIterator<Item = NodeIdx>,
+    {
+        let mut to_visit: VecDeque<_> = seed.into_iter().collect();
+        let mut seen: HashSet<_> = to_visit.iter().copied().collect();
+
+        std::iter::from_fn(move || {
+            let idx = to_visit.pop_front()?;
+            for p in self.parents(idx) {
+                if !seen.contains(&p) {
+                    let actor = self.actors[p.0 as usize].into();
+                    let seq = self.seq[p.0 as usize];
+                    if clock.get_for_actor(&actor) < NonZeroU32::new(seq) {
+                        seen.insert(p);
+                        to_visit.push_back(p);
+                    }
+                }
+            }
+            Some(idx)
+        })
+    }
+
+    fn cache_fragments(&mut self) {
+        for n in 0..self.hashes.len() {
+            self.cache_fragment(NodeIdx(n as u32))
+        }
+    }
+
+    fn cache_fragment(&mut self, head: NodeIdx) {
+        let hash = &self.hashes[head.0 as usize];
+        let level = hash.fragment_level();
+        if level == 0 {
+            return;
+        }
+        let mut deps = vec![];
+        let mut supercede = vec![];
+        let clock = self.calculate_clock([head].into());
+        for (i, f) in self.fragments.iter().enumerate().rev() {
+            if clock.covers(&f.clock) {
+                if self.hashes[f.head.0 as usize].fragment_level() >= level {
+                    deps.push(f.head);
+                } else {
+                    supercede.push(i);
+                }
+            }
+        }
+        for i in supercede {
+            self.fragments.remove(i);
+        }
+        SeqClock::merge(&mut self.fragment_top, &clock);
+        self.fragments.push(FragmentNode { head, deps, clock });
+    }
+
+    pub(crate) fn add_change(
+        &mut self,
+        change: &Change,
+        actor: usize,
+        authors: &mut Authors,
+    ) -> Result<(), MissingDep> {
         let hash = change.hash();
 
         if self.nodes_by_hash.contains_key(&hash) {
@@ -575,7 +723,7 @@ impl ChangeGraph {
             }
         }
 
-        self.add_changes([(change, actor)].into_iter())
+        self.add_changes([(change, actor)].into_iter(), authors)
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
@@ -633,17 +781,19 @@ impl ChangeGraph {
         })
     }
 
-    fn heads_to_nodes(&self, heads: &[ChangeHash]) -> Vec<NodeIdx> {
+    fn heads_to_nodes<'a>(
+        &self,
+        heads: &'a [ChangeHash],
+    ) -> impl Iterator<Item = NodeIdx> + use<'a, '_> {
         heads
             .iter()
             .filter_map(|h| self.nodes_by_hash.get(h))
             .copied()
-            .collect()
     }
 
-    pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes)
+        self.calculate_clock(nodes.collect())
             .iter()
             .map(|(actor, seq)| {
                 self.seq_index
@@ -657,16 +807,15 @@ impl ChangeGraph {
 
     pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes)
+        self.calculate_clock(nodes.collect())
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
         Some(*self.seq.get(idx.0 as usize)?)
     }
 
-    fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> SeqClock {
+    fn calculate_clock(&self, mut to_visit: BTreeSet<NodeIdx>) -> SeqClock {
         let mut clock = SeqClock::new(self.num_actors());
-        let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, usize::MAX);
 
@@ -709,7 +858,7 @@ impl ChangeGraph {
         heads: &[ChangeHash],
     ) {
         let nodes = self.heads_to_nodes(heads);
-        self.traverse_ancestors(nodes, |idx| {
+        self.traverse_ancestors(nodes.collect(), |idx| {
             let hash = &self.hashes[idx.0 as usize];
             changes.remove(hash);
             true
@@ -741,16 +890,26 @@ impl ChangeGraphCols {
         self.0.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
+    pub(crate) fn finalize(self, changes: &[Change], authors: &mut Authors) -> ChangeGraph {
         let mut graph = self.0;
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.is_empty());
 
+        // The encoded change columns only contain each change's maximum op.
+        // `load()` estimates op counts from dependencies, but that is ambiguous
+        // for an isolated actor whose first change can start above counter 1.
+        // Reconstruction has the verified changes, so use their exact lengths.
+        graph.num_ops = changes.iter().map(|change| change.len() as u64).collect();
+
         for c in changes {
             let hash = c.hash();
-            let node_idx = NodeIdx(graph.hashes.len() as u32);
+            let idx = graph.hashes.len();
+            let node_idx = NodeIdx(idx as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
-            graph.hashes.push(hash)
+            graph.hashes.push(hash);
+            if let Some(author) = c.author() {
+                authors.assign_author(author.into_owned(), graph.actors[idx].into());
+            }
         }
 
         for n in 0..(graph.len() as u32) {
@@ -758,6 +917,8 @@ impl ChangeGraphCols {
                 graph.cache_clock(NodeIdx(n));
             }
         }
+
+        graph.cache_fragments();
 
         graph
     }
@@ -780,10 +941,10 @@ impl ChangeGraphCols {
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
-        let actors = to_vec(ActorCursor::iter(actor_bytes))?;
-        let max_ops = to_u32_vec(DeltaCursor::iter(max_op_bytes))?;
+        let actors: Vec<ActorIdx> = hexane::decoder::<ActorIdx>(actor_bytes).collect();
+        let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::new(max_op_bytes).collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
-        let seq = to_u32_vec(DeltaCursor::iter(seq_bytes))?;
+        let seq: Vec<u32> = hexane::DeltaDecoder::<u32>::new(seq_bytes).collect();
 
         if let Some(a) = actors.iter().copied().map(usize::from).max() {
             if a >= num_actors {
@@ -792,10 +953,13 @@ impl ChangeGraphCols {
         }
 
         let len = actors.len();
+        let opts = hexane::LoadOpts::new().with_length(len);
 
-        let timestamps = ColumnData::load_unless_empty(time_bytes, len)?;
-        let messages = ColumnData::load_unless_empty(message_bytes, len)?;
-        let extra_bytes_meta = ColumnData::load_unless_empty(extra_meta_bytes, len)?;
+        let timestamps = hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
+        let messages =
+            hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
+        let extra_bytes_meta =
+            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts)?;
 
         if max_ops.len() != len {
             return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));
@@ -819,14 +983,14 @@ impl ChangeGraphCols {
         let mut parents = Vec::with_capacity(len);
         let mut edges = vec![];
 
-        let deps_count = UIntCursor::iter(deps_count_bytes).map(to_u32);
-        let mut deps_val = DeltaCursor::iter(deps_val_bytes).map(to_u32);
+        let deps_count: Vec<u32> = hexane::decoder::<u32>(deps_count_bytes).collect();
+        let mut deps_val_iter = hexane::DeltaDecoder::<u32>::new(deps_val_bytes);
 
-        let mut num_ops = Vec::with_capacity(len);
-        for (i, d) in deps_count.enumerate() {
-            let d = d? as usize;
+        let mut num_ops_vec = Vec::with_capacity(len);
+        for (i, d) in deps_count.iter().enumerate() {
+            let d = *d as usize;
             if d == 0 {
-                num_ops.push(max_ops[i] as u64);
+                num_ops_vec.push(max_ops[i] as u64);
                 parents.push(None);
                 continue;
             }
@@ -834,8 +998,9 @@ impl ChangeGraphCols {
             parents.push(Some(EdgeIdx::new(edges.len())));
             let mut last_max_op = 0;
             for e in 0..d {
-                let dep = deps_val.next();
-                let dep = dep.ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))??;
+                let dep = deps_val_iter
+                    .next()
+                    .ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))?;
                 let target = NodeIdx(dep);
                 let next = EdgeIdx::new(edges.len() + 1);
                 let next = if e + 1 == d { None } else { Some(next) };
@@ -845,9 +1010,9 @@ impl ChangeGraphCols {
             if last_max_op > max_ops[i] {
                 return Err(LoadError::InvalidMaxOp);
             }
-            num_ops.push(max_ops[i] as u64 - last_max_op as u64);
+            num_ops_vec.push(max_ops[i] as u64 - last_max_op as u64);
         }
-        let num_ops = num_ops.into_iter().collect();
+        let num_ops: hexane::Column<u64> = num_ops_vec.into_iter().collect();
 
         let heads = doc.heads().iter().copied().collect();
 
@@ -859,6 +1024,8 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
+        let fragments = vec![];
+        let fragment_top = SeqClock::new(num_actors);
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -877,28 +1044,10 @@ impl ChangeGraphCols {
             nodes_by_hash,
             clock_cache,
             seq_index,
+            fragments,
+            fragment_top,
         }))
     }
-}
-
-fn as_num_deps(num: usize) -> Option<Cow<'static, u64>> {
-    Some(Cow::Owned(num as u64))
-}
-
-fn as_seq(seq: &u32) -> Option<Cow<'_, i64>> {
-    Some(Cow::Owned(*seq as i64))
-}
-
-fn as_actor(actor_index: &ActorIdx) -> Option<Cow<'_, ActorIdx>> {
-    Some(Cow::Borrowed(actor_index))
-}
-
-fn as_max_op(m: &u32) -> Option<Cow<'_, i64>> {
-    Some(Cow::Owned(*m as i64))
-}
-
-fn as_deps(n: NodeIdx) -> Option<Cow<'static, i64>> {
-    Some(Cow::Owned(n.0 as i64))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -913,10 +1062,13 @@ mod tests {
     };
 
     use crate::{
+        make_rng,
         op_set2::{change::build_change, op_set::ResolvedAction, OpSet, TxOp},
+        transaction::Transactable,
         types::{ObjMeta, OpId, OpType},
-        ActorId, TextEncoding,
+        ActorId, AutoCommit, Automerge, TextEncoding, ROOT,
     };
+    use rand::RngExt;
 
     use super::*;
 
@@ -1003,6 +1155,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
+            let mut authors = Authors::default();
             let osd = OpSet::from_actors(self.actors.clone(), TextEncoding::platform_default());
 
             let start_op = parents
@@ -1054,58 +1207,351 @@ mod tests {
             let change = Change::new(build_change(&ops, &meta, &self.graph, &osd.actors));
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
-            self.graph.add_change(&change, actor_idx).unwrap();
+            self.graph
+                .add_change(&change, actor_idx, &mut authors)
+                .unwrap();
             self.changes.push(change);
             hash
         }
 
         fn build(&self) -> ChangeGraph {
+            let mut authors = Authors::with_actors(self.actors.len());
             let mut graph = ChangeGraph::new(self.actors.len());
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
-                graph.add_change(change, actor_idx).unwrap();
+                graph.add_change(change, actor_idx, &mut authors).unwrap();
             }
             graph
         }
+
+        fn all_hashes(&self) -> Vec<ChangeHash> {
+            self.changes.iter().map(|c| c.hash()).collect()
+        }
     }
-}
 
-fn to_vec<'a, I, T>(iter: I) -> Result<Vec<T>, PackError>
-where
-    I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
-    T: Copy + Default + 'a,
-{
-    iter.map(squish).collect()
-}
+    #[test]
+    fn fragments_cover_all_changes() {
+        // Create a long linear chain — with ~1000 changes, we expect several
+        // with fragment_level >= 1 (roughly 1 in 256).
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
 
-fn squish<T>(i: Result<Option<Cow<'_, T>>, PackError>) -> Result<T, PackError>
-where
-    T: Copy + Default,
-{
-    match i {
-        Err(e) => Err(e),
-        Ok(Some(i)) => Ok(*i),
-        Ok(None) => Ok(T::default()),
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+
+        // Collect all members hashes across all fragments
+        // (hashes may appear in multiple fragments — this is expected)
+        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        for f in &fragments {
+            for h in &f.members {
+                covered.insert(*h);
+            }
+        }
+
+        // Every change must appear in at least one fragment
+        let missing: Vec<_> = all_hashes.difference(&covered).collect();
+        assert!(
+            missing.is_empty(),
+            "changes not covered by any fragment: {:?}",
+            missing,
+        );
     }
-}
 
-fn to_u32<T>(i: Result<Option<Cow<'_, T>>, PackError>) -> Result<u32, PackError>
-where
-    T: TryInto<u32> + Copy + Default,
-{
-    match i {
-        Err(e) => Err(e),
-        Ok(Some(i)) => Ok((*i).try_into().unwrap_or(0)),
-        Ok(None) => Ok(0),
+    fn assert_fragment_invariants(fragments: &[Fragment]) {
+        for f in fragments {
+            // level must match the fragment_level of the id hash
+            assert_eq!(
+                f.level,
+                f.head.fragment_level(),
+                "fragment level mismatch for {:?}",
+                f.head
+            );
+
+            // id must be in members
+            assert!(
+                f.members.contains(&f.head),
+                "fragment id {:?} not found in its own members",
+                f.head
+            );
+
+            // deps must be equal or higher level than the fragment
+            for dep in &f.boundary {
+                assert!(
+                    dep.fragment_level() >= f.level,
+                    "fragment {:?} (level {}) has dep {:?} with lower level {}",
+                    f.head,
+                    f.level,
+                    dep,
+                    dep.fragment_level(),
+                );
+            }
+
+            // members must not contain a hash with a higher level than the id
+            for h in &f.members {
+                assert!(
+                    h.fragment_level() <= f.level,
+                    "fragment {:?} (level {}) contains {:?} with higher level {}",
+                    f.head,
+                    f.level,
+                    h,
+                    h.fragment_level(),
+                );
+            }
+        }
     }
-}
 
-fn to_u32_vec<'a, I, T>(iter: I) -> Result<Vec<u32>, PackError>
-where
-    I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
-    T: TryInto<u32> + Copy + Default + 'a,
-{
-    iter.map(to_u32).collect()
+    #[test]
+    fn fragment_id_and_level_consistent() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+
+        assert_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn fragments_work_with_concurrent_actors() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+
+        // Build two concurrent chains that merge periodically
+        let root = builder.change(&actor1, 1, &[]);
+        let mut tip1 = root;
+        let mut tip2 = root;
+        for i in 0..500 {
+            tip1 = builder.change(&actor1, 1, &[tip1]);
+            tip2 = builder.change(&actor2, 1, &[tip2]);
+            if i % 50 == 49 {
+                // merge
+                let merge = builder.change(&actor1, 1, &[tip1, tip2]);
+                tip1 = merge;
+                tip2 = merge;
+            }
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+
+        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        for f in &fragments {
+            for h in &f.members {
+                covered.insert(*h);
+            }
+        }
+
+        let missing: Vec<_> = all_hashes.difference(&covered).collect();
+        assert!(
+            missing.is_empty(),
+            "changes not covered by any fragment: {:?}",
+            missing,
+        );
+
+        assert_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn fragment_deps_reference_known_hashes() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
+
+        for f in &fragments {
+            for dep in &f.boundary {
+                assert!(
+                    all_hashes.contains(dep),
+                    "fragment {:?} has dep {:?} not in change graph",
+                    f.head,
+                    dep
+                );
+                // Deps of cached fragments (level > 0) should point to other fragment ids
+                // Deps of loose fragments (level == 0) point to change-level parents
+                if f.level > 0 {
+                    assert!(
+                        fragment_ids.contains(dep) || dep.fragment_level() == 0,
+                        "cached fragment {:?} has dep {:?} that is not a fragment id",
+                        f.head,
+                        dep
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fragments_filtered_by_levels() {
+        // 5000 changes gives ~20 expected level-1 fragments (1 hash in 256)
+        // so seeing zero cached fragments would be extraordinarily unlikely.
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..5000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+
+        let all: Vec<_> = graph.fragments(&heads, ..).collect();
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
+        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+
+        // loose + cached partition the full range
+        assert_eq!(loose.len() + cached.len(), all.len());
+        assert!(!loose.is_empty());
+        assert!(
+            !cached.is_empty(),
+            "expected at least one cached fragment from 5000 changes",
+        );
+
+        for f in &loose {
+            assert_eq!(f.level, 0, "0..=0 returned a non-zero level fragment");
+        }
+        for f in &cached {
+            assert!(f.level >= 1, "1.. returned a level-0 fragment");
+        }
+
+        // empty range yields nothing
+        assert_eq!(graph.fragments(&heads, 0..0).count(), 0);
+    }
+
+    #[test]
+    fn get_fragment_returns_loose_and_cached() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..5000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+
+        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
+        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+        assert!(!loose.is_empty());
+        assert!(!cached.is_empty(), "expected at least one cached fragment");
+
+        // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
+        let l = &loose[0];
+        let got = graph.get_fragment(l.head).expect("loose fragment exists");
+        assert_eq!(got, *l);
+
+        // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
+        let c = &cached[0];
+        let got = graph.get_fragment(c.head).expect("cached fragment exists");
+        assert_eq!(got, *c);
+
+        // unknown hash returns None
+        assert!(graph.get_fragment(ChangeHash([0xff; 32])).is_none());
+    }
+
+    #[test]
+    fn bundle_fragments_roundtrips_through_load_incremental() {
+        let mut rng = make_rng();
+        let mut doc = Automerge::new();
+
+        for _ in 0..1_000 {
+            let key = format!("k{}", rng.random::<u32>() % 32);
+            let value = (rng.random::<u32>() % 1000) as i64;
+            let mut tx = doc.transaction();
+            tx.put(ROOT, key, value).unwrap();
+            tx.commit();
+        }
+
+        let fragments = doc.fragments(..);
+
+        let bundles = doc.bundle_fragments(fragments);
+
+        let joined: Vec<u8> = bundles.into_iter().flatten().collect();
+
+        let mut loaded = AutoCommit::new();
+        loaded.load_incremental(&joined).unwrap();
+
+        assert_eq!(doc.get_heads(), loaded.get_heads());
+
+        let a = doc.save();
+        let b = loaded.save();
+        assert_eq!(a, b);
+    }
+
+    /// Regression test: `bundle()` must be insensitive to the order in which
+    /// callers provide change hashes. The change-metadata columns inside a
+    /// bundle are RLE/delta encoded, so if `from_meta` didn't sort its input
+    /// the column data would thrash and the bundle would inflate 10–20× on
+    /// common workloads (this is what `bundle_fragments` was hitting because
+    /// `Fragment::members` is in topological iteration order, not start_op
+    /// order).
+    #[test]
+    fn bundle_size_is_independent_of_input_hash_order() {
+        use crate::transaction::Transactable;
+        use crate::ROOT;
+
+        let mut doc = Automerge::new();
+        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]));
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "counter", 0i64).unwrap();
+        tx.commit();
+        for i in 1..=1_000_i64 {
+            let mut tx = doc.transaction();
+            tx.put(ROOT, "counter", i).unwrap();
+            tx.commit();
+        }
+
+        let hashes: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+
+        let sorted_bytes = doc.bundle(hashes.iter().copied()).unwrap().bytes().len();
+
+        let mut reversed = hashes.clone();
+        reversed.reverse();
+        let reversed_bytes = doc.bundle(reversed).unwrap().bytes().len();
+
+        // Implementation must internally sort; the two bundles' sizes should
+        // be identical (or at worst within a handful of bytes from differing
+        // varint widths). They must NOT differ by an order of magnitude.
+        assert_eq!(
+            sorted_bytes, reversed_bytes,
+            "bundle size depends on input hash order (sorted={}, reversed={}). \
+             from_meta must sort by start_op before encoding columns.",
+            sorted_bytes, reversed_bytes
+        );
+
+        // Sanity: the bundle should be within a small constant factor of the
+        // doc's save_nocompress() size — the underlying columnar encoding is
+        // the same, just without DEFLATE.
+        let snc = doc.save_nocompress().len();
+        assert!(
+            sorted_bytes < snc * 2,
+            "bundle of all changes ({} B) is suspiciously larger than \
+             save_nocompress() ({} B); columns may not be packing.",
+            sorted_bytes,
+            snc
+        );
+    }
 }
 
 pub(crate) struct ChangeIter<'a> {
@@ -1113,10 +1559,10 @@ pub(crate) struct ChangeIter<'a> {
     actors: std::slice::Iter<'a, ActorIdx>,
     seq: std::slice::Iter<'a, u32>,
     max_ops: std::slice::Iter<'a, u32>,
-    num_ops: ColumnDataIter<'a, UIntCursor>,
-    timestamps: ColumnDataIter<'a, DeltaCursor>,
-    messages: ColumnDataIter<'a, StrCursor>,
-    extra_bytes_meta: ColGroupIter<'a, MetaCursor>,
+    num_ops: hexane::Iter<'a, u64>,
+    timestamps: hexane::DeltaIter<'a, i64>,
+    messages: hexane::Iter<'a, Option<String>>,
+    extra_bytes_meta: hexane::prefix::PrefixIter<'a, ValueMeta>,
     graph: &'a ChangeGraph,
 }
 
@@ -1129,13 +1575,14 @@ impl<'a> Iterator for ChangeIter<'a> {
         let actor = (*self.actors.next()?).into();
         let seq = *self.seq.next()? as u64;
         let max_op = *self.max_ops.next()? as u64;
-        let num_ops = *self.num_ops.next().flatten().unwrap_or_default();
-        let timestamp = *self.timestamps.next().flatten().unwrap_or_default();
-        let message = self.messages.next().flatten();
+        let num_ops = self.num_ops.next().unwrap_or_default();
+        let timestamp = self.timestamps.next().unwrap_or_default();
+        let message = self.messages.next().flatten().map(Cow::Borrowed);
+
         let start_op = max_op - num_ops + 1;
 
         let meta = self.extra_bytes_meta.next()?;
-        let meta_range = meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+        let meta_range = meta.prefix() as usize..meta.total() as usize;
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
         let deps = self
             .graph
@@ -1162,13 +1609,15 @@ impl<'a> Iterator for ChangeIter<'a> {
         let actor = (*self.actors.nth(n)?).into();
         let seq = *self.seq.nth(n)? as u64;
         let max_op = *self.max_ops.nth(0)? as u64;
-        let num_ops = *self.num_ops.nth(0).flatten().unwrap_or_default();
-        let timestamp = *self.timestamps.nth(0).flatten().unwrap_or_default();
-        let message = self.messages.nth(0).flatten();
+        let num_ops = self.num_ops.next().unwrap_or_default();
+        let timestamp = self.timestamps.next().unwrap_or_default();
+        let message = self.messages.next().flatten().map(Cow::Borrowed);
+
         let start_op = max_op - num_ops + 1;
 
-        let meta = self.extra_bytes_meta.shift_acc(0)?;
-        let meta_range = meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+        let meta = self.extra_bytes_meta.delta_nth(n)?;
+        let meta_start = meta.delta as usize;
+        let meta_range = meta_start..(meta_start + meta.pv.value.length());
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
 
         let deps = self
@@ -1189,6 +1638,52 @@ impl<'a> Iterator for ChangeIter<'a> {
             builder: 0,
         })
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+struct FragmentNode {
+    head: NodeIdx,
+    deps: Vec<NodeIdx>,
+    clock: SeqClock,
+}
+
+impl FragmentNode {
+    fn export(&self, graph: &ChangeGraph) -> Fragment {
+        let head = graph.hashes[self.head.0 as usize];
+        let level = head.fragment_level();
+        let boundary = self
+            .deps
+            .iter()
+            .map(|d| graph.hashes[d.0 as usize])
+            .collect();
+        let clock = graph.calculate_clock(self.deps.clone().into_iter().collect());
+        let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
+        let checkpoints = members
+            .iter()
+            .copied()
+            .filter(|h| h.fragment_level() > 0)
+            .collect();
+        Fragment {
+            head,
+            level,
+            boundary,
+            checkpoints,
+            members,
+        }
+    }
+}
+
+/// EXPERIMENTAL: A section of the change graph identified by its head hash.
+///
+/// This is an experimental API, it may change or be removed without warning.
+#[doc(hidden)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct Fragment {
+    pub head: ChangeHash,
+    pub level: usize,
+    pub boundary: Vec<ChangeHash>,
+    pub checkpoints: Vec<ChangeHash>,
+    pub members: Vec<ChangeHash>,
 }
 
 #[rustfmt::skip]

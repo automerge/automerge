@@ -6,17 +6,16 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::num::NonZero;
 
-use super::super::meta::MetaCursor;
-use super::super::types::{ActionCursor, ActorCursor, ActorIdx};
+use super::super::types::{Action, ActorIdx};
+use super::super::ValueMeta;
 use super::{length_prefixed_bytes, shift_range};
 use super::{ActorMapper, ChangeOpsColumns};
 
-use hexane::{BooleanCursor, DeltaCursor, Encoder, StrCursor, UIntCursor};
-
+use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
-use crate::op_set2::op_set::IndexBuilder;
+use crate::op_set2::op_set::{IndexBuilder, MarkOrderValidator};
 use crate::storage::bundle::BundleChange;
 use crate::storage::change::{Change as StoredChange, Verified};
 use crate::storage::load::change_collector::Error;
@@ -128,7 +127,7 @@ pub(crate) struct ChangeBuilder<'a> {
     encoder: OpEncoderStrategy<'a>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 enum OpEncoderStrategy<'a> {
     Ops(VecEncoder<'a>),
     Enc(Box<ProgressiveEncoder<'a>>),
@@ -335,27 +334,27 @@ impl<'a> VecEncoder<'a> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ProgressiveEncoder<'a> {
     pub(crate) len: usize,
     pub(crate) start_op: Option<u64>,
     pub(crate) num_ops: u64,
     actors: Vec<bool>,
     queue: BTreeMap<usize, OpBuilder<'a>>,
-    obj_actor: Encoder<'a, ActorCursor>,
-    obj_ctr: Encoder<'a, UIntCursor>,
-    key_actor: Encoder<'a, ActorCursor>,
-    key_ctr: Encoder<'a, DeltaCursor>,
-    key_str: Encoder<'a, StrCursor>,
-    insert: Encoder<'a, BooleanCursor>,
-    action: Encoder<'a, ActionCursor>,
-    value_meta: Encoder<'a, MetaCursor>,
+    obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::Encoder<'a, Option<u64>>,
+    key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    key_str: hexane::Encoder<'a, Option<String>>,
+    insert: hexane::Encoder<'a, bool>,
+    action: hexane::Encoder<'a, Action>,
+    value_meta: hexane::Encoder<'a, ValueMeta>,
     value: Vec<u8>,
-    pred_count: Encoder<'a, UIntCursor>,
-    pred_actor: Encoder<'a, ActorCursor>,
-    pred_ctr: Encoder<'a, DeltaCursor>,
-    expand: Encoder<'a, BooleanCursor>,
-    mark_name: Encoder<'a, StrCursor>,
+    pred_count: hexane::Encoder<'a, u64>,
+    pred_actor: hexane::Encoder<'a, ActorIdx>,
+    pred_ctr: hexane::DeltaEncoder<'a, i64>,
+    expand: hexane::Encoder<'a, bool>,
+    mark_name: hexane::Encoder<'a, Option<String>>,
 }
 
 impl<'a> ProgressiveEncoder<'a> {
@@ -406,7 +405,8 @@ impl<'a> ProgressiveEncoder<'a> {
         self.obj_ctr.append(op.obj.counter());
         self.key_actor.append(op.key.actor());
         self.key_ctr.append(op.key.icounter());
-        self.key_str.append(op.key.key_str());
+        self.key_str
+            .append_owned(op.key.key_str().map(|s| s.into_owned()));
         self.insert.append(op.insert);
         self.action.append(op.action);
         self.value_meta.append(op.value.meta());
@@ -419,7 +419,8 @@ impl<'a> ProgressiveEncoder<'a> {
             self.pred_ctr.append(id.icounter());
         }
         self.expand.append(op.expand);
-        self.mark_name.append(op.mark_name);
+        self.mark_name
+            .append_owned(op.mark_name.map(|s| s.into_owned()));
     }
 
     fn flush(&mut self) {
@@ -464,26 +465,31 @@ impl<'a> ProgressiveEncoder<'a> {
     ) -> ChangeOpsColumns {
         let mapper = self.build_mapping(actor, mapper);
 
-        let remap = |actor: &ActorIdx| mapper[usize::from(*actor)].as_ref();
+        let remap_opt = |actor: Option<ActorIdx>| actor.map(|a| mapper[usize::from(a)].unwrap());
+        let remap = |a: ActorIdx| mapper[usize::from(a)].unwrap();
 
-        let obj_actor = self.obj_actor.save_to_and_remap_unless_empty(data, &remap);
-        let obj_ctr = self.obj_ctr.save_to_unless_empty(data);
-        let key_actor = self.key_actor.save_to_and_remap_unless_empty(data, &remap);
-        let key_ctr = self.key_ctr.save_to_unless_empty(data);
-        let key_str = self.key_str.save_to_unless_empty(data);
+        let obj_actor = self
+            .obj_actor
+            .save_to_unless_and_remap(data, None, &remap_opt);
+        let obj_ctr = self.obj_ctr.save_to_unless(data, None);
+        let key_actor = self
+            .key_actor
+            .save_to_unless_and_remap(data, None, &remap_opt);
+        let key_ctr = self.key_ctr.save_to_unless(data, None);
+        let key_str = self.key_str.save_to_unless(data, None);
         let insert = self.insert.save_to(data);
-        let action = self.action.save_to_unless_empty(data);
-        let value_meta = self.value_meta.save_to_unless_empty(data);
+        let action = self.action.save_to(data);
+        let value_meta = self.value_meta.save_to(data);
         let value = {
             let start = data.len();
             data.extend(self.value);
             start..data.len()
         };
-        let pred_count = self.pred_count.save_to_unless_empty(data);
-        let pred_actor = self.pred_actor.save_to_and_remap_unless_empty(data, &remap);
-        let pred_ctr = self.pred_ctr.save_to_unless_empty(data);
-        let expand = self.expand.save_to_unless_empty(data);
-        let mark_name = self.mark_name.save_to_unless_empty(data);
+        let pred_count = self.pred_count.save_to(data);
+        let pred_actor = self.pred_actor.save_to_and_remap(data, &remap);
+        let pred_ctr = self.pred_ctr.save_to(data);
+        let expand = self.expand.save_to_unless(data, false);
+        let mark_name = self.mark_name.save_to_unless(data, None);
 
         ChangeOpsColumns {
             obj_actor,
@@ -575,13 +581,18 @@ impl<'a> ChangeCollector<'a> {
         ChangeCollector::try_from_change_meta(meta, &op_set.actors)
     }
 
-    pub(crate) fn process_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
+    pub(crate) fn process_ops(
+        &mut self,
+        op_set: &'a OpSet,
+        mark_order: &mut MarkOrderValidator,
+    ) -> Result<(), ReadOpError> {
         let mut iter = op_set.iter();
 
         while let Some(op) = iter.try_next()? {
             let op_id = op.id;
             let op_succ = op.succ();
 
+            mark_order.process_op(&op);
             self.process_op(op);
 
             for id in op_succ {
@@ -654,6 +665,7 @@ impl<'a> ChangeCollector<'a> {
     pub(crate) fn exclude_hashes_meta(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
+        authors: &'a Authors,
         have_deps: &[ChangeHash],
     ) -> Vec<ChangeMetadata<'a>> {
         let changes = change_graph.get_build_metadata_clock(have_deps);
@@ -661,6 +673,7 @@ impl<'a> ChangeCollector<'a> {
             .into_iter()
             .map(|c| ChangeMetadata {
                 actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                author: authors.get_author_for_actor(c.actor),
                 seq: c.seq,
                 start_op: c.start_op,
                 max_op: c.max_op,
@@ -680,6 +693,7 @@ impl<'a> ChangeCollector<'a> {
     pub(crate) fn meta_for_hashes<I>(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
+        authors: &'a Authors,
         hashes: I,
     ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError>
     where
@@ -690,6 +704,7 @@ impl<'a> ChangeCollector<'a> {
             .into_iter()
             .map(|c| ChangeMetadata {
                 actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                author: authors.get_author_for_actor(c.actor),
                 seq: c.seq,
                 start_op: c.start_op,
                 max_op: c.max_op,
@@ -724,13 +739,25 @@ impl<'a> ChangeCollector<'a> {
         changes: Vec<BuildChangeMetadata<'a>>,
     ) -> Vec<Change> {
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
-        debug_assert_eq!(
-            r1,
-            crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
-                .unwrap()
-                .to_changes()
-                .unwrap()
-        );
+        #[cfg(debug_assertions)]
+        {
+            // Bundle::from_meta sorts changes by (start_op, actor) before
+            // encoding columns, so the two paths produce the same set of
+            // changes but not necessarily in the same order. Compare as sets
+            // keyed by hash.
+            let bundle_changes = crate::storage::Bundle::for_hashes(
+                op_set,
+                change_graph,
+                r1.iter().map(|c| c.hash()),
+            )
+            .unwrap()
+            .to_changes()
+            .unwrap();
+            let r1_hashes: std::collections::HashSet<_> = r1.iter().map(|c| c.hash()).collect();
+            let bundle_hashes: std::collections::HashSet<_> =
+                bundle_changes.iter().map(|c| c.hash()).collect();
+            debug_assert_eq!(r1_hashes, bundle_hashes);
+        }
         r1
     }
 

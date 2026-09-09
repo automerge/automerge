@@ -1,5 +1,6 @@
 use std::ops::RangeBounds;
 
+use crate::author::Author;
 use crate::automerge::SaveOptions;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
@@ -12,7 +13,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
-use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
+use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -55,6 +56,10 @@ use crate::{LoadOptions, VerificationMode};
 /// representation of the heads of the document last time you called [`Self::diff_incremental()`]
 /// but you can also manage it directly using [`Self::update_diff_cursor()`] and
 /// [`Self::reset_diff_cursor()`].
+///
+/// ## Authors and Actors
+///
+/// See the ["Authors and Actors"](`Automerge#authors-and-actors`) docs.
 #[derive(Debug, Clone)]
 pub struct AutoCommit {
     pub(crate) doc: Automerge,
@@ -103,6 +108,20 @@ impl AutoCommit {
             save_cursor: Vec::new(),
             isolation: None,
         }
+    }
+
+    /// Return a copy of this document with its data anonymized.
+    pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
+        self.ensure_transaction_closed();
+        Ok(Self {
+            doc: self.doc.anonymize()?,
+            transaction: None,
+            patch_log: PatchLog::inactive(),
+            diff_cursor: Vec::new(),
+            diff_cache: None,
+            save_cursor: Vec::new(),
+            isolation: None,
+        })
     }
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
@@ -179,7 +198,7 @@ impl AutoCommit {
     /// [`Self::reset_diff_cursor()`]
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        let heads = self.doc.get_heads();
+        let heads = self.get_heads();
         if !heads.is_empty() {
             self.patch_log.set_active(true);
             self.patch_log.truncate();
@@ -327,7 +346,7 @@ impl AutoCommit {
     /// ```
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         self.ensure_transaction_closed();
-        let heads = self.doc.get_heads();
+        let heads = self.get_heads();
         let diff_cursor = self.diff_cursor();
         let patches = self.diff(&diff_cursor, &heads);
         self.update_diff_cursor();
@@ -379,8 +398,36 @@ impl AutoCommit {
         self
     }
 
+    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
+    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
+        self.doc.get_actors_for_author(author)
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
+        self.doc.get_author_for_actor(actor)
+    }
+
+    pub fn get_author(&self) -> Option<&Author<'static>> {
+        self.doc.get_author()
+    }
+
+    pub fn get_authors(&self) -> &[Author<'static>] {
+        self.doc.get_authors()
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
@@ -613,6 +660,35 @@ impl AutoCommit {
         self.doc.dump()
     }
 
+    /// EXPERIMENTAL: Return the fragments covering the document history at
+    /// the given levels, ordered oldest to newest.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.doc.fragments(levels)
+    }
+
+    /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.doc.get_fragment(head)
+    }
+
+    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
+    /// (level-0 fragments with one member) or as a bundle.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        self.doc.bundle_fragments(fragments)
+    }
+
     /// Get the current heads of the document.
     ///
     /// This closes the transaction first, if one is in progress.
@@ -718,13 +794,21 @@ impl AutoCommit {
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
         // heads arg takes priority
         if let Some(h) = heads {
-            return Some(self.doc.clock_at(h));
+            // the heads == current-heads shortcut (an unscoped read) is only
+            // sound with no transaction in flight: pending ops are already in
+            // the op set but not yet under the graph's heads
+            return if self.transaction.is_none() {
+                self.doc.clock_at(h)
+            } else {
+                Some(self.doc.change_graph.clock_at(h))
+            };
         }
         match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
             (Some(_), Some((_, t))) => t.get_scope().clone(),
-            // then look at clock for isolation
-            (Some(i), None) => Some(self.doc.clock_at(i)),
+            // then look at clock for isolation (no transaction is open, so
+            // isolation at the current heads can read unscoped)
+            (Some(i), None) => self.doc.clock_at(i),
             _ => None,
         }
     }
@@ -733,6 +817,7 @@ impl AutoCommit {
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {
+            self.patch_log.finish_current_view(&self.doc, &before);
             let clock = self.doc.clock_range(&before, after);
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
         }

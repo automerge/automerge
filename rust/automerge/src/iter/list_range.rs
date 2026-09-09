@@ -163,17 +163,27 @@ impl<'a> Iterator for ListDiff<'a> {
             }
 
             if let Some(mut last) = last_visible {
-                last.update(state.expose);
+                let newly_visible = last.diff == Diff::Same;
+                last.update(state.expose || newly_visible);
+                // Deleting the winning value exposes `last`, so its put
+                // patch must carry the remaining register's conflict state.
+                last.conflict = state.num_new > 1;
                 if last.diff.is_visible() {
                     self.index += 1;
                 }
                 return Some(last);
             } else {
-                let list = state.diff_item(list.id, value, self.index, diff);
-                if diff.is_visible() {
+                let mut item = state.diff_item(list.id, value, self.index, diff);
+                if diff == Diff::Same && state.num_old > 1 && state.num_new == 1 {
+                    // The surviving value is unchanged, but removing the other
+                    // visible values clears its conflict flag. Emit a Put and,
+                    // for objects, expose children which are unchanged too.
+                    item.update(true);
+                }
+                if item.diff.is_visible() {
                     self.index += 1;
                 }
-                return Some(list);
+                return Some(item);
             }
         }
         None
@@ -261,9 +271,7 @@ impl Shiftable for ListIter<'_> {
         let id = self.id.shift_next(range.clone());
         let action = self.action.shift_next(range.clone());
         let value = self.value.shift_next(range.clone());
-        let inserts = self.inserts.shift_next(range);
-
-        let inserts = inserts?.as_usize();
+        let inserts = self.inserts.shift_next(range)?.total();
         let pos = self.id.pos() - 1;
         Some(List::new(inserts, action?, value?, id?, pos))
     }
@@ -295,7 +303,7 @@ impl<'a> Iterator for ListIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.id.next()?;
-        let inserts = self.inserts.next()?.as_usize();
+        let inserts = self.inserts.next()?.total();
         let action = self.action.next()?;
         let value = self.value.next()?;
         let pos = self.id.pos() - 1;
@@ -304,7 +312,7 @@ impl<'a> Iterator for ListIter<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let id = self.id.nth(n)?;
-        let inserts = self.inserts.nth(n)?.as_usize();
+        let inserts = self.inserts.nth(n)?.total();
         let action = self.action.nth(n)?;
         let value = self.value.nth(n)?;
         let pos = self.id.pos() - 1;

@@ -76,6 +76,15 @@ impl List {
                     .increment(value)?;
                 Ok(())
             }
+            PatchAction::Conflict {
+                prop: Prop::Seq(index),
+            } => {
+                self.0
+                    .get_mut(index)
+                    .ok_or(HydrateError::InvalidIndex(index))?
+                    .conflict = true;
+                Ok(())
+            }
             PatchAction::Mark { marks: _ } => {
                 todo!()
             }

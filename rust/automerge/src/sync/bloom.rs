@@ -107,7 +107,6 @@ impl BloomFilter {
             .map(|byte| byte & (1 << (probe & 7)))
     }
 
-    #[inline(never)]
     pub fn contains_hash(&self, hash: &ChangeHash) -> bool {
         if self.num_entries == 0 {
             false

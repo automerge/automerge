@@ -66,8 +66,8 @@ impl Transaction<'_> {
     /// the new heads.
     pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(self.doc, None, None);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash =
+            super::commit_transaction(tx, self.doc, &mut self.patch_log, CommitOptions::default());
         // TODO - remove this clone
         (hash, self.patch_log.clone())
     }
@@ -90,8 +90,7 @@ impl Transaction<'_> {
     /// ```
     pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
-        let hash = tx.commit(self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        let hash = super::commit_transaction(tx, self.doc, &mut self.patch_log, options);
         // TODO - remove this clone
         (hash, self.patch_log.clone())
     }
@@ -113,7 +112,10 @@ impl Transaction<'_> {
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
         if let Some(h) = heads {
-            Some(self.doc.clock_at(h))
+            // a transaction is in flight: its pending ops are in the op set
+            // but not under the graph's heads, so the current-heads
+            // shortcut in `scope_at` would wrongly expose them
+            Some(self.doc.change_graph.clock_at(h))
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }

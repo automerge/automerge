@@ -5,18 +5,39 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::op_set2::change::{length_prefixed_bytes, shift_range, ActorMapper};
+use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::op::{Op, OpBuilder};
-use crate::op_set2::types::{ActionCursor, ActorCursor, ActorIdx, KeyRef, MetaCursor};
+use crate::op_set2::types::{Action, ActorIdx, KeyRef};
 use crate::op_set2::{ReadOpError, ScalarValue};
+use crate::storage::change::DEFLATE_MIN_SIZE;
 use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{ChunkType, Header, RawColumn, RawColumns};
 use crate::types::{ChangeHash, ObjId, OpId};
 
-use hexane::{
-    BooleanCursor, ColumnCursor, CursorIter, DeltaCursor, Encoder, RawCursor, StrCursor, UIntCursor,
-};
-
 use super::{Bundle, BundleChange, BundleMetadata, BundleStorage, ParseError};
+
+/// Apply the actor remap inline to a nullable actor encoder and write the
+/// remapped bytes to `data`, eliding an all-`None` column to an empty range.
+fn save_opt_actor_unless_empty(
+    enc: hexane::Encoder<'_, Option<ActorIdx>>,
+    mapping: &[Option<ActorIdx>],
+    data: &mut Vec<u8>,
+) -> Range<usize> {
+    enc.save_to_unless_and_remap(data, None, |a: Option<ActorIdx>| {
+        a.map(|i| mapping[usize::from(i)].unwrap())
+    })
+}
+
+/// Apply the actor remap inline to a non-null actor encoder and always write
+/// the remapped bytes to `data`.  Used for columns where every entry is
+/// present (`id_actor`, `pred_actor`, change-level `actor`).
+fn save_actor(
+    enc: hexane::Encoder<'_, ActorIdx>,
+    mapping: &[Option<ActorIdx>],
+    data: &mut Vec<u8>,
+) -> Range<usize> {
+    enc.save_to_and_remap(data, |a: ActorIdx| mapping[usize::from(a)].unwrap())
+}
 
 pub(crate) struct BundleBuilder<'a> {
     mapper: ActorMapper<'a>,
@@ -33,6 +54,10 @@ impl<'a> BundleBuilder<'a> {
         mut changes: Vec<BundleMetadata<'a>>,
         mut mapper: ActorMapper<'a>,
     ) -> BundleBuilder<'a> {
+        // change[n].builder starts off as NodeIdx which is topo order
+        // writing the changes in topo order prevents un-needed hashes in the external buffer
+        changes.sort_by(|a, b| a.builder.cmp(&b.builder));
+
         let mut builders: Vec<_> = changes
             .iter()
             .enumerate()
@@ -122,49 +147,82 @@ impl<'a> BundleBuilder<'a> {
 
         mapper.build_mapping(None);
 
-        let mut data = vec![];
-
         let deps = self.change_writer.external.clone();
         let actors = mapper.iter().collect::<Vec<_>>();
 
-        leb128::write::unsigned(&mut data, deps.len() as u64).unwrap();
+        // Prefix: deps + actors. Identical in both the uncompressed and
+        // compressed representations.
+        let mut prefix = Vec::new();
+        leb128::write::unsigned(&mut prefix, deps.len() as u64).unwrap();
         for hash in &deps {
-            data.extend(hash.as_bytes());
+            prefix.extend(hash.as_bytes());
         }
-
-        leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
+        leb128::write::unsigned(&mut prefix, actors.len() as u64).unwrap();
         for actor in &actors {
-            length_prefixed_bytes(actor, &mut data);
+            length_prefixed_bytes(actor, &mut prefix);
         }
 
-        let mut change_bytes = vec![];
-        let change_cols = self.change_writer.finish(&mapper, &mut change_bytes);
-        let (changes_data, changes_meta) = change_cols.write(&mut data, change_bytes);
+        // Column data (uncompressed) and per-column metadata.
+        let mut change_data_buf = Vec::new();
+        let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
+        let changes_meta = change_cols.raw_columns();
+        let mut ops_data_buf = Vec::new();
+        let (ops_cols, id_ctr) = self.op_writer.finish(&mapper, &mut ops_data_buf);
+        let ops_meta = ops_cols.raw_columns();
 
-        let mut ops_bytes = vec![];
-        let ops_cols = self.op_writer.finish(&mapper, &mut ops_bytes);
-        let (ops_data, ops_meta) = ops_cols.write(&mut data, ops_bytes);
+        // ---- Uncompressed assembly (used in-memory for iteration) ----
+        let mut data_u = prefix.clone();
+        changes_meta.write(&mut data_u);
+        let changes_data_start_u = data_u.len();
+        data_u.extend_from_slice(&change_data_buf);
+        let changes_data_end_u = data_u.len();
+        ops_meta.write(&mut data_u);
+        let ops_data_start_u = data_u.len();
+        data_u.extend_from_slice(&ops_data_buf);
+        let ops_data_end_u = data_u.len();
 
-        let header = Header::new(ChunkType::Bundle, &data);
+        let header_u = Header::new(ChunkType::Bundle, &data_u);
+        let mut bytes_u = Vec::with_capacity(header_u.len() + data_u.len());
+        header_u.write(&mut bytes_u);
+        bytes_u.extend(data_u);
 
-        let mut bytes = Vec::with_capacity(header.len() + data.len());
-        header.write(&mut bytes);
-        bytes.extend(data);
+        let changes_data_u_range =
+            shift_range(changes_data_start_u..changes_data_end_u, header_u.len());
+        let ops_data_u_range = shift_range(ops_data_start_u..ops_data_end_u, header_u.len());
 
-        let bytes = Cow::Owned(bytes);
+        // ---- Compressed assembly (used as the on-disk/wire form) ----
+        // Per-column DEFLATE above DEFLATE_MIN_SIZE, mirroring Document.
+        let mut data_c = prefix;
+        let mut compressed_change_data = Vec::new();
+        let changes_meta_c = changes_meta.compress(
+            &change_data_buf,
+            &mut compressed_change_data,
+            DEFLATE_MIN_SIZE,
+        );
+        changes_meta_c.write(&mut data_c);
+        data_c.extend_from_slice(&compressed_change_data);
+        let mut compressed_ops_data = Vec::new();
+        let ops_meta_c =
+            ops_meta.compress(&ops_data_buf, &mut compressed_ops_data, DEFLATE_MIN_SIZE);
+        ops_meta_c.write(&mut data_c);
+        data_c.extend_from_slice(&compressed_ops_data);
 
-        let ops_data = shift_range(ops_data, header.len());
-        let changes_data = shift_range(changes_data, header.len());
+        let header_c = Header::new(ChunkType::Bundle, &data_c);
+        let mut bytes_c = Vec::with_capacity(header_c.len() + data_c.len());
+        header_c.write(&mut bytes_c);
+        bytes_c.extend(data_c);
 
         let storage = BundleStorage {
-            bytes,
-            header,
+            bytes: Cow::Owned(bytes_u),
+            compressed_bytes: Some(Cow::Owned(bytes_c)),
+            header: header_u,
             ops_meta,
-            ops_data,
+            ops_data: ops_data_u_range,
             deps,
             actors,
             changes_meta,
-            changes_data,
+            changes_data: changes_data_u_range,
+            id_ctr,
             _phantom: PhantomData,
         };
 
@@ -193,15 +251,15 @@ pub(crate) struct BundleChangeWriter<'a> {
     cap: usize,
     seen: HashMap<ChangeHash, usize>,
     external: Vec<ChangeHash>,
-    actor: Encoder<'a, ActorCursor>,
-    seq: Encoder<'a, DeltaCursor>,
-    start_op: Encoder<'a, DeltaCursor>,
-    max_op: Encoder<'a, DeltaCursor>,
-    timestamp: Encoder<'a, DeltaCursor>,
-    message: Encoder<'a, StrCursor>,
-    dep_count: Encoder<'a, UIntCursor>,
-    deps: Encoder<'a, DeltaCursor>,
-    extra_count: Encoder<'a, UIntCursor>,
+    actor: hexane::Encoder<'a, ActorIdx>,
+    seq: hexane::DeltaEncoder<'a, i64>,
+    start_op: hexane::DeltaEncoder<'a, i64>,
+    max_op: hexane::DeltaEncoder<'a, i64>,
+    timestamp: hexane::DeltaEncoder<'a, i64>,
+    message: hexane::Encoder<'a, Option<String>>,
+    dep_count: hexane::Encoder<'a, u32>,
+    deps: hexane::DeltaEncoder<'a, i64>,
+    extra_count: hexane::Encoder<'a, u32>,
     extra: Vec<u8>,
 }
 
@@ -222,33 +280,34 @@ impl<'a> BundleChangeWriter<'a> {
         self.seq.append(change.seq as i64);
         self.start_op.append(change.start_op as i64);
         self.max_op.append(change.max_op as i64);
-        self.message.append(change.message.clone());
+        self.message
+            .append_owned(change.message.as_deref().map(str::to_owned));
         self.timestamp.append(change.timestamp);
-        self.extra_count.append(change.extra.len() as u64);
+        self.extra_count.append(change.extra.len() as u32);
         self.extra.extend_from_slice(&change.extra);
-        self.dep_count.append(change.deps.len() as u64);
+        self.dep_count.append(change.deps.len() as u32);
         for d in &change.deps {
-            if let Some(i) = self.seen.get(d) {
-                self.deps.append(*i as i64);
+            let dep_idx = if let Some(i) = self.seen.get(d) {
+                *i as i64
             } else {
                 let index = self.cap + self.external.len();
                 self.seen.insert(*d, index);
                 self.external.push(*d);
-                self.deps.append(index as i64);
-            }
+                index as i64
+            };
+            self.deps.append(dep_idx);
         }
     }
 
     fn finish(self, mapper: &ActorMapper<'_>, data: &mut Vec<u8>) -> BundleChangeColumns {
-        let remap = move |a: &ActorIdx| mapper.mapping[usize::from(*a)].as_ref();
-        let actor = self.actor.save_to_and_remap(data, remap);
+        let actor = save_actor(self.actor, &mapper.mapping, data);
         let seq = self.seq.save_to(data);
         let start_op = self.start_op.save_to(data);
         let max_op = self.max_op.save_to(data);
         let timestamp = self.timestamp.save_to(data);
         let message = self.message.save_to(data);
         let dep_count = self.dep_count.save_to(data);
-        let deps = self.deps.save_to_unless_empty(data);
+        let deps = self.deps.save_to(data);
         let extra_count = self.extra_count.save_to(data);
         let start = data.len();
         data.extend_from_slice(&self.extra);
@@ -270,91 +329,132 @@ impl<'a> BundleChangeWriter<'a> {
 
 #[derive(Default)]
 pub(crate) struct BundleOpWriter<'a> {
-    obj_actor: Encoder<'a, ActorCursor>,
-    obj_ctr: Encoder<'a, DeltaCursor>,
-    key_actor: Encoder<'a, ActorCursor>,
-    key_ctr: Encoder<'a, DeltaCursor>,
-    key_str: Encoder<'a, StrCursor>,
-    id_actor: Encoder<'a, ActorCursor>,
-    id_ctr: Encoder<'a, DeltaCursor>,
-    insert: Encoder<'a, BooleanCursor>,
-    action: Encoder<'a, ActionCursor>,
-    value_meta: Encoder<'a, MetaCursor>,
-    value: Encoder<'a, RawCursor>,
-    pred_count: Encoder<'a, UIntCursor>,
-    pred_actor: Encoder<'a, ActorCursor>,
-    pred_ctr: Encoder<'a, DeltaCursor>,
-    expand: Encoder<'a, BooleanCursor>,
-    mark_name: Encoder<'a, StrCursor>,
+    obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    key_str: hexane::Encoder<'a, Option<String>>,
+    id_actor: hexane::Encoder<'a, ActorIdx>,
+    insert: hexane::Encoder<'a, bool>,
+    action: hexane::Encoder<'a, Action>,
+    value_meta: hexane::Encoder<'a, ValueMeta>,
+    value: Vec<u8>,
+    pred_count: hexane::Encoder<'a, u32>,
+    pred_actor: hexane::Encoder<'a, ActorIdx>,
+    pred_ctr: hexane::DeltaEncoder<'a, i64>,
+    expand: hexane::Encoder<'a, bool>,
+    mark_name: hexane::Encoder<'a, Option<String>>,
+    /// `(actor, counter, doc_pos)` for each op as we process it. At
+    /// `finish` time these are sorted by `(actor, counter)` and the
+    /// `doc_pos` values are emitted as a delta-int column.
+    inverse_positions: Vec<(usize, u64, u32)>,
 }
 
 impl<'a> BundleOpWriter<'a> {
     fn add(&mut self, op: OpBuilder<'a>, _index: usize, mapper: &mut ActorMapper<'a>) {
         mapper.process_op(&op);
+        let doc_pos = self.id_actor.len() as u32;
         self.id_actor.append(op.id.actoridx());
-        self.id_ctr.append(op.id.icounter());
         self.obj_actor.append(op.obj.actor());
         self.obj_ctr.append(op.obj.icounter());
         self.key_actor.append(op.key.actor());
         self.key_ctr.append(op.key.icounter());
-        self.key_str.append(op.key.key_str());
+        self.key_str
+            .append_owned(op.key.key_str().map(|s| s.into_owned()));
         self.insert.append(op.insert);
         self.action.append(op.action);
         self.value_meta.append(op.value.meta());
-        self.value.append(op.value.to_raw());
-        self.pred_count.append(op.pred.len() as u64);
+        if let Some(bytes) = op.value.to_raw() {
+            self.value.extend_from_slice(&bytes);
+        }
+        self.pred_count.append(op.pred.len() as u32);
         for p in &op.pred {
             self.pred_actor.append(p.actoridx());
             self.pred_ctr.append(p.icounter());
         }
         self.expand.append(op.expand);
-        self.mark_name.append(op.mark_name);
+        self.mark_name
+            .append_owned(op.mark_name.map(|s| s.into_owned()));
+        self.inverse_positions
+            .push((op.id.actor(), op.id.counter(), doc_pos));
     }
 
-    fn finish(self, mapper: &ActorMapper<'a>, data: &mut Vec<u8>) -> BundleOpsColumns {
-        let remap = move |a: &ActorIdx| mapper.mapping[usize::from(*a)].as_ref();
-        let obj_actor = self.obj_actor.save_to_and_remap_unless_empty(data, remap);
-        let obj_ctr = self.obj_ctr.save_to_unless_empty(data);
-        let key_actor = self.key_actor.save_to_and_remap_unless_empty(data, remap);
-        let key_ctr = self.key_ctr.save_to_unless_empty(data);
-        let key_str = self.key_str.save_to_unless_empty(data);
-        let id_actor = self.id_actor.save_to_and_remap(data, remap);
-        let id_ctr = self.id_ctr.save_to(data);
+    fn finish(
+        mut self,
+        mapper: &ActorMapper<'a>,
+        data: &mut Vec<u8>,
+    ) -> (BundleOpsColumns, Vec<i64>) {
+        let obj_actor = save_opt_actor_unless_empty(self.obj_actor, &mapper.mapping, data);
+        let obj_ctr = self.obj_ctr.save_to_unless(data, None);
+        let key_actor = save_opt_actor_unless_empty(self.key_actor, &mapper.mapping, data);
+        let key_ctr = self.key_ctr.save_to_unless(data, None);
+        let key_str = self.key_str.save_to_unless(data, None);
+        let id_actor = save_actor(self.id_actor, &mapper.mapping, data);
         let insert = self.insert.save_to(data);
-        let action = self.action.save_to_unless_empty(data);
-        let value_meta = self.value_meta.save_to_unless_empty(data);
-        let value = self.value.save_to_unless_empty(data);
-        let pred_count = self.pred_count.save_to_unless_empty(data);
-        let pred_actor = self.pred_actor.save_to_and_remap_unless_empty(data, remap);
-        let pred_ctr = self.pred_ctr.save_to_unless_empty(data);
-        let expand = self.expand.save_to_unless_empty(data);
-        let mark_name = self.mark_name.save_to_unless_empty(data);
+        let action = self.action.save_to(data);
+        let value_meta = self.value_meta.save_to(data);
+        let value_start = data.len();
+        data.extend_from_slice(&self.value);
+        let value = value_start..data.len();
+        let pred_count = self.pred_count.save_to(data);
+        let pred_actor = save_actor(self.pred_actor, &mapper.mapping, data);
+        let pred_ctr = self.pred_ctr.save_to(data);
+        let expand = self.expand.save_to_unless(data, false);
+        let mark_name = self.mark_name.save_to_unless(data, None);
 
-        BundleOpsColumns {
-            id_actor,
-            id_ctr,
-            obj_actor,
-            obj_ctr,
-            key_actor,
-            key_ctr,
-            key_str,
-            insert,
-            action,
-            value_meta,
-            value,
-            pred_count,
-            pred_actor,
-            pred_ctr,
-            expand,
-            mark_name,
+        // Capture doc-order counters before sorting `inverse_positions`.
+        // `add()` populates this Vec in doc order, so element k is the
+        // counter of the op at doc position k.
+        let id_ctr_values: Vec<i64> = self
+            .inverse_positions
+            .iter()
+            .map(|(_, counter, _)| *counter as i64)
+            .collect();
+
+        // Sort by canonical (actor, counter) order and emit each op's
+        // doc_pos as a delta-int — the inverse permutation. Readers walk
+        // the change metadata in (actor, seq) order to materialise the
+        // canonical (actor, counter) for each `k`, then look up
+        // `doc_pos = inverse[k]` to place that op's id in the doc-order
+        // column. For editing-style workloads where each new op lands
+        // close to its predecessor, the deltas are almost all `+1`s —
+        // far more compressible than the doc-order counter sequence.
+        self.inverse_positions
+            .sort_unstable_by_key(|(a, c, _)| (*a, *c));
+        let mut id_ctr_inverse_enc = hexane::DeltaEncoder::<i64>::default();
+        for (_, _, doc_pos) in &self.inverse_positions {
+            id_ctr_inverse_enc.append(*doc_pos as i64);
         }
+        let id_ctr_inverse = id_ctr_inverse_enc.save_to(data);
+
+        (
+            BundleOpsColumns {
+                id_actor,
+                id_ctr_inverse,
+                obj_actor,
+                obj_ctr,
+                key_actor,
+                key_ctr,
+                key_str,
+                insert,
+                action,
+                value_meta,
+                value,
+                pred_count,
+                pred_actor,
+                pred_ctr,
+                expand,
+                mark_name,
+            },
+            id_ctr_values,
+        )
     }
 }
 
 #[derive(Default)]
 pub(crate) struct BundleOpsColumns {
     pub(crate) id_actor: Range<usize>,
-    pub(crate) id_ctr: Range<usize>,
+    pub(crate) id_ctr_inverse: Range<usize>,
     pub(crate) obj_actor: Range<usize>,
     pub(crate) obj_ctr: Range<usize>,
     pub(crate) key_actor: Range<usize>,
@@ -386,19 +486,6 @@ pub(crate) struct BundleChangeColumns {
 }
 
 impl BundleChangeColumns {
-    fn write(
-        &self,
-        data: &mut Vec<u8>,
-        col_data: Vec<u8>,
-    ) -> (Range<usize>, RawColumns<compression::Uncompressed>) {
-        let cols = self.raw_columns();
-        cols.write(data);
-        let start = data.len();
-        data.extend(col_data);
-        let end = data.len();
-        (start..end, cols)
-    }
-
     fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (change::ACTOR, &self.actor),
@@ -420,18 +507,6 @@ impl BundleChangeColumns {
 }
 
 impl BundleOpsColumns {
-    fn write(
-        &self,
-        data: &mut Vec<u8>,
-        col_data: Vec<u8>,
-    ) -> (Range<usize>, RawColumns<compression::Uncompressed>) {
-        let cols = self.raw_columns();
-        cols.write(data);
-        let start = data.len();
-        data.extend(col_data);
-        let end = data.len();
-        (start..end, cols)
-    }
     fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (ops::OBJ_ACTOR, &self.obj_actor),
@@ -440,7 +515,6 @@ impl BundleOpsColumns {
             (ops::KEY_CTR, &self.key_ctr),
             (ops::KEY_STR, &self.key_str),
             (ops::ID_ACTOR, &self.id_actor),
-            (ops::ID_CTR, &self.id_ctr),
             (ops::INSERT, &self.insert),
             (ops::ACTION, &self.action),
             (ops::VALUE_META, &self.value_meta),
@@ -448,8 +522,9 @@ impl BundleOpsColumns {
             (ops::PRED_COUNT, &self.pred_count),
             (ops::PRED_ACTOR, &self.pred_actor),
             (ops::PRED_CTR, &self.pred_ctr),
-            (ops::MARK_NAME, &self.mark_name),
             (ops::EXPAND, &self.expand),
+            (ops::MARK_NAME, &self.mark_name),
+            (ops::ID_CTR_INVERSE, &self.id_ctr_inverse),
         ]
         .into_iter()
         .filter(|(_, range)| !range.is_empty())
@@ -495,15 +570,15 @@ pub(crate) struct BundleChangeIterUnverified<'a> {
 
 #[derive(Debug)]
 struct BundleChangeIterInner<'a> {
-    actor: CursorIter<'a, ActorCursor>,
-    seq: CursorIter<'a, DeltaCursor>,
-    max_op: CursorIter<'a, DeltaCursor>,
-    start_op: CursorIter<'a, DeltaCursor>,
-    timestamp: CursorIter<'a, DeltaCursor>,
-    message: CursorIter<'a, StrCursor>,
-    dep_count: CursorIter<'a, UIntCursor>,
-    deps: CursorIter<'a, DeltaCursor>,
-    extra_count: CursorIter<'a, UIntCursor>,
+    actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    seq: hexane::DeltaDecoder<'a, Option<i64>>,
+    max_op: hexane::DeltaDecoder<'a, Option<i64>>,
+    start_op: hexane::DeltaDecoder<'a, Option<i64>>,
+    timestamp: hexane::DeltaDecoder<'a, Option<i64>>,
+    message: hexane::Decoder<'a, Option<String>>,
+    dep_count: hexane::Decoder<'a, Option<u64>>,
+    deps: hexane::DeltaDecoder<'a, Option<i64>>,
+    extra_count: hexane::Decoder<'a, Option<u64>>,
     extra: &'a [u8],
 }
 
@@ -541,29 +616,29 @@ impl<'a> BundleChangeIterInner<'a> {
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
-        let mut actor = ActorCursor::iter(&[]);
-        let mut seq = DeltaCursor::iter(&[]);
-        let mut max_op = DeltaCursor::iter(&[]);
-        let mut start_op = DeltaCursor::iter(&[]);
-        let mut timestamp = DeltaCursor::iter(&[]);
-        let mut message = StrCursor::iter(&[]);
-        let mut dep_count = UIntCursor::iter(&[]);
-        let mut deps = DeltaCursor::iter(&[]);
-        let mut extra_count = UIntCursor::iter(&[]);
+        let mut actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut seq = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut max_op = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut start_op = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut timestamp = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut message = hexane::decoder::<Option<String>>(&[]);
+        let mut dep_count = hexane::decoder::<Option<u64>>(&[]);
+        let mut deps = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut extra_count = hexane::decoder::<Option<u64>>(&[]);
         let mut extra: &[u8] = &[];
 
         for col in columns.iter() {
             let d = &data[col.data()];
             match col.spec() {
-                change::ACTOR => actor = ActorCursor::iter(d),
-                change::SEQ => seq = DeltaCursor::iter(d),
-                change::START_OP => start_op = DeltaCursor::iter(d),
-                change::MAX_OP => max_op = DeltaCursor::iter(d),
-                change::TIMESTAMP => timestamp = DeltaCursor::iter(d),
-                change::MESSAGE => message = StrCursor::iter(d),
-                change::DEP_COUNT => dep_count = UIntCursor::iter(d),
-                change::DEPS => deps = DeltaCursor::iter(d),
-                change::EXTRA_COUNT => extra_count = UIntCursor::iter(d),
+                change::ACTOR => actor = hexane::decoder::<Option<ActorIdx>>(d),
+                change::SEQ => seq = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::START_OP => start_op = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::MAX_OP => max_op = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::TIMESTAMP => timestamp = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::MESSAGE => message = hexane::decoder::<Option<String>>(d),
+                change::DEP_COUNT => dep_count = hexane::decoder::<Option<u64>>(d),
+                change::DEPS => deps = hexane::DeltaDecoder::<Option<i64>>::new(d),
+                change::EXTRA_COUNT => extra_count = hexane::decoder::<Option<u64>>(d),
                 change::EXTRA => extra = d,
                 spec => return Err(ParseError::InvalidChangeColumn(u32::from(spec))),
             }
@@ -583,72 +658,40 @@ impl<'a> BundleChangeIterInner<'a> {
     }
 
     fn try_next(&mut self) -> Result<Option<BundleChange<'a>>, ParseError> {
-        let actor = match self.actor.next().transpose()?.flatten().as_deref().copied() {
-            Some(actor) => actor.into(),
+        let actor = match self.actor.next().flatten() {
+            Some(a) => a.into(),
             None => return Ok(None),
         };
-
         let seq = self
             .seq
             .next()
-            .transpose()?
             .flatten()
-            .as_deref()
-            .copied()
             .ok_or(ReadOpError::MissingValue("seq"))? as u64;
         let start_op = self
             .start_op
             .next()
-            .transpose()?
             .flatten()
-            .as_deref()
-            .copied()
             .ok_or(ReadOpError::MissingValue("start_op"))? as u64;
         let max_op = self
             .max_op
             .next()
-            .transpose()?
             .flatten()
-            .as_deref()
-            .copied()
             .ok_or(ReadOpError::MissingValue("max_op"))? as u64;
-        let timestamp = self
-            .timestamp
-            .next()
-            .transpose()?
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or(0);
-        let message = self.message.next().transpose()?.flatten();
-        let dep_count = self
-            .dep_count
-            .next()
-            .transpose()?
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or(0) as usize;
-        let mut deps = vec![];
+        let timestamp = self.timestamp.next().flatten().unwrap_or(0);
+        let message = self.message.next().flatten().map(Cow::Borrowed);
+        let dep_count = self.dep_count.next().flatten().unwrap_or(0) as usize;
+
+        let mut deps = Vec::with_capacity(dep_count);
         for _ in 0..dep_count {
             let dep = self
                 .deps
                 .next()
-                .transpose()?
                 .flatten()
-                .as_deref()
-                .copied()
                 .ok_or(ReadOpError::MissingValue("dep"))? as u64;
             deps.push(dep);
         }
-        let extra_count = self
-            .extra_count
-            .next()
-            .transpose()?
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or(0) as usize;
+
+        let extra_count = self.extra_count.next().flatten().unwrap_or(0) as usize;
         let (extra, tail) = self.extra.split_at(extra_count);
         let extra = Cow::Borrowed(extra);
         self.extra = tail;
@@ -672,39 +715,45 @@ pub(crate) struct OpIterUnverified<'a> {
 }
 
 impl<'a> OpIterUnverified<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
+    pub(crate) fn new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+        id_ctr_values: &'a [i64],
+    ) -> Self {
         Self {
-            inner: OpIterInner::try_new(columns, data).ok(),
+            inner: OpIterInner::try_new(columns, data, id_ctr_values).ok(),
         }
     }
 
     pub(crate) fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
+        id_ctr_values: &'a [i64],
     ) -> Result<Self, ParseError> {
         Ok(Self {
-            inner: Some(OpIterInner::try_new(columns, data)?),
+            inner: Some(OpIterInner::try_new(columns, data, id_ctr_values)?),
         })
     }
 }
 
 struct OpIterInner<'a> {
-    obj_actor: CursorIter<'a, ActorCursor>,
-    obj_ctr: CursorIter<'a, DeltaCursor>,
-    key_actor: CursorIter<'a, ActorCursor>,
-    key_ctr: CursorIter<'a, DeltaCursor>,
-    key_str: CursorIter<'a, StrCursor>,
-    id_actor: CursorIter<'a, ActorCursor>,
-    id_ctr: CursorIter<'a, DeltaCursor>,
-    insert: CursorIter<'a, BooleanCursor>,
-    action: CursorIter<'a, ActionCursor>,
-    meta: CursorIter<'a, MetaCursor>,
+    obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    key_str: hexane::Decoder<'a, Option<String>>,
+    id_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    /// Doc-order counter values reconstructed at parse time.
+    id_ctr: std::slice::Iter<'a, i64>,
+    insert: hexane::Decoder<'a, bool>,
+    action: hexane::Decoder<'a, Option<Action>>,
+    meta: hexane::Decoder<'a, Option<ValueMeta>>,
+    pred_count: hexane::Decoder<'a, Option<u64>>,
+    pred_actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    pred_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
+    expand: hexane::Decoder<'a, bool>,
+    mark_name: hexane::Decoder<'a, Option<String>>,
     value: &'a [u8],
-    pred_count: CursorIter<'a, UIntCursor>,
-    pred_actor: CursorIter<'a, ActorCursor>,
-    pred_ctr: CursorIter<'a, DeltaCursor>,
-    expand: CursorIter<'a, BooleanCursor>,
-    mark_name: CursorIter<'a, StrCursor>,
 }
 
 pub(crate) struct OpIter<'a> {
@@ -712,9 +761,13 @@ pub(crate) struct OpIter<'a> {
 }
 
 impl<'a> OpIter<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
+    pub(crate) fn new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+        id_ctr_values: &'a [i64],
+    ) -> Self {
         Self {
-            iter: OpIterUnverified::new(columns, data),
+            iter: OpIterUnverified::new(columns, data, id_ctr_values),
         }
     }
 }
@@ -741,68 +794,46 @@ impl<'a> Iterator for OpIterUnverified<'a> {
 
 impl<'a> OpIterInner<'a> {
     fn try_next(&mut self) -> Result<Option<OpBuilder<'a>>, ParseError> {
-        let id_actor = self.id_actor.next().transpose()?.flatten();
-        let id_ctr = self.id_ctr.next().transpose()?.flatten();
+        let id_actor = self.id_actor.next().flatten();
+        let id_ctr = self.id_ctr.next().copied();
         let id = match OpId::try_load(id_actor, id_ctr) {
             Ok(id) => id,
             Err(_) => return Ok(None),
         };
-        let obj_actor = self.obj_actor.next().transpose()?.flatten();
-        let obj_ctr = self.obj_ctr.next().transpose()?.flatten();
-        let obj = ObjId::try_load_i(obj_actor, obj_ctr)?;
 
-        let key_str = self.key_str.next().transpose()?.flatten();
-        let key_actor = self.key_actor.next().transpose()?.flatten();
-        let key_ctr = self.key_ctr.next().transpose()?.flatten();
+        let obj_actor = self.obj_actor.next().flatten();
+        let obj_ctr = self.obj_ctr.next().flatten();
+        let obj = ObjId::try_load(obj_actor, obj_ctr)?;
+
+        let key_str = self.key_str.next().flatten();
+        let key_actor = self.key_actor.next().flatten();
+        let key_ctr = self.key_ctr.next().flatten();
         let key = KeyRef::try_load(key_str, key_actor, key_ctr)?;
 
-        let action = *self
+        let action = self
             .action
             .next()
-            .transpose()?
             .flatten()
             .ok_or(ReadOpError::MissingValue("action"))?;
+        let insert = self.insert.next().unwrap_or_default();
+        let expand = self.expand.next().unwrap_or_default();
+        let mark_name = self.mark_name.next().flatten().map(Cow::Borrowed);
 
-        let insert = self
-            .insert
+        let value_meta = self
+            .meta
             .next()
-            .transpose()?
             .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or_default();
-
-        let expand = self
-            .expand
-            .next()
-            .transpose()?
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or_default();
-
-        let mark_name = self.mark_name.next().transpose()?.flatten();
-
-        let value_meta = self.meta.next().transpose()?.flatten();
-        let value_meta = value_meta.ok_or(ReadOpError::MissingValue("value_meta"))?;
+            .ok_or(ReadOpError::MissingValue("value_meta"))?;
         let (value_raw, tail) = self.value.split_at(value_meta.length());
         self.value = tail;
-        let value = ScalarValue::from_raw(*value_meta, value_raw)
+        let value = ScalarValue::from_raw(value_meta, value_raw)
             .map_err(|_| ReadOpError::MissingValue("value"))?;
 
-        let pred_count = self
-            .pred_count
-            .next()
-            .transpose()?
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or(0) as usize;
+        let pred_count = self.pred_count.next().flatten().unwrap_or(0) as usize;
         let mut pred = Vec::with_capacity(pred_count);
-
         for _ in 0..pred_count {
-            let pred_actor = self.pred_actor.next().transpose()?.flatten();
-            let pred_ctr = self.pred_ctr.next().transpose()?.flatten();
+            let pred_actor = self.pred_actor.next().flatten();
+            let pred_ctr = self.pred_ctr.next().flatten();
             pred.push(OpId::try_load(pred_actor, pred_ctr)?);
         }
 
@@ -822,44 +853,57 @@ impl<'a> OpIterInner<'a> {
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
+        id_ctr_values: &'a [i64],
     ) -> Result<Self, ParseError> {
-        let mut obj_actor = ActorCursor::iter(&[]);
-        let mut obj_ctr = DeltaCursor::iter(&[]);
-        let mut key_actor = ActorCursor::iter(&[]);
-        let mut key_ctr = DeltaCursor::iter(&[]);
-        let mut key_str = StrCursor::iter(&[]);
-        let mut id_actor = ActorCursor::iter(&[]);
-        let mut id_ctr = DeltaCursor::iter(&[]);
-        let mut insert = BooleanCursor::iter(&[]);
-        let mut action = ActionCursor::iter(&[]);
-        let mut meta = MetaCursor::iter(&[]);
-        let mut value: &[u8] = &[]; //RawCursor::iter(&[]);
-        let mut pred_count = UIntCursor::iter(&[]);
-        let mut pred_actor = ActorCursor::iter(&[]);
-        let mut pred_ctr = DeltaCursor::iter(&[]);
-        let mut expand = BooleanCursor::iter(&[]);
-        let mut mark_name = StrCursor::iter(&[]);
+        let mut obj_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut key_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut key_str = hexane::decoder::<Option<String>>(&[]);
+        let mut id_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let id_ctr = id_ctr_values.iter();
+        let mut insert = hexane::decoder::<bool>(&[]);
+        let mut action = hexane::decoder::<Option<Action>>(&[]);
+        let mut meta = hexane::decoder::<Option<ValueMeta>>(&[]);
+        let mut pred_count = hexane::decoder::<Option<u64>>(&[]);
+        let mut pred_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
+        let mut pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
+        let mut expand = hexane::decoder::<bool>(&[]);
+        let mut mark_name = hexane::decoder::<Option<String>>(&[]);
+        let mut value: &[u8] = &[];
 
         for col in columns.iter() {
             let d = &data[col.data()];
             type C = ColumnType;
             match (col.spec().id(), col.spec().col_type()) {
-                (ops::OBJ_COL_ID, C::Actor) => obj_actor = ActorCursor::iter(d),
-                (ops::OBJ_COL_ID, C::DeltaInteger) => obj_ctr = DeltaCursor::iter(d),
-                (ops::KEY_COL_ID, C::Actor) => key_actor = ActorCursor::iter(d),
-                (ops::KEY_COL_ID, C::DeltaInteger) => key_ctr = DeltaCursor::iter(d),
-                (ops::KEY_COL_ID, C::String) => key_str = StrCursor::iter(d),
-                (ops::ID_COL_ID, C::Actor) => id_actor = ActorCursor::iter(d),
-                (ops::ID_COL_ID, C::DeltaInteger) => id_ctr = DeltaCursor::iter(d),
-                (ops::INSERT_COL_ID, C::Boolean) => insert = BooleanCursor::iter(d),
-                (ops::ACTION_COL_ID, C::Integer) => action = ActionCursor::iter(d),
-                (ops::VAL_COL_ID, C::ValueMetadata) => meta = MetaCursor::iter(d),
+                (ops::OBJ_COL_ID, C::Actor) => obj_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::OBJ_COL_ID, C::DeltaInteger) => {
+                    obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::KEY_COL_ID, C::Actor) => key_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::KEY_COL_ID, C::DeltaInteger) => {
+                    key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::KEY_COL_ID, C::String) => key_str = hexane::decoder::<Option<String>>(d),
+                (ops::ID_COL_ID, C::Actor) => id_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                // Both counter encodings are handled at the storage layer.
+                (ops::ID_CTR_INVERSE_COL_ID, C::DeltaInteger) => {}
+                (ops::ID_COL_ID, C::DeltaInteger) => {}
+                (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::decoder::<bool>(d),
+                (ops::ACTION_COL_ID, C::Integer) => action = hexane::decoder::<Option<Action>>(d),
+                (ops::VAL_COL_ID, C::ValueMetadata) => {
+                    meta = hexane::decoder::<Option<ValueMeta>>(d)
+                }
                 (ops::VAL_COL_ID, C::Value) => value = d,
-                (ops::PRED_COL_ID, C::Group) => pred_count = UIntCursor::iter(d),
-                (ops::PRED_COL_ID, C::Actor) => pred_actor = ActorCursor::iter(d),
-                (ops::PRED_COL_ID, C::DeltaInteger) => pred_ctr = DeltaCursor::iter(d),
-                (ops::EXPAND_COL_ID, C::Boolean) => expand = BooleanCursor::iter(d),
-                (ops::MARK_NAME_COL_ID, C::String) => mark_name = StrCursor::iter(d),
+                (ops::PRED_COL_ID, C::Group) => pred_count = hexane::decoder::<Option<u64>>(d),
+                (ops::PRED_COL_ID, C::Actor) => pred_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::PRED_COL_ID, C::DeltaInteger) => {
+                    pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                }
+                (ops::EXPAND_COL_ID, C::Boolean) => expand = hexane::decoder::<bool>(d),
+                (ops::MARK_NAME_COL_ID, C::String) => {
+                    mark_name = hexane::decoder::<Option<String>>(d)
+                }
                 _ => return Err(ParseError::InvalidOpColumn(u32::from(col.spec()))),
             }
         }
@@ -897,9 +941,15 @@ pub(crate) mod ops {
     pub(super) const PRED_COL_ID:           ColumnId = ColumnId::new(7);
     pub(super) const EXPAND_COL_ID:         ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID:      ColumnId = ColumnId::new(10);
+    /// Inverse permutation of doc positions. For each op in canonical
+    /// `(actor, counter)` order, stores its doc-order index as a
+    /// delta-int. Readers reconstruct each op's `counter` from this
+    /// column plus the change metadata — no separate `ID_CTR` column on
+    /// the wire.
+    pub(super) const ID_CTR_INVERSE_COL_ID: ColumnId = ColumnId::new(11);
 
     pub(super) const ID_ACTOR:   ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
-    pub(super) const ID_CTR:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
+    pub(super) const ID_CTR_INVERSE: ColumnSpec = ColumnSpec::new_delta(ID_CTR_INVERSE_COL_ID);
     pub(super) const OBJ_ACTOR:  ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
     pub(super) const OBJ_CTR:    ColumnSpec = ColumnSpec::new_delta(OBJ_COL_ID);
     pub(super) const KEY_ACTOR:  ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
