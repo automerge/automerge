@@ -76,10 +76,13 @@
     "fmt": "prettier -c .prettierrc -w",
     "build": "node ./scripts/build.mjs",
     "test": "ts-mocha --loader=ts-node/esm --experimental-specifier-resolution=node --type-check test/*.ts",
+    "api-check": "api-extractor run -c config/api-extractor.json",
+    "api-update": "api-extractor run --local -c config/api-extractor.json",
     "packaging-tests": "node packaging_tests/run.mjs",
     "watch-docs": "typedoc src/index.ts --watch --readme none"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.59.1",
     "@types/expect": "^24.3.0",
     "@types/mocha": "^10.0.1",
     "@types/node": "^26.1.2",
