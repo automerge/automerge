@@ -48,6 +48,74 @@ Any time you change the rust code in `../rust/*` you'll need to re-run the
 
 Read on to understand what the `build` step is doing.
 
+## Checking the public API surface
+
+The public API is the set of values and types that consumers can reach through
+the package entry point (`src/index.ts`, built to `dist/index.d.ts`). It is easy
+to change this surface by accident - for example to add a method whose return
+type is used but never re-exported, so callers can call the method but cannot
+name its type (`Automerge.Author` is one such case). We guard against this with
+[API Extractor](https://api-extractor.com/).
+
+API Extractor reads `dist/index.d.ts`, walks the entire reachable public API,
+and writes a report of it to `etc/automerge.api.md`, which is committed to git.
+CI (`scripts/ci/js_tests`, via `npm run api-check`) regenerates the report and
+fails if it differs from the committed one. So any change to the public surface
+- a new export, a changed signature, a newly re-exported type - is caught and
+has to be acknowledged in review.
+
+The relevant files are:
+
+- `config/api-extractor.json` - the configuration.
+- `etc/automerge.api.md` - the committed report. This is the source of truth
+  that CI diffs against; review changes to it like any other code.
+- `temp/` - scratch space API Extractor writes the freshly generated report to
+  before diffing. It is git-ignored.
+
+### Everyday workflow
+
+`api-check` runs against the built `dist`, so build first:
+
+```
+npm run build
+npm run api-check     # verify the surface matches etc/automerge.api.md (what CI runs)
+```
+
+When you intentionally change the public API, regenerate the report and commit
+it alongside your change:
+
+```
+npm run api-update    # rewrites etc/automerge.api.md
+git add etc/automerge.api.md
+```
+
+If `api-check` fails in CI it means the committed report is stale: run
+`npm run api-update`, review the diff (it is human-readable), and commit it.
+
+### Forgotten exports
+
+API Extractor also flags "forgotten exports": types that are reachable through
+the public API but are not themselves exported from the entry point. These are
+recorded as comments at the bottom of `etc/automerge.api.md`, for example:
+
+```
+// (ae-forgotten-export) The symbol "Author" needs to be exported by the entry point index.d.ts
+```
+
+Today these are recorded as a baseline rather than failing the build, because
+there is a pre-existing backlog. Some of them are types that should be public
+(and simply need adding to an `export type { ... }` block in
+`src/implementation.ts`); others are genuine internals leaking into a public
+signature (which should instead be refactored out or marked `@internal`). Once
+the list is empty, promote `ae-forgotten-export` to a hard error by setting it
+to `"logLevel": "error"` with `"addToApiReportFile": false` in
+`config/api-extractor.json`.
+
+Note: API Extractor bundles its own TypeScript, which may be older than the one
+this package uses. When that happens it prints a "newer than the bundled
+compiler engine" notice and analyses with the bundled version; this is expected
+and harmless.
+
 ## Packaging the WebAssembly
 
 The `automerge-wasm` rust code uses `wasm-bindgen` to produce a WebAssembly
