@@ -1048,12 +1048,11 @@ fn revoke_author_with_new_actor_hidden() {
 
 // TODO(finto): test revoke at empty heads, i.e. document inception
 
-// Regression: `hydrate`/`materialize` must hide revoked ops even when called
-// with no explicit heads. Previously the no-heads path passed `clock = None`
-// straight through, so materialized values ignored the active revocation clock
-// while `get`/`keys`/`text` (which fall back to it) did not.
+// Regression: hydration with no heads and with explicitly supplied current
+// heads must both apply the active revocation clock, including when summing
+// counter increments (which cannot rely on the visibility index alone).
 #[test]
-fn revoke_reflected_in_hydrate_without_heads() {
+fn revoke_reflected_in_hydrate_with_implicit_and_explicit_current_heads() {
     let ffff = Author::try_from("ffff").unwrap();
     let aaaa = Author::try_from("aaaa").unwrap();
 
@@ -1073,6 +1072,7 @@ fn revoke_reflected_in_hydrate_without_heads() {
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.insert(&list, 3, "cat").unwrap();
     doc.splice_text(&text, 6, 0, "big ").unwrap();
+    let heads2 = doc.get_heads();
     let after = doc.hydrate(&ROOT, None).unwrap();
     assert_ne!(before, after);
 
@@ -1082,6 +1082,14 @@ fn revoke_reflected_in_hydrate_without_heads() {
         before,
         "materializing with no heads must hide revoked ops"
     );
+    assert_eq!(doc.get_heads(), heads2);
+    assert_eq!(
+        doc.hydrate(&ROOT, Some(&heads2)).unwrap(),
+        before,
+        "current heads must also exclude revoked counter increments"
+    );
+    assert_eq!(doc.document().hydrate(Some(&heads2)), before);
+    assert_eq!(doc.hydrate(&ROOT, Some(&heads1)).unwrap(), before);
 
     doc.unrevoke(&aaaa);
     assert_eq!(
@@ -1089,4 +1097,8 @@ fn revoke_reflected_in_hydrate_without_heads() {
         after,
         "unrevoke must restore the materialized state"
     );
+    assert_eq!(doc.get_heads(), heads2);
+    assert_eq!(doc.hydrate(&ROOT, Some(&heads2)).unwrap(), after);
+    assert_eq!(doc.document().hydrate(Some(&heads2)), after);
+    assert_eq!(doc.hydrate(&ROOT, Some(&heads1)).unwrap(), before);
 }

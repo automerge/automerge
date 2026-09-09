@@ -1409,15 +1409,15 @@ impl Automerge {
         }
     }
 
-    /// Clock for reading the document as at `heads`.
+    /// Clock for reading the document as at `heads`, including revocations.
     ///
-    /// If `heads` is `None`, then return a clock that includes revocation
-    /// information.
+    /// Both absent heads and explicit current heads need the active revocation
+    /// clock: `clock_at` returns `None` for the latter to enable indexed reads,
+    /// but walkers and counter sums still need an explicit visibility mask.
     pub(crate) fn clock_at_with_revocations(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
-        match heads {
-            Some(heads) => self.clock_at(heads),
-            None => self.active_revocation_clock().cloned(),
-        }
+        heads
+            .and_then(|heads| self.clock_at(heads))
+            .or_else(|| self.active_revocation_clock().cloned())
     }
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
