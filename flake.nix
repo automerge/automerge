@@ -71,9 +71,9 @@
           ];
         };
 
-        # Pinned nightly for the wasm build (must match WASM_TOOLCHAIN in CI).
+        # Pinned nightly for reproducible Nix WASM builds.
         # `-Zbuild-std` needs a nightly cargo/rustc plus the rust-src component.
-        wasm-rust-toolchain = pkgs.rust-bin.nightly."2026-04-25".minimal.override {
+        wasm-rust-toolchain = pkgs.rust-bin.nightly."2026-07-22".minimal.override {
           extensions = ["rust-src"];
           targets = ["wasm32-unknown-unknown"];
         };
@@ -342,21 +342,21 @@
           exec ./scripts/ci/wasm_tests
         '';
 
-        ci-js-tests = mk-ci-command "ci-js-tests" ([ci-nodejs] ++ pkgs.lib.optional pkgs.stdenv.isLinux pkgs.chromium ++ wasm-ci-inputs) ''
-          export WASM_CARGO=wasm-cargo
-          export PUPPETEER_SKIP_DOWNLOAD=1
-          ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-            export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
-          ''}
-          ${pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+        ci-js-tests =
+          if pkgs.stdenv.isDarwin
+          then mk-ci-command "ci-js-tests" [] ''
             echo "ci-js-tests requires the Linux Chromium package and is unavailable on Darwin" >&2
             exit 2
-          ''}
-          # Chromium's crash handler requires a writable configuration home.
-          export XDG_CONFIG_HOME="$repo_root/target/ci-xdg-config"
-          mkdir -p "$XDG_CONFIG_HOME"
-          exec ./scripts/ci/js_tests
-        '';
+          ''
+          else mk-ci-command "ci-js-tests" ([ci-nodejs pkgs.chromium] ++ wasm-ci-inputs) ''
+            export WASM_CARGO=wasm-cargo
+            export PUPPETEER_SKIP_DOWNLOAD=1
+            export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+            # Chromium's crash handler requires a writable configuration home.
+            export XDG_CONFIG_HOME="$repo_root/target/ci-xdg-config"
+            mkdir -p "$XDG_CONFIG_HOME"
+            exec ./scripts/ci/js_tests
+          '';
 
         ci-node18-packaging-test = mk-ci-command "ci-node18-packaging-test" ([nodejs-18] ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
