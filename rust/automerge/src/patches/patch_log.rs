@@ -739,7 +739,10 @@ impl ExposeQueue {
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
-                for span in doc.ops().spans(&id, clock.cloned()) {
+                let clock = clock
+                    .cloned()
+                    .or_else(|| doc.active_revocation_clock().cloned());
+                for span in doc.ops().spans(&id, clock) {
                     match span {
                         SpanInternal::Text(text, index, marks) => {
                             patch_builder.splice_text(exid.clone(), index, &text, marks.export());
