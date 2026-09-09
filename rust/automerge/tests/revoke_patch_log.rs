@@ -25,15 +25,16 @@ fn apply_log(doc: &Automerge, log: &mut PatchLog, view: &mut hydrate::Value) {
 #[test]
 fn caller_owned_log_preserves_repeated_revocation_transitions() {
     let (mut doc, author, text) = authored_text();
-    doc.revoke(author.clone(), &[], &mut PatchLog::inactive());
+    doc.revoke(author.clone(), &[], &mut PatchLog::inactive())
+        .unwrap();
     let mut view = doc.hydrate(None);
     let mut log = PatchLog::active();
 
     // All three transitions belong to one patch interval. Sorting their raw
     // events together must not duplicate the restored text.
-    doc.unrevoke(&author, &mut log);
-    doc.revoke(author.clone(), &[], &mut log);
-    doc.unrevoke(&author, &mut log);
+    doc.unrevoke(&author, &mut log).unwrap();
+    doc.revoke(author.clone(), &[], &mut log).unwrap();
+    doc.unrevoke(&author, &mut log).unwrap();
     assert_eq!(doc.text(&text).unwrap(), "abc");
     apply_log(&doc, &mut log, &mut view);
 }
@@ -48,8 +49,8 @@ fn caller_owned_log_preserves_local_edits_before_revocation() {
 
     // The pending append and the restoration of that same append must not both
     // be applied to the newly restored text object.
-    doc.revoke(author.clone(), &[], &mut log);
-    doc.unrevoke(&author, &mut log);
+    doc.revoke(author.clone(), &[], &mut log).unwrap();
+    doc.unrevoke(&author, &mut log).unwrap();
     assert_eq!(doc.text(&text).unwrap(), "abcX");
     apply_log(&doc, &mut log, &mut view);
 }
@@ -57,10 +58,11 @@ fn caller_owned_log_preserves_local_edits_before_revocation() {
 #[test]
 fn caller_owned_revocation_log_tracks_actor_reordering() {
     let (mut doc, author, text) = authored_text();
-    doc.revoke(author.clone(), &[], &mut PatchLog::inactive());
+    doc.revoke(author.clone(), &[], &mut PatchLog::inactive())
+        .unwrap();
     let mut view = doc.hydrate(None);
     let mut log = PatchLog::active();
-    doc.unrevoke(&author, &mut log);
+    doc.unrevoke(&author, &mut log).unwrap();
 
     // The fresh revocation log already references actor 0x80. A subsequent
     // transaction inserts actor 0x00 before it in the actor table. These fixed
@@ -87,7 +89,7 @@ fn unrevoke_restores_unchanged_text_from_other_authors() {
     let mut view = doc.hydrate(None);
 
     let mut log = PatchLog::active();
-    doc.revoke(author.clone(), &[], &mut log);
+    doc.revoke(author.clone(), &[], &mut log).unwrap();
     assert!(doc.get(ROOT, "text").unwrap().is_none());
     apply_log(&doc, &mut log, &mut view);
 
@@ -95,7 +97,7 @@ fn unrevoke_restores_unchanged_text_from_other_authors() {
     // finalization of any earlier log. The other author's X has not changed
     // visibility itself, but must be included when its parent is restored.
     let mut log = PatchLog::active();
-    doc.unrevoke(&author, &mut log);
+    doc.unrevoke(&author, &mut log).unwrap();
     assert_eq!(doc.text(&text).unwrap(), "abcX");
     apply_log(&doc, &mut log, &mut view);
 }
@@ -118,12 +120,12 @@ fn unrevoke_restores_unchanged_map_entries_from_other_authors() {
     let mut view = doc.hydrate(None);
 
     let mut log = PatchLog::active();
-    doc.revoke(author.clone(), &[], &mut log);
+    doc.revoke(author.clone(), &[], &mut log).unwrap();
     assert!(doc.get(ROOT, "map").unwrap().is_none());
     apply_log(&doc, &mut log, &mut view);
 
     let mut log = PatchLog::active();
-    doc.unrevoke(&author, &mut log);
+    doc.unrevoke(&author, &mut log).unwrap();
     assert_eq!(doc.get(&map, "original").unwrap().unwrap().0, true.into());
     assert_eq!(
         doc.get(&map, "other_author").unwrap().unwrap().0,
