@@ -36,6 +36,9 @@ export function applyPatch(doc: unknown, patch: Patch): void;
 export function applyPatches(doc: unknown, patches: Patch[]): void;
 
 // @public (undocumented)
+export type Author = string;
+
+// @public (undocumented)
 export type AutomergeValue = ScalarValue | {
     [key: string]: AutomergeValue;
 } | Array<AutomergeValue>;
@@ -97,6 +100,12 @@ export type Commit = {
     bytes: Uint8Array;
 };
 
+// @public (undocumented)
+export type ConflictPatch = {
+    action: "conflict";
+    path: Prop[];
+};
+
 // @public
 export type Conflicts = {
     [key: string]: AutomergeValue;
@@ -116,6 +125,9 @@ export class Counter {
 
 // @public (undocumented)
 export type Cursor = string;
+
+// @public (undocumented)
+export type CursorPosition = number | "start" | "end";
 
 // @public (undocumented)
 export function decodeChange(data: Change): DecodedChange;
@@ -264,8 +276,6 @@ export function getCommits(doc: Doc<unknown>): Commit[];
 // @public
 export function getConflicts<T>(doc: Doc<T>, prop: Prop): Conflicts | undefined;
 
-// Warning: (ae-forgotten-export) The symbol "CursorPosition" needs to be exported by the entry point index.d.ts
-//
 // @public
 export function getCursor<T>(doc: Doc<T>, path: Prop[], position: CursorPosition, move?: MoveCursor): Cursor;
 
@@ -295,6 +305,9 @@ export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads;
 
 // @public
 export function getObjectId(doc: any, prop?: Prop): ObjID | null;
+
+// @public (undocumented)
+export type Hash = string;
 
 // @public
 export function hasHeads(doc: Doc<unknown>, heads: Heads): boolean;
@@ -420,6 +433,13 @@ export type Mark = {
 export function mark<T>(doc: Doc<T>, path: Prop[], range: MarkRange, name: string, value: MarkValue): void;
 
 // @public (undocumented)
+export type MarkPatch = {
+    action: "mark";
+    path: Prop[];
+    marks: Mark[];
+};
+
+// @public (undocumented)
 export type MarkRange = {
     expand?: "before" | "after" | "both" | "none";
     start: number;
@@ -441,8 +461,6 @@ export interface MarkSet {
 // @public (undocumented)
 export type MarkValue = string | number | null | boolean | Date | Uint8Array;
 
-// Warning: (ae-forgotten-export) The symbol "Value" needs to be exported by the entry point index.d.ts
-//
 // @public (undocumented)
 export type MaterializeValue =
 | { [key: string]: MaterializeValue }
@@ -569,6 +587,16 @@ declare namespace next {
         Span,
         SyncMessage,
         UpdateSpansConfig,
+        Author,
+        Hash,
+        Op,
+        SyncHave,
+        PatchValue,
+        Value,
+        CursorPosition,
+        MarkPatch,
+        UnmarkPatch,
+        ConflictPatch,
         initializeWasm,
         initializeBase64Wasm,
         wasmInitialized,
@@ -605,10 +633,16 @@ declare namespace next {
 // @public (undocumented)
 export type ObjID = string;
 
-// Warning: (ae-forgotten-export) The symbol "MarkPatch" needs to be exported by the entry point index.d.ts
-// Warning: (ae-forgotten-export) The symbol "UnmarkPatch" needs to be exported by the entry point index.d.ts
-// Warning: (ae-forgotten-export) The symbol "ConflictPatch" needs to be exported by the entry point index.d.ts
-//
+// @public (undocumented)
+export type Op = {
+    action: string;
+    obj: ObjID;
+    key: string;
+    value?: string | number | boolean;
+    datatype?: string;
+    pred: string[];
+};
+
 // @public (undocumented)
 export type Patch =
 | PutPatch
@@ -632,6 +666,17 @@ export type PatchInfo<T> = {
 
 // @public (undocumented)
 export type PatchSource = "from" | "emptyChange" | "change" | "changeAt" | "merge" | "loadIncremental" | "applyChanges" | "addCommits" | "addFragments" | "receiveSyncMessage";
+
+// @public (undocumented)
+export type PatchValue =
+| string
+| number
+| boolean
+| null
+| Date
+| Uint8Array
+| {}
+| [];
 
 // @public (undocumented)
 export type Prop = string | number;
@@ -723,6 +768,12 @@ export function stats(doc: Doc<unknown>): {
 };
 
 // @public (undocumented)
+export type SyncHave = {
+    lastSync: Heads;
+    bloom: Uint8Array;
+};
+
+// @public (undocumented)
 export type SyncMessage = Uint8Array;
 
 // Warning: (ae-forgotten-export) The symbol "JsSyncState" needs to be exported by the entry point index.d.ts
@@ -748,6 +799,15 @@ export class Uint {
 // @public (undocumented)
 export function unmark<T>(doc: Doc<T>, path: Prop[], range: MarkRange, name: string): void;
 
+// @public (undocumented)
+export type UnmarkPatch = {
+    action: "unmark";
+    path: Prop[];
+    name: string;
+    start: number;
+    end: number;
+};
+
 // @public
 export function updateBlock<T>(doc: Doc<T>, path: Prop[], index: number | Cursor, block: {
     [key: string]: MaterializeValue;
@@ -768,6 +828,9 @@ export function updateText(doc: Doc<unknown>, path: Prop[], newText: string): vo
 // @public (undocumented)
 export function use(api: API): void;
 
+// @public (undocumented)
+export type Value = ScalarValue_2 | object;
+
 // @public
 export function view<T>(doc: Doc<T>, heads: Heads): Doc<T>;
 
@@ -784,11 +847,6 @@ export type WasmReleaseInfo = {
 
 // Warnings were encountered during analysis:
 //
-// dist/wasm_types.d.ts:89:5 - (ae-forgotten-export) The symbol "SyncHave" needs to be exported by the entry point index.d.ts
-// dist/wasm_types.d.ts:102:5 - (ae-forgotten-export) The symbol "Op" needs to be exported by the entry point index.d.ts
-// dist/wasm_types.d.ts:107:5 - (ae-forgotten-export) The symbol "Author" needs to be exported by the entry point index.d.ts
-// dist/wasm_types.d.ts:114:5 - (ae-forgotten-export) The symbol "Hash" needs to be exported by the entry point index.d.ts
-// dist/wasm_types.d.ts:220:5 - (ae-forgotten-export) The symbol "PatchValue" needs to be exported by the entry point index.d.ts
 // dist/wasm_types.d.ts:232:5 - (ae-forgotten-export) The symbol "ScalarValue_2" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
