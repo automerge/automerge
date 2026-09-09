@@ -1,6 +1,6 @@
 use automerge::{
-    transaction::Transactable, ActorId, Author, Automerge, ObjType, PatchLog, PatchLogMismatch,
-    TextEncoding, ROOT,
+    transaction::Transactable, ActorId, Author, AutoCommit, Automerge, ObjType, PatchLog,
+    PatchLogMismatch, ReadDoc, TextEncoding, ROOT,
 };
 
 const ENCODING: TextEncoding = TextEncoding::UnicodeCodePoint;
@@ -77,4 +77,75 @@ fn restored_paths_are_finalized_before_subsequent_list_edits() {
     view.apply_patches(ENCODING, doc.make_patches(&mut log))
         .unwrap();
     assert_eq!(view, doc.hydrate(None));
+}
+
+fn pending_subtree_restoration(isolated: bool) {
+    let author = Author::try_from("aaaa").unwrap();
+    let mut source = AutoCommit::new_with_encoding(ENCODING).with_author(Some(author.clone()));
+    let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
+    source.splice_text(&text, 0, 0, "abc").unwrap();
+    source.commit();
+    source.set_author(Some(Author::try_from("bbbb").unwrap()));
+    source.splice_text(&text, 3, 0, "X").unwrap();
+    let observed_heads = source.get_heads();
+    let original_changes = source.get_changes(&[]);
+    // The boundary also edits the restored object. Full exposure must replace
+    // the batch's child delta, not duplicate it; isolation must exclude it.
+    source.splice_text(&text, 4, 0, "Y").unwrap();
+    source.put(ROOT, "ack", true).unwrap();
+    let boundary_heads = source.get_heads();
+    let boundary = source.get_last_local_change().unwrap();
+
+    let mut doc = AutoCommit::new_with_encoding(ENCODING);
+    doc.apply_changes(original_changes).unwrap();
+    if isolated {
+        doc.isolate(&observed_heads);
+    }
+    doc.revoke(author, &boundary_heads);
+    doc.update_diff_cursor();
+    let mut view = doc.hydrate(ROOT, Some(&observed_heads)).unwrap();
+    doc.apply_changes([boundary]).unwrap();
+    view.apply_patches(ENCODING, doc.diff_incremental())
+        .unwrap();
+    let heads = doc.get_heads();
+    assert_eq!(view, doc.hydrate(ROOT, Some(&heads)).unwrap());
+    assert_eq!(
+        doc.text(&text).unwrap(),
+        if isolated { "abcX" } else { "abcXY" }
+    );
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn pending_resolution_restores_other_author_children() {
+    pending_subtree_restoration(false);
+}
+
+#[test]
+fn isolated_pending_resolution_restores_other_author_children() {
+    pending_subtree_restoration(true);
+}
+
+#[test]
+fn isolated_unrevoke_restores_only_the_pinned_subtree_contents() {
+    let author = Author::try_from("aaaa").unwrap();
+    let mut doc = AutoCommit::new_with_encoding(ENCODING).with_author(Some(author.clone()));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "abc").unwrap();
+    doc.commit();
+    doc.set_author(Some(Author::try_from("bbbb").unwrap()));
+    doc.splice_text(&text, 3, 0, "X").unwrap();
+    let heads = doc.get_heads();
+    doc.splice_text(&text, 4, 0, "future").unwrap();
+    doc.commit();
+    doc.isolate(&heads);
+    doc.revoke(author.clone(), &[]);
+    let mut view = doc.hydrate(ROOT, Some(&heads)).unwrap();
+    doc.update_diff_cursor();
+    doc.unrevoke(&author);
+    view.apply_patches(ENCODING, doc.diff_incremental())
+        .unwrap();
+    assert_eq!(doc.text(&text).unwrap(), "abcX");
+    assert_eq!(view, doc.hydrate(ROOT, Some(&heads)).unwrap());
+    assert!(doc.diff_incremental().is_empty());
 }

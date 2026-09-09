@@ -1,12 +1,12 @@
 use crate::change_queue::ChangeBatch;
-use crate::clock::{Clock, ClockRange};
+use crate::clock::Clock;
 use crate::hydrate::Value;
 use crate::iter::DiffIter;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
-    ActorId, ElemId, ObjId, ObjMeta, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
+    ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
@@ -1036,13 +1036,7 @@ impl BatchApply {
                 // not covered there, so the batch walk owns them and they are
                 // not double-logged. For an isolated import `log` is a null
                 // log, so this is a no-op and the caller drains the delta.
-                DiffIter::log(
-                    doc,
-                    ObjMeta::root(),
-                    ClockRange::Diff(before, after),
-                    log,
-                    true,
-                );
+                DiffIter::log_revocation(doc, before, after, log);
             }
         }
 

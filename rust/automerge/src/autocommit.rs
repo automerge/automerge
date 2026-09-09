@@ -2,7 +2,7 @@ use std::ops::RangeBounds;
 
 use crate::author::Author;
 use crate::automerge::SaveOptions;
-use crate::clock::{Clock, ClockRange};
+use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
@@ -413,13 +413,7 @@ impl AutoCommit {
         update(&mut self.doc, &mut PatchLog::inactive())
             .expect("a fresh patch log belongs to any document");
         let after = self.doc.clock_at_heads(&heads);
-        DiffIter::log(
-            &self.doc,
-            ObjMeta::root(),
-            ClockRange::Diff(before, after),
-            &mut self.patch_log,
-            true,
-        );
+        DiffIter::log_revocation(&self.doc, before, after, &mut self.patch_log);
         self.patch_log.finish_current_view(&self.doc, &heads);
     }
 
@@ -444,13 +438,7 @@ impl AutoCommit {
         self.patch_log
             .migrate_actors(&self.doc.ops().actors)
             .expect("AutoCommit's patch log always belongs to its document");
-        DiffIter::log(
-            &self.doc,
-            ObjMeta::root(),
-            ClockRange::Diff(before, after),
-            &mut self.patch_log,
-            true,
-        );
+        DiffIter::log_revocation(&self.doc, before, after, &mut self.patch_log);
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {

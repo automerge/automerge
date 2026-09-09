@@ -76,6 +76,38 @@ pub(crate) struct DiffIter<'a> {
 }
 
 impl<'a> DiffIter<'a> {
+    /// Log a revocation visibility transition using the normal exposure queue.
+    ///
+    /// An unrevoked object's creation op is absent from the before visibility
+    /// clock, so `predates` cannot recognize it as an existing object. Its
+    /// unchanged children (e.g. another author's edits) still need restoring.
+    /// Request exposure for object-valued puts/inserts in this transition;
+    /// ordinary historical diffs retain their existing exposure detection.
+    pub(crate) fn log_revocation(
+        doc: &'a Automerge,
+        before: Clock,
+        after: Clock,
+        log: &mut PatchLog,
+    ) {
+        if !log.is_active() {
+            return;
+        }
+        let clock = ClockRange::Diff(before, after);
+        for mut item in Self::new(doc, ObjMeta::root(), clock, true) {
+            // Only object-valued puts/inserts consume the exposure flag.
+            match &mut item.item {
+                DocDiffItem::Map(m) => m.expose = true,
+                DocDiffItem::List(l) => l.expose = true,
+                DocDiffItem::Text(SpanDiff {
+                    span: SpanInternal::Obj(_, _, expose),
+                    ..
+                }) => *expose = true,
+                _ => {}
+            }
+            item.log(log, doc.text_encoding());
+        }
+    }
+
     pub(crate) fn log(
         doc: &'a Automerge,
         obj: ObjMeta,

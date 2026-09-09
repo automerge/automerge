@@ -523,8 +523,7 @@ impl Automerge {
         let after = self.clock_at_heads(&heads);
         self.ops.recompute_indexes(&after);
         if patch_log.is_active() {
-            let clock = ClockRange::Diff(before, after);
-            DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+            DiffIter::log_revocation(self, before, after, patch_log);
             // Do not sort this transition together with subsequent edits or
             // revocations. Resolve its paths while this view is still current.
             patch_log.finish_current_view(self, &heads);
