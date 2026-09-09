@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-26.05";
-    # Retain the older snapshot for Node 18 and 20 compatibility tests.
+    # Keep the older snapshot only for the Node 18 and 20 compatibility jobs.
     nixpkgs-node18.url = "nixpkgs/nixos-23.11";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
@@ -34,7 +34,7 @@
         pkgs = import nixpkgs {inherit system overlays;};
         node18-pkgs = import nixpkgs-node18 {
           inherit system;
-          # Node 18 is retained only for compatibility coverage.
+          # Both Node 18 and 20 use this snapshot for compatibility coverage.
           config.allowInsecurePredicate = package:
             pkgs.lib.hasPrefix "nodejs-18" (pkgs.lib.getName package);
         };
@@ -342,10 +342,16 @@
           exec ./scripts/ci/wasm_tests
         '';
 
-        ci-js-tests = mk-ci-command "ci-js-tests" ([ci-nodejs pkgs.chromium] ++ wasm-ci-inputs) ''
+        ci-js-tests = mk-ci-command "ci-js-tests" ([ci-nodejs] ++ pkgs.lib.optional pkgs.stdenv.isLinux pkgs.chromium ++ wasm-ci-inputs) ''
           export WASM_CARGO=wasm-cargo
           export PUPPETEER_SKIP_DOWNLOAD=1
-          export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+          ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            export PUPPETEER_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium
+          ''}
+          ${pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+            echo "ci-js-tests requires the Linux Chromium package and is unavailable on Darwin" >&2
+            exit 2
+          ''}
           # Chromium's crash handler requires a writable configuration home.
           export XDG_CONFIG_HOME="$repo_root/target/ci-xdg-config"
           mkdir -p "$XDG_CONFIG_HOME"
@@ -469,7 +475,6 @@
 
               # JS
               chromedriver
-              chromium
               unstable.deno
               nodejs # Current LTS
 
@@ -490,14 +495,14 @@
             ++ command_menu
             ++ format-pkgs
             ++ cargo-installs
+            ++ lib.optional stdenv.isLinux chromium
             ++ lib.optionals stdenv.isDarwin darwin-installs;
 
           WASM_CARGO = "wasm-cargo";
 
-          # Use the Nix-provided Chromium for the JS packaging tests; the
-          # Chrome that Puppeteer downloads does not run on NixOS.
-          PUPPETEER_SKIP_DOWNLOAD = "1";
-          PUPPETEER_EXECUTABLE_PATH = "${pkgs.chromium}/bin/chromium";
+          # Use Nix-provided Chromium for JS packaging tests on Linux.
+          PUPPETEER_SKIP_DOWNLOAD = pkgs.lib.optionalString pkgs.stdenv.isLinux "1";
+          PUPPETEER_EXECUTABLE_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.chromium}/bin/chromium";
 
           shellHook = "menu";
         };
