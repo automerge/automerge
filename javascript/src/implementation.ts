@@ -538,7 +538,7 @@ export type ChangeAtResult<T> = {
  * const heads = automerge.getHeads(doc)
  *
  * // fork the document make a change
- * let fork = automerge.fork(doc)
+ * let fork = automerge.clone(doc)
  * fork = automerge.change(fork, () => {...})
  * const headsOnFork = automerge.getHeads(fork)
  *
