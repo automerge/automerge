@@ -399,6 +399,78 @@ describe("patches", () => {
         const marks = Automerge.marks(doc, ["foo"])
         assert.deepStrictEqual(marks, [])
       })
+
+      it("should apply patches which insert a block marker", () => {
+        // Block markers are emitted as an `insert` of an object into the text
+        // followed by patches for the marker's attributes
+        let doc = Automerge.from<{ text: string }>({ text: "" })
+        doc = Automerge.change(doc, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+          Automerge.splitBlock(d, ["text"], 6, {
+            type: "heading",
+            parents: ["blockquote"],
+            attrs: { level: 2 },
+          })
+          Automerge.splice(d, ["text"], 7, 0, "World")
+        })
+        const twoBlocks = Automerge.spans(doc, ["text"])
+
+        // Delete the second block and its text
+        const before = Automerge.getHeads(doc)
+        doc = Automerge.change(doc, d => Automerge.splice(d, ["text"], 6, 6))
+        const after = Automerge.getHeads(doc)
+        assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
+          { type: "block", value: { type: "paragraph", parents: [], attrs: {} } },
+          { type: "text", value: "Hello" },
+        ])
+
+        // Revert the deletion by applying the inverse diff
+        const inverse = Automerge.diff(doc, after, before)
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, inverse))
+        assert.deepStrictEqual(Automerge.spans(doc, ["text"]), twoBlocks)
+      })
+
+      it("should apply patches which update a block marker", () => {
+        let doc = Automerge.from<{ text: string }>({ text: "" })
+        doc = Automerge.change(doc, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+        })
+        const before = Automerge.getHeads(doc)
+        doc = Automerge.change(doc, d => {
+          Automerge.updateBlock(d, ["text"], 0, {
+            type: "heading",
+            parents: ["blockquote"],
+            attrs: { level: 2 },
+          })
+        })
+        const after = Automerge.getHeads(doc)
+
+        let other = Automerge.from<{ text: string }>({ text: "" })
+        other = Automerge.change(other, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+        })
+        const patches = Automerge.diff(doc, before, after)
+        other = Automerge.change(other, d => Automerge.applyPatches(d, patches))
+        assert.deepStrictEqual(
+          Automerge.spans(other, ["text"]),
+          Automerge.spans(doc, ["text"]),
+        )
+      })
     })
 
     describe("when applying to a vanilla javascript object", () => {
@@ -543,6 +615,34 @@ describe("patches", () => {
         }
         doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
         assert.deepStrictEqual(doc.foo[0].bar[0].foo, "qux")
+      })
+
+      it("should apply patches which insert a block marker", () => {
+        // A materialized document represents each block marker as a single
+        // object replacement character in the text, so applying the patches
+        // from `diff` to a vanilla object should reproduce the materialized
+        // string
+        let doc = Automerge.from<{ text: string }>({ text: "" })
+        doc = Automerge.change(doc, d => {
+          Automerge.splitBlock(d, ["text"], 0, {
+            type: "paragraph",
+            parents: [],
+            attrs: {},
+          })
+          Automerge.splice(d, ["text"], 1, 0, "Hello")
+          Automerge.splitBlock(d, ["text"], 6, {
+            type: "heading",
+            parents: ["blockquote"],
+            attrs: { level: 2 },
+          })
+          Automerge.splice(d, ["text"], 7, 0, "World")
+        })
+        assert.deepStrictEqual(doc.text, "\ufffcHello\ufffcWorld")
+
+        const vanilla = {}
+        const patches = Automerge.diff(doc, [], Automerge.getHeads(doc))
+        Automerge.applyPatches(vanilla, patches)
+        assert.deepStrictEqual(vanilla, { text: doc.text })
       })
     })
   })
