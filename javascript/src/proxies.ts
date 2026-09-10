@@ -35,7 +35,12 @@ export function validateForBatchInsert(
       validateForBatchInsert(value[i], context, [...path, i])
     }
   } else if (Object.prototype.toString.call(value) === "[object Object]") {
-    for (const k in value) {
+    for (const k of Object.keys(value)) {
+      if (k === "__proto__") {
+        throw new RangeError(
+          'The key "__proto__" is not allowed in Automerge documents',
+        )
+      }
       validateForBatchInsert(value[k], context, [...path, k])
     }
   }
@@ -263,6 +268,11 @@ const MapHandler = {
   set(target: Target, key: any, val: any) {
     const { context, objectId, path } = target
     target.cache.clear() // reset cache on set
+    if (key === "__proto__") {
+      throw new RangeError(
+        'The key "__proto__" is not allowed in Automerge documents',
+      )
+    }
     if (isSameDocument(val, context)) {
       throw new RangeError(
         "Cannot create a reference to an existing document object",
