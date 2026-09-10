@@ -658,7 +658,7 @@ impl PatchLog {
                 (None, Some(b)) => {
                     self.actors.insert(i, b.clone());
                 }
-                _ => return Err(crate::PatchLogMismatch),
+                _ => unreachable!("actors should be aligned")
             }
         }
         Ok(())

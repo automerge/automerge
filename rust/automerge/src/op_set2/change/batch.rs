@@ -91,9 +91,10 @@ impl<'a> Untangler<'a> {
         if doc_op.visible() && !deleted && !revoked {
             self.width = doc_op.width(self.seq_type, self.text_encoding);
         }
-        self.value.process_doc_op(doc_op, deleted, revoked);
+        let opvis = OpVis{deleted, revoked};
+        self.value.process_doc_op(doc_op, opvis);
         self.top
-            .process_doc_op(self.change_ops, doc_op, deleted, revoked);
+            .process_doc_op(self.change_ops, doc_op, opvis);
     }
 
     fn element_update(&mut self, doc_op: &Op<'_>) {
@@ -379,7 +380,7 @@ impl Top {
         *self = Top::Nothing;
     }
 
-    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool, revoked: bool) {
+    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, OpVis{deleted, revoked}: OpVis) {
         if d.visible() && !revoked {
             if deleted {
                 if let Top::Doc(i) = self {
@@ -468,15 +469,14 @@ impl<'a, 'b> MapWalker<'a, 'b> {
                 Some(Ordering::Greater) => break,
                 Some(Ordering::Equal) if d.id > ops[pos].id() => break,
                 _ => {
-                    let (deleted, revoked) =
-                        process_pred(self.doc_op.as_ref(), self.pred, self.succ, self.revocations);
+                    let predvis = process_pred(self.doc_op.as_ref(), self.pred, self.succ, self.revocations);
                     if d.prop() != self.value.key {
                         self.value.map_flush(self.log);
                         self.value.key = d.prop();
                         self.top.reset(self.conflicts);
                     }
-                    self.value.process_doc_op(d, deleted, revoked);
-                    self.top.process_doc_op(ops, d, deleted, revoked);
+                    self.value.process_doc_op(d, predvis);
+                    self.top.process_doc_op(ops, d, predvis);
                 }
             }
             self.next_doc_op();
@@ -485,11 +485,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 
     fn finish(&mut self, ops: &mut [ChangeOp]) {
         while let Some(d) = self.doc_op.as_ref() {
-            let (deleted, revoked) =
-                process_pred(self.doc_op.as_ref(), self.pred, self.succ, self.revocations);
+            let predvis = process_pred(self.doc_op.as_ref(), self.pred, self.succ, self.revocations);
             if d.prop() == self.value.key {
-                self.top.process_doc_op(ops, d, deleted, revoked);
-                self.value.process_doc_op(d, deleted, revoked);
+                self.top.process_doc_op(ops, d, predvis);
+                self.value.process_doc_op(d, predvis);
                 self.next_doc_op();
             } else {
                 break;
@@ -512,12 +511,18 @@ fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Opt
     }
 }
 
+#[derive(Clone, Copy)]
+struct OpVis {
+    deleted: bool,
+    revoked: bool,
+}
+
 fn process_pred(
     doc_op: Option<&Op<'_>>,
     pred: &mut PredCache,
     succ: &mut Vec<SuccInsert>,
     revocations: Option<&Clock>,
-) -> (bool, bool) {
+) -> OpVis {
     if let Some(d) = doc_op {
         let mut deleted = false;
         if let Some(mut successors) = pred.remove(&d.id) {
@@ -527,9 +532,9 @@ fn process_pred(
                 succ.push(d.add_succ_with_revocation(id, inc, rev));
             }
         }
-        (deleted, op_revoked(d, revocations))
+        OpVis{ deleted, revoked: op_revoked(d, revocations)}
     } else {
-        (false, false)
+        OpVis { deleted: false, revoked: false} 
     }
 }
 
@@ -590,7 +595,7 @@ impl OpValueOption {
         }
     }
 
-    fn set(&mut self, value: Value, id: OpId, deleted: bool, revoked: bool) {
+    fn set(&mut self, value: Value, id: OpId, OpVis{deleted, revoked}: OpVis) {
         if deleted && self.is_visible() {
             self.expose(value);
         } else {
@@ -648,13 +653,13 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool, revoked: bool) {
+    fn process_doc_op(&mut self, doc_op: &Op<'a>, opvis: OpVis) {
         match doc_op.action {
             Action::Increment => {}
             Action::Mark => {
                 // A revoked mark is invisible before and after the batch, so it
                 // must not enter the rich-text diff and leak into patches.
-                if !revoked {
+                if !opvis.revoked {
                     self.marks.before.process(doc_op.id, doc_op.action());
                     self.marks.after.process(doc_op.id, doc_op.action());
                 }
@@ -664,8 +669,7 @@ impl<'a> ValueState<'a> {
                     self.doc.set(
                         doc_op.hydrate_value(self.text_encoding),
                         doc_op.id,
-                        deleted,
-                        revoked,
+                        opvis,
                     );
                 }
             }
@@ -706,7 +710,7 @@ impl<'a> ValueState<'a> {
             _ => {
                 if op.visible() {
                     self.change
-                        .set(op.hydrate_value(self.text_encoding), op.id(), false, false);
+                        .set(op.hydrate_value(self.text_encoding), op.id(), OpVis{deleted: false, revoked: false});
                 }
             }
         }
@@ -926,12 +930,12 @@ impl BatchApply {
 
         log.migrate_actors(&doc.ops().actors)?;
 
-        // A change in this batch may witness a pending revocation boundary,
-        // changing the visibility of ops that predate it. Snapshot the
-        // pre-resolution visibility here: `insert_new_actors` has already added
-        // every incoming actor, so this clock has stable indexing, while
-        // `import_ops` (which resolves pending boundaries) has not run yet.
-        // Skipped entirely when no author is revoked.
+        // If we apply a change which connects the commit graph to a pending
+        // revocation boundary then the clock for the revoked author will be
+        // different before this change is applied vs after. This means that
+        // we have to save the revocation clock now, so that after applying
+        // the incoming change we can compare the new clocks with the current
+        // clock.
         let restoration = doc.active_revocation_clock().is_some().then(|| {
             let heads = doc.get_heads();
             let before = doc.clock_at_heads(&heads);
