@@ -818,6 +818,11 @@ impl ChangeGraph {
         self.to_op_clock(clock)
     }
 
+    /// Causal history only, for composing an internal view with a saved mask.
+    pub(crate) fn causal_clock_at(&self, heads: &[ChangeHash]) -> OpClock {
+        self.to_op_clock(self.clock_for_heads(heads))
+    }
+
     fn to_op_clock(&self, c: SeqClock) -> OpClock {
         c.iter()
             .map(|(actor, seq)| {

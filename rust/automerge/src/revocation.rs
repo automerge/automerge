@@ -1,3 +1,6 @@
+mod history;
+pub(crate) use history::{RevocationHistory, RevocationState};
+
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroU32,

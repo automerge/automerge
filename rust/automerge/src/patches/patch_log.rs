@@ -1,12 +1,14 @@
 use crate::automerge::Automerge;
+use crate::clock::ClockRange;
 use crate::exid::ExId;
 use crate::hydrate::Value;
-use crate::iter::SpanInternal;
+use crate::iter::{DiffIter, SpanInternal};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
-use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
-use crate::{ChangeHash, Patch};
+use crate::types::{ActorId, Clock, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType, TextEncoding};
+use crate::view::View;
+use crate::Patch;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
@@ -24,7 +26,11 @@ use super::PatchBuilder;
 ///
 /// A [`PatchLog`] is a set of _relative_ changes. It represents the changes required to go from the
 /// state at one point in history to another. What those two points are depends on how you use the
-/// log. A typical reason to create a [`PatchLog`] is to record the changes made by remote peers.
+/// log. Pending events retain the heads and revocation visibility at which they
+/// were recorded, so later revocation changes do not reinterpret their paths or
+/// exposed contents when patches are materialized.
+///
+/// A typical reason to create a [`PatchLog`] is to record the changes made by remote peers.
 /// Consider this example:
 ///
 /// ```no_run
@@ -48,7 +54,9 @@ pub struct PatchLog {
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
-    pub(crate) heads: Option<Vec<ChangeHash>>,
+    /// The endpoint of the pending events, not the last delivered diff cursor.
+    /// Both paths and exposed contents must be resolved under this saved view.
+    view: Option<View>,
     pub(crate) actors: Vec<ActorId>,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
@@ -231,7 +239,7 @@ impl PatchLog {
             events: Vec::new(),
             expose: HashSet::new(),
             completed_patches: Vec::new(),
-            heads: None,
+            view: None,
             path_map: Default::default(),
             path_hint: 0,
             actors: vec![],
@@ -269,26 +277,72 @@ impl PatchLog {
         self.events.len()
     }
 
-    /// Finalizes the events recorded for the current view before moving the
-    /// document to another point in history.
-    ///
-    /// Patch log events normally move forward through history, which makes it
-    /// safe for `make_current_patches` to sort them by object. This method is
-    /// needed when moving backwards in history or changing revocation visibility,
-    /// even at unchanged heads. Sorting events from both sides of such a
-    /// transition together would reorder changes that must remain chronological.
-    ///
-    /// Paths must also be resolved while this view is still current: list
-    /// indexes may identify different objects after the transition. Finalizing
-    /// concrete patches here preserves both their ordering and their paths, and
-    /// lets them be safely concatenated with patches from subsequent views.
-    pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
+    /// Advance the endpoint after recording ordinary forward events. This does
+    /// not log a diff: the transaction or import walk already recorded it.
+    pub(crate) fn set_view(&mut self, view: View) {
+        if self.active {
+            self.view = Some(view);
+        }
+    }
+
+    pub(crate) fn validate(&self, doc: &Automerge) -> Result<(), crate::PatchLogMismatch> {
+        if let Some(view) = &self.view {
+            doc.validate_view(view)?;
+        }
+        Ok(())
+    }
+
+    /// Reconcile the recorded endpoint with another view. An unbound log starts
+    /// at that view without recording its contents. Unlike public historical
+    /// diffs, this comparison preserves the revocations observed at each end.
+    pub(crate) fn transition_to(
+        &mut self,
+        doc: &Automerge,
+        after: View,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.validate(doc)?;
+        doc.validate_view(&after)?;
+        self.migrate_actors(&doc.ops.actors)?;
+        if !self.active {
+            return Ok(());
+        }
+        if let Some(before) = self.view.clone() {
+            if before == after {
+                return Ok(());
+            }
+            self.finish_view(doc);
+            let before_clock = doc.clock_for_view(&before);
+            let after_clock = doc.clock_for_view(&after);
+            if before_clock != after_clock {
+                if before.revocations != after.revocations {
+                    DiffIter::log_revocation(doc, before_clock, after_clock, self);
+                } else {
+                    DiffIter::log(
+                        doc,
+                        ObjMeta::root(),
+                        ClockRange::Diff(before_clock, after_clock),
+                        self,
+                        true,
+                    );
+                }
+            }
+            self.set_view(after);
+            // Do not sort across view transitions. Resolve exposed subtrees
+            // and paths at this endpoint before subsequent events move them.
+            self.finish_view(doc);
+        } else {
+            self.set_view(after);
+        }
+        Ok(())
+    }
+
+    /// Finalize one segment under its saved view, even if the document's heads
+    /// or revocations have changed since those events were recorded.
+    pub(crate) fn finish_view(&mut self, doc: &Automerge) {
         if !self.events.is_empty() || !self.expose.is_empty() {
             self.migrate_actors(&doc.ops.actors)
                 .expect("patch log actors must be validated before finalizing a view");
-            let previous_heads = self.heads.replace(heads.to_vec());
             let patches = self.make_current_patches(doc);
-            self.heads = previous_heads;
             self.completed_patches.extend(patches);
             self.events.clear();
             self.expose.clear();
@@ -498,13 +552,20 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
+        self.validate(doc)
+            .expect("patch log view must belong to this document");
+        self.migrate_actors(&doc.ops.actors)
+            .expect("patch log actors must belong to this document");
         let mut patches = self.completed_patches.clone();
         patches.extend(self.make_current_patches(doc));
         patches
     }
 
     fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        let clock = self.heads.as_ref().map(|h| doc.clock_at_heads(h));
+        let clock = self.view.as_ref().and_then(|view| {
+            // Retain the indexed fast path only for the actual current view.
+            (view != &doc.current_view()).then(|| doc.clock_for_view(view))
+        });
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
         self.events
@@ -528,6 +589,7 @@ impl PatchLog {
         self.events.clear();
         self.expose.clear();
         self.completed_patches.clear();
+        self.view = None;
         self.path_hint = 0;
         self.path_map = Default::default();
     }
@@ -540,13 +602,16 @@ impl PatchLog {
             completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
-            heads: None,
+            view: self.view.clone(),
             actors: self.actors.clone(),
             speculative_actor: None,
         }
     }
 
     pub(crate) fn migrate_actor(&mut self, index: usize) {
+        // Path hints also contain actor-indexed IDs. They can be recomputed.
+        self.path_map.clear();
+        self.path_hint = 0;
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
@@ -560,6 +625,8 @@ impl PatchLog {
     }
 
     fn remove_actor(&mut self, index: usize) {
+        self.path_map.clear();
+        self.path_hint = 0;
         self.actors.remove(index);
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
@@ -586,7 +653,7 @@ impl PatchLog {
         doc: &Automerge,
         args: &TransactionArgs,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.migrate_actors(&doc.ops.actors)?;
+        self.transition_to(doc, doc.view_at(&args.deps))?;
         // If this is the actor's first change then the actor was (potentially)
         // just added to the document. It should be removed again on
         // commit/rollback if the transaction produces no ops, so flag it as
@@ -665,6 +732,9 @@ impl PatchLog {
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
+        if other.view.is_some() {
+            self.view = other.view;
+        }
         self.completed_patches.extend(other.completed_patches);
         self.events.extend(other.events);
         self.expose.extend(other.expose);

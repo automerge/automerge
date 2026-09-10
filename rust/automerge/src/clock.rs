@@ -131,6 +131,13 @@ impl ClockRange {
 }
 
 impl Clock {
+    pub(crate) fn intersect(&mut self, other: &Self) {
+        assert_eq!(self.0.len(), other.0.len());
+        for (counter, bound) in self.0.iter_mut().zip(&other.0) {
+            *counter = (*counter).min(*bound);
+        }
+    }
+
     pub(crate) fn isolate(&mut self, actor_index: usize) {
         self.set_counter_of(actor_index, u32::MAX);
     }

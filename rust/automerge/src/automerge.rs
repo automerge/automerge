@@ -24,7 +24,8 @@ use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
-use crate::revocation::Revocations;
+use crate::revocation::{RevocationHistory, Revocations};
+use crate::view::View;
 use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
@@ -265,13 +266,7 @@ pub struct Automerge {
     pub(crate) change_graph: ChangeGraph,
     authors: Authors,
     revocations: Revocations,
-    cached_revocation_clock: RevocationClock,
-    /// Set by an import that resolves a pending revocation boundary: the
-    /// (before, after) visibility clocks at the pre-import heads. The core
-    /// logs this delta into the walk's patch log, but an isolated caller
-    /// suppresses that log and must re-log the delta against its isolated
-    /// view, so the clocks are surfaced here for it to drain.
-    pending_restoration_diff: Option<(Clock, Clock)>,
+    revocation_history: RevocationHistory,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
@@ -290,12 +285,11 @@ impl Automerge {
             change_graph: ChangeGraph::new(0),
             authors: Authors::with_actors(0),
             revocations: Revocations::new(),
-            cached_revocation_clock: RevocationClock::intialize(0),
+            revocation_history: RevocationHistory::new(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
-            pending_restoration_diff: None,
         }
     }
 
@@ -333,12 +327,11 @@ impl Automerge {
             change_graph: ChangeGraph::new(0),
             authors: Authors::with_actors(0),
             revocations: Revocations::new(),
-            cached_revocation_clock: RevocationClock::intialize(0),
+            revocation_history: RevocationHistory::new(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
-            pending_restoration_diff: None,
         }
     }
 
@@ -356,12 +349,11 @@ impl Automerge {
             change_graph,
             authors,
             revocations: Revocations::new(),
-            cached_revocation_clock: RevocationClock::intialize(0),
+            revocation_history: RevocationHistory::new(ops.actors.len()),
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
-            pending_restoration_diff: None,
         };
         doc.set_revocations(revocations);
         doc.rebuild_revocation_clock();
@@ -464,9 +456,10 @@ impl Automerge {
     /// Heads not yet present in the document are recorded as pending and
     /// applied once the corresponding change is witnessed.
     ///
-    /// Pending patches are finalized before and after the visibility transition.
+    /// Pending patches are finalized under their previously observed visibility,
+    /// then the revocation transition is recorded as a separate patch segment.
     /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if the log's actors
-    /// are incompatible with this document, without changing revocations.
+    /// or saved revocation state are incompatible, without changing revocations.
     pub fn revoke(
         &mut self,
         author: Author<'static>,
@@ -496,7 +489,7 @@ impl Automerge {
     /// Remove the revocation for `author`, recording the visibility transition.
     ///
     /// Returns [`PatchLogMismatch`](crate::PatchLogMismatch) if the log's actors
-    /// are incompatible with this document, without changing revocations.
+    /// or saved revocation state are incompatible, without changing revocations.
     pub fn unrevoke(
         &mut self,
         author: &Author<'static>,
@@ -512,23 +505,14 @@ impl Automerge {
         patch_log: &mut PatchLog,
         update: impl FnOnce(&mut Self),
     ) -> Result<(), crate::PatchLogMismatch> {
-        // Even a fresh log must remember which actor table its events use.
-        // Validate before changing visibility or resolving any pending paths.
-        patch_log.migrate_actors(&self.ops.actors)?;
-        let heads = self.get_heads();
-        patch_log.finish_current_view(self, &heads);
-        let before = self.clock_at_heads(&heads);
+        // Bind/validate the observed endpoint before mutating the document.
+        // Saved views remain resolvable after the new mask is published.
+        patch_log.transition_to(self, self.current_view())?;
         update(self);
         self.rebuild_revocation_clock();
-        let after = self.clock_at_heads(&heads);
-        self.ops.recompute_indexes(&after);
-        if patch_log.is_active() {
-            DiffIter::log_revocation(self, before, after, patch_log);
-            // Do not sort this transition together with subsequent edits or
-            // revocations. Resolve its paths while this view is still current.
-            patch_log.finish_current_view(self, &heads);
-        }
-        Ok(())
+        let after = self.current_view();
+        self.ops.recompute_indexes(&self.clock_for_view(&after));
+        patch_log.transition_to(self, after)
     }
 
     /// Return the set of revocations, per [`Author`].
@@ -579,7 +563,7 @@ impl Automerge {
         self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
         self.revocations.remove_actor(actor);
-        self.cached_revocation_clock.remove_actor(actor);
+        self.revocation_history.remove_actor(actor);
         self.change_graph.remove_actor(actor);
         self.authors.remove_actor(actor);
     }
@@ -1194,6 +1178,7 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
+            patch_log.transition_to(self, self.current_view())?;
             let mut doc = Self::load_with_options(
                 data,
                 LoadOptions::new()
@@ -1206,7 +1191,13 @@ impl Automerge {
             // in the file to be loaded is copied here
             doc.set_actor(self.actor_id().clone());
             doc.set_author(self.author.clone());
+            // Replacing an empty document must not invalidate views held by
+            // other logs (including AutoCommit's isolated log). Retain their
+            // history and migrate every saved mask to the loaded actor table.
+            doc.revocation_history = self.revocation_history.clone();
+            doc.revocation_history.migrate_actors(&self.ops.actors, &doc.ops.actors);
             doc.set_revocations(self.get_revocations());
+            patch_log.migrate_actors(&doc.ops.actors)?;
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
@@ -1237,6 +1228,7 @@ impl Automerge {
         patch_log: &mut PatchLog,
         recursive: bool,
     ) {
+        patch_log.set_view(self.current_view());
         let clock = ClockRange::default();
         let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
         patch_log.path_hint(path_map);
@@ -1486,7 +1478,7 @@ impl Automerge {
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
         self.revocations.insert_actor(index);
-        self.cached_revocation_clock.insert_actor(index);
+        self.revocation_history.insert_actor(index);
         self.authors.insert_actor(index);
         index
     }
@@ -1599,21 +1591,23 @@ impl Automerge {
         */
     }
 
-    /// Create patches representing the change in the current state of the document between the
-    /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
-    /// in the opposite order.
+    /// Compare the document at `before_heads` and `after_heads`, using current
+    /// revocations for both. Equal heads produce no patches, even if revocation
+    /// visibility has changed since those heads were observed.
+    ///
+    /// Reversing the arguments observes the changes in the opposite direction.
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
         DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
-        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.set_view(self.view_at(after_heads));
         patch_log.make_patches(self)
     }
 
     /// Create patches representing the change in the current state of an object
-    /// in the document between the `before_heads` and `after_heads` heads. If
-    /// the arguments are reverse it will observe the same changes in the
-    /// opposite order.
+    /// in the document between the `before_heads` and `after_heads` heads, using
+    /// current revocations for both, as in [`Self::diff`]. Reversing the
+    /// arguments observes the changes in the opposite direction.
     ///
     /// # Arguments
     ///
@@ -1637,7 +1631,7 @@ impl Automerge {
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
         DiffIter::log(self, obj, clock, &mut patch_log, recursive);
-        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.set_view(self.view_at(after_heads));
         Ok(patch_log.make_patches(self))
     }
 
@@ -2288,27 +2282,44 @@ impl Automerge {
     /// currently revoked — in which case slow paths can skip clock-based
     /// filtering. Borrowed callers do not have to copy the clock.
     pub(crate) fn active_revocation_clock(&self) -> Option<&Clock> {
-        self.cached_revocation_clock.active(&self.revocations)
+        self.revocation_history.active(&self.revocations)
     }
 
     pub(crate) fn clock_at_heads(&self, heads: &[ChangeHash]) -> Clock {
         self.change_graph.clock_at(heads, &self.revocations)
     }
 
-    /// Record the (before, after) visibility delta produced by resolving a
-    /// pending revocation boundary during import. See
-    /// [`Automerge::pending_restoration_diff`].
-    pub(crate) fn set_pending_restoration_diff(&mut self, before: Clock, after: Clock) {
-        self.pending_restoration_diff = Some((before, after));
+    pub(crate) fn view_at(&self, heads: &[ChangeHash]) -> View {
+        View {
+            heads: heads.to_vec(),
+            revocations: self.revocation_history.current(),
+        }
     }
 
-    /// Take the pending restoration delta recorded by the last import, if any.
-    pub(crate) fn take_pending_restoration_diff(&mut self) -> Option<(Clock, Clock)> {
-        self.pending_restoration_diff.take()
+    pub(crate) fn current_view(&self) -> View {
+        self.view_at(&self.get_heads())
+    }
+
+    pub(crate) fn validate_view(&self, view: &View) -> Result<(), crate::PatchLogMismatch> {
+        self.revocation_history
+            .get(&view.revocations)
+            .map(|_| ())
+    }
+
+    /// Unlike public heads-based reads, patch bookkeeping can reconstruct the
+    /// resolved visibility that was observed before a revocation changed.
+    pub(crate) fn clock_for_view(&self, view: &View) -> Clock {
+        let mut clock = self.change_graph.causal_clock_at(&view.heads);
+        clock.intersect(
+            self.revocation_history
+                .get(&view.revocations)
+                .expect("a saved view must belong to this document's revocation history"),
+        );
+        clock
     }
 
     fn rebuild_revocation_clock(&mut self) {
-        self.cached_revocation_clock
+        self.revocation_history
             .rebuild(&self.change_graph, &self.revocations);
     }
 }
@@ -2601,58 +2612,4 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: Clock,
-}
-
-/// Maintain a cached version of the revocation clock for [`Automerge`].
-///
-/// [`RevocationClock::active`] returns the inner [`Clock`].
-///
-/// Use [`RevocationClock::rebuild`] to recalculate the inner [`Clock`] whenever
-/// [`Automerge::revocations`] is modified.
-#[derive(Default, Debug, Clone, PartialEq)]
-struct RevocationClock {
-    inner: Clock,
-}
-
-impl RevocationClock {
-    /// Initialize the [`RevocationClock`] with the number of `actors` given.
-    fn intialize(actors: usize) -> Self {
-        Self {
-            inner: Clock(vec![u32::MAX; actors]),
-        }
-    }
-
-    /// The clock used to filter revoked ops on slow paths that bypass the
-    /// op-set index (e.g. `visible_slow`). `None` when no actors are
-    /// currently revoked — in which case slow paths can skip clock-based
-    /// filtering. Borrowed callers do not have to copy the clock.
-    fn active(&self, revocations: &Revocations) -> Option<&Clock> {
-        (!revocations.is_empty()).then_some(&self.inner)
-    }
-
-    /// Rebuild the inner [`Clock`] using the provided [`ChangeGraph`] and [`Revocations`].
-    fn rebuild(&mut self, change_graph: &ChangeGraph, revocations: &Revocations) {
-        let clock = (0_u32..change_graph.num_actors() as u32)
-            .map(|actor| {
-                let actor_usize = actor as usize;
-                let actor_idx = ActorIdx(actor);
-                if let Some(mask) = revocations.get_mask_for(&actor_idx) {
-                    mask.and_then(|seq| change_graph.max_op_for_seq(actor_usize, seq))
-                } else {
-                    Some(u32::MAX)
-                }
-            })
-            .collect();
-        self.inner = clock;
-    }
-
-    /// Insert the `actor` into the inner [`Clock`].
-    fn insert_actor(&mut self, actor: usize) {
-        self.inner.0.insert(actor, u32::MAX);
-    }
-
-    /// Remove the `actor` from the inner [`Clock`].
-    fn remove_actor(&mut self, actor: usize) {
-        self.inner.0.remove(actor);
-    }
 }

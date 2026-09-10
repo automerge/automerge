@@ -13,6 +13,7 @@ enum Import {
     Batch,
     Merge,
     Load,
+    LoadDocument,
     Sync,
 }
 
@@ -25,13 +26,22 @@ struct PendingRevocation {
 
 impl PendingRevocation {
     fn new() -> Self {
+        Self::with_later_changes(false)
+    }
+
+    fn with_later_changes(later: bool) -> Self {
         let author = Author::try_from("aaaa").unwrap();
         let mut source = AutoCommit::new_with_encoding(ENCODING)
             .with_author(Some(author.clone()))
             .with_actor(ActorId::from(vec![0x80]));
         source.put(ROOT, "x", 1).unwrap();
         let original_heads = source.get_heads();
-        let original = source.get_last_local_change().unwrap();
+        if later {
+            source.put(ROOT, "x", 2).unwrap();
+            source.put(ROOT, "future", true).unwrap();
+            source.commit();
+        }
+        let original_changes = source.get_changes(&[]);
 
         source.set_author(Some(Author::try_from("bbbb").unwrap()));
         source.set_actor(ActorId::from(vec![0x10]));
@@ -40,7 +50,7 @@ impl PendingRevocation {
         let boundary = source.get_last_local_change().unwrap();
 
         let mut doc = AutoCommit::new_with_encoding(ENCODING);
-        doc.apply_changes([original]).unwrap();
+        doc.apply_changes(original_changes).unwrap();
         // The boundary is unknown here, so x is initially hidden. Witnessing
         // the acknowledgement later should reveal that x predates the boundary.
         doc.revoke(author, &boundary_heads);
@@ -65,6 +75,10 @@ impl PendingRevocation {
             }
             Import::Load => {
                 let bytes = self.source.save_after(&self.original_heads);
+                self.doc.load_incremental(&bytes).unwrap();
+            }
+            Import::LoadDocument => {
+                let bytes = self.source.save();
                 self.doc.load_incremental(&bytes).unwrap();
             }
             Import::Sync => sync_docs(&mut self.source, &mut self.doc),
@@ -180,6 +194,67 @@ fn records_isolated_visibility_changes(mode: Import) {
     assert!(case.doc.diff_incremental().is_empty());
 }
 
+fn isolated_restoration_composes_with_integration(mode: Import) {
+    for drain_before_integrating in [false, true] {
+        // The underlying document has x=2, but the pinned view must restore
+        // x=1 and must not expose either `future` or the boundary's `ack`.
+        let mut case = PendingRevocation::with_later_changes(true);
+        case.doc.isolate(&case.original_heads);
+        let mut view = case.doc.hydrate(ROOT, Some(&case.original_heads)).unwrap();
+        case.doc.update_diff_cursor();
+        case.import_boundary(mode);
+        assert_eq!(case.doc.get_heads(), case.original_heads);
+        assert_eq!(case.doc.get(ROOT, "x").unwrap().unwrap().0, 1.into());
+        assert!(case.doc.get(ROOT, "future").unwrap().is_none());
+        assert!(case.doc.get(ROOT, "ack").unwrap().is_none());
+
+        if drain_before_integrating {
+            let patches = case.doc.diff_incremental();
+            assert!(puts_x(&patches), "missing pinned restoration: {patches:?}");
+            view.apply_patches(ENCODING, patches).unwrap();
+            assert_eq!(
+                view,
+                case.doc.hydrate(ROOT, Some(&case.original_heads)).unwrap()
+            );
+            assert!(case.doc.diff_incremental().is_empty());
+        }
+        case.doc.integrate();
+        view.apply_patches(ENCODING, case.doc.diff_incremental()).unwrap();
+        assert_eq!(view, case.doc.hydrate(ROOT, None).unwrap());
+        assert_eq!(case.doc.get(ROOT, "x").unwrap().unwrap().0, 2.into());
+        assert!(case.doc.diff_incremental().is_empty());
+    }
+}
+
+fn resolution_outside_isolation_still_updates_indexes(mode: Import) {
+    for tracking in [false, true] {
+        let mut case = PendingRevocation::with_later_changes(true);
+        case.doc.isolate(&[]);
+        if tracking {
+            case.doc.update_diff_cursor();
+        }
+        case.import_boundary(mode);
+        assert!(case.doc.diff_incremental().is_empty());
+
+        // The pinned clock did not change. The full document's indexes must
+        // nevertheless reflect the resolution, even with tracking disabled.
+        let heads = case.doc.document().get_heads();
+        let patches = case.doc.diff(&[], &heads);
+        let mut full_view = case.doc.hydrate(ROOT, Some(&[])).unwrap();
+        full_view.apply_patches(ENCODING, patches).unwrap();
+        assert_eq!(full_view, case.doc.hydrate(ROOT, Some(&heads)).unwrap());
+        assert_eq!(
+            case.doc.get_at(ROOT, "x", &heads).unwrap().unwrap().0,
+            2.into()
+        );
+
+        let mut isolated_view = case.doc.hydrate(ROOT, Some(&[])).unwrap();
+        case.doc.integrate();
+        isolated_view.apply_patches(ENCODING, case.doc.diff_incremental()).unwrap();
+        assert_eq!(isolated_view, full_view);
+    }
+}
+
 // Keep each entry point and invariant independently runnable, so an early
 // failure cannot hide missing handling in the other import wrappers.
 macro_rules! pending_import_tests {
@@ -201,6 +276,16 @@ macro_rules! pending_import_tests {
             fn records_isolated_visibility_changes() {
                 super::records_isolated_visibility_changes($mode);
             }
+
+            #[test]
+            fn isolated_restoration_composes_with_integration() {
+                super::isolated_restoration_composes_with_integration($mode);
+            }
+
+            #[test]
+            fn resolution_outside_isolation_still_updates_indexes() {
+                super::resolution_outside_isolation_still_updates_indexes($mode);
+            }
         }
     };
 }
@@ -209,6 +294,7 @@ pending_import_tests!(apply_changes, Import::Apply);
 pending_import_tests!(apply_changes_batch, Import::Batch);
 pending_import_tests!(merge, Import::Merge);
 pending_import_tests!(load_incremental, Import::Load);
+pending_import_tests!(load_document, Import::LoadDocument);
 pending_import_tests!(sync, Import::Sync);
 
 #[test]

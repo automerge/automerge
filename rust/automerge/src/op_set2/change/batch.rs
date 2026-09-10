@@ -1,7 +1,6 @@
 use crate::change_queue::ChangeBatch;
 use crate::clock::Clock;
 use crate::hydrate::Value;
-use crate::iter::DiffIter;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
@@ -926,23 +925,23 @@ impl BatchApply {
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), PatchLogMismatch> {
+        let before = doc.current_view();
+        log.transition_to(doc, before.clone())?;
         self.insert_new_actors(doc);
-
         log.migrate_actors(&doc.ops().actors)?;
-
-        // If we apply a change which connects the commit graph to a pending
-        // revocation boundary then the clock for the revoked author will be
-        // different before this change is applied vs after. This means that
-        // we have to save the revocation clock now, so that after applying
-        // the incoming change we can compare the new clocks with the current
-        // clock.
-        let restoration = doc.active_revocation_clock().is_some().then(|| {
-            let heads = doc.get_heads();
-            let before = doc.clock_at_heads(&heads);
-            (heads, before)
-        });
-
         self.import_ops(doc);
+
+        let after = doc.current_view();
+        let revocations_changed = before.revocations != after.revocations;
+        // Ordinary imports retain the fast walk. When visibility also changes,
+        // compare the saved view with the new view after applying the batch.
+        // One diff owns both restored and incoming ops, including exposures.
+        let mut inactive = PatchLog::inactive();
+        let walk_log = if revocations_changed {
+            &mut inactive
+        } else {
+            &mut *log
+        };
 
         let mut obj_info = doc.ops().obj_info.clone();
 
@@ -971,7 +970,7 @@ impl BatchApply {
                         doc.text_encoding(),
                         &mut self.pred,
                         &mut succ,
-                        log,
+                        walk_log,
                         &mut conflicts,
                         rev_clock.as_ref(),
                     );
@@ -994,7 +993,7 @@ impl BatchApply {
                         &mut self.pred,
                         doc_ops.end_pos(),
                     );
-                    walk_list(ut, doc_ops, &mut succ, log);
+                    walk_list(ut, doc_ops, &mut succ, walk_log);
                 }
                 _ => panic!("Obj {:?} Missing from Index", os.obj),
             }
@@ -1025,23 +1024,12 @@ impl BatchApply {
 
         self.insert_runs_of_ops(doc);
 
-        if let Some((pre_heads, before)) = restoration {
-            let after = doc.clock_at_heads(&pre_heads);
-            // `after` uses the same heads as `before`; only a resolved
-            // revocation boundary can make them differ.
-            if before != after {
-                // Rebuild indexes so current-state reads reflect restored ops.
-                let current = doc.clock_at_heads(&doc.get_heads());
-                doc.ops.recompute_indexes(&current);
-                // Surface the delta so an isolated caller (which suppresses the
-                // walk log below) can re-log it against its isolated view.
-                doc.set_pending_restoration_diff(before.clone(), after.clone());
-                // Log the visibility delta at the pre-import heads: new ops are
-                // not covered there, so the batch walk owns them and they are
-                // not double-logged. For an isolated import `log` is a null
-                // log, so this is a no-op and the caller drains the delta.
-                DiffIter::log_revocation(doc, before, after, log);
-            }
+        if revocations_changed {
+            // Index maintenance is independent of patch tracking or isolation.
+            doc.ops.recompute_indexes(&doc.clock_for_view(&after));
+            log.transition_to(doc, after)?;
+        } else {
+            log.set_view(after);
         }
 
         debug_assert!(doc.ops.validate_op_order());
@@ -1148,6 +1136,8 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        // Reject a view from a divergent history before consuming queued changes.
+        log.validate(self)?;
         let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
         let mut actor_author: HashSet<ActorId> = HashSet::new();

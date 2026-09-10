@@ -190,6 +190,7 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
         self.patch_log.truncate();
+        self.patch_log.set_view(self.doc.view_at(&heads));
         self.diff_cursor = heads;
     }
 
@@ -232,16 +233,12 @@ impl AutoCommit {
         let heads = self.doc.get_heads();
         if before.is_empty() && after == heads {
             let mut patch_log = PatchLog::active();
-            // This if statement is only active if the current heads are the same as `after`
-            // so we don't need to tell the patch log to target a specific heads and consequently
-            // it wll be able to generate patches very fast as it doesn't need to make any clocks
-            patch_log.heads = None;
             self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
             let clock = self.doc.clock_range(before, after);
             let mut patch_log = PatchLog::active();
-            patch_log.heads = Some(after.to_vec());
+            patch_log.set_view(self.doc.view_at(after));
             DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         }
@@ -288,11 +285,8 @@ impl AutoCommit {
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let patches = if self.patch_log.is_active() {
-            if let Some(heads) = &self.isolation {
-                // Resolve paths and exposed objects in the pinned view, not
-                // the underlying document's (possibly later) current state.
-                self.patch_log.finish_current_view(&self.doc, heads);
-            }
+            let heads = self.get_heads();
+            self.patch_to(&heads);
             self.patch_log.make_patches(&self.doc)
         } else {
             let heads = self.get_heads();
@@ -398,49 +392,37 @@ impl AutoCommit {
         &mut self,
         update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<(), crate::PatchLogMismatch>,
     ) {
-        self.ensure_transaction_closed();
-        if self.isolation.is_none() || !self.patch_log.is_active() {
-            // The core finalizes transitions for the full document view.
-            update(&mut self.doc, &mut self.patch_log)
-                .expect("AutoCommit's patch log always belongs to its document");
-            return;
-        }
-
-        let heads = self.get_heads();
-        // Record and finalize changes to the isolated view, not the full document.
-        self.patch_log.finish_current_view(&self.doc, &heads);
-        let before = self.doc.clock_at_heads(&heads);
-        update(&mut self.doc, &mut PatchLog::inactive())
-            .expect("a fresh patch log belongs to any document");
-        let after = self.doc.clock_at_heads(&heads);
-        DiffIter::log_revocation(&self.doc, before, after, &mut self.patch_log);
-        self.patch_log.finish_current_view(&self.doc, &heads);
-    }
-
-    /// After an import, surface a revocation restoration that the core
-    /// suppressed because this document is isolated.
-    ///
-    /// The core logs the restoration delta into the walk's patch log, but an
-    /// isolated import passes a null walk log, so the delta must be re-logged
-    /// against the isolated view here. For a non-isolated import the core has
-    /// already logged it, so the delta is simply drained and discarded.
-    fn drain_restoration_under_isolation(&mut self) {
-        let restoration = self.doc.take_pending_restoration_diff();
-        if self.isolation.is_none() || !self.patch_log.is_active() {
-            return;
-        }
-        let Some((before, after)) = restoration else {
-            return;
-        };
-        // The isolated import migrated only the null walk log, so bring
-        // `self.patch_log` in line with the document's actor table before
-        // logging against it.
-        self.patch_log
-            .migrate_actors(&self.doc.ops().actors)
+        self.with_patch_log(update)
             .expect("AutoCommit's patch log always belongs to its document");
-        DiffIter::log_revocation(&self.doc, before, after, &mut self.patch_log);
     }
 
+    /// Run a mutation with ordinary logging unless isolated. An isolated log
+    /// already names its observed view; after the mutation, saved revocation
+    /// history lets us reconcile that view without an import-specific snapshot.
+    fn with_patch_log<T, E>(
+        &mut self,
+        update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.ensure_transaction_closed();
+        if let Some(heads) = &self.isolation {
+            self.patch_log
+                .transition_to(&self.doc, self.doc.view_at(heads))
+                .expect("AutoCommit's patch log always belongs to its document");
+            let result = update(&mut self.doc, &mut PatchLog::inactive());
+            // Reconcile even when an import reports an error after partial progress.
+            self.patch_log
+                .transition_to(&self.doc, self.doc.view_at(heads))
+                .expect("AutoCommit's patch log always belongs to its document");
+            result
+        } else {
+            update(&mut self.doc, &mut self.patch_log)
+        }
+    }
+
+    /// Pin the document's causal history to `heads`. Incoming changes are not
+    /// visible until integration, but resolving a pending revocation boundary
+    /// can change visibility at these heads. When diff tracking is active, these
+    /// visibility changes are recorded immediately.
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
         self.patch_to(heads);
@@ -475,6 +457,8 @@ impl AutoCommit {
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
+            let heads = self.isolation.clone().unwrap_or_else(|| self.doc.get_heads());
+            self.patch_log.set_view(self.doc.view_at(&heads));
         }
     }
 
@@ -486,63 +470,27 @@ impl AutoCommit {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.ensure_transaction_closed();
-        let result = if self.isolation.is_some() {
-            self.doc
-                .load_incremental_log_patches(data, &mut PatchLog::null())
-        } else {
-            self.doc
-                .load_incremental_log_patches(data, &mut self.patch_log)
-        };
-        self.drain_restoration_under_isolation();
-        result
+        self.with_patch_log(|doc, log| doc.load_incremental_log_patches(data, log))
     }
 
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_closed();
-        let result = if self.isolation.is_some() {
-            self.doc
-                .apply_changes_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_log_patches(changes, &mut self.patch_log)
-        };
-        self.drain_restoration_under_isolation();
-        result
+        self.with_patch_log(|doc, log| doc.apply_changes_log_patches(changes, log))
     }
 
     pub fn apply_changes_batch(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_closed();
-        let result = if self.isolation.is_some() {
-            self.doc
-                .apply_changes_batch_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_batch_log_patches(changes, &mut self.patch_log)
-        };
-        self.drain_restoration_under_isolation();
-        result
+        self.with_patch_log(|doc, log| doc.apply_changes_batch_log_patches(changes, log))
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        let result = if self.isolation.is_some() {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut PatchLog::null())
-        } else {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
-        };
-        self.drain_restoration_under_isolation();
-        result
+        self.with_patch_log(|doc, log| doc.merge_and_log_patches(&mut other.doc, log))
     }
 
     /// Save the entirety of this document in a compact form.
@@ -754,6 +702,8 @@ impl AutoCommit {
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
         }
+        let heads = self.isolation.clone().unwrap_or_else(|| self.doc.get_heads());
+        self.patch_log.set_view(self.doc.view_at(&heads));
         hash
     }
 
@@ -779,16 +729,15 @@ impl AutoCommit {
     /// operations and a new one with no operations. The returned [`ChangeHash`] will always be the
     /// hash of the empty change.
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
-        self.ensure_transaction_closed();
-        let args = self.doc.transaction_args(None);
-        // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
-        // always belongs to this document and can never mismatch.
-        self.patch_log
-            .begin_transaction(&self.doc, &args)
-            .expect("AutoCommit's patch log always belongs to its document");
-        let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops.actors);
-        result
+        self.with_patch_log(|doc, log| {
+            let args = doc.transaction_args(None);
+            log.begin_transaction(doc, &args)?;
+            let result = TransactionInner::empty(doc, args, options.message, options.time);
+            log.finish_transaction(&doc.ops.actors);
+            log.set_view(doc.current_view());
+            Ok::<_, crate::PatchLogMismatch>(result)
+        })
+        .expect("AutoCommit's patch log always belongs to its document")
     }
 
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
@@ -833,13 +782,9 @@ impl AutoCommit {
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
-        // we may be isolated so we dont use self.doc.get_heads()
-        let before = self.get_heads();
-        if before.as_slice() != after {
-            self.patch_log.finish_current_view(&self.doc, &before);
-            let clock = self.doc.clock_range(&before, after);
-            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
-        }
+        self.patch_log
+            .transition_to(&self.doc, self.doc.view_at(after))
+            .expect("AutoCommit's patch log always belongs to its document");
     }
 
     /// Whether the peer represented by `other` has all the changes we have
@@ -1332,22 +1277,9 @@ impl SyncDoc for SyncWrapper<'_> {
         sync_state: &mut sync::State,
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
-        self.inner.ensure_transaction_closed();
-        let result = if self.inner.isolation.is_some() {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut PatchLog::null(),
-            )
-        } else {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut self.inner.patch_log,
-            )
-        };
-        self.inner.drain_restoration_under_isolation();
-        result
+        self.inner.with_patch_log(|doc, log| {
+            doc.receive_sync_message_log_patches(sync_state, message, log)
+        })
     }
 
     // I dont like this function - it makes sense on automerge but not autocommit

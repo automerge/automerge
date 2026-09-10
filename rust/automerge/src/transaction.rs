@@ -23,10 +23,12 @@ fn commit_transaction(
 ) -> Option<crate::ChangeHash> {
     let historical_heads = tx.get_scope().as_ref().map(|_| tx.get_deps());
     let hash = tx.commit(doc, options.message, options.time);
-    if let Some(heads) = historical_heads {
-        patch_log.heads = Some(hash.map_or(heads, |hash| vec![hash]));
-    }
+    let heads = match historical_heads {
+        Some(heads) => hash.map_or(heads, |hash| vec![hash]),
+        None => doc.get_heads(),
+    };
     patch_log.finish_transaction(&doc.ops().actors);
+    patch_log.set_view(doc.view_at(&heads));
     hash
 }
 
