@@ -1404,6 +1404,7 @@ impl OpSet {
     pub(crate) fn remove_actor(&mut self, idx: usize) {
         self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
+        self.cols.index.mark.rewrite_without_actor(idx);
         self.obj_info = ObjIndex(
             self.obj_info
                 .0
