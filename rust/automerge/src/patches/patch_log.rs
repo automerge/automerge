@@ -1,6 +1,7 @@
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::hydrate::Value;
+use crate::iter::SpanInternal;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
@@ -732,9 +733,23 @@ impl ExposeQueue {
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
-                let text = doc.text_for(&exid, clock.cloned()).ok()?;
-                // TODO - need doc, text_spans()
-                patch_builder.splice_text(exid, 0, &text, None);
+                for span in doc.ops().spans(&id, clock.cloned()) {
+                    match span {
+                        SpanInternal::Text(text, index, marks) => {
+                            patch_builder.splice_text(exid.clone(), index, &text, marks.export());
+                        }
+                        SpanInternal::Obj(id, index, _) => {
+                            let child = doc.id_to_exid(id);
+                            self.insert(child.clone());
+                            patch_builder.insert(
+                                exid.clone(),
+                                index,
+                                (crate::Value::Object(ObjType::Map), child),
+                                false,
+                            );
+                        }
+                    }
+                }
             }
             ObjType::List => {
                 for item in doc.list_range_for(&exid, .., clock.cloned()) {
