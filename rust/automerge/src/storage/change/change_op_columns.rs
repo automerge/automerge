@@ -376,6 +376,8 @@ pub enum ReadChangeOpError {
     InvalidOpType(#[from] InvalidOpType),
     #[error("counter too large")]
     CounterTooLarge,
+    #[error("column {0} contains bytes that no op reads")]
+    UnreadColumnBytes(&'static str),
 }
 
 #[derive(Clone)]
@@ -397,7 +399,13 @@ impl ChangeOpsIter<'_> {
     }
 
     fn try_next(&mut self) -> Result<Option<ChangeOp>, ReadChangeOpError> {
-        if self.failed || self.done() {
+        if self.failed {
+            Ok(None)
+        } else if self.done() {
+            // Unread bytes would be lost when re-encoding the change.
+            if !self.val.raw_done() {
+                return Err(ReadChangeOpError::UnreadColumnBytes("value"));
+            }
             Ok(None)
         } else {
             let obj = if let Some(ref mut objs) = self.obj {
