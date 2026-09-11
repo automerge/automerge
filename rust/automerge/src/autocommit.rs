@@ -814,6 +814,10 @@ impl AutoCommit {
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
+        // Establish the actor baseline before logging events (issue #1270);
+        // see `PatchLog::seed_actors`.
+        self.patch_log.seed_actors(&self.doc.ops().actors);
+
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {
