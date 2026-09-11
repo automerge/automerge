@@ -5,6 +5,12 @@
 * It is now possible to set an "Author ID" for a document. The author ID is an
   opaque byte array that can be examined to see the author ID of any change.
 
+### Fixed
+
+* `Cursor::from_str` now returns `None` (transformed to `AutomergeError::InvalidCursorFormat`
+in `Cursor::try_from<&str>`) instead of panicking when input is empty or has
+empty `ActorID`.
+
 ## 0.11.0
 
 ### Breaking Changes
