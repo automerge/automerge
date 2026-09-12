@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::evidence::{
     authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, Decision, Eligibility,
-    Evidence, EvidenceError, EvidenceLog, EventId, GraphFacts,
+    EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts,
 };
 use super::{Selection, ViewError, ViewSpec};
 use crate::exid::ExId;

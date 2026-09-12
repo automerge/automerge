@@ -21,7 +21,7 @@ use crate::{Automerge, AutomergeError, Patch, Prop, Value};
 
 pub use evidence::{
     authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, Decision, Eligibility,
-    Evidence, EvidenceError, EvidenceLog, EventId, GraphFacts, Reason,
+    EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts, Reason,
 };
 pub use session::{Capture, Input, Session, SessionError, StatusDelta, Transition, ViewId};
 

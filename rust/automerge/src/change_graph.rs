@@ -817,7 +817,10 @@ impl ChangeGraph {
     /// Experimental (prototype A): the actor index and inclusive op counter
     /// range of an integrated change. `None` for unknown hashes and for empty
     /// changes (which own no operations but still have ancestry).
-    pub(crate) fn op_range(&self, hash: &ChangeHash) -> Option<(usize, std::ops::RangeInclusive<u64>)> {
+    pub(crate) fn op_range(
+        &self,
+        hash: &ChangeHash,
+    ) -> Option<(usize, std::ops::RangeInclusive<u64>)> {
         let idx = self.nodes_by_hash.get(hash)?;
         let i = idx.0 as usize;
         let num_ops = self.num_ops.get(i).unwrap_or_default();
