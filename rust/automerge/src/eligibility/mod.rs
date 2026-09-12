@@ -20,8 +20,9 @@ use crate::types::{ChangeHash, ObjMeta};
 use crate::{Automerge, AutomergeError, Patch, Prop, Value};
 
 pub use evidence::{
-    authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, Decision, Eligibility,
-    EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts, Reason,
+    authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, ContextBinding,
+    ContextKind, Decision, Eligibility, EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts,
+    Reason,
 };
 pub use session::{
     Capture, Envelope, Input, Session, SessionError, SessionId, StatusDelta, Transition, ViewId,

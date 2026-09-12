@@ -23,3 +23,13 @@
 - [x] Item 5: `Session::view_at(policy, heads)` — EX-02 fixed-heads view with patch transition.
 - [x] Item 6: `Envelope` (`export`/`restore`), per-checkpoint frozen inputs; restore re-evaluates each checkpoint against only its own frozen inputs and rejects mismatches (`InconsistentEnvelope`, tamper test).
 - [x] 23 fixtures green (`fix-1-green-fixtures.log`); full suite 498 passed / 0 failed / 1 ignored (`fix-1-full-suite.log`), same head as final tests. rustfmt clean.
+
+## Fix wave 2 (re-review round 1)
+
+- [x] RED (compile): `fix-2-red-compile.log` (`ContextBinding`, `ContextKind`, `Reason::UnresolvedGrant` missing).
+- [x] RED (behavior, probe on pre-fix code, then deleted): `fix-2-red-behavior.log` — A3 in fresh context before G is `Excluded` (expected `Pending`); restored encoding is `UnicodeCodePoint` (expected `Utf16CodeUnit`).
+- [x] Finding A: `ContextBinding { context, kind: Established | FreshGrant }`; `FreshGrant` without grant ⇒ `Pending` + `Reason::UnresolvedGrant`; with grant ⇒ `Eligible` + `AdmittedByContext`; `Established` never admits/blocks. EX-03 envelope test oracle corrected to `Pending` and restored pending decision asserted with reason.
+- [x] Finding B: `Envelope.text_encoding`; `restore` uses `load_with_options(...text_encoding(..))`; Utf16 round-trip test.
+- [x] Tautology replaced with before/after `current()`, `checkpoint_count()`, view and frozen `InspectionSnapshot` equality; `out_of_range_checkpoint_is_rejected` added.
+- [x] Reason-only-change test now uses a second authorized revocation (a CTX0 grant no longer changes reasons for an `Established` binding).
+- [x] 27 fixtures green (`fix-2-green-fixtures.log`); full suite 502 passed / 0 failed / 1 ignored (`fix-2-full-suite.log`). rustfmt clean.

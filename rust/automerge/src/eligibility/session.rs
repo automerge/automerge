@@ -7,14 +7,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::evidence::{
-    authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, Decision, Eligibility,
-    EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts, Reason,
+    authorities, evaluate, Authority, ChangeFacts, ContextBinding, Decision, Eligibility, EventId,
+    Evidence, EvidenceError, EvidenceLog, GraphFacts, Reason,
 };
 use super::{Selection, ViewError, ViewSpec};
 use crate::exid::ExId;
 use crate::hydrate;
 use crate::types::ChangeHash;
-use crate::{Automerge, AutomergeError, Change, Patch, Prop, Value};
+use crate::{Automerge, AutomergeError, Change, LoadOptions, Patch, Prop, TextEncoding, Value};
 
 /// One harness delivery item.
 #[derive(Debug, Clone)]
@@ -24,7 +24,7 @@ pub enum Input {
     /// Toy model input binding a change to the authorization context it was
     /// authored under (EX-03). Immutable once recorded: identical rebinding is
     /// idempotent, a conflicting one rejects the whole group.
-    Binding(ChangeHash, AuthorizationContextId),
+    Binding(ChangeHash, ContextBinding),
 }
 
 /// Per-process unique namespace for sessions so that a [`ViewId`] from one
@@ -63,7 +63,7 @@ pub struct InspectionSnapshot {
     /// Changes received but not yet structurally integrated, with the
     /// dependencies they are waiting for.
     pub waiting: BTreeMap<ChangeHash, BTreeSet<ChangeHash>>,
-    pub bindings: BTreeMap<ChangeHash, AuthorizationContextId>,
+    pub bindings: BTreeMap<ChangeHash, ContextBinding>,
 }
 
 /// A captured view: content heads, selection and inspection state.
@@ -87,8 +87,7 @@ pub struct StatusDelta {
     /// already integrated).
     pub waiting_changes:
         BTreeMap<ChangeHash, (Option<BTreeSet<ChangeHash>>, Option<BTreeSet<ChangeHash>>)>,
-    pub binding_changes:
-        BTreeMap<ChangeHash, (Option<AuthorizationContextId>, AuthorizationContextId)>,
+    pub binding_changes: BTreeMap<ChangeHash, (Option<ContextBinding>, ContextBinding)>,
 }
 
 impl StatusDelta {
@@ -121,8 +120,8 @@ pub enum SessionError {
     #[error("change {hash} already bound to {existing:?}; refusing rebinding to {attempted:?}")]
     ConflictingBinding {
         hash: ChangeHash,
-        existing: AuthorizationContextId,
-        attempted: AuthorizationContextId,
+        existing: ContextBinding,
+        attempted: ContextBinding,
     },
     #[error("view {0:?} does not belong to this session or is out of range")]
     ForeignView(ViewId),
@@ -140,7 +139,7 @@ pub enum SessionError {
 struct Published {
     doc: Automerge,
     evidence: EvidenceLog,
-    bindings: BTreeMap<ChangeHash, AuthorizationContextId>,
+    bindings: BTreeMap<ChangeHash, ContextBinding>,
     capture: Capture,
 }
 
@@ -151,7 +150,7 @@ struct Published {
 struct CheckpointRecord {
     received: Vec<Vec<u8>>,
     evidence: EvidenceLog,
-    bindings: BTreeMap<ChangeHash, AuthorizationContextId>,
+    bindings: BTreeMap<ChangeHash, ContextBinding>,
     frozen: Capture,
 }
 
@@ -160,6 +159,9 @@ struct CheckpointRecord {
 #[derive(Debug, Clone)]
 pub struct Envelope {
     base: Vec<u8>,
+    /// Text encoding of the captured document; ordinary `save` bytes do not
+    /// carry it, so it is part of the complete interpretation capture.
+    text_encoding: TextEncoding,
     checkpoints: Vec<CheckpointRecord>,
 }
 
@@ -209,7 +211,7 @@ impl GraphFacts for DocFacts<'_> {
 pub(crate) fn snapshot(
     doc: &Automerge,
     evidence: &EvidenceLog,
-    bindings: &BTreeMap<ChangeHash, AuthorizationContextId>,
+    bindings: &BTreeMap<ChangeHash, ContextBinding>,
 ) -> (Selection, InspectionSnapshot) {
     let auth = authorities(evidence);
     let facts = DocFacts(doc);
@@ -252,7 +254,7 @@ pub(crate) fn snapshot(
 fn capture(
     doc: &Automerge,
     evidence: &EvidenceLog,
-    bindings: &BTreeMap<ChangeHash, AuthorizationContextId>,
+    bindings: &BTreeMap<ChangeHash, ContextBinding>,
 ) -> Capture {
     let (selection, inspection) = snapshot(doc, evidence, bindings);
     Capture {
@@ -509,7 +511,11 @@ impl Session {
             .map(|c| std::mem::take(&mut c.received))
             .and_then(|mut v| v.pop())
             .expect("session always has a base checkpoint");
-        Envelope { base, checkpoints }
+        Envelope {
+            base,
+            text_encoding: self.published.doc.text_encoding(),
+            checkpoints,
+        }
     }
 
     /// Reconstruct a session from an envelope by replaying each checkpoint's
@@ -517,8 +523,13 @@ impl Session {
     /// frozen table. Later checkpoints' evidence is never used for earlier
     /// ones.
     pub fn restore(envelope: Envelope) -> Result<Self, SessionError> {
-        let Envelope { base, checkpoints } = envelope;
-        let mut doc = Automerge::load(&base)?;
+        let Envelope {
+            base,
+            text_encoding,
+            checkpoints,
+        } = envelope;
+        let mut doc =
+            Automerge::load_with_options(&base, LoadOptions::new().text_encoding(text_encoding))?;
         let mut records = Vec::with_capacity(checkpoints.len());
         let mut captures = Vec::with_capacity(checkpoints.len());
         for (i, record) in checkpoints.into_iter().enumerate() {

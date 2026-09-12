@@ -149,3 +149,36 @@ Pure evaluator unit tests: `late_e1_cannot_overwrite_e2` (same set, two insertio
 - `restore` recomputes `authorities` from the frozen log rather than storing them separately — acceptable since the log is the frozen input, but it means the evaluator itself is trusted on restore (the mismatch check would catch evaluator drift as `InconsistentEnvelope`).
 - Atomicity test still triggers rejection before `apply_changes`; a structural failure *during* content application is not exercised (reviewer's note stands).
 - EX-04 authoring, EX-08/09/11–14, merge/incremental-load/sync paths remain unimplemented/unproven as before. EX-10 is now covered for the map-counter case only.
+
+---
+
+# Fix wave 2 (re-review round 1) — addendum
+
+**Status: DONE** for the three requested items; prior concerns (in-memory envelope, process-local `SessionId`, `apply_changes`-time structural failure untested, EX-04/08/09/11–14 and import paths unproven) still stand.
+
+## Commit
+
+Single commit for this wave, parent `ece98c313ac2`; the commit id is the head of `jj log` in this workspace (the id changes when this line is edited, so it is not inlined).
+
+## Test totals (same head)
+
+- `cargo test --locked --offline -p automerge --test revocation_prototype`: **27 passed** (`fix-2-green-fixtures.log`).
+- `cargo test --locked --offline -p automerge --lib --tests`: **502 passed, 0 failed, 1 ignored** (`fix-2-full-suite.log`; prototype section 27). 472 + 27 + 3 = 502.
+
+## TDD evidence
+
+| Step | Log | Content |
+|---|---|---|
+| Red (compile) | `fix-2-red-compile.log` | `ContextBinding`/`ContextKind`/`Reason::UnresolvedGrant` absent. |
+| Red (behavior) | `fix-2-red-behavior.log` | Probe on pre-fix code: A3 (CTXG, no G) `Excluded` not `Pending`; restored doc encoding `UnicodeCodePoint` not `Utf16CodeUnit`. Probe deleted after recording; durable tests below. |
+| Green | `fix-2-green-fixtures.log` | 27 tests. Two test adjustments during the wave: (a) `ex03_removing_restrictions_is_not_the_grant` now delivers G up front (without it, A3 is correctly pending and the `{before}` oracle no longer holds; the contrast — invalidating R restores `during` — is preserved); (b) the reason-only-change check in `queued_only_receipt_…` uses a second authorized revocation, since a grant for an `Established` context no longer alters reasons. |
+
+## Repairs
+
+**A. Fresh-grant context (`evidence.rs`).** `Input::Binding(hash, ContextBinding { context, kind })` with `ContextKind::{Established, FreshGrant}`. Evaluation: `FreshGrant` + matching `Grant` ⇒ `Eligible`/`AdmittedByContext` (revocations bypassed); `FreshGrant` without grant ⇒ `Pending`/`UnresolvedGrant` and the change is masked out of the default view (not allow-all, not excluded); `Established` contexts are evaluated only through revocation frontiers. Tests: `ex03_fresh_context_is_pending_until_grant_arrives` (A3 `Pending`, A2 `Excluded`, A1 `Eligible`, default `{before}`; G ⇒ `Pending→Eligible` status for A3 only, exactly one patch, replay, frozen pending checkpoint unchanged); `fresh_context_without_grant_is_not_allow_all` (no revocation at all: `Established` eligible, `FreshGrant` pending); `ex03_envelope_round_trip_…` oracle corrected — the pre-grant checkpoint is `Pending` with `UnresolvedGrant(CTXG)` and restores as such even though G is in later checkpoints' frozen inputs. Bindings remain immutable (`ConflictingBinding` compares the whole `ContextBinding`).
+
+**B. Envelope text encoding (`session.rs`).** `Envelope.text_encoding` captured from the published doc; `restore` loads with `LoadOptions::new().text_encoding(..)`. Test `envelope_preserves_non_default_text_encoding` (Utf16 base with a simple map; restored `text_encoding()` equal, heads equal, view equal).
+
+**C. Assertions.** Tautology replaced: `before = s.current()`, `count_before`, view, and `Arc<InspectionSnapshot>` captured *before* the rejected delivery; asserted equal afterwards. `out_of_range_checkpoint_is_rejected` added (`checkpoint(1)` on a one-checkpoint session ⇒ `ForeignView`).
+
+**Report correction.** The fix-1 addendum said authorities are "not stored separately" on restore. That was inaccurate: every frozen `InspectionSnapshot` includes its `authorities` table, and `restore` compares the recomputed snapshot (including authorities) against it, rejecting mismatch with `InconsistentEnvelope`.

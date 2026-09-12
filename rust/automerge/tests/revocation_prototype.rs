@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use automerge::eligibility::{
-    Authority, AuthorizationContextId, Decision, Eligibility, EventId, Evidence, Input, Reason,
-    Session, Transition,
+    Authority, AuthorizationContextId, ContextBinding, ContextKind, Decision, Eligibility, EventId,
+    Evidence, Input, Reason, Session, Transition,
 };
 use automerge::hydrate::{self, Value};
 use automerge::transaction::Transactable;
@@ -754,6 +754,16 @@ fn ex02_variant_boundary_also_edits_restored_object() {
 const G_ID: EventId = EventId(4);
 const CTX0: AuthorizationContextId = AuthorizationContextId(0);
 const CTXG: AuthorizationContextId = AuthorizationContextId(7);
+/// Alice's original (established) context.
+const B0: ContextBinding = ContextBinding {
+    context: CTX0,
+    kind: ContextKind::Established,
+};
+/// The context linked to fresh grant G: unresolved until G is known.
+const BG: ContextBinding = ContextBinding {
+    context: CTXG,
+    kind: ContextKind::FreshGrant,
+};
 
 struct Ex03 {
     base: Automerge,
@@ -823,9 +833,9 @@ fn ex03_check_final(session: &Session, fx: &Ex03) {
 fn ex03_fresh_grant_non_prefix_selection() {
     let fx = ex03();
     let bindings = vec![
-        Input::Binding(fx.a1.hash(), CTX0),
-        Input::Binding(fx.a2.hash(), CTX0),
-        Input::Binding(fx.a3.hash(), CTXG),
+        Input::Binding(fx.a1.hash(), B0),
+        Input::Binding(fx.a2.hash(), B0),
+        Input::Binding(fx.a3.hash(), BG),
     ];
     // Order 1: everything at once.
     let mut s = Session::new(fx.base.clone());
@@ -896,20 +906,22 @@ fn ex03_removing_restrictions_is_not_the_grant() {
     deliver(
         &mut s,
         vec![
-            Input::Binding(fx.a2.hash(), CTX0),
-            Input::Binding(fx.a3.hash(), CTXG),
+            Input::Binding(fx.a2.hash(), B0),
+            Input::Binding(fx.a3.hash(), BG),
             Input::Change(fx.a1.clone()),
             Input::Change(fx.a2.clone()),
             Input::Change(fx.a3.clone()),
             Input::Evidence(fx.r.clone()),
             Input::Evidence(fx.e1.clone()),
+            Input::Evidence(fx.g.clone()),
         ],
     );
     let cp = s.current();
     assert!(hydrated_eq(
         &s.hydrate(cp).unwrap(),
-        &expect_ints(&[("before", 1)])
+        &expect_ints(&[("before", 1), ("after", 3)])
     ));
+    // Invalidating R (not G) is what restores `during`.
     deliver(
         &mut s,
         vec![Input::Evidence(Evidence::Invalidates {
@@ -1277,8 +1289,8 @@ fn captured_scope_recompiles_after_earlier_sorting_actor_arrives() {
     deliver(
         &mut s,
         vec![
-            Input::Binding(fx.a2.hash(), CTX0),
-            Input::Binding(fx.a3.hash(), CTXG),
+            Input::Binding(fx.a2.hash(), B0),
+            Input::Binding(fx.a3.hash(), BG),
             Input::Change(fx.a1.clone()),
             Input::Change(fx.a2.clone()),
             Input::Change(fx.a3.clone()),
@@ -1425,14 +1437,14 @@ fn ex10_excluded_increment_self_diff_duplicate_and_restore_replay() {
 #[test]
 fn conflicting_context_binding_is_rejected_atomically_in_both_orders() {
     let fx = ex03();
-    for order in [[CTX0, CTXG], [CTXG, CTX0]] {
+    for order in [[B0, BG], [BG, B0]] {
         let mut s = Session::new(fx.base.clone());
         deliver(
             &mut s,
             vec![
-                Input::Binding(fx.a1.hash(), CTX0),
+                Input::Binding(fx.a1.hash(), B0),
                 Input::Binding(fx.a2.hash(), order[0]),
-                Input::Binding(fx.a3.hash(), CTXG),
+                Input::Binding(fx.a3.hash(), BG),
                 Input::Change(fx.a1.clone()),
                 Input::Change(fx.a2.clone()),
                 Input::Evidence(fx.r.clone()),
@@ -1440,11 +1452,13 @@ fn conflicting_context_binding_is_rejected_atomically_in_both_orders() {
                 Input::Evidence(fx.g.clone()),
             ],
         );
-        let before = s.current();
-        let before_view = s.hydrate(before).unwrap();
         // Identical binding: idempotent, no status delta.
         let t = deliver(&mut s, vec![Input::Binding(fx.a2.hash(), order[0])]);
         assert!(t.patches.is_empty() && t.status.is_empty());
+        let before = s.current();
+        let count_before = s.checkpoint_count();
+        let before_view = s.hydrate(before).unwrap();
+        let inspection_before = s.capture(before).unwrap().inspection.clone();
         // Conflicting binding in a group with otherwise-valid content A3.
         let err = s
             .deliver(vec![
@@ -1460,8 +1474,14 @@ fn conflicting_context_binding_is_rejected_atomically_in_both_orders() {
             ),
             "{err:?}"
         );
-        assert_eq!(s.current(), s.current());
-        assert_eq!(s.hydrate(s.current()).unwrap(), before_view);
+        assert_eq!(s.current(), before);
+        assert_eq!(s.checkpoint_count(), count_before);
+        assert_eq!(s.hydrate(before).unwrap(), before_view);
+        assert_eq!(
+            *s.capture(before).unwrap().inspection,
+            *inspection_before,
+            "frozen inspection must be unchanged"
+        );
         assert!(!s.is_integrated(s.current(), &fx.a3.hash()).unwrap());
         assert!(s.doc().get_change_by_hash(&fx.a3.hash()).is_none());
         assert_eq!(
@@ -1474,8 +1494,8 @@ fn conflicting_context_binding_is_rejected_atomically_in_both_orders() {
     deliver(
         &mut s,
         vec![
-            Input::Binding(fx.a2.hash(), CTX0),
-            Input::Binding(fx.a3.hash(), CTXG),
+            Input::Binding(fx.a2.hash(), B0),
+            Input::Binding(fx.a3.hash(), BG),
             Input::Change(fx.a1.clone()),
             Input::Change(fx.a2.clone()),
             Input::Change(fx.a3.clone()),
@@ -1485,7 +1505,7 @@ fn conflicting_context_binding_is_rejected_atomically_in_both_orders() {
         ],
     );
     ex03_check_final(&s, &fx);
-    assert!(s.deliver(vec![Input::Binding(fx.a2.hash(), CTXG)]).is_err());
+    assert!(s.deliver(vec![Input::Binding(fx.a2.hash(), BG)]).is_err());
     ex03_check_final(&s, &fx);
 }
 
@@ -1565,25 +1585,48 @@ fn queued_only_receipt_is_an_inspection_transition() {
     );
     assert!(t.status.newly_integrated.contains(&fx.c.hash()));
     // Binding receipt and reason changes are signalled too.
-    let t = deliver(&mut s, vec![Input::Binding(fx.a.hash(), CTX0)]);
+    let t = deliver(&mut s, vec![Input::Binding(fx.a.hash(), B0)]);
     assert!(!t.status.is_empty());
     assert_eq!(
         t.status.binding_changes.get(&fx.a.hash()),
-        Some(&(None, CTX0))
+        Some(&(None, B0))
     );
-    // A grant for CTX0 adds an `AdmittedByContext` reason while A stays eligible.
+    // Reason-only change: A is already excluded by R; a second authorized
+    // revocation R2 adds an `OutsideFrontier` reason without changing
+    // eligibility.
+    deliver(
+        &mut s,
+        vec![
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    assert_eq!(
+        s.decision(s.current(), &fx.a.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+    let r2 = EventId(20);
     let t = deliver(
         &mut s,
-        vec![Input::Evidence(Evidence::Grant {
-            id: G_ID,
-            context: CTX0,
-        })],
+        vec![
+            Input::Evidence(Evidence::Revocation {
+                id: r2,
+                target: author("alice"),
+                frontier: vec![],
+            }),
+            Input::Evidence(Evidence::Authorizes {
+                id: EventId(21),
+                event: r2,
+            }),
+        ],
     );
     assert!(t.status.eligibility_changes.is_empty());
-    assert_eq!(
-        t.status.reason_changes.get(&fx.a.hash()),
-        Some(&(vec![], vec![Reason::AdmittedByContext(CTX0)]))
-    );
+    let (before_reasons, after_reasons) = t.status.reason_changes.get(&fx.a.hash()).unwrap();
+    assert_eq!(before_reasons.len(), 1);
+    assert_eq!(after_reasons.len(), 2);
+    assert!(after_reasons
+        .iter()
+        .any(|r| matches!(r, Reason::OutsideFrontier { event, .. } if *event == r2)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1689,8 +1732,8 @@ fn ex03_envelope_round_trip_preserves_gap_and_pending_checkpoint() {
     deliver(
         &mut s,
         vec![
-            Input::Binding(fx.a2.hash(), CTX0),
-            Input::Binding(fx.a3.hash(), CTXG),
+            Input::Binding(fx.a2.hash(), B0),
+            Input::Binding(fx.a3.hash(), BG),
             Input::Change(fx.a2.clone()),
             Input::Change(fx.a3.clone()),
             Input::Evidence(fx.r.clone()),
@@ -1702,11 +1745,16 @@ fn ex03_envelope_round_trip_preserves_gap_and_pending_checkpoint() {
         s.waiting(waiting_cp, &fx.a2.hash()).unwrap(),
         Some([fx.a1.hash()].into_iter().collect())
     );
-    // Checkpoint 2: A1 arrives; G not yet known -> A3 excluded.
+    // Checkpoint 2: A1 arrives; G not yet known -> A3 *pending* (its fresh
+    // context is unresolved), A2 excluded.
     deliver(&mut s, vec![Input::Change(fx.a1.clone())]);
     let pre_grant_cp = s.current();
     assert_eq!(
         s.decision(pre_grant_cp, &fx.a3.hash()).unwrap().eligibility,
+        Eligibility::Pending
+    );
+    assert_eq!(
+        s.decision(pre_grant_cp, &fx.a2.hash()).unwrap().eligibility,
         Eligibility::Excluded
     );
     assert!(hydrated_eq(
@@ -1735,11 +1783,11 @@ fn ex03_envelope_round_trip_preserves_gap_and_pending_checkpoint() {
         &restored.hydrate(r_final).unwrap(),
         &expect_ints(&[("before", 1), ("after", 3)])
     ));
+    // Pending decision restored although G is known in later checkpoints.
     let r_pre = restored.checkpoint(pre_grant_cp.index()).unwrap();
-    assert_eq!(
-        restored.decision(r_pre, &fx.a3.hash()).unwrap().eligibility,
-        Eligibility::Excluded
-    );
+    let d3 = restored.decision(r_pre, &fx.a3.hash()).unwrap();
+    assert_eq!(d3.eligibility, Eligibility::Pending);
+    assert!(d3.reasons.contains(&Reason::UnresolvedGrant(CTXG)));
     assert!(hydrated_eq(
         &restored.hydrate(r_pre).unwrap(),
         &expect_ints(&[("before", 1)])
@@ -1763,7 +1811,7 @@ fn envelope_with_inconsistent_frozen_table_is_rejected() {
     deliver(
         &mut s,
         vec![
-            Input::Binding(fx.a2.hash(), CTX0),
+            Input::Binding(fx.a2.hash(), B0),
             Input::Change(fx.a1.clone()),
             Input::Change(fx.a2.clone()),
             Input::Evidence(fx.r.clone()),
@@ -1775,5 +1823,136 @@ fn envelope_with_inconsistent_frozen_table_is_rejected() {
     assert!(matches!(
         Session::restore(envelope),
         Err(automerge::eligibility::SessionError::InconsistentEnvelope { .. })
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Fix wave 2 — re-review findings A/B and assertion repairs
+// ---------------------------------------------------------------------------
+
+/// Finding A: a change in a fresh-grant-linked context is *pending* until the
+/// grant is known; an original-context change stays excluded; no allow-all.
+#[test]
+fn ex03_fresh_context_is_pending_until_grant_arrives() {
+    let fx = ex03();
+    let mut s = Session::new(fx.base.clone());
+    let t0 = deliver(
+        &mut s,
+        vec![
+            Input::Binding(fx.a1.hash(), B0),
+            Input::Binding(fx.a2.hash(), B0),
+            Input::Binding(fx.a3.hash(), BG),
+            Input::Change(fx.a1.clone()),
+            Input::Change(fx.a2.clone()),
+            Input::Change(fx.a3.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    replay_ok(&s, &t0);
+    let pending_cp = s.current();
+    let d3 = s.decision(pending_cp, &fx.a3.hash()).unwrap();
+    assert_eq!(d3.eligibility, Eligibility::Pending);
+    assert!(
+        d3.reasons.contains(&Reason::UnresolvedGrant(CTXG)),
+        "{d3:?}"
+    );
+    assert_eq!(
+        s.decision(pending_cp, &fx.a2.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+    assert_eq!(
+        s.decision(pending_cp, &fx.a1.hash()).unwrap().eligibility,
+        Eligibility::Eligible
+    );
+    // Default materialization omits pending work.
+    assert!(hydrated_eq(
+        &s.hydrate(pending_cp).unwrap(),
+        &expect_ints(&[("before", 1)])
+    ));
+
+    // G arrives: A3 Pending -> Eligible, A2 unchanged, one patch, replay.
+    let t = deliver(&mut s, vec![Input::Evidence(fx.g.clone())]);
+    assert_eq!(
+        t.status.eligibility_changes.get(&fx.a3.hash()),
+        Some(&(Eligibility::Pending, Eligibility::Eligible))
+    );
+    assert!(!t.status.eligibility_changes.contains_key(&fx.a2.hash()));
+    assert_eq!(t.patches.len(), 1, "{:?}", t.patches);
+    replay_ok(&s, &t);
+    ex03_check_final(&s, &fx);
+    // Frozen pending checkpoint unchanged.
+    assert_eq!(
+        s.decision(pending_cp, &fx.a3.hash()).unwrap().eligibility,
+        Eligibility::Pending
+    );
+}
+
+/// Finding A (negative): a fresh-context change with *no* revocation in play
+/// is still pending without its grant — missing authorization evidence is not
+/// allow-all — while an established-context change is eligible.
+#[test]
+fn fresh_context_without_grant_is_not_allow_all() {
+    let fx = ex03();
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Binding(fx.a1.hash(), B0),
+            Input::Binding(fx.a2.hash(), BG),
+            Input::Change(fx.a1.clone()),
+            Input::Change(fx.a2.clone()),
+        ],
+    );
+    let cp = s.current();
+    assert_eq!(
+        s.decision(cp, &fx.a1.hash()).unwrap().eligibility,
+        Eligibility::Eligible
+    );
+    assert_eq!(
+        s.decision(cp, &fx.a2.hash()).unwrap().eligibility,
+        Eligibility::Pending
+    );
+    assert!(hydrated_eq(
+        &s.hydrate(cp).unwrap(),
+        &expect_ints(&[("before", 1)])
+    ));
+}
+
+/// Finding B: the envelope preserves the document's text encoding.
+#[test]
+fn envelope_preserves_non_default_text_encoding() {
+    let encoding = TextEncoding::Utf16CodeUnit;
+    assert_ne!(encoding, TextEncoding::platform_default());
+    let base = Automerge::new_with_encoding(encoding)
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    let a1 = tx_put(&mut alice, "x", 1);
+    let mut s = Session::new(base);
+    deliver(&mut s, vec![Input::Change(a1.clone())]);
+    assert_eq!(s.doc().text_encoding(), encoding);
+    let restored = Session::restore(s.export()).unwrap();
+    assert_eq!(restored.doc().text_encoding(), encoding);
+    assert_eq!(restored.doc().get_heads(), s.doc().get_heads());
+    assert!(hydrated_eq(
+        &restored.hydrate(restored.current()).unwrap(),
+        &expect_ints(&[("x", 1)])
+    ));
+}
+
+/// Out-of-range checkpoint index is rejected explicitly.
+#[test]
+fn out_of_range_checkpoint_is_rejected() {
+    let fx = ex01();
+    let s = Session::new(fx.base.clone());
+    assert_eq!(s.checkpoint_count(), 1);
+    assert!(s.checkpoint(0).is_ok());
+    assert!(matches!(
+        s.checkpoint(1),
+        Err(automerge::eligibility::SessionError::ForeignView(_))
     ));
 }

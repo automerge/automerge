@@ -18,6 +18,24 @@ pub struct EventId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AuthorizationContextId(pub u64);
 
+/// How a bound context is to be evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ContextKind {
+    /// An ordinary, already-established authoring context. It neither
+    /// admits nor blocks; revocations apply normally.
+    Established,
+    /// A context linked to a fresh grant. Until a matching `Grant` is known
+    /// the change is *pending*; once known, the change is admitted.
+    FreshGrant,
+}
+
+/// Immutable association of a change with its authoring context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContextBinding {
+    pub context: AuthorizationContextId,
+    pub kind: ContextKind,
+}
+
 /// Toy evidence vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Evidence {
@@ -83,6 +101,8 @@ pub enum Reason {
     },
     UnresolvedEvidence(EventId),
     AdmittedByContext(AuthorizationContextId),
+    /// Bound to a fresh-grant context whose grant is not yet known.
+    UnresolvedGrant(AuthorizationContextId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,7 +160,7 @@ pub enum EvidenceError {
 pub struct ChangeFacts<'a> {
     pub hash: ChangeHash,
     pub author: Option<Author<'a>>,
-    pub context: Option<AuthorizationContextId>,
+    pub context: Option<ContextBinding>,
 }
 
 /// Structural questions the evaluator asks of the integrated graph.
@@ -227,17 +247,28 @@ pub fn evaluate(
     facts: &dyn GraphFacts,
     change: &ChangeFacts<'_>,
 ) -> Decision {
-    let admitted_by: Option<AuthorizationContextId> = change.context.filter(|ctx| {
-        log.iter()
-            .any(|e| matches!(e, Evidence::Grant { context, .. } if context == ctx))
-    });
     let mut decision = Decision::eligible();
-    if let Some(ctx) = admitted_by {
-        decision.reasons.push(Reason::AdmittedByContext(ctx));
-        return decision;
-    }
     let mut excluded = false;
     let mut pending = false;
+    if let Some(ContextBinding {
+        context,
+        kind: ContextKind::FreshGrant,
+    }) = change.context
+    {
+        let granted = log
+            .iter()
+            .any(|e| matches!(e, Evidence::Grant { context: c, .. } if *c == context));
+        if granted {
+            decision.reasons.push(Reason::AdmittedByContext(context));
+            return decision;
+        }
+        // Missing grant evidence is not allow-all: the change waits. Whether
+        // an earlier revocation applies depends on this unresolved grant, so
+        // the outcome is pending rather than excluded.
+        decision.eligibility = Eligibility::Pending;
+        decision.reasons.push(Reason::UnresolvedGrant(context));
+        return decision;
+    }
     for item in log.iter() {
         let Evidence::Revocation {
             id,
