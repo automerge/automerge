@@ -22,6 +22,13 @@ Run from `rust/`, always `--locked --offline`; logs under assigned implementatio
 
 Scope priority is the running map/native-control slice. EX-04 and EX-08–14, general sync/import paths, formatting replay and optimization remain unproven unless actually executed. No dependency additions, capability system, filtered replay, or ordinary-map control substitute.
 
+## Fix wave 1 (review F1, 20-minute bound)
+
+1. Add behavior tests in `prototype/tests.rs` for received R retaining known H but depending on missing X. Cover eventual valid X (H in ancestry) and invalid X (H outside ancestry); assert separate authority/integration/target status, eligible-only materialization, frozen rereads and atomic invalid-group rejection. Run before production edits; logs `fix-1-red-f1.log`.
+2. In `prototype/policy.rs::resolve_controls`, require integrated R before final frontier exclusion. Add a precise unresolved-validation reason when H is already known; preserve missing-H EX-02 reasoning and pending-authority EX-01 behavior. No quarantine/removal semantics. Record F2 dissent without changing control eligibility.
+3. Add named EX-04 scalar adoption using existing selected editing and retained original inspection; assert Bob's new identity, mock authorship, empty predecessors, A still excluded and ordinary conflict after restoration. Correct feature-aware action-range diagnostic in `op_set2/types.rs` with a covering assertion.
+4. Run focused prototype tests plus all 4,032 schedules, full feature/default suites, targeted formatting. Update progress/report with exact evidence and jj commits; no structural extension.
+
 ## Actual bounded implementation decisions
 
 - Existing `Automerge` private helpers sufficed: no `automerge.rs` edits were needed. `prototype/core.rs` orchestrates the real graph and `prototype/policy.rs::resolve_controls(HistoryFacts, &PolicySnapshot) -> Interpretation` is the pure evaluator. `prototype/tests.rs` plus the original `first_test` exercise private APIs. `prototype/gate_tests.rs` runs with the feature disabled.

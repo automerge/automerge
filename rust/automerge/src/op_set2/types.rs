@@ -138,7 +138,12 @@ impl TryFrom<u64> for Action {
             #[cfg(feature = "experimental-revocation")]
             8 => Ok(Action::Revoke),
             other => Err(PackError::InvalidValue(format!(
-                "valid action (integer between 0 and 7), unexpected integer: {}",
+                "valid action (integer between 0 and {}), unexpected integer: {}",
+                if cfg!(feature = "experimental-revocation") {
+                    8
+                } else {
+                    7
+                },
                 other
             ))),
         }

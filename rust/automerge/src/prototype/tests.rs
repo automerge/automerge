@@ -158,6 +158,97 @@ fn ex01_all_1920_schedules_and_duplicate_idempotence() {
 }
 
 #[test]
+fn ex04_adopt_excluded_scalar_as_bobs_new_change_without_reinstating_alice() {
+    let f = ex01();
+    let mut s = Session::new();
+    deliver(
+        &mut s,
+        vec![
+            content(&f.doc, f.h),
+            content(&f.doc, f.a),
+            content(&f.doc, f.r),
+            content(&f.doc, f.c),
+            Input::Authorize(f.r),
+        ],
+    );
+    let excluded = s.capture();
+    assert_eq!(excluded.eligibility[&f.a], Eligibility::Excluded);
+    assert_eq!(s.scalar(&excluded, "suggestion"), None);
+    assert_eq!(
+        s.scalar(&excluded, "title").as_deref(),
+        Some("Weekend plan")
+    );
+
+    // Inspect original retained work, not the root's eligible projection.
+    let source = s.doc.get_change_by_hash(&f.a).unwrap();
+    assert_eq!(source.actor_id(), &actor(20));
+    let proposed = source.decode().operations[0].primitive_value().unwrap();
+    assert_eq!(proposed.as_str(), Some("Camping"));
+    let reviewed_source = source.hash();
+    let bob = actor(40);
+    let (d, t) = s
+        .edit(&excluded, bob.clone(), b"bob", |tx| {
+            tx.put(ROOT, "suggestion", proposed.clone())
+        })
+        .unwrap();
+    check_replay(&s, &t);
+    assert_ne!(d, reviewed_source);
+    let adoption = s.doc.get_change_by_hash(&d).unwrap();
+    assert_eq!(adoption.actor_id(), &bob);
+    assert_eq!(adoption.deps(), excluded.heads.as_slice());
+    assert!(adoption.decode().operations[0].pred.is_empty());
+    // The mock author binding is an explicit captured input, distinct from actor ID.
+    let package = s.export();
+    let (_, author) = package
+        .content
+        .iter()
+        .find(|(bytes, _)| Change::from_bytes(bytes.clone()).unwrap().hash() == d)
+        .unwrap();
+    assert_eq!(author, b"bob");
+    let adopted = s.capture();
+    assert_eq!(adopted.eligibility[&f.a], Eligibility::Excluded);
+    assert_eq!(adopted.eligibility[&d], Eligibility::Eligible);
+    assert_eq!(s.scalar(&adopted, "suggestion").as_deref(), Some("Camping"));
+    assert_eq!(s.scalar(&adopted, "title").as_deref(), Some("Weekend plan"));
+    let adoption_id = s.candidates(&adopted, &ROOT, "suggestion")[0].1.clone();
+    assert_ne!(adoption_id, f.original);
+    assert_eq!(s.doc.hash_for_opid(&adoption_id), Some(d));
+    assert_eq!(
+        s.doc
+            .get_change_by_hash(&reviewed_source)
+            .unwrap()
+            .raw_bytes(),
+        source.raw_bytes()
+    );
+
+    // Restoring A does not give D a new predecessor: equal scalars still conflict by identity.
+    deliver(&mut s, vec![Input::Invalidate(f.r)]);
+    let restored = s.capture();
+    assert_eq!(restored.eligibility[&f.a], Eligibility::Eligible);
+    let candidates = s.candidates(&restored, &ROOT, "suggestion");
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|(_, id)| id.clone())
+            .collect::<Vec<_>>(),
+        vec![f.original, adoption_id]
+    );
+    assert!(candidates
+        .iter()
+        .all(|(value, _)| value.as_str() == Some("Camping")));
+    assert_eq!(s.scalar(&excluded, "suggestion"), None);
+    assert_eq!(s.candidates(&adopted, &ROOT, "suggestion").len(), 1);
+}
+
+#[test]
+fn native_action_diagnostic_includes_enabled_experimental_range() {
+    let error = crate::op_set2::types::Action::try_from(9)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("between 0 and 8"), "{error}");
+}
+
+#[test]
 fn ex01_status_only_and_earlier_actor_live_reread() {
     let mut f = ex01();
     let mut tx = f.doc.transaction();
@@ -189,6 +280,99 @@ fn ex01_status_only_and_earlier_actor_live_reread() {
     assert_eq!(s.hydrate(&frozen), value);
     let foreign = Session::new();
     assert!(foreign.scope(&frozen).is_err());
+}
+
+fn queued_control_known_frontier(valid_dependency: bool) {
+    let f = ex01();
+    let mut dependency = if valid_dependency {
+        f.doc.fork_at(&[f.h]).unwrap()
+    } else {
+        Automerge::new()
+    };
+    dependency.set_actor(actor(50));
+    let x = dependency.empty_commit(Default::default());
+    let mut expanded = f.doc.get_change_by_hash(&f.r).unwrap().decode();
+    expanded.deps = vec![x];
+    let control: Change = expanded.into();
+    let r = control.hash();
+    let mut s = Session::new();
+    deliver(&mut s, vec![content(&f.doc, f.h), content(&f.doc, f.a)]);
+    // Receipt alone is not credible authority and cannot hide Alice's work.
+    deliver(&mut s, vec![Input::Content(control, b"other".to_vec())]);
+    let unverified = s.capture();
+    assert_eq!(unverified.authority[&r], Authority::Pending);
+    assert_eq!(unverified.eligibility[&f.a], Eligibility::Eligible);
+    assert_eq!(
+        s.scalar(&unverified, "suggestion").as_deref(),
+        Some("Camping")
+    );
+
+    let t = deliver(&mut s, vec![Input::Authorize(r)]);
+    let queued = s.capture();
+    assert_eq!(queued.authority[&r], Authority::Authorized);
+    assert!(!queued.integrated.contains(&r));
+    assert!(queued.integrated.contains(&f.h));
+    assert_eq!(
+        queued.missing_dependencies[&r],
+        std::collections::BTreeSet::from([x])
+    );
+    assert!(!queued.unresolved_frontiers.contains_key(&r)); // H is known, not missing.
+    assert_eq!(queued.eligibility[&f.a], Eligibility::Pending);
+    assert_eq!(
+        queued.reasons[&f.a],
+        super::policy::Reason::AwaitingControlValidation(r)
+    );
+    assert_eq!(s.scalar(&queued, "suggestion"), None); // Pending effects are hidden.
+    assert!(t.status.contains(&f.a));
+    let restored = s.reconstruct().unwrap();
+    assert_eq!(restored.capture(), queued);
+
+    if valid_dependency {
+        let t = deliver(&mut s, vec![content(&dependency, x)]);
+        let integrated = s.capture();
+        assert!(integrated.integrated.contains(&r));
+        assert_eq!(integrated.authority[&r], Authority::Authorized);
+        assert_eq!(integrated.eligibility[&f.a], Eligibility::Excluded);
+        assert_eq!(
+            integrated.reasons[&f.a],
+            super::policy::Reason::OutsideFrontier(r)
+        );
+        assert_eq!(s.scalar(&integrated, "suggestion"), None);
+        assert!(t.content.is_empty()); // Pending -> excluded is status-only.
+        assert!(t.status.contains(&f.a));
+    } else {
+        let mut independent = Automerge::new().with_actor(actor(60));
+        let d = put(&mut independent, "independent", "must not publish");
+        for _ in 0..2 {
+            let error = s
+                .deliver(vec![content(&independent, d), content(&dependency, x)])
+                .err()
+                .unwrap();
+            assert_eq!(error, "frontier is not dependency ancestry");
+            assert_eq!(s.capture(), queued);
+            assert!(s.doc.get_change_by_hash(&x).is_none());
+            assert!(s.doc.get_change_by_hash(&d).is_none());
+            assert_eq!(s.scalar(&s.capture(), "suggestion"), None);
+        }
+        // No invented quarantine: the invalid queued R remains pending, not excluded.
+        assert_eq!(s.capture().eligibility[&f.a], Eligibility::Pending);
+    }
+    assert_eq!(
+        s.scalar(&unverified, "suggestion").as_deref(),
+        Some("Camping")
+    );
+    assert_eq!(s.scalar(&queued, "suggestion"), None);
+    assert_eq!(queued.eligibility[&f.a], Eligibility::Pending);
+}
+
+#[test]
+fn native_queued_control_waits_for_valid_dependency_before_exclusion() {
+    queued_control_known_frontier(true);
+}
+
+#[test]
+fn native_queued_control_invalid_dependency_rejection_preserves_pending_capture() {
+    queued_control_known_frontier(false);
 }
 
 #[test]

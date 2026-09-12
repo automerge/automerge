@@ -37,6 +37,7 @@ pub(super) enum Reason {
     ActiveControl(ChangeHash),
     InvalidatedControl(ChangeHash),
     MissingFrontier(ChangeHash),
+    AwaitingControlValidation(ChangeHash),
     OutsideFrontier(ChangeHash),
     FreshGrant(u64),
     MissingGrant(u64),
@@ -70,6 +71,9 @@ pub(super) fn resolve_controls(
         .collect();
     let mut reasons = BTreeMap::new();
     // Precompute each retained ancestry once, independent of the viewed heads.
+    // Known retained hashes alone are insufficient: only an integrated control
+    // has passed the session's dependency-ancestry validation. Credible queued
+    // controls may make targets pending, but cannot establish final exclusion.
     let frontiers: BTreeMap<_, _> = history
         .controls
         .iter()
@@ -77,9 +81,11 @@ pub(super) fn resolve_controls(
             (
                 *h,
                 if c.retain.iter().any(|b| !history.integrated.contains(b)) {
-                    None
+                    Err(Reason::MissingFrontier(*h))
+                } else if !history.integrated.contains(h) {
+                    Err(Reason::AwaitingControlValidation(*h))
                 } else {
-                    Some(ancestry(history.archive, &c.retain))
+                    Ok(ancestry(history.archive, &c.retain))
                 },
             )
         })
@@ -116,11 +122,11 @@ pub(super) fn resolve_controls(
                     continue;
                 }
                 match &frontiers[r] {
-                    None => {
+                    Err(unresolved) => {
                         status = Eligibility::Pending;
-                        reason = Reason::MissingFrontier(*r);
+                        reason = unresolved.clone();
                     }
-                    Some(frontier) if !frontier.contains(h) => {
+                    Ok(frontier) if !frontier.contains(h) => {
                         status = Eligibility::Excluded;
                         reason = Reason::OutsideFrontier(*r);
                     }
