@@ -1,6 +1,6 @@
-# Prototype B — B1 checkpoint and reciprocal-review fix wave 1
+# Prototype B — B1, approved repair and B3 structural evidence
 
-**Status: DONE_WITH_CONCERNS** — working B1 map/native-control checkpoint, not complete structural catalogue or production integration.
+**Status: DONE_WITH_CONCERNS** — runnable EX-01–14 catalogue checkpoints, including B3 structural/formatting replay. Scope variants and integration limitations remain; not production integration. Latest source **`c33dcb62`**; final suites **531 feature / 475 default passed, 1 ignored each**. B3 extension review pending.
 
 Date: 2026-09-12. Workspace: `automerge-revocation-b`.
 
@@ -10,6 +10,7 @@ Date: 2026-09-12. Workspace: `automerge-revocation-b`.
 - Implementation: **`174274e71989a4369a967e61e996eae34ff08aee`**, jj change `vqxmktrsqwzpszyoppvvqnnzxszmmwpl`, description `prototype B: native controls, frozen map interpretations and staged patch transitions`.
 - Initial report: `4e28b301a9fa5de42bc95e5e99865493759d58a3`, `prototype B: document executed B1 evidence and limitations`.
 - Fix wave 1: **`a797e199ac519f4c95203633f1d3d420217ba80f`**, jj change `osvtqqzkwoopwkwkrqtxpoxnrvrvyymz`, `prototype B: keep unvalidated queued controls pending; cover scalar adoption`. Source tested by all `fix-1-*` final runs below. This report update is a subsequent documentation-only commit.
+- B3 structural implementation: **`c33dcb6238a8dc412757fb29f7c66f401a7e79c9`**, jj change `xkmvsvrwukummsxtqrrlpwnqqktnmksq`, `prototype B: selected sequences, counters and rich-text replay evidence`. This latest report update follows as documentation only.
 - Used only the assigned source workspace/run directory and supplied read-only brief/spec/plan/B design/TDD skill. No sibling implementation, historical revocation branch, subagents, model invocations, pushes or shared bookmark changes.
 - Clean pinned parent and Rust 1.90 were verified. Coordinator supplied the clean-baseline result (472 passed, 1 ignored); I did not independently rerun that baseline. Final default-source regression suite was run below.
 
@@ -32,6 +33,10 @@ The mock adapter supplies explicit trusted actor-to-author bindings and affirmat
 | EX-05 | Eligible A, excluded replacement B, eligible C: conflict candidates are original A and C identities, not transitive suppression. Invalidation leaves only C. |
 | EX-06 | Eligible deletion targeting excluded B does not delete A. An excluded deletion restores A; invalidation hides it again. A new selected-view deletion records A as its actual predecessor. |
 | EX-07 | Excluded map attachment with eligible child and independent root edit; child remains object-locally inspectable and root-unreachable. Restoring attachment exposes existing child; patch replay passes. |
+| EX-08/09 (B3) | Hidden insertion anchor retains Y; concurrent Z/Y ordering; exact insertion element IDs distinct from replacement value IDs; selected-index authoring and earlier-sorting actor reread. Eligible scalar/map replacement at excluded element preserves original element, without adopting old map children. |
+| EX-10/11 (B3) | Map/list counters exclude +100 but retain +5; self-diff/empty/duplicate/restoration; excluded base contributes no counter; increments remain attached to original base and do not migrate to old/new bases. Both eligible increment suppressing a scalar conflict and excluded increment failing to suppress that scalar are covered. |
+| EX-12/13 (B3) | Eligible marks over hidden XY preserve bc; dormant XY mark has no visible range; pre-exclusion interior Q remains marked. Collapsed-gap post-exclusion Q is unmarked for all four expansion modes in the fixed characterization. Code-point/UTF-8/UTF-16 selected read/edit/reconstruction fixtures include emoji. |
+| EX-14 (B3) | Excluded mark/unmark, cold insertion mark leakage, partial unmark plus independent eligible unmark, and selected authoring not copying excluded formatting. Real text/spans/marks reads and separate formatting-state patch replay. |
 | Additional model test | **48 proptest cases**, valid chains of 1–17 Alice register replacements, arbitrary granted-context holes. Independent direct-successor candidate oracle, real transition replay, reconstruction and reinstatement. No random invalid operation fragments. |
 
 EX-02/03 enumeration freezes and rereads every published capture, but does not separately redeliver each event in every schedule as EX-01 does. The finite bounds above are not exhaustive Automerge or authority-graph verification.
@@ -46,7 +51,7 @@ Selected root hydration and conflict candidates call real Automerge helpers. Pub
 
 `Session::edit` allocates the ordinary isolated transaction actor using captured **structural heads**, then compiles selected targets in the resulting actor table. Dependencies retain observed excluded history; predecessors come from the selected view. The transaction-local range starts at its allocated start operation, not at all actor history. Structurally available hidden objects remain editable. Authoring runs on a staged clone and imports the new original change through session validation.
 
-`Package` is an **in-memory complete experiment export**: original native change bytes plus capture/policy/provenance, version 1. Restore decodes and integrates a fresh operation graph and checks the full capture. This is not a serialized durable envelope format. Session encoding is fixed at its ordinary default; text is outside this checkpoint. Native document-only save/load retains R but **does not restore its external authority interpretation**; a test explicitly demonstrates that distinction.
+`Package` is an **in-memory complete experiment export**: original native change bytes plus capture/policy/provenance, version 1. Restore decodes and integrates a fresh operation graph and checks the full capture. This is not a serialized durable envelope format. B3 captures the explicit session text encoding and preserves it on reconstruction; mismatched scopes reject. Code-point/UTF-8/UTF-16 are exercised; grapheme-rich-text replay remains unproven. Native document-only save/load retains R but **does not restore its external authority interpretation**; a test explicitly demonstrates that distinction.
 
 ## Commands and actual outcomes
 
@@ -112,16 +117,16 @@ Some new tests passed immediately on the existing slice: direct-target EX-05/06,
 
 1. **Scan/clone cost:** each delivery stages a whole Session clone, scans the archive to find causally ready changes, repeatedly reconstructs change metadata, evaluates captures, compiles per-operation BTreeSets, and diffs complete endpoints. No production benchmark claim. Final feature library suite, including all schedules/property tests, took 73.52 seconds in the debug test profile; this is test runtime, not a comparative performance measurement.
 2. **Storage/capture cost:** original Change archive duplicates graph storage; captures duplicate hash classifications, inspection and evidence/provenance. Export includes all received original bytes. No interval compression, canonical capture hashing or durable package serializer.
-3. **B1 is map/scalar only:** Session explicitly rejects lists, text, counters, marks, table creation and competing controls. **EX-08–14 are unimplemented/unproven**, and no formatting-aware patch observer exists. Ordinary control-free structural tests still pass but do not validate selected structural semantics.
+3. **Structural support is bounded evidence, not universal coverage:** B3 lifts list/text/counter/mark rejection with the regressions detailed below. Table creation and competing controls remain rejected. Fixed EX-08–14 and 32 generated formatting cases pass; general structural model generation, grapheme-rich-text patch replay, arbitrary nested rich-text block payloads and all rich-text conflict combinations remain unproven.
 4. **Recovery remains limited:** EX-04 named scalar adoption now passes after fix wave 1 using the existing editing API. The test records A as the reviewed source locally; no durable adoption provenance format, general recovery, policy forks, signatures, Keyhive graph, unauthorized-versus-invalidated variants, multiple control composition or grant revocation.
 5. **Private prototype boundary only:** native encoding is accepted by the feature build; session-specific ancestry, scope restrictions and group atomicity are not globally imposed on ordinary Automerge load/merge/sync. Ordinary raw control-bearing imports are transport/noninterference characterizations, not authorization-aware APIs. The experimental session is the supported interpretation path. No sync negotiation adapter, bundle route or strict compact-session import implementation.
-6. **No optimized selected import-log proof:** transitions discard import logs and use endpoint diffs. The native batch patch test proves content noninterference under allow-all only. Map restored-subtree duplicate exposure is covered; arbitrary nested conflicts and non-map structural exposure are not.
+6. **No optimized selected import-log proof:** transitions discard import logs and use endpoint diffs. The native batch patch test proves content noninterference under allow-all only. Map/list/text/block restored-subtree exposure and a simultaneous nested text edit are covered by B3; arbitrary nested conflict combinations are not.
 7. **Trusted mock facts are essential:** actor-author bytes are external bindings checked for consistency and captured. Existing native author metadata is not used as a capability proof or reconciled by this mock adapter. Context associations are trusted immutable facts; delivering content before its required fresh-context association is outside the bundled fixture input contract. A `Context(h, g)` association overrides restriction applicability for h in this single-control model; it is not general context-versus-control evaluation. Extending beyond one control requires revisiting that boundary.
-8. **Private API rough edges:** string errors, internal unwraps behind validated captured contexts, fresh-control actor restriction, fixed default encoding and full-capture comparisons are intentional disposable costs. No public production API is proposed.
+8. **Private API rough edges:** string errors, internal unwraps behind validated captured contexts, fresh-control actor restriction and full-capture comparisons are intentional disposable costs. No public production API is proposed.
 
 ## Fix wave 1 — reciprocal review disposition and executed evidence
 
-**Status: DONE_WITH_CONCERNS. F1 corrected; scoped re-review pending.** The initial passing 499-test suite did not cover pre-validation effectiveness. The supplied reciprocal review and coordinator ruling were read completely. No other model/reviewer was invoked.
+**Status: DONE_WITH_CONCERNS. F1 corrected; scoped re-review APPROVED.** The initial passing 499-test suite did not cover pre-validation effectiveness. The supplied reciprocal review and coordinator ruling were read completely. No other model/reviewer was invoked.
 
 ### F1: validated control readiness precedes final exclusion
 
@@ -170,11 +175,101 @@ rustfmt --edition 2021 --config skip_children=true --check \
 
 Complete fix diff self-reviewed with `jj diff --git` and saved as `fix-1-diff.patch`. No source changes follow the final fix-wave full-suite/formatting runs.
 
+## B3 structural extension — implementation and evidence
+
+Started 2026-09-12 17:47 UTC from approved repair/report `53836b40`. Source checkpoint committed at approximately 18:12 UTC, within the 40-minute bound. The supplied Fable re-review approves F1 and task quality; that review executed no tests. Coordinator-supplied repair reruns were 503/473 passed, 1 ignored; B3 ran its own full suites below. Native action 8, ancestry-validation gate, policy evaluator and context semantics were not changed.
+
+### New interfaces and source changes
+
+- `prototype/core.rs`: lift rejection of List/Text/Counter/Increment/Mark families; keep Table and competing-control rejection. `Capture` now includes `TextEncoding`; `Session::with_encoding` constructs explicitly, restore preserves encoding, and scope rejects mismatches. Plain `Transition::apply` skips standalone `Mark` because hydrated text has no formatting state and panics on those patches. This is explicitly a **plain projection observer**, not rich-text certification.
+- `prototype/format_observer.rs` (**test only**): independent per-character mark maps plus block payloads. It replays `SpliceText` with insertion marks, `Mark` (including null removals), `DeleteSeq`, block `Insert`, nested block field patches, and before-path attachment deletion/replacement/index shifts. It compares this replay to the complete real selected `spans_for` result. Expected fixture formatting and the generated range model do not consult production eligibility/mark code. It never fills formatting from the after-view. Unhandled text patch kinds/grapheme indexing panic in this test observer rather than silently pretending support.
+- `iter/list_range.rs`, `iter/spans.rs::push_block`: full exposure uses prior structural existence rather than selected participation, extending the reviewed map exposure fix to restored list elements and text blocks.
+- `patches/patch_log.rs::ExposeQueue::flush_obj`: expose complete selected text through internal spans, retaining splice marks and block IDs/children instead of collapsing every block to a plain U+FFFC. Block entries remain native `Insert(Object(Map), id)` plus child patches; no `Span::Block` is discarded.
+- `iter/spans.rs::SpanState::push_str`: added-text coalescing compares **complete after-formatting**, not the mark delta between endpoints. Unchanged mark boundaries still split restored text into marked/unmarked runs.
+- New `prototype/structural_tests.rs`: 26 structural tests including 32 generated formatting cases and 24 receipt/batch schedules. `tests/prototype_exposure_compat.rs`: two control-free regressions run under both feature configurations. Saved minimized proptest seed retained in `proptest-regressions/prototype/structural_tests.txt`.
+
+### Behaviors beyond catalogue headlines
+
+EX-07 now covers: excluded text attachment with eligible text and marks; nested map/text restoration with simultaneous eligible Q delta and exact nonduplicated character count; excluded list-map element exposing eligible child; excluded text block exposing eligible child payload; and attachment exclusion/restoration replay in both directions. Control-free restoration verifies bold `bc`, a real paragraph block at index 2 and its `kind` property. Ordinary reverse-deletion diff also checks restored text spanning an unchanged mark boundary.
+
+Sequence inspection resolves object IDs against the live actor table, reads visible values and their actual insertion element keys separately, and checks recorded insertion/predecessor identities. EX-08's selected replacement changes the value operation ID while all surviving element IDs retain order. EX-09 proves Y is a replacement of X's element, not a new insertion. An early actor import is followed by frozen reads.
+
+Counter tests use real selected candidates and patch replay, not a numerical reducer. EX-11 with a retained old base yields 10 rather than 15; restoring B yields 105; a new selected-authored counter base 50 has its own candidate and does not inherit +5. Mixed scalar/counter conflicts are exercised in both exclusion directions.
+
+Formatting fixtures compare actual spans, selected plain text and marks (not only JSON), replay transitions, freeze/reread captures, and reconstruct selected sessions. EX-14 includes standalone Mark patches and cold already-excluded mark import where insertion patches must not leak formatting. EX-13 distinguishes pre-exclusion interior Q (bold) from Q typed into the collapsed visible gap (not bold for any of None/Before/After/Both in this history); this is a characterization, not a new expansion policy.
+
+Native route characterization constructs a mixed list/counter/text/mark history with R and passes it through direct changes, one batched apply, merge, compact load, and incremental change bytes. Every original change's bytes and heads match. Each route then feeds a session with explicit policy and yields the same selected hydrated state, formatting replay and reconstruction. **This does not prove selected optimized native import logs, session sync negotiation or authority persistence in native document bytes.**
+
+The extra structural receipt test enumerates **6 permutations × 4 contiguous partitions = 24 schedules** of A/eligible text+mark B/R, with H and authoritative R evidence preloaded. Every published group checks independently expected plain/bold strings and replays rich patches; each event is redelivered, and all captures are reread. Existing EX-01/02/03 **4,032 schedules** remain unchanged and pass in final full runs. No broad structural permutation claim beyond those 24 schedules.
+
+### TDD failures and fixes
+
+Here `T` is `cargo test --locked --offline -p automerge --features experimental-revocation --lib`, run from `rust/`; all logs are in assigned `implementation-1/b/`.
+
+| Command suffix / fixture | Actual red | Green / disposition |
+|---|---|---|
+| `prototype::structural_tests` (initial EX-08/09) | `extend-red-lists.log`: 3 behavior failures at map-only admission gate. | `extend-green-lists.log`: 3 pass after allowing lists. Core list ordering/replacement needed no further fix for those tests. |
+| `prototype::structural_tests::ex1` (EX-10/11) | `extend-red-counters.log`: 3 rejected by counter gate. | `extend-counters-behavior.log`: 3 pass after permitting counters/increments. No counter folding fix. |
+| `prototype::structural_tests::ex1` (EX-12–14) | `extend-red-text.log`: observer API setup compile failure (`ConcreteTextValue` needs `make_string`). `extend-red-text-behavior.log`: 2 rejected by text gate. `extend-text-behavior.log`: real plain-observer panic on standalone Mark. | `extend-green-marks.log`: plain observer explicitly excludes marks, separate rich observer replays them. |
+| `prototype::structural_tests` (restoration) | `extend-red-exposure.log`: 3 behavior failures: lost formatting, collapsed/lost block payload and empty restored list-map child. | `extend-green-exposure.log`: all 11 then-current tests pass with spans-aware and structural exposure fixes. |
+| `prototype::structural_tests` (text block) | `extend-red-block.log`: restored block child missing, 14 other tests pass. | `extend-green-block.log`: 15 pass with structural block exposure. |
+| `prototype::structural_tests::ex12_unicode_selected` | `extend-red-encoding-api.log`: absent constructor. `extend-red-encoding-behavior.log`: UTF-8 reconstructs as code-point. | `extend-green-encoding.log`: explicit captured encoding preserved in all 3 tested encodings. |
+| `prototype::structural_tests::model_formatted` then `prototype::structural_tests::restored_text_splice` | `extend-model-formatting.log`: generated case lost bold on restored X. Minimized to gap=1, extra=3, start_seed=9, len_seed=0; seed saved. `extend-red-mark-boundary.log`: fixed minimal regression also fails. | `extend-green-mark-boundary.log`: complete after-format comparison fixes restored splice coalescing; 21 then-current tests pass including generated cases. |
+| `prototype::structural_tests::ex07_formatted_attachment_exclusion` | `extend-red-observer-parent.log`: **test observer bug**, parent DeleteMap did not clear text. | `extend-green-observer-parent.log`: captured-before-path replay added to observer; no production fix needed. |
+| `prototype::structural_tests::ex0` then `…::ex08` | `extend-element-identities.log`: **test helper bug**, stale embedded actor index after early import yielded no elements. | `extend-element-identities-corrected.log`: resolve object through live table; value and element identities checked separately. |
+
+Other extension variants passed first run: map-valued replacement, counter self-diffs/mixed scalar suppression, partial unmarks, most fixed mark range materialization, selected authoring, mixed native routes, 24 structural schedules and default-feature compatibility. They are executed evidence, not individually claimed red/green cycles. The generated formatting test demonstrates why fixed EX-12/13 alone was not sufficient.
+
+### Final commands, totals and timings
+
+```sh
+# From rust/
+cargo test --locked --offline -p automerge --features experimental-revocation --lib --tests
+# extend-checkpoint-feature.log: 531 passed, 0 failed, 1 ignored, exit 0
+# 241 lib (57 prototype tests, including 26 structural) + 290 integration
+
+cargo test --locked --offline -p automerge --lib --tests
+# extend-checkpoint-default.log: 475 passed, 0 failed, 1 ignored, exit 0
+# 185 lib + 290 integration
+
+cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::structural_tests
+# extend-checkpoint-focused.log: 26 passed, exit 0; 1.08s test execution
+```
+
+Final feature library execution took **57.22s**, default library **7.86s**; the focused structural test run took **1.08s**, and the separate 24-schedule run **0.69s**. All are **debug test-run timings, not production or comparative benchmarks**. Full logs before the final extra schedule test (`extend-full-feature-first.log`, `extend-full-feature-final.log`, `extend-full-default-final.log`) are retained but superseded by `extend-checkpoint-*`.
+
+Changed Rust files formatted and checked at source root with:
+
+```sh
+jj diff --name-only | grep '\.rs$' | xargs rustfmt --edition 2021 --config skip_children=true
+jj diff --name-only | grep '\.rs$' | xargs rustfmt --edition 2021 --config skip_children=true --check
+# extend-rustfmt-final.log: exit 0, no output
+```
+
+Only the known two manifest warnings remain. No dependency additions or environment changes. Source unchanged after these final commands; extension diff self-reviewed via `jj diff --git` and saved as `extend-checkpoint.diff`.
+
+### Concrete size/cost and remaining limitations
+
+At the tested source checkpoint, `wc -l` reports `core.rs` **596**, `policy.rs` **145**, `format_observer.rs` **195**, `structural_tests.rs` **1,223**, existing `tests.rs` **1,225**, `gate_tests.rs` **32**, `prototype.rs` **86**, and default compatibility tests **88**: **3,590 physical Rust lines** across those eight experiment/test files. This includes comments/tests, not a complexity score. Extension touches **9 Rust files**, one saved seed and local documentation. Cumulative experiment touches **28 Rust files**, plus Cargo manifest, one seed and three documentation files (**33 files**). Compared with the approved repair source, shared production mechanics changed in only list diff, spans diff and patch exposure; the pure authority evaluator/native action implementation is unchanged.
+
+New runtime costs: rich restored-subtree exposure scans spans instead of a plain string; full-after-mark comparison may split more splices correctly. Captures add encoding. Session cloning, archive scans, per-op BTreeSets, full endpoint diffs and duplicate capture data remain. The rich replay observer is test-side only; applications would still need their own checked rich-text consumer.
+
+Unsupported/unproven: table creation still rejected; competing controls still rejected; grapheme indexing is accepted by the existing Automerge constructor but **not proven by this extension's observer** (which explicitly panics); arbitrary PutSeq/scalar conflict transformations in text and arbitrarily nested rich-text inside block payloads are not covered by the test observer. In-memory Package is not a durable serialized envelope. No sync negotiation or selected optimized incremental-import-log proof, general recovery/provenance, full Keyhive, signatures, general multi-control contexts or invalid-control quarantine policy. The F1 invalid queued-control availability limitation is unchanged. EX-02/03 per-event duplicate enumeration and dedicated historical-isolation API remain prior omissions. No claim that every rich-text operation combination is correct follows from this finite catalogue.
+
 ## Minimal reproductions
 
 From `rust/`:
 
 ```sh
+# All B3 structural examples, rich patch replay, generated model and 24 schedules
+cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::structural_tests
+
+# Minimized restored-formatting failure found by property testing
+cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::structural_tests::restored_text_splice
+
+# Control-free compatibility for shared exposure/coalescing fixes
+cargo test --locked --offline -p automerge --test prototype_exposure_compat
+
 # Review F1: known H, missing X, then valid/invalid X; native validation gates exclusion
 cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::tests::native_queued_control
 
@@ -202,4 +297,4 @@ The pre-fix EX-07 minimal trace is: excluded `root.section = map M`; eligible `M
 
 ## Assessment
 
-The running checkpoint demonstrates B's concrete causal benefit and native statement persistence with the reviewed pre-validation exclusion bug now corrected. It also demonstrates that native controls still require external evidence snapshots, pre-integration provisional handling, non-prefix selection and nonlocal subtree patch treatment. Invalid queued controls retain a concrete pending-availability limitation under strict rejection. No comparison winner can be inferred without the coordinator's scoped re-review and the counterpart evidence. Ready for that review; not ready for structural or production claims.
+The running checkpoint demonstrates B's concrete causal benefit and native statement persistence with the approved pre-validation exclusion repair intact. B3 now supplies bounded real sequence/counter/rich-text evidence and exposed a formatting coalescing bug that fixed examples missed. Native controls still require external evidence snapshots, pre-integration provisional handling, non-prefix selection and nonlocal subtree patch treatment. Invalid queued controls retain a concrete pending-availability limitation under strict rejection. Ready for coordinator-managed extension review and comparative evidence collection; no production selection or universal structural correctness claim.
