@@ -114,7 +114,7 @@ impl TransactionInner {
             && self
                 .scope
                 .as_ref()
-                .is_some_and(|scope| !scope.covers(&obj.id.0))
+                .is_some_and(|scope| !scope.contains(&obj.id.0))
         {
             return Err(AutomergeError::InvalidObjId(id.to_string()));
         }

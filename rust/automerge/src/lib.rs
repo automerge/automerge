@@ -271,6 +271,7 @@ mod clock;
 mod columnar;
 mod convert;
 mod cursor;
+pub mod eligibility;
 pub mod error;
 mod exid;
 pub mod hydrate;

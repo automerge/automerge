@@ -48,6 +48,10 @@ pub struct PatchLog {
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
     pub(crate) heads: Option<Vec<ChangeHash>>,
+    /// Experimental (prototype A): an explicit read scope for patch
+    /// construction. When set, `make_current_patches` must not re-resolve a
+    /// clock from `heads` (heads do not identify an eligibility view).
+    pub(crate) scope: Option<Clock>,
     pub(crate) actors: Vec<ActorId>,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
@@ -231,6 +235,7 @@ impl PatchLog {
             expose: HashSet::new(),
             completed_patches: Vec::new(),
             heads: None,
+            scope: None,
             path_map: Default::default(),
             path_hint: 0,
             actors: vec![],
@@ -508,7 +513,10 @@ impl PatchLog {
     }
 
     fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        let clock = self.heads.as_ref().map(|h| doc.change_graph.clock_at(h));
+        let clock = match self.scope.take() {
+            Some(scope) => Some(scope),
+            None => self.heads.as_ref().map(|h| doc.change_graph.clock_at(h)),
+        };
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
         self.events
@@ -545,6 +553,7 @@ impl PatchLog {
             path_map: Default::default(),
             path_hint: 0,
             heads: None,
+            scope: None,
             actors: self.actors.clone(),
             speculative_actor: None,
         }

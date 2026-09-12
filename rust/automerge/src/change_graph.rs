@@ -335,6 +335,10 @@ impl ChangeGraph {
         self.nodes_by_hash.contains_key(hash)
     }
 
+    pub(crate) fn iter_hashes(&self) -> impl Iterator<Item = ChangeHash> + '_ {
+        self.hashes.iter().copied()
+    }
+
     pub(crate) fn get_bundle_metadata<I>(
         &self,
         hashes: I,
@@ -808,6 +812,35 @@ impl ChangeGraph {
     pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes.collect())
+    }
+
+    /// Experimental (prototype A): the actor index and inclusive op counter
+    /// range of an integrated change. `None` for unknown hashes and for empty
+    /// changes (which own no operations but still have ancestry).
+    pub(crate) fn op_range(&self, hash: &ChangeHash) -> Option<(usize, std::ops::RangeInclusive<u64>)> {
+        let idx = self.nodes_by_hash.get(hash)?;
+        let i = idx.0 as usize;
+        let num_ops = self.num_ops.get(i).unwrap_or_default();
+        if num_ops == 0 {
+            return None;
+        }
+        let max_op = self.max_ops[i] as u64;
+        let start = max_op - num_ops + 1;
+        Some((self.actors[i].into(), start..=max_op))
+    }
+
+    /// Experimental (prototype A): whether `hash` is in the ancestry (inclusive)
+    /// of `frontier`. `None` if either side is not integrated.
+    pub(crate) fn in_ancestry(&self, frontier: &[ChangeHash], hash: &ChangeHash) -> Option<bool> {
+        if !frontier.iter().all(|h| self.nodes_by_hash.contains_key(h)) {
+            return None;
+        }
+        let idx = self.nodes_by_hash.get(hash)?;
+        let i = idx.0 as usize;
+        let actor: usize = self.actors[i].into();
+        let seq = self.seq[i];
+        let clock = self.seq_clock_for_heads(frontier);
+        Some(clock.get_for_actor(&actor).is_some_and(|s| s.get() >= seq))
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
