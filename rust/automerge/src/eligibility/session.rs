@@ -3,11 +3,12 @@
 //! views and transitions; a failed group publishes nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::evidence::{
     authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, Decision, Eligibility,
-    EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts,
+    EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts, Reason,
 };
 use super::{Selection, ViewError, ViewSpec};
 use crate::exid::ExId;
@@ -21,13 +22,30 @@ pub enum Input {
     Change(Change),
     Evidence(Evidence),
     /// Toy model input binding a change to the authorization context it was
-    /// authored under (EX-03).
+    /// authored under (EX-03). Immutable once recorded: identical rebinding is
+    /// idempotent, a conflicting one rejects the whole group.
     Binding(ChangeHash, AuthorizationContextId),
 }
 
-/// Opaque index of a published capture within a session.
+/// Per-process unique namespace for sessions so that a [`ViewId`] from one
+/// session cannot select a capture of another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ViewId(usize);
+pub struct SessionId(u64);
+
+static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+
+impl SessionId {
+    fn fresh() -> Self {
+        Self(NEXT_SESSION.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// Checked identity of a published capture: session namespace plus index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ViewId {
+    session: SessionId,
+    index: usize,
+}
 
 /// Frozen inspection state at a checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,18 +65,32 @@ pub struct Capture {
     pub inspection: Arc<InspectionSnapshot>,
 }
 
+/// Complete inspection transition between two captures. Every field of
+/// [`InspectionSnapshot`] has a corresponding change map so that
+/// `is_empty()` is true iff the two snapshots are identical.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusDelta {
     pub eligibility_changes: BTreeMap<ChangeHash, (Eligibility, Eligibility)>,
+    /// Decisions whose reasons changed while eligibility did not.
+    pub reason_changes: BTreeMap<ChangeHash, (Vec<Reason>, Vec<Reason>)>,
     pub authority_changes: BTreeMap<EventId, (Option<Authority>, Authority)>,
     pub newly_integrated: BTreeSet<ChangeHash>,
+    /// Waiting inventory changes: `None` means absent (not received or
+    /// already integrated).
+    pub waiting_changes:
+        BTreeMap<ChangeHash, (Option<BTreeSet<ChangeHash>>, Option<BTreeSet<ChangeHash>>)>,
+    pub binding_changes:
+        BTreeMap<ChangeHash, (Option<AuthorizationContextId>, AuthorizationContextId)>,
 }
 
 impl StatusDelta {
     pub fn is_empty(&self) -> bool {
         self.eligibility_changes.is_empty()
+            && self.reason_changes.is_empty()
             && self.authority_changes.is_empty()
             && self.newly_integrated.is_empty()
+            && self.waiting_changes.is_empty()
+            && self.binding_changes.is_empty()
     }
 }
 
@@ -78,6 +110,18 @@ pub enum SessionError {
     Evidence(#[from] EvidenceError),
     #[error(transparent)]
     View(#[from] ViewError),
+    #[error("change {hash} already bound to {existing:?}; refusing rebinding to {attempted:?}")]
+    ConflictingBinding {
+        hash: ChangeHash,
+        existing: AuthorizationContextId,
+        attempted: AuthorizationContextId,
+    },
+    #[error("view {0:?} does not belong to this session or is out of range")]
+    ForeignView(ViewId),
+    #[error("change {0} is not integrated in the requested view")]
+    NotIntegrated(ChangeHash),
+    #[error("event {0:?} is unknown in the requested view")]
+    UnknownEvent(EventId),
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +134,7 @@ struct Published {
 
 #[derive(Debug)]
 pub struct Session {
+    id: SessionId,
     published: Published,
     captures: Vec<Capture>,
 }
@@ -109,7 +154,7 @@ impl GraphFacts for DocFacts<'_> {
     }
 }
 
-fn snapshot(
+pub(crate) fn snapshot(
     doc: &Automerge,
     evidence: &EvidenceLog,
     bindings: &BTreeMap<ChangeHash, AuthorizationContextId>,
@@ -152,19 +197,28 @@ fn snapshot(
     )
 }
 
+fn capture(
+    doc: &Automerge,
+    evidence: &EvidenceLog,
+    bindings: &BTreeMap<ChangeHash, AuthorizationContextId>,
+) -> Capture {
+    let (selection, inspection) = snapshot(doc, evidence, bindings);
+    Capture {
+        spec: ViewSpec {
+            heads: doc.get_heads(),
+            selection,
+        },
+        inspection: Arc::new(inspection),
+    }
+}
+
 impl Session {
     pub fn new(doc: Automerge) -> Self {
         let evidence = EvidenceLog::default();
         let bindings = BTreeMap::new();
-        let (selection, inspection) = snapshot(&doc, &evidence, &bindings);
-        let capture = Capture {
-            spec: ViewSpec {
-                heads: doc.get_heads(),
-                selection,
-            },
-            inspection: Arc::new(inspection),
-        };
+        let capture = capture(&doc, &evidence, &bindings);
         Self {
+            id: SessionId::fresh(),
             published: Published {
                 doc,
                 evidence,
@@ -186,53 +240,62 @@ impl Session {
                 Input::Evidence(e) => {
                     stage.evidence.insert(e)?;
                 }
-                Input::Binding(hash, ctx) => {
-                    stage.bindings.insert(hash, ctx);
-                }
+                Input::Binding(hash, ctx) => match stage.bindings.get(&hash) {
+                    Some(existing) if *existing == ctx => {}
+                    Some(existing) => {
+                        return Err(SessionError::ConflictingBinding {
+                            hash,
+                            existing: *existing,
+                            attempted: ctx,
+                        })
+                    }
+                    None => {
+                        stage.bindings.insert(hash, ctx);
+                    }
+                },
             }
         }
         stage.doc.apply_changes(changes)?;
-        let (selection, inspection) = snapshot(&stage.doc, &stage.evidence, &stage.bindings);
-        let after = Capture {
-            spec: ViewSpec {
-                heads: stage.doc.get_heads(),
-                selection,
-            },
-            inspection: Arc::new(inspection),
-        };
+        let after = capture(&stage.doc, &stage.evidence, &stage.bindings);
         let before = &self.published.capture;
         // Both endpoint scopes compile against the post-import graph.
         let patches = stage.doc.diff_view(&before.spec, &after.spec)?;
         let status = status_delta(&before.inspection, &after.inspection);
-        let before_id = ViewId(self.captures.len() - 1);
+        let before_id = self.current();
         stage.capture = after.clone();
         self.published = stage;
         self.captures.push(after);
         Ok(Transition {
             before: before_id,
-            after: ViewId(self.captures.len() - 1),
+            after: self.current(),
             patches,
             status,
         })
     }
 
     pub fn current(&self) -> ViewId {
-        ViewId(self.captures.len() - 1)
+        ViewId {
+            session: self.id,
+            index: self.captures.len() - 1,
+        }
     }
 
-    pub fn capture(&self, id: ViewId) -> &Capture {
-        &self.captures[id.0]
+    pub fn capture(&self, id: ViewId) -> Result<&Capture, SessionError> {
+        if id.session != self.id {
+            return Err(SessionError::ForeignView(id));
+        }
+        self.captures
+            .get(id.index)
+            .ok_or(SessionError::ForeignView(id))
     }
 
     pub fn doc(&self) -> &Automerge {
         &self.published.doc
     }
 
-    pub fn hydrate(&self, id: ViewId) -> hydrate::Value {
-        self.published
-            .doc
-            .hydrate_view(&self.captures[id.0].spec)
-            .expect("captured view compiles against the published graph")
+    pub fn hydrate(&self, id: ViewId) -> Result<hydrate::Value, SessionError> {
+        let cap = self.capture(id)?;
+        Ok(self.published.doc.hydrate_view(&cap.spec)?)
     }
 
     pub fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -240,37 +303,39 @@ impl Session {
         id: ViewId,
         obj: O,
         prop: P,
-    ) -> Vec<(Value<'_>, ExId)> {
-        self.published
-            .doc
-            .get_all_view(&self.captures[id.0].spec, obj, prop)
-            .expect("captured view compiles against the published graph")
+    ) -> Result<Vec<(Value<'_>, ExId)>, SessionError> {
+        let cap = self.capture(id)?;
+        Ok(self.published.doc.get_all_view(&cap.spec, obj, prop)?)
     }
 
-    pub fn decision(&self, id: ViewId, hash: &ChangeHash) -> Decision {
-        self.captures[id.0]
+    pub fn decision(&self, id: ViewId, hash: &ChangeHash) -> Result<Decision, SessionError> {
+        self.capture(id)?
             .inspection
             .decisions
             .get(hash)
             .cloned()
-            .unwrap_or_else(|| panic!("change {hash} is not integrated in view {id:?}"))
+            .ok_or(SessionError::NotIntegrated(*hash))
     }
 
-    pub fn authority(&self, id: ViewId, event: EventId) -> Authority {
-        self.captures[id.0]
+    pub fn authority(&self, id: ViewId, event: EventId) -> Result<Authority, SessionError> {
+        self.capture(id)?
             .inspection
             .authorities
             .get(&event)
             .cloned()
-            .unwrap_or_else(|| panic!("event {event:?} unknown in view {id:?}"))
+            .ok_or(SessionError::UnknownEvent(event))
     }
 
-    pub fn waiting(&self, id: ViewId, hash: &ChangeHash) -> Option<BTreeSet<ChangeHash>> {
-        self.captures[id.0].inspection.waiting.get(hash).cloned()
+    pub fn waiting(
+        &self,
+        id: ViewId,
+        hash: &ChangeHash,
+    ) -> Result<Option<BTreeSet<ChangeHash>>, SessionError> {
+        Ok(self.capture(id)?.inspection.waiting.get(hash).cloned())
     }
 
-    pub fn is_integrated(&self, id: ViewId, hash: &ChangeHash) -> bool {
-        self.captures[id.0].inspection.decisions.contains_key(hash)
+    pub fn is_integrated(&self, id: ViewId, hash: &ChangeHash) -> Result<bool, SessionError> {
+        Ok(self.capture(id)?.inspection.decisions.contains_key(hash))
     }
 }
 
@@ -286,6 +351,11 @@ fn status_delta(before: &InspectionSnapshot, after: &InspectionSnapshot) -> Stat
                     .eligibility_changes
                     .insert(*hash, (prev.eligibility, d.eligibility));
             }
+            Some(prev) if prev.reasons != d.reasons => {
+                delta
+                    .reason_changes
+                    .insert(*hash, (prev.reasons.clone(), d.reasons.clone()));
+            }
             Some(_) => {}
         }
     }
@@ -295,6 +365,23 @@ fn status_delta(before: &InspectionSnapshot, after: &InspectionSnapshot) -> Stat
             delta
                 .authority_changes
                 .insert(*event, (prev.cloned(), a.clone()));
+        }
+    }
+    let waiting_keys: BTreeSet<&ChangeHash> =
+        before.waiting.keys().chain(after.waiting.keys()).collect();
+    for hash in waiting_keys {
+        let prev = before.waiting.get(hash);
+        let next = after.waiting.get(hash);
+        if prev != next {
+            delta
+                .waiting_changes
+                .insert(*hash, (prev.cloned(), next.cloned()));
+        }
+    }
+    for (hash, ctx) in &after.bindings {
+        let prev = before.bindings.get(hash).copied();
+        if prev != Some(*ctx) {
+            delta.binding_changes.insert(*hash, (prev, *ctx));
         }
     }
     delta

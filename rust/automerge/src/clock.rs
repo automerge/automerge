@@ -141,14 +141,21 @@ impl ClockRange {
         }
     }
 
+    /// Participation in the `before` clock (effect predicate: counter sums,
+    /// visibility). Must not delegate to [`Self::predates`], which is
+    /// structural only.
     pub(crate) fn visible_before(&self, id: &OpId) -> bool {
-        self.predates(id)
+        match self {
+            Self::Diff(before, _) => before.covers(id),
+            _ => false,
+        }
     }
 
-    /// Structural containment in the `before` clock. Used for exposure
-    /// decisions: an object that already structurally existed before must not
-    /// be re-exposed wholesale even if it only now participates (its children
-    /// emit their own deltas). Distinct from [`Self::visible_before`].
+    /// Structural containment in the `before` clock. Used by the exposure
+    /// paths (`map_range`/`list_range`/`spans`): an object whose creation
+    /// already structurally existed before, and which now participates, is
+    /// exposed with its complete after-state (its unchanged children emit no
+    /// deltas of their own). Distinct from [`Self::visible_before`].
     pub(crate) fn predates(&self, id: &OpId) -> bool {
         match self {
             Self::Diff(before, _) => before.contains(id),

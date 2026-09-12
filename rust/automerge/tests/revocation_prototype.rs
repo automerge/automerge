@@ -141,16 +141,19 @@ fn ex01_three_checkpoints() {
     );
     let cp1 = session.current();
     assert!(hydrated_eq(
-        &session.hydrate(cp1),
+        &session.hydrate(cp1).unwrap(),
         &expect_map(&[("title", "Weekend plan"), ("suggestion", "Camping")])
     ));
-    assert_eq!(session.authority(cp1, R_ID), Authority::Pending(vec![]));
     assert_eq!(
-        session.decision(cp1, &a_hash).eligibility,
+        session.authority(cp1, R_ID).unwrap(),
+        Authority::Pending(vec![])
+    );
+    assert_eq!(
+        session.decision(cp1, &a_hash).unwrap().eligibility,
         Eligibility::Eligible
     );
     assert_eq!(
-        session.decision(cp1, &c_hash).eligibility,
+        session.decision(cp1, &c_hash).unwrap().eligibility,
         Eligibility::Eligible
     );
     assert!(t1.status.authority_changes.contains_key(&R_ID));
@@ -159,26 +162,26 @@ fn ex01_three_checkpoints() {
     let t2 = deliver(&mut session, vec![Input::Evidence(fx.e1.clone())]);
     let cp2 = session.current();
     assert!(hydrated_eq(
-        &session.hydrate(cp2),
+        &session.hydrate(cp2).unwrap(),
         &expect_map(&[("title", "Weekend plan")])
     ));
-    assert_eq!(session.authority(cp2, R_ID), Authority::Authorized);
-    let d: Decision = session.decision(cp2, &a_hash);
+    assert_eq!(session.authority(cp2, R_ID).unwrap(), Authority::Authorized);
+    let d: Decision = session.decision(cp2, &a_hash).unwrap();
     assert_eq!(d.eligibility, Eligibility::Excluded);
     assert!(d
         .reasons
         .iter()
         .any(|r| matches!(r, Reason::OutsideFrontier { event, .. } if *event == R_ID)));
     assert_eq!(
-        session.decision(cp2, &c_hash).eligibility,
+        session.decision(cp2, &c_hash).unwrap().eligibility,
         Eligibility::Eligible
     );
     // Patch replay: before + patches == after.
-    let mut replay = session.hydrate(cp1);
+    let mut replay = session.hydrate(cp1).unwrap();
     replay
         .apply_patches(TextEncoding::platform_default(), t2.patches.clone())
         .unwrap();
-    assert_eq!(replay, session.hydrate(cp2));
+    assert_eq!(replay, session.hydrate(cp2).unwrap());
     assert_eq!(
         t2.status.eligibility_changes.get(&a_hash),
         Some(&(Eligibility::Eligible, Eligibility::Excluded))
@@ -188,25 +191,28 @@ fn ex01_three_checkpoints() {
     let t3 = deliver(&mut session, vec![Input::Evidence(fx.e2.clone())]);
     let cp3 = session.current();
     assert!(hydrated_eq(
-        &session.hydrate(cp3),
+        &session.hydrate(cp3).unwrap(),
         &expect_map(&[("title", "Weekend plan"), ("suggestion", "Camping")])
     ));
-    assert_eq!(session.authority(cp3, R_ID), Authority::Invalidated);
     assert_eq!(
-        session.decision(cp3, &a_hash).eligibility,
+        session.authority(cp3, R_ID).unwrap(),
+        Authority::Invalidated
+    );
+    assert_eq!(
+        session.decision(cp3, &a_hash).unwrap().eligibility,
         Eligibility::Eligible
     );
     assert_eq!(
-        session.decision(cp3, &c_hash).eligibility,
+        session.decision(cp3, &c_hash).unwrap().eligibility,
         Eligibility::Eligible
     );
-    let mut replay = session.hydrate(cp2);
+    let mut replay = session.hydrate(cp2).unwrap();
     replay
         .apply_patches(TextEncoding::platform_default(), t3.patches.clone())
         .unwrap();
-    assert_eq!(replay, session.hydrate(cp3));
+    assert_eq!(replay, session.hydrate(cp3).unwrap());
     // Original identity: the restored suggestion value is A's original op.
-    let vals = session.get_all(cp3, &ROOT, "suggestion");
+    let vals = session.get_all(cp3, &ROOT, "suggestion").unwrap();
     assert_eq!(vals.len(), 1);
     assert_eq!(vals[0].1.to_string(), format!("2@{}", actor(1)));
     // The document itself never lost A.
@@ -214,14 +220,17 @@ fn ex01_three_checkpoints() {
 
     // Frozen captures: rereading cp1/cp2 after E2 yields the same views.
     assert!(hydrated_eq(
-        &session.hydrate(cp2),
+        &session.hydrate(cp2).unwrap(),
         &expect_map(&[("title", "Weekend plan")])
     ));
     assert_eq!(
-        session.decision(cp2, &a_hash).eligibility,
+        session.decision(cp2, &a_hash).unwrap().eligibility,
         Eligibility::Excluded
     );
-    assert_eq!(session.authority(cp1, R_ID), Authority::Pending(vec![]));
+    assert_eq!(
+        session.authority(cp1, R_ID).unwrap(),
+        Authority::Pending(vec![])
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -333,44 +342,58 @@ fn ex01_input(fx: &Ex01, ev: Ev) -> Input {
 fn check_ex01(session: &Session, fx: &Ex01, delivered: &std::collections::BTreeSet<Ev>) {
     let exp = ex01_expect(delivered);
     let cp = session.current();
-    let got = session.hydrate(cp);
+    let got = session.hydrate(cp).unwrap();
     assert!(
         hydrated_eq(&got, &exp.view),
         "delivered {delivered:?}: got {got:?}, expected {:?}",
         exp.view
     );
-    assert_eq!(session.is_integrated(cp, &fx.a.hash()), exp.a_integrated);
-    assert_eq!(session.is_integrated(cp, &fx.c.hash()), exp.c_integrated);
+    assert_eq!(
+        session.is_integrated(cp, &fx.a.hash()).unwrap(),
+        exp.a_integrated
+    );
+    assert_eq!(
+        session.is_integrated(cp, &fx.c.hash()).unwrap(),
+        exp.c_integrated
+    );
     if exp.a_integrated {
         assert_eq!(
-            session.decision(cp, &fx.a.hash()).eligibility,
+            session.decision(cp, &fx.a.hash()).unwrap().eligibility,
             exp.a_eligibility,
             "delivered {delivered:?}"
         );
     }
     if exp.c_integrated {
         assert_eq!(
-            session.decision(cp, &fx.c.hash()).eligibility,
+            session.decision(cp, &fx.c.hash()).unwrap().eligibility,
             Eligibility::Eligible
         );
     } else if delivered.contains(&Ev::C) {
         // C received but waiting for A.
         assert_eq!(
-            session.waiting(cp, &fx.c.hash()),
+            session.waiting(cp, &fx.c.hash()).unwrap(),
             Some([fx.a.hash()].into_iter().collect())
         );
     }
     if let Some(auth) = exp.r_authority {
-        assert_eq!(session.authority(cp, R_ID), auth, "delivered {delivered:?}");
+        assert_eq!(
+            session.authority(cp, R_ID).unwrap(),
+            auth,
+            "delivered {delivered:?}"
+        );
     }
 }
 
 fn replay_ok(session: &Session, t: &Transition) {
-    let mut replay = session.hydrate(t.before);
+    let mut replay = session.hydrate(t.before).unwrap();
     replay
         .apply_patches(TextEncoding::platform_default(), t.patches.clone())
         .unwrap();
-    assert_eq!(replay, session.hydrate(t.after), "patch replay mismatch");
+    assert_eq!(
+        replay,
+        session.hydrate(t.after).unwrap(),
+        "patch replay mismatch"
+    );
 }
 
 #[test]
@@ -393,10 +416,10 @@ fn ex01_all_1920_schedules() {
             }
             let cp = session.current();
             final_views.push((
-                flat(&session.hydrate(cp)),
-                session.decision(cp, &fx.a.hash()),
-                session.decision(cp, &fx.c.hash()),
-                session.authority(cp, R_ID),
+                flat(&session.hydrate(cp).unwrap()),
+                session.decision(cp, &fx.a.hash()).unwrap(),
+                session.decision(cp, &fx.c.hash()).unwrap(),
+                session.authority(cp, R_ID).unwrap(),
             ));
         }
     }
@@ -419,7 +442,10 @@ fn ex01_duplicates_are_idempotent() {
         let t = deliver(&mut session, vec![ex01_input(&fx, e)]);
         assert!(t.patches.is_empty(), "duplicate {e:?} produced patches");
         assert!(t.status.is_empty(), "duplicate {e:?} produced status delta");
-        assert_eq!(session.hydrate(before), session.hydrate(session.current()));
+        assert_eq!(
+            session.hydrate(before).unwrap(),
+            session.hydrate(session.current()).unwrap()
+        );
     }
     let t = deliver(
         &mut session,
@@ -442,21 +468,24 @@ fn ex01_e2_before_e1_exposes_unresolved_then_resolves() {
         ],
     );
     let cp = session.current();
-    assert_eq!(session.authority(cp, R_ID), Authority::Pending(vec![E1_ID]));
     assert_eq!(
-        session.authority(cp, E2_ID),
+        session.authority(cp, R_ID).unwrap(),
         Authority::Pending(vec![E1_ID])
     );
     assert_eq!(
-        session.decision(cp, &fx.a.hash()).eligibility,
+        session.authority(cp, E2_ID).unwrap(),
+        Authority::Pending(vec![E1_ID])
+    );
+    assert_eq!(
+        session.decision(cp, &fx.a.hash()).unwrap().eligibility,
         Eligibility::Eligible
     );
     // Late E1 must not overwrite E2's conclusion.
     let t = deliver(&mut session, vec![Input::Evidence(fx.e1.clone())]);
     let cp = session.current();
-    assert_eq!(session.authority(cp, R_ID), Authority::Invalidated);
+    assert_eq!(session.authority(cp, R_ID).unwrap(), Authority::Invalidated);
     assert_eq!(
-        session.decision(cp, &fx.a.hash()).eligibility,
+        session.decision(cp, &fx.a.hash()).unwrap().eligibility,
         Eligibility::Eligible
     );
     assert!(t.patches.is_empty());
@@ -498,7 +527,7 @@ fn ex01_status_only_variant_independent_delete_hides_suggestion() {
     );
     let cp1 = session.current();
     assert!(hydrated_eq(
-        &session.hydrate(cp1),
+        &session.hydrate(cp1).unwrap(),
         &expect_map(&[("title", "Trip plan")])
     ));
 
@@ -528,7 +557,7 @@ fn ex01_status_only_variant_independent_delete_hides_suggestion() {
         Some(&(Some(Authority::Authorized), Authority::Invalidated))
     );
     assert!(hydrated_eq(
-        &session.hydrate(session.current()),
+        &session.hydrate(session.current()).unwrap(),
         &expect_map(&[("title", "Trip plan")])
     ));
 }
@@ -544,7 +573,7 @@ fn ex01_status_stream_without_alice_content() {
     assert!(!t1.status.is_empty());
     assert!(!t2.status.is_empty());
     assert_eq!(
-        session.authority(session.current(), R_ID),
+        session.authority(session.current(), R_ID).unwrap(),
         Authority::Invalidated
     );
 }
@@ -607,7 +636,7 @@ fn ex02_missing_boundary_then_resolution() {
     );
     let cp0 = bob.current();
     assert!(hydrated_eq(
-        &bob.hydrate(cp0),
+        &bob.hydrate(cp0).unwrap(),
         &expect_ints(&[("x", 1), ("y", 2)])
     ));
 
@@ -617,31 +646,37 @@ fn ex02_missing_boundary_then_resolution() {
         vec![Input::Evidence(r.clone()), Input::Evidence(e1.clone())],
     );
     let cp1 = bob.current();
-    assert!(hydrated_eq(&bob.hydrate(cp1), &expect_ints(&[])));
+    assert!(hydrated_eq(&bob.hydrate(cp1).unwrap(), &expect_ints(&[])));
     for c in [&a1, &a2] {
-        let d = bob.decision(cp1, &c.hash());
+        let d = bob.decision(cp1, &c.hash()).unwrap();
         assert_eq!(d.eligibility, Eligibility::Pending);
         assert!(d.reasons.iter().any(
             |r| matches!(r, Reason::MissingBoundary { event, missing } if *event == R_ID && missing == &vec![h])
         ));
         // Pending eligibility is distinct from missing content dependencies.
-        assert!(bob.is_integrated(cp1, &c.hash()));
-        assert_eq!(bob.waiting(cp1, &c.hash()), None);
+        assert!(bob.is_integrated(cp1, &c.hash()).unwrap());
+        assert_eq!(bob.waiting(cp1, &c.hash()).unwrap(), None);
     }
     replay_ok(&bob, &t1);
     // Heads unchanged: same content heads, different view.
-    assert_eq!(bob.capture(cp0).spec.heads, bob.capture(cp1).spec.heads);
+    assert_eq!(
+        bob.capture(cp0).unwrap().spec.heads,
+        bob.capture(cp1).unwrap().spec.heads
+    );
 
     // H arrives: A1 eligible, A2 excluded.
     let t2 = deliver(&mut bob, vec![Input::Change(h_change.clone())]);
     let cp2 = bob.current();
-    assert!(hydrated_eq(&bob.hydrate(cp2), &expect_ints(&[("x", 1)])));
+    assert!(hydrated_eq(
+        &bob.hydrate(cp2).unwrap(),
+        &expect_ints(&[("x", 1)])
+    ));
     assert_eq!(
-        bob.decision(cp2, &a1.hash()).eligibility,
+        bob.decision(cp2, &a1.hash()).unwrap().eligibility,
         Eligibility::Eligible
     );
     assert_eq!(
-        bob.decision(cp2, &a2.hash()).eligibility,
+        bob.decision(cp2, &a2.hash()).unwrap().eligibility,
         Eligibility::Excluded
     );
     assert_eq!(
@@ -657,13 +692,13 @@ fn ex02_missing_boundary_then_resolution() {
     assert_eq!(t2.patches.len(), 1);
 
     // Frozen captures do not reinterpret after H arrives.
-    assert!(hydrated_eq(&bob.hydrate(cp1), &expect_ints(&[])));
+    assert!(hydrated_eq(&bob.hydrate(cp1).unwrap(), &expect_ints(&[])));
     assert_eq!(
-        bob.decision(cp1, &a1.hash()).eligibility,
+        bob.decision(cp1, &a1.hash()).unwrap().eligibility,
         Eligibility::Pending
     );
     assert!(hydrated_eq(
-        &bob.hydrate(cp0),
+        &bob.hydrate(cp0).unwrap(),
         &expect_ints(&[("x", 1), ("y", 2)])
     ));
 }
@@ -705,7 +740,7 @@ fn ex02_variant_boundary_also_edits_restored_object() {
     let t = deliver(&mut bob, vec![Input::Change(h_change)]);
     replay_ok(&bob, &t);
     assert!(hydrated_eq(
-        &bob.hydrate(bob.current()),
+        &bob.hydrate(bob.current()).unwrap(),
         &expect_ints(&[("x", 1), ("z", 3)])
     ));
     // Exactly one put per newly visible key; no duplicate exposure.
@@ -768,18 +803,18 @@ fn ex03() -> Ex03 {
 fn ex03_check_final(session: &Session, fx: &Ex03) {
     let cp = session.current();
     assert!(hydrated_eq(
-        &session.hydrate(cp),
+        &session.hydrate(cp).unwrap(),
         &expect_ints(&[("before", 1), ("after", 3)])
     ));
     assert_eq!(
-        session.decision(cp, &fx.a1.hash()).eligibility,
+        session.decision(cp, &fx.a1.hash()).unwrap().eligibility,
         Eligibility::Eligible
     );
     assert_eq!(
-        session.decision(cp, &fx.a2.hash()).eligibility,
+        session.decision(cp, &fx.a2.hash()).unwrap().eligibility,
         Eligibility::Excluded
     );
-    let d3 = session.decision(cp, &fx.a3.hash());
+    let d3 = session.decision(cp, &fx.a3.hash()).unwrap();
     assert_eq!(d3.eligibility, Eligibility::Eligible);
     assert!(d3.reasons.contains(&Reason::AdmittedByContext(CTXG)));
 }
@@ -820,9 +855,9 @@ fn ex03_fresh_grant_non_prefix_selection() {
     let t = deliver(&mut s, vec![Input::Change(fx.a3.clone())]);
     let cp = s.current();
     // A3 waits structurally for A2; that is not an eligibility state.
-    assert!(!s.is_integrated(cp, &fx.a3.hash()));
+    assert!(!s.is_integrated(cp, &fx.a3.hash()).unwrap());
     assert_eq!(
-        s.waiting(cp, &fx.a3.hash()),
+        s.waiting(cp, &fx.a3.hash()).unwrap(),
         Some([fx.a2.hash()].into_iter().collect())
     );
     assert!(t.patches.is_empty());
@@ -833,7 +868,7 @@ fn ex03_fresh_grant_non_prefix_selection() {
     assert_eq!(t.patches.len(), 1, "{:?}", t.patches);
 
     // The selection has a hole for one continuing actor: capture and reread.
-    let cap = s.capture(s.current()).spec.clone();
+    let cap = s.capture(s.current()).unwrap().spec.clone();
     let sel: Vec<(ChangeHash, Eligibility)> = [&fx.a1, &fx.a2, &fx.a3]
         .iter()
         .map(|c| (c.hash(), cap.selection.get(&c.hash()).unwrap()))
@@ -871,7 +906,10 @@ fn ex03_removing_restrictions_is_not_the_grant() {
         ],
     );
     let cp = s.current();
-    assert!(hydrated_eq(&s.hydrate(cp), &expect_ints(&[("before", 1)])));
+    assert!(hydrated_eq(
+        &s.hydrate(cp).unwrap(),
+        &expect_ints(&[("before", 1)])
+    ));
     deliver(
         &mut s,
         vec![Input::Evidence(Evidence::Invalidates {
@@ -881,7 +919,7 @@ fn ex03_removing_restrictions_is_not_the_grant() {
         })],
     );
     assert!(hydrated_eq(
-        &s.hydrate(s.current()),
+        &s.hydrate(s.current()).unwrap(),
         &expect_ints(&[("before", 1), ("during", 2), ("after", 3)])
     ));
 }
@@ -967,17 +1005,17 @@ fn ex05_eligible_overwrite_through_excluded_predecessor() {
         ],
     );
     let all = s.current();
-    let vals = s.get_all(all, &ROOT, "title");
+    let vals = s.get_all(all, &ROOT, "title").unwrap();
     assert_eq!(vals.len(), 1);
     assert_eq!(vals[0].0.to_string(), "\"Revised\"");
     // Exclude Bob's B (frontier = A; B is outside).
     let t = deliver(&mut s, exclude_evidence("bob", &[fx.a.hash()]));
     let cp = s.current();
     assert_eq!(
-        s.decision(cp, &fx.b.hash()).eligibility,
+        s.decision(cp, &fx.b.hash()).unwrap().eligibility,
         Eligibility::Excluded
     );
-    let vals = s.get_all(cp, &ROOT, "title");
+    let vals = s.get_all(cp, &ROOT, "title").unwrap();
     let ids: Vec<String> = vals.iter().map(|v| v.1.to_string()).collect();
     assert_eq!(
         ids,
@@ -986,7 +1024,7 @@ fn ex05_eligible_overwrite_through_excluded_predecessor() {
     );
     replay_ok(&s, &t);
     // Conflict is exposed in the hydrated view.
-    match s.hydrate(cp) {
+    match s.hydrate(cp).unwrap() {
         Value::Map(m) => assert!(m.iter().find(|(k, _)| *k == "title").unwrap().1.conflict),
         other => panic!("{other:?}"),
     }
@@ -1010,15 +1048,18 @@ fn ex06_eligible_delete_of_excluded_replacement() {
             Input::Change(fx.c.clone()),
         ],
     );
-    assert!(hydrated_eq(&s.hydrate(s.current()), &expect_map(&[])));
+    assert!(hydrated_eq(
+        &s.hydrate(s.current()).unwrap(),
+        &expect_map(&[])
+    ));
     let t = deliver(&mut s, exclude_evidence("bob", &[fx.a.hash()]));
     let cp = s.current();
     // C targeted B only; A reappears.
     assert!(hydrated_eq(
-        &s.hydrate(cp),
+        &s.hydrate(cp).unwrap(),
         &expect_map(&[("title", "Original")])
     ));
-    let vals = s.get_all(cp, &ROOT, "title");
+    let vals = s.get_all(cp, &ROOT, "title").unwrap();
     assert_eq!(vals.len(), 1);
     assert_eq!(vals[0].1.to_string(), format!("1@{}", actor(1)));
     replay_ok(&s, &t);
@@ -1056,10 +1097,13 @@ fn ex06_simple_excluded_delete_targeting_eligible_value() {
         &mut s,
         vec![Input::Change(a.clone()), Input::Change(b.clone())],
     );
-    assert!(hydrated_eq(&s.hydrate(s.current()), &expect_map(&[])));
+    assert!(hydrated_eq(
+        &s.hydrate(s.current()).unwrap(),
+        &expect_map(&[])
+    ));
     let t = deliver(&mut s, exclude_evidence("bob", &[a.hash()]));
     assert!(hydrated_eq(
-        &s.hydrate(s.current()),
+        &s.hydrate(s.current()).unwrap(),
         &expect_map(&[("title", "Original")])
     ));
     replay_ok(&s, &t);
@@ -1071,7 +1115,10 @@ fn ex06_simple_excluded_delete_targeting_eligible_value() {
             after: vec![E1_ID],
         })],
     );
-    assert!(hydrated_eq(&s.hydrate(s.current()), &expect_map(&[])));
+    assert!(hydrated_eq(
+        &s.hydrate(s.current()).unwrap(),
+        &expect_map(&[])
+    ));
     replay_ok(&s, &t);
 }
 
@@ -1127,21 +1174,21 @@ fn ex07_excluded_container_eligible_child_and_restore_replay() {
     let t = deliver(&mut s, exclude_evidence("alice", &[]));
     let cp = s.current();
     assert_eq!(
-        s.decision(cp, &mk.hash()).eligibility,
+        s.decision(cp, &mk.hash()).unwrap().eligibility,
         Eligibility::Excluded
     );
     assert_eq!(
-        s.decision(cp, &child.hash()).eligibility,
+        s.decision(cp, &child.hash()).unwrap().eligibility,
         Eligibility::Eligible
     );
-    let view = s.hydrate(cp);
+    let view = s.hydrate(cp).unwrap();
     assert!(
         hydrated_eq(&view, &expect_map(&[("title", "Root")])),
         "{view:?}"
     );
     replay_ok(&s, &t);
     // The child is inspectable by object id without restoring M.
-    let inside = s.get_all(cp, &section, "title");
+    let inside = s.get_all(cp, &section, "title").unwrap();
     assert_eq!(inside.len(), 1);
     assert_eq!(inside[0].0.to_string(), "\"Plans\"");
 
@@ -1155,7 +1202,7 @@ fn ex07_excluded_container_eligible_child_and_restore_replay() {
         })],
     );
     let cp2 = s.current();
-    let after = s.hydrate(cp2);
+    let after = s.hydrate(cp2).unwrap();
     match &after {
         Value::Map(m) => {
             let sec = m.get("section").expect("section restored");
@@ -1197,7 +1244,7 @@ fn failed_group_publishes_nothing() {
         ],
     );
     let before = s.current();
-    let before_view = s.hydrate(before);
+    let before_view = s.hydrate(before).unwrap();
     // Group with valid content C plus conflicting reuse of evidence id E1.
     let bad = Evidence::Authorizes {
         id: E1_ID,
@@ -1212,11 +1259,11 @@ fn failed_group_publishes_nothing() {
         automerge::eligibility::SessionError::Evidence(_)
     ));
     assert_eq!(s.current(), before);
-    assert_eq!(s.hydrate(before), before_view);
-    assert!(!s.is_integrated(before, &fx.c.hash()));
+    assert_eq!(s.hydrate(before).unwrap(), before_view);
+    assert!(!s.is_integrated(before, &fx.c.hash()).unwrap());
     assert!(s.doc().get_change_by_hash(&fx.c.hash()).is_none());
     assert_eq!(
-        s.decision(before, &fx.a.hash()).eligibility,
+        s.decision(before, &fx.a.hash()).unwrap().eligibility,
         Eligibility::Excluded
     );
 }
@@ -1252,15 +1299,289 @@ fn captured_scope_recompiles_after_earlier_sorting_actor_arrives() {
     replay_ok(&s, &t);
     // Old capture rereads identically with the new actor table.
     assert!(hydrated_eq(
-        &s.hydrate(cp),
+        &s.hydrate(cp).unwrap(),
         &expect_ints(&[("before", 1), ("after", 3)])
     ));
     assert!(hydrated_eq(
-        &s.hydrate(s.current()),
+        &s.hydrate(s.current()).unwrap(),
         &expect_ints(&[("before", 1), ("after", 3), ("zed", 9)])
     ));
     assert_eq!(
-        s.decision(s.current(), &fx.a2.hash()).eligibility,
+        s.decision(s.current(), &fx.a2.hash()).unwrap().eligibility,
         Eligibility::Excluded
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Fix wave 1 — review findings
+// ---------------------------------------------------------------------------
+
+fn invalidate_r() -> Input {
+    Input::Evidence(Evidence::Invalidates {
+        id: E2_ID,
+        event: R_ID,
+        after: vec![E1_ID],
+    })
+}
+
+/// Finding 4 / EX-10: eligible base 10, excluded +100 (Bob), eligible +5.
+struct Ex10 {
+    base: Automerge,
+    mk: Change,
+    inc100: Change,
+    inc5: Change,
+}
+
+fn ex10() -> Ex10 {
+    let base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.put(ROOT, "n", ScalarValue::Counter(10.into()))?;
+            Ok(())
+        })
+        .unwrap();
+    let mk = alice.get_last_local_change().unwrap();
+    let mut bob = alice
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.increment(ROOT, "n", 100)?;
+        Ok(())
+    })
+    .unwrap();
+    let inc100 = bob.get_last_local_change().unwrap();
+    let mut carol = bob
+        .fork()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    carol
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.increment(ROOT, "n", 5)?;
+            Ok(())
+        })
+        .unwrap();
+    let inc5 = carol.get_last_local_change().unwrap();
+    Ex10 {
+        base,
+        mk,
+        inc100,
+        inc5,
+    }
+}
+
+fn counter_value(v: &Value) -> i64 {
+    match v {
+        Value::Map(m) => match m.get("n") {
+            Some(Value::Scalar(ScalarValue::Counter(c))) => i64::from(c),
+            other => panic!("no counter: {other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn ex10_excluded_increment_self_diff_duplicate_and_restore_replay() {
+    let fx = ex10();
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(fx.mk.clone()),
+            Input::Change(fx.inc100.clone()),
+            Input::Change(fx.inc5.clone()),
+        ],
+    );
+    assert_eq!(counter_value(&s.hydrate(s.current()).unwrap()), 115);
+    let t = deliver(&mut s, exclude_evidence("bob", &[fx.mk.hash()]));
+    let cp = s.current();
+    assert_eq!(counter_value(&s.hydrate(cp).unwrap()), 15);
+    replay_ok(&s, &t);
+    // Same-capture diff must be empty.
+    let spec = &s.capture(cp).unwrap().spec;
+    let self_diff = s.doc().diff_view(spec, spec).unwrap();
+    assert!(self_diff.is_empty(), "self diff: {self_diff:?}");
+    // Empty delivery group and duplicate delivery are no-ops with replay.
+    let t = deliver(&mut s, vec![]);
+    assert!(t.patches.is_empty(), "{:?}", t.patches);
+    replay_ok(&s, &t);
+    let t = deliver(&mut s, vec![Input::Change(fx.inc100.clone())]);
+    assert!(t.patches.is_empty(), "{:?}", t.patches);
+    assert!(t.status.is_empty());
+    assert_eq!(counter_value(&s.hydrate(s.current()).unwrap()), 15);
+    // Restore +100: replay must yield 115.
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    assert_eq!(counter_value(&s.hydrate(s.current()).unwrap()), 115);
+    replay_ok(&s, &t);
+}
+
+/// Finding 1: bindings are immutable fixture inputs.
+#[test]
+fn conflicting_context_binding_is_rejected_atomically_in_both_orders() {
+    let fx = ex03();
+    for order in [[CTX0, CTXG], [CTXG, CTX0]] {
+        let mut s = Session::new(fx.base.clone());
+        deliver(
+            &mut s,
+            vec![
+                Input::Binding(fx.a1.hash(), CTX0),
+                Input::Binding(fx.a2.hash(), order[0]),
+                Input::Binding(fx.a3.hash(), CTXG),
+                Input::Change(fx.a1.clone()),
+                Input::Change(fx.a2.clone()),
+                Input::Evidence(fx.r.clone()),
+                Input::Evidence(fx.e1.clone()),
+                Input::Evidence(fx.g.clone()),
+            ],
+        );
+        let before = s.current();
+        let before_view = s.hydrate(before).unwrap();
+        // Identical binding: idempotent, no status delta.
+        let t = deliver(&mut s, vec![Input::Binding(fx.a2.hash(), order[0])]);
+        assert!(t.patches.is_empty() && t.status.is_empty());
+        // Conflicting binding in a group with otherwise-valid content A3.
+        let err = s
+            .deliver(vec![
+                Input::Change(fx.a3.clone()),
+                Input::Binding(fx.a2.hash(), order[1]),
+            ])
+            .err()
+            .expect("conflicting binding rejected");
+        assert!(
+            matches!(
+                err,
+                automerge::eligibility::SessionError::ConflictingBinding { .. }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(s.current(), s.current());
+        assert_eq!(s.hydrate(s.current()).unwrap(), before_view);
+        assert!(!s.is_integrated(s.current(), &fx.a3.hash()).unwrap());
+        assert!(s.doc().get_change_by_hash(&fx.a3.hash()).is_none());
+        assert_eq!(
+            s.capture(s.current()).unwrap().inspection.bindings[&fx.a2.hash()],
+            order[0]
+        );
+    }
+    // Rebinding A2 to CTXG after the fact cannot admit it.
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Binding(fx.a2.hash(), CTX0),
+            Input::Binding(fx.a3.hash(), CTXG),
+            Input::Change(fx.a1.clone()),
+            Input::Change(fx.a2.clone()),
+            Input::Change(fx.a3.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+            Input::Evidence(fx.g.clone()),
+        ],
+    );
+    ex03_check_final(&s, &fx);
+    assert!(s.deliver(vec![Input::Binding(fx.a2.hash(), CTXG)]).is_err());
+    ex03_check_final(&s, &fx);
+}
+
+/// Finding 2: ViewIds are session-namespaced and checked.
+#[test]
+fn foreign_view_id_is_rejected_not_misread() {
+    let fx = ex01();
+    let mut s1 = Session::new(fx.base.clone());
+    let mut s2 = Session::new(fx.base.clone());
+    deliver(
+        &mut s1,
+        vec![
+            Input::Change(fx.a.clone()),
+            Input::Change(fx.c.clone()),
+            Input::Evidence(fx.r.clone()),
+        ],
+    );
+    deliver(
+        &mut s2,
+        vec![
+            Input::Change(fx.a.clone()),
+            Input::Change(fx.c.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    let id1 = s1.current();
+    let id2 = s2.current();
+    assert_ne!(id1, id2);
+    assert!(matches!(
+        s2.hydrate(id1),
+        Err(automerge::eligibility::SessionError::ForeignView(_))
+    ));
+    assert!(matches!(
+        s2.capture(id1),
+        Err(automerge::eligibility::SessionError::ForeignView(_))
+    ));
+    assert!(s2.decision(id1, &fx.a.hash()).is_err());
+    assert!(s2.authority(id1, R_ID).is_err());
+    assert!(s2.get_all(id1, &ROOT, "title").is_err());
+    // Own ids still work and differ in content.
+    assert!(hydrated_eq(
+        &s1.hydrate(id1).unwrap(),
+        &expect_map(&[("title", "Weekend plan"), ("suggestion", "Camping")])
+    ));
+    assert!(hydrated_eq(
+        &s2.hydrate(id2).unwrap(),
+        &expect_map(&[("title", "Weekend plan")])
+    ));
+}
+
+/// Finding 3: queued-only receipt is an observable inspection transition;
+/// duplicates are not.
+#[test]
+fn queued_only_receipt_is_an_inspection_transition() {
+    let fx = ex01();
+    let mut s = Session::new(fx.base.clone());
+    let t = deliver(&mut s, vec![Input::Change(fx.c.clone())]);
+    assert!(t.patches.is_empty());
+    assert!(!t.status.is_empty(), "queued receipt must be signalled");
+    assert_eq!(
+        t.status.waiting_changes.get(&fx.c.hash()),
+        Some(&(None, Some([fx.a.hash()].into_iter().collect())))
+    );
+    // Duplicate queued receipt: no-op.
+    let t = deliver(&mut s, vec![Input::Change(fx.c.clone())]);
+    assert!(
+        t.patches.is_empty() && t.status.is_empty(),
+        "{:?}",
+        t.status
+    );
+    // A arrives: C leaves the waiting inventory and integrates.
+    let t = deliver(&mut s, vec![Input::Change(fx.a.clone())]);
+    assert_eq!(
+        t.status.waiting_changes.get(&fx.c.hash()),
+        Some(&(Some([fx.a.hash()].into_iter().collect()), None))
+    );
+    assert!(t.status.newly_integrated.contains(&fx.c.hash()));
+    // Binding receipt and reason changes are signalled too.
+    let t = deliver(&mut s, vec![Input::Binding(fx.a.hash(), CTX0)]);
+    assert!(!t.status.is_empty());
+    assert_eq!(
+        t.status.binding_changes.get(&fx.a.hash()),
+        Some(&(None, CTX0))
+    );
+    // A grant for CTX0 adds an `AdmittedByContext` reason while A stays eligible.
+    let t = deliver(
+        &mut s,
+        vec![Input::Evidence(Evidence::Grant {
+            id: G_ID,
+            context: CTX0,
+        })],
+    );
+    assert!(t.status.eligibility_changes.is_empty());
+    assert_eq!(
+        t.status.reason_changes.get(&fx.a.hash()),
+        Some(&(vec![], vec![Reason::AdmittedByContext(CTX0)]))
     );
 }
