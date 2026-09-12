@@ -2099,3 +2099,530 @@ fn ex04_variant_object_id_edit_into_hidden_container_allowed() {
     let inside = s.get_all(s.current(), &section, "title").unwrap();
     assert_eq!(inside.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// A3 — EX-08/09 lists
+// ---------------------------------------------------------------------------
+
+fn list_strs(
+    s: &Session,
+    id: automerge::eligibility::ViewId,
+    list: &automerge::ObjId,
+) -> Vec<String> {
+    s.doc()
+        .list_view(&s.capture(id).unwrap().spec, list)
+        .unwrap()
+        .into_iter()
+        .map(|(_, v, _)| v.to_string())
+        .collect()
+}
+
+fn list_ids(
+    s: &Session,
+    id: automerge::eligibility::ViewId,
+    list: &automerge::ObjId,
+) -> Vec<String> {
+    s.doc()
+        .list_view(&s.capture(id).unwrap().spec, list)
+        .unwrap()
+        .into_iter()
+        .map(|(_, _, e)| e.to_string())
+        .collect()
+}
+
+fn hydrated_list_strs(v: &Value, key: &str) -> Vec<String> {
+    match v {
+        Value::Map(m) => match m.get(key) {
+            Some(Value::List(l)) => l.iter().map(|lv| format!("{:?}", lv.value)).collect(),
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+struct ListFx {
+    base: Automerge,
+    list: automerge::ObjId,
+    x: Change,
+}
+
+/// Carol creates [L, R]; Alice inserts X after L.
+fn list_fx() -> ListFx {
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let list = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let l = tx.put_object(ROOT, "items", automerge::ObjType::List)?;
+            tx.insert(&l, 0, "L")?;
+            tx.insert(&l, 1, "R")?;
+            Ok(l)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.insert(&list, 1, "X")?;
+            Ok(())
+        })
+        .unwrap();
+    let x = alice.get_last_local_change().unwrap();
+    ListFx { base, list, x }
+}
+
+#[test]
+fn ex08_insertion_after_excluded_anchor_survives_with_stable_order() {
+    let fx = list_fx();
+    // Bob inserts Y after X; Carol concurrently inserts Z after L (near X).
+    let mut bob = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([fx.x.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.insert(&fx.list, 2, "Y")?;
+        Ok(())
+    })
+    .unwrap();
+    let y = bob.get_last_local_change().unwrap();
+    let mut carol = fx
+        .base
+        .fork()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    carol
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.insert(&fx.list, 1, "Z")?;
+            Ok(())
+        })
+        .unwrap();
+    let z = carol.get_last_local_change().unwrap();
+
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(fx.x.clone()),
+            Input::Change(y.clone()),
+            Input::Change(z.clone()),
+        ],
+    );
+    let all = s.current();
+    let full = list_strs(&s, all, &fx.list);
+    let full_ids = list_ids(&s, all, &fx.list);
+    assert_eq!(full.len(), 5);
+    assert_eq!(full[0], "\"L\"");
+    assert_eq!(full[4], "\"R\"");
+    // Exclude Alice's X.
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let cp = s.current();
+    let vis = list_strs(&s, cp, &fx.list);
+    let vis_ids = list_ids(&s, cp, &fx.list);
+    assert_eq!(vis.len(), 4);
+    assert!(!vis.contains(&"\"X\"".to_string()));
+    assert!(vis.contains(&"\"Y\"".to_string()));
+    // Surviving identities keep their relative order from the full view.
+    let expected_ids: Vec<String> = full_ids
+        .iter()
+        .filter(|id| vis_ids.contains(id))
+        .cloned()
+        .collect();
+    assert_eq!(vis_ids, expected_ids);
+    // Patches index the *visible* view and replay through hydrate.
+    replay_ok(&s, &t);
+    assert_eq!(
+        hydrated_list_strs(&s.hydrate(cp).unwrap(), "items"),
+        vis.iter()
+            .map(|v| format!("Scalar(Str({v}))"))
+            .collect::<Vec<_>>()
+    );
+    // Restore X: original value reappears in the retained order; Y unchanged.
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    replay_ok(&s, &t);
+    assert_eq!(list_strs(&s, s.current(), &fx.list), full);
+    assert_eq!(list_ids(&s, s.current(), &fx.list), full_ids);
+}
+
+#[test]
+fn ex08_capture_reread_after_earlier_sorting_actor_arrives() {
+    let fx = list_fx();
+    let mut bob = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([fx.x.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.insert(&fx.list, 2, "Y")?;
+        Ok(())
+    })
+    .unwrap();
+    let y = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(fx.base.clone());
+    deliver(&mut s, vec![Input::Change(fx.x.clone()), Input::Change(y)]);
+    deliver(&mut s, exclude_evidence("alice", &[]));
+    let cp = s.current();
+    let before = list_strs(&s, cp, &fx.list);
+    assert_eq!(before, vec!["\"L\"", "\"Y\"", "\"R\""]);
+    // Actor 0x00 sorts before everyone; its arrival shifts actor indices.
+    let mut zed = fx
+        .base
+        .fork()
+        .with_author(Some(author("zed")))
+        .with_actor(actor(0));
+    zed.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.insert(&fx.list, 2, "W")?;
+        Ok(())
+    })
+    .unwrap();
+    let w = zed.get_last_local_change().unwrap();
+    let t = deliver(&mut s, vec![Input::Change(w)]);
+    replay_ok(&s, &t);
+    assert_eq!(
+        list_strs(&s, cp, &fx.list),
+        before,
+        "old capture must reread identically"
+    );
+    let now = list_strs(&s, s.current(), &fx.list);
+    assert_eq!(now.len(), 4);
+    assert!(!now.contains(&"\"X\"".to_string()));
+}
+
+#[test]
+fn ex09_eligible_replacement_at_excluded_insertion_identity() {
+    let fx = list_fx();
+    // Bob assigns Y to X's element identity (put at index 1, not insert).
+    let mut bob = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([fx.x.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(&fx.list, 1, "Y")?;
+        Ok(())
+    })
+    .unwrap();
+    let y = bob.get_last_local_change().unwrap();
+    // Y's op targets X's value op as predecessor (same element identity).
+    let yexp = y.decode();
+    assert_eq!(yexp.operations.len(), 1);
+    assert!(!yexp.operations[0].insert);
+    assert_eq!(yexp.operations[0].pred.len(), 1);
+
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![Input::Change(fx.x.clone()), Input::Change(y.clone())],
+    );
+    assert_eq!(
+        list_strs(&s, s.current(), &fx.list),
+        vec!["\"L\"", "\"Y\"", "\"R\""]
+    );
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let cp = s.current();
+    assert_eq!(
+        list_strs(&s, cp, &fx.list),
+        vec!["\"L\"", "\"Y\"", "\"R\""],
+        "replacement value survives on retained element identity"
+    );
+    assert_eq!(list_ids(&s, cp, &fx.list)[1], format!("5@{}", actor(2)));
+    replay_ok(&s, &t);
+    // Restore X: Y's put still supersedes X's value (direct predecessor).
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    replay_ok(&s, &t);
+    assert_eq!(
+        list_strs(&s, s.current(), &fx.list),
+        vec!["\"L\"", "\"Y\"", "\"R\""]
+    );
+}
+
+#[test]
+fn ex09_variant_replace_excluded_map_element_with_eligible_map() {
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let list = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let l = tx.put_object(ROOT, "items", automerge::ObjType::List)?;
+            tx.insert(&l, 0, "L")?;
+            Ok(l)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    let old_map = alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let m = tx.insert_object(&list, 1, automerge::ObjType::Map)?;
+            tx.put(&m, "k", "old")?;
+            Ok(m)
+        })
+        .unwrap()
+        .result;
+    let x = alice.get_last_local_change().unwrap();
+    let mut bob = base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([x.clone()]).unwrap();
+    let new_map = bob
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let m = tx.put_object(&list, 1, automerge::ObjType::Map)?;
+            tx.put(&m, "k", "new")?;
+            Ok(m)
+        })
+        .unwrap()
+        .result;
+    let y = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(&mut s, vec![Input::Change(x), Input::Change(y)]);
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    replay_ok(&s, &t);
+    let cp = s.current();
+    let items = s
+        .doc()
+        .list_view(&s.capture(cp).unwrap().spec, &list)
+        .unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1].2, new_map);
+    let hv = s.hydrate(cp).unwrap();
+    match &hv {
+        Value::Map(m) => match m.get("items") {
+            Some(Value::List(l)) => match &l.iter().nth(1).unwrap().value {
+                Value::Map(inner) => assert_eq!(
+                    inner.get("k"),
+                    Some(&Value::Scalar(ScalarValue::Str("new".into())))
+                ),
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+    // Old map is not adopted: its child is not visible through the new map.
+    let old_children = s.get_all(cp, &old_map, "k").unwrap();
+    assert_eq!(old_children.len(), 0, "excluded child must not be visible");
+}
+
+// ---------------------------------------------------------------------------
+// A3 — EX-11 counters
+// ---------------------------------------------------------------------------
+
+fn counter_opt(v: &Value) -> Option<i64> {
+    match v {
+        Value::Map(m) => match m.get("n") {
+            Some(Value::Scalar(ScalarValue::Counter(c))) => Some(i64::from(c)),
+            None => None,
+            other => panic!("unexpected: {other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn ex11_excluded_counter_base_supplies_nothing_to_eligible_increment() {
+    let base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut bob = base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(ROOT, "n", ScalarValue::Counter(100.into()))?;
+        Ok(())
+    })
+    .unwrap();
+    let b = bob.get_last_local_change().unwrap();
+    let mut carol = bob
+        .fork()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    carol
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.increment(ROOT, "n", 5)?;
+            Ok(())
+        })
+        .unwrap();
+    let c = carol.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(
+        &mut s,
+        vec![Input::Change(b.clone()), Input::Change(c.clone())],
+    );
+    assert_eq!(counter_opt(&s.hydrate(s.current()).unwrap()), Some(105));
+    let t = deliver(&mut s, exclude_evidence("bob", &[]));
+    let cp = s.current();
+    assert_eq!(
+        counter_opt(&s.hydrate(cp).unwrap()),
+        None,
+        "no base, no counter"
+    );
+    assert!(s.get_all(cp, &ROOT, "n").unwrap().is_empty());
+    assert_eq!(
+        s.decision(cp, &c.hash()).unwrap().eligibility,
+        Eligibility::Eligible
+    );
+    replay_ok(&s, &t);
+    let spec = &s.capture(cp).unwrap().spec;
+    assert!(s.doc().diff_view(spec, spec).unwrap().is_empty());
+}
+
+#[test]
+fn ex11_eligible_increment_on_excluded_replacement_base() {
+    let base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.put(ROOT, "n", ScalarValue::Counter(10.into()))?;
+            Ok(())
+        })
+        .unwrap();
+    let a = alice.get_last_local_change().unwrap();
+    let mut bob = alice
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(ROOT, "n", ScalarValue::Counter(100.into()))?;
+        Ok(())
+    })
+    .unwrap();
+    let b = bob.get_last_local_change().unwrap();
+    let mut carol = bob
+        .fork()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    carol
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.increment(ROOT, "n", 5)?;
+            Ok(())
+        })
+        .unwrap();
+    let c = carol.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(a.clone()),
+            Input::Change(b.clone()),
+            Input::Change(c.clone()),
+        ],
+    );
+    assert_eq!(counter_opt(&s.hydrate(s.current()).unwrap()), Some(105));
+    let t = deliver(&mut s, exclude_evidence("bob", &[a.hash()]));
+    let cp = s.current();
+    // 10, not 15: the +5 is not migrated onto A's base.
+    assert_eq!(counter_opt(&s.hydrate(cp).unwrap()), Some(10));
+    let vals = s.get_all(cp, &ROOT, "n").unwrap();
+    assert_eq!(vals.len(), 1);
+    assert_eq!(vals[0].1.to_string(), format!("1@{}", actor(1)));
+    replay_ok(&s, &t);
+    let t = deliver(&mut s, vec![]);
+    assert!(t.patches.is_empty() && t.status.is_empty());
+    let t = deliver(&mut s, vec![Input::Change(c.clone())]);
+    assert!(t.patches.is_empty() && t.status.is_empty());
+    // Restore B: 105 and A suppressed.
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    replay_ok(&s, &t);
+    assert_eq!(counter_opt(&s.hydrate(s.current()).unwrap()), Some(105));
+    let vals = s.get_all(s.current(), &ROOT, "n").unwrap();
+    assert_eq!(vals.len(), 1);
+    assert_eq!(vals[0].1.to_string(), format!("2@{}", actor(2)));
+}
+
+/// Compatibility variant: an increment also suppresses a targeted non-counter
+/// conflict candidate; excluding the increment re-exposes the candidate.
+#[test]
+fn ex11_compat_increment_suppresses_targeted_scalar_candidate() {
+    let base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    // Alice: counter 10. Bob concurrently: n = "text". Then Carol (seeing
+    // both) increments by 5: the increment targets both candidates.
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.put(ROOT, "n", ScalarValue::Counter(10.into()))?;
+            Ok(())
+        })
+        .unwrap();
+    let a = alice.get_last_local_change().unwrap();
+    let mut bob = base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(ROOT, "n", "text")?;
+        Ok(())
+    })
+    .unwrap();
+    let b = bob.get_last_local_change().unwrap();
+    let mut carol = base
+        .fork()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    carol.apply_changes([a.clone(), b.clone()]).unwrap();
+    let both = carol.get_all(ROOT, "n").unwrap();
+    assert_eq!(both.len(), 2);
+    carol
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.increment(ROOT, "n", 5)?;
+            Ok(())
+        })
+        .unwrap();
+    let c = carol.get_last_local_change().unwrap();
+    let cexp = c.decode();
+    assert_eq!(
+        cexp.operations[0].pred.len(),
+        2,
+        "increment targets both candidates"
+    );
+    // Baseline (allow-all) behaviour: recorded here as characterization.
+    let baseline: Vec<String> = carol
+        .get_all(ROOT, "n")
+        .unwrap()
+        .iter()
+        .map(|v| v.0.to_string())
+        .collect();
+
+    let mut s = Session::new(base);
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(a.clone()),
+            Input::Change(b.clone()),
+            Input::Change(c.clone()),
+        ],
+    );
+    let all: Vec<String> = s
+        .get_all(s.current(), &ROOT, "n")
+        .unwrap()
+        .iter()
+        .map(|v| v.0.to_string())
+        .collect();
+    assert_eq!(all, baseline, "allow-all view equals ordinary Automerge");
+    // Exclude Carol's increment: both original candidates are exposed.
+    let t = deliver(&mut s, exclude_evidence("carol", &[]));
+    replay_ok(&s, &t);
+    let vals = s.get_all(s.current(), &ROOT, "n").unwrap();
+    let mut got: Vec<String> = vals.iter().map(|v| v.0.to_string()).collect();
+    got.sort();
+    assert_eq!(got, vec!["\"text\"", "Counter: 10"]);
+}

@@ -151,3 +151,44 @@ impl Automerge {
         ))
     }
 }
+
+impl Automerge {
+    /// Visible list/text elements under `view`: (index, value, element op id).
+    pub fn list_view<O: AsRef<ExId>>(
+        &self,
+        view: &ViewSpec,
+        obj: O,
+    ) -> Result<Vec<(usize, Value<'static>, ExId)>, ViewError> {
+        let clock = self.scope_for(view)?;
+        Ok(self
+            .list_range_for(obj.as_ref(), .., Some(clock))
+            .map(|item| {
+                let id = item.id();
+                (item.index, item.value.into_owned().into(), id)
+            })
+            .collect())
+    }
+
+    pub fn text_view<O: AsRef<ExId>>(&self, view: &ViewSpec, obj: O) -> Result<String, ViewError> {
+        let clock = self.scope_for(view)?;
+        Ok(self.text_for(obj.as_ref(), Some(clock))?)
+    }
+
+    pub fn spans_view<O: AsRef<ExId>>(
+        &self,
+        view: &ViewSpec,
+        obj: O,
+    ) -> Result<Vec<crate::iter::Span>, ViewError> {
+        let clock = self.scope_for(view)?;
+        Ok(self.spans_for(obj.as_ref(), Some(clock))?.collect())
+    }
+
+    pub fn marks_view<O: AsRef<ExId>>(
+        &self,
+        view: &ViewSpec,
+        obj: O,
+    ) -> Result<Vec<crate::marks::Mark>, ViewError> {
+        let clock = self.scope_for(view)?;
+        Ok(self.marks_for(obj.as_ref(), Some(clock))?)
+    }
+}
