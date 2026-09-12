@@ -135,6 +135,11 @@ pub enum SessionError {
         "envelope checkpoint {checkpoint} re-evaluates differently from its frozen table: {detail}"
     )]
     InconsistentEnvelope { checkpoint: usize, detail: String },
+    #[error("authoring with actor {actor} would discard queued changes {lost:?}; refused")]
+    QueuedActorBranch {
+        actor: crate::ActorId,
+        lost: Vec<ChangeHash>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -623,15 +628,53 @@ impl Session {
     where
         F: FnOnce(&mut crate::transaction::Transaction<'_>) -> Result<(), AutomergeError>,
     {
+        self.author_impl(policy, author, actor, context, None, f)
+    }
+
+    /// [`Self::author`] with an explicit commit timestamp (deterministic
+    /// change hashes in fixtures).
+    pub fn author_with_time<F>(
+        &mut self,
+        policy: ViewId,
+        author: crate::Author<'static>,
+        actor: crate::ActorId,
+        context: ContextBinding,
+        time: i64,
+        f: F,
+    ) -> Result<(Transition, Option<ChangeHash>), SessionError>
+    where
+        F: FnOnce(&mut crate::transaction::Transaction<'_>) -> Result<(), AutomergeError>,
+    {
+        self.author_impl(policy, author, actor, context, Some(time), f)
+    }
+
+    fn author_impl<F>(
+        &mut self,
+        policy: ViewId,
+        author: crate::Author<'static>,
+        actor: crate::ActorId,
+        context: ContextBinding,
+        time: Option<i64>,
+        f: F,
+    ) -> Result<(Transition, Option<ChangeHash>), SessionError>
+    where
+        F: FnOnce(&mut crate::transaction::Transaction<'_>) -> Result<(), AutomergeError>,
+    {
         let spec = self.capture(policy)?.spec.clone();
+        let queued_before: BTreeSet<ChangeHash> =
+            self.published.doc.queue.iter().map(Change::hash).collect();
         let mut stage = self.published.clone();
         stage.doc.set_author(Some(author));
-        stage.doc.set_actor(actor);
+        stage.doc.set_actor(actor.clone());
         let hash = {
             let mut tx = stage.doc.transaction_view(&spec)?;
             match f(&mut tx) {
                 Ok(()) => {
-                    let (hash, _log) = tx.commit();
+                    let mut opts = crate::transaction::CommitOptions::default();
+                    if let Some(t) = time {
+                        opts = opts.with_time(t);
+                    }
+                    let (hash, _log) = tx.commit_with(opts);
                     hash
                 }
                 Err(e) => {
@@ -640,15 +683,47 @@ impl Session {
                 }
             }
         };
-        let mut received = Vec::new();
-        if let Some(h) = hash {
-            let change = stage
-                .doc
-                .get_change_by_hash(&h)
-                .expect("committed change is retrievable");
-            received.push(change.raw_bytes().to_vec());
-            stage.bindings.insert(h, context);
+        let Some(h) = hash else {
+            // No-op: publish nothing (in particular no transaction-opening
+            // side effects such as queued-branch pruning). Stage discarded.
+            let id = self.current();
+            return Ok((
+                Transition {
+                    before: id,
+                    after: id,
+                    patches: Vec::new(),
+                    status: StatusDelta::default(),
+                },
+                None,
+            ));
+        };
+        // Bounded policy: never discard valid queued history. If opening this
+        // actor's next sequence pruned queued changes, reject explicitly.
+        let queued_after: BTreeSet<ChangeHash> = stage.doc.queue.iter().map(Change::hash).collect();
+        let lost: Vec<ChangeHash> = queued_before.difference(&queued_after).copied().collect();
+        if !lost.is_empty() {
+            return Err(SessionError::QueuedActorBranch { actor, lost });
         }
+        // Immutable bindings apply to authored changes too.
+        match stage.bindings.get(&h) {
+            Some(existing) if *existing == context => {}
+            Some(existing) => {
+                return Err(SessionError::ConflictingBinding {
+                    hash: h,
+                    existing: *existing,
+                    attempted: context,
+                })
+            }
+            None => {
+                stage.bindings.insert(h, context);
+            }
+        }
+        let change = stage
+            .doc
+            .get_change_by_hash(&h)
+            .expect("committed change is retrievable");
+        let received = vec![change.raw_bytes().to_vec()];
+        let hash = Some(h);
         let after = capture(&stage.doc, &stage.evidence, &stage.bindings);
         let before = &self.published.capture;
         let patches = stage.doc.diff_view(&before.spec, &after.spec)?;

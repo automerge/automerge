@@ -250,3 +250,38 @@ Debug build, unoptimized: all 40 fixtures ≈ 3.1 s wall, of which the 1,920-sch
 - Text fixtures use `ExpandMark::None`/`Both` only in the configurations above; collapsed-gap insertion (A-C10) across expansion modes is not characterized. Block markers are not exposed by `flush_obj` (fixtures have none).
 - Envelope still in-memory; `SessionId` process-local; structural failure during `apply_changes` untested (as before).
 - Formatting observer is test-side and text-object-local; it handles `SpliceText`, `DeleteSeq`, `Mark` only.
+
+---
+
+# A3 repair wave 1 (extension review) — addendum
+
+**Status: DONE** for the five Important findings and the two extra items; prior standing omissions unchanged (merge/load/sync/AutoCommit, collapsed-gap characterization, in-memory envelope, process-local `SessionId`, `apply_changes`-time structural failure).
+
+## Commit
+
+Single commit for this wave, parent `6fef5d18b331` (head of `jj log` in this workspace).
+
+## Test totals (head)
+
+- `cargo test --locked --offline -p automerge --test revocation_prototype`: **48 passed** (`extend-fix-1-green-fixtures.log`).
+- `cargo test --locked --offline -p automerge --lib --tests`: **523 passed, 0 failed, 1 ignored** (`extend-fix-1-full-suite.log`) = 472 + 48 + 3.
+
+## TDD evidence
+
+| Log | Content |
+|---|---|
+| `extend-fix-1-red-compile.log` | New tests reference `author_with_time`, `list_elements_view`, `SessionError::QueuedActorBranch` (absent). |
+| `extend-fix-1-red-behavior.log` | Probe on pre-fix code reproducing the reviewer's counterexamples verbatim: (1) `excluded Camping leaked: Some(("Camping", 2@alice))` when authoring with `actor(0)`; (2) ordinary reverse diff `SpliceText("ab")` — placeholder lost; (3) `queued C was pruned by no-op authoring`. Probe deleted after recording. |
+| `extend-fix-1-green-fixtures.log` | 48 tests incl. eight new regressions. |
+
+## Repairs by finding
+
+1. **Mask/actor order** (`eligibility/mod.rs::transaction_view`): validate view → `transaction_args(Some(heads))` (baseline `isolate_actor`, may insert actors) → compile mask against the *resulting* actor table → attach to the structural isolation clock. Tests: `ex04_authoring_with_earlier_sorting_actor_hides_excluded_work` (actor 0; `tx.get(suggestion)` is `None`; read-after-write sees own put; D's `pred` empty; A stays excluded) and `ex04_authoring_against_stale_view_uses_safe_actor_and_view_preds` (Carol authors against heads `[A]` while her C exists outside: concurrency actor allocated, deps `[A]`, pred is H's title op `1@carol` not C's, C/D become concurrent candidates).
+2. **Block placeholders** (`patch_log.rs::flush_obj`): `Span::Block` emits a U+FFFC splice with encoding width, matching the established `text()` projection; contents are not expanded (no general block recovery claimed). Test `ordinary_reverse_diff_restores_text_with_block_placeholder` (control-free: `a␣b` with block, delete `t`, reverse `diff`, hydrate replay equals before-state, spliced text `a\u{fffc}b`). Formatted EX-07 test still green.
+3. **No-op authoring / queued history** (`session.rs::author_impl`): a transaction with no ops publishes nothing — no checkpoint, no record, the stage (and its queue pruning) is discarded. For real authoring, if opening the actor's next sequence removed queued changes, the whole operation is rejected with `QueuedActorBranch{actor, lost}` (bounded policy: reject rather than silently choose a branch). Tests: `noop_authoring_preserves_queued_history_and_envelope` (C keeps waiting, integrates when A arrives, envelope restores) and `authoring_conflicting_with_queued_actor_branch_is_rejected`.
+4. **Bindings in `author`**: same immutable-binding rule as delivery. Test `authoring_respects_prebound_context`: deterministic D (fixed time) prebound `FreshGrant(CTXG)`; authoring D with `Established` ⇒ `ConflictingBinding{hash: D}`, checkpoint count/inspection unchanged, D absent; identical prebinding ⇒ accepted, D `Pending` with no patches.
+5. **Sequence identity**: `list_view` doc now states the id is the *value* op; new `list_elements_view` returns `(index, value, value_op_id, element_id)`. Test `ex09_ex08_decoded_sequence_keys_target_alice_insertion`: Bob's replacement `5@bob` has sequence key **and** pred `4@alice`; EX-08's Y is an insertion keyed after `4@alice` with empty pred; under exclusion index 1 reports value `5@bob` / element `4@alice`, index 0 element `2@carol`. The earlier report's "element id `5@bob`" wording was wrong: `5@bob` is the value-op id.
+
+**Extra:** `ex14_insertion_after_excluded_mark_does_not_leak_bold` — X delivered after the mark is excluded yields exactly one unmarked `SpliceText("X")`, formatted replay `aXb`.
+
+**Log correction:** `extend-green-ex07-formatted.log` (previous wave) records the intermediate **3-vs-1 assertion failure** after the `flush_obj` fix, not a green run; the green evidence for that test is `extend-green-ex12-14.log` / `extend-green-fixtures.log`.

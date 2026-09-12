@@ -742,14 +742,22 @@ impl ExposeQueue {
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
                 // Expose formatted text span by span so marks travel with each
-                // splice (previously plain text only). Block markers are not
-                // exposed here (outside the prototype's fixtures).
+                // splice (previously plain text only). Block markers keep the
+                // established U+FFFC placeholder projection and width; their
+                // contents are not expanded here.
                 let mut index = 0;
                 for span in doc.spans_for(&exid, clock.cloned()).ok()? {
-                    if let crate::iter::Span::Text { text, marks } = span {
-                        let width = doc.text_encoding().width(&text);
-                        patch_builder.splice_text(exid.clone(), index, &text, marks);
-                        index += width;
+                    match span {
+                        crate::iter::Span::Text { text, marks } => {
+                            let width = doc.text_encoding().width(&text);
+                            patch_builder.splice_text(exid.clone(), index, &text, marks);
+                            index += width;
+                        }
+                        crate::iter::Span::Block(_) => {
+                            let placeholder = "\u{fffc}";
+                            patch_builder.splice_text(exid.clone(), index, placeholder, None);
+                            index += doc.text_encoding().width(placeholder);
+                        }
                     }
                 }
             }

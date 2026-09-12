@@ -43,3 +43,16 @@
 - [x] RED (behavior): `ex07_restored_container_with_formatted_text_replays_once` — exposure of a restored text emitted `SpliceText{marks: None}` for `hello` although `el` is bold (`extend-red-ex12-14.log`, the pre-existing `flush_obj` TODO / A-C02).
 - [x] GREEN: `PatchLog::ExposeQueue::flush_obj` exposes text span-by-span via `spans_for` with marks (`extend-green-ex07-formatted.log` shows the corrected patch stream; then oracle fixed to count total spliced width instead of one splice). EX-12/13/14 passed with the test-side `FormattedText` observer (`extend-green-ex12-14.log`).
 - [x] 40 fixtures green (`extend-green-fixtures.log`); full suite 515 passed / 0 failed / 1 ignored (`extend-full-suite.log`). rustfmt clean.
+
+## A3 repair wave 1 (extension review)
+
+- [x] RED (compile): `extend-fix-1-red-compile.log` (`author_with_time`, `list_elements_view`, `QueuedActorBranch` absent).
+- [x] RED (behavior, probe on pre-fix code, deleted after recording): `extend-fix-1-red-behavior.log` — (1) actor0 authoring sees excluded `Camping`; (2) ordinary reverse diff exposes `ab` not `a\u{fffc}b`; (3) no-op `author` prunes queued C. All three reviewer counterexamples reproduced.
+- [x] Fix 1: `transaction_view` validates view, allocates/isolates actor, then compiles mask against resulting actor table.
+- [x] Fix 2: `flush_obj` emits U+FFFC placeholder splices for `Span::Block` with correct width.
+- [x] Fix 3: no-op authoring publishes nothing (stage discarded); real authoring that would prune queued changes → `SessionError::QueuedActorBranch{actor, lost}` (bounded policy: reject, never discard).
+- [x] Fix 4: `author` applies immutable-binding validation (identical idempotent, conflicting rejected atomically). `author_with_time` added for deterministic hashes.
+- [x] Fix 5: `list_view` doc corrected (value-op id); `list_elements_view` exposes `(value_op_id, element_id)`; decoded keys/preds asserted (`5@bob` keyed/pred on `4@alice`; EX-08 Y insertion keyed after `4@alice`).
+- [x] EX-14 leakage: X imported after mark excluded — single unmarked splice.
+- [x] Log naming corrected in report: `extend-green-ex07-formatted.log` records the 3-vs-1 oracle failure, not a green run.
+- [x] 48 fixtures green (`extend-fix-1-green-fixtures.log`); full suite 523 passed / 0 failed / 1 ignored (`extend-fix-1-full-suite.log`). rustfmt clean.

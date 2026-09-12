@@ -139,10 +139,15 @@ impl Automerge {
         &mut self,
         view: &ViewSpec,
     ) -> Result<crate::transaction::Transaction<'_>, ViewError> {
-        let mask = self.scope_for(view)?.mask().cloned();
+        // Validate the view first (heads present, classification complete).
+        self.scope_for(view)?;
+        // Actor allocation/isolation may insert actors and shift indices, so
+        // the actor-indexed mask must be compiled *after* it, against the
+        // resulting actor table.
         let mut args = self.transaction_args(Some(&view.heads));
+        let mask = self.scope_for(view)?.mask().cloned();
         // `transaction_args(Some(heads))` produced the structural isolation
-        // clock (heads clock with this actor isolated). Re-attach the mask.
+        // clock (heads clock with this actor isolated). Attach the mask.
         args.scope = args.scope.take().map(|c| c.with_mask(mask));
         Ok(crate::transaction::Transaction::new(
             self,
@@ -153,7 +158,9 @@ impl Automerge {
 }
 
 impl Automerge {
-    /// Visible list/text elements under `view`: (index, value, element op id).
+    /// Visible list/text elements under `view`: `(index, value, value_op_id)`.
+    /// The id is the selected *value* operation (a replacement's own id), not
+    /// the insertion element identity; see [`Self::list_elements_view`] for both.
     pub fn list_view<O: AsRef<ExId>>(
         &self,
         view: &ViewSpec,
@@ -190,5 +197,37 @@ impl Automerge {
     ) -> Result<Vec<crate::marks::Mark>, ViewError> {
         let clock = self.scope_for(view)?;
         Ok(self.marks_for(obj.as_ref(), Some(clock))?)
+    }
+}
+
+impl Automerge {
+    /// Visible list elements under `view` with both identities:
+    /// `(index, value, value_op_id, element_id)`. The value op id is the
+    /// selected value operation (a replacement's own id); the element id is
+    /// the original insertion the sequence key addresses.
+    pub fn list_elements_view<O: AsRef<ExId>>(
+        &self,
+        view: &ViewSpec,
+        obj: O,
+    ) -> Result<Vec<(usize, Value<'static>, ExId, ExId)>, ViewError> {
+        let clock = self.scope_for(view)?;
+        let mut out = Vec::new();
+        for item in self.list_range_for(obj.as_ref(), .., Some(clock.clone())) {
+            let value_id = item.id();
+            let value_op = item.op_id();
+            let elem = self
+                .ops()
+                .find_op_by_id_and_vis(&value_op, None)
+                .and_then(|(op, _)| op.cursor().ok())
+                .map(|e| e.0)
+                .unwrap_or(value_op);
+            out.push((
+                item.index,
+                item.value.into_owned().into(),
+                value_id,
+                self.id_to_exid(elem),
+            ));
+        }
+        Ok(out)
     }
 }

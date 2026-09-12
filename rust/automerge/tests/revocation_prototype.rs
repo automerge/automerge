@@ -3090,3 +3090,385 @@ fn ex07_restored_container_with_formatted_text_replays_once() {
     assert_eq!(splice_len, 5, "{:?}", t.patches);
     assert_eq!(after.plain(), "hello");
 }
+
+// ---------------------------------------------------------------------------
+// A3 repair wave 1 — extension review findings
+// ---------------------------------------------------------------------------
+
+use automerge::eligibility::SessionError;
+
+fn legacy_opid(op: &automerge::ExpandedChange, i: usize) -> Option<String> {
+    match &op.operations[i].key {
+        automerge::legacy::Key::Seq(automerge::legacy::ElementId::Id(id)) => {
+            Some(format!("{}@{}", id.0, id.1))
+        }
+        _ => None,
+    }
+}
+
+fn pred_strs(op: &automerge::ExpandedChange, i: usize) -> Vec<String> {
+    op.operations[i]
+        .pred
+        .iter()
+        .map(|p| format!("{}@{}", p.0, p.1))
+        .collect()
+}
+
+/// Finding 1: authoring with an actor sorting *before* the masked actor.
+#[test]
+fn ex04_authoring_with_earlier_sorting_actor_hides_excluded_work() {
+    let fx = ex01();
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(fx.a.clone()),
+            Input::Change(fx.c.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    let view = s.current();
+    let (t, d) = s
+        .author(view, author("bob"), actor(0), CTX_BOB, |tx| {
+            assert!(
+                tx.get(ROOT, "suggestion").unwrap().is_none(),
+                "excluded Camping leaked into authoring view"
+            );
+            tx.put(ROOT, "suggestion", "Camping")?;
+            // Transaction-local read-after-write.
+            assert_eq!(
+                tx.get(ROOT, "suggestion").unwrap().unwrap().0.to_string(),
+                "\"Camping\""
+            );
+            Ok(())
+        })
+        .unwrap();
+    replay_ok(&s, &t);
+    let d = s.doc().get_change_by_hash(&d.unwrap()).unwrap().decode();
+    assert!(pred_strs(&d, 0).is_empty(), "{:?}", pred_strs(&d, 0));
+    assert_eq!(
+        s.decision(s.current(), &fx.a.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+}
+
+/// Finding 1: stale capture (session has moved on) with the authoring
+/// actor already having ops outside the view -> concurrency actor branch.
+#[test]
+fn ex04_authoring_against_stale_view_uses_safe_actor_and_view_preds() {
+    let fx = ex01();
+    let mut s = Session::new(fx.base.clone());
+    deliver(&mut s, vec![Input::Change(fx.a.clone())]);
+    let stale = s.current(); // heads = [A], title = Trip plan, suggestion = Camping
+    deliver(&mut s, vec![Input::Change(fx.c.clone())]); // Carol's C
+                                                        // Carol (actor 3) authors against the stale view: she already has C
+                                                        // outside it, so a concurrency actor must be used.
+    let (t, d) = s
+        .author(stale, author("carol"), actor(3), CTX_BOB, |tx| {
+            assert_eq!(
+                tx.get(ROOT, "title").unwrap().unwrap().0.to_string(),
+                "\"Trip plan\""
+            );
+            tx.put(ROOT, "title", "Stale edit")?;
+            Ok(())
+        })
+        .unwrap();
+    replay_ok(&s, &t);
+    let d = s.doc().get_change_by_hash(&d.unwrap()).unwrap();
+    assert_ne!(
+        d.actor_id(),
+        &actor(3),
+        "must not reuse an actor with ops outside the view"
+    );
+    assert_eq!(d.deps(), &[fx.a.hash()]);
+    let dx = d.decode();
+    // Pred is the title op visible in the stale view (H's put, 1@carol), not C's.
+    assert_eq!(pred_strs(&dx, 0), vec![format!("1@{}", actor(3))]);
+    // Result: C and D are concurrent candidates for title.
+    let vals = s.get_all(s.current(), &ROOT, "title").unwrap();
+    assert_eq!(vals.len(), 2);
+}
+
+/// Finding 2: ordinary (control-free) reverse diff restoring text with a
+/// block marker keeps the placeholder projection and indices.
+#[test]
+fn ordinary_reverse_diff_restores_text_with_block_placeholder() {
+    let mut doc = Automerge::new().with_actor(actor(3));
+    let text = doc
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let t = tx.put_object(ROOT, "t", automerge::ObjType::Text)?;
+            tx.splice_text(&t, 0, 0, "a")?;
+            tx.split_block(&t, 1)?;
+            tx.splice_text(&t, 2, 0, "b")?;
+            Ok(t)
+        })
+        .unwrap()
+        .result;
+    let with_text = doc.get_heads();
+    assert_eq!(doc.text(&text).unwrap(), "a\u{fffc}b");
+    let before_hydrate = doc.hydrate(Some(&with_text));
+    doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.delete(ROOT, "t")?;
+        Ok(())
+    })
+    .unwrap();
+    let without = doc.get_heads();
+    let patches = doc.diff(&without, &with_text);
+    let mut replay = doc.hydrate(Some(&without));
+    replay
+        .apply_patches(TextEncoding::platform_default(), patches.clone())
+        .unwrap();
+    assert_eq!(replay, before_hydrate, "{patches:?}");
+    let spliced: String = patches
+        .iter()
+        .filter_map(|p| match &p.action {
+            PatchAction::SpliceText { value, .. } => Some(value.make_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(spliced, "a\u{fffc}b");
+}
+
+/// Finding 3: a no-op authoring call must not prune queued received work.
+#[test]
+fn noop_authoring_preserves_queued_history_and_envelope() {
+    let fx = ex01();
+    let mut s = Session::new(fx.base.clone());
+    deliver(&mut s, vec![Input::Change(fx.c.clone())]); // C waits for A
+    let cp = s.current();
+    assert_eq!(
+        s.waiting(cp, &fx.c.hash()).unwrap(),
+        Some([fx.a.hash()].into_iter().collect())
+    );
+    // Carol's own actor (3) — the one C belongs to.
+    let (t, d) = s
+        .author(cp, author("carol"), actor(3), CTX_BOB, |_tx| Ok(()))
+        .unwrap();
+    assert!(d.is_none());
+    assert!(
+        t.patches.is_empty() && t.status.is_empty(),
+        "{:?}",
+        t.status
+    );
+    assert_eq!(
+        s.waiting(s.current(), &fx.c.hash()).unwrap(),
+        Some([fx.a.hash()].into_iter().collect()),
+        "queued C must survive a no-op authoring"
+    );
+    let t = deliver(&mut s, vec![Input::Change(fx.a.clone())]);
+    replay_ok(&s, &t);
+    assert!(s.is_integrated(s.current(), &fx.c.hash()).unwrap());
+    assert!(hydrated_eq(
+        &s.hydrate(s.current()).unwrap(),
+        &expect_map(&[("title", "Weekend plan"), ("suggestion", "Camping")])
+    ));
+    let restored = Session::restore(s.export()).expect("envelope restores");
+    assert_eq!(restored.checkpoint_count(), s.checkpoint_count());
+}
+
+/// Finding 3: real authoring that would conflict with a queued actor branch
+/// is rejected explicitly instead of discarding the queued change.
+#[test]
+fn authoring_conflicting_with_queued_actor_branch_is_rejected() {
+    let fx = ex01();
+    let mut s = Session::new(fx.base.clone());
+    deliver(&mut s, vec![Input::Change(fx.c.clone())]); // C = carol seq 2, waiting for A
+    let cp = s.current();
+    let before_count = s.checkpoint_count();
+    let err = s
+        .author(cp, author("carol"), actor(3), CTX_BOB, |tx| {
+            tx.put(ROOT, "title", "Competing")?;
+            Ok(())
+        })
+        .err()
+        .expect("rejected");
+    assert!(
+        matches!(err, SessionError::QueuedActorBranch { .. }),
+        "{err:?}"
+    );
+    assert_eq!(s.checkpoint_count(), before_count);
+    assert_eq!(
+        s.waiting(s.current(), &fx.c.hash()).unwrap(),
+        Some([fx.a.hash()].into_iter().collect())
+    );
+    // Still integrates later.
+    deliver(&mut s, vec![Input::Change(fx.a.clone())]);
+    assert!(s.is_integrated(s.current(), &fx.c.hash()).unwrap());
+}
+
+/// Finding 4: `Session::author` honours immutable bindings.
+#[test]
+fn authoring_respects_prebound_context() {
+    let fx = ex01();
+    // Precompute D deterministically on a clone with the same actor/heads.
+    let mut pre = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    pre.transact_with::<_, _, automerge::AutomergeError, _>(
+        |_| automerge::transaction::CommitOptions::default().with_time(0),
+        |tx| {
+            tx.put(ROOT, "suggestion", "Camping")?;
+            Ok(())
+        },
+    )
+    .unwrap();
+    let d_hash = pre.get_last_local_change().unwrap().hash();
+
+    let mut s = Session::new(fx.base.clone());
+    deliver(&mut s, vec![Input::Binding(d_hash, BG)]); // FreshGrant(CTXG), no G
+    let cp = s.current();
+    let before_count = s.checkpoint_count();
+    let before_inspection = s.capture(cp).unwrap().inspection.clone();
+    let err = s
+        .author_with_time(cp, author("bob"), actor(2), CTX_BOB, 0, |tx| {
+            tx.put(ROOT, "suggestion", "Camping")?;
+            Ok(())
+        })
+        .err()
+        .expect("conflicting prebinding rejected");
+    assert!(
+        matches!(err, SessionError::ConflictingBinding { hash, .. } if hash == d_hash),
+        "{err:?}"
+    );
+    assert_eq!(s.checkpoint_count(), before_count);
+    assert_eq!(*s.capture(cp).unwrap().inspection, *before_inspection);
+    assert!(s.doc().get_change_by_hash(&d_hash).is_none());
+    // Identical prebinding: idempotent; D is pending (fresh grant unresolved).
+    let (t, h) = s
+        .author_with_time(cp, author("bob"), actor(2), BG, 0, |tx| {
+            tx.put(ROOT, "suggestion", "Camping")?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(h, Some(d_hash));
+    assert!(t.patches.is_empty(), "pending D must not be materialized");
+    assert_eq!(
+        s.decision(s.current(), &d_hash).unwrap().eligibility,
+        Eligibility::Pending
+    );
+}
+
+/// Finding 5: sequence identities — Bob's replacement is a *value* op whose
+/// sequence key and pred are Alice's insertion `4@alice`; EX-08's Y is an
+/// insertion keyed after X.
+#[test]
+fn ex09_ex08_decoded_sequence_keys_target_alice_insertion() {
+    let fx = list_fx();
+    let xexp = fx.x.decode();
+    assert!(xexp.operations[0].insert);
+    let x_id = format!("4@{}", actor(1));
+    // EX-09 replacement.
+    let mut bob = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([fx.x.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(&fx.list, 1, "Y")?;
+        Ok(())
+    })
+    .unwrap();
+    let y = bob.get_last_local_change().unwrap().decode();
+    assert!(!y.operations[0].insert);
+    assert_eq!(legacy_opid(&y, 0), Some(x_id.clone()));
+    assert_eq!(pred_strs(&y, 0), vec![x_id.clone()]);
+    // EX-08 insertion after X.
+    let mut bob2 = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob2.apply_changes([fx.x.clone()]).unwrap();
+    bob2.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.insert(&fx.list, 2, "Y")?;
+        Ok(())
+    })
+    .unwrap();
+    let yi = bob2.get_last_local_change().unwrap().decode();
+    assert!(yi.operations[0].insert);
+    assert_eq!(legacy_opid(&yi, 0), Some(x_id.clone()), "Y anchored to X");
+    assert!(pred_strs(&yi, 0).is_empty());
+    // With X excluded, list_view reports value ids; the element identity of
+    // index 1 is still X's insertion, exposed via `list_elements_view`.
+    let mut s = Session::new(fx.base.clone());
+    let ych = bob.get_last_local_change().unwrap();
+    deliver(
+        &mut s,
+        vec![Input::Change(fx.x.clone()), Input::Change(ych)],
+    );
+    deliver(&mut s, exclude_evidence("alice", &[]));
+    let elems = s
+        .doc()
+        .list_elements_view(&s.capture(s.current()).unwrap().spec, &fx.list)
+        .unwrap();
+    let (values, elements): (Vec<String>, Vec<String>) = elems
+        .iter()
+        .map(|(_, _, value_id, elem_id)| (value_id.to_string(), elem_id.to_string()))
+        .unzip();
+    assert_eq!(values[1], format!("5@{}", actor(2)));
+    assert_eq!(elements[1], x_id);
+    assert_eq!(elements[0], format!("2@{}", actor(3)));
+}
+
+/// EX-14 leakage: eligible X imported *after* the mark is excluded — its
+/// insertion patch must not carry bold.
+#[test]
+fn ex14_insertion_after_excluded_mark_does_not_leak_bold() {
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let text = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let t = tx.put_object(ROOT, "t", automerge::ObjType::Text)?;
+            tx.splice_text(&t, 0, 0, "ab")?;
+            Ok(t)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.mark(
+                &text,
+                Mark::new("bold".into(), true, 0, 2),
+                ExpandMark::Both,
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let am = alice.get_last_local_change().unwrap();
+    let mut bob = base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([am.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.splice_text(&text, 1, 0, "X")?;
+        Ok(())
+    })
+    .unwrap();
+    let bx = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(&mut s, vec![Input::Change(am)]);
+    deliver(&mut s, exclude_evidence("alice", &[]));
+    let t = deliver(&mut s, vec![Input::Change(bx)]);
+    let splices: Vec<&automerge::Patch> = t
+        .patches
+        .iter()
+        .filter(|p| matches!(p.action, PatchAction::SpliceText { .. }))
+        .collect();
+    assert_eq!(splices.len(), 1, "{:?}", t.patches);
+    if let PatchAction::SpliceText { marks, value, .. } = &splices[0].action {
+        assert_eq!(value.make_string(), "X");
+        assert!(marks.as_ref().is_none_or(|m| m.is_empty()), "{marks:?}");
+    }
+    replay_formatted(&s, &text, &t);
+    assert_eq!(formatted(&s, s.current(), &text).render_bold(), "aXb");
+}
