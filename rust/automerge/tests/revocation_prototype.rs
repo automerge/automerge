@@ -1585,3 +1585,195 @@ fn queued_only_receipt_is_an_inspection_transition() {
         Some(&(vec![], vec![Reason::AdmittedByContext(CTX0)]))
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fix wave 1 — items 5 and 6
+// ---------------------------------------------------------------------------
+
+/// Item 5 / EX-02: an isolated view at fixed content heads. H integrates in
+/// the session (heads advance), but a view pinned at the *old* heads with
+/// the *new* classification shows A1 while the old capture stays pending.
+#[test]
+fn ex02_fixed_content_heads_view_resolves_without_moving_heads() {
+    let h0 = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut alice = h0
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    let a1 = tx_put(&mut alice, "x", 1);
+    let a2 = tx_put(&mut alice, "y", 2);
+    let mut carol = h0
+        .fork()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    carol.apply_changes([a1.clone()]).unwrap();
+    let h = carol.empty_commit(Default::default());
+    let h_change = carol.get_change_by_hash(&h).unwrap();
+    let r = Evidence::Revocation {
+        id: R_ID,
+        target: author("alice"),
+        frontier: vec![h],
+    };
+    let e1 = Evidence::Authorizes {
+        id: E1_ID,
+        event: R_ID,
+    };
+    let mut bob = Session::new(h0.clone());
+    deliver(
+        &mut bob,
+        vec![
+            Input::Change(a1.clone()),
+            Input::Change(a2.clone()),
+            Input::Evidence(r),
+            Input::Evidence(e1),
+        ],
+    );
+    let pending = bob.current();
+    let pending_heads = bob.capture(pending).unwrap().spec.heads.clone();
+    assert_eq!(pending_heads, vec![a2.hash()]);
+    assert!(hydrated_eq(
+        &bob.hydrate(pending).unwrap(),
+        &expect_ints(&[])
+    ));
+
+    // H integrates; session heads move on.
+    deliver(&mut bob, vec![Input::Change(h_change)]);
+    let resolved = bob.current();
+    assert_ne!(bob.capture(resolved).unwrap().spec.heads, pending_heads);
+
+    // New view: resolved classification at the *unchanged* content heads.
+    let fixed = bob.view_at(resolved, &pending_heads).unwrap();
+    assert_eq!(fixed.heads, pending_heads);
+    let fixed_view = bob.doc().hydrate_view(&fixed).unwrap();
+    assert!(
+        hydrated_eq(&fixed_view, &expect_ints(&[("x", 1)])),
+        "{fixed_view:?}"
+    );
+    assert_eq!(fixed.selection.get(&a1.hash()), Some(Eligibility::Eligible));
+    assert_eq!(fixed.selection.get(&a2.hash()), Some(Eligibility::Excluded));
+    // H is outside the fixed heads: it is not part of this view's content.
+    assert_eq!(fixed.selection.get(&h), None);
+
+    // Old snapshot stays pending.
+    assert!(hydrated_eq(
+        &bob.hydrate(pending).unwrap(),
+        &expect_ints(&[])
+    ));
+    assert_eq!(
+        bob.decision(pending, &a1.hash()).unwrap().eligibility,
+        Eligibility::Pending
+    );
+
+    // Patch transition between the pending capture and the fixed-heads view.
+    let old_spec = bob.capture(pending).unwrap().spec.clone();
+    let patches = bob.doc().diff_view(&old_spec, &fixed).unwrap();
+    assert_eq!(patches.len(), 1, "{patches:?}");
+    let mut replay = bob.hydrate(pending).unwrap();
+    replay
+        .apply_patches(TextEncoding::platform_default(), patches)
+        .unwrap();
+    assert_eq!(replay, fixed_view);
+}
+
+/// Item 6 / EX-03: complete capture round-trip through a disposable
+/// envelope. Reconstruction replays frozen per-checkpoint inputs; it must not
+/// use later evidence to reinterpret an earlier pending checkpoint.
+#[test]
+fn ex03_envelope_round_trip_preserves_gap_and_pending_checkpoint() {
+    let fx = ex03();
+    let mut s = Session::new(fx.base.clone());
+    // Checkpoint 1: R authoritative but its frontier A1 is not yet known ->
+    // A2/A3 not present either; deliver A2, A3 only (they wait for A1).
+    deliver(
+        &mut s,
+        vec![
+            Input::Binding(fx.a2.hash(), CTX0),
+            Input::Binding(fx.a3.hash(), CTXG),
+            Input::Change(fx.a2.clone()),
+            Input::Change(fx.a3.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    let waiting_cp = s.current();
+    assert_eq!(
+        s.waiting(waiting_cp, &fx.a2.hash()).unwrap(),
+        Some([fx.a1.hash()].into_iter().collect())
+    );
+    // Checkpoint 2: A1 arrives; G not yet known -> A3 excluded.
+    deliver(&mut s, vec![Input::Change(fx.a1.clone())]);
+    let pre_grant_cp = s.current();
+    assert_eq!(
+        s.decision(pre_grant_cp, &fx.a3.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+    assert!(hydrated_eq(
+        &s.hydrate(pre_grant_cp).unwrap(),
+        &expect_ints(&[("before", 1)])
+    ));
+    // Checkpoint 3: G -> gap selection.
+    deliver(&mut s, vec![Input::Evidence(fx.g.clone())]);
+    let final_cp = s.current();
+    ex03_check_final(&s, &fx);
+
+    let envelope = s.export();
+    // Content-only export does not carry interpretation.
+    let content_only = Automerge::load(&s.doc().save()).unwrap();
+    assert_eq!(content_only.get_heads(), s.doc().get_heads());
+    assert!(hydrated_eq(
+        &content_only.hydrate(None),
+        &expect_ints(&[("before", 1), ("during", 2), ("after", 3)])
+    ));
+
+    let restored = Session::restore(envelope).expect("envelope restores");
+    assert_eq!(restored.checkpoint_count(), s.checkpoint_count());
+    let r_final = restored.checkpoint(final_cp.index()).unwrap();
+    ex03_check_final(&restored, &fx);
+    assert!(hydrated_eq(
+        &restored.hydrate(r_final).unwrap(),
+        &expect_ints(&[("before", 1), ("after", 3)])
+    ));
+    let r_pre = restored.checkpoint(pre_grant_cp.index()).unwrap();
+    assert_eq!(
+        restored.decision(r_pre, &fx.a3.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+    assert!(hydrated_eq(
+        &restored.hydrate(r_pre).unwrap(),
+        &expect_ints(&[("before", 1)])
+    ));
+    let r_wait = restored.checkpoint(waiting_cp.index()).unwrap();
+    assert_eq!(
+        restored.waiting(r_wait, &fx.a2.hash()).unwrap(),
+        Some([fx.a1.hash()].into_iter().collect())
+    );
+    assert!(!restored.is_integrated(r_wait, &fx.a2.hash()).unwrap());
+    // Restored ids are namespaced to the restored session.
+    assert!(restored.hydrate(final_cp).is_err());
+}
+
+/// A tampered envelope (frozen table disagrees with re-evaluation of its own
+/// frozen inputs) is rejected, not silently reinterpreted.
+#[test]
+fn envelope_with_inconsistent_frozen_table_is_rejected() {
+    let fx = ex03();
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Binding(fx.a2.hash(), CTX0),
+            Input::Change(fx.a1.clone()),
+            Input::Change(fx.a2.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    let mut envelope = s.export();
+    envelope.tamper_last_checkpoint_selection(&fx.a2.hash(), Eligibility::Eligible);
+    assert!(matches!(
+        Session::restore(envelope),
+        Err(automerge::eligibility::SessionError::InconsistentEnvelope { .. })
+    ));
+}

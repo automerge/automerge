@@ -11,3 +11,15 @@
 - [x] EX-05/06/07: green on first run (`red-ex05-07.log`). A-C01 falsifier executed: reverting `ClockRange::predates` to `covers` makes EX-07 replay produce an empty restored section (`red-ex07-predates-covers.log`); restored to `contains`.
 - [x] Failure atomicity and actor-table recompilation tests: green (`green-all-fixtures.log`).
 - [x] Full `cargo test --locked --offline -p automerge --lib --tests`: all green, 1 ignored (`full-suite.log`). rustfmt clean.
+
+## Fix wave 1 (review round 1)
+
+- [x] RED (compile): new tests for findings 1–3 + EX-10 against missing API (`fix-1-red-compile.log`).
+- [x] RED (behavioral): EX-10 self-diff probe on pre-fix predicate emits `Increment -100` (`fix-1-red-ex10-counter.log`) → `visible_before` now `before.covers`; `predates` stays `before.contains`, docs corrected → GREEN (`fix-1-green-ex10-counter.log`; probe file removed after recording).
+- [x] Finding 1: bindings immutable (`SessionError::ConflictingBinding`, atomic rejection both orders, rebinding A2→CTXG rejected).
+- [x] Finding 2: `ViewId{session, index}`; all accessors return `Result`; `ForeignView` for foreign/out-of-range.
+- [x] Finding 3: `StatusDelta` now covers reasons, waiting inventory, bindings; `is_empty()` iff snapshots identical.
+- [x] Findings 1–4 green (`fix-1-green-findings-1-4.log`, 20 tests). Commit `f4066e60`.
+- [x] Item 5: `Session::view_at(policy, heads)` — EX-02 fixed-heads view with patch transition.
+- [x] Item 6: `Envelope` (`export`/`restore`), per-checkpoint frozen inputs; restore re-evaluates each checkpoint against only its own frozen inputs and rejects mismatches (`InconsistentEnvelope`, tamper test).
+- [x] 23 fixtures green (`fix-1-green-fixtures.log`); full suite 498 passed / 0 failed / 1 ignored (`fix-1-full-suite.log`), same head as final tests. rustfmt clean.

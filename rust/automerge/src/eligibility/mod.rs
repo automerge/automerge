@@ -23,7 +23,9 @@ pub use evidence::{
     authorities, evaluate, Authority, AuthorizationContextId, ChangeFacts, Decision, Eligibility,
     EventId, Evidence, EvidenceError, EvidenceLog, GraphFacts, Reason,
 };
-pub use session::{Capture, Input, Session, SessionError, StatusDelta, Transition, ViewId};
+pub use session::{
+    Capture, Envelope, Input, Session, SessionError, SessionId, StatusDelta, Transition, ViewId,
+};
 
 /// Whole-change classification of every integrated change (hash-keyed;
 /// non-prefix selections are expressible).

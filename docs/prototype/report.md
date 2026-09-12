@@ -104,3 +104,48 @@ Pure evaluator unit tests: `late_e1_cannot_overwrite_e2` (same set, two insertio
 2. EX-08–11 with real list/counter reads through `get_all_view`/`hydrate_view`; add `spans_view`/`marks_view` for EX-12–14 plus a formatting-aware observer.
 3. Envelope round-trip and content-only-vs-complete-capture test.
 4. Merge/incremental-load/sync path matrix with re-evaluation after each import.
+
+---
+
+# Fix wave 1 (review round 1) — addendum
+
+**Status: DONE_WITH_CONCERNS** (all six required items implemented and tested; concerns listed at the end).
+
+## Commits
+
+| Commit | Content |
+|---|---|
+| `f4066e605c4a` | Findings 1–4: immutable bindings, namespaced checked `ViewId` + `Result` accessors, complete `StatusDelta`, `visible_before` participation fix + `predates` doc correction; EX-10 test. |
+| `@` (this addendum's commit) | Items 5–6: `Session::view_at`, `Envelope` export/restore with per-checkpoint frozen inputs; report/progress. |
+
+## Test totals (exact, same head)
+
+- `cargo test --locked --offline -p automerge --test revocation_prototype`: **23 passed** (`fix-1-green-fixtures.log`).
+- `cargo test --locked --offline -p automerge --lib --tests`: **498 passed, 0 failed, 1 ignored** (`fix-1-full-suite.log`; its `revocation_prototype` section shows 23). Arithmetic: 472 baseline + 23 fixtures + 3 evaluator unit tests = 498. The earlier report's "489 / overlap" statement was wrong: `full-suite.log` was run before the final two regressions were added (14 fixtures), and the coordinator's 491 corresponds to 16 fixtures.
+
+## TDD evidence
+
+| Step | Log | Content |
+|---|---|---|
+| Red (compile) | `fix-1-red-compile.log` | 20 errors: missing `ConflictingBinding`, `ForeignView`, `waiting_changes`, `Result` accessors. |
+| Red (behavior) | `fix-1-red-ex10-counter.log` | Probe test on pre-fix `visible_before`: same-capture `diff_view` emits `[Increment { prop: "n", value: -100 }]` exactly as the review predicted. |
+| Green | `fix-1-green-ex10-counter.log` | Same probe after `visible_before → before.covers`. Probe file then deleted; the durable test is `ex10_excluded_increment_self_diff_duplicate_and_restore_replay`. |
+| Green | `fix-1-green-findings-1-4.log` | 20 tests incl. the 1,920 schedules. One iteration: my initial reason-change assertion (R+E1 changes eligibility, not only reasons) was wrong; replaced with a Grant that adds `AdmittedByContext` while eligibility stays `Eligible`. |
+| Green | `fix-1-green-fixtures.log` | 23 tests incl. items 5–6. Items 5/6 tests passed on first compile (no separate red beyond the compile failure). |
+
+## Repairs by finding
+
+1. **Bindings** (`session.rs` `deliver`): identical → no-op; conflicting → `SessionError::ConflictingBinding{hash, existing, attempted}` before `apply_changes`, whole group discarded. Test `conflicting_context_binding_is_rejected_atomically_in_both_orders` covers both orders, a group with otherwise-valid A3 (not integrated, not in doc), unchanged view/bindings, and rejection of rebinding A2→CTXG after the fact (`ex03_check_final` still holds).
+2. **ViewId** = `{session: SessionId, index}` with a process-unique `SessionId`. `capture/hydrate/get_all/decision/authority/waiting/is_integrated` return `Result<_, SessionError>`; foreign/out-of-range → `ForeignView`. Test `foreign_view_id_is_rejected_not_misread` (two sessions, same index, different content). Not a persistent digest: a restored session gets a fresh namespace and old ids are rejected (tested); `ViewId::index()` + `Session::checkpoint(i)` re-address checkpoints after restore.
+3. **StatusDelta** adds `reason_changes`, `waiting_changes` (`Option` before/after), `binding_changes`; `is_empty()` iff the two `InspectionSnapshot`s are equal. Test `queued_only_receipt_is_an_inspection_transition`: C-before-A signals `waiting: None→{A}`, duplicate is a no-op, A's arrival signals `{A}→None` + `newly_integrated`, binding receipt and reason-only changes are signalled. EX-01 duplicate/1,920 tests still assert empty deltas for duplicates.
+4. **Counter predicate**: `ClockRange::visible_before` now `before.covers` (participation); `predates` stays `before.contains` (exposure) with corrected doc comment. Test `ex10_…`: 115 → 15 with replay, self-diff empty, empty group and duplicate `+100` produce no patches, restoring `+100` replays to 115.
+5. **EX-02 fixed heads**: `Session::view_at(policy, heads)` filters the policy capture's selection to the ancestry of `heads` and compiles it. Test: pending capture at heads `[A2]` shows `{}`; after H integrates (session heads move), `view_at(resolved, [A2])` shows `{x:1}` with A1 eligible / A2 excluded / H absent; old capture still pending `{}`; `diff_view(old, fixed)` is exactly one patch and replays.
+6. **EX-03 envelope**: `Envelope { base bytes, checkpoints: [{received raw change bytes, evidence, bindings, frozen capture}] }`. `restore` replays checkpoints in order, re-evaluates each against **its own** frozen evidence/bindings, and errors (`InconsistentEnvelope`) if heads, selection or inspection differ. Test round-trips a waiting checkpoint (A2 waiting for A1), a pre-grant checkpoint (A3 excluded) and the final gap `[Eligible, Excluded, Eligible]`; also shows content-only `save/load` yields `{before, during, after}` (no interpretation). Tamper test rejects a corrupted frozen selection.
+
+## Remaining concerns (not blockers for this wave)
+
+- `Envelope` is an in-memory Rust struct, not serialized bytes; "disposable and private" per the prompt. Serialization would be a straightforward addition but is untested.
+- `SessionId` is a process-local counter: foreign-session detection is sound within a process, not across processes (would need a digest).
+- `restore` recomputes `authorities` from the frozen log rather than storing them separately — acceptable since the log is the frozen input, but it means the evaluator itself is trusted on restore (the mismatch check would catch evaluator drift as `InconsistentEnvelope`).
+- Atomicity test still triggers rejection before `apply_changes`; a structural failure *during* content application is not exercised (reviewer's note stands).
+- EX-04 authoring, EX-08/09/11–14, merge/incremental-load/sync paths remain unimplemented/unproven as before. EX-10 is now covered for the map-counter case only.

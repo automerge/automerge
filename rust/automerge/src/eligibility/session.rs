@@ -47,6 +47,14 @@ pub struct ViewId {
     index: usize,
 }
 
+impl ViewId {
+    /// Position of this capture in its session (stable across envelope
+    /// restoration; the session namespace is not).
+    pub fn index(&self) -> usize {
+        self.index
+    }
+}
+
 /// Frozen inspection state at a checkpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectionSnapshot {
@@ -122,6 +130,10 @@ pub enum SessionError {
     NotIntegrated(ChangeHash),
     #[error("event {0:?} is unknown in the requested view")]
     UnknownEvent(EventId),
+    #[error(
+        "envelope checkpoint {checkpoint} re-evaluates differently from its frozen table: {detail}"
+    )]
+    InconsistentEnvelope { checkpoint: usize, detail: String },
 }
 
 #[derive(Debug, Clone)]
@@ -132,11 +144,51 @@ struct Published {
     capture: Capture,
 }
 
+/// Frozen inputs of one published checkpoint: the raw change bytes received
+/// in its group (integrated or queued), and the complete evidence/binding
+/// tables as of that checkpoint, plus the capture they produced.
+#[derive(Debug, Clone)]
+struct CheckpointRecord {
+    received: Vec<Vec<u8>>,
+    evidence: EvidenceLog,
+    bindings: BTreeMap<ChangeHash, AuthorizationContextId>,
+    frozen: Capture,
+}
+
+/// Disposable in-memory session envelope: content bytes of the base document
+/// plus per-checkpoint frozen inputs and results. Not a wire format.
+#[derive(Debug, Clone)]
+pub struct Envelope {
+    base: Vec<u8>,
+    checkpoints: Vec<CheckpointRecord>,
+}
+
+impl Envelope {
+    /// Test hook: corrupt the frozen selection of the last checkpoint so that
+    /// it no longer matches re-evaluation of its own frozen inputs.
+    pub fn tamper_last_checkpoint_selection(&mut self, hash: &ChangeHash, e: Eligibility) {
+        let last = self
+            .checkpoints
+            .last_mut()
+            .expect("at least one checkpoint");
+        let mut map: BTreeMap<ChangeHash, Eligibility> = last
+            .frozen
+            .spec
+            .selection
+            .iter()
+            .map(|(h, e)| (*h, *e))
+            .collect();
+        map.insert(*hash, e);
+        last.frozen.spec.selection = Selection::new(map);
+    }
+}
+
 #[derive(Debug)]
 pub struct Session {
     id: SessionId,
     published: Published,
     captures: Vec<Capture>,
+    records: Vec<CheckpointRecord>,
 }
 
 struct DocFacts<'a>(&'a Automerge);
@@ -217,15 +269,22 @@ impl Session {
         let evidence = EvidenceLog::default();
         let bindings = BTreeMap::new();
         let capture = capture(&doc, &evidence, &bindings);
+        let base = doc.save();
         Self {
             id: SessionId::fresh(),
             published: Published {
                 doc,
-                evidence,
-                bindings,
+                evidence: evidence.clone(),
+                bindings: bindings.clone(),
                 capture: capture.clone(),
             },
-            captures: vec![capture],
+            captures: vec![capture.clone()],
+            records: vec![CheckpointRecord {
+                received: vec![base],
+                evidence,
+                bindings,
+                frozen: capture,
+            }],
         }
     }
 
@@ -234,9 +293,13 @@ impl Session {
     pub fn deliver(&mut self, inputs: Vec<Input>) -> Result<Transition, SessionError> {
         let mut stage = self.published.clone();
         let mut changes = Vec::new();
+        let mut received = Vec::new();
         for input in inputs {
             match input {
-                Input::Change(c) => changes.push(c),
+                Input::Change(c) => {
+                    received.push(c.raw_bytes().to_vec());
+                    changes.push(c);
+                }
                 Input::Evidence(e) => {
                     stage.evidence.insert(e)?;
                 }
@@ -263,6 +326,12 @@ impl Session {
         let status = status_delta(&before.inspection, &after.inspection);
         let before_id = self.current();
         stage.capture = after.clone();
+        self.records.push(CheckpointRecord {
+            received,
+            evidence: stage.evidence.clone(),
+            bindings: stage.bindings.clone(),
+            frozen: after.clone(),
+        });
         self.published = stage;
         self.captures.push(after);
         Ok(Transition {
@@ -385,4 +454,124 @@ fn status_delta(before: &InspectionSnapshot, after: &InspectionSnapshot) -> Stat
         }
     }
     delta
+}
+
+impl Session {
+    pub fn checkpoint_count(&self) -> usize {
+        self.captures.len()
+    }
+
+    /// The [`ViewId`] of the `index`-th checkpoint of this session.
+    pub fn checkpoint(&self, index: usize) -> Result<ViewId, SessionError> {
+        let id = ViewId {
+            session: self.id,
+            index,
+        };
+        self.capture(id).map(|_| id)
+    }
+
+    /// A view at explicit fixed content `heads` interpreted with the
+    /// classification captured at `policy`. The policy snapshot may know
+    /// changes outside `heads` (ruling 6); those are simply not part of the
+    /// view's content. Historical captures are never reinterpreted.
+    pub fn view_at(&self, policy: ViewId, heads: &[ChangeHash]) -> Result<ViewSpec, SessionError> {
+        let cap = self.capture(policy)?;
+        let doc = &self.published.doc;
+        for h in heads {
+            if !doc.change_graph.has_change(h) {
+                return Err(SessionError::View(ViewError::ForeignHeads(*h)));
+            }
+        }
+        let map: BTreeMap<ChangeHash, Eligibility> = cap
+            .spec
+            .selection
+            .iter()
+            .filter(|(hash, _)| doc.change_graph.in_ancestry(heads, hash) == Some(true))
+            .map(|(h, e)| (*h, *e))
+            .collect();
+        let spec = ViewSpec {
+            heads: heads.to_vec(),
+            selection: Selection::new(map),
+        };
+        // Compile once to surface unclassified changes explicitly.
+        doc.scope_for(&spec)?;
+        Ok(spec)
+    }
+
+    /// Export the complete session: base content bytes plus, per checkpoint,
+    /// the raw received change bytes and frozen evidence/binding tables and
+    /// resulting capture.
+    pub fn export(&self) -> Envelope {
+        let mut checkpoints = self.records.clone();
+        // Checkpoint 0 holds the base document bytes in `received[0]`.
+        let base = checkpoints
+            .first_mut()
+            .map(|c| std::mem::take(&mut c.received))
+            .and_then(|mut v| v.pop())
+            .expect("session always has a base checkpoint");
+        Envelope { base, checkpoints }
+    }
+
+    /// Reconstruct a session from an envelope by replaying each checkpoint's
+    /// frozen inputs in order and asserting that re-evaluation reproduces the
+    /// frozen table. Later checkpoints' evidence is never used for earlier
+    /// ones.
+    pub fn restore(envelope: Envelope) -> Result<Self, SessionError> {
+        let Envelope { base, checkpoints } = envelope;
+        let mut doc = Automerge::load(&base)?;
+        let mut records = Vec::with_capacity(checkpoints.len());
+        let mut captures = Vec::with_capacity(checkpoints.len());
+        for (i, record) in checkpoints.into_iter().enumerate() {
+            let mut changes = Vec::with_capacity(record.received.len());
+            for bytes in &record.received {
+                changes.push(Change::from_bytes(bytes.clone()).map_err(|e| {
+                    SessionError::InconsistentEnvelope {
+                        checkpoint: i,
+                        detail: format!("undecodable change bytes: {e}"),
+                    }
+                })?);
+            }
+            doc.apply_changes(changes)?;
+            let recomputed = capture(&doc, &record.evidence, &record.bindings);
+            if recomputed.spec.heads != record.frozen.spec.heads {
+                return Err(SessionError::InconsistentEnvelope {
+                    checkpoint: i,
+                    detail: "content heads differ".into(),
+                });
+            }
+            if recomputed.spec.selection != record.frozen.spec.selection {
+                return Err(SessionError::InconsistentEnvelope {
+                    checkpoint: i,
+                    detail: "selection differs".into(),
+                });
+            }
+            if *recomputed.inspection != *record.frozen.inspection {
+                return Err(SessionError::InconsistentEnvelope {
+                    checkpoint: i,
+                    detail: "inspection differs".into(),
+                });
+            }
+            captures.push(record.frozen.clone());
+            records.push(record);
+        }
+        if records.is_empty() {
+            return Err(SessionError::InconsistentEnvelope {
+                checkpoint: 0,
+                detail: "no checkpoints".into(),
+            });
+        }
+        records[0].received = vec![base];
+        let last = records.last().expect("non-empty");
+        Ok(Self {
+            id: SessionId::fresh(),
+            published: Published {
+                doc,
+                evidence: last.evidence.clone(),
+                bindings: last.bindings.clone(),
+                capture: last.frozen.clone(),
+            },
+            captures,
+            records,
+        })
+    }
 }
