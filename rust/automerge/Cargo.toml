@@ -9,6 +9,7 @@ description = "A JSON-like data structure (a CRDT) that can be modified concurre
 readme = "./README.md"
 
 [features]
+experimental-revocation = []
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "getrandom/wasm_js", "hexane/wasm"]
 utf8-indexing = []
 utf16-indexing = []

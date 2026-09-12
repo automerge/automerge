@@ -18,6 +18,9 @@ pub enum AnonymizeError {
         /// The dependency which has not yet been anonymized.
         dependency: ChangeHash,
     },
+    /// Native controls require semantic reference rewriting, unsupported here.
+    #[error("cannot anonymize experimental controls")]
+    ExperimentalControl,
     /// The rewritten changes could not be applied.
     #[error(transparent)]
     Apply(#[from] AutomergeError),
@@ -66,6 +69,13 @@ impl Anonymization {
         for change in changes {
             let old_hash = change.hash();
             let mut expanded = change.decode();
+            if expanded
+                .operations
+                .iter()
+                .any(|op| matches!(op.action, OpType::Revoke(_)))
+            {
+                return Err(AnonymizeError::ExperimentalControl);
+            }
             expanded.hash = None;
             expanded.deps = expanded
                 .deps
@@ -154,6 +164,7 @@ impl Anonymization {
                 *value = self.anonymize_scalar(value);
             }
             OpType::Make(_) | OpType::Delete | OpType::MarkEnd(_) => {}
+            OpType::Revoke(_) => unreachable!("controls rejected before rewriting"),
         }
     }
 

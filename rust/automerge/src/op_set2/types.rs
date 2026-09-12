@@ -79,6 +79,15 @@ pub(crate) enum Action {
     MakeTable,
     /// Mark formatting spans in rich-text contexts.
     Mark,
+    /// Experimental non-content control row (wire action 8).
+    #[cfg_attr(not(feature = "experimental-revocation"), allow(dead_code))]
+    Revoke,
+}
+
+impl Action {
+    pub(crate) fn is_non_value(self) -> bool {
+        matches!(self, Self::Increment | Self::Revoke)
+    }
 }
 
 impl fmt::Display for Action {
@@ -92,6 +101,7 @@ impl fmt::Display for Action {
             Self::Increment => write!(f, "INC"),
             Self::MakeTable => write!(f, "TBL"),
             Self::Mark => write!(f, "MRK"),
+            Self::Revoke => write!(f, "REV"),
         }
     }
 }
@@ -107,6 +117,7 @@ impl From<Action> for u64 {
             Action::Increment => 5,
             Action::MakeTable => 6,
             Action::Mark => 7,
+            Action::Revoke => 8,
         }
     }
 }
@@ -124,6 +135,8 @@ impl TryFrom<u64> for Action {
             5 => Ok(Action::Increment),
             6 => Ok(Action::MakeTable),
             7 => Ok(Action::Mark),
+            #[cfg(feature = "experimental-revocation")]
+            8 => Ok(Action::Revoke),
             other => Err(PackError::InvalidValue(format!(
                 "valid action (integer between 0 and 7), unexpected integer: {}",
                 other
@@ -153,6 +166,7 @@ pub(crate) enum OpType<'a> {
     Put(ScalarValue<'a>),
     MarkBegin(bool, MarkData<'a>),
     MarkEnd(bool),
+    Revoke,
 }
 
 impl<'a> OpType<'a> {
@@ -168,6 +182,7 @@ impl<'a> OpType<'a> {
             Action::MakeText => Self::Make(ObjType::Text),
             Action::MakeTable => Self::Make(ObjType::Table),
             Action::Set => Self::Put(value.clone()),
+            Action::Revoke => Self::Revoke,
             Action::Delete => Self::Delete,
             Action::Increment => match value {
                 ScalarValue::Int(i) => Self::Increment(*i),

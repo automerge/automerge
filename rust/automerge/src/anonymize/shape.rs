@@ -231,6 +231,7 @@ impl ShapeBuilder {
                 expand: *expand,
             },
             OpType::MarkEnd(expand) => ActionShape::MarkEnd(*expand),
+            OpType::Revoke(_) => panic!("experimental controls are not anonymizable"),
         }
     }
 

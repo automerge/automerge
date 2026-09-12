@@ -103,7 +103,7 @@ impl ChangeOp {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+        !(self.bld.action.is_non_value() || self.bld.is_delete() || self.has_succ())
     }
 
     pub(crate) fn has_succ(&self) -> bool {
@@ -654,7 +654,9 @@ impl OpLike for ChangeOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+        !(op.bld.action.is_non_value()
+            || op.bld.is_delete()
+            || op.succ.iter().any(|(_, inc)| inc.is_none()))
     }
 
     fn top(op: &Self) -> bool {
@@ -1146,7 +1148,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() {
+        if self.action.is_non_value() {
             false
         } else if self.is_counter() {
             !self.succ_inc().any(|(_, inc)| inc.is_none())

@@ -20,6 +20,7 @@ impl Serialize for OpType {
             OpType::Put(_) => RawOpType::Set,
             OpType::MarkBegin(_) => RawOpType::MarkBegin,
             OpType::MarkEnd(_) => RawOpType::MarkEnd,
+            OpType::Revoke(_) => RawOpType::Revoke,
         };
         raw_type.serialize(serializer)
     }

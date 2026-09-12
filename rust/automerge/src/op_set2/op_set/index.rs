@@ -255,7 +255,7 @@ impl IndexBuilder {
 }
 
 fn vis_num(op: &Op<'_>) -> u32 {
-    if op.is_inc() {
+    if op.action.is_non_value() {
         u32::MAX
     } else {
         op.succ().len() as u32

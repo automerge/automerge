@@ -1,6 +1,6 @@
 use crate::types::Clock;
 
-use super::{Action, KeyRef, Op, OpsFound};
+use super::{KeyRef, Op, OpsFound};
 
 use std::fmt::Debug;
 
@@ -58,7 +58,7 @@ impl<'a, I: Iterator<Item = Op<'a>>> Iterator for OpsFoundIter<'a, I> {
             if let Some(found) = &mut self.found {
                 found.end_pos = op.pos + 1;
                 found.range = self.start_pos..(op.pos + 1);
-                if op.action != Action::Increment && op.scope_to_clock(self.clock.as_ref()) {
+                if !op.action.is_non_value() && op.scope_to_clock(self.clock.as_ref()) {
                     found.ops.push(op);
                 }
             }

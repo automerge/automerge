@@ -9,7 +9,19 @@ use std::num::NonZeroU32;
 /// For example, given an [`OpId`], one can use [`OpId::actor`] to find the
 /// currently stored counter of the actor in the [`Clock`].
 #[derive(Default, Debug, Clone, PartialEq)]
-pub(crate) struct Clock(pub(crate) Vec<u32>);
+pub(crate) struct Clock {
+    structural: Vec<u32>,
+    // None preserves ordinary vector-clock interpretation. Some permits arbitrary
+    // whole-change gaps compiled into operation membership by the experiment.
+    selected: Option<std::collections::BTreeSet<OpId>>,
+    local: Option<LocalScope>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LocalScope {
+    actor: usize,
+    start: u64,
+}
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct SeqClock(pub(crate) Vec<Option<NonZeroU32>>);
@@ -108,6 +120,15 @@ impl ClockRange {
         self.predates(id)
     }
 
+    /// Structural existence is independent of participation. An attachment restored by
+    /// selection needs full subtree exposure even if it was previously ineligible.
+    pub(crate) fn structurally_predates(&self, id: &OpId) -> bool {
+        match self {
+            Self::Diff(before, _) => before.structurally_covers(id),
+            _ => false,
+        }
+    }
+
     pub(crate) fn predates(&self, id: &OpId) -> bool {
         match self {
             Self::Diff(before, _) => before.covers(id),
@@ -132,6 +153,27 @@ impl Clock {
     /// If the [`OpId::actor`] is an index that is greater than the length of
     /// the vector, i.e. the actor does not exist in the [`Clock`].
     pub(crate) fn covers(&self, id: &OpId) -> bool {
+        self.structurally_covers(id)
+            && self.selected.as_ref().is_none_or(|selected| {
+                selected.contains(id)
+                    || self.local.as_ref().is_some_and(|local| {
+                        id.actor() == local.actor && id.counter() >= local.start
+                    })
+            })
+    }
+
+    #[cfg(feature = "experimental-revocation")]
+    pub(crate) fn select(&mut self, ops: std::collections::BTreeSet<OpId>) {
+        self.selected = Some(ops);
+    }
+
+    #[cfg(feature = "experimental-revocation")]
+    pub(crate) fn include_transaction(&mut self, actor: usize, start: u64) {
+        self.isolate(actor);
+        self.local = Some(LocalScope { actor, start });
+    }
+
+    pub(crate) fn structurally_covers(&self, id: &OpId) -> bool {
         self.counter_of(id.actor()) as u64 >= id.counter()
     }
 
@@ -142,7 +184,7 @@ impl Clock {
     /// If the `actor` index is out of bounds of the internal vector.
     #[inline]
     fn counter_of(&self, actor: usize) -> u32 {
-        self.0[actor]
+        self.structural[actor]
     }
 
     /// Set the `actor`'s counter to the given `counter` value.
@@ -152,13 +194,17 @@ impl Clock {
     /// If the `actor` index is out of bounds of the internal vector.
     #[inline]
     fn set_counter_of(&mut self, actor: usize, counter: u32) {
-        self.0[actor] = counter;
+        self.structural[actor] = counter;
     }
 }
 
 impl std::iter::FromIterator<Option<u32>> for Clock {
     fn from_iter<I: IntoIterator<Item = Option<u32>>>(iter: I) -> Self {
-        Clock(iter.into_iter().map(|i| i.unwrap_or(0)).collect())
+        Clock {
+            structural: iter.into_iter().map(|i| i.unwrap_or(0)).collect(),
+            selected: None,
+            local: None,
+        }
     }
 }
 
@@ -169,12 +215,16 @@ mod tests {
 
     impl Clock {
         pub(crate) fn new(size: usize) -> Self {
-            Self(vec![0; size])
+            Self {
+                structural: vec![0; size],
+                selected: None,
+                local: None,
+            }
         }
 
         pub(crate) fn include(&mut self, actor_idx: usize, data: u32) -> bool {
-            if data > self.0[actor_idx] {
-                self.0[actor_idx] = data;
+            if data > self.structural[actor_idx] {
+                self.structural[actor_idx] = data;
                 true
             } else {
                 false
@@ -182,13 +232,13 @@ mod tests {
         }
 
         fn is_greater(&self, other: &Self) -> bool {
-            !std::iter::zip(self.0.iter(), other.0.iter()).any(|(a, b)| a < b)
+            !std::iter::zip(self.structural.iter(), other.structural.iter()).any(|(a, b)| a < b)
         }
     }
 
     impl PartialOrd for Clock {
         fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            if self.0 == other.0 {
+            if self.structural == other.structural {
                 Some(Ordering::Equal)
             } else if self.is_greater(other) {
                 Some(Ordering::Greater)

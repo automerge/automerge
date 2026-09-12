@@ -276,6 +276,11 @@ mod exid;
 pub mod hydrate;
 mod indexed_cache;
 pub mod iter;
+#[cfg(feature = "experimental-revocation")]
+mod prototype;
+#[cfg(all(test, not(feature = "experimental-revocation")))]
+#[path = "prototype/gate_tests.rs"]
+mod prototype_gate_tests;
 pub use iter::Span;
 #[doc(hidden)]
 pub mod legacy;

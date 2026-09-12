@@ -245,7 +245,7 @@ impl<'a> Iterator for MapDiff<'a> {
                 Diff::Add => {
                     last_is_same = false;
                     num_new += 1;
-                    expose = self.clock.predates(&map.id);
+                    expose = self.clock.structurally_predates(&map.id);
                 }
             }
             let value;

@@ -246,6 +246,10 @@ impl OpType {
             },
             6 => Ok(()),
             7 => Ok(()),
+            #[cfg(feature = "experimental-revocation")]
+            8 if matches!(value, ScalarValue::Bytes(bytes) if crate::prototype::decode_control(bytes).is_ok()) => {
+                Ok(())
+            }
             _ => Err(error::InvalidOpType::UnknownAction(action)),
         }
     }

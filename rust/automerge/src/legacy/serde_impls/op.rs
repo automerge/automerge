@@ -50,6 +50,11 @@ impl Serialize for Op {
         }
         match &self.action {
             OpType::Increment(n) => op.serialize_field("value", &n)?,
+            OpType::Revoke(_) => {
+                return Err(serde::ser::Error::custom(
+                    "experimental controls require native bytes",
+                ))
+            }
             OpType::Put(ScalarValue::Counter(c)) => op.serialize_field("value", &c.start)?,
             OpType::Put(value) => op.serialize_field("value", &value)?,
             OpType::MarkBegin(MarkData {
@@ -85,6 +90,7 @@ pub(crate) enum RawOpType {
     Set,
     MarkBegin,
     MarkEnd,
+    Revoke,
 }
 
 impl Serialize for RawOpType {
@@ -102,6 +108,7 @@ impl Serialize for RawOpType {
             RawOpType::Set => "set",
             RawOpType::MarkBegin => "markBegin",
             RawOpType::MarkEnd => "markEnd",
+            RawOpType::Revoke => "experimentalRevoke",
         };
         serializer.serialize_str(s)
     }
@@ -243,6 +250,9 @@ impl<'de> Deserialize<'de> for Op {
                         })
                     }
                     RawOpType::MarkEnd => OpType::MarkEnd(expand.unwrap_or(false)),
+                    RawOpType::Revoke => {
+                        return Err(Error::custom("experimental controls require native bytes"))
+                    }
                 };
                 Ok(Op {
                     action,

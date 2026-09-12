@@ -218,6 +218,8 @@ pub enum OpType {
     Put(ScalarValue),
     MarkBegin(MarkData),
     MarkEnd(bool),
+    /// Experimental native control payload; not an ordinary value.
+    Revoke(Vec<u8>),
 }
 
 impl OpType {
@@ -260,6 +262,10 @@ impl OpType {
                 }),
                 None => Self::MarkEnd(expand),
             },
+            8 => match value {
+                ScalarValue::Bytes(bytes) => Self::Revoke(bytes),
+                _ => panic!("invalid control payload"),
+            },
             other => panic!("unknown action type {}", other),
         }
     }
@@ -274,6 +280,7 @@ impl OpType {
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
             Self::MarkBegin(_) | Self::MarkEnd(_) => 7,
+            Self::Revoke(_) => 8,
         }
     }
 
@@ -305,6 +312,7 @@ impl Op {
     pub fn primitive_value(&self) -> Option<ScalarValue> {
         match &self.action {
             OpType::Put(v) => Some(v.clone()),
+            OpType::Revoke(bytes) => Some(ScalarValue::Bytes(bytes.clone())),
             OpType::MarkBegin(MarkData { value, .. }) => Some(value.clone()),
             OpType::Increment(i) => Some(ScalarValue::Int(*i)),
             _ => None,

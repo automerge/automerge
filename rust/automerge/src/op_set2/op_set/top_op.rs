@@ -348,7 +348,7 @@ struct ScanTopRow<'a> {
 }
 
 fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
-    if action == Action::Increment || !clock.covers(&id) {
+    if action.is_non_value() || !clock.covers(&id) {
         return false;
     }
     for (id, inc) in succ.with_inc() {

@@ -509,6 +509,14 @@ impl PatchLog {
 
     fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
         let clock = self.heads.as_ref().map(|h| doc.change_graph.clock_at(h));
+        self.make_scoped_patches(doc, clock)
+    }
+
+    pub(crate) fn make_scoped_patches(
+        &mut self,
+        doc: &Automerge,
+        clock: Option<Clock>,
+    ) -> Vec<Patch> {
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
         self.events

@@ -122,7 +122,7 @@ impl<'a> ScanVisIter<'a> {
     }
 
     fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
-        let is_inc = action == Action::Increment;
+        let is_inc = action.is_non_value();
         let mut deleted = false;
         for (id, inc) in succ.with_inc() {
             if inc.is_none() && clock.covers(&id) {
@@ -181,7 +181,7 @@ impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for VisibleOpIter<'a, I> {
     fn next(&mut self) -> Option<Self::Item> {
         let clock = self.clock.as_ref();
         for mut op in self.iter.by_ref() {
-            if op.action == Action::Increment {
+            if op.action.is_non_value() {
                 continue;
             }
             if op.scope_to_clock(clock) {

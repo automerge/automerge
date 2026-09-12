@@ -611,7 +611,7 @@ impl<'a> ValueState<'a> {
 
     fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool) {
         match doc_op.action {
-            Action::Increment => {}
+            Action::Increment | Action::Revoke => {}
             Action::Mark => {
                 self.marks.before.process(doc_op.id, doc_op.action());
                 self.marks.after.process(doc_op.id, doc_op.action());
@@ -650,7 +650,7 @@ impl<'a> ValueState<'a> {
 
     fn process_change_op(&mut self, op: &ChangeOp) {
         match op.action() {
-            Action::Delete => {}
+            Action::Delete | Action::Revoke => {}
             Action::Increment => self.do_increment(op),
             Action::Mark => self.process_mark(op.id(), op.mark_data()),
             _ => {
