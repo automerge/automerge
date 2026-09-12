@@ -33,3 +33,13 @@
 - [x] Tautology replaced with before/after `current()`, `checkpoint_count()`, view and frozen `InspectionSnapshot` equality; `out_of_range_checkpoint_is_rejected` added.
 - [x] Reason-only-change test now uses a second authorized revocation (a CTX0 grant no longer changes reasons for an `Established` binding).
 - [x] 27 fixtures green (`fix-2-green-fixtures.log`); full suite 502 passed / 0 failed / 1 ignored (`fix-2-full-suite.log`). rustfmt clean.
+
+## A3 — structural extension and adoption
+
+- [x] Plan update in `implementation-plan.md` (A3 table).
+- [x] RED (compile): EX-04 tests against missing `Session::{author, inspect_all}` (`extend-red-ex04.log`).
+- [x] GREEN EX-04: `Automerge::transaction_view`, `Clock::mask()`, `Session::{author, inspect_all}` (`extend-green-ex04.log`). Commit 1.
+- [x] EX-08/09/11: view-scoped `list_view/text_view/spans_view/marks_view` readers; tests passed first run after two test-literal fixes (op counter `5@bob`, counter Display `Counter: 10`) — no production semantic change was needed (`extend-green-ex08-09-11.log`). Commit 2.
+- [x] RED (behavior): `ex07_restored_container_with_formatted_text_replays_once` — exposure of a restored text emitted `SpliceText{marks: None}` for `hello` although `el` is bold (`extend-red-ex12-14.log`, the pre-existing `flush_obj` TODO / A-C02).
+- [x] GREEN: `PatchLog::ExposeQueue::flush_obj` exposes text span-by-span via `spans_for` with marks (`extend-green-ex07-formatted.log` shows the corrected patch stream; then oracle fixed to count total spliced width instead of one splice). EX-12/13/14 passed with the test-side `FormattedText` observer (`extend-green-ex12-14.log`).
+- [x] 40 fixtures green (`extend-green-fixtures.log`); full suite 515 passed / 0 failed / 1 ignored (`extend-full-suite.log`). rustfmt clean.

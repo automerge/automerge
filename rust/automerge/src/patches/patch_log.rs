@@ -741,9 +741,17 @@ impl ExposeQueue {
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
-                let text = doc.text_for(&exid, clock.cloned()).ok()?;
-                // TODO - need doc, text_spans()
-                patch_builder.splice_text(exid, 0, &text, None);
+                // Expose formatted text span by span so marks travel with each
+                // splice (previously plain text only). Block markers are not
+                // exposed here (outside the prototype's fixtures).
+                let mut index = 0;
+                for span in doc.spans_for(&exid, clock.cloned()).ok()? {
+                    if let crate::iter::Span::Text { text, marks } = span {
+                        let width = doc.text_encoding().width(&text);
+                        patch_builder.splice_text(exid.clone(), index, &text, marks);
+                        index += width;
+                    }
+                }
             }
             ObjType::List => {
                 for item in doc.list_range_for(&exid, .., clock.cloned()) {

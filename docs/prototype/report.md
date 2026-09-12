@@ -182,3 +182,71 @@ Single commit for this wave, parent `ece98c313ac2`; the commit id is the head of
 **C. Assertions.** Tautology replaced: `before = s.current()`, `count_before`, view, and `Arc<InspectionSnapshot>` captured *before* the rejected delivery; asserted equal afterwards. `out_of_range_checkpoint_is_rejected` added (`checkpoint(1)` on a one-checkpoint session ⇒ `ForeignView`).
 
 **Report correction.** The fix-1 addendum said authorities are "not stored separately" on restore. That was inaccurate: every frozen `InspectionSnapshot` includes its `authorities` table, and `restore` compares the recomputed snapshot (including authorities) against it, rejecting mismatch with `InconsistentEnvelope`.
+
+---
+
+# A3 — structural extension and adoption — addendum
+
+**Status: DONE_WITH_CONCERNS.** Items 1–4 of the A3 brief implemented and tested; item 5 (import routes) not implemented, listed as unsupported.
+
+## Commits (jj, workspace A; parent `5394572bbbd3`)
+
+| Commit | Content |
+|---|---|
+| `7d2543d9` | Selected-view authoring: `Automerge::transaction_view`, `Clock::mask()`, `Session::{author, inspect_all}`; EX-04 tests. |
+| `fd64c84a` | View-scoped `list_view/text_view/spans_view/marks_view`; EX-08/09/11 tests. |
+| `@` (head) | `flush_obj` formatted exposure fix; EX-12/13/14 + formatted EX-07 tests; docs. |
+
+## Test totals (head)
+
+- `cargo test --locked --offline -p automerge --test revocation_prototype`: **40 passed** (`extend-green-fixtures.log`).
+- `cargo test --locked --offline -p automerge --lib --tests`: **515 passed, 0 failed, 1 ignored** (`extend-full-suite.log`) = 472 + 40 + 3.
+
+## Implemented fixture IDs this wave
+
+| ID | Test | What is asserted |
+|---|---|---|
+| EX-04 | `ex04_inspect_then_adopt_scalar_without_reinstating_alice` | Bob's view `{title}`; `inspect_all` view exposes A's `Camping` at op `2@alice` while A is `Excluded`; `Session::author(view, bob, actor, ctx, f)`: inside `f`, `tx.get(suggestion)` is `None`; D commits with deps == captured heads, author `bob`, actor `bob`, **`pred` empty** (no targeting of hidden A), one eligible new hash bound to `CTX_BOB`; A stays `Excluded`; view `{title, suggestion}` with candidate `4@bob`; replay ok; after invalidating R, `get_all` = `{2@alice, 4@bob}` (ordinary concurrent conflict). |
+| EX-04 var. | `ex04_variant_object_id_edit_into_hidden_container_allowed` | Object-ID edit into a structurally present but excluded map is accepted (ruling 2); no root patches; inspectable by ObjId. |
+| EX-08 | `ex08_insertion_after_excluded_anchor_survives_with_stable_order` | `[L,Z?,X,Y,R]` (with concurrent Z near X); excluding X ⇒ 4 elements without X, Y present, surviving element ids in the same relative order as the full view; hydrate replay equals `list_view`; restoring X returns the exact full value+id order. |
+| EX-08 char. | `ex08_capture_reread_after_earlier_sorting_actor_arrives` | Actor `0x00` inserts after capture; old capture rereads `[L,Y,R]`. |
+| EX-09 | `ex09_eligible_replacement_at_excluded_insertion_identity` | Bob's `put(list,1,Y)` has `pred.len()==1` (targets X's value); excluding X ⇒ `[L,Y,R]` with element id `5@bob`; restoring X keeps Y (direct predecessor). |
+| EX-09 var. | `ex09_variant_replace_excluded_map_element_with_eligible_map` | New map visible with `k=new`; old excluded map's child not visible via `get_all`. |
+| EX-11 | `ex11_excluded_counter_base_supplies_nothing_to_eligible_increment` | `105` ⇒ no counter at all (`get_all` empty), C still `Eligible`, self-diff empty. |
+| EX-11 | `ex11_eligible_increment_on_excluded_replacement_base` | `105` ⇒ `10` with candidate `1@alice` (not 15); empty/duplicate group no-ops; restoring B ⇒ `105`, candidate `2@bob`. |
+| EX-11 compat | `ex11_compat_increment_suppresses_targeted_scalar_candidate` | Increment with `pred.len()==2` over `{Counter 10, "text"}`; allow-all view equals ordinary Automerge (characterized); excluding the increment re-exposes both candidates. |
+| EX-12 | `ex12_eligible_mark_over_partly_excluded_text` | `a**bXYc**d` ⇒ `a**bc**d` (`marks_view` = `[1,3)`), formatted replay; restore returns the exact original formatting. |
+| EX-13 | `ex13_dormant_mark_and_surviving_interior_insertion` | `ab**XY**cd` ⇒ `abcd` with no non-empty visible mark; variant `ab**XQY**cd` ⇒ `ab**Q**cd`; formatted replay. |
+| EX-14 | `ex14_excluded_mark_and_excluded_unmark` | A: `**aXb**` ⇒ `aXb`, no `SpliceText` carries bold; B: `**a**bc**d**` ⇒ `**abcd**` when unmark excluded, back on restore; formatted replay each step. |
+| EX-07 fmt | `ex07_restored_container_with_formatted_text_replays_once` | Restoring an excluded map containing bold text emits splices whose widths sum to the text length, with marks, no standalone `Mark`; formatted observer from empty reproduces `h**el**lo`. |
+
+## TDD evidence
+
+- `extend-red-ex04.log`: compile red (`Session::author/inspect_all` absent). EX-04 then passed on first run of the implementation (no intermediate semantic failure).
+- EX-08/09/11 passed first run; two *test literal* corrections (`extend-green-ex08-09-11.log`). No production semantics changed — honest note: these fixtures did not force a production fix.
+- **Real behavioral red**: `extend-red-ex12-14.log` — formatted EX-07 failed: exposure emitted `SpliceText{marks: None}` for the whole restored text. Cause: `patch_log.rs::ExposeQueue::flush_obj` used `text_for` + `None` marks (the baseline TODO the design packet flagged as A-C02). Fix: expose via `spans_for`, one splice per span with its `MarkSet`. `extend-green-ex07-formatted.log` shows the corrected 3-splice stream; my oracle had asserted "exactly one splice", corrected to "splice widths sum to text length, no standalone Mark".
+- EX-12/13/14 themselves passed once the observer existed (`extend-green-ex12-14.log`); the mark filter paths (`marks_at`, `RichTextQueryState`) honoured the mask through `covers` without further change — this is executed evidence for these fixtures only.
+
+## Production code changed this wave
+
+| File | Change |
+|---|---|
+| `src/eligibility/mod.rs` | `transaction_view`, `list_view`, `text_view`, `spans_view`, `marks_view`. |
+| `src/eligibility/session.rs` | `inspect_all`, `author` (staged clone, `set_author`/`set_actor`, view transaction, commit, bind, publish, record). |
+| `src/clock.rs` | `Clock::mask()` accessor. |
+| `src/patches/patch_log.rs` | `flush_obj` text exposure with marks (affects ordinary exposure paths too; full suite unchanged: 515/0/1). |
+
+Source LOC (eligibility module): evidence 402, mod 194, session 676 = 1,272. Test file: 3,092 lines, 40 tests. Files changed since baseline: 12 (incl. docs).
+
+## Debug fixture cost (NOT a benchmark)
+
+Debug build, unoptimized: all 40 fixtures ≈ 3.1 s wall, of which the 1,920-schedule EX-01 test is ≈ 2.6 s (~1.4 ms per schedule incl. clone-staging and full diff). Labelled as debug fixture cost only.
+
+## Unsupported / unproven (explicit)
+
+- Import routes: only `apply_changes` batches and `Session::author`. **Merge, incremental load, sync, `AutoCommit`, `load` of eligibility state via ordinary bytes** — not exercised; heads-keyed public APIs (`*_at`, `diff`) remain allow-all and unaware of views.
+- `Session::author` produces an inactive-log transaction; patches come from the endpoint `diff_view`, not from transaction logging.
+- `inspect_all` is an allow-all view of the same heads (inspection), not a general per-change reveal; pending vs excluded is distinguished by the decision table, not by separate inspection views.
+- Text fixtures use `ExpandMark::None`/`Both` only in the configurations above; collapsed-gap insertion (A-C10) across expansion modes is not characterized. Block markers are not exposed by `flush_obj` (fixtures have none).
+- Envelope still in-memory; `SessionId` process-local; structural failure during `apply_changes` untested (as before).
+- Formatting observer is test-side and text-object-local; it handles `SpliceText`, `DeleteSeq`, `Mark` only.

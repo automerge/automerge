@@ -2626,3 +2626,467 @@ fn ex11_compat_increment_suppresses_targeted_scalar_candidate() {
     got.sort();
     assert_eq!(got, vec!["\"text\"", "Counter: 10"]);
 }
+
+// ---------------------------------------------------------------------------
+// A3 — EX-12/13/14 text and marks with a formatting-aware observer
+// ---------------------------------------------------------------------------
+
+use automerge::marks::{ExpandMark, Mark};
+use automerge::{PatchAction, Span};
+
+/// Test-side formatting-aware observer: a sequence of (char, active marks).
+/// Replays `SpliceText{marks}`, `DeleteSeq`, and standalone `Mark` patches
+/// for one text object; compares against full `spans_view` materialization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FormattedText {
+    chars: Vec<(char, BTreeMap<String, String>)>,
+}
+
+impl FormattedText {
+    fn from_spans(spans: &[Span]) -> Self {
+        let mut chars = Vec::new();
+        for sp in spans {
+            match sp {
+                Span::Text { text, marks } => {
+                    let ms: BTreeMap<String, String> = marks
+                        .as_ref()
+                        .map(|m| {
+                            m.iter()
+                                .filter(|(_, v)| !matches!(v, ScalarValue::Null))
+                                .map(|(k, v)| (k.to_string(), v.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    for c in text.chars() {
+                        chars.push((c, ms.clone()));
+                    }
+                }
+                Span::Block(_) => panic!("no blocks in these fixtures"),
+            }
+        }
+        Self { chars }
+    }
+
+    fn plain(&self) -> String {
+        self.chars.iter().map(|(c, _)| *c).collect()
+    }
+
+    /// Markdown-ish rendering: `**` around bold runs.
+    fn render_bold(&self) -> String {
+        let mut out = String::new();
+        let mut bold = false;
+        for (c, ms) in &self.chars {
+            let b = ms.get("bold").is_some_and(|v| v == "true");
+            if b != bold {
+                out.push_str("**");
+                bold = b;
+            }
+            out.push(*c);
+        }
+        if bold {
+            out.push_str("**");
+        }
+        out
+    }
+
+    fn apply(&mut self, text_obj: &automerge::ObjId, patches: &[automerge::Patch]) {
+        for p in patches {
+            if &p.obj != text_obj {
+                continue;
+            }
+            match &p.action {
+                PatchAction::SpliceText {
+                    index,
+                    value,
+                    marks,
+                } => {
+                    let ms: BTreeMap<String, String> = marks
+                        .as_ref()
+                        .map(|m| {
+                            m.iter()
+                                .filter(|(_, v)| !matches!(v, ScalarValue::Null))
+                                .map(|(k, v)| (k.to_string(), v.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let s = value.make_string();
+                    for (i, c) in s.chars().enumerate() {
+                        self.chars.insert(index + i, (c, ms.clone()));
+                    }
+                }
+                PatchAction::DeleteSeq { index, length } => {
+                    self.chars.drain(*index..*index + *length);
+                }
+                PatchAction::Mark { marks } => {
+                    for m in marks {
+                        for i in m.start..m.end {
+                            if matches!(m.value, ScalarValue::Null) {
+                                self.chars[i].1.remove(m.name.as_str());
+                            } else {
+                                self.chars[i]
+                                    .1
+                                    .insert(m.name.to_string(), m.value.to_string());
+                            }
+                        }
+                    }
+                }
+                other => panic!("unexpected text patch {other:?}"),
+            }
+        }
+    }
+}
+
+fn formatted(
+    s: &Session,
+    id: automerge::eligibility::ViewId,
+    text: &automerge::ObjId,
+) -> FormattedText {
+    FormattedText::from_spans(
+        &s.doc()
+            .spans_view(&s.capture(id).unwrap().spec, text)
+            .unwrap(),
+    )
+}
+
+/// Replay a transition's text patches on the before-formatting and compare
+/// with the after-formatting from full materialization.
+fn replay_formatted(s: &Session, text: &automerge::ObjId, t: &Transition) {
+    let mut before = formatted(s, t.before, text);
+    before.apply(text, &t.patches);
+    let after = formatted(s, t.after, text);
+    assert_eq!(
+        before, after,
+        "formatted replay mismatch\npatches: {:?}",
+        t.patches
+    );
+    // Plain-text agreement with the scoped text API too.
+    assert_eq!(
+        after.plain(),
+        s.doc()
+            .text_view(&s.capture(t.after).unwrap().spec, text)
+            .unwrap()
+    );
+}
+
+struct TextFx {
+    base: Automerge,
+    text: automerge::ObjId,
+    xy: Change,
+}
+
+/// Carol: text "abcd". Alice inserts "XY" at 2 -> "abXYcd".
+fn text_fx() -> TextFx {
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let text = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let t = tx.put_object(ROOT, "t", automerge::ObjType::Text)?;
+            tx.splice_text(&t, 0, 0, "abcd")?;
+            Ok(t)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.splice_text(&text, 2, 0, "XY")?;
+            Ok(())
+        })
+        .unwrap();
+    let xy = alice.get_last_local_change().unwrap();
+    TextFx { base, text, xy }
+}
+
+fn bob_after_xy(fx: &TextFx) -> Automerge {
+    let mut bob = fx
+        .base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([fx.xy.clone()]).unwrap();
+    bob
+}
+
+#[test]
+fn ex12_eligible_mark_over_partly_excluded_text() {
+    let fx = text_fx();
+    let mut bob = bob_after_xy(&fx);
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        // bold over "bXYc" = indices 1..5
+        tx.mark(
+            &fx.text,
+            Mark::new("bold".into(), true, 1, 5),
+            ExpandMark::None,
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let m = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(fx.base.clone());
+    let t0 = deliver(&mut s, vec![Input::Change(fx.xy.clone()), Input::Change(m)]);
+    replay_formatted(&s, &fx.text, &t0);
+    let all = formatted(&s, s.current(), &fx.text);
+    assert_eq!(all.render_bold(), "a**bXYc**d");
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let cp = s.current();
+    let f = formatted(&s, cp, &fx.text);
+    assert_eq!(f.plain(), "abcd");
+    assert_eq!(f.render_bold(), "a**bc**d");
+    let marks = s
+        .doc()
+        .marks_view(&s.capture(cp).unwrap().spec, &fx.text)
+        .unwrap();
+    assert_eq!(marks.len(), 1);
+    assert_eq!((marks[0].start, marks[0].end), (1, 3));
+    replay_formatted(&s, &fx.text, &t);
+    // Restore XY: back to the full formatting, replayed exactly.
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    replay_formatted(&s, &fx.text, &t);
+    assert_eq!(formatted(&s, s.current(), &fx.text), all);
+}
+
+#[test]
+fn ex13_dormant_mark_and_surviving_interior_insertion() {
+    let fx = text_fx();
+    let mut bob = bob_after_xy(&fx);
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        // bold over "XY" only = 2..4
+        tx.mark(
+            &fx.text,
+            Mark::new("bold".into(), true, 2, 4),
+            ExpandMark::None,
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let m = bob.get_last_local_change().unwrap();
+    // Case 1: dormant.
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![Input::Change(fx.xy.clone()), Input::Change(m.clone())],
+    );
+    assert_eq!(
+        formatted(&s, s.current(), &fx.text).render_bold(),
+        "ab**XY**cd"
+    );
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let cp = s.current();
+    let f = formatted(&s, cp, &fx.text);
+    assert_eq!(f.plain(), "abcd");
+    assert_eq!(f.render_bold(), "abcd", "no visible bold span");
+    let marks = s
+        .doc()
+        .marks_view(&s.capture(cp).unwrap().spec, &fx.text)
+        .unwrap();
+    assert!(
+        marks
+            .iter()
+            .all(|m| m.start == m.end || matches!(m.value, ScalarValue::Null)),
+        "no non-empty visible mark: {marks:?}"
+    );
+    replay_formatted(&s, &fx.text, &t);
+
+    // Case 2: Bob inserts eligible Q between X and Y before exclusion.
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.splice_text(&fx.text, 3, 0, "Q")?;
+        Ok(())
+    })
+    .unwrap();
+    let q = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(fx.xy.clone()),
+            Input::Change(m.clone()),
+            Input::Change(q),
+        ],
+    );
+    assert_eq!(
+        formatted(&s, s.current(), &fx.text).render_bold(),
+        "ab**XQY**cd"
+    );
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let f = formatted(&s, s.current(), &fx.text);
+    assert_eq!(f.plain(), "abQcd");
+    assert_eq!(f.render_bold(), "ab**Q**cd");
+    replay_formatted(&s, &fx.text, &t);
+}
+
+#[test]
+fn ex14_excluded_mark_and_excluded_unmark() {
+    // Case A: eligible "ab"; Alice bolds it; Bob inserts X inside; exclude mark.
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let text = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let t = tx.put_object(ROOT, "t", automerge::ObjType::Text)?;
+            tx.splice_text(&t, 0, 0, "ab")?;
+            Ok(t)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.mark(
+                &text,
+                Mark::new("bold".into(), true, 0, 2),
+                ExpandMark::Both,
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let am = alice.get_last_local_change().unwrap();
+    let mut bob = base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([am.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.splice_text(&text, 1, 0, "X")?;
+        Ok(())
+    })
+    .unwrap();
+    let bx = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(base.clone());
+    deliver(
+        &mut s,
+        vec![Input::Change(am.clone()), Input::Change(bx.clone())],
+    );
+    assert_eq!(formatted(&s, s.current(), &text).render_bold(), "**aXb**");
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let f = formatted(&s, s.current(), &text);
+    assert_eq!(f.plain(), "aXb");
+    assert_eq!(
+        f.render_bold(),
+        "aXb",
+        "no bold leaks through Bob's insertion"
+    );
+    for p in &t.patches {
+        if let PatchAction::SpliceText { marks, .. } = &p.action {
+            assert!(marks.as_ref().is_none_or(|m| m.is_empty()), "{p:?}");
+        }
+    }
+    replay_formatted(&s, &text, &t);
+
+    // Case B: eligible bold, then an unmark over an overlapping range; exclude the unmark.
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let text = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let t = tx.put_object(ROOT, "t", automerge::ObjType::Text)?;
+            tx.splice_text(&t, 0, 0, "abcd")?;
+            tx.mark(&t, Mark::new("bold".into(), true, 0, 4), ExpandMark::None)?;
+            Ok(t)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.unmark(&text, "bold", 1, 3, ExpandMark::None)?;
+            Ok(())
+        })
+        .unwrap();
+    let un = alice.get_last_local_change().unwrap();
+    let mut s = Session::new(base.clone());
+    let t = deliver(&mut s, vec![Input::Change(un.clone())]);
+    assert_eq!(
+        formatted(&s, s.current(), &text).render_bold(),
+        "**a**bc**d**"
+    );
+    replay_formatted(&s, &text, &t);
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    assert_eq!(formatted(&s, s.current(), &text).render_bold(), "**abcd**");
+    replay_formatted(&s, &text, &t);
+    // Restore the unmark.
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    assert_eq!(
+        formatted(&s, s.current(), &text).render_bold(),
+        "**a**bc**d**"
+    );
+    replay_formatted(&s, &text, &t);
+}
+
+/// Restoration of an excluded container holding formatted text exposes the
+/// children and marks exactly once (falsifier 1 from the design packet).
+#[test]
+fn ex07_restored_container_with_formatted_text_replays_once() {
+    let base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    let (section, text) = alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let m = tx.put_object(ROOT, "section", automerge::ObjType::Map)?;
+            let t = tx.put_object(&m, "t", automerge::ObjType::Text)?;
+            Ok((m, t))
+        })
+        .unwrap()
+        .result;
+    let mk = alice.get_last_local_change().unwrap();
+    let mut bob = base
+        .fork()
+        .with_author(Some(author("bob")))
+        .with_actor(actor(2));
+    bob.apply_changes([mk.clone()]).unwrap();
+    bob.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.splice_text(&text, 0, 0, "hello")?;
+        tx.mark(
+            &text,
+            Mark::new("bold".into(), true, 1, 3),
+            ExpandMark::None,
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let content = bob.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(&mut s, vec![Input::Change(mk), Input::Change(content)]);
+    deliver(&mut s, exclude_evidence("alice", &[]));
+    assert!(hydrated_eq(
+        &s.hydrate(s.current()).unwrap(),
+        &expect_map(&[])
+    ));
+    let _ = section;
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    // Full hydrate replay (structure) and formatted replay (marks) both hold.
+    replay_ok(&s, &t);
+    let mut ft = FormattedText { chars: vec![] };
+    ft.apply(&text, &t.patches);
+    let after = formatted(&s, s.current(), &text);
+    assert_eq!(ft, after, "{:?}", t.patches);
+    assert_eq!(after.render_bold(), "h**el**lo");
+    // Exposure exactly once: one splice per formatted span, whose widths
+    // sum to the text length (no duplicated characters), and no standalone
+    // Mark patch re-applying the same formatting.
+    let splice_len: usize = t
+        .patches
+        .iter()
+        .filter(|p| p.obj == text)
+        .map(|p| match &p.action {
+            PatchAction::SpliceText { value, .. } => value.make_string().chars().count(),
+            PatchAction::Mark { .. } => panic!("standalone mark during exposure: {p:?}"),
+            other => panic!("{other:?}"),
+        })
+        .sum();
+    assert_eq!(splice_len, 5, "{:?}", t.patches);
+    assert_eq!(after.plain(), "hello");
+}
