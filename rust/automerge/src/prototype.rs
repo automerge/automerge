@@ -1,7 +1,11 @@
 //! Disposable native-control experiment. No public API or format promise.
 #![allow(dead_code)]
 mod core;
+#[cfg(test)]
+mod format_observer;
 mod policy;
+#[cfg(test)]
+mod structural_tests;
 #[cfg(test)]
 mod tests;
 pub(crate) use core::decode_control;

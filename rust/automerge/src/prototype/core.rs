@@ -121,6 +121,7 @@ pub(super) enum Input {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Capture {
     identity: ActorId,
+    encoding: crate::TextEncoding,
     pub(super) heads: Vec<ChangeHash>,
     pub(super) eligibility: BTreeMap<ChangeHash, Eligibility>,
     pub(super) authority: BTreeMap<ChangeHash, Authority>,
@@ -163,7 +164,16 @@ impl Transition {
         }
         let mut value = observer.value.clone();
         value
-            .apply_patches(self.encoding, self.content.clone())
+            // Hydrated values contain plain text only. Rich-text replay is checked
+            // separately by the formatting-aware test observer; never send Mark to
+            // hydrate::Text::apply, whose mark arm is deliberately unimplemented.
+            .apply_patches(
+                self.encoding,
+                self.content
+                    .iter()
+                    .filter(|p| !matches!(p.action, crate::PatchAction::Mark { .. }))
+                    .cloned(),
+            )
             .map_err(|e| e.to_string())?;
         *observer = Observer {
             capture: self.after.clone(),
@@ -208,8 +218,11 @@ pub(super) fn ancestry(
 }
 impl Session {
     pub(super) fn new() -> Self {
+        Self::with_encoding(Automerge::new().text_encoding())
+    }
+    pub(super) fn with_encoding(encoding: crate::TextEncoding) -> Self {
         Self {
-            doc: Automerge::new(),
+            doc: Automerge::new_with_encoding(encoding),
             identity: ActorId::random(),
             archive: BTreeMap::new(),
             authors: BTreeMap::new(),
@@ -256,14 +269,8 @@ impl Session {
                     }
                     let decoded = change.decode();
                     for op in &decoded.operations {
-                        match &op.action {
-                            legacy::OpType::Make(crate::ObjType::List | crate::ObjType::Text | crate::ObjType::Table)
-                            | legacy::OpType::Increment(_) | legacy::OpType::MarkBegin(_) | legacy::OpType::MarkEnd(_)
-                            | legacy::OpType::Put(ScalarValue::Counter(_)) => return Err("B1 supports map/scalar content only; structural catalogue not yet validated".into()),
-                            _ => {}
-                        }
-                        if !matches!(op.key, legacy::Key::Map(_)) {
-                            return Err("B1 supports map keys only".into());
+                        if matches!(op.action, legacy::OpType::Make(crate::ObjType::Table)) {
+                            return Err("table creation not yet validated".into());
                         }
                         if let legacy::OpType::Revoke(bytes) = &op.action {
                             if change.len() != 1
@@ -424,7 +431,7 @@ impl Session {
         }
     }
     pub(super) fn restore(package: Package) -> Result<Self, String> {
-        let mut restored = Self::new();
+        let mut restored = Self::with_encoding(package.capture.encoding);
         restored.identity = package.capture.identity.clone();
         restored.receive(package.version, package.content)?;
         let policy = &package.capture.policy;
@@ -491,6 +498,7 @@ impl Session {
             .collect();
         Capture {
             identity: self.identity.clone(),
+            encoding: self.doc.text_encoding(),
             heads: self.doc.get_heads(),
             eligibility,
             authority,
@@ -508,6 +516,9 @@ impl Session {
         }
     }
     pub(super) fn scope(&self, capture: &Capture) -> Result<Clock, String> {
+        if capture.encoding != self.doc.text_encoding() {
+            return Err("incompatible capture text encoding".into());
+        }
         if capture.identity != self.identity {
             return Err("foreign capture".into());
         }

@@ -1066,7 +1066,7 @@ fn patch_observer_rejects_foreign_and_stale_endpoints_atomically() {
 fn unsupported_structural_content_and_competing_controls_fail_at_session_boundary() {
     let mut doc = Automerge::new().with_actor(actor(10));
     let mut tx = doc.transaction();
-    tx.put_object(ROOT, "list", ObjType::List).unwrap();
+    tx.put_object(ROOT, "table", ObjType::Table).unwrap();
     let a = tx.commit().0.unwrap();
     let mut s = Session::new();
     let before = s.capture();

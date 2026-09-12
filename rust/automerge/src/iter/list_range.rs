@@ -137,7 +137,7 @@ impl<'a> Iterator for ListDiff<'a> {
                 Diff::Add => {
                     last_is_same = false;
                     state.num_new += 1;
-                    state.expose = self.clock.predates(&list.id);
+                    state.expose = self.clock.structurally_predates(&list.id);
                 }
             }
 

@@ -188,7 +188,7 @@ impl<'a> SpansDiff<'a> {
 
     fn push_block(&mut self, diff: Diff) -> Option<SpanDiff> {
         let id = self.next_opid()?;
-        let expose = self.clock.predates(&id);
+        let expose = self.clock.structurally_predates(&id);
         Some(self.state.push_block(diff, id, expose))
     }
 
@@ -493,7 +493,10 @@ impl SpanState {
         debug_assert!(self.next_diff.is_none());
 
         let flush_needed = match &self.next_text {
-            Some(next) => diff != next.diff || self.marks != next.marks,
+            // Added text carries the complete after formatting, not the delta
+            // between endpoints. An unchanged mark boundary has an empty delta
+            // but must still split newly exposed text into marked/unmarked runs.
+            Some(next) => diff != next.diff || self.marks.with(diff) != next.marks,
             None => false,
         };
 

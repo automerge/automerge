@@ -740,9 +740,25 @@ impl ExposeQueue {
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
-                let text = doc.text_for(&exid, clock.cloned()).ok()?;
-                // TODO - need doc, text_spans()
-                patch_builder.splice_text(exid, 0, &text, None);
+                // Expose the complete after-view, including formatting and real block
+                // objects. Plain text would lose marks and collapse blocks to U+FFFC.
+                for span in doc.ops().spans(&id, clock.cloned()) {
+                    match span {
+                        crate::iter::SpanInternal::Text(text, index, marks) => {
+                            patch_builder.splice_text(exid.clone(), index, &text, marks.export());
+                        }
+                        crate::iter::SpanInternal::Obj(opid, index, _) => {
+                            let block = doc.id_to_exid(opid);
+                            self.insert(block.clone());
+                            patch_builder.insert(
+                                exid.clone(),
+                                index,
+                                (crate::Value::Object(ObjType::Map), block),
+                                false,
+                            );
+                        }
+                    }
+                }
             }
             ObjType::List => {
                 for item in doc.list_range_for(&exid, .., clock.cloned()) {
