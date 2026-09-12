@@ -492,8 +492,13 @@ impl SpanState {
     fn push_str(&mut self, diff: Diff, s: &str) -> Option<SpanDiff> {
         debug_assert!(self.next_diff.is_none());
 
+        // `next.marks` was stored as `marks.with(next.diff)`, so compare the
+        // projection for *this* diff kind too. Comparing the raw `MarkDiff`
+        // uses diff-equality, under which an unchanged mark on both sides
+        // (`Diff(m, m)`) equals `Nothing` and an added marked character would
+        // be coalesced into a preceding unmarked added run.
         let flush_needed = match &self.next_text {
-            Some(next) => diff != next.diff || self.marks != next.marks,
+            Some(next) => diff != next.diff || self.marks.with(diff) != next.marks,
             None => false,
         };
 

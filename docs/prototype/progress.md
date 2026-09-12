@@ -56,3 +56,10 @@
 - [x] EX-14 leakage: X imported after mark excluded — single unmarked splice.
 - [x] Log naming corrected in report: `extend-green-ex07-formatted.log` records the 3-vs-1 oracle failure, not a green run.
 - [x] 48 fixtures green (`extend-fix-1-green-fixtures.log`); full suite 523 passed / 0 failed / 1 ignored (`extend-fix-1-full-suite.log`). rustfmt clean.
+
+## Crossfix — common restored-mark regression
+
+- [x] Durable control-free test `tests/revocation_common_exposure.rs::reverse_deletion_diff_splits_restored_text_at_unchanged_mark` (from coordinator's supplied source, first test only). RED reproduced: bold restored substring `""` not `"X"` (`crossfix-red.log`).
+- [x] Cause (own investigation, `src/iter/spans.rs::SpanState::push_str`): the flush predicate compared the raw current `MarkDiff` with `next.marks`, which is stored as `marks.with(diff)`. `MarkDiff::eq` is *diff*-equality, so an unchanged mark present on both sides (`Diff(m, m)`) compares equal to `Nothing`; an added marked character was therefore coalesced into the preceding unmarked `Add` run and lost its marks. Fix: compare `self.marks.with(diff)` with `next.marks`. One-line predicate change; no fixture special-casing.
+- [x] GREEN (`crossfix-green.log`). Eligible-view counterpart `eligible_view_restoration_splits_text_at_unchanged_mark` added (bold restored `X` in its own splice; formatted replay; end state `aX**XQ**Xbcd` — my first oracle forgot the restored trailing X, corrected).
+- [x] 49 prototype fixtures + 1 common test green (`crossfix-fixtures.log`); full suite 525 passed / 0 failed / 1 ignored (`crossfix-full-suite.log`). rustfmt clean.

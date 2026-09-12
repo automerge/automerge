@@ -285,3 +285,39 @@ Single commit for this wave, parent `6fef5d18b331` (head of `jj log` in this wor
 **Extra:** `ex14_insertion_after_excluded_mark_does_not_leak_bold` — X delivered after the mark is excluded yields exactly one unmarked `SpliceText("X")`, formatted replay `aXb`.
 
 **Log correction:** `extend-green-ex07-formatted.log` (previous wave) records the intermediate **3-vs-1 assertion failure** after the `flush_obj` fix, not a green run; the green evidence for that test is `extend-green-ex12-14.log` / `extend-green-fixtures.log`.
+
+---
+
+# Crossfix — common restored-mark regression — addendum
+
+**Status: DONE (fixed).** Single commit, parent `bc38ae2f5f87`.
+
+## Reproduction and cause
+
+`tests/revocation_common_exposure.rs::reverse_deletion_diff_splits_restored_text_at_unchanged_mark` (coordinator-supplied, control-free) — RED on `bc38ae2f`: patches `SpliceText("XX", marks: None)`, `SpliceText("X", marks: None)`; bold substring `""` (`crossfix-red.log`).
+
+Root cause in ordinary diff span logging, `src/iter/spans.rs::SpanState::push_str`:
+
+```rust
+// before
+Some(next) => diff != next.diff || self.marks != next.marks,
+// after
+Some(next) => diff != next.diff || self.marks.with(diff) != next.marks,
+```
+
+`NextText::marks` is stored as `marks.with(diff)` (for `Diff::Add`, only the after-side set). The raw comparison used `MarkDiff::eq`, which compares *mark differences*: an unchanged mark on both endpoints (`MarkDiff::Diff(m, m)`) is equal to `MarkDiff::Nothing`. So when an *added* character lay inside an unchanged bold range following an added unmarked run, no flush happened and the marked character was appended to the unmarked splice. Comparing the same projection as the stored value restores the split. Not a fixture special case; ordinary patch generation is unchanged otherwise.
+
+## Evidence
+
+| Log | Content |
+|---|---|
+| `crossfix-red.log` | common test fails on `bc38ae2f` (`left: ""`, `right: "X"`). |
+| `crossfix-green.log` | same test passes after the one-line predicate fix; includes hydrate replay from hidden to before heads. |
+| `crossfix-fixtures.log` | 49 prototype fixtures incl. new `eligible_view_restoration_splits_text_at_unchanged_mark` (Alice's deletions excluded; restoration patches carry bold `X` alone; formatted replay; end `aX**XQ**Xbcd`). |
+| `crossfix-full-suite.log` | **525 passed, 0 failed, 1 ignored** (472 + 49 + 3 + 1). |
+
+The supplied second test (block contents exposure) was deliberately not added: A only preserves the ordinary U+FFFC block placeholder projection in exposure and does not claim block-content recovery.
+
+## Note for the comparison
+
+This defect lives in the baseline `DiffIter`/`spans` machinery both prototypes rely on for real patch generation; it is shared ordinary Automerge behaviour, not an external-interpretation cost. It was invisible to earlier suites because their marked restorations did not start inside an unmarked added run.

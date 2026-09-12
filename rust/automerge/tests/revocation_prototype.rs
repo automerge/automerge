@@ -3472,3 +3472,67 @@ fn ex14_insertion_after_excluded_mark_does_not_leak_bold() {
     replay_formatted(&s, &text, &t);
     assert_eq!(formatted(&s, s.current(), &text).render_bold(), "aXb");
 }
+
+// ---------------------------------------------------------------------------
+// Crossfix — eligible-view restoration at an unchanged mark boundary
+// ---------------------------------------------------------------------------
+
+/// Same shape as the control-free common regression, via eligibility:
+/// Carol's text `aXXXbcd` with bold `[2,3)` and Q inserted at 3; Alice
+/// deletes index 4 and `[1,3)`; excluding Alice restores `XX`+`X` with the
+/// bold `X` in its own marked splice.
+#[test]
+fn eligible_view_restoration_splits_text_at_unchanged_mark() {
+    let mut base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let text = base
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            let t = tx.put_object(ROOT, "text", automerge::ObjType::Text)?;
+            tx.splice_text(&t, 0, 0, "aXXXbcd")?;
+            tx.mark(&t, Mark::new("bold".into(), true, 2, 3), ExpandMark::Both)?;
+            tx.splice_text(&t, 3, 0, "Q")?;
+            Ok(t)
+        })
+        .unwrap()
+        .result;
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.splice_text(&text, 4, 1, "")?;
+            tx.splice_text(&text, 1, 2, "")?;
+            Ok(())
+        })
+        .unwrap();
+    let del = alice.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(&mut s, vec![Input::Change(del)]);
+    assert_eq!(formatted(&s, s.current(), &text).render_bold(), "a**Q**bcd");
+    let t = deliver(&mut s, exclude_evidence("alice", &[]));
+    let bold_added: String = t
+        .patches
+        .iter()
+        .filter_map(|p| match &p.action {
+            PatchAction::SpliceText {
+                value,
+                marks: Some(m),
+                ..
+            } if m
+                .iter()
+                .any(|(n, v)| n == "bold" && v.as_bool() == Some(true)) =>
+            {
+                Some(value.make_string())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bold_added, "X", "{:?}", t.patches);
+    replay_formatted(&s, &text, &t);
+    assert_eq!(
+        formatted(&s, s.current(), &text).render_bold(),
+        "aX**XQ**Xbcd"
+    );
+}
