@@ -176,6 +176,10 @@ impl Clock {
         self
     }
 
+    pub(crate) fn mask(&self) -> Option<&Arc<OpMask>> {
+        self.mask.as_ref()
+    }
+
     /// Structural containment: the operation is within the history described
     /// by this clock, regardless of eligibility.
     pub(crate) fn contains(&self, id: &OpId) -> bool {

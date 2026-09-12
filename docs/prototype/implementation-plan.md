@@ -49,3 +49,14 @@ Cost if wrong: identical to the packet's cost — the predicate split lives in o
 6. Full `cargo test --locked --offline -p automerge --lib --tests`; rustfmt check; commit; report.
 
 Command (from `rust/`): `cargo test --locked --offline -p automerge --test revocation_prototype`
+
+## A3 update (structural + adoption)
+
+| Item | Interface | Files |
+|---|---|---|
+| EX-04 authoring | `Automerge::transaction_view(view: &ViewSpec) -> Result<Transaction, ViewError>`: deps = captured heads; actor via `isolate_actor(heads)` (structural precondition on history); `scope = scope_for(view)` with the transaction actor isolated (`Clock::isolate`) so transaction-local ops are visible; mask retained so previously classified hidden ops stay out of predecessor selection. `Session::author(policy, ctx, f) -> Result<Transition>`: runs f in a view transaction on a staged clone, commits, binds the new hash to `ctx`, publishes. | `eligibility/mod.rs`, `eligibility/session.rs`, `automerge.rs` (small `transaction_args_for_view`). |
+| EX-08/09 | `Session::list_values(id, obj) -> Vec<(Value, ExId)>` via `list_range_for`; existing `diff_view`. | `eligibility/mod.rs` |
+| EX-10/11 | existing `get_all_view`/`hydrate_view` | tests only |
+| EX-12–14 | `Automerge::spans_view(view, obj) -> Vec<Span>`, `text_view`; test-side `FormattedText` observer applying `SpliceText{marks}`, `Mark`, `DeleteSeq`. | `eligibility/mod.rs`, tests |
+
+Tests (red first each): `ex04_inspect_then_adopt_scalar`, `ex08_*`, `ex09_*`, `ex11_*`, `ex12_*`, `ex13_*`, `ex14_*`.

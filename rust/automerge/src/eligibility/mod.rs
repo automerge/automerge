@@ -127,3 +127,27 @@ impl Automerge {
         Ok(patch_log.make_patches(self))
     }
 }
+
+impl Automerge {
+    /// EXPERIMENTAL: start a transaction whose reads (predecessor and index
+    /// selection, object checks) are scoped to `view`. Dependencies are the
+    /// captured heads; the actor is isolated with the baseline structural
+    /// precondition (`isolate_actor`); the transaction's own new ops are made
+    /// visible by isolating the actor in the scope clock while the
+    /// eligibility mask of previously classified changes is retained.
+    pub fn transaction_view(
+        &mut self,
+        view: &ViewSpec,
+    ) -> Result<crate::transaction::Transaction<'_>, ViewError> {
+        let mask = self.scope_for(view)?.mask().cloned();
+        let mut args = self.transaction_args(Some(&view.heads));
+        // `transaction_args(Some(heads))` produced the structural isolation
+        // clock (heads clock with this actor isolated). Re-attach the mask.
+        args.scope = args.scope.take().map(|c| c.with_mask(mask));
+        Ok(crate::transaction::Transaction::new(
+            self,
+            args,
+            PatchLog::inactive(),
+        ))
+    }
+}

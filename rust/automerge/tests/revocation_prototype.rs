@@ -1956,3 +1956,146 @@ fn out_of_range_checkpoint_is_rejected() {
         Err(automerge::eligibility::SessionError::ForeignView(_))
     ));
 }
+
+// ---------------------------------------------------------------------------
+// A3 — EX-04: inspect excluded work, adopt as a new eligible change
+// ---------------------------------------------------------------------------
+
+const CTX_BOB: ContextBinding = ContextBinding {
+    context: AuthorizationContextId(42),
+    kind: ContextKind::Established,
+};
+
+#[test]
+fn ex04_inspect_then_adopt_scalar_without_reinstating_alice() {
+    let fx = ex01();
+    let mut s = Session::new(fx.base.clone());
+    deliver(
+        &mut s,
+        vec![
+            Input::Change(fx.a.clone()),
+            Input::Change(fx.c.clone()),
+            Input::Evidence(fx.r.clone()),
+            Input::Evidence(fx.e1.clone()),
+        ],
+    );
+    let view = s.current();
+    assert!(hydrated_eq(
+        &s.hydrate(view).unwrap(),
+        &expect_map(&[("title", "Weekend plan")])
+    ));
+    // Inspection: A's excluded suggestion is visible under an allow-all
+    // inspection view of the same heads, and A is Excluded.
+    let all = s.inspect_all(view).unwrap();
+    let sugg = s.doc().get_all_view(&all, &ROOT, "suggestion").unwrap();
+    assert_eq!(sugg.len(), 1);
+    assert_eq!(sugg[0].0.to_string(), "\"Camping\"");
+    assert_eq!(sugg[0].1.to_string(), format!("2@{}", actor(1)));
+    assert_eq!(
+        s.decision(view, &fx.a.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+
+    // Bob adopts: authors D against his eligible view.
+    let bob_actor = actor(2);
+    let (t, d_hash) = s
+        .author(view, author("bob"), bob_actor.clone(), CTX_BOB, |tx| {
+            // Bob sees no suggestion in his view.
+            assert!(tx.get(ROOT, "suggestion").unwrap().is_none());
+            tx.put(ROOT, "suggestion", "Camping")?;
+            Ok(())
+        })
+        .unwrap();
+    let d_hash = d_hash.expect("D committed");
+    replay_ok(&s, &t);
+    let after = s.current();
+    assert!(hydrated_eq(
+        &s.hydrate(after).unwrap(),
+        &expect_map(&[("title", "Weekend plan"), ("suggestion", "Camping")])
+    ));
+    // A stays excluded; D is a new eligible change with Bob's identity.
+    assert_eq!(
+        s.decision(after, &fx.a.hash()).unwrap().eligibility,
+        Eligibility::Excluded
+    );
+    assert_eq!(
+        s.decision(after, &d_hash).unwrap().eligibility,
+        Eligibility::Eligible
+    );
+    assert_ne!(d_hash, fx.a.hash());
+    let d = s.doc().get_change_by_hash(&d_hash).unwrap();
+    assert_eq!(d.author().unwrap(), author("bob"));
+    assert_eq!(d.actor_id(), &bob_actor);
+    // D's deps are the captured heads; its op does not target hidden A.
+    let mut deps = d.deps().to_vec();
+    deps.sort();
+    let mut heads = s.capture(view).unwrap().spec.heads.clone();
+    heads.sort();
+    assert_eq!(deps, heads);
+    let expanded = d.decode();
+    assert_eq!(expanded.operations.len(), 1);
+    assert!(
+        expanded.operations[0].pred.is_empty(),
+        "D must not target hidden A: {:?}",
+        expanded.operations[0].pred
+    );
+    // Visible candidate is D's op, not A's.
+    let vals = s.get_all(after, &ROOT, "suggestion").unwrap();
+    assert_eq!(vals.len(), 1);
+    assert_eq!(vals[0].1.to_string(), format!("4@{}", bob_actor));
+    // Context bound to D.
+    assert_eq!(
+        s.capture(after).unwrap().inspection.bindings.get(&d_hash),
+        Some(&CTX_BOB)
+    );
+
+    // If A later returns, ordinary CRDT rules decide: A and D are concurrent
+    // candidates for `suggestion`.
+    let t = deliver(&mut s, vec![invalidate_r()]);
+    replay_ok(&s, &t);
+    let vals = s.get_all(s.current(), &ROOT, "suggestion").unwrap();
+    let mut ids: Vec<String> = vals.iter().map(|v| v.1.to_string()).collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec![format!("2@{}", actor(1)), format!("4@{}", bob_actor)]
+    );
+}
+
+/// Authoring into a structurally present but hidden container by object id
+/// remains allowed (ruling 2); the edit is eligible but unreachable.
+#[test]
+fn ex04_variant_object_id_edit_into_hidden_container_allowed() {
+    let base = Automerge::new()
+        .with_author(Some(author("carol")))
+        .with_actor(actor(3));
+    let mut alice = base
+        .fork()
+        .with_author(Some(author("alice")))
+        .with_actor(actor(1));
+    let section = alice
+        .transact::<_, _, automerge::AutomergeError>(|tx| {
+            Ok(tx.put_object(ROOT, "section", automerge::ObjType::Map)?)
+        })
+        .unwrap()
+        .result;
+    let mk = alice.get_last_local_change().unwrap();
+    let mut s = Session::new(base);
+    deliver(&mut s, vec![Input::Change(mk.clone())]);
+    deliver(&mut s, exclude_evidence("alice", &[]));
+    let view = s.current();
+    let (t, d) = s
+        .author(view, author("bob"), actor(2), CTX_BOB, |tx| {
+            tx.put(&section, "title", "Plans")?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(d.is_some());
+    assert!(t.patches.is_empty(), "unreachable edit: {:?}", t.patches);
+    assert!(hydrated_eq(
+        &s.hydrate(s.current()).unwrap(),
+        &expect_map(&[])
+    ));
+    let inside = s.get_all(s.current(), &section, "title").unwrap();
+    assert_eq!(inside.len(), 1);
+}

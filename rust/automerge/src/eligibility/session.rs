@@ -14,7 +14,9 @@ use super::{Selection, ViewError, ViewSpec};
 use crate::exid::ExId;
 use crate::hydrate;
 use crate::types::ChangeHash;
-use crate::{Automerge, AutomergeError, Change, LoadOptions, Patch, Prop, TextEncoding, Value};
+use crate::{
+    Automerge, AutomergeError, Change, LoadOptions, Patch, Prop, ReadDoc, TextEncoding, Value,
+};
 
 /// One harness delivery item.
 #[derive(Debug, Clone)]
@@ -584,5 +586,91 @@ impl Session {
             captures,
             records,
         })
+    }
+}
+
+impl Session {
+    /// An allow-all *inspection* view at the same content heads as `id`:
+    /// every integrated change within those heads is treated as eligible so
+    /// excluded/pending work can be read. This is inspection, not policy.
+    pub fn inspect_all(&self, id: ViewId) -> Result<ViewSpec, SessionError> {
+        let cap = self.capture(id)?;
+        let map: BTreeMap<ChangeHash, Eligibility> = cap
+            .spec
+            .selection
+            .iter()
+            .map(|(h, _)| (*h, Eligibility::Eligible))
+            .collect();
+        Ok(ViewSpec {
+            heads: cap.spec.heads.clone(),
+            selection: Selection::new(map),
+        })
+    }
+
+    /// Author a new change against the captured view `policy`: reads inside
+    /// `f` see exactly that view; the resulting change depends on the captured
+    /// heads, carries `author`/`actor`, is bound to `context`, and the group
+    /// is published like any other delivery (evaluate, diff, status).
+    /// Returns the transition and the new change hash (`None` if no ops).
+    pub fn author<F>(
+        &mut self,
+        policy: ViewId,
+        author: crate::Author<'static>,
+        actor: crate::ActorId,
+        context: ContextBinding,
+        f: F,
+    ) -> Result<(Transition, Option<ChangeHash>), SessionError>
+    where
+        F: FnOnce(&mut crate::transaction::Transaction<'_>) -> Result<(), AutomergeError>,
+    {
+        let spec = self.capture(policy)?.spec.clone();
+        let mut stage = self.published.clone();
+        stage.doc.set_author(Some(author));
+        stage.doc.set_actor(actor);
+        let hash = {
+            let mut tx = stage.doc.transaction_view(&spec)?;
+            match f(&mut tx) {
+                Ok(()) => {
+                    let (hash, _log) = tx.commit();
+                    hash
+                }
+                Err(e) => {
+                    tx.rollback();
+                    return Err(e.into());
+                }
+            }
+        };
+        let mut received = Vec::new();
+        if let Some(h) = hash {
+            let change = stage
+                .doc
+                .get_change_by_hash(&h)
+                .expect("committed change is retrievable");
+            received.push(change.raw_bytes().to_vec());
+            stage.bindings.insert(h, context);
+        }
+        let after = capture(&stage.doc, &stage.evidence, &stage.bindings);
+        let before = &self.published.capture;
+        let patches = stage.doc.diff_view(&before.spec, &after.spec)?;
+        let status = status_delta(&before.inspection, &after.inspection);
+        let before_id = self.current();
+        stage.capture = after.clone();
+        self.records.push(CheckpointRecord {
+            received,
+            evidence: stage.evidence.clone(),
+            bindings: stage.bindings.clone(),
+            frozen: after.clone(),
+        });
+        self.published = stage;
+        self.captures.push(after);
+        Ok((
+            Transition {
+                before: before_id,
+                after: self.current(),
+                patches,
+                status,
+            },
+            hash,
+        ))
     }
 }
