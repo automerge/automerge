@@ -1,4 +1,4 @@
-# Prototype B — first implementation evidence checkpoint
+# Prototype B — B1 checkpoint and reciprocal-review fix wave 1
 
 **Status: DONE_WITH_CONCERNS** — working B1 map/native-control checkpoint, not complete structural catalogue or production integration.
 
@@ -8,7 +8,8 @@ Date: 2026-09-12. Workspace: `automerge-revocation-b`.
 
 - Baseline: `7f96e1b2798102cc4aa271172be131299d6fbe95`.
 - Implementation: **`174274e71989a4369a967e61e996eae34ff08aee`**, jj change `vqxmktrsqwzpszyoppvvqnnzxszmmwpl`, description `prototype B: native controls, frozen map interpretations and staged patch transitions`.
-- This report is committed separately as `prototype B: document executed B1 evidence and limitations`; no source changes follow the tested implementation commit.
+- Initial report: `4e28b301a9fa5de42bc95e5e99865493759d58a3`, `prototype B: document executed B1 evidence and limitations`.
+- Fix wave 1: **`a797e199ac519f4c95203633f1d3d420217ba80f`**, jj change `osvtqqzkwoopwkwkrqtxpoxnrvrvyymz`, `prototype B: keep unvalidated queued controls pending; cover scalar adoption`. Source tested by all `fix-1-*` final runs below. This report update is a subsequent documentation-only commit.
 - Used only the assigned source workspace/run directory and supplied read-only brief/spec/plan/B design/TDD skill. No sibling implementation, historical revocation branch, subagents, model invocations, pushes or shared bookmark changes.
 - Clean pinned parent and Rust 1.90 were verified. Coordinator supplied the clean-baseline result (472 passed, 1 ignored); I did not independently rerun that baseline. Final default-source regression suite was run below.
 
@@ -27,6 +28,7 @@ The mock adapter supplies explicit trusted actor-to-author bindings and affirmat
 | EX-01 | All three policy checkpoints; original suggestion identity reinstated; C depends on R and remains eligible; R pending/authorized/invalidated inspection. **120 orders × 16 partitions = 1,920 schedules** of A/R/C/E1/E2, H preloaded. Every published group has independent intermediate expectations and native patch replay; every event is redelivered; frozen endpoints are reread on the later live graph. E2-before-E1 and a deletion/status-only variant are covered. |
 | EX-02 | Credible queued R with missing H makes integrated A1/A2 pending; empty H restores only A1. Frozen pending capture and unchanged isolated content heads with later known boundary pass. A map-restoration variant with an eligible boundary edit emits its two child puts once. **24 × 8 = 192 schedules** of A1/A2/H/R, authority bundled with R and H0 preloaded. |
 | EX-03 | One continuing Alice actor; A1/A3 eligible, A2 excluded; fresh-context A3 pending until G; A3 can wait structurally on delayed A2. Complete-package reconstruction preserves the hole. **120 × 16 = 1,920 schedules** of A1/A2/A3/R/G, context bundled with A3 and authority with R. Each group checks independent state/status expectations and patch replay. |
+| EX-04 | Added in fix wave 1: inspect retained excluded Camping; Bob authors new eligible D with a new hash/op identity, captured mock authorship and empty predecessors against the excluded view. A remains excluded. Later invalidation restores A alongside D as two equal-valued conflict candidates. Native patch replay and frozen captures pass. No general recovery API or durable adoption provenance format. |
 | EX-05 | Eligible A, excluded replacement B, eligible C: conflict candidates are original A and C identities, not transitive suppression. Invalidation leaves only C. |
 | EX-06 | Eligible deletion targeting excluded B does not delete A. An excluded deletion restores A; invalidation hides it again. A new selected-view deletion records A as its actual predecessor. |
 | EX-07 | Excluded map attachment with eligible child and independent root edit; child remains object-locally inspectable and root-unreachable. Restoring attachment exposes existing child; patch replay passes. |
@@ -52,7 +54,7 @@ All cargo commands were synchronous, run from `rust/`, with configured separate 
 
 `/home/fintohaps/Developer/Ink+Switch/automerge-revocation-design/implementation-1/b/`
 
-Final commands on the implementation source:
+Initial B1 commands on `174274e7` (fix-wave final results follow):
 
 ```sh
 cargo test --locked --offline -p automerge --features experimental-revocation --lib --tests
@@ -111,17 +113,74 @@ Some new tests passed immediately on the existing slice: direct-target EX-05/06,
 1. **Scan/clone cost:** each delivery stages a whole Session clone, scans the archive to find causally ready changes, repeatedly reconstructs change metadata, evaluates captures, compiles per-operation BTreeSets, and diffs complete endpoints. No production benchmark claim. Final feature library suite, including all schedules/property tests, took 73.52 seconds in the debug test profile; this is test runtime, not a comparative performance measurement.
 2. **Storage/capture cost:** original Change archive duplicates graph storage; captures duplicate hash classifications, inspection and evidence/provenance. Export includes all received original bytes. No interval compression, canonical capture hashing or durable package serializer.
 3. **B1 is map/scalar only:** Session explicitly rejects lists, text, counters, marks, table creation and competing controls. **EX-08–14 are unimplemented/unproven**, and no formatting-aware patch observer exists. Ordinary control-free structural tests still pass but do not validate selected structural semantics.
-4. **EX-04 adoption not implemented as its named fixture.** Selected-view scalar authoring and predecessor inspection work, but this report does not claim inspected-source adoption/provenance recovery. No general recovery, policy forks, signatures, Keyhive graph, unauthorized-versus-invalidated variants, multiple control composition or grant revocation.
+4. **Recovery remains limited:** EX-04 named scalar adoption now passes after fix wave 1 using the existing editing API. The test records A as the reviewed source locally; no durable adoption provenance format, general recovery, policy forks, signatures, Keyhive graph, unauthorized-versus-invalidated variants, multiple control composition or grant revocation.
 5. **Private prototype boundary only:** native encoding is accepted by the feature build; session-specific ancestry, scope restrictions and group atomicity are not globally imposed on ordinary Automerge load/merge/sync. Ordinary raw control-bearing imports are transport/noninterference characterizations, not authorization-aware APIs. The experimental session is the supported interpretation path. No sync negotiation adapter, bundle route or strict compact-session import implementation.
 6. **No optimized selected import-log proof:** transitions discard import logs and use endpoint diffs. The native batch patch test proves content noninterference under allow-all only. Map restored-subtree duplicate exposure is covered; arbitrary nested conflicts and non-map structural exposure are not.
-7. **Trusted mock facts are essential:** actor-author bytes are external bindings checked for consistency and captured. Existing native author metadata is not used as a capability proof or reconciled by this mock adapter. Context associations are trusted immutable facts; delivering content before its required fresh-context association is outside the bundled fixture input contract.
+7. **Trusted mock facts are essential:** actor-author bytes are external bindings checked for consistency and captured. Existing native author metadata is not used as a capability proof or reconciled by this mock adapter. Context associations are trusted immutable facts; delivering content before its required fresh-context association is outside the bundled fixture input contract. A `Context(h, g)` association overrides restriction applicability for h in this single-control model; it is not general context-versus-control evaluation. Extending beyond one control requires revisiting that boundary.
 8. **Private API rough edges:** string errors, internal unwraps behind validated captured contexts, fresh-control actor restriction, fixed default encoding and full-capture comparisons are intentional disposable costs. No public production API is proposed.
+
+## Fix wave 1 — reciprocal review disposition and executed evidence
+
+**Status: DONE_WITH_CONCERNS. F1 corrected; scoped re-review pending.** The initial passing 499-test suite did not cover pre-validation effectiveness. The supplied reciprocal review and coordinator ruling were read completely. No other model/reviewer was invoked.
+
+### F1: validated control readiness precedes final exclusion
+
+The behavioral red covered both eventual valid and invalid X:
+
+1. H and Alice's A are integrated. Receive R with `deps=[X]`, `retain=[H]`; X is missing and H is known.
+2. Without evidence, R authority is pending and A stays eligible with visible Camping.
+3. `Authorize(R)` makes R's authority authorized while R remains structurally queued. **A must be Pending and hidden**, not Excluded. Both tests failed here on the reviewed code (`left: Excluded; right: Pending`).
+4. Valid X includes H in its ancestry: receipt integrates X and validates/integrates R, then A becomes Excluded. This is a status-only Pending→Excluded transition with no content patches.
+5. Invalid X does not include H: ancestry validation rejects the whole group. Neither X nor an independent change submitted in that group is published. Retrying rejects again. The before-view and full inspection capture remain unchanged.
+
+`prototype/policy.rs` now returns unresolved frontier evaluation while R is not in the integrated manifest, even if all retained hashes are known. New `Reason::AwaitingControlValidation(R)` identifies the unresolved validation; the existing capture's `missing_dependencies[R]={X}` supplies the dependency detail and `unresolved_frontiers` correctly does **not** claim H is missing. Actual missing H retains `MissingFrontier(R)` for EX-02. Authority evaluation, R's own eligibility, native ready-loop validation and whole-group staging are unchanged.
+
+**Remaining availability limitation:** after the rejected invalid-X group, the previously accepted R is still archived, authorized and queued; A remains Pending/hidden indefinitely absent other policy evidence. Rejection also prevents X from entering the live graph through that group. This is not final exclusion, and no statement removal, quarantine or automatic recovery semantics were invented. A production policy for invalid queued controls remains required. The tests explicitly preserve and reconstruct the pending capture and reread the earlier visible capture after subsequent input.
+
+### Other findings
+
+- **F2 retained as documented dissent:** reviewer suggested making invalidated R eligible as a retained statement. Per coordinator/spec, R eligibility continues to describe whether its control effect participates: pending authority→Pending, authorized→Eligible, invalidated→Excluded. R's native statement/history remains structurally retained in all cases; authority and integration stay separately inspectable. No requested semantics change was made.
+- **F3:** added named EX-04 scalar adoption regression on the existing API; it passed immediately, so it is not claimed as a new behavioral-red cycle. It asserts Bob's new actor/op/hash, explicit mock author binding in exported capture inputs, observed dependencies, empty predecessors, original A bytes unchanged, A still excluded, and two ordinary candidates after restoration. EX-02/03 per-event duplicate enumeration and historical isolation via a dedicated API remain omitted; single-control context override cost is explicit above.
+- **F4:** feature-enabled action errors now say 0–8; feature-disabled errors still say 0–7. Added assertion failed before correction. Other reported string-error/unwrap/scan/clone/legacy-validation-order costs remain unchanged. No structural work was added.
+
+### Exact commands/results
+
+All commands run synchronously from `rust/` except rustfmt, using the same configured separate target directory. Logs in the assigned `implementation-1/b/` directory:
+
+| Command | Log and outcome |
+|---|---|
+| `cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::tests::native_queued_control` | `fix-1-red-f1.log`: **2 failed behavior tests**, exit 101, Excluded versus Pending. Same command after fix: `fix-1-green-f1.log`: **2 passed**, exit 0. |
+| `cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::tests::ex04` | `fix-1-ex04.log`: **1 passed**, exit 0 on existing authoring implementation. |
+| `cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::tests::native_action_diagnostic` | `fix-1-red-diagnostic.log`: **1 failed**, exit 101 (advertised 0–7 under enabled feature). Corrected diagnostic passes in focused/final runs. |
+| `cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype -- --skip all_192` | `fix-1-focused.log`: **28 passed**, exit 0, including native/EX-01–07/model/diagnostic regressions. |
+| `cargo test --locked --offline -p automerge --features experimental-revocation --lib all_192` | `fix-1-schedules.log`: **3 passed**, **4,032 schedules**, exit 0, 74.35s. Existing independent fixture oracles unchanged. |
+| `cargo test --locked --offline -p automerge --features experimental-revocation --lib --tests` | `fix-1-full-feature.log`: **503 passed, 0 failed, 1 ignored**, exit 0 (215 lib, including 31 prototype tests, plus 288 integration). Library runtime 79.01s, not a performance benchmark. |
+| `cargo test --locked --offline -p automerge --lib --tests` | `fix-1-full-default.log`: **473 passed, 0 failed, 1 ignored**, exit 0 (185 lib plus 288 integration), including feature-disabled diagnostic/gate. |
+
+Only the two known manifest warnings remain. Targeted formatting was applied and then checked at repository root:
+
+```sh
+rustfmt --edition 2021 --config skip_children=true --check \
+  rust/automerge/src/prototype/policy.rs \
+  rust/automerge/src/prototype/tests.rs \
+  rust/automerge/src/prototype/gate_tests.rs \
+  rust/automerge/src/op_set2/types.rs
+# fix-1-rustfmt.log: exit 0, no output
+```
+
+Complete fix diff self-reviewed with `jj diff --git` and saved as `fix-1-diff.patch`. No source changes follow the final fix-wave full-suite/formatting runs.
 
 ## Minimal reproductions
 
 From `rust/`:
 
 ```sh
+# Review F1: known H, missing X, then valid/invalid X; native validation gates exclusion
+cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::tests::native_queued_control
+
+# Named scalar adoption, without admitting the excluded original
+cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::tests::ex04
+
 # Three resolved authority checkpoints, original identity and C survival
 cargo test --locked --offline -p automerge --features experimental-revocation --lib prototype::first_test::ex01_authority_checkpoints
 
@@ -143,4 +202,4 @@ The pre-fix EX-07 minimal trace is: excluded `root.section = map M`; eligible `M
 
 ## Assessment
 
-The running checkpoint demonstrates B's concrete causal benefit and native statement persistence without weakening independent eligibility. It also demonstrates that native controls still require external evidence snapshots, pre-integration provisional handling, non-prefix selection and nonlocal subtree patch treatment. No comparison winner can be inferred without the coordinator's independent review and the counterpart evidence. Ready for that review; not ready for structural or production claims.
+The running checkpoint demonstrates B's concrete causal benefit and native statement persistence with the reviewed pre-validation exclusion bug now corrected. It also demonstrates that native controls still require external evidence snapshots, pre-integration provisional handling, non-prefix selection and nonlocal subtree patch treatment. Invalid queued controls retain a concrete pending-availability limitation under strict rejection. No comparison winner can be inferred without the coordinator's scoped re-review and the counterpart evidence. Ready for that review; not ready for structural or production claims.
