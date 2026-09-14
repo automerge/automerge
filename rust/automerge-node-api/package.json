@@ -1,0 +1,36 @@
+{
+  "name": "@automerge/automerge-node-api",
+  "version": "0.1.0",
+  "description": "Node-API bindings to the automerge rust implementation",
+  "homepage": "https://github.com/automerge/automerge/tree/main/rust/automerge-node-api",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.cjs"
+    }
+  },
+  "repository": {
+    "url": "github:automerge/automerge",
+    "directory": "rust/automerge-node-api"
+  },
+  "collaborators": [
+    "Kræn Hansen <mail@kraenhansen.dk>"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0-alpha.80",
+    "@tsconfig/node22": "^22",
+    "@types/node": "^22",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "napi": {
+    "binaryName": "automerge"
+  },
+  "scripts": {
+    "build": "napi build --release",
+    "build:debug": "napi build",
+    "test": "tsx --test *.test.ts"
+  }
+}
