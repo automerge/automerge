@@ -1281,6 +1281,16 @@ mod tests {
                 f.head
             );
 
+            // Checkpoints must exclude both the head and the boundary.
+            assert!(!f.checkpoints.contains(&f.head));
+            for boundary in &f.boundary {
+                assert!(!f.checkpoints.contains(boundary));
+            }
+            for checkpoint in &f.checkpoints {
+                assert!(f.members.contains(checkpoint));
+                assert!(checkpoint.fragment_level() > 0);
+            }
+
             // deps must be equal or higher level than the fragment
             for dep in &f.boundary {
                 assert!(
@@ -1321,6 +1331,40 @@ mod tests {
         let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
 
         assert_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn fragment_checkpoints_exclude_head_and_boundary() {
+        // Fix the actor and change contents so fragment levels are deterministic.
+        let mut doc = AutoCommit::new().with_actor(ActorId::from(&[1][..]));
+        for value in 0..1500 {
+            doc.put(ROOT, "counter", value).unwrap();
+            doc.commit();
+        }
+
+        let fragments = doc.fragments(1..);
+        assert!(!fragments.is_empty(), "expected bundled fragments");
+        assert!(
+            fragments.iter().any(|f| !f.boundary.is_empty()),
+            "expected a fragment with a boundary to exercise boundary exclusion",
+        );
+        for fragment in fragments {
+            assert!(fragment.members.contains(&fragment.head));
+            assert!(
+                !fragment.checkpoints.contains(&fragment.head),
+                "fragment {:?} contains its own head as a checkpoint",
+                fragment.head,
+            );
+            for boundary in &fragment.boundary {
+                assert!(
+                    !fragment.checkpoints.contains(boundary),
+                    "fragment {:?} contains boundary {:?} as a checkpoint",
+                    fragment.head,
+                    boundary,
+                );
+            }
+            assert_eq!(doc.get_fragment(fragment.head), Some(fragment));
+        }
     }
 
     #[test]
@@ -1661,7 +1705,7 @@ impl FragmentNode {
         let checkpoints = members
             .iter()
             .copied()
-            .filter(|h| h.fragment_level() > 0)
+            .filter(|h| *h != head && h.fragment_level() > 0)
             .collect();
         Fragment {
             head,
@@ -1682,6 +1726,7 @@ pub struct Fragment {
     pub head: ChangeHash,
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
+    /// Non-zero-level members of the fragment, excluding its head.
     pub checkpoints: Vec<ChangeHash>,
     pub members: Vec<ChangeHash>,
 }
