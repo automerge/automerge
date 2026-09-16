@@ -1,9 +1,61 @@
-## Unreleased
+## 0.12.0
+
+### Breaking Changes
+
+* Removed the obsolete `optree-visualisation` Cargo feature and its optional
+  `dot` dependency. The visualization API was already removed in 0.7.0.
+* `ChangeMetadata` and `ExpandedChange` have a new `author` field. Code that
+  constructs these structs or exhaustively destructures them must be updated.
+* `AutomergeError` has a new `DuplicateAuthor` variant for attempts to assign
+  an author to an actor more than once. Exhaustive matches must handle this
+  variant.
 
 ### Added
 
-* It is now possible to set an "Author ID" for a document. The author ID is an
-  opaque byte array that can be examined to see the author ID of any change.
+* Author IDs identify authors independently of actor IDs. The new `Author` type
+  holds opaque bytes and supports hexadecimal parsing, formatting, and serde
+  serialization. `Automerge` and `AutoCommit` now provide `with_author`,
+  `set_author`, `get_author`, `get_authors`, `get_actors_for_author`, and
+  `get_author_for_actor`; `LoadOptions::author` sets the author for subsequent
+  edits when loading a document. Changing the author generates a fresh actor ID.
+* Author assignments are stored in the extra bytes of an actor's first change
+  and preserved through merging and saving/loading. `Change::author` reads an
+  assignment from an individual change; subsequent changes from the same actor
+  need not contain one. The `author` field returned by `get_changes_meta` and
+  `get_change_meta_by_hash` resolves authorship through the actor-to-author
+  mapping. Expanded changes also expose the author assignment.
+* `Value::as_scalar` and `Value::as_objtype`, plus `as_bytes`, `as_str`, `as_i64`,
+  `as_u64`, `as_f64`, and `as_bool` on both `Value` and `ScalarValue`, provide
+  accessors named consistently with Rust conventions.
+
+### Changed
+
+* Reworked batch change application to deduplicate incoming changes and check
+  for duplicate actor sequence numbers against queued and incoming changes in
+  an upfront validation pass. It also rejects duplicate author assignments.
+
+### Deprecated
+
+* `Value::to_scalar` and the `to_bytes`, `to_str`, `to_i64`, `to_u64`, `to_f64`,
+  and `to_bool` methods on `Value` and `ScalarValue` are deprecated in favor of
+  their `as_*` counterparts. Their behavior is unchanged.
+
+### Fixed
+
+* Fixed a performance regression in large transactions: checking whether an
+  object was created in the current transaction now takes constant time rather
+  than scanning all pending operations for every edit.
+* Patches that expose an existing text object now include rich-text marks,
+  embedded blocks, and the blocks' contents instead of flattening the object to
+  plain text. This also fixes diffs that restore a deleted rich-text object.
+* Fixed list insertion positioning when a counter increment precedes a trailing
+  insert during change application. This could corrupt operation grouping and
+  cause subsequent change reconstruction via `get_changes` to fail.
+* Experimental fragment metadata no longer includes the fragment's own head in
+  `checkpoints`. Checkpoints exclude both the head and boundary hashes, while
+  the head remains in `members`.
+* Loading empty input with `load_with_options` now respects the requested text
+  encoding instead of using the platform default.
 
 ## 0.11.0
 
