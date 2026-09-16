@@ -363,10 +363,23 @@ pub struct Bijou64;
 mod bijou64_impl {
     use super::{Bijou64, Codec, VarBuf};
     use crate::PackError;
+    use bijoux::u64 as bijoux_u64;
+
+    // helper: create a byte buffer and encode n into it, returning (boxed_bytes, written_len)
+    fn encode_u64_array(n: u64) -> (Box<[u8]>, usize) {
+        let len = bijoux_u64::encoded_len(n) as usize;
+        let mut buf = vec![0u8; len];
+        let written = match bijoux_u64::encode(&mut buf, n) {
+            Ok(w) => w,
+            Err(e) => panic!("bijoux encode failed: {:?}", e),
+        };
+        (buf.into_boxed_slice(), written)
+    }
 
     impl Codec for Bijou64 {
         #[inline]
         fn encode_unsigned(n: u64) -> VarBuf {
+            let (bytes, len) = encode_u64_array(n);
             let mut out = VarBuf::new();
             out.extend_from_slice(&bijoux::u64::encoded_bytes(n));
             out
@@ -381,6 +394,7 @@ mod bijou64_impl {
 
         #[inline]
         fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
+            match bijoux_u64::decode(data) {
             match bijoux::u64::decode(data) {
                 Ok((v, n)) => Some((n, v)),
                 Err(_) => None,
@@ -396,9 +410,10 @@ mod bijou64_impl {
         }
 
         fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
+            match bijoux_u64::decode(data) {
             match bijoux::u64::decode(data) {
                 Ok((v, n)) => Ok((n, v)),
-                Err(e) => Err(PackError::InvalidValue(format!("bijou64: {e}"))),
+                Err(e) => Err(PackError::InvalidValue(format!("bijoux: {e}"))),
             }
         }
 
@@ -430,11 +445,13 @@ mod bijou64_impl {
 
         #[inline]
         fn unsigned_size(n: u64) -> u64 {
+            bijoux_u64::encoded_len(n) as u64
             bijoux::u64::encoded_len(n) as u64
         }
 
         #[inline]
         fn signed_size(n: i64) -> u64 {
+            bijoux_u64::encoded_len(zigzag(n)) as u64
             bijoux::i64::encoded_len(n) as u64
         }
     }
