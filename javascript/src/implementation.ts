@@ -83,6 +83,16 @@ export type {
   Span,
   SyncMessage,
   UpdateSpansConfig,
+  Author,
+  Hash,
+  Op,
+  SyncHave,
+  PatchValue,
+  Value,
+  CursorPosition,
+  MarkPatch,
+  UnmarkPatch,
+  ConflictPatch,
 } from "./wasm_types.js"
 
 /** @hidden **/
