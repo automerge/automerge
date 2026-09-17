@@ -838,6 +838,11 @@ impl Automerge {
     /// Load a document without verifying the head hashes
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
+    ///
+    /// The resulting document is only intended for inspection (e.g. with
+    /// [`ReadDoc`] methods). Because the stored heads may not correspond to the
+    /// changes in the document there is no guarantee that other operations - in
+    /// particular [`Automerge::save`] - will work on the resulting document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
         Self::load_with_options(
             data,
