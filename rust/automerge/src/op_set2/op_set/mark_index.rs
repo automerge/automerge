@@ -57,6 +57,19 @@ impl MarkIdx {
             Self::End(id) => Self::End(id.with_new_actor(idx)),
         }
     }
+
+    fn without_actor(self, idx: usize) -> Self {
+        match self {
+            Self::Start(id) => Self::Start(
+                id.without_actor(idx)
+                    .expect("cannot remove actor with marks"),
+            ),
+            Self::End(id) => Self::End(
+                id.without_actor(idx)
+                    .expect("cannot remove actor with marks"),
+            ),
+        }
+    }
 }
 
 // ── v1 hexane column-value traits ────────────────────────────────────────────
@@ -255,6 +268,21 @@ impl MarkIndexColumn {
             .cache
             .iter()
             .map(|(key, val)| (key.with_new_actor(idx), val.clone()))
+            .collect();
+    }
+
+    pub(crate) fn rewrite_without_actor(&mut self, idx: usize) {
+        self.remap_values(|m| m.without_actor(idx));
+        self.cache = self
+            .cache
+            .iter()
+            .map(|(key, val)| {
+                (
+                    key.without_actor(idx)
+                        .expect("cannot remove actor with marks"),
+                    val.clone(),
+                )
+            })
             .collect();
     }
 

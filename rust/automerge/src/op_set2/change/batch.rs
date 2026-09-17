@@ -6,7 +6,7 @@ use crate::op_set2::SuccInsert;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
-use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
+use crate::{Automerge, Change, ChangeHash, PatchLog};
 use crate::{AutomergeError, TextEncoding};
 
 use super::super::op::{ChangeOp, Op, OpBuilder};
@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
+type PendingPreds = SmallHashMap<OpId, (ObjId, KeyRef<'static>, OpId)>;
 
 #[derive(Debug, Clone, Default)]
 struct BatchApply {
@@ -854,9 +855,16 @@ impl BatchApply {
         }
     }
 
-    fn import_ops(&mut self, doc: &mut Automerge) {
+    fn import_ops(&mut self, doc: &mut Automerge) -> Result<PendingPreds, AutomergeError> {
+        let mut missing = PendingPreds::default();
         for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops).unwrap();
+            doc.import_ops_to(c, &mut self.ops, &mut missing)?;
+        }
+        Ok(missing)
+    }
+
+    fn record_history(&self, doc: &mut Automerge) {
+        for c in &self.changes {
             doc.update_history(c);
         }
         doc.remove_unused_actors(true);
@@ -866,16 +874,31 @@ impl BatchApply {
         &mut self,
         doc: &mut Automerge,
         log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
+    ) -> Result<(), AutomergeError> {
         self.insert_new_actors(doc);
 
-        log.migrate_actors(&doc.ops().actors)?;
-
-        self.import_ops(doc);
+        let missing = match self.import_ops(doc) {
+            Ok(missing) => missing,
+            Err(e) => {
+                doc.remove_unused_actors(false);
+                return Err(e);
+            }
+        };
 
         let mut obj_info = doc.ops().obj_info.clone();
 
-        self.order_ops_for_doc(&mut obj_info);
+        if let Err(e) = self.order_ops_for_doc(&mut obj_info, doc, missing) {
+            // Roll back actors added for this batch.
+            doc.remove_unused_actors(false);
+            return Err(e);
+        }
+
+        if let Err(e) = log.migrate_actors(&doc.ops().actors) {
+            doc.remove_unused_actors(false);
+            return Err(e.into());
+        }
+
+        self.record_history(doc);
 
         let mut succ = vec![];
 
@@ -976,7 +999,12 @@ impl BatchApply {
         doc.ops().len() - start
     }
 
-    pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
+    fn order_ops_for_doc(
+        &mut self,
+        obj_info: &mut ObjIndex,
+        doc: &Automerge,
+        mut missing: PendingPreds,
+    ) -> Result<(), AutomergeError> {
         self.ops.sort_by(|a, b| {
             a.bld.obj.cmp(&b.bld.obj).then_with(|| {
                 match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
@@ -985,9 +1013,18 @@ impl BatchApply {
                 }
             })
         });
+        let invalid_pred = |op, pred| AutomergeError::InvalidPred {
+            op: doc.id_to_exid(op),
+            pred: doc.id_to_exid(pred),
+        };
         let mut start = 0;
         let mut last_obj = None;
         for (i, o) in self.ops.iter().enumerate() {
+            if let Some((obj, key, successor)) = missing.remove(&o.id()) {
+                if (obj, key) != (o.bld.obj, o.elemid_or_key()) {
+                    return Err(invalid_pred(successor, o.id()));
+                }
+            }
             for p in o.pred().iter() {
                 self.pred
                     .entry(*p)
@@ -1012,6 +1049,29 @@ impl BatchApply {
             let span = start..self.ops.len();
             self.obj_spans.push(ObjSpan { obj, span });
         }
+
+        // Check stored predecessors before recording history or changing the ops.
+        let mut walker = ObjWalker::new(doc.ops());
+        for span in &self.obj_spans {
+            if missing.is_empty() {
+                break;
+            }
+            let range = walker.seek_to_obj(span.obj);
+            for op in doc.ops().iter_range(&range) {
+                if let Some((obj, key, successor)) = missing.remove(&op.id) {
+                    if (obj, key) != (op.obj, op.elemid_or_key()) {
+                        return Err(invalid_pred(successor, op.id));
+                    }
+                }
+            }
+        }
+        if let Some((pred, (_, _, op))) = missing.into_iter().next() {
+            return Err(AutomergeError::MissingPred {
+                op: doc.id_to_exid(op),
+                pred: doc.id_to_exid(pred),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1100,26 +1160,41 @@ impl Automerge {
             incoming.push(change)?;
         }
 
+        let previous_queue = self.queue.clone();
         self.queue.extend(incoming);
         let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
-        Ok(BatchApply::new(changes).apply(self, log)?)
+        if let Err(err) = BatchApply::new(changes).apply(self, log) {
+            // Validation can fail after ready changes have been removed from the queue.
+            self.queue = previous_queue;
+            return Err(err);
+        }
+        Ok(())
     }
 
     fn import_ops_to(
         &mut self,
         change: &Change,
         ops: &mut Vec<ChangeOp>,
+        missing: &mut PendingPreds,
     ) -> Result<(), AutomergeError> {
-        let new_ops = self.import_ops(change)?;
+        let new_ops = self.import_ops(change, missing)?;
         ops.extend(new_ops);
         Ok(())
     }
 
-    fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
-        let actors: Vec<_> = change
+    fn import_ops(
+        &mut self,
+        change: &Change,
+        missing: &mut PendingPreds,
+    ) -> Result<Vec<ChangeOp>, AutomergeError> {
+        let actors = change
             .actors()
-            .map(|a| self.ops.lookup_actor(a).unwrap())
-            .collect();
+            .map(|a| {
+                self.ops
+                    .lookup_actor(a)
+                    .ok_or_else(|| AutomergeError::InvalidActorId(a.to_string()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         change
             .iter_ops()
@@ -1151,6 +1226,33 @@ impl Automerge {
                     succ: vec![],
                     bld,
                 };
+                // Deletes are stored only as successor entries on their predecessors.
+                if change.action() == Action::Delete && change.pred().is_empty() {
+                    return Err(AutomergeError::MissingDeletePred {
+                        op: self.id_to_exid(id),
+                    });
+                }
+                for p in change.pred() {
+                    match missing.entry(*p) {
+                        std::collections::hash_map::Entry::Occupied(entry) => {
+                            let (obj, key, _) = entry.get();
+                            if *obj != change.bld.obj || *key != change.elemid_or_key() {
+                                return Err(AutomergeError::InvalidPred {
+                                    op: self.id_to_exid(id),
+                                    pred: self.id_to_exid(*p),
+                                });
+                            }
+                        }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            let key = if change.bld.insert {
+                                KeyRef::Seq(ElemId(id))
+                            } else {
+                                change.key().clone()
+                            };
+                            entry.insert((change.bld.obj, key, id));
+                        }
+                    }
+                }
                 Ok(change)
             })
             .collect()

@@ -4448,3 +4448,275 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
         .unwrap();
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn change_with_unread_value_bytes_is_rejected() {
+    // A null claims 297 payload bytes, leaving 369 raw bytes unread.
+    let bytes = fixture("change_null_value_with_payload.automerge");
+    let error = Change::from_bytes(bytes.clone()).unwrap_err();
+    assert!(error.to_string().contains("null should have length 0"));
+    assert!(Automerge::load(&bytes).is_err());
+    let mut doc = Automerge::new();
+    assert!(doc.load_incremental(&bytes).is_err());
+}
+
+#[test]
+fn delete_without_existing_pred_is_rejected() {
+    let make = |pred: Vec<automerge::legacy::OpId>| {
+        automerge::Change::from(automerge::ExpandedChange {
+            operations: vec![automerge::legacy::Op {
+                action: automerge::legacy::OpType::Delete,
+                obj: automerge::legacy::ObjectId::Root,
+                key: automerge::legacy::Key::Map("value".into()),
+                pred: pred.into_iter().collect(),
+                insert: false,
+            }],
+            actor_id: ActorId::from(b"synthetic".as_slice()),
+            author: None,
+            hash: None,
+            seq: 1,
+            start_op: std::num::NonZero::new(1).unwrap(),
+            time: 0,
+            message: None,
+            deps: vec![],
+            extra_bytes: vec![],
+        })
+    };
+    let missing = automerge::legacy::OpId::new(7, &ActorId::from(b"missing".as_slice()));
+    let known_actor = automerge::legacy::OpId::new(7, &ActorId::from(b"synthetic".as_slice()));
+    let mut base = AutoCommit::new();
+    base.put(ROOT, "kept", "before").unwrap();
+    base.commit();
+    let wrong_property = automerge::legacy::OpId::new(1, base.get_actor());
+    for (case, change) in [
+        make(vec![]),
+        make(vec![missing]),
+        make(vec![known_actor]),
+        make(vec![wrong_property]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut doc = base.clone();
+        let heads = doc.get_heads();
+        let saved = doc.save();
+        let mut next = doc.fork();
+        next.put(ROOT, "kept", "after").unwrap();
+        let valid = next.get_changes(&heads);
+
+        let expected_op = format!("1@{}", change.actor_id());
+        let error = doc.apply_changes(vec![change]).unwrap_err();
+        match (case, &error) {
+            (0, automerge::AutomergeError::MissingDeletePred { op }) => {
+                assert_eq!(op.to_string(), expected_op);
+                assert!(error.to_string().contains(&expected_op));
+            }
+            (2, automerge::AutomergeError::MissingPred { op, pred })
+            | (3, automerge::AutomergeError::InvalidPred { op, pred }) => {
+                let expected_pred = if case == 2 {
+                    format!("7@{}", ActorId::from(b"synthetic".as_slice()))
+                } else {
+                    format!("1@{}", base.get_actor())
+                };
+                assert_eq!(pred.to_string(), expected_pred);
+                assert_eq!(op.to_string(), expected_op);
+                assert!(error.to_string().contains(&expected_op));
+                assert!(error.to_string().contains(&pred.to_string()));
+            }
+            (1, automerge::AutomergeError::InvalidActorId(actor)) => {
+                assert_eq!(actor, &ActorId::from(b"missing".as_slice()).to_string());
+            }
+            _ => panic!("unexpected error for case {case}: {error}"),
+        }
+        assert_eq!(doc.get_heads(), heads);
+        assert_eq!(doc.get_changes(&[]).len(), 1);
+        assert_eq!(doc.save(), saved);
+        AutoCommit::load(&saved).unwrap();
+
+        doc.apply_changes(valid).unwrap();
+        assert_eq!(doc.get_heads(), next.get_heads());
+        assert_eq!(doc.get(ROOT, "kept").unwrap().unwrap().0, "after".into());
+    }
+}
+
+#[test]
+fn predecessors_in_incoming_batch_are_accepted() {
+    let mut source = AutoCommit::new();
+    source.put(ROOT, "value", 1).unwrap();
+    source.commit();
+    source.put(ROOT, "value", 2).unwrap();
+    source.commit();
+    source.delete(ROOT, "value").unwrap();
+    source.commit();
+
+    let changes = source.get_changes(&[]);
+    let mut doc = AutoCommit::new();
+    doc.apply_changes(changes).unwrap();
+    assert_eq!(doc.get_heads(), source.get_heads());
+    assert!(doc.get(ROOT, "value").unwrap().is_none());
+    assert_eq!(doc.get_changes(&[]).len(), 3);
+    let mut loaded = AutoCommit::load(&doc.save()).unwrap();
+    assert_eq!(loaded.get_heads(), source.get_heads());
+}
+
+fn rejected_delete_change(with_missing_pred: bool) -> Change {
+    use automerge::legacy::{Key, ObjectId, Op, OpId, OpType};
+
+    let actor = ActorId::from(b"a".as_slice());
+    Change::from(ExpandedChange {
+        operations: vec![Op {
+            action: OpType::Delete,
+            obj: ObjectId::Root,
+            key: Key::Map("value".into()),
+            pred: if with_missing_pred {
+                vec![OpId::new(7, &actor)]
+            } else {
+                vec![]
+            }
+            .into_iter()
+            .collect(),
+            insert: false,
+        }],
+        actor_id: actor,
+        author: None,
+        hash: None,
+        seq: 1,
+        start_op: std::num::NonZero::new(1).unwrap(),
+        time: 0,
+        message: None,
+        deps: vec![],
+        extra_bytes: vec![],
+    })
+}
+
+#[test]
+fn rejected_batch_preserves_mark_actor_ids() {
+    let mut base = AutoCommit::new().with_actor(ActorId::from(b"z".as_slice()));
+    let text = base.put_object(ROOT, "text", ObjType::Text).unwrap();
+    base.splice_text(&text, 0, 0, "abcd").unwrap();
+    base.commit();
+    let heads = base.get_heads();
+    let mut concurrent = base.fork().with_actor(ActorId::from(b"zz".as_slice()));
+    base.mark(
+        &text,
+        Mark::new("bold".into(), true, 0, 2),
+        ExpandMark::None,
+    )
+    .unwrap();
+    base.commit();
+    concurrent
+        .mark(
+            &text,
+            Mark::new("italic".into(), true, 2, 4),
+            ExpandMark::None,
+        )
+        .unwrap();
+    let changes = concurrent.get_changes(&heads);
+    let mut expected = base.document().clone();
+    expected.apply_changes_batch(changes.clone()).unwrap();
+
+    // Exercise rejection during both import and operation ordering.
+    for with_missing_pred in [false, true] {
+        let mut doc = base.document().clone();
+        let before = doc.save();
+        assert!(doc
+            .apply_changes_batch([rejected_delete_change(with_missing_pred)])
+            .is_err());
+        assert_eq!(doc.save(), before);
+        assert_eq!(doc.marks(&text).unwrap(), base.marks(&text).unwrap());
+        doc.apply_changes_batch(changes.clone()).unwrap();
+        assert_eq!(doc.marks(&text).unwrap(), expected.marks(&text).unwrap());
+        assert_eq!(doc.save(), expected.save());
+    }
+}
+
+#[test]
+fn rejected_batch_preserves_previously_queued_changes() {
+    let mut source = AutoCommit::new().with_actor(ActorId::from(b"z".as_slice()));
+    source.put(ROOT, "value", 1).unwrap();
+    source.commit();
+    source.put(ROOT, "value", 2).unwrap();
+    source.commit();
+    let changes = source.get_changes(&[]);
+
+    for with_missing_pred in [false, true] {
+        let mut doc = Automerge::new();
+        doc.apply_changes_batch([changes[1].clone()]).unwrap();
+        let before = doc.save();
+        assert!(doc
+            .apply_changes_batch([
+                changes[0].clone(),
+                rejected_delete_change(with_missing_pred),
+            ])
+            .is_err());
+        assert!(doc.get_heads().is_empty());
+        assert_eq!(doc.save(), before);
+        doc.apply_changes_batch([changes[0].clone()]).unwrap();
+        assert_eq!(doc.get_heads(), source.get_heads());
+        assert_eq!(doc.get(ROOT, "value").unwrap().unwrap().0, 2.into());
+    }
+}
+
+#[test]
+fn batch_predecessors_must_target_the_same_property() {
+    use automerge::legacy::{Key, ObjectId, Op, OpId, OpType};
+
+    // Exercise predecessors encountered before and after their successors.
+    for (original_key, replacement_key, shared_pred) in [
+        ("a", "z", false),
+        ("z", "a", false),
+        ("a", "z", true),
+        ("z", "a", true),
+    ] {
+        let actor = ActorId::from(b"synthetic".as_slice());
+        let mut operations = vec![
+            Op {
+                action: OpType::Put(1.into()),
+                obj: ObjectId::Root,
+                key: Key::Map(original_key.into()),
+                pred: vec![].into_iter().collect(),
+                insert: false,
+            },
+            Op {
+                action: OpType::Put(2.into()),
+                obj: ObjectId::Root,
+                key: Key::Map(replacement_key.into()),
+                pred: vec![OpId::new(1, &actor)].into_iter().collect(),
+                insert: false,
+            },
+        ];
+        if shared_pred {
+            operations.push(Op {
+                action: OpType::Put(3.into()),
+                obj: ObjectId::Root,
+                key: Key::Map(original_key.into()),
+                pred: vec![OpId::new(1, &actor)].into_iter().collect(),
+                insert: false,
+            });
+        }
+        let change = Change::from(automerge::ExpandedChange {
+            operations,
+            actor_id: actor.clone(),
+            author: None,
+            hash: None,
+            seq: 1,
+            start_op: std::num::NonZero::new(1).unwrap(),
+            time: 0,
+            message: None,
+            deps: vec![],
+            extra_bytes: vec![],
+        });
+        let mut doc = Automerge::new();
+        let error = doc.apply_changes([change]).unwrap_err();
+        match error {
+            automerge::AutomergeError::InvalidPred { op, pred } => {
+                let successor = if shared_pred { 3 } else { 2 };
+                assert_eq!(op.to_string(), format!("{successor}@{actor}"));
+                assert_eq!(pred.to_string(), format!("1@{actor}"));
+            }
+            error => panic!("unexpected error: {error}"),
+        }
+        assert!(doc.get_heads().is_empty());
+        assert_eq!(doc.length(ROOT), 0);
+    }
+}
