@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
@@ -15,7 +14,7 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
-use crate::actor::ActorInsert;
+use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
 use crate::change_graph::ChangeGraph;
 use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -51,21 +50,20 @@ pub(crate) enum Actor {
 }
 
 impl Actor {
-    fn remove_actor(&mut self, index: usize, actors: &[ActorId]) {
+    /// React to `removed` having been removed from the actor table. If it
+    /// was this actor, fall back to holding the id directly.
+    fn remove_actor(&mut self, removal: &ActorRemoval, removed: ActorId) {
         if let Actor::Cached(idx) = self {
-            match (*idx).cmp(&index) {
-                Ordering::Equal => *self = Actor::Unused(actors[index].clone()),
-                Ordering::Greater => *idx -= 1,
-                Ordering::Less => (),
+            match removal.apply(*idx) {
+                Some(new_idx) => *idx = new_idx,
+                None => *self = Actor::Unused(removed),
             }
         }
     }
 
-    fn rewrite_with_new_actor(&mut self, index: usize) {
+    fn shift(&mut self, shift: &ActorShift) {
         if let Actor::Cached(idx) = self {
-            if *idx >= index {
-                *idx += 1;
-            }
+            *idx = shift.apply(*idx);
         }
     }
 }
@@ -266,15 +264,7 @@ pub struct Automerge {
 impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
-        Automerge {
-            queue: ChangeQueue::new(),
-            change_graph: ChangeGraph::new(0),
-            authors: Authors::with_actors(0),
-            ops: OpSet::new(TextEncoding::platform_default()),
-            deps: Default::default(),
-            actor: Actor::Unused(ActorId::random()),
-            author: None,
-        }
+        Self::new_with_encoding(TextEncoding::platform_default())
     }
 
     /// Return a copy of this document with its data anonymized using a fresh random seed.
@@ -306,11 +296,12 @@ impl Automerge {
     }
 
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
+        let ops = OpSet::new(encoding);
         Automerge {
             queue: ChangeQueue::new(),
-            change_graph: ChangeGraph::new(0),
-            authors: Authors::with_actors(0),
-            ops: OpSet::new(encoding),
+            change_graph: ChangeGraph::new(&ops.actors),
+            authors: Authors::with_actors(ops.actors.len()),
+            ops,
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
@@ -340,6 +331,11 @@ impl Automerge {
 
     pub(crate) fn ops(&self) -> &OpSet {
         &self.ops
+    }
+
+    /// The actors known to this document, in canonical (sorted) order.
+    pub(crate) fn actors(&self) -> &ActorTable {
+        &self.ops.actors
     }
 
     pub(crate) fn changes(&self) -> &ChangeGraph {
@@ -425,11 +421,13 @@ impl Automerge {
         }
     }
 
+    /// Remove the actor at index `actor`, which must have no changes in the
+    /// document, from every actor-indexed structure.
     pub(crate) fn remove_actor(&mut self, actor: usize) {
-        self.actor.remove_actor(actor, &self.ops.actors);
-        self.ops.remove_actor(actor);
-        self.change_graph.remove_actor(actor);
-        self.authors.remove_actor(actor);
+        let (removed, removal) = self.ops.remove_actor(actor);
+        self.actor.remove_actor(&removal, removed);
+        self.change_graph.remove_actor(&removal);
+        self.authors.remove_actor(&removal);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -1307,11 +1305,11 @@ impl Automerge {
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.insert_actor(actor) {
             ActorInsert::Existing(idx) => idx,
-            ActorInsert::Inserted(idx) => {
-                self.change_graph.insert_actor(idx);
-                self.actor.rewrite_with_new_actor(idx);
-                self.authors.insert_actor(idx);
-                idx
+            ActorInsert::Inserted(shift) => {
+                self.change_graph.insert_actor(&shift);
+                self.actor.shift(&shift);
+                self.authors.insert_actor(&shift);
+                shift.index()
             }
         }
     }

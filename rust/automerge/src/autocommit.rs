@@ -460,7 +460,7 @@ impl AutoCommit {
         if let Some((patch_log, tx)) = self.transaction.take() {
             self.patch_log.merge(patch_log);
             let hash = tx.commit(&mut self.doc, None, None);
-            self.patch_log.finish_transaction(&self.doc.ops().actors);
+            self.patch_log.finish_transaction(self.doc.actors());
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
@@ -731,7 +731,7 @@ impl AutoCommit {
         let (patch_log, tx) = self.transaction.take().unwrap();
         self.patch_log.merge(patch_log);
         let hash = tx.commit(&mut self.doc, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        self.patch_log.finish_transaction(self.doc.actors());
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
         }
@@ -744,7 +744,7 @@ impl AutoCommit {
             .take()
             .map(|(_, tx)| {
                 let num = tx.rollback(&mut self.doc);
-                self.patch_log.finish_transaction(&self.doc.ops().actors);
+                self.patch_log.finish_transaction(self.doc.actors());
                 num
             })
             .unwrap_or(0)
@@ -768,7 +768,7 @@ impl AutoCommit {
             .begin_transaction(&self.doc, &args)
             .expect("AutoCommit's patch log always belongs to its document");
         let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
-        self.patch_log.finish_transaction(&self.doc.ops.actors);
+        self.patch_log.finish_transaction(self.doc.actors());
         result
     }
 

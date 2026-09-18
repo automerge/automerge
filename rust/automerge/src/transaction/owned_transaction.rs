@@ -91,7 +91,7 @@ impl OwnedTransaction {
     /// Rollback the transaction, returning the document and number of cancelled ops.
     pub fn rollback(mut self) -> (Automerge, usize) {
         let cancelled = self.inner.take().unwrap().rollback(&mut self.doc);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        self.patch_log.finish_transaction(self.doc.actors());
         (self.doc, cancelled)
     }
 
