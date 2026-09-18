@@ -437,6 +437,11 @@ impl PartialOrd for OpId {
     }
 }
 
+/// Compares counters first and then actor *indices*, which stands in for
+/// comparing actor ids. That is only sound because the indices point into a
+/// [`crate::actor::ActorTable`], which is kept in lexicographic order by
+/// construction; two `OpId`s from different documents (or from a document
+/// whose actor table has not been canonicalised) must not be compared.
 impl Ord for OpId {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0).then(self.1.cmp(&other.1))
