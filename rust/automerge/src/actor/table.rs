@@ -1,4 +1,5 @@
-//! The set of actors known to a document, kept in lexicographic order.
+//! The set of actors known to a document, and the tokens which witness
+//! changes to it.
 use std::ops::Deref;
 
 use crate::ActorId;
@@ -37,21 +38,15 @@ use crate::ActorId;
 /// - [`ActorTable::insert`] attempts to insert an [`ActorId`] into the table.
 ///   The return value reports whether the actor was already existing, or if it
 ///   was inserted, with the index of the actor's position in both cases.
+///   If the [`ActorId`] is newly inserted, an [`ActorShift`] token is provided
+///   to update other sets that mirror the actor's indices.
 /// - [`ActorTable::remove`] removes the [`ActorId`] found at the given index,
 ///   returning the [`ActorId`] that was in that position.
+///   An [`ActorRemoval`] token is also provided to update other sets that
+///   mirror the actor's indices.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ActorTable {
     table: Vec<ActorId>,
-}
-
-/// Result of [`ActorTable::insert`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ActorInsert {
-    /// The actor was already present at this index.
-    Existing(usize),
-    /// The actor was inserted at this index; every structure indexed by actor
-    /// must shift indices `>= idx` up by one.
-    Inserted(usize),
 }
 
 /// Returns `true` if the `table` of actors is uniquely sorted.
@@ -76,18 +71,24 @@ impl ActorTable {
         Self { table }
     }
 
-    /// The index of `actor`, if present.
+    /// Return the index of the [`ActorId`], if present.
     pub(crate) fn lookup(&self, actor: &ActorId) -> Option<usize> {
         self.table.binary_search(actor).ok()
     }
 
-    /// Insert `actor` if it is not already present, reporting where it lives.
+    /// Insert the [`ActorId`] into the table.
+    ///
+    /// [`ActorInsert`] reports whether the [`ActorId`] already existed, and the
+    /// index of where it lives in the table.
+    ///
+    /// If the insertion was new, the [`ActorShift`] token must be used in other
+    /// actor-ordered tables.
     pub(crate) fn insert(&mut self, actor: ActorId) -> ActorInsert {
         match self.table.binary_search(&actor) {
             Ok(idx) => ActorInsert::Existing(idx),
             Err(idx) => {
                 self.table.insert(idx, actor);
-                ActorInsert::Inserted(idx)
+                ActorInsert::Inserted(ActorShift(idx))
             }
         }
     }
@@ -98,8 +99,8 @@ impl ActorTable {
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
-    pub(crate) fn remove(&mut self, idx: usize) -> ActorId {
-        self.table.remove(idx)
+    pub(crate) fn remove(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
+        (self.table.remove(idx), ActorRemoval(idx))
     }
 }
 
@@ -108,6 +109,90 @@ impl Deref for ActorTable {
 
     fn deref(&self) -> &[ActorId] {
         &self.table
+    }
+}
+
+/// Result of [`ActorTable::insert`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActorInsert {
+    /// The actor was already present at this index.
+    Existing(usize),
+    /// The actor was inserted; every structure indexed by actor must apply
+    /// the shift.
+    Inserted(ActorShift),
+}
+
+impl ActorInsert {
+    #[cfg(test)]
+    pub(crate) fn index(&self) -> usize {
+        match self {
+            Self::Existing(idx) => *idx,
+            Self::Inserted(shift) => shift.index(),
+        }
+    }
+}
+
+/// Evidence that an actor was inserted into an [`ActorTable`] at
+/// [`Self::index`], obtainable only from [`ActorTable::insert`].
+///
+/// Every structure which stores actor indices must be told about the
+/// insertion so it can move indices `>= index` up by one; taking this token
+/// as the argument ties those updates to a real table mutation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ActorShift(usize);
+
+impl ActorShift {
+    /// Fabricate a shift for tests which model an actor-indexed structure in
+    /// isolation from an actual table.
+    #[cfg(test)]
+    pub(crate) fn for_test(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Return the inner index value.
+    pub(crate) fn index(&self) -> usize {
+        self.0
+    }
+
+    /// Map an actor index stored before the insertion to its new value.
+    pub(crate) fn apply(&self, idx: usize) -> usize {
+        if idx >= self.0 {
+            idx + 1
+        } else {
+            idx
+        }
+    }
+}
+
+/// Evidence that the actor at [`Self::index`] was removed from an
+/// [`ActorTable`], obtainable only from [`ActorTable::remove`].
+///
+/// Every structure which stores actor indices must be told so it can drop
+/// references to the removed actor and move indices `> index` down by one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ActorRemoval(usize);
+
+impl ActorRemoval {
+    /// Fabricate a removal for tests which model an actor-indexed structure
+    /// in isolation from an actual table.
+    #[cfg(test)]
+    pub(crate) fn for_test(index: usize) -> Self {
+        Self(index)
+    }
+
+    /// Return the inner index value.
+    pub(crate) fn index(&self) -> usize {
+        self.0
+    }
+
+    /// Map an actor index stored before the removal to its new value, or
+    /// `None` if it referred to the removed actor.
+    pub(crate) fn apply(&self, idx: usize) -> Option<usize> {
+        match idx.cmp(&self.0) {
+            std::cmp::Ordering::Greater => Some(idx - 1),
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Less => Some(idx),
+        }
     }
 }
 
@@ -129,9 +214,9 @@ mod tests {
     #[test]
     fn insert_keeps_order_and_reports_position() {
         let mut t = ActorTable::new();
-        assert_eq!(t.insert(actor(5)), ActorInsert::Inserted(0));
-        assert_eq!(t.insert(actor(1)), ActorInsert::Inserted(0));
-        assert_eq!(t.insert(actor(9)), ActorInsert::Inserted(2));
+        assert_eq!(t.insert(actor(5)).index(), 0);
+        assert_eq!(t.insert(actor(1)).index(), 0);
+        assert_eq!(t.insert(actor(9)).index(), 2);
         assert_eq!(t.insert(actor(5)), ActorInsert::Existing(1));
         assert_eq!(&*t, &[actor(1), actor(5), actor(9)]);
         assert_eq!(t.lookup(&actor(9)), Some(2));
@@ -139,9 +224,26 @@ mod tests {
     }
 
     #[test]
-    fn remove_returns_actor() {
-        let mut t = ActorTable::from_document_order(vec![actor(1), actor(2)]);
-        assert_eq!(t.remove(0), actor(1));
-        assert_eq!(&*t, &[actor(2)]);
+    fn shift_moves_indices_at_or_after_insertion() {
+        let mut t = ActorTable::from_document_order(vec![actor(1), actor(9)]);
+        let ActorInsert::Inserted(shift) = t.insert(actor(5)) else {
+            panic!("expected insertion")
+        };
+        assert_eq!(shift.index(), 1);
+        assert_eq!(shift.apply(0), 0);
+        assert_eq!(shift.apply(1), 2);
+        assert_eq!(shift.apply(5), 6);
+    }
+
+    #[test]
+    fn removal_drops_removed_and_moves_later_indices_down() {
+        let mut t = ActorTable::from_document_order(vec![actor(1), actor(5), actor(9)]);
+        let (removed, removal) = t.remove(1);
+        assert_eq!(removed, actor(5));
+        assert_eq!(&*t, &[actor(1), actor(9)]);
+        assert_eq!(removal.index(), 1);
+        assert_eq!(removal.apply(0), Some(0));
+        assert_eq!(removal.apply(1), None);
+        assert_eq!(removal.apply(2), Some(1));
     }
 }

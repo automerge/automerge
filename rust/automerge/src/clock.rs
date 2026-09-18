@@ -1,3 +1,4 @@
+use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::types::OpId;
 
 use std::num::NonZeroU32;
@@ -19,20 +20,33 @@ impl SeqClock {
         self.0.iter().copied().enumerate()
     }
 
-    pub(crate) fn remove_actor(&mut self, idx: usize) {
-        self.0.remove(idx);
+    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
+        self.0.remove(removal.index());
     }
 
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        self.0.insert(idx, None)
+    pub(crate) fn shift_actor(&mut self, shift: &ActorShift) {
+        self.0.insert(shift.index(), None)
     }
 
     pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<NonZeroU32> {
         self.0.get(*actor_index).copied().flatten()
     }
 
-    pub(crate) fn new(size: usize) -> Self {
-        Self(vec![None; size])
+    /// An empty clock with a slot for every actor in `actors`.
+    pub(crate) fn new(actors: &ActorTable) -> Self {
+        Self::with_num_actors(actors.len())
+    }
+
+    /// An empty clock with `num_actors` slots. Prefer [`Self::new`] when the
+    /// actor table is at hand; this exists for the [`crate::change_graph`]
+    /// internals which only track a count.
+    pub(crate) fn with_num_actors(num_actors: usize) -> Self {
+        Self(vec![None; num_actors])
+    }
+
+    /// An empty clock covering the same actors as `self`.
+    pub(crate) fn empty_like(&self) -> Self {
+        Self::with_num_actors(self.0.len())
     }
 
     pub(crate) fn include(&mut self, actor_idx: usize, data: Option<u32>) -> bool {

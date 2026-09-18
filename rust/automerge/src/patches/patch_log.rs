@@ -1,3 +1,4 @@
+use crate::actor::{ActorInsert, ActorTable};
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::hydrate::Value;
@@ -49,7 +50,10 @@ pub struct PatchLog {
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
     pub(crate) heads: Option<Vec<ChangeHash>>,
-    pub(crate) actors: Vec<ActorId>,
+    /// Mirror of the document's actor table at the time the logged events
+    /// were recorded; event ids are indices into it. Kept in step with the
+    /// document by [`Self::migrate_actors`].
+    pub(crate) actors: ActorTable,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
     /// so these must be removed from the patch log too (see [`PatchLog::finish_transaction`]).
@@ -234,7 +238,7 @@ impl PatchLog {
             heads: None,
             path_map: Default::default(),
             path_hint: 0,
-            actors: vec![],
+            actors: ActorTable::new(),
             speculative_actor: None,
         }
     }
@@ -289,7 +293,7 @@ impl PatchLog {
     /// lets them be safely concatenated with patches from subsequent views.
     pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
         if !self.events.is_empty() || !self.expose.is_empty() {
-            self.migrate_actors(&doc.ops.actors)
+            self.migrate_actors(doc.actors())
                 .expect("AutoCommit's patch log always belongs to its document");
             let previous_heads = self.heads.replace(heads.to_vec());
             let patches = self.make_current_patches(doc);
@@ -565,7 +569,7 @@ impl PatchLog {
     }
 
     fn remove_actor(&mut self, index: usize) {
-        self.actors.remove(index);
+        let (_actor, _removal) = self.actors.remove(index);
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
@@ -591,13 +595,13 @@ impl PatchLog {
         doc: &Automerge,
         args: &TransactionArgs,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.migrate_actors(&doc.ops.actors)?;
+        self.migrate_actors(doc.actors())?;
         // If this is the actor's first change then the actor was (potentially)
         // just added to the document. It should be removed again on
         // commit/rollback if the transaction produces no ops, so flag it as
         // speculative.
         if let Some(speculative_actor) =
-            (args.seq == 1).then(|| doc.ops.actors[args.actor_index].clone())
+            (args.seq == 1).then(|| doc.actors()[args.actor_index].clone())
         {
             assert!(
                 self.speculative_actor.is_none(),
@@ -613,16 +617,16 @@ impl PatchLog {
     /// This allows the patch log to clean up any speculative actors that were added
     /// when the transaction began. This method should be called after the transaction
     /// has been committed or rolled back.
-    pub(crate) fn finish_transaction(&mut self, doc_actors: &[ActorId]) {
+    pub(crate) fn finish_transaction(&mut self, doc_actors: &ActorTable) {
         let Some(speculative_actor) = self.speculative_actor.take() else {
             return;
         };
-        if !doc_actors.contains(&speculative_actor) {
-            if let Ok(index) = self.actors.binary_search(&speculative_actor) {
+        if doc_actors.lookup(&speculative_actor).is_none() {
+            if let Some(index) = self.actors.lookup(&speculative_actor) {
                 self.remove_actor(index);
             }
         }
-        debug_assert_eq!(self.actors.as_slice(), doc_actors);
+        debug_assert_eq!(self.actors, *doc_actors);
     }
 
     // Re-align this patch log's actor list (and the event indices into it) with the document's
@@ -633,29 +637,33 @@ impl PatchLog {
     // actors after it, so the event ids stored in the patch log have to be re-indexed to match.
     pub(crate) fn migrate_actors(
         &mut self,
-        others: &[ActorId],
+        others: &ActorTable,
     ) -> Result<(), crate::PatchLogMismatch> {
-        if self.actors.as_slice() == others {
+        if self.actors == *others {
             return Ok(());
         }
         if self.actors.is_empty() {
-            self.actors = others.to_vec();
+            self.actors = others.clone();
             return Ok(());
         }
-        for i in 0..others.len() {
-            match (self.actors.get(i), others.get(i)) {
-                (Some(a), Some(b)) if a == b => {}
-                (Some(a), Some(b)) if b < a => {
-                    self.actors.insert(i, b.clone());
-                    self.migrate_actor(i);
+        // Both tables are sorted, so the document's table must be a superset
+        // of ours: every actor we know must still be present. Insert each
+        // actor the document has and we don't, re-indexing logged events.
+        for actor in others.iter() {
+            if let ActorInsert::Inserted(shift) = self.actors.insert(actor.clone()) {
+                // Only events referring to actors at or after the insertion
+                // point need re-indexing. If the new actor lands past every
+                // existing one there is nothing to move.
+                if shift.index() + 1 != self.actors.len() {
+                    self.migrate_actor(shift.index());
                 }
-                (None, Some(b)) => {
-                    self.actors.insert(i, b.clone());
-                }
-                _ => return Err(crate::PatchLogMismatch),
             }
         }
-        Ok(())
+        if self.actors == *others {
+            Ok(())
+        } else {
+            Err(crate::PatchLogMismatch)
+        }
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
