@@ -26,7 +26,7 @@ fn commit_transaction(
     if let Some(heads) = historical_heads {
         patch_log.heads = Some(hash.map_or(heads, |hash| vec![hash]));
     }
-    patch_log.finish_transaction(&doc.ops().actors);
+    patch_log.finish_transaction(doc.actors());
     hash
 }
 

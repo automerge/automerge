@@ -5,4 +5,4 @@
 
 mod table;
 
-pub(crate) use table::{ActorInsert, ActorTable};
+pub(crate) use table::{ActorInsert, ActorRemoval, ActorShift, ActorTable};

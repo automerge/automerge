@@ -1,5 +1,5 @@
 use super::parents::Parents;
-use crate::actor::{ActorInsert, ActorTable};
+use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
@@ -1387,17 +1387,21 @@ impl OpSet {
 
     /// Ensure `actor` is in the actor table, shifting op actor indices if it
     /// had to be inserted before existing actors.
+    ///
+    /// The returned [`ActorInsert::Inserted`] token must be applied to every
+    /// other actor-indexed structure in the document.
     pub(crate) fn insert_actor(&mut self, actor: ActorId) -> ActorInsert {
         let insert = self.actors.insert(actor);
-        if let ActorInsert::Inserted(idx) = insert {
-            if idx + 1 != self.actors.len() {
-                self.rewrite_with_new_actor(idx)
+        if let ActorInsert::Inserted(shift) = &insert {
+            if shift.index() + 1 != self.actors.len() {
+                self.shift_actors(shift)
             }
         }
         insert
     }
 
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+    fn shift_actors(&mut self, shift: &ActorShift) {
+        let idx = shift.index();
         self.cols.rewrite_with_new_actor(idx);
         self.cols.index.mark.rewrite_with_new_actor(idx);
         self.obj_info = ObjIndex(
@@ -1409,8 +1413,13 @@ impl OpSet {
         );
     }
 
-    pub(crate) fn remove_actor(&mut self, idx: usize) {
-        self.actors.remove(idx);
+    /// Remove the actor at `idx` from the actor table and drop every op
+    /// reference to it.
+    ///
+    /// The returned token must be applied to every other actor-indexed
+    /// structure in the document.
+    pub(crate) fn remove_actor(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
+        let (actor, removal) = self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
         self.obj_info = ObjIndex(
             self.obj_info
@@ -1419,6 +1428,7 @@ impl OpSet {
                 .filter_map(|(id, make)| Some((id.without_actor(idx)?, make.without_actor(idx)?)))
                 .collect(),
         );
+        (actor, removal)
     }
 }
 

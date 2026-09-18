@@ -328,7 +328,7 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
+        let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut index = op_set.index_builder();
 
@@ -368,7 +368,7 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Vec<Change>, ReconstructError> {
         let op_set = OpSet::load(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
+        let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut mark_order = MarkOrderValidator::default();
         let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
