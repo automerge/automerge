@@ -98,7 +98,7 @@ impl Transaction<'_> {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(mut self) -> usize {
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        self.patch_log.finish_transaction(self.doc.actors());
         self.inner.take().unwrap().rollback(self.doc)
     }
 
