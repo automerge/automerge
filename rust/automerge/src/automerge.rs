@@ -300,7 +300,7 @@ impl Automerge {
         Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(&ops.actors),
-            authors: Authors::with_actors(ops.actors.len()),
+            authors: Authors::new(&ops.actors),
             ops,
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),

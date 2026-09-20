@@ -344,7 +344,7 @@ impl<'a> Document<'a> {
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
-        let mut authors = Authors::with_actors(change_cols.len());
+        let mut authors = Authors::new(&op_set.actors);
         let change_graph = change_cols.finalize(&changes.changes, &mut authors);
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
