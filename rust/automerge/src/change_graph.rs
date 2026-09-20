@@ -7,7 +7,7 @@ use std::ops::RangeBounds;
 
 #[cfg(test)]
 use crate::actor::ActorInsert;
-use crate::actor::{ActorRemoval, ActorShift, ActorTable};
+use crate::actor::{ActorIndexed, ActorRemoval, ActorShift, ActorTable};
 use crate::storage::BundleMetadata;
 use crate::{
     author::Authors,
@@ -27,7 +27,7 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
@@ -44,7 +44,8 @@ pub(crate) struct ChangeGraph {
     heads: BTreeSet<ChangeHash>,
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
     clock_cache: HashMap<NodeIdx, SeqClock>,
-    seq_index: Vec<Vec<NodeIdx>>,
+    /// Each actor's changes, in `seq` order.
+    seq_index: ActorIndexed<Vec<NodeIdx>>,
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
 }
@@ -87,10 +88,6 @@ struct Edge {
 impl ChangeGraph {
     /// An empty graph tracking the actors in `actors`.
     pub(crate) fn new(actors: &ActorTable) -> Self {
-        Self::with_num_actors(actors.len())
-    }
-
-    fn with_num_actors(num_actors: usize) -> Self {
         Self {
             edges: Vec::new(),
             nodes_by_hash: HashMap::new(),
@@ -107,9 +104,9 @@ impl ChangeGraph {
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
-            seq_index: vec![vec![]; num_actors],
+            seq_index: ActorIndexed::new(actors),
             fragments: vec![],
-            fragment_top: SeqClock::with_num_actors(num_actors),
+            fragment_top: SeqClock::new(actors),
         }
     }
 
@@ -167,7 +164,7 @@ impl ChangeGraph {
             f.clock.shift_actor(shift)
         }
         self.fragment_top.shift_actor(shift);
-        self.seq_index.insert(idx, vec![]);
+        self.seq_index.insert(shift, vec![]);
     }
 
     /// Forget an actor just removed from the document's actor table. The
@@ -182,7 +179,7 @@ impl ChangeGraph {
         }
         if self.seq_index.get(idx).is_some() {
             assert!(self.seq_index[idx].is_empty());
-            self.seq_index.remove(idx);
+            self.seq_index.remove(removal);
         }
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(removal)
@@ -575,7 +572,7 @@ impl ChangeGraph {
 
             assert!(actor < self.seq_index.len());
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
-            self.seq_index[actor].push(node_idx);
+            self.seq_index.as_mut_slice()[actor].push(node_idx);
 
             for parent_hash in change.deps().iter() {
                 self.add_parent(node_idx, parent_hash);
@@ -802,15 +799,13 @@ impl ChangeGraph {
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes.collect())
-            .iter()
-            .map(|(actor, seq)| {
+            .map_to_clock(|actor, seq| {
                 self.seq_index
                     .get(actor)
-                    .and_then(|v| v.get(seq?.get() as usize - 1))
+                    .and_then(|v| v.get(seq.get() as usize - 1))
                     .and_then(|i| self.max_ops.get(i.0 as usize))
                     .copied()
             })
-            .collect()
     }
 
     pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
@@ -983,10 +978,10 @@ impl ChangeGraphCols {
             return Err(LoadError::InvalidColumnLength(MESSAGE_COL_SPEC));
         }
 
-        let mut seq_index = vec![vec![]; num_actors];
+        let mut seq_index: ActorIndexed<Vec<NodeIdx>> = ActorIndexed::new(actor_table);
         for (i, actor) in actors.iter().enumerate() {
             let actor = actor.0 as usize;
-            seq_index[actor].push(NodeIdx(i as u32));
+            seq_index.as_mut_slice()[actor].push(NodeIdx(i as u32));
         }
 
         let mut parents = Vec::with_capacity(len);
@@ -1168,7 +1163,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut authors = Authors::default();
+            let mut authors = Authors::new(&self.actors);
             let osd = OpSet::from_actors(self.actors.to_vec(), TextEncoding::platform_default());
 
             let start_op = parents
@@ -1225,7 +1220,7 @@ mod tests {
         }
 
         fn build(&self) -> ChangeGraph {
-            let mut authors = Authors::with_actors(self.actors.len());
+            let mut authors = Authors::new(&self.actors);
             let mut graph = ChangeGraph::new(&self.actors);
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());

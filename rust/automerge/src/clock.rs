@@ -1,31 +1,29 @@
-use crate::actor::{ActorRemoval, ActorShift, ActorTable};
+use crate::actor::{ActorIndexed, ActorRemoval, ActorShift, ActorTable};
 use crate::types::OpId;
 
 use std::num::NonZeroU32;
 
 /// A [`Clock`] is a vector clock for a set of actors.
 ///
-/// Each index of the vector represents that actors counter.
+/// Each slot holds the greatest op counter seen for that actor.
 ///
 /// For example, given an [`OpId`], one can use [`OpId::actor`] to find the
 /// currently stored counter of the actor in the [`Clock`].
-#[derive(Default, Debug, Clone, PartialEq)]
-pub(crate) struct Clock(pub(crate) Vec<u32>);
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Clock(ActorIndexed<u32>);
 
-#[derive(Default, Debug, Clone, PartialEq)]
-pub(crate) struct SeqClock(pub(crate) Vec<Option<NonZeroU32>>);
+/// A vector clock over change *sequence numbers*: each slot holds the
+/// greatest `seq` seen for that actor, or `None` if none has.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SeqClock(ActorIndexed<Option<NonZeroU32>>);
 
 impl SeqClock {
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, Option<NonZeroU32>)> + '_ {
-        self.0.iter().copied().enumerate()
-    }
-
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
-        self.0.remove(removal.index());
+        self.0.remove(removal);
     }
 
     pub(crate) fn shift_actor(&mut self, shift: &ActorShift) {
-        self.0.insert(shift.index(), None)
+        self.0.insert(shift, None)
     }
 
     pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<NonZeroU32> {
@@ -34,30 +32,35 @@ impl SeqClock {
 
     /// An empty clock with a slot for every actor in `actors`.
     pub(crate) fn new(actors: &ActorTable) -> Self {
-        Self::with_num_actors(actors.len())
-    }
-
-    /// An empty clock with `num_actors` slots. Prefer [`Self::new`] when the
-    /// actor table is at hand; this exists for the [`crate::change_graph`]
-    /// internals which only track a count.
-    pub(crate) fn with_num_actors(num_actors: usize) -> Self {
-        Self(vec![None; num_actors])
+        Self(ActorIndexed::new(actors))
     }
 
     /// An empty clock covering the same actors as `self`.
     pub(crate) fn empty_like(&self) -> Self {
-        Self::with_num_actors(self.0.len())
+        Self(ActorIndexed::new_like(&self.0))
+    }
+
+    /// Derive a [`Clock`] over the same actors, mapping each actor's `seq`
+    /// to an op counter with `f`.
+    pub(crate) fn map_to_clock(
+        &self,
+        mut f: impl FnMut(usize, NonZeroU32) -> Option<u32>,
+    ) -> Clock {
+        Clock(ActorIndexed::from_slots_of(&self.0, |actor, seq| {
+            seq.and_then(|seq| f(actor, seq)).unwrap_or(0)
+        }))
     }
 
     pub(crate) fn include(&mut self, actor_idx: usize, data: Option<u32>) -> bool {
         if let Some(data) = data {
-            match self.0[actor_idx] {
+            let slots = self.0.as_mut_slice();
+            match slots[actor_idx] {
                 None => {
-                    self.0[actor_idx] = NonZeroU32::try_from(data).ok();
+                    slots[actor_idx] = NonZeroU32::try_from(data).ok();
                     true
                 }
                 Some(old_data) if old_data.get() < data => {
-                    self.0[actor_idx] = NonZeroU32::try_from(data).ok();
+                    slots[actor_idx] = NonZeroU32::try_from(data).ok();
                     true
                 }
                 _ => false,
@@ -68,7 +71,7 @@ impl SeqClock {
     }
 
     pub(crate) fn merge(a: &mut Self, b: &Self) {
-        for (a, b) in std::iter::zip(a.0.iter_mut(), b.0.iter()) {
+        for (a, b) in std::iter::zip(a.0.as_mut_slice().iter_mut(), b.0.iter()) {
             if *a < *b {
                 *a = *b;
             }
@@ -166,13 +169,16 @@ impl Clock {
     /// If the `actor` index is out of bounds of the internal vector.
     #[inline]
     fn set_counter_of(&mut self, actor: usize, counter: u32) {
-        self.0[actor] = counter;
+        self.0.as_mut_slice()[actor] = counter;
     }
-}
 
-impl std::iter::FromIterator<Option<u32>> for Clock {
-    fn from_iter<I: IntoIterator<Item = Option<u32>>>(iter: I) -> Self {
-        Clock(iter.into_iter().map(|i| i.unwrap_or(0)).collect())
+    /// A clock from explicit per-actor counters, for tests which model the
+    /// actor table implicitly.
+    #[cfg(test)]
+    pub(crate) fn from_counters(counters: impl IntoIterator<Item = Option<u32>>) -> Self {
+        Clock(ActorIndexed::from_slots_for_test(
+            counters.into_iter().map(|c| c.unwrap_or(0)).collect(),
+        ))
     }
 }
 
@@ -183,12 +189,12 @@ mod tests {
 
     impl Clock {
         pub(crate) fn new(size: usize) -> Self {
-            Self(vec![0; size])
+            Self::from_counters(std::iter::repeat_n(None, size))
         }
 
         pub(crate) fn include(&mut self, actor_idx: usize, data: u32) -> bool {
             if data > self.0[actor_idx] {
-                self.0[actor_idx] = data;
+                self.0.as_mut_slice()[actor_idx] = data;
                 true
             } else {
                 false

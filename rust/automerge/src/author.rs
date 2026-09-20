@@ -2,7 +2,7 @@ use core::fmt;
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use crate::actor::{ActorRemoval, ActorShift};
+use crate::actor::{ActorIndexed, ActorRemoval, ActorShift, ActorTable};
 use crate::error;
 
 /// [`Authors`] records change authorship in an Automerge document.
@@ -18,7 +18,7 @@ use crate::error;
 ///
 /// [`Authors`] will also keep track of the current [`Author`] that is acting on
 /// the document, if set.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct Authors {
     /// Previously recorded [`Author`]s.
     ///
@@ -38,17 +38,28 @@ pub(crate) struct Authors {
     ///
     /// Each index of the `Vec` is the same as the index into an actors set, and
     /// the entry at the index corresponds to an entry in [`Authors::authors`].
-    actor_to_author: Vec<Option<AuthorIdx>>,
+    actor_to_author: ActorIndexed<Option<AuthorIdx>>,
 }
 
 impl Authors {
-    /// Initialize the [`Authors`] set with a known size of actors, setting all
-    /// mapping entries to `None`.
+    /// Initialize the [`Authors`] set for the actors in `actors`, with no
+    /// author assigned to any of them.
+    pub(crate) fn new(actors: &ActorTable) -> Self {
+        Self {
+            authors: Vec::default(),
+            current: None,
+            actor_to_author: ActorIndexed::new(actors),
+        }
+    }
+
+    /// An [`Authors`] for `actors` unnamed actors, for tests which model the
+    /// actor table implicitly.
+    #[cfg(test)]
     pub(crate) fn with_actors(actors: usize) -> Self {
         Self {
             authors: Vec::default(),
             current: None,
-            actor_to_author: vec![None; actors],
+            actor_to_author: ActorIndexed::from_slots_for_test(vec![None; actors]),
         }
     }
 
@@ -88,13 +99,13 @@ impl Authors {
     /// Assign the given `actor` to the given `author`.
     pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
         let author_id = self.put_author(author);
-        self.actor_to_author[actor] = Some(author_id);
+        self.actor_to_author.as_mut_slice()[actor] = Some(author_id);
     }
 
     /// Make room for an actor just inserted into the document's actor table,
     /// with no author assigned.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
-        self.actor_to_author.insert(shift.index(), None);
+        self.actor_to_author.insert(shift, None);
     }
 
     /// Forget an actor just removed from the document's actor table.
@@ -103,7 +114,7 @@ impl Authors {
     /// once the final actor has been removed. In reality, actors are only
     /// removed as part of rollback semantics, so that should never happen.
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
-        self.actor_to_author.remove(removal.index());
+        self.actor_to_author.remove(removal);
     }
 
     /// [`Author`] is inserted into the set of authors, and the [`Author`] is
@@ -115,7 +126,7 @@ impl Authors {
         match self.authors.binary_search(&author) {
             Err(index) => {
                 self.authors.insert(index, author);
-                for a in self.actor_to_author.iter_mut().flatten() {
+                for a in self.actor_to_author.as_mut_slice().iter_mut().flatten() {
                     a.with_new_author(index)
                 }
                 if let Some(a) = self.current.as_mut() {
