@@ -2015,7 +2015,7 @@ mod tests {
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
-            let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
+            let clock = Clock::from_counters([None, Some(9), Some(9)]);
             let ops = opset
                 .top_ops(&ObjId(OpId::new(1, 1)), Some(clock.clone()))
                 .collect::<Vec<_>>();
