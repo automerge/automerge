@@ -7,7 +7,7 @@ use std::ops::RangeBounds;
 
 #[cfg(test)]
 use crate::actor::ActorInsert;
-use crate::actor::{ActorIndexed, ActorRemoval, ActorShift, ActorTable};
+use crate::actor::{ActorIndexed, ActorRefs, ActorRemoval, ActorShift, ActorTable};
 use crate::storage::BundleMetadata;
 use crate::{
     author::Authors,
@@ -31,7 +31,8 @@ use crate::{
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
-    actors: Vec<ActorIdx>,
+    /// Each change's actor, indexed by change.
+    actors: ActorRefs<Vec<ActorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
     max_ops: Vec<u32>,
@@ -92,7 +93,7 @@ impl ChangeGraph {
             edges: Vec::new(),
             nodes_by_hash: HashMap::new(),
             hashes: Vec::new(),
-            actors: Vec::new(),
+            actors: ActorRefs::default(),
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: hexane::Column::new(),
@@ -151,12 +152,7 @@ impl ChangeGraph {
 
     /// Make room for an actor just inserted into the document's actor table.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
-        let idx = shift.index();
-        if self.seq_index.len() != idx {
-            for actor_index in &mut self.actors {
-                actor_index.0 = shift.apply(actor_index.0 as usize) as u32;
-            }
-        }
+        self.actors.shift_actors(shift);
         for clock in self.clock_cache.values_mut() {
             clock.shift_actor(shift)
         }
@@ -171,12 +167,9 @@ impl ChangeGraph {
     /// actor must have no changes in the graph.
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
         let idx = removal.index();
-        for actor_index in &mut self.actors {
-            actor_index.0 = removal
-                .apply(actor_index.0 as usize)
-                .expect("removed actor still has changes in the graph")
-                as u32;
-        }
+        self.actors
+            .remove_actor(removal)
+            .expect("removed actor still has changes in the graph");
         if self.seq_index.get(idx).is_some() {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(removal);
@@ -945,7 +938,8 @@ impl ChangeGraphCols {
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
-        let actors: Vec<ActorIdx> = hexane::decoder::<ActorIdx>(actor_bytes).collect();
+        let actors: ActorRefs<Vec<ActorIdx>> =
+            ActorRefs(hexane::decoder::<ActorIdx>(actor_bytes).collect());
         let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::new(max_op_bytes).collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
         let seq: Vec<u32> = hexane::DeltaDecoder::<u32>::new(seq_bytes).collect();
