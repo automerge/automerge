@@ -1,4 +1,4 @@
-use crate::actor::{ActorInsert, ActorTable};
+use crate::actor::{ActorInsert, ActorRefs, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::hydrate::Value;
@@ -43,8 +43,8 @@ use super::PatchBuilder;
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
-    expose: HashSet<OpId>,
+    events: ActorRefs<Vec<(ObjId, Event)>>,
+    expose: ActorRefs<HashSet<OpId>>,
     completed_patches: Vec<Patch>,
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
@@ -114,61 +114,11 @@ pub(crate) enum Event {
 }
 
 impl Event {
-    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
-        match self {
-            Self::PutMap {
-                key,
-                value,
-                id,
-                conflict,
-            } => Self::PutMap {
-                key,
-                value,
-                id: id.with_new_actor(idx),
-                conflict,
-            },
-            Self::PutSeq {
-                index,
-                value,
-                id,
-                conflict,
-            } => Self::PutSeq {
-                index,
-                value,
-                id: id.with_new_actor(idx),
-                conflict,
-            },
-            Self::Insert {
-                index,
-                value,
-                id,
-                conflict,
-            } => Self::Insert {
-                index,
-                value,
-                id: id.with_new_actor(idx),
-                conflict,
-            },
-            Self::IncrementMap { key, n, id } => Self::IncrementMap {
-                key,
-                n,
-                id: id.with_new_actor(idx),
-            },
-            Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
-                index,
-                n,
-                id: id.with_new_actor(idx),
-            },
-            event => event,
-        }
-    }
-
-    // Re-index this event after the actor at `idx` has been removed from the actor list.
-    //
-    // This may only be called for actors which are not referenced by the event (e.g. an actor
-    // which was speculatively added when opening a transaction but ended up making no ops). If the
-    // event _does_ reference the removed actor this returns `None`.
-    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+    /// Re-index the op id this event refers to, if it has one. Events which
+    /// carry no op id are returned unchanged.
+    ///
+    /// If the callback `f` returns `None`, then the return value is also `None`.
+    fn map_id(self, f: impl FnOnce(OpId) -> Option<OpId>) -> Option<Self> {
         Some(match self {
             Self::PutMap {
                 key,
@@ -178,7 +128,7 @@ impl Event {
             } => Self::PutMap {
                 key,
                 value,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
                 conflict,
             },
             Self::PutSeq {
@@ -189,7 +139,7 @@ impl Event {
             } => Self::PutSeq {
                 index,
                 value,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
                 conflict,
             },
             Self::Insert {
@@ -200,21 +150,31 @@ impl Event {
             } => Self::Insert {
                 index,
                 value,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
                 conflict,
             },
-            Self::IncrementMap { key, n, id } => Self::IncrementMap {
-                key,
-                n,
-                id: id.without_actor(idx)?,
-            },
+            Self::IncrementMap { key, n, id } => Self::IncrementMap { key, n, id: f(id)? },
             Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
                 index,
                 n,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
             },
             event => event,
         })
+    }
+}
+
+impl HasActorIndices for Event {
+    fn shifted(self, shift: &ActorShift) -> Self {
+        self.map_id(|id| Some(id.shifted(shift)))
+            .expect("shifting never drops an event")
+    }
+
+    // This may only be called for actors which are not referenced by the event (e.g. an actor
+    // which was speculatively added when opening a transaction but ended up making no ops). If the
+    // event _does_ reference the removed actor this returns `None`.
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
+        self.map_id(|id| id.removed(removal))
     }
 }
 
@@ -232,8 +192,8 @@ impl PatchLog {
     pub fn new(active: bool) -> Self {
         PatchLog {
             active,
-            events: Vec::new(),
-            expose: HashSet::new(),
+            events: ActorRefs::default(),
+            expose: ActorRefs::default(),
             completed_patches: Vec::new(),
             heads: None,
             path_map: Default::default(),
@@ -520,7 +480,7 @@ impl PatchLog {
             .sort_by(|(obj_a, _), (obj_b, _)| obj_a.cmp(obj_b));
         let mut expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
-        for (obj, event) in &self.events {
+        for (obj, event) in self.events.iter() {
             let key = doc.id_to_exid(obj.0);
             expose.pump_queue(&key, &mut patch_builder, doc, clock.as_ref());
             if expose.should_skip(&key) {
@@ -544,8 +504,8 @@ impl PatchLog {
     pub(crate) fn branch(&mut self) -> Self {
         Self {
             active: self.active,
-            events: Vec::new(),
-            expose: HashSet::new(),
+            events: ActorRefs::default(),
+            expose: ActorRefs::default(),
             completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
@@ -555,33 +515,22 @@ impl PatchLog {
         }
     }
 
-    pub(crate) fn migrate_actor(&mut self, index: usize) {
-        let dirty = std::mem::take(&mut self.events);
-        self.events = dirty
-            .into_iter()
-            .map(|(obj, event)| (obj.with_new_actor(index), event.with_new_actor(index)))
-            .collect();
-        let dirty = std::mem::take(&mut self.expose);
-        self.expose = dirty
-            .into_iter()
-            .map(|id| id.with_new_actor(index))
-            .collect();
+    fn shift_actors(&mut self, shift: &ActorShift) {
+        self.events.shift_actors(shift);
+        self.expose.shift_actors(shift);
     }
 
+    /// Forget the actor at `index`, which must not be referenced by any
+    /// logged event (it was speculatively added for a transaction which
+    /// produced no ops).
     fn remove_actor(&mut self, index: usize) {
-        let (_actor, _removal) = self.actors.remove(index);
-        let dirty = std::mem::take(&mut self.events);
-        self.events = dirty
-            .into_iter()
-            .filter_map(|(obj, event)| {
-                Some((obj.without_actor(index)?, event.without_actor(index)?))
-            })
-            .collect();
-        let dirty = std::mem::take(&mut self.expose);
-        self.expose = dirty
-            .into_iter()
-            .filter_map(|id| id.without_actor(index))
-            .collect();
+        let (_actor, removal) = self.actors.remove(index);
+        self.events
+            .remove_actor(&removal)
+            .expect("removed actor is still referenced by a logged event");
+        self.expose
+            .remove_actor(&removal)
+            .expect("removed actor is still referenced by an exposed op");
     }
 
     /// Notify the patch log that we are beginning a new transaction
@@ -655,7 +604,7 @@ impl PatchLog {
                 // point need re-indexing. If the new actor lands past every
                 // existing one there is nothing to move.
                 if shift.index() + 1 != self.actors.len() {
-                    self.migrate_actor(shift.index());
+                    self.shift_actors(&shift);
                 }
             }
         }
@@ -668,8 +617,8 @@ impl PatchLog {
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.completed_patches.extend(other.completed_patches);
-        self.events.extend(other.events);
-        self.expose.extend(other.expose);
+        self.events.extend(other.events.0);
+        self.expose.extend(other.expose.0);
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {

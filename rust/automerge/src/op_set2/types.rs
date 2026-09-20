@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::actor::{ActorRemoval, ActorShift, HasActorIndices, NoActorIndices};
 use crate::author::Author;
 use crate::error::AutomergeError;
 use crate::types;
@@ -26,6 +27,16 @@ impl fmt::Display for ActorIdx {
 impl From<usize> for ActorIdx {
     fn from(val: usize) -> Self {
         ActorIdx(val as u32)
+    }
+}
+
+impl HasActorIndices for ActorIdx {
+    fn shifted(self, shift: &ActorShift) -> Self {
+        usize::from(self).shifted(shift).into()
+    }
+
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
+        usize::from(self).removed(removal).map(Self::from)
     }
 }
 
@@ -58,6 +69,8 @@ pub(crate) struct MarkData<'a> {
     pub(crate) name: Cow<'a, str>,
     pub(crate) value: ScalarValue<'a>,
 }
+
+impl NoActorIndices for MarkData<'_> {}
 
 /// The description of an [`Action`] in an Automerge operation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]

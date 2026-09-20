@@ -14,7 +14,7 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
-use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
+use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
 use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -54,7 +54,7 @@ impl Actor {
     /// was this actor, fall back to holding the id directly.
     fn remove_actor(&mut self, removal: &ActorRemoval, removed: ActorId) {
         if let Actor::Cached(idx) = self {
-            match removal.apply(*idx) {
+            match idx.removed(removal) {
                 Some(new_idx) => *idx = new_idx,
                 None => *self = Actor::Unused(removed),
             }
@@ -63,7 +63,7 @@ impl Actor {
 
     fn shift(&mut self, shift: &ActorShift) {
         if let Actor::Cached(idx) = self {
-            *idx = shift.apply(*idx);
+            *idx = idx.shifted(shift);
         }
     }
 }
