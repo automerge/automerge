@@ -155,7 +155,7 @@ impl ActorShift {
     }
 
     /// Map an actor index stored before the insertion to its new value.
-    pub(crate) fn apply(&self, idx: usize) -> usize {
+    pub(super) fn apply(&self, idx: usize) -> usize {
         if idx >= self.0 {
             idx + 1
         } else {
@@ -187,7 +187,7 @@ impl ActorRemoval {
 
     /// Map an actor index stored before the removal to its new value, or
     /// `None` if it referred to the removed actor.
-    pub(crate) fn apply(&self, idx: usize) -> Option<usize> {
+    pub(super) fn apply(&self, idx: usize) -> Option<usize> {
         match idx.cmp(&self.0) {
             std::cmp::Ordering::Greater => Some(idx - 1),
             std::cmp::Ordering::Equal => None,

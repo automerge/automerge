@@ -1,3 +1,4 @@
+use crate::actor::{ActorRemoval, ActorShift, HasActorIndices};
 use crate::error;
 use crate::error::AutomergeError;
 use crate::legacy as amp;
@@ -448,23 +449,17 @@ impl Ord for OpId {
     }
 }
 
+impl HasActorIndices for OpId {
+    fn shifted(self, shift: &ActorShift) -> Self {
+        OpId(self.0, self.actor().shifted(shift) as u32)
+    }
+
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
+        Some(OpId(self.0, self.actor().removed(removal)? as u32))
+    }
+}
+
 impl OpId {
-    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
-        if self.actor() >= idx {
-            OpId(self.0, self.1 + 1)
-        } else {
-            self
-        }
-    }
-
-    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
-        match self.actor().cmp(&idx) {
-            Ordering::Greater => Some(OpId(self.0, self.1 - 1)),
-            Ordering::Equal => None,
-            Ordering::Less => Some(self),
-        }
-    }
-
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
         Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
@@ -524,23 +519,26 @@ impl AsRef<OpId> for ObjId {
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub(crate) OpId);
 
-impl ObjId {
-    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+/// The root object's id carries no real actor index, so it is left alone.
+impl HasActorIndices for ObjId {
+    fn shifted(self, shift: &ActorShift) -> Self {
         if self.is_root() {
             self
         } else {
-            ObjId(self.0.with_new_actor(idx))
+            ObjId(self.0.shifted(shift))
         }
     }
 
-    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
         if self.is_root() {
             Some(self)
         } else {
-            self.0.without_actor(idx).map(ObjId)
+            self.0.removed(removal).map(ObjId)
         }
     }
+}
 
+impl ObjId {
     pub(crate) fn load(counter: Option<u64>, actor: Option<ActorIdx>) -> Option<ObjId> {
         match (counter, actor) {
             (Some(c), Some(a)) => Some(ObjId(OpId::new(c, a.into()))),

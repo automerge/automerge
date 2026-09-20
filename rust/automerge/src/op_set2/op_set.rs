@@ -1401,33 +1401,23 @@ impl OpSet {
     }
 
     fn shift_actors(&mut self, shift: &ActorShift) {
-        let idx = shift.index();
-        self.cols.rewrite_with_new_actor(idx);
-        self.cols.index.mark.rewrite_with_new_actor(idx);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .map(|(id, make)| (id.with_new_actor(idx), make.with_new_actor(idx)))
-                .collect(),
-        );
+        self.cols.rewrite_with_new_actor(shift.index());
+        self.cols.index.mark.shift(shift);
+        self.obj_info.0.shift_actors(shift);
     }
 
-    /// Remove the actor at `idx` from the actor table and drop every op
-    /// reference to it.
+    /// Remove the actor at `idx` from the actor table. The actor must have
+    /// no ops in the document.
     ///
     /// The returned token must be applied to every other actor-indexed
     /// structure in the document.
     pub(crate) fn remove_actor(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
         let (actor, removal) = self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .filter_map(|(id, make)| Some((id.without_actor(idx)?, make.without_actor(idx)?)))
-                .collect(),
-        );
+        self.obj_info
+            .0
+            .remove_actor(&removal)
+            .expect("removed actor still owns objects");
         (actor, removal)
     }
 }
