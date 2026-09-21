@@ -324,21 +324,54 @@ impl<'a> ActorMapper<'a> {
     }
 
     pub(crate) fn build_mapping(&mut self, default_actor: Option<usize>) {
-        let mut seen_index = 0;
+        let seen = std::mem::take(&mut self.seen_actors);
+        let mapping = std::mem::take(&mut self.mapping);
+        self.mapping = self.assign_chunk_indices(&seen, default_actor, mapping);
+        self.seen_actors = seen;
+    }
 
-        if let Some(actor) = default_actor {
-            self.seen_actors[actor] = false;
-            self.mapping[actor] = Some(ActorIdx(0));
-            seen_index = 1;
+    /// Assign chunk-local actor indices for one change.
+    ///
+    /// The change's own actor, if any, gets index 0. Every other actor marked
+    /// in `seen` is recorded in `other_actors` and numbered from 1 in
+    /// **lexicographic order of actor id**, because that is the order the
+    /// canonical change chunk encoding lists them in. When the document's
+    /// actor table is itself sorted this coincides with table-index order, but
+    /// documents written by older Javascript clients can carry unsorted tables,
+    /// and sorting here keeps reconstructed change hashes identical to the ones
+    /// computed by the implementation which wrote the document.
+    ///
+    /// `mapping` is reused as the output buffer and it is resized to the table.
+    pub(super) fn assign_chunk_indices(
+        &mut self,
+        seen: &[bool],
+        own_actor: Option<usize>,
+        mut mapping: Vec<Option<ActorIdx>>,
+    ) -> Vec<Option<ActorIdx>> {
+        mapping.clear();
+        mapping.resize(seen.len(), None);
+        self.other_actors.clear();
+
+        let mut next = 0;
+        if let Some(actor) = own_actor {
+            mapping[actor] = Some(ActorIdx(0));
+            next = 1;
         }
 
-        for (index, seen) in self.seen_actors.iter().enumerate() {
-            if *seen {
-                self.other_actors.push(index);
-                self.mapping[index] = Some(ActorIdx(seen_index));
-                seen_index += 1;
-            }
+        let mut others: Vec<usize> = seen
+            .iter()
+            .enumerate()
+            .filter_map(|(index, seen)| (*seen && Some(index) != own_actor).then_some(index))
+            .collect();
+        others.sort_by(|a, b| self.actors.actor(*a).cmp(self.actors.actor(*b)));
+
+        for index in others {
+            self.other_actors.push(index);
+            mapping[index] = Some(ActorIdx(next));
+            next += 1;
         }
+
+        mapping
     }
 
     fn remap_actors<C>(&mut self, ops: &[C], change_actor: usize)

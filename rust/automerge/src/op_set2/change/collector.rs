@@ -432,39 +432,16 @@ impl<'a> ProgressiveEncoder<'a> {
         }
     }
 
-    pub(crate) fn build_mapping(
-        &mut self,
-        default: usize,
-        m: &mut ActorMapper<'_>,
-    ) -> Vec<Option<ActorIdx>> {
-        m.other_actors.truncate(0);
-        let mut seen_index = 1;
-        if default >= self.actors.len() {
-            self.actors.resize(default + 1, false);
-        }
-        let mut mapping = vec![None; self.actors.len()];
-
-        self.actors[default] = false;
-        mapping[default] = Some(ActorIdx(0));
-
-        for (index, seen) in self.actors.iter().enumerate() {
-            if *seen {
-                m.other_actors.push(index);
-                mapping[index] = Some(ActorIdx(seen_index));
-                seen_index += 1;
-            }
-        }
-
-        mapping
-    }
-
     pub(crate) fn save_to(
         mut self,
         actor: usize,
         data: &mut Vec<u8>,
         mapper: &mut ActorMapper<'_>,
     ) -> ChangeOpsColumns {
-        let mapper = self.build_mapping(actor, mapper);
+        if actor >= self.actors.len() {
+            self.actors.resize(actor + 1, false);
+        }
+        let mapper = mapper.assign_chunk_indices(&self.actors, Some(actor), Vec::new());
 
         let remap_opt = |actor: Option<ActorIdx>| actor.map(|a| mapper[usize::from(a)].unwrap());
         let remap = |a: ActorIdx| mapper[usize::from(a)].unwrap();
