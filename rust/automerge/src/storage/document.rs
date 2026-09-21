@@ -4,7 +4,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
-use crate::actor::ActorList;
+use crate::actor::{ActorList, ActorTable, UnsortedActors};
 use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
@@ -327,12 +327,36 @@ impl<'a> Document<'a> {
         }
     }
 
+    /// Build an [`Automerge`] from this document chunk.
+    ///
+    /// A document's op columns index actors by their position in the stored
+    /// actor table. When that table is in canonical (sorted) order the columns
+    /// are adopted directly. Documents written by older Javascript clients may
+    /// have stored the table in first-seen order instead; their columns cannot
+    /// be adopted as-is because `OpId` ordering depends on actor index, so the
+    /// changes are reconstructed and applied to a fresh document, which
+    /// rebuilds everything in canonical order.
     pub(crate) fn reconstruct(
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
     ) -> Result<Automerge, ReconstructError> {
-        let mut op_set = OpSet::load(self, text_encoding)?;
+        match self.actors.clone().into_table() {
+            Ok(actors) => self.adopt_columns(actors, mode, text_encoding),
+            Err(UnsortedActors) => {
+                tracing::debug!("document actor table is not sorted, rebuilding from changes");
+                self.rebuild_from_changes(mode, text_encoding)
+            }
+        }
+    }
+
+    fn adopt_columns(
+        &self,
+        actors: ActorTable,
+        mode: VerificationMode,
+        text_encoding: TextEncoding,
+    ) -> Result<Automerge, ReconstructError> {
+        let mut op_set = OpSet::load_with_actors(self, actors, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut index = op_set.index_builder();
@@ -368,24 +392,59 @@ impl<'a> Document<'a> {
         }
     }
 
+    fn rebuild_from_changes(
+        &self,
+        mode: VerificationMode,
+        text_encoding: TextEncoding,
+    ) -> Result<Automerge, ReconstructError> {
+        let (collected, mark_order_error) = self.collect_changes(text_encoding)?;
+        self.verify_changes(&collected, mode)?;
+
+        let mut doc = Automerge::new_with_encoding(text_encoding);
+        doc.apply_changes(collected.changes)
+            .map_err(|e| ReconstructError::ApplyChanges(Box::new(e)))?;
+
+        match mark_order_error {
+            Some(err) => Err(ReconstructError::InvalidMarkOrderDoc {
+                doc: Box::new(doc),
+                error_message: err,
+            }),
+            None => Ok(doc),
+        }
+    }
+
     pub(crate) fn reconstruct_changes(
         &self,
         text_encoding: TextEncoding,
     ) -> Result<Vec<Change>, ReconstructError> {
-        let op_set = OpSet::load(self, text_encoding)?;
+        let (collected, mark_order_error) = self.collect_changes(text_encoding)?;
+        match mark_order_error {
+            Some(err) => Err(ReconstructError::InvalidMarkOrderChanges {
+                changes: collected.changes,
+                error_message: err,
+            }),
+            None => Ok(collected.changes),
+        }
+    }
+
+    /// Reconstruct the document's changes without adopting its op columns.
+    ///
+    /// This works for any actor table order, sorted or not, because change
+    /// reconstruction only needs actor indices to be consistent with the
+    /// stored columns. Any mark order violation is returned alongside the
+    /// changes rather than as an error so callers can decide how to treat it.
+    fn collect_changes(
+        &self,
+        text_encoding: TextEncoding,
+    ) -> Result<(CollectedChanges, Option<String>), ReconstructError> {
+        let op_set = OpSet::load_for_reconstruction(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut mark_order = MarkOrderValidator::default();
         let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
         change_collector.process_ops(&op_set, &mut mark_order)?;
-        let changes = change_collector.collect(&op_set)?.changes;
-        if let Some(err) = mark_order.take_error() {
-            return Err(ReconstructError::InvalidMarkOrderChanges {
-                changes,
-                error_message: err,
-            });
-        }
-        Ok(changes)
+        let collected = change_collector.collect(&op_set)?;
+        Ok((collected, mark_order.take_error()))
     }
 }
 
@@ -396,6 +455,8 @@ pub(crate) enum ReconstructError {
     //OpsOutOfOrder,
     #[error("invalid changes: {0}")]
     InvalidChanges(#[from] crate::storage::load::change_collector::Error),
+    #[error("error applying reconstructed changes: {0}")]
+    ApplyChanges(Box<crate::AutomergeError>),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
     // FIXME - i need to do this check

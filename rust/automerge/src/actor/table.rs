@@ -22,8 +22,11 @@ use crate::{op_set2::ActorIdx, ActorId};
 /// # Construction
 ///
 /// - [`ActorTable::new`] creates a new, empty table.
-/// - A table is populated through [`ActorTable::insert`]; there is no bulk
-///   constructor from an arbitrary list, which is what keeps it sorted.
+/// - [`ActorTable::from_sorted`] creates a table from a vector of actors. If
+///   the actors are not unique and sorted an [`UnsortedActors`] error is
+///   returned. A chunk's stored list is promoted through
+///   [`ActorList::into_table`](super::ActorList::into_table), which is this
+///   check by another name.
 ///
 /// # Lookup
 ///
@@ -44,6 +47,11 @@ use crate::{op_set2::ActorIdx, ActorId};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ActorTable {
     table: Vec<ActorId>,
+}
+
+/// Returns `true` if the `table` of actors is uniquely sorted.
+fn is_uniquely_sorted(table: &[ActorId]) -> bool {
+    table.windows(2).all(|w| w[0] < w[1])
 }
 
 impl ActorTable {
@@ -87,6 +95,19 @@ impl ActorTable {
     /// Return the underlying [`Vec`] of actors.
     pub(crate) fn to_vec(&self) -> Vec<ActorId> {
         self.table.clone()
+    }
+
+    /// Adopt an actor list which is already in strictly increasing order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnsortedActors`] if `table` was not in lexicographic order.
+    pub(crate) fn from_sorted(table: Vec<ActorId>) -> Result<Self, UnsortedActors> {
+        if is_uniquely_sorted(&table) {
+            Ok(Self { table })
+        } else {
+            Err(UnsortedActors)
+        }
     }
 
     /// Adopt an actor list in whatever order it is in, for a reconstruction-
@@ -234,12 +255,46 @@ impl ActorRemoval {
     }
 }
 
+/// The actor IDs passed to [`ActorTable::from_sorted`] were not in strictly
+/// increasing order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("actor table is not sorted")]
+pub(crate) struct UnsortedActors;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn actor(b: u8) -> ActorId {
         ActorId::from(&[b; 4][..])
+    }
+
+    #[test]
+    fn from_sorted_accepts_strictly_increasing() {
+        let t = ActorTable::from_sorted(vec![actor(1), actor(2), actor(3)]).unwrap();
+        assert_eq!(t.len(), 3);
+        assert_eq!(t.lookup(&actor(2)), Some(1));
+    }
+
+    #[test]
+    fn from_sorted_accepts_empty() {
+        assert!(ActorTable::from_sorted(vec![]).is_ok());
+    }
+
+    #[test]
+    fn from_sorted_rejects_unsorted() {
+        assert_eq!(
+            ActorTable::from_sorted(vec![actor(2), actor(1)]),
+            Err(UnsortedActors)
+        );
+    }
+
+    #[test]
+    fn from_sorted_rejects_duplicates() {
+        assert_eq!(
+            ActorTable::from_sorted(vec![actor(1), actor(1)]),
+            Err(UnsortedActors)
+        );
     }
 
     #[test]

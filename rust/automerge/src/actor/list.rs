@@ -1,7 +1,7 @@
 //! A chunk's actor list as stored, before its order has been checked.
 use crate::{op_set2::ActorIdx, ActorId};
 
-use super::table::ActorTable;
+use super::table::{ActorTable, UnsortedActors};
 
 /// The actor list carried by a stored chunk (a document, a bundle), in the
 /// order the writer stored it.
@@ -13,10 +13,10 @@ use super::table::ActorTable;
 /// actors in first-seen order, and a bundle from any other client need not be
 /// sorted either.
 ///
-/// Reconstructing a chunk's changes only needs the positions to be
-/// consistent, so that path works from an [`ActorList`] directly. Anything
-/// which relies on the order - a live [`ActorTable`], `OpId` comparison,
-/// actor lookup - needs that order to be sorted.
+/// Reconstructing a chunk's changes only needs the positions to be consistent,
+/// so that path works from an [`ActorList`] directly. Anything which relies on
+/// the order - a live [`ActorTable`], `OpId` comparison, actor lookup - must
+/// first go through [`ActorList::into_table`], which checks it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ActorList {
     list: Vec<ActorId>,
@@ -28,13 +28,25 @@ impl ActorList {
         Self { list }
     }
 
+    /// Promote to a live [`ActorTable`], if - and only if - the stored order
+    /// is the canonical one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnsortedActors`] if the list is not strictly increasing. The
+    /// chunk's columns are then only fit for reconstructing its changes, not
+    /// for adopting directly.
+    pub(crate) fn into_table(self) -> Result<ActorTable, UnsortedActors> {
+        ActorTable::from_sorted(self.list)
+    }
+
     /// Wrap as an [`ActorTable`] *without* checking the order, for an op set
     /// that exists only to reconstruct the chunk's changes.
     ///
     /// That op set never answers lookups or compares `OpId`s, which are the
     /// operations that depend on the table being sorted; it is only iterated
     /// and its actor indices resolved back to ids. The result must not be
-    /// adopted as a live document's table.
+    /// adopted as a live document's table; use [`Self::into_table`] for that.
     pub(crate) fn for_reconstruction(self) -> ActorTable {
         ActorTable::unchecked(self.list)
     }
@@ -88,6 +100,26 @@ mod tests {
         assert_eq!(
             list.iter().cloned().collect::<Vec<_>>(),
             [actor(9), actor(1)]
+        );
+    }
+
+    #[test]
+    fn into_table_accepts_sorted() {
+        let table = ActorList::from_stored(vec![actor(1), actor(9)])
+            .into_table()
+            .unwrap();
+        assert_eq!(table.lookup(&actor(9)), Some(1));
+    }
+
+    #[test]
+    fn into_table_rejects_unsorted_and_duplicates() {
+        assert_eq!(
+            ActorList::from_stored(vec![actor(9), actor(1)]).into_table(),
+            Err(UnsortedActors)
+        );
+        assert_eq!(
+            ActorList::from_stored(vec![actor(1), actor(1)]).into_table(),
+            Err(UnsortedActors)
         );
     }
 }

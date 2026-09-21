@@ -6,6 +6,8 @@
 //! Use [`ActorList`] when you require a list of actors, that has no particular
 //! constraints on it. Usually, these [`ActorId`]s come from an external source
 //! where the constraints on the [`ActorTable`] may not hold.
+//! An [`ActorList`] can be converted into an [`ActorTable`] via its
+//! [`ActorList::into_table`] method.
 //!
 //! Use the [`ActorIds`] trait when either an [`ActorTable`] or an [`ActorList`]
 //! will suffice.
@@ -26,7 +28,7 @@ mod table;
 pub(crate) use index::ActorIndexed;
 pub(crate) use list::ActorList;
 pub(crate) use reference::{ActorRefs, HasActorIndices, NoActorIndices};
-pub(crate) use table::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
+pub(crate) use table::{ActorInsert, ActorRemoval, ActorShift, ActorTable, UnsortedActors};
 
 use crate::ActorId;
 

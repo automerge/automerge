@@ -1184,19 +1184,27 @@ impl OpSet {
     }
 
     /// Adopt the ops of a document chunk over its actor list as stored,
-    /// sorted or not.
+    /// sorted or not, for the sole purpose of reconstructing its changes.
     ///
-    /// The op columns index actors by position in the stored list, so the
-    /// indices are consistent with the columns whatever the order. A live op
-    /// set additionally relies on the table being sorted, for `lookup_actor`
-    /// and `OpId` ordering; documents saved by this implementation guarantee
-    /// that, and loading does not yet check it.
-    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
+    /// Change reconstruction only needs actor positions consistent with the
+    /// columns, which any stored list has. The result must not become a live
+    /// document's op set: `lookup_actor` and `OpId` ordering are only
+    /// meaningful once the table is sorted. Use [`Self::load_with_actors`]
+    /// with a table from [`ActorList::into_table`] for that.
+    pub(crate) fn load_for_reconstruction(
+        doc: &Document<'_>,
+        text_encoding: TextEncoding,
+    ) -> Result<Self, PackError> {
         let actors = doc.actors().clone().for_reconstruction();
         Self::load_with_actors(doc, actors, text_encoding)
     }
 
-    /// Adopt the ops of a document chunk directly over the given table.
+    /// Adopt the ops of a document chunk directly as a live op set.
+    ///
+    /// The caller supplies the document's actor table, which must have come
+    /// from [`ActorList::into_table`]: the op columns index actors by
+    /// position, so they can only be adopted as-is when that order is the
+    /// canonical one.
     pub(crate) fn load_with_actors(
         doc: &Document<'_>,
         actors: ActorTable,
@@ -1699,7 +1707,10 @@ mod tests {
         doc.delete(crate::ROOT, "key2").unwrap();
         let saved = doc.save();
         let doc_chunk = load_document_chunk(&saved);
-        let opset = super::OpSet::load(&doc_chunk, TextEncoding::platform_default()).unwrap();
+        let actors = doc_chunk.actors().clone().into_table().unwrap();
+        let opset =
+            super::OpSet::load_with_actors(&doc_chunk, actors, TextEncoding::platform_default())
+                .unwrap();
         let ops = opset.iter().collect::<Vec<_>>();
         let actual_ops = doc.doc.ops().iter().collect::<Vec<_>>();
         if ops != actual_ops {
