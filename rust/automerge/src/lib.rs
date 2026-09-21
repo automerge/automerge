@@ -259,6 +259,7 @@ macro_rules! __log {
      }
  }
 
+mod actor;
 pub mod anonymize;
 mod author;
 mod autocommit;
