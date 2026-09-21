@@ -1,4 +1,5 @@
 use super::parents::Parents;
+use crate::actor::{ActorInsert, ActorTable};
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
@@ -58,7 +59,7 @@ pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSet {
-    pub(crate) actors: Vec<ActorId>,
+    pub(crate) actors: ActorTable,
     pub(crate) obj_info: ObjIndex,
     cols: Columns,
     pub(crate) text_encoding: TextEncoding,
@@ -78,7 +79,7 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            actors,
+            actors: ActorTable::from_document_order(actors),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
@@ -1185,22 +1186,24 @@ impl OpSet {
     }
 
     pub(crate) fn lookup_actor(&self, actor: &ActorId) -> Option<usize> {
-        self.actors.binary_search(actor).ok()
+        self.actors.lookup(actor)
     }
 
     pub(crate) fn new(text_encoding: TextEncoding) -> Self {
         OpSet {
-            actors: vec![],
+            actors: ActorTable::new(),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding,
         }
     }
 
+    /// Adopt the ops of a document chunk directly, with the actor table in
+    /// the order the document stored it.
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
-        let actors = doc.actors().to_vec();
+        let actors = ActorTable::from_document_order(doc.actors().to_vec());
         Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
     }
 
@@ -1214,7 +1217,7 @@ impl OpSet {
     ) -> Self {
         let cols = Columns::new(ops);
         OpSet {
-            actors,
+            actors: ActorTable::from_document_order(actors),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),
@@ -1224,7 +1227,7 @@ impl OpSet {
     fn from_parts(
         cols: RawColumns<Uncompressed>,
         data: &[u8],
-        actors: Vec<ActorId>,
+        actors: ActorTable,
         text_encoding: TextEncoding,
     ) -> Result<Self, PackError> {
         let cols = Columns::load(cols.as_map(), data, &actors)?;
@@ -1397,11 +1400,16 @@ impl OpSet {
     // * maybe do something with types to make scan required to get
     //    validated bytes
 
-    pub(crate) fn insert_actor(&mut self, idx: usize, actor: ActorId) {
-        if self.actors.len() != idx {
-            self.rewrite_with_new_actor(idx)
+    /// Ensure `actor` is in the actor table, shifting op actor indices if it
+    /// had to be inserted before existing actors.
+    pub(crate) fn insert_actor(&mut self, actor: ActorId) -> ActorInsert {
+        let insert = self.actors.insert(actor);
+        if let ActorInsert::Inserted(idx) = insert {
+            if idx + 1 != self.actors.len() {
+                self.rewrite_with_new_actor(idx)
+            }
         }
-        self.actors.insert(idx, actor)
+        insert
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
@@ -1802,7 +1810,8 @@ mod tests {
 
     #[test]
     fn column_data_iter_range() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        actors.sort();
 
         let ops = vec![
             TestOp {
@@ -1885,7 +1894,8 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        actors.sort();
 
         let test_ops = vec![
             TestOp {

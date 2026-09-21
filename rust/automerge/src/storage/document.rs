@@ -201,8 +201,9 @@ impl<'a> Document<'a> {
         let mut change_out = Vec::new();
         let change_metadata = change_graph.encode(&mut change_out);
 
-        // actors already sorted
-        let actors = op_set.actors.clone();
+        // The ActorTable is sorted by construction, so the stored order is
+        // canonical.
+        let actors = op_set.actors.to_vec();
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();

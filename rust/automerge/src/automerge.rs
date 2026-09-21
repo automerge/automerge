@@ -15,6 +15,7 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
+use crate::actor::ActorInsert;
 use crate::change_graph::ChangeGraph;
 use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -365,9 +366,9 @@ impl Automerge {
 
     /// Set the actor id for this document.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
-        match self.ops.actors.binary_search(&actor) {
-            Ok(idx) => self.actor = Actor::Cached(idx),
-            Err(_) => self.actor = Actor::Unused(actor),
+        match self.ops.lookup_actor(&actor) {
+            Some(idx) => self.actor = Actor::Cached(idx),
+            None => self.actor = Actor::Unused(actor),
         }
         self
     }
@@ -412,7 +413,7 @@ impl Automerge {
     }
 
     pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
-        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        let actor_index = self.ops.actors.lookup(actor)?;
         self.authors.get_author_for_actor(actor_index)
     }
 
@@ -1289,8 +1290,7 @@ impl Automerge {
 
         let actor_index = self
             .ops
-            .actors
-            .binary_search(change.actor_id())
+            .lookup_actor(change.actor_id())
             .expect("Change's actor not already in the document");
 
         self.change_graph
@@ -1298,25 +1298,21 @@ impl Automerge {
             .expect("Change's deps should already be in the document");
     }
 
-    fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
-        self.ops.insert_actor(index, actor);
-        self.change_graph.insert_actor(index);
-        self.actor.rewrite_with_new_actor(index);
-        self.authors.insert_actor(index);
-        index
-    }
-
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
-        match self.ops.actors.binary_search(actor) {
-            Ok(idx) => idx,
-            Err(idx) => self.insert_actor(idx, actor.clone()),
-        }
+        self.put_actor(actor.clone())
     }
 
-    fn put_actor(&mut self, actor: ActorId) -> usize {
-        match self.ops.actors.binary_search(&actor) {
-            Ok(idx) => idx,
-            Err(idx) => self.insert_actor(idx, actor),
+    /// Ensure `actor` is in the actor table and return its index, shifting
+    /// every actor-indexed structure if it had to be inserted.
+    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+        match self.ops.insert_actor(actor) {
+            ActorInsert::Existing(idx) => idx,
+            ActorInsert::Inserted(idx) => {
+                self.change_graph.insert_actor(idx);
+                self.actor.rewrite_with_new_actor(idx);
+                self.authors.insert_actor(idx);
+                idx
+            }
         }
     }
 

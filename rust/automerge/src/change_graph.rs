@@ -1136,8 +1136,14 @@ mod tests {
         fn actor(&mut self) -> ActorId {
             use rand::RngExt;
             let actor = ActorId::from(self.rng.random::<[u8; 16]>().to_vec());
-            self.graph.insert_actor(self.actors.len());
-            self.actors.push(actor.clone());
+            // Mirror `Automerge::put_actor`: keep the table sorted and shift
+            // the graph's actor indices to match.
+            let idx = self
+                .actors
+                .binary_search(&actor)
+                .expect_err("random actor already present");
+            self.graph.insert_actor(idx);
+            self.actors.insert(idx, actor.clone());
             actor
         }
 
