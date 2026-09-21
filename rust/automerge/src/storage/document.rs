@@ -505,3 +505,52 @@ impl std::fmt::Debug for MismatchedHeads {
 }
 
 use super::load::VerificationMode;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{parse, Chunk};
+
+    /// The document attached to <https://github.com/automerge/automerge/issues/697>,
+    /// written by JS automerge 1.0.1-preview.7. Its actor table is stored in
+    /// first-seen rather than lexicographic order.
+    fn issue_697_document() -> Vec<u8> {
+        std::fs::read("./tests/fixtures/issue_697_old_js_doc.automerge").unwrap()
+    }
+
+    fn parse_document(data: &[u8]) -> Document<'_> {
+        let (_, chunk) = Chunk::parse(parse::Input::new(data)).unwrap();
+        let Chunk::Document(doc) = chunk else {
+            panic!("expected a document chunk");
+        };
+        doc
+    }
+
+    /// Change hashes are recomputed by re-encoding each change's chunk, whose
+    /// "other actors" list is lexicographically sorted. Reconstructing with
+    /// the document's own (unsorted) actor order instead would change the
+    /// bytes and so the hashes; arriving at the stored head means every
+    /// change re-encoded to what the original implementation hashed.
+    #[test]
+    fn reconstructed_changes_hash_to_the_stored_head() {
+        let data = issue_697_document();
+        let doc = parse_document(&data);
+
+        let changes = doc
+            .reconstruct_changes(TextEncoding::platform_default())
+            .unwrap();
+        assert_eq!(changes.len(), 124);
+
+        // The heads are the changes nobody depends on.
+        let depended_on: BTreeSet<ChangeHash> = changes
+            .iter()
+            .flat_map(|c| c.deps().iter().copied())
+            .collect();
+        let heads: Vec<ChangeHash> = changes
+            .iter()
+            .map(|c| c.hash())
+            .filter(|h| !depended_on.contains(h))
+            .collect();
+        assert_eq!(heads, doc.heads());
+    }
+}
