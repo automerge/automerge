@@ -210,10 +210,14 @@ impl ValueTransition {
                 let expose = expose(&after.winner);
                 let winner = after.winner;
                 if is_text && winner.value.is_scalar() {
-                    // FIXME: This preserves an existing bug: newly visible text
-                    // needs complete after-marks, not a delta. Unchanged marks
-                    // (for example, bold across a concurrent delete/put) are lost.
-                    log.splice(obj, index, winner.value.as_str(), marks.current().export());
+                    // Newly inserted text has no existing formatting to retain,
+                    // so supply all after-marks, including unchanged ones.
+                    log.splice(
+                        obj,
+                        index,
+                        winner.value.as_str(),
+                        marks.after.current().cloned(),
+                    );
                 } else {
                     log.insert_and_maybe_expose(
                         obj,
