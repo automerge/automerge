@@ -185,6 +185,49 @@ fn text_appeared_object_inserts_without_marks() {
     assert!(values[0].0.is_object());
 }
 
+/// Newly visible text needs its complete after-format, including marks
+/// which were already active before the text appeared.
+#[test]
+fn text_appeared_scalar_splices_with_complete_after_format() {
+    let fx = fixture();
+    let mut after = CandidateSummary::default();
+    after.add_incoming(fx.text_elem, text_value("q"));
+    let action = one(text_patches(
+        &fx,
+        CandidateSummary::default(),
+        after.clone(),
+        &RichTextDiff::default(),
+    ));
+    let (index, text, marks) = splice_of(&action);
+    assert_eq!((index, text.as_str()), (0, "q"));
+    assert!(marks.is_empty());
+
+    let action = one(text_patches(
+        &fx,
+        CandidateSummary::default(),
+        after.clone(),
+        &bold_appearing(&fx),
+    ));
+    let (_, _, marks) = splice_of(&action);
+    assert_eq!(
+        marks,
+        vec![("bold".to_string(), ScalarValue::Boolean(true))]
+    );
+
+    // Unchanged bold must be supplied even though its delta is empty.
+    let action = one(text_patches(
+        &fx,
+        CandidateSummary::default(),
+        after,
+        &bold_unchanged(&fx),
+    ));
+    let (_, _, marks) = splice_of(&action);
+    assert_eq!(
+        marks,
+        vec![("bold".to_string(), ScalarValue::Boolean(true))]
+    );
+}
+
 /// The `bold_unchanged` helper stands in for the parent's mark state. Check
 /// it against a real mark operation: feeding the document's actual mark op
 /// to both `RichTextDiff` state machines yields the same after format the

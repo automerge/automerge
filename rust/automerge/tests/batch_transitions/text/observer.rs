@@ -26,7 +26,7 @@ fn format(marks: Option<&MarkSet>) -> Format {
         .collect()
 }
 
-fn formatted(text: &str, marks: Format, encoding: TextEncoding) -> FormattedText {
+pub(super) fn formatted(text: &str, marks: Format, encoding: TextEncoding) -> FormattedText {
     units(text, encoding)
         .into_iter()
         .map(|unit| (unit, marks.clone()))
