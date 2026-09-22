@@ -78,10 +78,6 @@ impl ChangeOp {
         Some(MarkData { name, value })
     }
 
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        self.bld.hydrate_value(text_encoding)
-    }
-
     pub(crate) fn hydrate_value_and_fix_counters(
         &self,
         text_encoding: TextEncoding,
@@ -124,10 +120,6 @@ impl ChangeOp {
     pub(crate) fn action(&self) -> Action {
         self.bld.action
     }
-    pub(crate) fn value(&self) -> &ScalarValue<'static> {
-        &self.bld.value
-    }
-
     pub(crate) fn key(&self) -> &KeyRef<'static> {
         &self.bld.key
     }

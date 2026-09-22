@@ -4,7 +4,7 @@ use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
+    ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
 };
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
@@ -16,6 +16,9 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+
+mod transition;
+use transition::{CandidateSummary, ValueTransition};
 
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 
@@ -65,14 +68,7 @@ impl<'a> Untangler<'a> {
     }
 
     fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
-        let mut deleted = false;
-        if let Some(mut successors) = self.pred.remove(&doc_op.id) {
-            normalize_increment_successors(doc_op.is_counter(), &mut successors);
-            for (id, inc) in successors {
-                deleted |= inc.is_none();
-                succ.push(doc_op.add_succ(id, inc));
-            }
-        }
+        let effect @ SuccessorEffect { deleted, .. } = process_pred(doc_op, self.pred, succ);
 
         if doc_op.insert {
             self.flush(log);
@@ -82,7 +78,7 @@ impl<'a> Untangler<'a> {
         if doc_op.visible() && !deleted {
             self.width = doc_op.width(self.seq_type, self.text_encoding);
         }
-        self.value.process_doc_op(doc_op, deleted);
+        self.value.process_doc_op(doc_op, effect);
         self.top.process_doc_op(self.change_ops, doc_op, deleted);
     }
 
@@ -452,13 +448,14 @@ impl<'a, 'b> MapWalker<'a, 'b> {
                 Some(Ordering::Greater) => break,
                 Some(Ordering::Equal) if d.id > ops[pos].id() => break,
                 _ => {
-                    let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
+                    let effect @ SuccessorEffect { deleted, .. } =
+                        process_pred(d, self.pred, self.succ);
                     if d.prop() != self.value.key {
                         self.value.map_flush(self.log);
                         self.value.key = d.prop();
                         self.top.reset(self.conflicts);
                     }
-                    self.value.process_doc_op(d, deleted);
+                    self.value.process_doc_op(d, effect);
                     self.top.process_doc_op(ops, d, deleted);
                 }
             }
@@ -468,10 +465,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 
     fn finish(&mut self, ops: &mut [ChangeOp]) {
         while let Some(d) = self.doc_op.as_ref() {
-            let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
+            let effect @ SuccessorEffect { deleted, .. } = process_pred(d, self.pred, self.succ);
             if d.prop() == self.value.key {
                 self.top.process_doc_op(ops, d, deleted);
-                self.value.process_doc_op(d, deleted);
+                self.value.process_doc_op(d, effect);
                 self.next_doc_op();
             } else {
                 break;
@@ -482,118 +479,60 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     }
 }
 
+/// For a non-counter predecessor, replace increment amounts with `None` so
+/// those successors are treated as overwrites. Counter predecessors retain
+/// their increment amounts.
 fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
     if !is_counter {
         for (_, increment) in successors {
-            // Increment operations preserve and update counter predecessors,
-            // but act as ordinary overwrites for non-counter predecessors.
-            if increment.is_some() {
-                *increment = None;
-            }
+            let _ = increment.take();
         }
     }
 }
 
-fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
-    if let Some(d) = doc_op {
-        let mut deleted = false;
-        if let Some(mut successors) = pred.remove(&d.id) {
-            normalize_increment_successors(d.is_counter(), &mut successors);
-            for (id, inc) in successors {
-                deleted |= inc.is_none();
-                succ.push(d.add_succ(id, inc));
-            }
-        }
-        deleted
-    } else {
-        false
-    }
+/// The combined effect of this batch’s successors on an existing operation:
+/// whether they suppress it, and their total counter increment.
+#[derive(Debug, Default, Clone, Copy)]
+struct SuccessorEffect {
+    deleted: bool,
+    increment: i64,
 }
 
+/// Collect the incoming successors of `d`, append their links to the deferred
+/// successor buffer, and return their combined effect on `d`.
+///
+/// After normalization, a `None` increment denotes a suppressing successor;
+/// `Some(n)` contributes a counter increment.
+fn process_pred(d: &Op<'_>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> SuccessorEffect {
+    let mut effect = SuccessorEffect::default();
+    if let Some(mut successors) = pred.remove(&d.id) {
+        normalize_increment_successors(d.is_counter(), &mut successors);
+        for (id, inc) in successors {
+            if let Some(n) = inc {
+                effect.increment += n;
+            } else {
+                effect.deleted = true;
+            }
+            succ.push(d.add_succ(id, inc));
+        }
+    }
+    effect
+}
+
+/// Tracks one map property or sequence element while a batch is walked: its
+/// visible candidates before and after the batch, and its formatting context.
+///
+/// Flushing hands the two summaries to the private `transition` module, which
+/// classifies and encodes the change into the patch log.
 #[derive(Debug, Clone)]
 struct ValueState<'a> {
     obj: ObjId,
     seq_type: SequenceType,
     text_encoding: TextEncoding,
     key: Option<PropRef<'a>>,
-    doc: OpValueOption,
-    change: OpValueOption,
+    before: CandidateSummary,
+    after: CandidateSummary,
     marks: RichTextDiff<'a>,
-}
-
-#[derive(Debug, Clone)]
-struct OpValue {
-    id: OpId,
-    value: Value,
-    deleted: bool,
-    conflict: bool,
-    expose: bool,
-    replaced: Option<Value>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct OpValueOption(Option<OpValue>);
-
-impl OpValueOption {
-    fn id(&self) -> Option<OpId> {
-        self.value().map(|o| o.id)
-    }
-
-    fn increment(&mut self, n: i64) {
-        if let Self(Some(ov)) = self {
-            if let Value::Scalar(ScalarValue::Counter(c)) = &mut ov.value {
-                c.increment(n);
-            }
-        }
-    }
-
-    fn expose(&mut self, replaced: Value) {
-        if let Self(Some(ov)) = self {
-            ov.expose = true;
-            ov.replaced = Some(replaced);
-        }
-    }
-
-    fn set(&mut self, value: Value, id: OpId, deleted: bool) {
-        if deleted && self.is_visible() {
-            self.expose(value);
-        } else {
-            let conflict = self.is_visible();
-            let expose = !deleted && self.is_deleted();
-            *self = Self(Some(OpValue {
-                value,
-                id,
-                conflict,
-                deleted,
-                expose,
-                replaced: None,
-            }));
-        }
-    }
-
-    fn is_none(&self) -> bool {
-        self.value().is_none()
-    }
-
-    fn value(&self) -> Option<&OpValue> {
-        self.0.as_ref()
-    }
-
-    fn is_visible(&self) -> bool {
-        self.value().map(|o| !o.deleted).unwrap_or(false)
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.value().map(|o| o.deleted).unwrap_or(false)
-    }
-
-    fn take(&mut self) -> Self {
-        Self(self.0.take())
-    }
-
-    fn into_value(self) -> Option<OpValue> {
-        self.0
-    }
 }
 
 impl<'a> ValueState<'a> {
@@ -603,13 +542,13 @@ impl<'a> ValueState<'a> {
             seq_type: encoding,
             text_encoding,
             key: None,
-            doc: OpValueOption(None),
-            change: OpValueOption(None),
+            before: CandidateSummary::default(),
+            after: CandidateSummary::default(),
             marks: RichTextDiff::default(),
         }
     }
 
-    fn process_doc_op(&mut self, doc_op: &Op<'a>, deleted: bool) {
+    fn process_doc_op(&mut self, doc_op: &Op<'a>, effect: SuccessorEffect) {
         match doc_op.action {
             Action::Increment => {}
             Action::Mark => {
@@ -618,24 +557,20 @@ impl<'a> ValueState<'a> {
             }
             _ => {
                 if doc_op.visible() {
-                    self.doc
-                        .set(doc_op.hydrate_value(self.text_encoding), doc_op.id, deleted);
+                    // OpIter yields stored counter bases, not their current totals.
+                    let mut doc_op = doc_op.clone();
+                    doc_op.fix_counter(None);
+                    let mut value = doc_op.hydrate_value(self.text_encoding);
+                    // Before always includes this candidate, even if the batch
+                    // deletes it. Only after gets new counter contributions.
+                    self.before.add_existing(doc_op.id, value.clone());
+                    if !effect.deleted {
+                        if let Value::Scalar(ScalarValue::Counter(c)) = &mut value {
+                            c.increment(effect.increment);
+                        }
+                        self.after.add_existing(doc_op.id, value);
+                    }
                 }
-            }
-        }
-    }
-
-    fn do_increment(&mut self, op: &ChangeOp) {
-        if self.change.is_none() {
-            if let Some(id) = self.doc.id() {
-                if op.pred().contains(&id) && !self.doc.is_deleted() {
-                    self.change = self.doc.clone();
-                }
-            }
-        }
-        if let Some(id) = self.change.id() {
-            if op.pred().contains(&id) {
-                self.change.increment(op.value().as_i64());
             }
         }
     }
@@ -650,24 +585,25 @@ impl<'a> ValueState<'a> {
 
     fn process_change_op(&mut self, op: &ChangeOp) {
         match op.action() {
-            Action::Delete => {}
-            Action::Increment => self.do_increment(op),
+            // Successor lists already supply the complete counter contribution.
+            Action::Delete | Action::Increment => {}
             Action::Mark => self.process_mark(op.id(), op.mark_data()),
             _ => {
                 if op.visible() {
-                    self.change
-                        .set(op.hydrate_value(self.text_encoding), op.id(), false);
+                    self.after.add_incoming(
+                        op.id(),
+                        op.hydrate_value_and_fix_counters(self.text_encoding),
+                    );
                 }
             }
         }
     }
 
     fn map_flush(&mut self, log: &mut PatchLog) {
-        let obj = self.obj;
-        let change = self.change.take();
-        let doc = self.doc.take();
+        let before = std::mem::take(&mut self.before);
+        let after = std::mem::take(&mut self.after);
         if let Some(PropRef::Map(key)) = self.key.take() {
-            Self::map_process(obj, &key, doc, change, log);
+            ValueTransition::new(before, after).emit_map(self.obj, &key, log);
         }
     }
 
@@ -675,159 +611,16 @@ impl<'a> ValueState<'a> {
         if self.key.take().is_none() {
             return;
         }
-        let obj = self.obj;
-        let encoding = self.seq_type;
-        if encoding == SequenceType::List {
-            match (self.doc.0.take(), self.change.0.take()) {
-                (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
-                (Some(d), Some(c)) if d.id == c.id => {
-                    let n = c.value.as_i64() - d.value.as_i64();
-                    if n != 0 {
-                        log.increment_seq(obj, index, n, c.id);
-                    }
-                }
-                (Some(d), Some(c)) if c.id < d.id => {
-                    log.flag_conflict(obj, &Prop::from(index));
-                }
-                (Some(d), Some(c)) => {
-                    let conflict = !d.deleted || c.conflict;
-                    log.put_seq(obj, index, c.value, c.id, conflict, false)
-                }
-                (Some(d), None) => {
-                    if d.expose {
-                        log.put_seq(obj, index, d.value, d.id, d.conflict, true);
-                    } else if d.deleted {
-                        log.delete_seq(obj, index, 1);
-                    }
-                }
-                _ => {}
-            }
-        } else {
-            match (self.doc.0.take(), self.change.0.take()) {
-                (None, Some(c)) => {
-                    match c.value {
-                        Value::Scalar(_) => {
-                            // I don't think this branch can ever actually happen in practice. If we
-                            // reach here it's because there is a non-inserting operation (i.e. an
-                            // update) to the operation at `index`, but we only allow insertions
-                            // into text objects. Regardless, we handle this is a splice just in
-                            // case
-                            log.splice(obj, index, c.value.as_str(), self.marks.current().export());
-                        }
-                        _ => log.insert(obj, index, c.value, c.id, c.conflict),
-                    }
-                }
-                (Some(d), Some(c)) if d.deleted => {
-                    // A text update replaces one Automerge sequence element, but that element can
-                    // render as more than one unit in the configured text encoding. Express the
-                    // update as a deletion and insertion so materialized text removes the full
-                    // width of the old value.
-                    log.replace_seq(
-                        obj,
-                        index,
-                        &d.value,
-                        c.value,
-                        c.id,
-                        c.conflict,
-                        false,
-                        self.seq_type,
-                        self.text_encoding,
-                        self.marks.current().export(),
-                    );
-                }
-                (Some(d), Some(c)) if d.id == c.id => {
-                    // Counter increments do not change the rendered text.
-                }
-                (Some(d), Some(c)) if c.id > d.id => {
-                    let conflict = !d.deleted || c.conflict;
-                    log.replace_seq(
-                        obj,
-                        index,
-                        &d.value,
-                        c.value,
-                        c.id,
-                        conflict,
-                        false,
-                        self.seq_type,
-                        self.text_encoding,
-                        self.marks.current().export(),
-                    );
-                }
-                (Some(d), Some(_)) if !d.conflict => {
-                    log.flag_conflict(obj, &Prop::from(index));
-                }
-                (Some(d), None) if d.expose => {
-                    let replaced = d
-                        .replaced
-                        .clone()
-                        .expect("exposed value must record the value it replaces");
-                    log.replace_seq(
-                        obj,
-                        index,
-                        &replaced,
-                        d.value,
-                        d.id,
-                        d.conflict,
-                        true,
-                        self.seq_type,
-                        self.text_encoding,
-                        self.marks.current().export(),
-                    );
-                }
-                (Some(d), None) if d.deleted => {
-                    let w = d.value.width(self.seq_type, self.text_encoding);
-                    log.delete_seq(obj, index, w);
-                }
-                (Some(d), None) => {
-                    if let Some(m) = self.marks.current().export() {
-                        log.mark(
-                            obj,
-                            index,
-                            d.value.width(self.seq_type, self.text_encoding),
-                            &m,
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn map_process(
-        obj: ObjId,
-        key: &str,
-        doc: OpValueOption,
-        change: OpValueOption,
-        log: &mut PatchLog,
-    ) {
-        match (doc.into_value(), change.into_value()) {
-            (None, Some(c)) => {
-                log.put_map(obj, key, c.value, c.id, c.conflict, false);
-            }
-            (Some(d), None) => {
-                if d.expose {
-                    log.put_map(obj, key, d.value, d.id, d.conflict, true);
-                } else if d.deleted {
-                    log.delete_map(obj, key);
-                }
-            }
-            (Some(d), Some(c)) if c.id > d.id => {
-                let conflict = (c.conflict && !d.conflict) || !d.deleted;
-                log.put_map(obj, key, c.value, c.id, conflict, false);
-            }
-            (Some(d), Some(c)) if c.id < d.id => {
-                if !d.conflict {
-                    log.flag_conflict(obj, &Prop::from(key));
-                }
-            }
-            (Some(d), Some(c)) if d.id == c.id => {
-                let n = c.value.as_i64() - d.value.as_i64();
-                if n != 0 {
-                    log.increment_map(obj, key, n, c.id);
-                }
-            }
-            _ => {}
-        }
+        let before = std::mem::take(&mut self.before);
+        let after = std::mem::take(&mut self.after);
+        ValueTransition::new(before, after).emit_sequence(
+            self.obj,
+            index,
+            self.seq_type,
+            self.text_encoding,
+            &self.marks,
+            log,
+        );
     }
 }
 
