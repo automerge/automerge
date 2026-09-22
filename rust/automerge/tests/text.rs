@@ -1021,3 +1021,134 @@ fn splicing_into_multibyte_characters() {
     // deleting in the middle of a multi-byte character will delete after
     assert_eq!(doc3.text(&text).unwrap(), "ABBBBBC");
 }
+
+/// The `(name, value)` pairs `marks` reports as covering `index`, in the form
+/// `get_marks` returns them.
+fn marks_covering(marks: &[Mark], index: usize) -> Vec<(String, ScalarValue)> {
+    let mut covering = marks
+        .iter()
+        .filter(|m| m.start <= index && index < m.end)
+        .map(|m| (m.name.to_string(), m.value.clone()))
+        .collect::<Vec<_>>();
+    covering.sort_by(|a, b| a.0.cmp(&b.0));
+    covering
+}
+
+fn mark_pairs(marks: &automerge::marks::MarkSet) -> Vec<(String, ScalarValue)> {
+    marks
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.clone()))
+        .collect()
+}
+
+#[test]
+fn get_marks_agrees_with_marks_at_every_index() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "the quick brown fox").unwrap();
+
+    for mark in [
+        Mark::new("bold".into(), true, 0, 9),
+        Mark::new("italic".into(), true, 4, 15),
+        Mark::new("link".into(), ScalarValue::Str("example".into()), 10, 19),
+        Mark::new("bold".into(), ScalarValue::Int(2), 6, 8),
+    ] {
+        doc.mark(&text, mark, ExpandMark::None).unwrap();
+    }
+
+    let heads = doc.get_heads();
+
+    doc.mark(
+        &text,
+        Mark::new("bold".into(), ScalarValue::Null, 2, 5),
+        ExpandMark::None,
+    )
+    .unwrap();
+    doc.splice_text(&text, 19, 0, " jumps over").unwrap();
+
+    let len = doc.length(&text);
+    let marks = doc.marks(&text).unwrap();
+    for index in 0..len + 2 {
+        assert_eq!(
+            mark_pairs(&doc.get_marks(&text, index, None).unwrap()),
+            marks_covering(&marks, index),
+            "marks at index {index}"
+        );
+    }
+
+    let len_at = doc.length_at(&text, &heads);
+    let marks_at = doc.marks_at(&text, &heads).unwrap();
+    for index in 0..len_at + 2 {
+        assert_eq!(
+            mark_pairs(&doc.get_marks(&text, index, Some(&heads)).unwrap()),
+            marks_covering(&marks_at, index),
+            "marks at index {index} at heads"
+        );
+    }
+}
+
+#[test]
+fn get_marks_index_counts_the_same_units_as_marks() {
+    for encoding in [
+        TextEncoding::UnicodeCodePoint,
+        TextEncoding::Utf8CodeUnit,
+        TextEncoding::Utf16CodeUnit,
+        TextEncoding::GraphemeCluster,
+    ] {
+        let mut doc = AutoCommit::new_with_encoding(encoding);
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "a\u{1f600}bc").unwrap();
+
+        let len = doc.length(&text);
+        doc.mark(
+            &text,
+            Mark::new("bold".into(), true, 1, len),
+            ExpandMark::None,
+        )
+        .unwrap();
+
+        let marks = doc.marks(&text).unwrap();
+        for index in 0..len + 2 {
+            assert_eq!(
+                mark_pairs(&doc.get_marks(&text, index, None).unwrap()),
+                marks_covering(&marks, index),
+                "{encoding:?}: marks at index {index}"
+            );
+        }
+    }
+}
+
+#[test]
+fn get_marks_at_the_end_of_a_long_text() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, &"the quick brown fox. ".repeat(10_000))
+        .unwrap();
+
+    let len = doc.length(&text);
+    assert_eq!(len, 210_000);
+    doc.mark(
+        &text,
+        Mark::new("bold".into(), true, len - 4, len),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    let bold = vec![("bold".to_string(), ScalarValue::Boolean(true))];
+    assert_eq!(
+        mark_pairs(&doc.get_marks(&text, len - 1, None).unwrap()),
+        bold
+    );
+    assert_eq!(
+        mark_pairs(&doc.get_marks(&text, len - 4, None).unwrap()),
+        bold
+    );
+    assert_eq!(
+        mark_pairs(&doc.get_marks(&text, len - 5, None).unwrap()),
+        vec![]
+    );
+    assert_eq!(
+        mark_pairs(&doc.get_marks(&text, len, None).unwrap()),
+        vec![]
+    );
+}

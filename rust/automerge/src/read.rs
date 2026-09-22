@@ -161,6 +161,10 @@ pub trait ReadDoc {
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark>, AutomergeError>;
 
+    /// Get the marks covering `index` of a sequence, as at `heads`
+    ///
+    /// `index` counts the same units as [`Self::length()`] and the ranges
+    /// [`Self::marks()`] reports.
     fn get_marks<O: AsRef<ExId>>(
         &self,
         obj: O,

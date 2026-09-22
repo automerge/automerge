@@ -1,3 +1,12 @@
+## Unreleased
+
+### Fixed
+
+* `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character
+  text went from 9ms to 1.6us).
+* `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
+  rather than disagreeing under some text encodings.
+
 ## 0.12.0
 
 ### Breaking Changes

@@ -1933,12 +1933,41 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self.ops.top_ops(&obj.id, clock).marks();
-        iter.nth(index);
-        match iter.get_marks() {
-            Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),
-            None => Ok(MarkSet::default()),
+
+        if clock.is_none() && obj.typ == ObjType::Text {
+            let fast = self.ops().get_marks_fast(&obj.id, index);
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                let slow = self.get_marks_slow(&obj, index, None);
+                assert_eq!(fast, slow, "indexed marks != walked marks");
+            }
+            return Ok(fast);
         }
+
+        Ok(self.get_marks_slow(&obj, index, clock))
+    }
+
+    fn get_marks_slow(
+        &self,
+        obj: &crate::types::ObjMeta,
+        index: usize,
+        clock: Option<Clock>,
+    ) -> MarkSet {
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
+            return MarkSet::default();
+        };
+        let mut iter = self.ops.top_ops(&obj.id, clock).marks();
+        let mut pos = 0;
+        while let Some(op) = iter.next() {
+            pos += op.width(seq_type, self.text_encoding());
+            if pos > index {
+                return match iter.get_marks() {
+                    Some(arc) => arc.as_ref().clone().without_unmarks(),
+                    None => MarkSet::default(),
+                };
+            }
+        }
+        MarkSet::default()
     }
 
     fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
