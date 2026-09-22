@@ -892,7 +892,13 @@ impl OpSet {
             }
             index += ops.width(seq_type, self.text_encoding);
         }
-        None
+        // Nothing visible sits at or after the op, so it belongs at the end of
+        // the sequence.
+        Some(FoundOpId {
+            op,
+            index,
+            visible: false,
+        })
     }
 
     pub(crate) fn action_iter_range(&self, range: &Range<usize>) -> ActionIter<'_> {
