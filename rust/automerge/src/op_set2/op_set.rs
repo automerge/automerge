@@ -1023,6 +1023,21 @@ impl OpSet {
         acc.into_iter_no_unmark().collect()
     }
 
+    pub(crate) fn get_marks_fast(&self, obj: &ObjId, index: usize) -> MarkSet {
+        if !self.cols.index.mark.has_any_marks() {
+            return MarkSet::default();
+        }
+        let range = self.scope_to_obj(obj);
+        let mut widths = self.cols.index.text.iter_range(range);
+        let Some(seek) = widths.advance_prefix(index as u64) else {
+            return MarkSet::default();
+        };
+        let state = self.cols.index.mark.rich_text_at(seek.pos, None);
+        MarkSet::from_query_state(&state)
+            .map(|set| set.as_ref().clone())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
         // only the action and value columns are needed: the `TopIter`
         // skipper jumps between top ops without materializing full ops
