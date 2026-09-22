@@ -130,4 +130,48 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_invisible_parents_of_a_deleted_last_element() {
+        // Create a document whose last list element is an object, delete that element, then
+        // generate a path to the object it contained. Nothing visible follows the deleted
+        // element.
+
+        let mut doc = crate::AutoCommit::new();
+        let list = doc
+            .put_object(crate::ROOT, "list", crate::ObjType::List)
+            .unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        let obj = doc.insert_object(&list, 1, crate::ObjType::Map).unwrap();
+        doc.delete(&list, 1).unwrap();
+        let after_delete = doc.get_heads();
+        // an unrelated change, so that `after_delete` is in the past
+        doc.put(crate::ROOT, "unrelated", 1).unwrap();
+
+        let expected = vec![
+            Parent {
+                obj: crate::ROOT,
+                prop: Prop::Map("list".to_string()),
+                visible: true,
+                typ: ObjType::Map,
+            },
+            Parent {
+                obj: list,
+                prop: Prop::Seq(1),
+                visible: false,
+                typ: ObjType::List,
+            },
+        ];
+
+        let mut parents = doc.parents(&obj).unwrap().collect::<Vec<_>>();
+        parents.reverse();
+        assert_eq!(parents, expected);
+
+        let mut parents_at = doc
+            .parents_at(&obj, &after_delete)
+            .unwrap()
+            .collect::<Vec<_>>();
+        parents_at.reverse();
+        assert_eq!(parents_at, expected);
+    }
 }
