@@ -14,6 +14,9 @@ use crate::iter::RichTextDiff;
 use crate::types::{ObjId, OpId, Prop, ScalarValue, SequenceType};
 use crate::{PatchLog, TextEncoding};
 
+#[cfg(test)]
+mod tests;
+
 /// Whether this candidate is present in the document before this batch, or is
 /// part of the incoming batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
