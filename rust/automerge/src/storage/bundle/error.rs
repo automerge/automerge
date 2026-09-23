@@ -34,6 +34,8 @@ pub(crate) enum ParseError {
     InverseDecode,
     #[error("ID_CTR_INVERSE length does not match op count")]
     InverseLengthMismatch,
+    #[error(transparent)]
+    UnsortedActors(#[from] crate::actor::UnsortedActors),
 }
 
 impl<E: Into<ParseError>> From<parse::ParseError<E>> for ParseError {

@@ -1,6 +1,7 @@
 use super::meta::ValueMeta;
 use super::op::{AsChangeOp, OpBuilder};
 use super::types::{Action, ActorIdx};
+use crate::actor::ActorTable;
 use crate::change_graph::ChangeGraph;
 use crate::storage::change::{ChangeOpsColumns as ChangeOpsColumns2, Verified};
 use crate::storage::{Change, ChunkType, Header};
@@ -37,7 +38,7 @@ pub(crate) fn build_change<T, G>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
     graph: &G,
-    actors: &[ActorId],
+    actors: &ActorTable,
 ) -> Change<'static, Verified>
 where
     T: AsChangeOp,
@@ -269,11 +270,10 @@ where
 // this structure allows for the vectors to be allocated
 // once and reused (via trucate()) when creating a large number
 // of changes (like on load)
-#[derive(Debug, PartialEq)]
 pub(crate) struct ActorMapper<'a> {
     seen_actors: Vec<bool>,
     pub(crate) mapping: Vec<Option<ActorIdx>>,
-    actors: &'a [ActorId],
+    actors: &'a ActorTable,
     other_actors: Vec<usize>,
 }
 
@@ -282,7 +282,7 @@ impl<'a> ActorMapper<'a> {
         self.other_actors.iter().map(|i| self.actors[*i].clone())
     }
 
-    pub(crate) fn new(actors: &'a [ActorId]) -> ActorMapper<'a> {
+    pub(crate) fn new(actors: &'a ActorTable) -> ActorMapper<'a> {
         let len = actors.len();
         ActorMapper {
             seen_actors: vec![false; len],

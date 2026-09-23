@@ -1,8 +1,8 @@
 //! The set of actors known to a document, and the tokens which witness
 //! changes to it.
-use std::ops::Deref;
+use std::ops::Index;
 
-use crate::ActorId;
+use crate::{op_set2::ActorIdx, ActorId};
 
 /// The set of [`ActorId`]s that are recorded for a document.
 ///
@@ -22,11 +22,11 @@ use crate::ActorId;
 /// # Construction
 ///
 /// - [`ActorTable::new`] creates a new, empty table.
-/// - [`ActorTable::from_sorted`] creates a new table from a given vector of
-///   actors. If the actors are not unique and sorted, then an [`UnsortedActors`]
-///   error is returned.
-/// - [`ActorTable::from_document_order`] creates a new table from an existing
-///   document's actor set, which is expected to be in sorted order.
+/// - [`ActorTable::from_sorted`] creates a table from a vector of actors. If
+///   the actors are not unique and sorted an [`UnsortedActors`] error is
+///   returned. A chunk's stored list is promoted through
+///   [`ActorList::into_table`](super::ActorList::into_table), which is this
+///   check by another name.
 ///
 /// # Lookup
 ///
@@ -60,15 +60,54 @@ impl ActorTable {
         Self::default()
     }
 
-    /// Adopt a document's actor list in the order it was stored.
+    /// A table holding exactly `actors`, in sorted order, for tests which
+    /// want to start from a known set.
+    #[cfg(test)]
+    pub(crate) fn from_actors(actors: impl IntoIterator<Item = ActorId>) -> Self {
+        let mut table = Self::new();
+        for actor in actors {
+            table.insert(actor);
+        }
+        table
+    }
+
+    /// Return the number of actors in the table.
+    pub(crate) fn len(&self) -> usize {
+        self.table.len()
+    }
+
+    /// Return `true` is the table is empty.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.table.is_empty()
+    }
+
+    /// Get the [`ActorId`] at the given index, returning `None` if the `index`
+    /// was out of bounds.
+    pub(crate) fn get(&self, index: usize) -> Option<&ActorId> {
+        self.table.get(index)
+    }
+
+    /// Return an [`ExactSizeIterator`] over the table of actors.
+    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = &ActorId> {
+        self.table.iter()
+    }
+
+    /// Return the underlying [`Vec`] of actors.
+    pub(crate) fn to_vec(&self) -> Vec<ActorId> {
+        self.table.clone()
+    }
+
+    /// Adopt an actor list which is already in strictly increasing order.
     ///
-    /// A document's op columns index actors by position in the stored list,
-    /// so the indices are consistent with the columns. [`Self::lookup`] and
-    /// `OpId` ordering additionally rely on that order being sorted, which
-    /// documents saved by this implementation guarantee.
-    pub(crate) fn from_document_order(table: Vec<ActorId>) -> Self {
-        debug_assert!(is_uniquely_sorted(&table));
-        Self { table }
+    /// # Errors
+    ///
+    /// Returns [`UnsortedActors`] if `table` was not in lexicographic order.
+    pub(crate) fn from_sorted(table: Vec<ActorId>) -> Result<Self, UnsortedActors> {
+        if is_uniquely_sorted(&table) {
+            Ok(Self { table })
+        } else {
+            Err(UnsortedActors)
+        }
     }
 
     /// Return the index of the [`ActorId`], if present.
@@ -104,11 +143,20 @@ impl ActorTable {
     }
 }
 
-impl Deref for ActorTable {
-    type Target = [ActorId];
+// FIXME: We should probably only use ActorIdx
+impl Index<usize> for ActorTable {
+    type Output = ActorId;
 
-    fn deref(&self) -> &[ActorId] {
-        &self.table
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.table[index]
+    }
+}
+
+impl Index<ActorIdx> for ActorTable {
+    type Output = ActorId;
+
+    fn index(&self, index: ActorIdx) -> &Self::Output {
+        &self.table[usize::from(index)]
     }
 }
 
@@ -196,6 +244,12 @@ impl ActorRemoval {
     }
 }
 
+/// The actor IDs passed to [`ActorTable::from_sorted`] were not in strictly
+/// increasing order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("actor table is not sorted")]
+pub(crate) struct UnsortedActors;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,10 +259,31 @@ mod tests {
     }
 
     #[test]
-    fn from_document_order_preserves_order_and_lookup() {
-        let t = ActorTable::from_document_order(vec![actor(1), actor(2), actor(3)]);
+    fn from_sorted_accepts_strictly_increasing() {
+        let t = ActorTable::from_sorted(vec![actor(1), actor(2), actor(3)]).unwrap();
         assert_eq!(t.len(), 3);
         assert_eq!(t.lookup(&actor(2)), Some(1));
+    }
+
+    #[test]
+    fn from_sorted_accepts_empty() {
+        assert!(ActorTable::from_sorted(vec![]).is_ok());
+    }
+
+    #[test]
+    fn from_sorted_rejects_unsorted() {
+        assert_eq!(
+            ActorTable::from_sorted(vec![actor(2), actor(1)]),
+            Err(UnsortedActors)
+        );
+    }
+
+    #[test]
+    fn from_sorted_rejects_duplicates() {
+        assert_eq!(
+            ActorTable::from_sorted(vec![actor(1), actor(1)]),
+            Err(UnsortedActors)
+        );
     }
 
     #[test]
@@ -218,14 +293,14 @@ mod tests {
         assert_eq!(t.insert(actor(1)).index(), 0);
         assert_eq!(t.insert(actor(9)).index(), 2);
         assert_eq!(t.insert(actor(5)), ActorInsert::Existing(1));
-        assert_eq!(&*t, &[actor(1), actor(5), actor(9)]);
+        assert_eq!(t.to_vec(), [actor(1), actor(5), actor(9)]);
         assert_eq!(t.lookup(&actor(9)), Some(2));
         assert_eq!(t.lookup(&actor(7)), None);
     }
 
     #[test]
     fn shift_moves_indices_at_or_after_insertion() {
-        let mut t = ActorTable::from_document_order(vec![actor(1), actor(9)]);
+        let mut t = ActorTable::from_actors([actor(1), actor(9)]);
         let ActorInsert::Inserted(shift) = t.insert(actor(5)) else {
             panic!("expected insertion")
         };
@@ -237,10 +312,10 @@ mod tests {
 
     #[test]
     fn removal_drops_removed_and_moves_later_indices_down() {
-        let mut t = ActorTable::from_document_order(vec![actor(1), actor(5), actor(9)]);
+        let mut t = ActorTable::from_actors([actor(1), actor(5), actor(9)]);
         let (removed, removal) = t.remove(1);
         assert_eq!(removed, actor(5));
-        assert_eq!(&*t, &[actor(1), actor(9)]);
+        assert_eq!(t.to_vec(), [actor(1), actor(9)]);
         assert_eq!(removal.index(), 1);
         assert_eq!(removal.apply(0), Some(0));
         assert_eq!(removal.apply(1), None);

@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn actor_refs_shift_and_remove_every_element() {
-        let mut table = ActorTable::from_document_order(vec![actor(1), actor(9)]);
+        let mut table = ActorTable::from_actors([actor(1), actor(9)]);
         // Elements refer to actor indices 0 and 1.
         let mut refs: ActorRefs<Vec<usize>> = ActorRefs(vec![0, 1, 1]);
 
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn actor_refs_hashmap_reindexes_keys_and_values() {
-        let mut table = ActorTable::from_document_order(vec![actor(1), actor(9)]);
+        let mut table = ActorTable::from_actors([actor(1), actor(9)]);
         let mut refs: ActorRefs<HashMap<usize, usize>> = ActorRefs(HashMap::from([(0, 1), (1, 0)]));
 
         let ActorInsert::Inserted(shift) = table.insert(actor(0)) else {
