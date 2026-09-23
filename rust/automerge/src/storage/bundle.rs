@@ -85,7 +85,7 @@ impl Bundle {
     }
 
     pub fn actors(&self) -> &[ActorId] {
-        &self.storage.actors
+        self.storage.actors.as_slice()
     }
 
     pub fn authors(&self) -> &[Vec<u8>] {
