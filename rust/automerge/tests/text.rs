@@ -1021,3 +1021,63 @@ fn splicing_into_multibyte_characters() {
     // deleting in the middle of a multi-byte character will delete after
     assert_eq!(doc3.text(&text).unwrap(), "ABBBBBC");
 }
+
+#[test]
+fn diff_splices_carry_the_marks_of_each_inserted_character() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "aaa").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 3),
+        ExpandMark::Both,
+    )
+    .unwrap();
+    let heads_before = doc.get_heads();
+    for _ in 0..3 {
+        doc.splice_text(&text, 0, 0, "x").unwrap();
+    }
+    doc.unmark(&text, "bold", 0, 1, ExpandMark::Both).unwrap();
+    let heads_after = doc.get_heads();
+
+    let bold = Some(std::sync::Arc::new(
+        [("bold".to_string(), ScalarValue::from(true))]
+            .into_iter()
+            .collect::<automerge::marks::MarkSet>(),
+    ));
+    let spans: Vec<_> = doc.spans(&text).unwrap().collect();
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text {
+                text: "x".to_string(),
+                marks: None
+            },
+            Span::Text {
+                text: "xxaaa".to_string(),
+                marks: bold.clone()
+            },
+        ]
+    );
+
+    let splices: Vec<_> = doc
+        .diff(&heads_before, &heads_after)
+        .into_iter()
+        .filter_map(|patch| match patch.action {
+            PatchAction::SpliceText {
+                index,
+                value,
+                marks,
+                ..
+            } => Some((index, value.make_string(), marks)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        splices,
+        vec![
+            (0, "x".to_string(), None),
+            (1, "xx".to_string(), bold.map(|m| (*m).clone()))
+        ]
+    );
+}
