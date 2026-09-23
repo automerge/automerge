@@ -1,3 +1,11 @@
+## Unreleased
+
+### Fixed
+
+* `diff` reports inserted text under the marks each character has after the
+  diff, rather than sometimes using the first character's marks for the whole
+  run.
+
 ## 0.12.0
 
 ### Breaking Changes
