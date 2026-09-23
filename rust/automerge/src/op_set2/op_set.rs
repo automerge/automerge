@@ -6,6 +6,7 @@ use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
 use crate::storage::columns::BadColumnLayout;
+use crate::storage::document::ReconstructError as LoadError;
 use crate::storage::{columns::compression::Uncompressed, Document, RawColumns};
 use crate::types;
 use crate::types::{
@@ -79,7 +80,7 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            actors: ActorTable::from_document_order(actors),
+            actors: ActorTable::from_actors(actors),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
@@ -1198,13 +1199,22 @@ impl OpSet {
         }
     }
 
-    /// Adopt the ops of a document chunk directly, with the actor table in
-    /// the order the document stored it.
-    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
+    /// Adopt the ops of a document chunk directly.
+    ///
+    /// The op columns index actors by position in the document's stored actor
+    /// list, and a live op set relies on that order being sorted (for
+    /// `lookup_actor` and `OpId` ordering), so the list is checked as it is
+    /// promoted to an [`ActorTable`].
+    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, LoadError> {
+        let actors = doc.actors().clone().into_table()?;
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
-        let actors = ActorTable::from_document_order(doc.actors().to_vec());
-        Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
+        Ok(Self::from_parts(
+            doc.op_metadata.clone(),
+            data,
+            actors,
+            text_encoding,
+        )?)
     }
 
     #[cfg(test)]
@@ -1217,7 +1227,7 @@ impl OpSet {
     ) -> Self {
         let cols = Columns::new(ops);
         OpSet {
-            actors: ActorTable::from_document_order(actors),
+            actors: ActorTable::from_actors(actors),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),

@@ -4,6 +4,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
+use crate::actor::ActorList;
 use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
@@ -11,7 +12,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -27,7 +28,7 @@ pub(crate) struct Document<'a> {
     #[allow(dead_code)]
     compressed_bytes: Option<Cow<'a, [u8]>>,
     header: Header,
-    actors: Vec<ActorId>,
+    actors: ActorList,
     heads: Vec<ChangeHash>,
     pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
@@ -113,7 +114,10 @@ impl<'a> Document<'a> {
                 let (i, heads) = parse::length_prefixed(parse::change_hash)(i)?;
                 let (i, change_meta) = RawColumns::parse::<ParseError>(i)?;
                 let (i, ops_meta) = RawColumns::parse::<ParseError>(i)?;
-                Ok((i, (actors, heads, change_meta, ops_meta)))
+                Ok((
+                    i,
+                    (ActorList::from_stored(actors), heads, change_meta, ops_meta),
+                ))
             },
             i,
         )?;
@@ -202,12 +206,12 @@ impl<'a> Document<'a> {
         let change_metadata = change_graph.encode(&mut change_out);
 
         // The ActorTable is sorted by construction, so the stored order is
-        // canonical.
-        let actors = op_set.actors.to_vec();
+        // canonical and a later load can adopt the columns directly.
+        let actors = ActorList::from_stored(op_set.actors.to_vec());
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
-        for actor in &actors {
+        for actor in actors.iter() {
             leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
             data.extend(actor.to_bytes());
         }
@@ -296,7 +300,8 @@ impl<'a> Document<'a> {
         self.header.checksum_valid()
     }
 
-    pub(crate) fn actors(&self) -> &[ActorId] {
+    /// The document's actor list, in the order it was stored.
+    pub(crate) fn actors(&self) -> &ActorList {
         &self.actors
     }
 
@@ -400,6 +405,8 @@ pub(crate) enum ReconstructError {
     InvalidOp(#[from] crate::error::InvalidOpType),
     #[error(transparent)]
     PackErr(#[from] PackError),
+    #[error(transparent)]
+    UnsortedActors(#[from] crate::actor::UnsortedActors),
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
     #[error("invalid actor id {0}")]
