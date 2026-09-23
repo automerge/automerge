@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Range;
 
+use crate::actor::ActorList;
 use crate::op_set2::change::{length_prefixed_bytes, shift_range, ActorMapper};
 use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::op::{Op, OpBuilder};
@@ -148,7 +149,7 @@ impl<'a> BundleBuilder<'a> {
         mapper.build_mapping(None);
 
         let deps = self.change_writer.external.clone();
-        let actors = mapper.iter().collect::<Vec<_>>();
+        let actors = ActorList::from_stored(mapper.iter().collect());
 
         // Prefix: deps + actors. Identical in both the uncompressed and
         // compressed representations.
@@ -158,7 +159,7 @@ impl<'a> BundleBuilder<'a> {
             prefix.extend(hash.as_bytes());
         }
         leb128::write::unsigned(&mut prefix, actors.len() as u64).unwrap();
-        for actor in &actors {
+        for actor in actors.iter() {
             length_prefixed_bytes(actor, &mut prefix);
         }
 
