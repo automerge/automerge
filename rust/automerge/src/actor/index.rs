@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn actor_indexed_tracks_table_length() {
-        let mut table = ActorTable::from_document_order(vec![actor(1), actor(9)]);
+        let mut table = ActorTable::from_actors([actor(1), actor(9)]);
         let mut slots: ActorIndexed<u8> = ActorIndexed::build_from(&table, |i| i as u8 * 10);
         assert_eq!(&*slots, &[0, 10]);
 

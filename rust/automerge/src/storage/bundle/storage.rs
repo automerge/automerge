@@ -2,12 +2,13 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::ops::Range;
 
+use crate::actor::ActorList;
 use crate::op_set2::change::ChangeCollector;
 use crate::storage::change::{OpReadState, Unverified, Verified};
 use crate::storage::columns::compression;
 use crate::storage::columns::{ColumnId, ColumnType};
 use crate::storage::{parse, Header, RawColumns};
-use crate::types::{ActorId, ChangeHash};
+use crate::types::ChangeHash;
 use crate::Change;
 
 use super::{BundleChangeIter, BundleChangeIterUnverified, OpIter, OpIterUnverified, ParseError};
@@ -31,7 +32,7 @@ pub(crate) struct BundleStorage<'a, OpReadState> {
     pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
     pub(crate) header: Header,
     pub(crate) deps: Vec<ChangeHash>,
-    pub(crate) actors: Vec<ActorId>,
+    pub(crate) actors: ActorList,
     pub(crate) ops_meta: RawColumns<compression::Uncompressed>,
     pub(crate) ops_data: Range<usize>,
     pub(crate) changes_meta: RawColumns<compression::Uncompressed>,
@@ -162,7 +163,7 @@ impl<'a> BundleStorage<'a, Unverified> {
             |i| -> parse::ParseResult<'_, _, ParseError> {
                 let (i, deps) = parse::length_prefixed(parse::change_hash)(i)?;
                 let (i, actors) = parse::length_prefixed(parse::actor_id)(i)?;
-                Ok((i, (deps, actors)))
+                Ok((i, (deps, ActorList::from_stored(actors))))
             },
             input,
         )?;

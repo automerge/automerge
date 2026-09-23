@@ -79,7 +79,7 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            actors: ActorTable::from_document_order(actors),
+            actors: ActorTable::from_actors(actors),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
@@ -1183,12 +1183,27 @@ impl OpSet {
         }
     }
 
-    /// Adopt the ops of a document chunk directly, with the actor table in
-    /// the order the document stored it.
+    /// Adopt the ops of a document chunk over its actor list as stored,
+    /// sorted or not.
+    ///
+    /// The op columns index actors by position in the stored list, so the
+    /// indices are consistent with the columns whatever the order. A live op
+    /// set additionally relies on the table being sorted, for `lookup_actor`
+    /// and `OpId` ordering; documents saved by this implementation guarantee
+    /// that, and loading does not yet check it.
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
+        let actors = doc.actors().clone().for_reconstruction();
+        Self::load_with_actors(doc, actors, text_encoding)
+    }
+
+    /// Adopt the ops of a document chunk directly over the given table.
+    pub(crate) fn load_with_actors(
+        doc: &Document<'_>,
+        actors: ActorTable,
+        text_encoding: TextEncoding,
+    ) -> Result<Self, PackError> {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
-        let actors = ActorTable::from_document_order(doc.actors().to_vec());
         Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
     }
 
@@ -1202,7 +1217,7 @@ impl OpSet {
     ) -> Self {
         let cols = Columns::new(ops);
         OpSet {
-            actors: ActorTable::from_document_order(actors),
+            actors: ActorTable::from_actors(actors),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),

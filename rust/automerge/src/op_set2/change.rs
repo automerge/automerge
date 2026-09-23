@@ -1,6 +1,7 @@
 use super::meta::ValueMeta;
 use super::op::{AsChangeOp, OpBuilder};
 use super::types::{Action, ActorIdx};
+use crate::actor::ActorIds;
 use crate::change_graph::ChangeGraph;
 use crate::storage::change::{ChangeOpsColumns as ChangeOpsColumns2, Verified};
 use crate::storage::{Change, ChunkType, Header};
@@ -37,7 +38,7 @@ pub(crate) fn build_change<T, G>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
     graph: &G,
-    actors: &[ActorId],
+    actors: &dyn ActorIds,
 ) -> Change<'static, Verified>
 where
     T: AsChangeOp,
@@ -60,7 +61,7 @@ where
     let num_ops = ops.len();
     let mut col_data = Vec::new();
 
-    let actor = mapper.actors[meta.actor].clone();
+    let actor = mapper.actors.actor(meta.actor).clone();
 
     let start_op = ops.first().map(T::op_id_ctr).unwrap_or(meta.max_op + 1);
 
@@ -269,20 +270,21 @@ where
 // this structure allows for the vectors to be allocated
 // once and reused (via trucate()) when creating a large number
 // of changes (like on load)
-#[derive(Debug, PartialEq)]
 pub(crate) struct ActorMapper<'a> {
     seen_actors: Vec<bool>,
     pub(crate) mapping: Vec<Option<ActorIdx>>,
-    actors: &'a [ActorId],
+    actors: &'a dyn ActorIds,
     other_actors: Vec<usize>,
 }
 
 impl<'a> ActorMapper<'a> {
     pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = ActorId> + '_ {
-        self.other_actors.iter().map(|i| self.actors[*i].clone())
+        self.other_actors
+            .iter()
+            .map(|i| self.actors.actor(*i).clone())
     }
 
-    pub(crate) fn new(actors: &'a [ActorId]) -> ActorMapper<'a> {
+    pub(crate) fn new(actors: &'a dyn ActorIds) -> ActorMapper<'a> {
         let len = actors.len();
         ActorMapper {
             seen_actors: vec![false; len],
