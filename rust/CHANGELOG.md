@@ -6,6 +6,9 @@
   text went from 9ms to 1.6us).
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
+* `diff` reports inserted text under the marks each character has after the
+  diff, rather than sometimes using the first character's marks for the whole
+  run.
 
 ## 0.12.0
 
