@@ -137,6 +137,11 @@ impl AutoCommit {
         })
     }
 
+    /// Load a document without verifying the head hashes
+    ///
+    /// See [`Automerge::load_unverified_heads`]. The resulting document is
+    /// only intended for inspection; there is no guarantee that other
+    /// operations - in particular [`Self::save`] - will work on it.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_unverified_heads(data)?;
         Ok(Self {
