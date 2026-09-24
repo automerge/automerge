@@ -64,6 +64,18 @@ pub enum AutomergeError {
     MissingHash(ChangeHash),
     #[error("change's deps should already be in the document")]
     MissingDeps,
+    #[error("operation {op} references missing predecessor {pred}")]
+    MissingPred {
+        op: crate::ObjId,
+        pred: crate::ObjId,
+    },
+    #[error("operation {op} and predecessor {pred} target different objects or properties")]
+    InvalidPred {
+        op: crate::ObjId,
+        pred: crate::ObjId,
+    },
+    #[error("delete operation {op} has no predecessors")]
+    MissingDeletePred { op: crate::ObjId },
     #[error("compressed chunk was not a change")]
     NonChangeCompressed,
     #[error("id was not an object id")]

@@ -54,3 +54,7 @@ proptest = { version = "^1.7.0", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features = ["float_roundtrip"], default-features = true }
 test-log = { version = "0.2.10", features = ["trace"], default-features = false }
 tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
+
+[[bench]]
+name = "apply_batch"
+harness = false

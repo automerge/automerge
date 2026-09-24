@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::op_set2::change::ChangeCollector;
+use crate::op_set2::types::ActorIdx;
 use crate::storage::change::{OpReadState, Unverified, Verified};
 use crate::storage::columns::compression;
 use crate::storage::columns::{ColumnId, ColumnType};
@@ -82,8 +83,12 @@ fn extract_id_ctr_values(
 ) -> Result<Vec<i64>, ParseError> {
     let mut inverse_bytes: Option<&[u8]> = None;
     let mut id_ctr_bytes: Option<&[u8]> = None;
+    let mut id_actor_bytes: &[u8] = &[];
     for col in ops_meta.0.iter() {
         let spec = col.spec();
+        if spec.id() == ID_COL_ID && spec.col_type() == ColumnType::Actor {
+            id_actor_bytes = &ops_data[col.data()];
+        }
         if spec.col_type() != ColumnType::DeltaInteger {
             continue;
         }
@@ -100,10 +105,13 @@ fn extract_id_ctr_values(
         }
     }
 
+    // Check row counts before expanding counter runs.
+    let num_ops = hexane::Column::<ActorIdx>::load(id_actor_bytes)?.len();
+
     // New format: reconstruct doc-order counters from the inverse
     // permutation column.
     if let Some(inverse_bytes) = inverse_bytes {
-        let inverse: Vec<i64> = decode_delta_int(inverse_bytes)?;
+        let inverse: Vec<i64> = decode_delta_int(inverse_bytes, num_ops)?;
 
         let mut change_meta: Vec<(usize, u64, u64, u64)> =
             BundleChangeIterUnverified::try_new(changes_meta, changes_data)?
@@ -134,17 +142,18 @@ fn extract_id_ctr_values(
 
     // Legacy format: decode the explicit doc-order id_ctr column.
     if let Some(id_ctr_bytes) = id_ctr_bytes {
-        return decode_delta_int(id_ctr_bytes);
+        return decode_delta_int(id_ctr_bytes, num_ops);
     }
 
     // Empty bundle (no ops) — both columns absent.
-    Ok(Vec::new())
+    decode_delta_int(&[], num_ops)
 }
 
-fn decode_delta_int(bytes: &[u8]) -> Result<Vec<i64>, ParseError> {
-    hexane::DeltaDecoder::<Option<i64>>::new(bytes)
-        .map(|item| item.ok_or(ParseError::InverseDecode))
-        .collect()
+fn decode_delta_int(bytes: &[u8], num_ops: usize) -> Result<Vec<i64>, ParseError> {
+    // Streaming decoders require validated input.
+    let column =
+        hexane::DeltaColumn::<i64>::load_with(bytes, hexane::LoadOpts::new().with_length(num_ops))?;
+    Ok(column.iter().collect())
 }
 
 impl<'a> BundleStorage<'a, Unverified> {
@@ -330,5 +339,144 @@ impl BundleStorage<'_, Verified> {
 
     pub(crate) fn deps(&self) -> &[ChangeHash] {
         &self.deps
+    }
+}
+
+#[cfg(test)]
+mod counter_column_tests {
+    use super::{
+        decode_delta_int, extract_id_ctr_values, ParseError, ID_COL_ID, ID_CTR_INVERSE_COL_ID,
+    };
+    use crate::storage::columns::{compression, RawColumn};
+    use crate::storage::{ColumnSpec, RawColumns};
+
+    fn counter_columns(
+        actor_bytes: &[u8],
+        counter_spec: ColumnSpec,
+        counter_bytes: &[u8],
+    ) -> (RawColumns<compression::Uncompressed>, Vec<u8>) {
+        let mut data = actor_bytes.to_vec();
+        data.extend_from_slice(counter_bytes);
+        let columns = [
+            RawColumn::new(ColumnSpec::new_actor(ID_COL_ID), 0..actor_bytes.len()),
+            RawColumn::new(counter_spec, actor_bytes.len()..data.len()),
+        ]
+        .into_iter()
+        .collect();
+        (columns, data)
+    }
+
+    #[test]
+    fn truncated_counter_columns_return_errors() {
+        // One literal delta whose signed LEB128 value is truncated.
+        assert!(decode_delta_int(&[0x7f, 0x80], 1).is_err());
+    }
+
+    #[test]
+    fn overflowing_counter_columns_return_errors() {
+        let overflowing = hexane::Column::<i64>::from_values(vec![i64::MAX, 1]).save();
+        assert!(decode_delta_int(&overflowing, 2).is_err());
+    }
+
+    #[test]
+    fn null_counter_columns_return_errors() {
+        let nulls = hexane::DeltaColumn::<Option<i64>>::from_values(vec![None]).save();
+        assert!(decode_delta_int(&nulls, 1).is_err());
+    }
+
+    #[test]
+    fn valid_counter_columns_round_trip() {
+        for values in [vec![], vec![1, 2, 2, 5, 3], vec![i64::MAX, i64::MAX - 1]] {
+            let encoded = hexane::DeltaColumn::<i64>::from_values(values.clone()).save();
+            assert_eq!(decode_delta_int(&encoded, values.len()).unwrap(), values);
+        }
+    }
+
+    #[test]
+    fn counter_columns_require_the_operation_count() {
+        let encoded = hexane::DeltaColumn::<i64>::from_values(vec![1, 2]).save();
+        for expected in [0, 1, 3] {
+            assert!(matches!(
+                decode_delta_int(&encoded, expected),
+                Err(ParseError::Pack(hexane::PackError::InvalidLength(2, n))) if n == expected
+            ));
+        }
+        assert!(matches!(
+            decode_delta_int(&[], 1),
+            Err(ParseError::Pack(hexane::PackError::InvalidLength(0, 1)))
+        ));
+    }
+
+    #[test]
+    fn both_counter_encodings_reject_amplified_runs() {
+        // Repeat -19 for 114,440,652 rows.
+        let amplified = [0xcc, 0xf3, 0xc8, 0x36, 0x6d];
+        let actor = hexane::Column::<u32>::from_values(vec![0]).save();
+        for id in [ID_COL_ID, ID_CTR_INVERSE_COL_ID] {
+            for actors in [&[][..], actor.as_slice()] {
+                let (columns, data) =
+                    counter_columns(actors, ColumnSpec::new_delta(id), &amplified);
+                assert!(matches!(
+                    extract_id_ctr_values(&RawColumns(vec![]), &[], &columns, &data),
+                    Err(ParseError::Pack(hexane::PackError::InvalidLength(
+                        114_440_652,
+                        _
+                    )))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_counters_with_operation_ids_are_rejected() {
+        let actor = hexane::Column::<u32>::from_values(vec![0]).save();
+        let (columns, data) = counter_columns(&actor, ColumnSpec::new_delta(ID_COL_ID), &[]);
+        assert!(matches!(
+            extract_id_ctr_values(&RawColumns(vec![]), &[], &columns, &data),
+            Err(ParseError::Pack(hexane::PackError::InvalidLength(0, 1)))
+        ));
+    }
+
+    #[test]
+    fn compressed_legacy_counters_with_matching_ids_round_trip() {
+        let actor = hexane::Column::<u32>::from_values(vec![0; 256]).save();
+        let values: Vec<i64> = (1..=256).collect();
+        let counters = hexane::DeltaColumn::<i64>::from_values(values.clone()).save();
+        let (columns, data) = counter_columns(&actor, ColumnSpec::new_delta(ID_COL_ID), &counters);
+        assert_eq!(
+            extract_id_ctr_values(&RawColumns(vec![]), &[], &columns, &data).unwrap(),
+            values
+        );
+    }
+
+    // Regenerate with python3 scripts/generate-malformed-fixtures.py.
+    fn fixture_error(bytes: &[u8]) -> ParseError {
+        let input = crate::storage::parse::Input::new(bytes);
+        let (input, header) = super::Header::parse::<ParseError>(input).unwrap();
+        super::BundleStorage::parse_following_header(input, header)
+            .unwrap_err()
+            .into()
+    }
+
+    #[test]
+    fn amplified_bundles_return_load_errors() {
+        for bytes in [
+            include_bytes!("fixtures/timeout-counter-bundle.bin").as_slice(),
+            include_bytes!("fixtures/slow-counter-bundle.bin").as_slice(),
+        ] {
+            assert!(matches!(
+                fixture_error(bytes),
+                ParseError::Pack(hexane::PackError::InvalidLength(114_440_652, 1))
+            ));
+            assert!(crate::AutoCommit::load(bytes).is_err());
+            assert!(crate::Bundle::try_from(bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn malformed_bundle_returns_a_load_error() {
+        let bytes = include_bytes!("fixtures/truncated-counter-bundle.bin");
+        assert!(matches!(fixture_error(bytes), ParseError::Pack(_)));
+        assert!(crate::AutoCommit::load(bytes).is_err());
     }
 }

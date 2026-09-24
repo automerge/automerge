@@ -745,14 +745,15 @@ impl<'a> ChangeCollector<'a> {
             // encoding columns, so the two paths produce the same set of
             // changes but not necessarily in the same order. Compare as sets
             // keyed by hash.
-            let bundle_changes = crate::storage::Bundle::for_hashes(
-                op_set,
-                change_graph,
-                r1.iter().map(|c| c.hash()),
-            )
-            .unwrap()
-            .to_changes()
-            .unwrap();
+            // Use stored hashes because re-encoding can change a hash.
+            let stored_hashes = changes
+                .iter()
+                .map(|c| change_graph.index_to_hash(c.builder).cloned().unwrap());
+            let bundle_changes =
+                crate::storage::Bundle::for_hashes(op_set, change_graph, stored_hashes)
+                    .unwrap()
+                    .to_changes()
+                    .unwrap();
             let r1_hashes: std::collections::HashSet<_> = r1.iter().map(|c| c.hash()).collect();
             let bundle_hashes: std::collections::HashSet<_> =
                 bundle_changes.iter().map(|c| c.hash()).collect();
