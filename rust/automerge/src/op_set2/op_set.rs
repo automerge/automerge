@@ -1,10 +1,12 @@
 use super::parents::Parents;
+use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
 use crate::storage::columns::BadColumnLayout;
+use crate::storage::document::ReconstructError as LoadError;
 use crate::storage::{columns::compression::Uncompressed, Document, RawColumns};
 use crate::types;
 use crate::types::{
@@ -58,7 +60,7 @@ pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSet {
-    pub(crate) actors: Vec<ActorId>,
+    pub(crate) actors: ActorTable,
     pub(crate) obj_info: ObjIndex,
     cols: Columns,
     pub(crate) text_encoding: TextEncoding,
@@ -78,7 +80,7 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            actors,
+            actors: ActorTable::from_actors(actors),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
@@ -1185,23 +1187,34 @@ impl OpSet {
     }
 
     pub(crate) fn lookup_actor(&self, actor: &ActorId) -> Option<usize> {
-        self.actors.binary_search(actor).ok()
+        self.actors.lookup(actor)
     }
 
     pub(crate) fn new(text_encoding: TextEncoding) -> Self {
         OpSet {
-            actors: vec![],
+            actors: ActorTable::new(),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding,
         }
     }
 
-    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
+    /// Adopt the ops of a document chunk directly.
+    ///
+    /// The op columns index actors by position in the document's stored actor
+    /// list, and a live op set relies on that order being sorted (for
+    /// `lookup_actor` and `OpId` ordering), so the list is checked as it is
+    /// promoted to an [`ActorTable`].
+    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, LoadError> {
+        let actors = doc.actors().clone().into_table()?;
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
-        let actors = doc.actors().to_vec();
-        Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
+        Ok(Self::from_parts(
+            doc.op_metadata.clone(),
+            data,
+            actors,
+            text_encoding,
+        )?)
     }
 
     #[cfg(test)]
@@ -1214,7 +1227,7 @@ impl OpSet {
     ) -> Self {
         let cols = Columns::new(ops);
         OpSet {
-            actors,
+            actors: ActorTable::from_actors(actors),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),
@@ -1224,7 +1237,7 @@ impl OpSet {
     fn from_parts(
         cols: RawColumns<Uncompressed>,
         data: &[u8],
-        actors: Vec<ActorId>,
+        actors: ActorTable,
         text_encoding: TextEncoding,
     ) -> Result<Self, PackError> {
         let cols = Columns::load(cols.as_map(), data, &actors)?;
@@ -1397,35 +1410,40 @@ impl OpSet {
     // * maybe do something with types to make scan required to get
     //    validated bytes
 
-    pub(crate) fn insert_actor(&mut self, idx: usize, actor: ActorId) {
-        if self.actors.len() != idx {
-            self.rewrite_with_new_actor(idx)
+    /// Ensure `actor` is in the actor table, shifting op actor indices if it
+    /// had to be inserted before existing actors.
+    ///
+    /// The returned [`ActorInsert::Inserted`] token must be applied to every
+    /// other actor-indexed structure in the document.
+    pub(crate) fn insert_actor(&mut self, actor: ActorId) -> ActorInsert {
+        let insert = self.actors.insert(actor);
+        if let ActorInsert::Inserted(shift) = &insert {
+            if shift.index() + 1 != self.actors.len() {
+                self.shift_actors(shift)
+            }
         }
-        self.actors.insert(idx, actor)
+        insert
     }
 
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        self.cols.rewrite_with_new_actor(idx);
-        self.cols.index.mark.rewrite_with_new_actor(idx);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .map(|(id, make)| (id.with_new_actor(idx), make.with_new_actor(idx)))
-                .collect(),
-        );
+    fn shift_actors(&mut self, shift: &ActorShift) {
+        self.cols.rewrite_with_new_actor(shift.index());
+        self.cols.index.mark.shift(shift);
+        self.obj_info.0.shift_actors(shift);
     }
 
-    pub(crate) fn remove_actor(&mut self, idx: usize) {
-        self.actors.remove(idx);
+    /// Remove the actor at `idx` from the actor table. The actor must have
+    /// no ops in the document.
+    ///
+    /// The returned token must be applied to every other actor-indexed
+    /// structure in the document.
+    pub(crate) fn remove_actor(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
+        let (actor, removal) = self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .filter_map(|(id, make)| Some((id.without_actor(idx)?, make.without_actor(idx)?)))
-                .collect(),
-        );
+        self.obj_info
+            .0
+            .remove_actor(&removal)
+            .expect("removed actor still owns objects");
+        (actor, removal)
     }
 }
 
@@ -1802,7 +1820,8 @@ mod tests {
 
     #[test]
     fn column_data_iter_range() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        actors.sort();
 
         let ops = vec![
             TestOp {
@@ -1885,7 +1904,8 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        actors.sort();
 
         let test_ops = vec![
             TestOp {
@@ -2010,7 +2030,7 @@ mod tests {
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
-            let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
+            let clock = Clock::from_counters([None, Some(9), Some(9)]);
             let ops = opset
                 .top_ops(&ObjId(OpId::new(1, 1)), Some(clock.clone()))
                 .collect::<Vec<_>>();

@@ -4,6 +4,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
+use crate::actor::ActorList;
 use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
@@ -11,7 +12,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -27,7 +28,7 @@ pub(crate) struct Document<'a> {
     #[allow(dead_code)]
     compressed_bytes: Option<Cow<'a, [u8]>>,
     header: Header,
-    actors: Vec<ActorId>,
+    actors: ActorList,
     heads: Vec<ChangeHash>,
     pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
@@ -113,7 +114,10 @@ impl<'a> Document<'a> {
                 let (i, heads) = parse::length_prefixed(parse::change_hash)(i)?;
                 let (i, change_meta) = RawColumns::parse::<ParseError>(i)?;
                 let (i, ops_meta) = RawColumns::parse::<ParseError>(i)?;
-                Ok((i, (actors, heads, change_meta, ops_meta)))
+                Ok((
+                    i,
+                    (ActorList::from_stored(actors), heads, change_meta, ops_meta),
+                ))
             },
             i,
         )?;
@@ -201,12 +205,13 @@ impl<'a> Document<'a> {
         let mut change_out = Vec::new();
         let change_metadata = change_graph.encode(&mut change_out);
 
-        // actors already sorted
-        let actors = op_set.actors.clone();
+        // The ActorTable is sorted by construction, so the stored order is
+        // canonical and a later load can adopt the columns directly.
+        let actors = ActorList::from_stored(op_set.actors.to_vec());
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
-        for actor in &actors {
+        for actor in actors.iter() {
             leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
             data.extend(actor.to_bytes());
         }
@@ -295,7 +300,8 @@ impl<'a> Document<'a> {
         self.header.checksum_valid()
     }
 
-    pub(crate) fn actors(&self) -> &[ActorId] {
+    /// The document's actor list, in the order it was stored.
+    pub(crate) fn actors(&self) -> &ActorList {
         &self.actors
     }
 
@@ -327,7 +333,7 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
+        let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut index = op_set.index_builder();
 
@@ -343,7 +349,7 @@ impl<'a> Document<'a> {
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
-        let mut authors = Authors::with_actors(change_cols.len());
+        let mut authors = Authors::new(&op_set.actors);
         let change_graph = change_cols.finalize(&changes.changes, &mut authors);
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
@@ -367,7 +373,7 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Vec<Change>, ReconstructError> {
         let op_set = OpSet::load(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
+        let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut mark_order = MarkOrderValidator::default();
         let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
@@ -399,6 +405,8 @@ pub(crate) enum ReconstructError {
     InvalidOp(#[from] crate::error::InvalidOpType),
     #[error(transparent)]
     PackErr(#[from] PackError),
+    #[error(transparent)]
+    UnsortedActors(#[from] crate::actor::UnsortedActors),
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
     #[error("invalid actor id {0}")]

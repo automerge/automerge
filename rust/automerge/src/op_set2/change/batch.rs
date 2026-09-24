@@ -869,7 +869,7 @@ impl BatchApply {
     ) -> Result<(), PatchLogMismatch> {
         self.insert_new_actors(doc);
 
-        log.migrate_actors(&doc.ops().actors)?;
+        log.migrate_actors(doc.actors())?;
 
         self.import_ops(doc);
 

@@ -2,11 +2,12 @@ use super::meta::ValueMeta;
 use super::op::OpLike;
 use super::op_set::MarkIndexColumn;
 use super::types::{Action, ActorIdx, ScalarValue};
+use crate::actor::ActorTable;
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::columns::{BadColumnLayout, Columns as ColumnFormat};
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
-use crate::types::{ActorId, SequenceType, TextEncoding};
+use crate::types::{SequenceType, TextEncoding};
 use hexane::PackError;
 
 use std::collections::BTreeMap;
@@ -252,7 +253,7 @@ impl Columns {
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
-        _actors: &[ActorId],
+        _actors: &ActorTable,
     ) -> Result<Self, PackError> {
         let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 

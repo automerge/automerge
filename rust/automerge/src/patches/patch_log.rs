@@ -1,3 +1,4 @@
+use crate::actor::{ActorInsert, ActorRefs, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::hydrate::Value;
@@ -42,14 +43,17 @@ use super::PatchBuilder;
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
-    expose: HashSet<OpId>,
+    events: ActorRefs<Vec<(ObjId, Event)>>,
+    expose: ActorRefs<HashSet<OpId>>,
     completed_patches: Vec<Patch>,
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
     pub(crate) heads: Option<Vec<ChangeHash>>,
-    pub(crate) actors: Vec<ActorId>,
+    /// Mirror of the document's actor table at the time the logged events
+    /// were recorded; event ids are indices into it. Kept in step with the
+    /// document by [`Self::migrate_actors`].
+    pub(crate) actors: ActorTable,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
     /// so these must be removed from the patch log too (see [`PatchLog::finish_transaction`]).
@@ -110,61 +114,11 @@ pub(crate) enum Event {
 }
 
 impl Event {
-    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
-        match self {
-            Self::PutMap {
-                key,
-                value,
-                id,
-                conflict,
-            } => Self::PutMap {
-                key,
-                value,
-                id: id.with_new_actor(idx),
-                conflict,
-            },
-            Self::PutSeq {
-                index,
-                value,
-                id,
-                conflict,
-            } => Self::PutSeq {
-                index,
-                value,
-                id: id.with_new_actor(idx),
-                conflict,
-            },
-            Self::Insert {
-                index,
-                value,
-                id,
-                conflict,
-            } => Self::Insert {
-                index,
-                value,
-                id: id.with_new_actor(idx),
-                conflict,
-            },
-            Self::IncrementMap { key, n, id } => Self::IncrementMap {
-                key,
-                n,
-                id: id.with_new_actor(idx),
-            },
-            Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
-                index,
-                n,
-                id: id.with_new_actor(idx),
-            },
-            event => event,
-        }
-    }
-
-    // Re-index this event after the actor at `idx` has been removed from the actor list.
-    //
-    // This may only be called for actors which are not referenced by the event (e.g. an actor
-    // which was speculatively added when opening a transaction but ended up making no ops). If the
-    // event _does_ reference the removed actor this returns `None`.
-    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+    /// Re-index the op id this event refers to, if it has one. Events which
+    /// carry no op id are returned unchanged.
+    ///
+    /// If the callback `f` returns `None`, then the return value is also `None`.
+    fn map_id(self, f: impl FnOnce(OpId) -> Option<OpId>) -> Option<Self> {
         Some(match self {
             Self::PutMap {
                 key,
@@ -174,7 +128,7 @@ impl Event {
             } => Self::PutMap {
                 key,
                 value,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
                 conflict,
             },
             Self::PutSeq {
@@ -185,7 +139,7 @@ impl Event {
             } => Self::PutSeq {
                 index,
                 value,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
                 conflict,
             },
             Self::Insert {
@@ -196,21 +150,31 @@ impl Event {
             } => Self::Insert {
                 index,
                 value,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
                 conflict,
             },
-            Self::IncrementMap { key, n, id } => Self::IncrementMap {
-                key,
-                n,
-                id: id.without_actor(idx)?,
-            },
+            Self::IncrementMap { key, n, id } => Self::IncrementMap { key, n, id: f(id)? },
             Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
                 index,
                 n,
-                id: id.without_actor(idx)?,
+                id: f(id)?,
             },
             event => event,
         })
+    }
+}
+
+impl HasActorIndices for Event {
+    fn shifted(self, shift: &ActorShift) -> Self {
+        self.map_id(|id| Some(id.shifted(shift)))
+            .expect("shifting never drops an event")
+    }
+
+    // This may only be called for actors which are not referenced by the event (e.g. an actor
+    // which was speculatively added when opening a transaction but ended up making no ops). If the
+    // event _does_ reference the removed actor this returns `None`.
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
+        self.map_id(|id| id.removed(removal))
     }
 }
 
@@ -228,13 +192,13 @@ impl PatchLog {
     pub fn new(active: bool) -> Self {
         PatchLog {
             active,
-            events: Vec::new(),
-            expose: HashSet::new(),
+            events: ActorRefs::default(),
+            expose: ActorRefs::default(),
             completed_patches: Vec::new(),
             heads: None,
             path_map: Default::default(),
             path_hint: 0,
-            actors: vec![],
+            actors: ActorTable::new(),
             speculative_actor: None,
         }
     }
@@ -289,7 +253,7 @@ impl PatchLog {
     /// lets them be safely concatenated with patches from subsequent views.
     pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
         if !self.events.is_empty() || !self.expose.is_empty() {
-            self.migrate_actors(&doc.ops.actors)
+            self.migrate_actors(doc.actors())
                 .expect("AutoCommit's patch log always belongs to its document");
             let previous_heads = self.heads.replace(heads.to_vec());
             let patches = self.make_current_patches(doc);
@@ -516,7 +480,7 @@ impl PatchLog {
             .sort_by(|(obj_a, _), (obj_b, _)| obj_a.cmp(obj_b));
         let mut expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
-        for (obj, event) in &self.events {
+        for (obj, event) in self.events.iter() {
             let key = doc.id_to_exid(obj.0);
             expose.pump_queue(&key, &mut patch_builder, doc, clock.as_ref());
             if expose.should_skip(&key) {
@@ -540,8 +504,8 @@ impl PatchLog {
     pub(crate) fn branch(&mut self) -> Self {
         Self {
             active: self.active,
-            events: Vec::new(),
-            expose: HashSet::new(),
+            events: ActorRefs::default(),
+            expose: ActorRefs::default(),
             completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
@@ -551,33 +515,22 @@ impl PatchLog {
         }
     }
 
-    pub(crate) fn migrate_actor(&mut self, index: usize) {
-        let dirty = std::mem::take(&mut self.events);
-        self.events = dirty
-            .into_iter()
-            .map(|(obj, event)| (obj.with_new_actor(index), event.with_new_actor(index)))
-            .collect();
-        let dirty = std::mem::take(&mut self.expose);
-        self.expose = dirty
-            .into_iter()
-            .map(|id| id.with_new_actor(index))
-            .collect();
+    fn shift_actors(&mut self, shift: &ActorShift) {
+        self.events.shift_actors(shift);
+        self.expose.shift_actors(shift);
     }
 
+    /// Forget the actor at `index`, which must not be referenced by any
+    /// logged event (it was speculatively added for a transaction which
+    /// produced no ops).
     fn remove_actor(&mut self, index: usize) {
-        self.actors.remove(index);
-        let dirty = std::mem::take(&mut self.events);
-        self.events = dirty
-            .into_iter()
-            .filter_map(|(obj, event)| {
-                Some((obj.without_actor(index)?, event.without_actor(index)?))
-            })
-            .collect();
-        let dirty = std::mem::take(&mut self.expose);
-        self.expose = dirty
-            .into_iter()
-            .filter_map(|id| id.without_actor(index))
-            .collect();
+        let (_actor, removal) = self.actors.remove(index);
+        self.events
+            .remove_actor(&removal)
+            .expect("removed actor is still referenced by a logged event");
+        self.expose
+            .remove_actor(&removal)
+            .expect("removed actor is still referenced by an exposed op");
     }
 
     /// Notify the patch log that we are beginning a new transaction
@@ -591,13 +544,13 @@ impl PatchLog {
         doc: &Automerge,
         args: &TransactionArgs,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.migrate_actors(&doc.ops.actors)?;
+        self.migrate_actors(doc.actors())?;
         // If this is the actor's first change then the actor was (potentially)
         // just added to the document. It should be removed again on
         // commit/rollback if the transaction produces no ops, so flag it as
         // speculative.
         if let Some(speculative_actor) =
-            (args.seq == 1).then(|| doc.ops.actors[args.actor_index].clone())
+            (args.seq == 1).then(|| doc.actors()[args.actor_index].clone())
         {
             assert!(
                 self.speculative_actor.is_none(),
@@ -613,16 +566,16 @@ impl PatchLog {
     /// This allows the patch log to clean up any speculative actors that were added
     /// when the transaction began. This method should be called after the transaction
     /// has been committed or rolled back.
-    pub(crate) fn finish_transaction(&mut self, doc_actors: &[ActorId]) {
+    pub(crate) fn finish_transaction(&mut self, doc_actors: &ActorTable) {
         let Some(speculative_actor) = self.speculative_actor.take() else {
             return;
         };
-        if !doc_actors.contains(&speculative_actor) {
-            if let Ok(index) = self.actors.binary_search(&speculative_actor) {
+        if doc_actors.lookup(&speculative_actor).is_none() {
+            if let Some(index) = self.actors.lookup(&speculative_actor) {
                 self.remove_actor(index);
             }
         }
-        debug_assert_eq!(self.actors.as_slice(), doc_actors);
+        debug_assert_eq!(self.actors, *doc_actors);
     }
 
     // Re-align this patch log's actor list (and the event indices into it) with the document's
@@ -633,35 +586,39 @@ impl PatchLog {
     // actors after it, so the event ids stored in the patch log have to be re-indexed to match.
     pub(crate) fn migrate_actors(
         &mut self,
-        others: &[ActorId],
+        others: &ActorTable,
     ) -> Result<(), crate::PatchLogMismatch> {
-        if self.actors.as_slice() == others {
+        if self.actors == *others {
             return Ok(());
         }
         if self.actors.is_empty() {
-            self.actors = others.to_vec();
+            self.actors = others.clone();
             return Ok(());
         }
-        for i in 0..others.len() {
-            match (self.actors.get(i), others.get(i)) {
-                (Some(a), Some(b)) if a == b => {}
-                (Some(a), Some(b)) if b < a => {
-                    self.actors.insert(i, b.clone());
-                    self.migrate_actor(i);
+        // Both tables are sorted, so the document's table must be a superset
+        // of ours: every actor we know must still be present. Insert each
+        // actor the document has and we don't, re-indexing logged events.
+        for actor in others.iter() {
+            if let ActorInsert::Inserted(shift) = self.actors.insert(actor.clone()) {
+                // Only events referring to actors at or after the insertion
+                // point need re-indexing. If the new actor lands past every
+                // existing one there is nothing to move.
+                if shift.index() + 1 != self.actors.len() {
+                    self.shift_actors(&shift);
                 }
-                (None, Some(b)) => {
-                    self.actors.insert(i, b.clone());
-                }
-                _ => return Err(crate::PatchLogMismatch),
             }
         }
-        Ok(())
+        if self.actors == *others {
+            Ok(())
+        } else {
+            Err(crate::PatchLogMismatch)
+        }
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.completed_patches.extend(other.completed_patches);
-        self.events.extend(other.events);
-        self.expose.extend(other.expose);
+        self.events.extend(other.events.0);
+        self.expose.extend(other.expose.0);
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
