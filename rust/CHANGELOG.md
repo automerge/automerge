@@ -66,6 +66,12 @@
 * Loading empty input with `load_with_options` now respects the requested text
   encoding instead of using the platform default.
 
+### Fixed
+
+* `Cursor::from_str` now returns `None` (transformed to `AutomergeError::InvalidCursorFormat`
+in `Cursor::try_from<&str>`) instead of panicking when input is empty or has
+empty `ActorID`.
+
 ## 0.11.0
 
 ### Breaking Changes

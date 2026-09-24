@@ -50,7 +50,7 @@
 //! All composite values have an ID ([`ObjId`]) which is created when the value
 //! is inserted into the document or is the root object ID [`ROOT`]. Values in
 //! the document are then referred to by the pair (`object ID`, `key`). The
-//! `key` is represented by the [`Prop`] type and is either a string for a maps,
+//! `key` is represented by the [`Prop`] type and is either a string for maps,
 //! or an index for sequences.
 //!
 //! ### Conflicts
