@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::author::Author;
-use crate::automerge::SaveOptions;
+use crate::automerge::{HistoryUpdate, SaveOptions};
 use crate::clock::ReadAt;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
@@ -471,7 +471,10 @@ impl AutoCommit {
     pub(crate) fn ensure_transaction_closed(&mut self) {
         if let Some((patch_log, tx)) = self.transaction.take() {
             self.patch_log.merge(patch_log);
-            let hash = tx.commit(&mut self.doc, None, None);
+            let (hash, history) = match tx.commit(&mut self.doc, None, None) {
+                Some((hash, history)) => (Some(hash), history),
+                None => (None, HistoryUpdate::Unchanged),
+            };
             self.patch_log.finish_transaction(self.doc.actors());
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
@@ -482,6 +485,28 @@ impl AutoCommit {
                 .unwrap_or_else(|| self.doc.get_heads());
             self.patch_log
                 .set_view_with(&self.doc, || self.doc.visible(&heads));
+            self.patch_log
+                .set_view_with(&self.doc, || self.doc.visible(&heads));
+            self.publish_resolved_boundary(history, &heads);
+        }
+    }
+
+    /// If a local commit resolved a pending write-frontier boundary, publish the
+    /// new visibility. Called after the commit's op-set mutation is complete
+    /// and the internal log's view has been advanced past the commit, so the
+    /// mask-constant invariant holds; the log observes the mask change as a
+    /// diff at its own (possibly isolated) view.
+    fn publish_resolved_boundary(&mut self, history: HistoryUpdate, heads: &[ChangeHash]) {
+        if let HistoryUpdate::BoundaryResolved = history {
+            self.doc
+                .republish_mask(&mut PatchLog::inactive(), |_| {})
+                .expect("a fresh patch log belongs to any document");
+            // The internal log always belongs to this document and
+            // `finish_transaction` just realigned its actors, so this cannot
+            // mismatch.
+            self.patch_log
+                .transition_to(&self.doc, |d| d.visible(heads))
+                .expect("AutoCommit's patch log always belongs to its document");
         }
     }
 
@@ -720,7 +745,10 @@ impl AutoCommit {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.take().unwrap();
         self.patch_log.merge(patch_log);
-        let hash = tx.commit(&mut self.doc, options.message, options.time);
+        let (hash, history) = match tx.commit(&mut self.doc, options.message, options.time) {
+            Some((hash, history)) => (Some(hash), history),
+            None => (None, HistoryUpdate::Unchanged),
+        };
         self.patch_log.finish_transaction(self.doc.actors());
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
@@ -731,6 +759,7 @@ impl AutoCommit {
             .unwrap_or_else(|| self.doc.get_heads());
         self.patch_log
             .set_view_with(&self.doc, || self.doc.visible(&heads));
+        self.publish_resolved_boundary(history, &heads);
         hash
     }
 
@@ -756,17 +785,22 @@ impl AutoCommit {
     /// operations and a new one with no operations. The returned [`ChangeHash`] will always be the
     /// hash of the empty change.
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
-        self.ensure_transaction_closed();
-        let args = self.doc.transaction_args(None);
-        // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
-        // always belongs to this document and can never mismatch.
-        self.patch_log
-            .begin_transaction(&self.doc, &args)
-            .expect("AutoCommit's patch log always belongs to its document");
-        let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
-        self.patch_log
-            .set_view_with(&self.doc, || self.doc.visible_current());
-        result
+        self.with_patch_log(|doc, log| {
+            let args = doc.transaction_args(None);
+            log.begin_transaction(doc, &args)?;
+            let (result, history) =
+                TransactionInner::empty(doc, args, options.message, options.time);
+            log.finish_transaction(doc.actors());
+            log.set_view_with(doc, || doc.visible_current());
+            if let HistoryUpdate::BoundaryResolved = history {
+                // The empty change is fully recorded and the log's view has
+                // been advanced past it, so the resolved boundary's
+                // visibility can be published now.
+                doc.republish_mask(log, |_| {})?;
+            }
+            Ok::<_, crate::PatchLogMismatch>(result)
+        })
+        .expect("AutoCommit's patch log always belongs to its document")
     }
 
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit

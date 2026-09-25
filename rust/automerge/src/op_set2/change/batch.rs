@@ -1,4 +1,6 @@
+use crate::automerge::HistoryUpdate;
 use crate::change_queue::ChangeBatch;
+use crate::clock::Mask;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
@@ -20,7 +22,7 @@ use std::ops::Range;
 mod transition;
 use transition::{CandidateSummary, ValueTransition};
 
-type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
+type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>, bool)>>;
 
 #[derive(Debug, Clone, Default)]
 struct BatchApply {
@@ -75,11 +77,23 @@ impl<'a> Untangler<'a> {
             self.value.key = Some(PropRef::Seq(self.index));
         }
 
-        if doc_op.visible() && !deleted {
+        // A doc op hidden by the mask snapshot is invisible: it occupies no
+        // width in the patch index and takes no part in top/conflict tracking.
+        // Mask-aware visibility is computed once here and shared by the
+        // width accounting, the candidate summaries and top/conflict
+        // tracking: an op whose only deleting successor is hidden by the
+        // mask is visible (restored), so raw `Op::visible()` must not be
+        // consulted for any of them.
+        let hidden = self.value.hides(&doc_op.id);
+        let visible = !hidden && self.value.masked_visible(doc_op);
+        if visible && !deleted {
             self.width = doc_op.width(self.seq_type, self.text_encoding);
         }
         self.value.process_doc_op(doc_op, effect);
-        self.top.process_doc_op(self.change_ops, doc_op, deleted);
+        if !hidden {
+            self.top
+                .process_doc_op(self.change_ops, doc_op, deleted, visible);
+        }
     }
 
     fn element_update(&mut self, doc_op: &Op<'_>) {
@@ -178,9 +192,9 @@ impl<'a> Untangler<'a> {
         op.subsort = self.count;
         self.count += 1;
 
-        if op.is_set_or_make() && !op.has_succ() {
+        if op.is_set_or_make() && !op.has_succ() && !op.masked {
             vis = Some(pos);
-        } else if op.action() == Action::Mark {
+        } else if op.action() == Action::Mark && !op.masked {
             self.value.process_mark(op.id(), op.mark_data());
         }
 
@@ -202,7 +216,7 @@ impl<'a> Untangler<'a> {
                 next_op.subsort = self.count;
                 self.count += 1;
 
-                next_op.is_set_or_make() && !next_op.has_succ()
+                next_op.is_set_or_make() && !next_op.has_succ() && !next_op.masked
             };
 
             if next_vis {
@@ -246,9 +260,7 @@ impl<'a> Untangler<'a> {
     }
 
     fn new(
-        obj: ObjId,
-        encoding: SequenceType,
-        text_encoding: TextEncoding,
+        value: ValueState<'a>,
         conflicts: &'a mut Vec<Adjust>,
         change_ops: &'a mut [ChangeOp],
         pred: &'a mut PredCache,
@@ -260,7 +272,6 @@ impl<'a> Untangler<'a> {
         let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
         let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
         let mut last_e = None;
-        let value = ValueState::new(obj, encoding, text_encoding);
         for (i, op) in change_ops.iter_mut().enumerate() {
             if let Some(mut successors) = pred.remove(&op.id()) {
                 let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
@@ -294,8 +305,8 @@ impl<'a> Untangler<'a> {
             pred,
             change_ops,
             updates,
-            seq_type: encoding,
-            text_encoding,
+            seq_type: value.seq_type,
+            text_encoding: value.text_encoding,
             conflicts,
             updates_stack,
             top: Top::Nothing,
@@ -361,8 +372,10 @@ impl Top {
         *self = Top::Nothing;
     }
 
-    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool) {
-        if d.visible() {
+    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool, visible: bool) {
+        // `visible` is the caller's mask-aware visibility for `d`; the raw
+        // successor check would miss values restored by the mask.
+        if visible {
             if deleted {
                 if let Top::Doc(i) = self {
                     *self = Top::Expose(*i)
@@ -390,9 +403,8 @@ impl Top {
 
 impl<'a, 'b> MapWalker<'a, 'b> {
     fn new(
-        obj: ObjId,
+        value: ValueState<'a>,
         mut ops: OpIter<'a>,
-        text_encoding: TextEncoding,
         pred: &'b mut PredCache,
         succ: &'b mut Vec<SuccInsert>,
         log: &'b mut PatchLog,
@@ -400,7 +412,6 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     ) -> Self {
         let pos = ops.pos();
         let doc_op = ops.next();
-        let value = ValueState::new(obj, SequenceType::List, text_encoding);
         let top = Top::Nothing;
         MapWalker {
             ops,
@@ -456,7 +467,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
                         self.top.reset(self.conflicts);
                     }
                     self.value.process_doc_op(d, effect);
-                    self.top.process_doc_op(ops, d, deleted);
+                    if !self.value.hides(&d.id) {
+                        let visible = self.value.masked_visible(d);
+                        self.top.process_doc_op(ops, d, deleted, visible);
+                    }
                 }
             }
             self.next_doc_op();
@@ -467,7 +481,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
         while let Some(d) = self.doc_op.as_ref() {
             let effect @ SuccessorEffect { deleted, .. } = process_pred(d, self.pred, self.succ);
             if d.prop() == self.value.key {
-                self.top.process_doc_op(ops, d, deleted);
+                if !self.value.hides(&d.id) {
+                    let visible = self.value.masked_visible(d);
+                    self.top.process_doc_op(ops, d, deleted, visible);
+                }
                 self.value.process_doc_op(d, effect);
                 self.next_doc_op();
             } else {
@@ -482,9 +499,9 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 /// For a non-counter predecessor, replace increment amounts with `None` so
 /// those successors are treated as overwrites. Counter predecessors retain
 /// their increment amounts.
-fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
+fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>, bool)]) {
     if !is_counter {
-        for (_, increment) in successors {
+        for (_, increment, _) in successors {
             let _ = increment.take();
         }
     }
@@ -502,12 +519,17 @@ struct SuccessorEffect {
 /// successor buffer, and return their combined effect on `d`.
 ///
 /// After normalization, a `None` increment denotes a suppressing successor;
-/// `Some(n)` contributes a counter increment.
+/// `Some(n)` contributes a counter increment. A masked successor keeps its
+/// link in the index but contributes neither.
 fn process_pred(d: &Op<'_>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> SuccessorEffect {
     let mut effect = SuccessorEffect::default();
     if let Some(mut successors) = pred.remove(&d.id) {
         normalize_increment_successors(d.is_counter(), &mut successors);
-        for (id, inc) in successors {
+        for (id, inc, masked) in successors {
+            if masked {
+                succ.push(d.add_succ_with_mask(id, inc, true));
+                continue;
+            }
             if let Some(n) = inc {
                 effect.increment += n;
             } else {
@@ -533,10 +555,18 @@ struct ValueState<'a> {
     before: CandidateSummary,
     after: CandidateSummary,
     marks: RichTextDiff<'a>,
+    /// The mask snapshot the batch walks under; fixed for the whole walk.
+    /// A doc op it hides is not a candidate in either summary.
+    mask: Option<&'a Mask>,
 }
 
 impl<'a> ValueState<'a> {
-    fn new(obj: ObjId, encoding: SequenceType, text_encoding: TextEncoding) -> Self {
+    fn new(
+        obj: ObjId,
+        encoding: SequenceType,
+        text_encoding: TextEncoding,
+        mask: Option<&'a Mask>,
+    ) -> Self {
         Self {
             obj,
             seq_type: encoding,
@@ -545,10 +575,33 @@ impl<'a> ValueState<'a> {
             before: CandidateSummary::default(),
             after: CandidateSummary::default(),
             marks: RichTextDiff::default(),
+            mask,
+        }
+    }
+
+    /// Whether the mask snapshot hides this doc op.
+    fn hides(&self, id: &OpId) -> bool {
+        self.mask.is_some_and(|m| m.hides(id))
+    }
+
+    /// Whether this doc op is visible under the mask snapshot: a stored
+    /// successor only overwrites it if the mask does not hide that
+    /// successor too.
+    fn masked_visible(&self, doc_op: &Op<'a>) -> bool {
+        match self.mask {
+            None => doc_op.visible(),
+            Some(mask) => !doc_op
+                .succ_inc()
+                .any(|(id, inc)| inc.is_none() && !mask.hides(&id)),
         }
     }
 
     fn process_doc_op(&mut self, doc_op: &Op<'a>, effect: SuccessorEffect) {
+        // A hidden doc op is invisible before and after the batch: it enters
+        // neither summary and its mark must not leak into the rich-text diff.
+        if self.hides(&doc_op.id) {
+            return;
+        }
         match doc_op.action {
             Action::Increment => {}
             Action::Mark => {
@@ -556,10 +609,11 @@ impl<'a> ValueState<'a> {
                 self.marks.after.process(doc_op.id, doc_op.action());
             }
             _ => {
-                if doc_op.visible() {
-                    // OpIter yields stored counter bases, not their current totals.
+                if self.masked_visible(doc_op) {
+                    // OpIter yields stored counter bases, not their current
+                    // totals; under a mask only unmasked increments count.
                     let mut doc_op = doc_op.clone();
-                    doc_op.fix_counter(None);
+                    doc_op.fix_counter(self.mask.map(Mask::clock));
                     let mut value = doc_op.hydrate_value(self.text_encoding);
                     // Before always includes this candidate, even if the batch
                     // deletes it. Only after gets new counter contributions.
@@ -584,6 +638,10 @@ impl<'a> ValueState<'a> {
     }
 
     fn process_change_op(&mut self, op: &ChangeOp) {
+        // A masked incoming op is never a candidate and its mark is skipped.
+        if op.masked {
+            return;
+        }
         match op.action() {
             // Successor lists already supply the complete counter contribution.
             Action::Delete | Action::Increment => {}
@@ -641,18 +699,32 @@ impl BatchApply {
         }
     }
 
-    fn insert_new_actors(&mut self, doc: &mut Automerge) {
+    fn insert_new_actors(&self, doc: &mut Automerge) {
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
-            doc.put_actor_ref(c.actor_id());
+            let actor_idx = doc.put_actor_ref(c.actor_id());
+            if let Some(a) = c.author() {
+                doc.assign_author(a.into_owned(), actor_idx);
+            }
         }
     }
 
-    fn import_ops(&mut self, doc: &mut Automerge) {
+    /// Flag every incoming op against the mask snapshot and import it. The
+    /// graph is already up to date; the mask has not moved.
+    fn import_ops(&mut self, doc: &mut Automerge, mask: Option<&Mask>) {
+        let actors_before = doc.ops().actors.len();
         for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops).unwrap();
-            doc.update_history(c);
+            doc.import_ops_to(c, &mut self.ops, mask).unwrap();
         }
         doc.remove_unused_actors(true);
+        // The mask snapshot and the ops staged above are baked against the
+        // actor indices as of step 3; an actor removal here would silently
+        // invalidate both. Step 4 gave every inserted actor a seq entry, so
+        // this is unreachable — assert it stays that way.
+        debug_assert_eq!(
+            doc.ops().actors.len(),
+            actors_before,
+            "no actor renumbering between the mask snapshot and the walk"
+        );
     }
 
     pub(crate) fn apply(
@@ -660,15 +732,22 @@ impl BatchApply {
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), PatchLogMismatch> {
-        // Reconcile the log's saved endpoint with the pre-apply state so the
-        // events recorded below extend it, then advance it past the batch.
+        // Align the batch and log with the incoming doc, taking a snapshot of
+        // the mask before the op set mutation.
         log.transition_to(doc, |d| d.visible_current())?;
-
         self.insert_new_actors(doc);
-
         log.migrate_actors(doc.actors())?;
+        let mask0 = doc.mask().cloned();
 
-        self.import_ops(doc);
+        // Mark whether a pending boundary has been resolved by any of the
+        // incoming changes. If resolved is true, the mask is published after
+        // the op set is consistent again.
+        let mut resolved = false;
+        for c in &self.changes {
+            resolved |= matches!(doc.update_history(c), HistoryUpdate::BoundaryResolved);
+        }
+
+        self.import_ops(doc, mask0.as_ref());
 
         let mut obj_info = doc.ops().obj_info.clone();
 
@@ -685,10 +764,15 @@ impl BatchApply {
             let doc_ops = doc.ops().iter_range(&obj_range);
             match obj_info.object_type(&os.obj) {
                 Some(ObjType::Map) => {
-                    let mut walker = MapWalker::new(
+                    let value = ValueState::new(
                         os.obj,
-                        doc_ops,
+                        SequenceType::List,
                         doc.text_encoding(),
+                        mask0.as_ref(),
+                    );
+                    let mut walker = MapWalker::new(
+                        value,
+                        doc_ops,
                         &mut self.pred,
                         &mut succ,
                         log,
@@ -703,10 +787,10 @@ impl BatchApply {
                         ObjType::List => SequenceType::List,
                         _ => unreachable!(),
                     };
+                    let value =
+                        ValueState::new(os.obj, sequence_type, doc.text_encoding(), mask0.as_ref());
                     let ut = Untangler::new(
-                        os.obj,
-                        sequence_type,
-                        doc.text_encoding(),
+                        value,
                         &mut conflicts,
                         &mut self.ops[os.span.clone()],
                         &mut self.pred,
@@ -743,7 +827,16 @@ impl BatchApply {
 
         self.insert_runs_of_ops(doc);
 
+        // Advance the log past the batch without a diff: the walk above
+        // already recorded these events under the snapshot.
         log.set_view_with(doc, || doc.visible_current());
+
+        // If the batch witnessed a pending write-frontier boundary, publish the
+        // mask change once, as its own visibility transition between two
+        // internally consistent op-set states.
+        if resolved {
+            doc.republish_mask(log, |_| {})?;
+        }
 
         debug_assert!(doc.ops.validate_op_order());
         Ok(())
@@ -791,7 +884,7 @@ impl BatchApply {
                 self.pred
                     .entry(*p)
                     .or_default()
-                    .push((o.id(), o.get_increment_value()));
+                    .push((o.id(), o.get_increment_value(), o.masked));
             }
             if let Some(info) = o.obj_info() {
                 obj_info.insert(o.id(), info)
@@ -849,6 +942,16 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        // Validate the observer before any change is taken from the queue: a
+        // rejected log must leave previously queued changes available for a
+        // retry with a compatible log. `migrate_actors` checks compatibility
+        // before mutating, and on success aligns the log with the document's
+        // actors, so the later `transition_to`/`migrate_actors` calls in
+        // `BatchApply::apply` cannot fail: applying a batch only *adds*
+        // actors, and migrating onto a superset of the log's actors always
+        // succeeds.
+        log.migrate_actors(&self.ops.actors)?;
+
         let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
         let mut actor_author: HashSet<ActorId> = HashSet::new();
@@ -887,6 +990,9 @@ impl Automerge {
             {
                 return Err(AutomergeError::duplicate_author(&change));
             }
+            if change.author().is_some() && change.seq() != 1 {
+                return Err(AutomergeError::author_on_non_initial_seq(&change));
+            }
 
             seen.insert(hash);
             actor_seqs
@@ -908,13 +1014,18 @@ impl Automerge {
         &mut self,
         change: &Change,
         ops: &mut Vec<ChangeOp>,
+        mask: Option<&Mask>,
     ) -> Result<(), AutomergeError> {
-        let new_ops = self.import_ops(change)?;
+        let new_ops = self.import_ops(change, mask)?;
         ops.extend(new_ops);
         Ok(())
     }
 
-    fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
+    fn import_ops(
+        &mut self,
+        change: &Change,
+        mask: Option<&Mask>,
+    ) -> Result<Vec<ChangeOp>, AutomergeError> {
         let actors: Vec<_> = change
             .actors()
             .map(|a| self.ops.lookup_actor(a).unwrap())
@@ -948,6 +1059,9 @@ impl Automerge {
                     subsort: 0,
                     conflicted: false,
                     succ: vec![],
+                    // The invariant fact for this batch: hidden by the mask
+                    // snapshot taken before the graph was updated.
+                    masked: mask.is_some_and(|m| m.hides(&id)),
                     bld,
                 };
                 Ok(change)
@@ -1836,5 +1950,22 @@ mod tests {
 
             doc.validate_top_index();
         }
+    }
+
+    #[test]
+    fn batch_multiple_changes_same_author() {
+        let author = crate::Author::try_from("aabbccdd").unwrap();
+        let mut doc1 = AutoCommit::new().with_author(Some(author.clone()));
+        doc1.put(&ROOT, "key1", "value1").unwrap();
+        doc1.commit();
+        doc1.put(&ROOT, "key2", "value2").unwrap();
+        doc1.commit();
+
+        let heads0 = [];
+        let changes = doc1.get_changes(&heads0);
+        assert_eq!(changes.len(), 2);
+
+        let mut doc2 = AutoCommit::new();
+        doc2.apply_changes_batch(changes).unwrap();
     }
 }

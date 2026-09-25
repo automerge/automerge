@@ -55,7 +55,14 @@ impl<'a> Transaction<'a> {
         args: TransactionArgs,
         opts: CommitOptions,
     ) -> ChangeHash {
-        TransactionInner::empty(doc, args, opts.message, opts.time)
+        let (hash, history) = TransactionInner::empty(doc, args, opts.message, opts.time);
+        if let crate::automerge::HistoryUpdate::BoundaryResolved = history {
+            // No patch log observes this change, but a resolved pending
+            // boundary must still publish the new visibility mask.
+            doc.republish_mask(&mut PatchLog::inactive(), |_| {})
+                .expect("a fresh patch log belongs to any document");
+        }
+        hash
     }
 }
 

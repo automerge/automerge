@@ -82,6 +82,11 @@ impl WriteFrontier {
             .map(|heads| heads.as_slice())
     }
 
+    /// Returns `true` if the given `author` is being masked by the write-frontier.
+    pub(crate) fn is_author_masked(&self, author: &Author<'_>) -> bool {
+        self.author_frontier.contains_key(author)
+    }
+
     /// Return the set of write-frontiers, per [`Author`].
     pub(crate) fn get_write_frontier(&self) -> &HashMap<Author<'static>, Vec<ChangeHash>> {
         &self.author_frontier
@@ -128,7 +133,6 @@ impl WriteFrontier {
     }
 
     /// Insert a `mask` for the given `actor`.
-    #[cfg(test)]
     pub(crate) fn insert_mask_for(&mut self, actor: ActorIdx, mask: Option<NonZeroU32>) {
         self.frontier_mask.insert(actor, SeqNumber(mask));
     }
@@ -163,8 +167,7 @@ impl WriteFrontier {
     /// [`Authors`] is used for finding the recorded actors for each author,
     /// while `get_clock` is a callback for calculating the new [`SeqClock`] for
     /// updating the mask entry for each actor.
-    #[allow(unused)]
-    fn recompute_write_frontiers(
+    pub(crate) fn recompute_write_frontiers(
         &mut self,
         authors: &Authors,
         get_clock: impl Fn(&[ChangeHash]) -> SeqClock,
@@ -188,8 +191,7 @@ impl WriteFrontier {
 
     /// Remove the `head` from the pending changes, returning `true` if it
     /// existed in the set.
-    #[allow(unused)]
-    fn pop_pending_change(&mut self, head: &ChangeHash) -> bool {
+    pub(crate) fn pop_pending_change(&mut self, head: &ChangeHash) -> bool {
         self.pending_changes.remove(head)
     }
 }
