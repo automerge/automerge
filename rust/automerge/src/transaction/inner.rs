@@ -32,6 +32,13 @@ pub(crate) struct TransactionInner {
     scope: Option<VisibleClock>,
     pending: Vec<TxOp>,
     author: Option<Author<'static>>,
+    /// Whether the visibility mask hides every op this transaction creates,
+    /// since the transaction's actor belongs to a masked author.
+    ///
+    /// The mask is constant while a transaction is open, so this is fixed at
+    /// creation. Masked ops are still committed but they are never logged as
+    /// visible patches.
+    masked: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +71,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) scope: Option<VisibleClock>,
     /// The author of the change
     pub(crate) author: Option<Author<'static>>,
+    /// Whether the visibility mask hides the ops this transaction creates
+    pub(crate) masked: bool,
 }
 
 impl TransactionInner {
@@ -76,6 +85,7 @@ impl TransactionInner {
             deps,
             scope,
             author,
+            masked,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -89,7 +99,15 @@ impl TransactionInner {
             pending: vec![],
             scope,
             author,
+            masked,
         }
+    }
+
+    /// Returns `true` if ops should be recorded in `patch_log`.
+    ///
+    /// The log must be active, and the ops must be visible.
+    fn logs(&self, patch_log: &PatchLog) -> bool {
+        patch_log.is_active() && !self.masked
     }
 
     /// Create an empty change
@@ -303,13 +321,15 @@ impl TransactionInner {
     }
 
     fn next_delete(&mut self, obj: ObjMeta, index: usize, elemid: ElemId, ops: &[Op<'_>]) -> TxOp {
-        TxOp::list_del(
+        let op = TxOp::list_del(
             self.next_id(),
             obj,
             index,
             elemid,
             ops.iter().map(|op| op.id),
         )
+        .masked(self.masked);
+        op
     }
 
     fn insert_local_op(
@@ -391,9 +411,7 @@ impl TransactionInner {
         let index = query.index;
         let elemid = query.elemid;
 
-        //let key = query.elemid.into();
-
-        let op = TxOp::insert(id, *obj, pos, index, action, elemid);
+        let op = TxOp::insert(id, *obj, pos, index, action, elemid).masked(self.masked);
         let inserted = InsertedOp {
             id,
             pos: op.pos,
@@ -424,7 +442,8 @@ impl TransactionInner {
             begin.index,
             OpType::MarkEnd(expand),
             ElemId(begin.id),
-        );
+        )
+        .masked(self.masked);
         let inserted = InsertedOp {
             id,
             pos: op.pos,
@@ -477,14 +496,18 @@ impl TransactionInner {
         let increment_replacement =
             increment_replacement(&query.ops, &resolved_action, doc.text_encoding());
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred);
+        let op =
+            TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred).masked(self.masked);
 
         let inc_value = op.get_increment_value();
 
+        // A masked op's successor links must not delete or increment: the
+        // index records the link without flipping visibility.
+        let masked = self.masked;
         let succ: Vec<_> = query
             .ops
             .iter()
-            .map(|op| op.add_succ(id, inc_value))
+            .map(|op| op.add_succ_with_mask(id, inc_value, masked))
             .collect();
 
         self.insert_local_op(
@@ -551,12 +574,14 @@ impl TransactionInner {
             resolved_action,
             eid,
             pred,
-        );
+        )
+        .masked(self.masked);
         let inc_value = op.get_increment_value();
+        let masked = self.masked;
         let succ = query
             .ops
             .iter()
-            .map(|op| op.add_succ(id, inc_value))
+            .map(|op| op.add_succ_with_mask(id, inc_value, masked))
             .collect::<Vec<_>>();
 
         self.insert_local_op(doc, patch_log, op, &succ, query.range, replaced);
@@ -760,8 +785,19 @@ impl TransactionInner {
             0
         };
 
-        // delete `del` items - performing the query for each one
-        let mut delete_index = index + inserted_width;
+        // delete `del` items - performing the query for each one.
+        //
+        // Deletion targets are selected from the visible sequence. In an
+        // unmasked transaction the inserted items are visible (the targets
+        // sit after them) and each deletion collapses the sequence back
+        // onto the cursor. A masked transaction's inserts have no visible
+        // width and its deletes do not collapse positions, so the cursor
+        // starts at `index` and must step over each deleted element.
+        let mut delete_index = if self.masked {
+            index
+        } else {
+            index + inserted_width
+        };
         let mut deleted: usize = 0;
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
@@ -785,20 +821,26 @@ impl TransactionInner {
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
             let mut op = self.next_delete(obj, delete_index, query_elemid, &query.ops);
+            let masked = self.masked;
             let ops_pos = query
                 .ops
                 .iter()
-                .map(|o| o.add_succ(op.id(), None))
+                .map(|o| o.add_succ_with_mask(op.id(), None, masked))
                 .collect::<Vec<_>>();
 
             op.undo = doc.ops_mut().add_succ_with_undo(&ops_pos);
 
             deleted += step;
+            if masked {
+                // The masked delete left its target visible: move past it so
+                // the next query does not select the same element again.
+                delete_index += step;
+            }
 
             self.pending.push(op);
         }
 
-        if deleted > 0 && patch_log.is_active() {
+        if deleted > 0 && self.logs(patch_log) {
             patch_log.delete_seq(obj.id, delete_index, deleted);
         }
 
@@ -871,7 +913,7 @@ impl TransactionInner {
             end.pos,
             begin.pos
         );
-        if patch_log.is_active() {
+        if self.logs(patch_log) {
             patch_log.mark(
                 obj.id,
                 begin.index,
@@ -918,17 +960,20 @@ impl TransactionInner {
 
         let id = self.next_id();
 
-        let op = TxOp::insert_obj(id, obj, pos, index, ObjType::Map, query.elemid);
+        let op =
+            TxOp::insert_obj(id, obj, pos, index, ObjType::Map, query.elemid).masked(self.masked);
 
         doc.ops_mut().splice(op.pos, &[&op]);
 
-        patch_log.insert(
-            obj.id,
-            index,
-            crate::hydrate::Value::Map(crate::hydrate::Map::default()),
-            id,
-            false,
-        );
+        if self.logs(patch_log) {
+            patch_log.insert(
+                obj.id,
+                index,
+                crate::hydrate::Value::Map(crate::hydrate::Map::default()),
+                id,
+                false,
+            );
+        }
 
         self.pending.push(op);
 
@@ -975,13 +1020,16 @@ impl TransactionInner {
             )
             .unwrap();
 
-        let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
+        let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id])
+            .masked(self.masked);
 
-        let succ_pos = vec![found.op.add_succ(op.id(), None)];
+        let succ_pos = vec![found.op.add_succ_with_mask(op.id(), None, self.masked)];
 
         op.undo = doc.ops_mut().add_succ_with_undo(&succ_pos);
 
-        patch_log.delete_seq(text_obj.id, index, 1);
+        if self.logs(patch_log) {
+            patch_log.delete_seq(text_obj.id, index, 1);
+        }
 
         self.pending.push(op);
 
@@ -1009,7 +1057,7 @@ impl TransactionInner {
     ) {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;
-        if patch_log.is_active() && !op.noop {
+        if self.logs(patch_log) && !op.noop {
             if op.bld.insert {
                 if !op.is_mark() {
                     assert!(obj_typ.is_sequence());
@@ -1479,7 +1527,7 @@ impl<'a> BatchInsertion<'a> {
 
     fn append<F: FnOnce(usize, OpId) -> TxOp>(&mut self, factory: F) -> OpId {
         let id = self.inner.next_id();
-        let op = factory(self.next_pos(), id);
+        let op = factory(self.next_pos(), id).masked(self.inner.masked);
         self.inner
             .finalize_op(self.doc.text_encoding(), self.patch_log, &op, None, None);
         self.inner.pending.push(op);
@@ -1514,13 +1562,14 @@ impl<'a> BatchInsertion<'a> {
                 self.next_pos(),
                 char,
                 elemid,
-            );
+            )
+            .masked(self.inner.masked);
             inserted_width += op.bld.width(SequenceType::Text, self.doc.text_encoding());
             elemid = ElemId(op.id());
             self.inner.pending.push(op);
         }
 
-        if self.patch_log.is_active() {
+        if self.inner.logs(self.patch_log) {
             self.patch_log.splice(container.id, index, text_str, marks);
         }
 
