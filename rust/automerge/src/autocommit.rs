@@ -199,11 +199,9 @@ impl AutoCommit {
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
-        if !heads.is_empty() {
-            self.patch_log.set_active(true);
-            self.patch_log.truncate();
-            self.diff_cursor = heads;
-        }
+        self.patch_log.truncate();
+        self.patch_log.set_view(&self.doc, self.doc.visible(&heads));
+        self.diff_cursor = heads;
     }
 
     /// Returns the cursor set by [`Self::update_diff_cursor()`]
@@ -288,15 +286,14 @@ impl AutoCommit {
         } else if range.before().is_empty() && range.after() == heads {
             let mut patch_log = PatchLog::active();
             // This if statement is only active if the current heads are the same as `after`
-            // so we don't need to tell the patch log to target a specific heads and consequently
-            // it wll be able to generate patches very fast as it doesn't need to make any clocks
-            patch_log.heads = None;
+            // so the view set by `log_current_state` equals the current visible clock and
+            // patches are generated very fast as no historical clocks are needed
             self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
             let clock = self.doc.clock_range(range.before(), range.after());
             let mut patch_log = PatchLog::active();
-            patch_log.heads = Some(range.after().to_vec());
+            patch_log.set_view(&self.doc, self.doc.visible(range.after()));
             DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         };
@@ -344,11 +341,26 @@ impl AutoCommit {
     /// let patches = doc.diff(&diff_cursor, &heads);
     /// doc.update_diff_cursor();
     /// ```
+    /// While tracking is active, this returns the accumulated view
+    /// transitions since the last cursor update, resolved under the patch
+    /// log's recorded endpoint.
+    ///
+    /// Before tracking starts, after [`Self::reset_diff_cursor()`], or while the
+    /// cursor is still at the empty document, this falls back to a historical
+    /// diff from the empty document to the current view.
+    /// Call [`Self::update_diff_cursor()`] to start tracking from an existing
+    /// view without returning its patches.
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         self.ensure_transaction_closed();
-        let heads = self.get_heads();
-        let diff_cursor = self.diff_cursor();
-        let patches = self.diff(&diff_cursor, &heads);
+        let patches = if self.patch_log.is_active() && !self.diff_cursor.is_empty() {
+            let heads = self.get_heads();
+            self.patch_to(&heads);
+            self.patch_log.make_patches(&self.doc)
+        } else {
+            let heads = self.get_heads();
+            let diff_cursor = self.diff_cursor();
+            self.diff(&diff_cursor, &heads)
+        };
         self.update_diff_cursor();
         patches
     }
@@ -464,6 +476,12 @@ impl AutoCommit {
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
+            let heads = self
+                .isolation
+                .clone()
+                .unwrap_or_else(|| self.doc.get_heads());
+            self.patch_log
+                .set_view_with(&self.doc, || self.doc.visible(&heads));
         }
     }
 
@@ -735,6 +753,12 @@ impl AutoCommit {
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
         }
+        let heads = self
+            .isolation
+            .clone()
+            .unwrap_or_else(|| self.doc.get_heads());
+        self.patch_log
+            .set_view_with(&self.doc, || self.doc.visible(&heads));
         hash
     }
 
@@ -769,6 +793,8 @@ impl AutoCommit {
             .expect("AutoCommit's patch log always belongs to its document");
         let result = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
         self.patch_log.finish_transaction(&self.doc.ops.actors);
+        self.patch_log
+            .set_view_with(&self.doc, || self.doc.visible_current());
         result
     }
 
@@ -814,13 +840,9 @@ impl AutoCommit {
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
-        // we may be isolated so we dont use self.doc.get_heads()
-        let before = self.get_heads();
-        if before.as_slice() != after {
-            self.patch_log.finish_current_view(&self.doc, &before);
-            let clock = self.doc.clock_range(&before, after);
-            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
-        }
+        self.patch_log
+            .transition_to(&self.doc, |d| d.visible(after))
+            .expect("AutoCommit's patch log always belongs to its document");
     }
 
     /// Whether the peer represented by `other` has all the changes we have
