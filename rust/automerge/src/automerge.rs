@@ -1074,6 +1074,7 @@ impl Automerge {
         patch_log: &mut PatchLog,
         recursive: bool,
     ) {
+        patch_log.set_view(self, self.visible_current());
         let clock = ClockRange::default();
         let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
         patch_log.path_hint(path_map);
@@ -1241,6 +1242,11 @@ impl Automerge {
         VisibleClock::new(self.change_graph.clock_at(heads))
     }
 
+    /// The visible clock at the current heads.
+    pub(crate) fn visible_current(&self) -> VisibleClock {
+        self.visible(&self.get_heads())
+    }
+
     /// Return a [`ReadAt`] that depends on the provided `heads`.
     ///
     /// If `heads` is `None` or is the current set of heads, then a
@@ -1251,6 +1257,15 @@ impl Automerge {
         match heads {
             Some(h) if !self.change_graph.heads_are_current(h) => ReadAt::at(self.visible(h)),
             _ => ReadAt::current(),
+        }
+    }
+
+    /// Read at a stored view: `Current` when it equals today's visible clock.
+    pub(crate) fn read_visible<'a>(&'a self, v: &'a VisibleClock) -> ReadAt<'a> {
+        if *v == self.visible_current() {
+            ReadAt::current()
+        } else {
+            ReadAt::At(std::borrow::Cow::Borrowed(v))
         }
     }
 
@@ -1428,8 +1443,8 @@ impl Automerge {
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
+        patch_log.set_view(self, self.visible(after_heads));
         DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
-        patch_log.heads = Some(after_heads.to_vec());
         patch_log.make_patches(self)
     }
 
@@ -1459,8 +1474,8 @@ impl Automerge {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
+        patch_log.set_view(self, self.visible(after_heads));
         DiffIter::log(self, obj, clock, &mut patch_log, recursive);
-        patch_log.heads = Some(after_heads.to_vec());
         Ok(patch_log.make_patches(self))
     }
 

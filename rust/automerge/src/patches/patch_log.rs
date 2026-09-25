@@ -1,13 +1,13 @@
 use crate::automerge::Automerge;
-use crate::clock::ReadAt;
+use crate::clock::{ClockRange, ReadAt, VisibleClock};
 use crate::exid::ExId;
 use crate::hydrate::Value;
-use crate::iter::SpanInternal;
+use crate::iter::{DiffIter, SpanInternal};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
-use crate::types::{ActorId, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
-use crate::{ChangeHash, Patch};
+use crate::types::{ActorId, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType, TextEncoding};
+use crate::Patch;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
@@ -49,7 +49,9 @@ pub struct PatchLog {
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
-    pub(crate) heads: Option<Vec<ChangeHash>>,
+    /// The endpoint of the pending events, not the last delivered diff cursor.
+    /// Both paths and exposed contents must be resolved under this saved view.
+    view: Option<VisibleClock>,
     pub(crate) actors: Vec<ActorId>,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
@@ -232,7 +234,7 @@ impl PatchLog {
             events: Vec::new(),
             expose: HashSet::new(),
             completed_patches: Vec::new(),
-            heads: None,
+            view: None,
             path_map: Default::default(),
             path_hint: 0,
             actors: vec![],
@@ -258,10 +260,6 @@ impl PatchLog {
         Self::new(true)
     }
 
-    pub(crate) fn set_active(&mut self, setting: bool) {
-        self.active = setting
-    }
-
     pub(crate) fn is_active(&self) -> bool {
         self.active
     }
@@ -274,8 +272,73 @@ impl PatchLog {
         self.events.len()
     }
 
-    /// Finalizes the events recorded for the current view before moving the
-    /// document to another point in history.
+    /// Advance the endpoint after recording ordinary forward events. This does
+    /// not log a diff: the transaction or import walk already recorded it.
+    ///
+    /// The stored view is always bound together with the document's actor
+    /// list: a clock is meaningless without the identities behind its
+    /// columns, so recording one without the other would let a later actor
+    /// insertion misattribute the clock's entries. Actor migration runs even
+    /// on an inactive log (mirroring [`Self::transition_to`]); only the view
+    /// itself is skipped.
+    pub(crate) fn set_view(&mut self, doc: &Automerge, view: VisibleClock) {
+        self.set_view_with(doc, || view)
+    }
+
+    /// Like [`Self::set_view`] but computes the view lazily, so an inactive
+    /// log skips the clock computation entirely.
+    pub(crate) fn set_view_with(&mut self, doc: &Automerge, view: impl FnOnce() -> VisibleClock) {
+        self.migrate_actors(&doc.ops.actors)
+            .expect("patch log actors must match the document when binding a view");
+        if self.active {
+            self.view = Some(view());
+        }
+    }
+
+    /// Reconcile the recorded endpoint with another view: finish the current
+    /// segment, log the diff from the recorded endpoint to `after`, adopt
+    /// `after` and finish again. An unbound log (view == `None`) just adopts
+    /// `after` without recording its contents.
+    ///
+    /// `after` is a closure so the clock is only computed when the log is
+    /// active; actor migration still runs unconditionally.
+    pub(crate) fn transition_to(
+        &mut self,
+        doc: &Automerge,
+        after: impl FnOnce(&Automerge) -> VisibleClock,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.migrate_actors(&doc.ops.actors)?;
+        if !self.active {
+            return Ok(());
+        }
+        let after = after(doc);
+        match self.view.clone() {
+            Some(before) if before == after => Ok(()),
+            Some(before) => {
+                self.finish_view(doc);
+                DiffIter::log(
+                    doc,
+                    ObjMeta::root(),
+                    ClockRange::Diff(before, after.clone()),
+                    self,
+                    true,
+                );
+                self.view = Some(after);
+                // Do not sort across view transitions. Resolve exposed
+                // subtrees and paths at this endpoint before subsequent
+                // events move them.
+                self.finish_view(doc);
+                Ok(())
+            }
+            None => {
+                self.view = Some(after);
+                Ok(())
+            }
+        }
+    }
+
+    /// Finalize one segment of events under the log's saved view, even if the
+    /// document's heads have changed since those events were recorded.
     ///
     /// Patch log events normally move forward through history, which makes it
     /// safe for `make_current_patches` to sort them by object. This method is
@@ -288,13 +351,11 @@ impl PatchLog {
     /// indexes may identify different objects after the transition. Finalizing
     /// concrete patches here preserves both their ordering and their paths, and
     /// lets them be safely concatenated with patches from subsequent views.
-    pub(crate) fn finish_current_view(&mut self, doc: &Automerge, heads: &[ChangeHash]) {
+    pub(crate) fn finish_view(&mut self, doc: &Automerge) {
         if !self.events.is_empty() || !self.expose.is_empty() {
             self.migrate_actors(&doc.ops.actors)
-                .expect("AutoCommit's patch log always belongs to its document");
-            let previous_heads = self.heads.replace(heads.to_vec());
+                .expect("patch log actors must be validated before finalizing a view");
             let patches = self.make_current_patches(doc);
-            self.heads = previous_heads;
             self.completed_patches.extend(patches);
             self.events.clear();
             self.expose.clear();
@@ -510,8 +571,16 @@ impl PatchLog {
     }
 
     fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        let read = match self.heads.as_ref() {
-            Some(h) => ReadAt::at(doc.visible(h)),
+        // The document may have gained actors since the log last saw it
+        // (e.g. through `apply_changes` with another, inactive log). The
+        // stored view and event ids index into the actor list, so re-align
+        // them before resolving anything against `doc`. Migration only
+        // fails for a log from a different document lineage.
+        self.migrate_actors(&doc.ops.actors)
+            .expect("patch log actors must match the document when making patches");
+        let view = self.view.clone();
+        let read = match view.as_ref() {
+            Some(v) => doc.read_visible(v),
             None => ReadAt::current(),
         };
         let path_map = self.get_path_map();
@@ -537,6 +606,7 @@ impl PatchLog {
         self.events.clear();
         self.expose.clear();
         self.completed_patches.clear();
+        self.view = None;
         self.path_hint = 0;
         self.path_map = Default::default();
     }
@@ -549,13 +619,16 @@ impl PatchLog {
             completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
-            heads: None,
+            view: self.view.clone(),
             actors: self.actors.clone(),
             speculative_actor: None,
         }
     }
 
     pub(crate) fn migrate_actor(&mut self, index: usize) {
+        if let Some(view) = &mut self.view {
+            view.insert_actor(index);
+        }
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
@@ -570,6 +643,9 @@ impl PatchLog {
 
     fn remove_actor(&mut self, index: usize) {
         self.actors.remove(index);
+        if let Some(view) = &mut self.view {
+            view.remove_actor(index);
+        }
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
             .into_iter()
@@ -595,7 +671,7 @@ impl PatchLog {
         doc: &Automerge,
         args: &TransactionArgs,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.migrate_actors(&doc.ops.actors)?;
+        self.transition_to(doc, |d| d.visible(&args.deps))?;
         // If this is the actor's first change then the actor was (potentially)
         // just added to the document. It should be removed again on
         // commit/rollback if the transaction produces no ops, so flag it as
@@ -643,8 +719,29 @@ impl PatchLog {
             return Ok(());
         }
         if self.actors.is_empty() {
+            // A view is only ever bound together with the actor list
+            // ([`Self::set_view_with`]), so a log that has never seen an
+            // actor list can only hold a view recorded against an empty
+            // document; it grows from zero as the actors arrive.
+            if let Some(view) = &mut self.view {
+                debug_assert!(view.len() == 0);
+                for i in 0..others.len() {
+                    view.insert_actor(i);
+                }
+            }
             self.actors = others.to_vec();
             return Ok(());
+        }
+        // Every old actor must still exist. Check before mutating the log so a
+        // mismatch (including a missing trailing actor) leaves it usable with
+        // its original document.
+        let mut remaining = others.iter();
+        if !self
+            .actors
+            .iter()
+            .all(|actor| remaining.any(|other| other == actor))
+        {
+            return Err(crate::PatchLogMismatch);
         }
         for i in 0..others.len() {
             match (self.actors.get(i), others.get(i)) {
@@ -655,6 +752,11 @@ impl PatchLog {
                 }
                 (None, Some(b)) => {
                     self.actors.insert(i, b.clone());
+                    // A trailing append shifts no event indices, but the
+                    // stored view still gains the actor.
+                    if let Some(view) = &mut self.view {
+                        view.insert_actor(i);
+                    }
                 }
                 _ => return Err(crate::PatchLogMismatch),
             }
@@ -663,6 +765,9 @@ impl PatchLog {
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
+        if other.view.is_some() {
+            self.view = other.view;
+        }
         self.completed_patches.extend(other.completed_patches);
         self.events.extend(other.events);
         self.expose.extend(other.expose);

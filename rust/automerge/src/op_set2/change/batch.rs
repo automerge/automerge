@@ -660,6 +660,10 @@ impl BatchApply {
         doc: &mut Automerge,
         log: &mut PatchLog,
     ) -> Result<(), PatchLogMismatch> {
+        // Reconcile the log's saved endpoint with the pre-apply state so the
+        // events recorded below extend it, then advance it past the batch.
+        log.transition_to(doc, |d| d.visible_current())?;
+
         self.insert_new_actors(doc);
 
         log.migrate_actors(&doc.ops().actors)?;
@@ -738,6 +742,8 @@ impl BatchApply {
         doc.ops.add_succ(&succ);
 
         self.insert_runs_of_ops(doc);
+
+        log.set_view_with(doc, || doc.visible_current());
 
         debug_assert!(doc.ops.validate_op_order());
         Ok(())
