@@ -2,7 +2,7 @@ use super::{
     ListDiff, ListDiffItem, ListRange, ListRangeItem, MapDiff, MapDiffItem, MapRange, MapRangeItem,
     Span, SpanDiff, SpanInternal, SpansDiff, SpansInternal,
 };
-use crate::clock::{Clock, ClockRange};
+use crate::clock::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
@@ -19,6 +19,7 @@ use std::sync::Arc;
 pub struct DocIter<'a> {
     op_set: Option<&'a OpSet>,
     obj_export: Arc<ExId>,
+    read: ReadAt<'a>,
     inner: DocIterInternal<'a>,
 }
 
@@ -27,6 +28,7 @@ impl<'a> DocIter<'a> {
         Self {
             op_set: None,
             obj_export: Arc::new(ExId::Root),
+            read: ReadAt::current(),
             inner: DocIterInternal::empty(encoding),
         }
     }
@@ -35,17 +37,14 @@ impl<'a> DocIter<'a> {
         self.inner.span_iter.encoding()
     }
 
-    fn clock(&self) -> Option<&Clock> {
-        self.inner.span_iter.clock()
-    }
-
-    pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, clock: Option<Clock>) -> Self {
+    pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, read: ReadAt<'a>) -> Self {
         let obj_export = Arc::new(doc.ops().id_to_exid(obj.id.0));
         let op_set = Some(doc.ops());
         Self {
             op_set,
             obj_export,
-            inner: DocIterInternal::new(doc, obj, clock),
+            inner: DocIterInternal::new(doc, obj, read.clone()),
+            read,
         }
     }
 }
@@ -79,7 +78,7 @@ impl<'a> DiffIter<'a> {
     pub(crate) fn log(
         doc: &'a Automerge,
         obj: ObjMeta,
-        clock: ClockRange,
+        clock: ClockRange<'a>,
         log: &mut PatchLog,
         recursive: bool,
     ) -> BTreeMap<ObjId, (Prop, ObjId)> {
@@ -94,7 +93,7 @@ impl<'a> DiffIter<'a> {
     pub(crate) fn new(
         doc: &'a Automerge,
         obj: ObjMeta,
-        clock: ClockRange,
+        clock: ClockRange<'a>,
         recursive: bool,
     ) -> Self {
         let op_set = doc.ops();
@@ -175,15 +174,15 @@ impl<'a> DiffIter<'a> {
 }
 
 impl<'a> DocIterInternal<'a> {
-    fn new(doc: &'a Automerge, obj: ObjMeta, clock: Option<Clock>) -> Self {
+    fn new(doc: &'a Automerge, obj: ObjMeta, read: ReadAt<'a>) -> Self {
         let op_set = doc.ops();
         let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
         let mut obj_id_iter = op_set.obj_id_iter();
         let scope = obj_id_iter.seek_to_value(obj);
-        let map_iter = MapRange::new(op_set, scope.clone(), clock.clone());
-        let list_iter = ListRange::new(op_set, scope.clone(), clock.clone(), ..);
-        let span_iter = SpansInternal::new(op_set, scope, clock, doc.text_encoding());
+        let map_iter = MapRange::new(op_set, scope.clone(), read.clone());
+        let list_iter = ListRange::new(op_set, scope.clone(), read.clone(), ..);
+        let span_iter = SpansInternal::new(op_set, scope, read, doc.text_encoding());
         let path_map = BTreeMap::new();
         let next_objs = BTreeMap::new();
         DocIterInternal {
@@ -298,7 +297,7 @@ impl<'a> Iterator for DocIter<'a> {
         }
         Some(DocObjItem {
             obj: self.obj_export.clone(),
-            item: item.export(self.op_set?, self.clock(), self.encoding()),
+            item: item.export(self.op_set?, &self.read, self.encoding()),
         })
     }
 }
@@ -461,16 +460,11 @@ impl<'a> DocItemInternal<'a> {
         }
     }
 
-    fn export(
-        self,
-        op_set: &'a OpSet,
-        clock: Option<&Clock>,
-        encoding: TextEncoding,
-    ) -> DocItem<'a> {
+    fn export(self, op_set: &'a OpSet, read: &ReadAt<'_>, encoding: TextEncoding) -> DocItem<'a> {
         match self {
             Self::Map(m) => DocItem::Map(m),
             Self::List(l) => DocItem::List(l),
-            Self::Text(t) => DocItem::Text(t.export(op_set, clock, encoding)),
+            Self::Text(t) => DocItem::Text(t.export(op_set, read, encoding)),
         }
     }
 

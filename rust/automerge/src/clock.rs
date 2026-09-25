@@ -1,6 +1,7 @@
 use crate::actor::{ActorIndexed, ActorRemoval, ActorShift, ActorTable};
 use crate::types::OpId;
 
+use std::borrow::Cow;
 use std::num::NonZeroU32;
 
 /// A [`Clock`] is a vector clock for a set of actors.
@@ -88,36 +89,99 @@ impl SeqClock {
     }
 }
 
+/// The clock a read actually observes: the causal prefix at some heads.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ClockRange {
-    Current(Option<Clock>),
-    Diff(Clock, Clock),
-}
+pub(crate) struct VisibleClock(Clock);
 
-impl Default for ClockRange {
-    fn default() -> Self {
-        Self::Current(None)
+impl VisibleClock {
+    pub(crate) fn new(causal: Clock) -> Self {
+        Self(causal)
+    }
+
+    /// Return a reference to the underlying [`Clock`].
+    pub(crate) fn clock(&self) -> &Clock {
+        &self.0
+    }
+
+    /// Returns `true` if the clock covers [`OpId`] (see [`Clock::covers`]).
+    pub(crate) fn covers(&self, id: &OpId) -> bool {
+        self.0.covers(id)
+    }
+
+    /// Isolate the given `actor` by setting their counter to the max value.
+    pub(crate) fn isolate(&mut self, actor: usize) {
+        self.0.isolate(actor)
     }
 }
 
-impl ClockRange {
-    pub(crate) fn current(clock: Option<Clock>) -> Self {
-        Self::Current(clock)
+/// The snapshot of a clock for a given document, either current or historical.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ReadAt<'a> {
+    Current,
+    At(Cow<'a, VisibleClock>),
+}
+
+impl<'a> ReadAt<'a> {
+    /// A read at the current heads: the indexes are authoritative.
+    pub(crate) fn current() -> Self {
+        Self::Current
     }
 
-    pub(crate) fn after(&self) -> Option<&Clock> {
+    /// Construct a historical snapshot.
+    pub(crate) fn at(v: VisibleClock) -> Self {
+        Self::At(Cow::Owned(v))
+    }
+
+    /// Return a historical clock, if this snapshot is configured to do so.
+    ///
+    /// `None` implies that indexes are authoritative, and is used for the fast path.
+    pub(crate) fn historical(&self) -> Option<&Clock> {
         match self {
-            Self::Diff(_, after) => Some(after),
-            Self::Current(Some(after)) => Some(after),
-            _ => None,
+            Self::At(v) => Some(v.clock()),
+            Self::Current { .. } => None,
         }
+    }
+
+    /// Return the [`Clock`] for op comparison on slow paths.
+    ///
+    /// `None` implies that there is no filtering required.
+    pub(crate) fn filter(&self) -> Option<&Clock> {
+        match self {
+            Self::At(v) => Some(v.clock()),
+            Self::Current => None,
+        }
+    }
+
+    /// Return a borrowed reference of this [`ReadAt`].
+    pub(crate) fn borrow(&self) -> ReadAt<'_> {
+        match self {
+            Self::Current => ReadAt::Current,
+            Self::At(v) => ReadAt::At(Cow::Borrowed(v.as_ref())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ClockRange<'a> {
+    Current(ReadAt<'a>),
+    Diff(VisibleClock, VisibleClock),
+}
+
+impl Default for ClockRange<'_> {
+    fn default() -> Self {
+        Self::Current(ReadAt::current())
+    }
+}
+
+impl<'a> ClockRange<'a> {
+    pub(crate) fn current(read: ReadAt<'a>) -> Self {
+        Self::Current(read)
     }
 
     pub(crate) fn visible_after(&self, id: &OpId) -> bool {
         match self {
-            Self::Current(Some(after)) => after.covers(id),
             Self::Diff(_, after) => after.covers(id),
-            _ => true,
+            Self::Current(r) => r.filter().is_none_or(|c| c.covers(id)),
         }
     }
 

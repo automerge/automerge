@@ -1,4 +1,4 @@
-use crate::clock::Clock;
+use crate::clock::{Clock, ReadAt};
 use crate::iter::tools::{BoolColumnSkipper, PeekShift, Shiftable, SkipIter, Skipper};
 use crate::marks::MarkSet;
 use crate::op_set2::op::SuccCursors;
@@ -23,7 +23,8 @@ pub(crate) struct TopOps<'a> {
 }
 
 impl<'a> TopOps<'a> {
-    pub(crate) fn new(op_set: &'a OpSet, clock: Option<Clock>, range: Range<usize>) -> Self {
+    pub(crate) fn new(op_set: &'a OpSet, read: &ReadAt<'_>, range: Range<usize>) -> Self {
+        let clock = read.filter().cloned();
         let visible_pos = range.start;
         let visible = VisIter::new(op_set, clock.as_ref(), range.clone());
         let iter = SkipIter::new(
