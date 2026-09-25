@@ -378,7 +378,7 @@ impl TransactionInner {
 
         let query = doc
             .ops()
-            .query_insert_at(&obj.id, index, seq_type, &self.read_at())?;
+            .query_insert_at(&obj.id, index, seq_type, &self.read_at(doc))?;
 
         let marks = query.marks;
         let pos = query.pos;
@@ -456,7 +456,7 @@ impl TransactionInner {
 
         let mut query = doc
             .ops()
-            .seek_ops_by_map_key(&obj.id, &prop, &self.read_at());
+            .seek_ops_by_map_key(&obj.id, &prop, &self.read_at(doc));
 
         let Some(resolved_action) = query.resolve_action(action) else {
             return Ok(None);
@@ -506,7 +506,7 @@ impl TransactionInner {
         };
         let mut query = doc
             .ops()
-            .seek_ops_by_index(&obj.id, index, seq_type, &self.read_at());
+            .seek_ops_by_index(&obj.id, index, seq_type, &self.read_at(doc));
         let id = self.next_id();
         let eid = query
             .ops
@@ -696,7 +696,7 @@ impl TransactionInner {
         let inserted_width = if !splice_type.is_empty() {
             let query = doc
                 .ops()
-                .query_insert_at(&obj.id, index, seq_type, &self.read_at())?;
+                .query_insert_at(&obj.id, index, seq_type, &self.read_at(doc))?;
 
             index = query.index;
 
@@ -762,7 +762,7 @@ impl TransactionInner {
 
             let query =
                 doc.ops()
-                    .seek_ops_by_index(&obj.id, delete_index, seq_type, &self.read_at());
+                    .seek_ops_by_index(&obj.id, delete_index, seq_type, &self.read_at(doc));
 
             let step = if let Some(op) = query.ops.last() {
                 op.width(seq_type, doc.text_encoding())
@@ -841,7 +841,7 @@ impl TransactionInner {
             // above does.
             let end_pos = doc
                 .ops()
-                .query_insert_at(&obj.id, mark.end, SequenceType::Text, &self.read_at())?
+                .query_insert_at(&obj.id, mark.end, SequenceType::Text, &self.read_at(doc))?
                 .pos;
             if end_pos > begin.pos {
                 self.do_insert(
@@ -905,7 +905,7 @@ impl TransactionInner {
 
         let query =
             doc.ops()
-                .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at())?;
+                .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at(doc))?;
 
         let pos = query.pos;
         let index = query.index;
@@ -949,7 +949,7 @@ impl TransactionInner {
 
         let target = doc
             .ops()
-            .seek_ops_by_index(&text_obj.id, index, SequenceType::Text, &self.read_at())
+            .seek_ops_by_index(&text_obj.id, index, SequenceType::Text, &self.read_at(doc))
             .ops
             .into_iter()
             .next_back()
@@ -961,7 +961,12 @@ impl TransactionInner {
         // FIXME - no clock?
         let found = doc
             .ops()
-            .seek_list_opid(&text_obj.id, block_id, SequenceType::Text, &self.read_at())
+            .seek_list_opid(
+                &text_obj.id,
+                block_id,
+                SequenceType::Text,
+                &self.read_at(doc),
+            )
             .unwrap();
 
         let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
@@ -1100,7 +1105,7 @@ impl TransactionInner {
         let obj = self.exid_to_obj(doc, map)?;
         let current_vals = doc
             .ops()
-            .map_range(&obj.id, .., self.read_at())
+            .map_range(&obj.id, .., self.read_at(doc))
             .map(|m| (m.key.to_string(), m.value.to_value(), m.id()))
             .collect::<Vec<_>>();
 
@@ -1380,11 +1385,11 @@ impl TransactionInner {
     }
 
     /// The read position of this transaction: its isolation scope if any,
-    /// otherwise the current document.
-    pub(crate) fn read_at(&self) -> ReadAt<'_> {
+    /// otherwise the current document (which carries the write-frontier mask).
+    pub(crate) fn read_at<'a>(&'a self, doc: &'a Automerge) -> ReadAt<'a> {
         match &self.scope {
             Some(scope) => ReadAt::At(std::borrow::Cow::Borrowed(scope)),
-            None => ReadAt::current(),
+            None => doc.read_current(),
         }
     }
 

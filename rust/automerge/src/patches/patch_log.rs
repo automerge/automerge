@@ -581,7 +581,7 @@ impl PatchLog {
         let view = self.view.clone();
         let read = match view.as_ref() {
             Some(v) => doc.read_visible(v),
-            None => ReadAt::current(),
+            None => doc.read_current(),
         };
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();

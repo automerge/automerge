@@ -640,9 +640,9 @@ impl OpSet {
             self.seek_ops_by_index_slow(obj, index, seq_type, Some(clock))
         } else {
             let found = if seq_type == SequenceType::List {
-                self.seek_list_ops_by_index_fast(obj, index)
+                self.seek_list_ops_by_index_fast(obj, index, read)
             } else {
-                self.seek_text_ops_by_index_fast(obj, index)
+                self.seek_text_ops_by_index_fast(obj, index, read)
             };
             #[cfg(feature = "slow_path_assertions")]
             {
@@ -707,6 +707,7 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         index: usize,
+        read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
         let range = self.scope_to_obj(obj);
 
@@ -714,7 +715,14 @@ impl OpSet {
         if let Some(tx) = top_iter.advance_prefix(index) {
             let range = self.list_register_at_pos(tx.pos, range);
             let end_pos = range.end;
-            let ops = self.iter_range(&range).visible(self, None).collect();
+            // The `top` index gave us the element's position (it is rebuilt
+            // under the write-frontier mask), but register selection and counter
+            // aggregation within the element must also honour the mask:
+            // a delete or increment from a masked author must not count.
+            let ops = self
+                .iter_range(&range)
+                .visible(self, read.filter())
+                .collect();
             OpsFound {
                 index,
                 ops,
@@ -732,10 +740,31 @@ impl OpSet {
         }
     }
 
+    /// Returns true if `op`, for text register selection, is visible.
+    ///
+    /// When `filter` is `None` this is equivalent to the `op` having no
+    /// successors.
+    ///
+    /// Otherwise, `op` must be covered by `filter`, and no successor that
+    /// overwrites or deletes it may be covered. Increment successors do not
+    /// hide `op`.
+    fn text_register_visible(op: &Op<'_>, filter: Option<&Clock>) -> bool {
+        match filter {
+            None => op.succ().len() == 0,
+            Some(clock) => {
+                clock.covers(&op.id)
+                    && !op
+                        .succ_inc()
+                        .any(|(id, inc)| inc.is_none() && clock.covers(&id))
+            }
+        }
+    }
+
     pub(crate) fn seek_text_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
         mut index: usize,
+        read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
         let mut range = self.scope_to_obj(obj);
         let mut text_iter = self.cols.index.text.iter_range(range.clone());
@@ -764,7 +793,7 @@ impl OpSet {
                 }
                 end_pos = op.pos + 1;
                 range.end = op.pos + 1;
-                if op.succ().len() == 0 && op.action != Action::Mark {
+                if Self::text_register_visible(&op, read.filter()) && op.action != Action::Mark {
                     ops.push(op);
                 }
             }
@@ -1286,6 +1315,25 @@ impl OpSet {
             self.cols.mark_name.iter_range(range.clone()),
             self.cols.expand.iter_range(range.clone()),
         )
+    }
+
+    /// Rebuild every op index with visibility computed under `clock`,
+    /// making the indexes authoritative for reads at that visibility.
+    pub(crate) fn recompute_indexes(&mut self, clock: &Clock) {
+        let mut builder = self.index_builder();
+        let mut last = None;
+        for op in self.iter() {
+            let next = Some((op.obj, op.elemid_or_key()));
+
+            if last != next {
+                builder.flush();
+                last = next;
+            }
+
+            builder.process_op(&op, Some(clock));
+        }
+        let (indexes, _) = builder.finish();
+        self.set_indexes(indexes);
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -2003,7 +2051,7 @@ mod tests {
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
             let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
-            let read = ReadAt::at(crate::clock::VisibleClock::new(clock.clone()));
+            let read = ReadAt::at(crate::clock::VisibleClock::new(clock.clone(), None));
             let ops = opset
                 .top_ops(&ObjId(OpId::new(1, 1)), read.borrow())
                 .collect::<Vec<_>>();

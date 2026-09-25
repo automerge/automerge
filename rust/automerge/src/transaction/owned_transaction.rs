@@ -116,7 +116,7 @@ impl OwnedTransaction {
                 .as_ref()
                 .and_then(|i| i.get_scope().as_ref())
                 .map_or_else(
-                    || clock::ReadAt::current(),
+                    || self.doc.read_current(),
                     |scope| clock::ReadAt::At(Cow::Borrowed(scope)),
                 )
         }

@@ -283,6 +283,7 @@ pub mod marks;
 pub mod op_set2;
 pub mod patches;
 mod read;
+mod write_frontier;
 mod sequence_tree;
 mod storage;
 pub mod sync;

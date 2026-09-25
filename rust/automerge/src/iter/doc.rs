@@ -28,7 +28,7 @@ impl<'a> DocIter<'a> {
         Self {
             op_set: None,
             obj_export: Arc::new(ExId::Root),
-            read: ReadAt::current(),
+            read: ReadAt::unmasked(),
             inner: DocIterInternal::empty(encoding),
         }
     }

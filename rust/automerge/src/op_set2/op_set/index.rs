@@ -1,7 +1,9 @@
+use crate::clock::Clock;
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
 use std::collections::HashMap;
+use std::u32;
 
 // TODO : this could be faster and use less memory if
 // hexane::Encoder was used here instead of Vec<>
@@ -182,14 +184,29 @@ impl IndexBuilder {
         }
         self.last_flush = len;
     }
-    pub(crate) fn process_op(&mut self, op: &Op<'_>) {
+
+    /// Add `op` and its successors to the indexes being built.
+    ///
+    /// When `clock` is `None`, all operations are included. Otherwise, only
+    /// covered operations contribute to visibility: uncovered successors do
+    /// not hide values, and uncovered increments do not affect counter values.
+    ///
+    /// Mark ordering is validated and object and successor metadata are
+    /// recorded regardless of coverage. Marks outside the clock are omitted
+    /// from the mark index.
+    ///
+    /// Call [`Self::flush`] between registers. Successor indexing is handled
+    /// here, that is, callers must not also call [`Self::process_succ`] for
+    /// this op.
+    pub(crate) fn process_op(&mut self, op: &Op<'_>, clock: Option<&Clock>) {
+        let visible = clock.is_none_or(|clock| clock.covers(&op.id));
+
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
-        self.marks.push(mark_index);
+        self.marks.push(if visible { mark_index } else { None });
 
-        self.succ.push(vis_num(op));
+        self.succ.push(vis_num(op, clock));
         self.top.push(false);
-
         self.widths
             .push(op.width(SequenceType::Text, self.text_encoding) as u64);
 
@@ -198,12 +215,18 @@ impl IndexBuilder {
         if let Some(i) = op.get_increment_value() {
             for (succ_idx, op_idx) in count.into_iter().flatten() {
                 self.incs[succ_idx] = Some(i);
-                self.succ[op_idx] -= 1;
+                if visible {
+                    self.succ[op_idx] -= 1;
+                }
             }
         }
 
         if let Some(obj_info) = op.obj_info() {
             self.obj_info.insert(op.id, obj_info);
+        }
+
+        for succ_id in op.succ() {
+            self.process_succ(op.is_counter(), succ_id);
         }
     }
 
@@ -254,10 +277,14 @@ impl IndexBuilder {
     }
 }
 
-fn vis_num(op: &Op<'_>) -> u32 {
+fn vis_num(op: &Op<'_>, clock: Option<&Clock>) -> u32 {
     if op.is_inc() {
-        u32::MAX
-    } else {
-        op.succ().len() as u32
+        return u32::MAX;
+    }
+
+    match clock {
+        None => op.succ().len() as u32,
+        Some(clock) if !clock.covers(&op.id) => u32::MAX,
+        Some(clock) => op.succ().filter(|id| clock.covers(id)).count() as u32,
     }
 }
