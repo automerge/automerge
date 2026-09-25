@@ -27,6 +27,108 @@ fn two_authors() -> (Automerge, Author<'static>, Vec<automerge::ChangeHash>) {
 }
 
 #[test]
+fn mask_apply_changes() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    let map = doc.put_object(ROOT, "map", ObjType::Map).unwrap();
+    doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+    doc.increment(ROOT, "counter", 2).unwrap();
+    doc.put(&map, "key1", "value1").unwrap();
+    doc.put(&map, "key2", "value2").unwrap();
+    doc.put(&map, "key3", "value3").unwrap();
+    doc.splice(&list, 0, 0, [1, 2, 3, 4]).unwrap();
+    doc.splice_text(&text, 0, 0, "the quick fox jumped over the lazy dog")
+        .unwrap();
+
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    fork.increment(ROOT, "counter", 4).unwrap();
+
+    doc.merge(&mut fork).unwrap();
+
+    let epoc = doc.get_heads();
+
+    let mut remote = AutoCommit::new();
+    remote
+        .load_incremental(&[doc.save(), fork.save()].concat())
+        .unwrap();
+    remote.mask_author(bad, &epoc);
+    remote.update_diff_cursor();
+
+    doc.increment(ROOT, "counter", 8).unwrap();
+    // Concurrent with fork's put of the same key below: the masked side of
+    // the conflict loses, so good's value must win visibly.
+    doc.put(&map, "conflict", "good_update").unwrap();
+    fork.increment(ROOT, "counter", 16).unwrap();
+    fork.delete(&map, "key1").unwrap();
+    fork.put(&map, "key2", "value4").unwrap();
+    fork.put(&map, "key3", "value5").unwrap();
+    fork.put(&map, "conflict", "bad_update").unwrap();
+    fork.delete(&list, 1).unwrap();
+    fork.insert(&list, 1, 100).unwrap();
+    fork.splice_text(&text, 4, 5, "free").unwrap();
+    let bad_map = fork.put_object(ROOT, "bad_map", ObjType::Map).unwrap();
+
+    doc.merge(&mut fork).unwrap();
+
+    doc.put(&map, "key3", "value6").unwrap();
+    doc.put(&bad_map, "bad_key", "bad_val").unwrap();
+    doc.insert(&list, 2, 200).unwrap();
+    doc.splice_text(&text, 6, 2, "endly").unwrap();
+
+    remote
+        .load_incremental(&[doc.save_incremental(), fork.save_incremental()].concat())
+        .unwrap();
+
+    assert_eq!(
+        remote.get(ROOT, "counter").unwrap().unwrap().0.as_i64(),
+        Some(15)
+    );
+    assert_eq!(
+        remote.get(&map, "key1").unwrap().unwrap().0,
+        "value1".into()
+    );
+    assert_eq!(
+        remote.get(&map, "key2").unwrap().unwrap().0,
+        "value2".into()
+    );
+    assert_eq!(
+        remote.get(&map, "key3").unwrap().unwrap().0,
+        "value6".into()
+    );
+    assert_eq!(
+        remote.get(&map, "conflict").unwrap().unwrap().0,
+        "good_update".into()
+    );
+    assert_eq!(remote.get(&list, 1).unwrap().unwrap().0, 200.into());
+    assert_eq!(
+        remote.text(&text).unwrap(),
+        "the endlyquick fox jumped over the lazy dog"
+    );
+
+    let patches = remote.diff_incremental();
+
+    assert_eq!(patches.len(), 5);
+    assert!(patches
+        .iter()
+        .any(|p| matches!(p.action, PatchAction::Increment { value: 8, .. })));
+    assert!(patches
+        .iter()
+        .any(|p| matches!(&p.action, PatchAction::SpliceText { .. })));
+    assert!(patches.iter().any(
+        |p| matches!(&p.action, PatchAction::Insert { values, .. } if values.get(0).unwrap().0 == 200.into())
+    ));
+    assert!(patches.iter().any(
+        |p| matches!(&p.action, PatchAction::PutMap { value, .. } if value.0 == "value6".into())
+    ));
+    assert!(patches.iter().any(
+        |p| matches!(&p.action, PatchAction::PutMap { value, .. } if value.0 == "good_update".into())
+    ));
+}
+
+#[test]
 fn pending_change_hides_author_entirely() {
     let (mut doc, alice, _) = two_authors();
     let unseen = automerge::ChangeHash([7; 32]);
@@ -378,6 +480,144 @@ fn cached_mask_handles_multi_op_changes() {
     assert!(
         !keys.contains(&"post_mask".to_string()),
         "post_mask should be filtered; got keys={:?}",
+        keys
+    );
+}
+
+// ======================= authors & actors =======================
+
+#[test]
+fn mask_with_new_actor_same_author() {
+    let good = Author::try_from("aaaa").unwrap();
+    let bad = Author::try_from("ffff").unwrap();
+
+    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    doc.put(ROOT, "key", "original").unwrap();
+
+    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let epoch = doc.get_heads();
+
+    // Bad author makes changes with first actor
+    fork.put(ROOT, "key1", "bad1").unwrap();
+
+    // Create a new doc with the same bad author (different actor)
+    let mut fork2 = doc.fork().with_author(Some(bad.clone()));
+    fork2.put(ROOT, "key2", "bad2").unwrap();
+
+    doc.merge(&mut fork).unwrap();
+
+    let mut remote = AutoCommit::new();
+    remote.mask_author(bad, &epoch);
+    remote.merge(&mut doc).unwrap();
+
+    // new actor already masked
+    remote.update_diff_cursor();
+    remote.merge(&mut fork2).unwrap();
+    let patches = remote.diff_incremental();
+    // patches should not contain bad keys
+    for p in &patches {
+        if let PatchAction::PutMap { key, .. } = &p.action {
+            assert_ne!(key.as_str(), "key1");
+            assert_ne!(key.as_str(), "key2");
+        }
+    }
+
+    // Both actors under the bad author should be masked
+    assert!(remote.get(ROOT, "key1").unwrap().is_none());
+    assert!(remote.get(ROOT, "key2").unwrap().is_none());
+    assert_eq!(
+        remote.get(ROOT, "key").unwrap().unwrap().0,
+        "original".into()
+    );
+    // iter() should not contain bad keys
+    let iter_keys: Vec<_> = remote
+        .iter()
+        .filter_map(|item| item.key().map(String::from))
+        .collect();
+    assert!(!iter_keys.contains(&"key1".to_string()));
+    assert!(!iter_keys.contains(&"key2".to_string()));
+    assert!(iter_keys.contains(&"key".to_string()));
+}
+
+// Regression test for a bug in `change_graph::insert_actor`.
+//
+// When a new actor is inserted at a sorted position lower than existing
+// actors, all existing actor indices shift up. `insert_actor` updates
+// `self.actors`, `self.seq_index`, `self.actor_author`, and the per-node
+// clocks in `clock_cache`, but it does **not** re-key the write-frontier mask.
+// After a shift, the mask still has entries keyed at the old (now stale)
+// indices.
+//
+// As a result, write-frontier mask (rebuilt from the stale mask) marks the
+// wrong actors as masked. The slow query path that consults the active
+// write-frontier clock then filters incorrectly.
+#[test]
+fn write_frontier_mask_survives_actor_reordering() {
+    let bad = Author::try_from("ffff").unwrap();
+
+    // Two actor IDs with deterministic sort order: `actor_late` sorts AFTER
+    // `actor_early`. We add `actor_late` first, then `actor_early`, forcing
+    // an actor reordering on the second add.
+    let actor_late = ActorId::try_from("ff").unwrap();
+    let actor_early = ActorId::try_from("00").unwrap();
+
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::try_from("aa").unwrap()); // doc's own actor, between early and late
+    doc.put(ROOT, "good_key", "good").unwrap();
+
+    let pre_change = doc.get_heads();
+
+    // First bad actor publishes a change.
+    let mut fork_late = doc.fork().with_author(Some(bad.clone()));
+    fork_late.set_actor(actor_late);
+    fork_late.put(ROOT, "late_actor_key", "from_late").unwrap();
+    fork_late.commit();
+
+    doc.merge(&mut fork_late).unwrap();
+
+    // Mask bad at `pre_change` — bad has no pre-change history, so all of
+    // bad's changes (current and future) should be masked.
+    doc.mask_author(bad.clone(), &pre_change);
+
+    // Sanity check: the late-actor key is correctly hidden.
+    assert!(doc.get(ROOT, "late_actor_key").unwrap().is_none());
+
+    // Now add a second bad actor with an ID that sorts BEFORE the existing
+    // bad actor. This forces `insert_actor` to insert at a low index,
+    // shifting the existing bad actor (and the doc actor) up.
+    let mut fork_early = doc.fork().with_author(Some(bad.clone()));
+    fork_early.set_actor(actor_early);
+    fork_early
+        .put(ROOT, "early_actor_key", "from_early")
+        .unwrap();
+    fork_early.commit();
+    doc.merge(&mut fork_early).unwrap();
+
+    // After the actor reordering, both bad-actor keys should still be
+    // masked (same author).
+    assert!(
+        doc.get(ROOT, "late_actor_key").unwrap().is_none(),
+        "late_actor_key should remain masked after actor reordering"
+    );
+    assert!(
+        doc.get(ROOT, "early_actor_key").unwrap().is_none(),
+        "early_actor_key should be masked (same author)"
+    );
+
+    let keys: Vec<String> = doc.keys(ROOT).collect();
+    assert!(
+        keys.contains(&"good_key".to_string()),
+        "good_key should remain visible; got keys={:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"late_actor_key".to_string()),
+        "late_actor_key should be filtered by keys(); got keys={:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"early_actor_key".to_string()),
+        "early_actor_key should be filtered by keys(); got keys={:?}",
         keys
     );
 }

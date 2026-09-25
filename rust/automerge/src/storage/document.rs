@@ -345,7 +345,7 @@ impl<'a> Document<'a> {
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::with_actors(change_cols.len());
-        let change_graph = change_cols.finalize(&changes.changes, &mut authors);
+        let change_graph = change_cols.finalize(&changes.changes, &mut authors)?;
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
@@ -408,6 +408,8 @@ pub(crate) enum ReconstructError {
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]
     InvalidMaxOp,
+    #[error("author provided for change with non-initial sequence number: {0}")]
+    AuthorOnNonInitialSeq(u64, ActorId),
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderDoc {
         doc: Box<Automerge>,

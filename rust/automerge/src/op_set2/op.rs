@@ -49,10 +49,13 @@ impl AsBuilder for &TxOp {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
-    pub(crate) succ: Vec<(OpId, Option<i64>)>,
+    pub(crate) succ: Vec<(OpId, Option<i64>, bool)>,
     pub(crate) pos: Option<usize>,
     pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
+    /// Whether this incoming op is hidden by the mask snapshot the batch
+    /// walks under. An import-time fact only; never stored on a doc op.
+    pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -84,7 +87,11 @@ impl ChangeOp {
     ) -> hydrate::Value {
         if self.bld.action == Action::Set {
             if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self.succ.iter().filter_map(|(_, inc)| *inc).sum();
+                let inc: i64 = self
+                    .succ
+                    .iter()
+                    .filter_map(|(_, inc, rev)| (*inc).filter(|_| !rev))
+                    .sum();
                 hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
             } else {
                 hydrate::Value::Scalar(self.bld.value.to_owned())
@@ -99,11 +106,13 @@ impl ChangeOp {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+        !(self.masked || self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
 
     pub(crate) fn has_succ(&self) -> bool {
-        self.succ.iter().any(|(_, inc)| inc.is_none())
+        self.succ
+            .iter()
+            .any(|(_, inc, masked)| inc.is_none() && !masked)
     }
 
     pub(crate) fn insert(&self) -> bool {
@@ -634,11 +643,15 @@ impl OpLike for ChangeOp {
     type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        if op.masked {
+            None
+        } else {
+            op.bld.mark_index()
+        }
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
-        if Self::visible(op) {
+        if op.visible() {
             op.bld.width(seq_type, text_encoding) as u64
         } else {
             0
@@ -646,11 +659,11 @@ impl OpLike for ChangeOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+        op.visible()
     }
 
     fn top(op: &Self) -> bool {
-        !op.conflicted && Self::visible(op)
+        !op.conflicted && op.visible()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -929,6 +942,9 @@ pub(crate) struct SuccInsert {
     pub(crate) inc: Option<i64>,
     pub(crate) len: u64,
     pub(crate) sub_pos: usize,
+    /// A masked successor keeps the link in the index but must not change
+    /// the predecessor's visibility or counter total.
+    pub(crate) masked: bool,
 }
 
 impl<'a> Op<'a> {
@@ -945,7 +961,16 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
+        self.add_succ_with_mask(id, inc, false)
+    }
+
+    pub(crate) fn add_succ_with_mask(
+        &self,
+        id: OpId,
+        mut inc: Option<i64>,
+        masked: bool,
+    ) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
         if inc.is_some() && !self.is_counter() {
@@ -965,6 +990,7 @@ impl<'a> Op<'a> {
             inc,
             len,
             sub_pos,
+            masked,
         }
     }
 

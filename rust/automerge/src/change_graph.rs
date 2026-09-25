@@ -824,6 +824,26 @@ impl ChangeGraph {
         self.calculate_clock(nodes.collect())
     }
 
+    /// Return the [`SeqClock`] for the given frontier.
+    ///
+    /// A frontier only resolves if every [`ChangeHash`] is present in the
+    /// change graph. If any of them are not present, then an empty clock is
+    /// returned.
+    /// This is required because a partial clock could make the author's pending
+    /// changes visible, that may still be part of the pending portion of the
+    /// frontier.
+    ///
+    /// Otherwise, the clock calculated for the given heads is returned.
+    ///
+    /// [`SeqClock`]: clock::SeqClock
+    pub(crate) fn seq_clock_for_local_heads(&self, heads: &[ChangeHash]) -> SeqClock {
+        if self.missing_hashes(heads).next().is_some() {
+            SeqClock::new(self.num_actors())
+        } else {
+            self.seq_clock_for_heads(heads)
+        }
+    }
+
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
         Some(*self.seq.get(idx.0 as usize)?)
     }
@@ -904,7 +924,11 @@ impl ChangeGraphCols {
         self.0.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change], authors: &mut Authors) -> ChangeGraph {
+    pub(crate) fn finalize(
+        self,
+        changes: &[Change],
+        authors: &mut Authors,
+    ) -> Result<ChangeGraph, LoadError> {
         let mut graph = self.0;
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.is_empty());
@@ -922,12 +946,18 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
             if let Some(author) = c.author() {
-                // Saved documents written by an honest encoder only carry the
-                // author footer on seq=1. Skip rather than panic on bad data
-                // — any further validation is the apply path's job.
-                if c.seq() == 1 {
-                    authors.assign_author(author.into_owned(), graph.actors[idx].into());
+                // Honest encoders only carry the author footer on seq=1; the
+                // apply path rejects anything else. Loading must reject it
+                // too: skipping the footer would leave the ops unattributed
+                // (so masking could never hide them) while Change::author
+                // still reports the author.
+                if c.seq() != 1 {
+                    return Err(LoadError::AuthorOnNonInitialSeq(
+                        c.seq(),
+                        c.actor_id().clone(),
+                    ));
                 }
+                authors.assign_author(author.into_owned(), graph.actors[idx].into());
             }
         }
 
@@ -939,7 +969,7 @@ impl ChangeGraphCols {
 
         graph.cache_fragments();
 
-        graph
+        Ok(graph)
     }
 
     pub(crate) fn load(doc: &Document<'_>) -> Result<Self, LoadError> {
@@ -1108,6 +1138,58 @@ mod tests {
 
         let clock = graph.seq_clock_for_heads(&[change4]);
         assert_eq!(clock, expected_clock);
+    }
+
+    /// A DOCUMENT chunk carrying an author footer on a seq!=1 change must
+    /// fail to load, exactly like the same change applied directly
+    /// (`AutomergeError::AuthorOnNonInitialSeq`). Skipping the footer would
+    /// leave the ops unattributed — unhideable by masking — while
+    /// `Change::author` still reports the author. Such bytes cannot be built
+    /// through the public API (both the encoder and the apply path enforce
+    /// the invariant), so the guard is pinned at the reconstruction level:
+    /// real document columns, with the forged footer spliced into the
+    /// decoded change list that `reconstruct` hands to `finalize`.
+    #[test]
+    fn finalize_rejects_author_footer_at_non_initial_seq() {
+        use crate::storage::{parse::Input, Chunk};
+        use crate::{Author, ExpandedChange};
+
+        // A real two-change document from a single actor.
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "k1", "v1").unwrap();
+        doc.commit();
+        doc.put(ROOT, "k2", "v2").unwrap();
+        doc.commit();
+        let saved = doc.save();
+        let (_, chunk) = Chunk::parse(Input::new(&saved)).unwrap();
+        let Chunk::Document(document) = chunk else {
+            panic!("expected a document chunk");
+        };
+        let cols = ChangeGraphCols::load(&document).unwrap();
+
+        // Forge the seq=2 change: re-encode it with an author footer in
+        // extra_bytes, the same encoding transaction/inner.rs::extra_bytes
+        // writes (Footer::Author discriminant 1, then a LEB128 length).
+        let author = Author::try_from("ffff").unwrap();
+        let mut changes = doc.get_changes(&[]);
+        changes.sort_by_key(Change::seq);
+        assert_eq!(changes.len(), 2);
+        let mut expanded: ExpandedChange = (&changes[1]).into();
+        expanded.extra_bytes = vec![1, author.as_bytes().len() as u8];
+        expanded.extra_bytes.extend_from_slice(author.as_bytes());
+        let forged: Change = expanded.into();
+        assert_eq!(forged.seq(), 2);
+        assert!(forged.author().is_some());
+        let forged_changes = vec![changes[0].clone(), forged];
+
+        let mut authors = Authors::with_actors(cols.len());
+        let err = cols
+            .finalize(&forged_changes, &mut authors)
+            .expect_err("an author footer at seq 2 must fail the load");
+        assert!(
+            matches!(err, LoadError::AuthorOnNonInitialSeq(2, _)),
+            "expected AuthorOnNonInitialSeq(2, _), got {err:?}"
+        );
     }
 
     #[test]

@@ -283,7 +283,6 @@ pub mod marks;
 pub mod op_set2;
 pub mod patches;
 mod read;
-mod write_frontier;
 mod sequence_tree;
 mod storage;
 pub mod sync;
@@ -292,6 +291,7 @@ mod text_value;
 pub mod transaction;
 mod types;
 mod value;
+mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
 pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};

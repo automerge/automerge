@@ -4576,3 +4576,64 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
         .unwrap();
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn rejects_change_with_author_footer_at_non_initial_seq() {
+    // Encode an author footer the same way the encoder does in
+    // transaction/inner.rs::extra_bytes — Footer::Author (=1) is pub(crate)
+    // so we hard-code its discriminant here. Both the discriminant and the
+    // length are LEB128 values that fit in a single byte.
+    fn author_footer(author_bytes: &[u8]) -> Vec<u8> {
+        assert!(author_bytes.len() < 128);
+        let mut buf = vec![1, author_bytes.len() as u8];
+        buf.extend_from_slice(author_bytes);
+        buf
+    }
+
+    let author = Author::try_from("ffff").unwrap();
+
+    // Build a real, well-formed seq=2 change from a single actor.
+    let mut doc = AutoCommit::new();
+    doc.put(automerge::ROOT, "k1", "v1").unwrap();
+    doc.commit();
+    doc.put(automerge::ROOT, "k2", "v2").unwrap();
+    doc.commit();
+
+    let changes = doc.get_changes(&[]);
+    let seq2 = changes
+        .iter()
+        .find(|c| c.seq() == 2)
+        .expect("expected a seq=2 change");
+    assert!(seq2.author().is_none(), "test setup: seq=2 should be clean");
+
+    // Forge: re-encode the seq=2 change with an author footer in
+    // extra_bytes. The hash will recompute, so the resulting Change is
+    // structurally valid in every other respect.
+    let mut expanded: ExpandedChange = seq2.into();
+    expanded.extra_bytes = author_footer(author.as_bytes());
+    expanded.hash = None;
+    let forged: Change = expanded.into();
+    assert_eq!(forged.seq(), 2);
+    assert!(forged.author().is_some());
+
+    // The seq=1 change is needed first so the seq=2 forgery isn't
+    // rejected as an orphan.
+    let seq1 = changes
+        .iter()
+        .find(|c| c.seq() == 1)
+        .expect("expected a seq=1 change")
+        .clone();
+
+    let mut victim = AutoCommit::new();
+    let result = victim.apply_changes([seq1, forged]);
+    assert!(
+        result.is_err(),
+        "apply_changes should reject author footer at seq != 1, got Ok"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, AutomergeError::AuthorOnNonInitialSeq(2, _)),
+        "expected AuthorOnNonInitialSeq(2, _), got {:?}",
+        err
+    );
+}

@@ -274,7 +274,7 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
+            if !i.masked && i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
                 self.cols.index.top.splice(i.pos, 1, [false]);
@@ -303,7 +303,9 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
+            if i.masked {
+                undo.push(SuccUndo::new(*i, None, None, None));
+            } else if i.inc.is_none() {
                 delete = true;
                 let visible = self.cols.index.visible.get(i.pos);
                 let text = self.cols.index.text.values().get(i.pos);
