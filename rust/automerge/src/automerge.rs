@@ -30,7 +30,7 @@ use crate::transaction::{
 };
 use crate::write_frontier::WriteFrontier;
 
-use crate::clock::{self, Clock, ClockRange, Mask, ReadAt, VisibleClock};
+use crate::clock::{Clock, ClockRange, Mask, ReadAt, VisibleClock};
 use crate::hydrate;
 use crate::op_set2::ActorIdx;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
@@ -69,6 +69,21 @@ impl Actor {
             *idx = idx.shifted(shift);
         }
     }
+}
+
+/// Outcome of [`Automerge::update_history`].
+///
+/// Every mutation path must consume this: when a change resolves a pending
+/// write-frontier boundary, the new visibility has to be published through
+/// [`Automerge::republish_mask`] once the op set is consistent again.
+#[must_use = "a resolved pending boundary must be republished"]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HistoryUpdate {
+    /// The change did not resolve a pending write-frontier boundary.
+    Unchanged,
+    /// The change was a pending write-frontier boundary: the stored seq-mask has
+    /// been recomputed and the caller must publish the visibility change.
+    BoundaryResolved,
 }
 
 /// What to do when loading a document partially succeeds
@@ -523,31 +538,11 @@ impl Automerge {
     /// Callers must go through [`Automerge::republish_mask`] (or, on load,
     /// rebuild once at the end).
     fn apply_write_frontier(&mut self, author: Author<'static>, from: &[ChangeHash]) {
-        let seq_clock = self.boundary_seq_clock(from);
+        let seq_clock = self.change_graph.seq_clock_for_local_heads(from);
         self.write_frontier
             .extend_pending_changes(self.change_graph.missing_hashes(from));
         self.write_frontier
             .mask(author, from.to_vec(), &seq_clock, &self.authors);
-    }
-
-    /// Return the [`SeqClock`] for the given write-frontier.
-    ///
-    /// A frontier only resolves if every [`ChangeHash`] is present in the
-    /// change graph. If any of them are not present, then an empty clock is
-    /// returned.
-    /// This is required because a partial clock could make the author's pending
-    /// changes visible, that may still be part of the pending portion of the
-    /// write-frontier.
-    ///
-    /// Otherwise, the clock calculated for the given heads is returned.
-    ///
-    /// [`SeqClock`]: clock::SeqClock
-    pub(crate) fn boundary_seq_clock(&self, heads: &[ChangeHash]) -> clock::SeqClock {
-        if self.change_graph.missing_hashes(heads).next().is_some() {
-            clock::SeqClock::new(self.actors())
-        } else {
-            self.change_graph.seq_clock_for_heads(heads)
-        }
     }
 
     /// Reveal the `author`, restoring their changes.
@@ -633,9 +628,33 @@ impl Automerge {
     /// Whether `author` is currently masked, e.g. so an application can
     /// disable editing for a masked local author.
     pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
-        self.write_frontier
-            .get_write_frontier()
-            .contains_key(author)
+        self.write_frontier.is_author_masked(author)
+    }
+
+    /// See [`Authors::assign_author`].
+    ///
+    /// If the `author` is masked, the new `actor` is added to the mask at
+    /// the author's write-frontier boundary (fully masked when the actor has no
+    /// entry at that boundary).
+    pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
+        // `rebuild_mask` below does not recompute the op-set indexes, which
+        // is only sound because a freshly assigned actor has no ops yet.
+        debug_assert_eq!(
+            self.change_graph.seq_for_actor(actor),
+            0,
+            "assign_author must run before the actor records any ops"
+        );
+        if let Some(heads) = self
+            .write_frontier
+            .get_write_frontier_for_author(&author)
+            .map(|h| h.to_vec())
+        {
+            let clock = self.change_graph.seq_clock_for_local_heads(&heads);
+            self.write_frontier
+                .insert_mask_for(ActorIdx::from(actor), clock.get_for_actor(&actor));
+        }
+        self.authors.assign_author(author, actor);
+        self.rebuild_mask();
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
@@ -1194,6 +1213,10 @@ impl Automerge {
                         doc,
                         error_message: _,
                     }) if mark_order.allows_invalid() => *doc,
+                    // Same policy violation, same error as the apply path.
+                    Err(ReconstructError::AuthorOnNonInitialSeq(seq, actor)) => {
+                        return Err(AutomergeError::AuthorOnNonInitialSeq(seq, actor))
+                    }
                     Err(e) => return Err(load::Error::InflateDocument(Box::new(e)).into()),
                 }
             }
@@ -1604,7 +1627,12 @@ impl Automerge {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
-    pub(crate) fn update_history(&mut self, change: &Change) {
+    /// Add the change to the graph. Returns
+    /// [`HistoryUpdate::BoundaryResolved`] if it was a pending write-frontier
+    /// boundary; witnessing one updates the stored seq-mask, but never the
+    /// visibility [`Mask`] — publishing that is the caller's single
+    /// [`Automerge::republish_mask`] step after the op set is consistent.
+    pub(crate) fn update_history(&mut self, change: &Change) -> HistoryUpdate {
         self.update_deps(change);
 
         let actor_index = self
@@ -1612,9 +1640,21 @@ impl Automerge {
             .lookup_actor(change.actor_id())
             .expect("Change's actor not already in the document");
 
-        self.change_graph
+        let hash = self
+            .change_graph
             .add_change(change, actor_index, &mut self.authors)
             .expect("Change's deps should already be in the document");
+
+        if self.write_frontier.pop_pending_change(&hash) {
+            let graph = &self.change_graph;
+            self.write_frontier
+                .recompute_write_frontiers(&self.authors, |heads| {
+                    graph.seq_clock_for_local_heads(heads)
+                });
+            HistoryUpdate::BoundaryResolved
+        } else {
+            HistoryUpdate::Unchanged
+        }
     }
 
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {

@@ -12,7 +12,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{Author, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{ActorId, Author, Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -351,7 +351,7 @@ impl<'a> Document<'a> {
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::new(&op_set.actors);
-        let change_graph = change_cols.finalize(&changes.changes, &mut authors);
+        let change_graph = change_cols.finalize(&changes.changes, &mut authors)?;
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
@@ -416,6 +416,8 @@ pub(crate) enum ReconstructError {
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]
     InvalidMaxOp,
+    #[error("author provided for change with non-initial sequence number: {0}")]
+    AuthorOnNonInitialSeq(u64, ActorId),
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderDoc {
         doc: Box<Automerge>,

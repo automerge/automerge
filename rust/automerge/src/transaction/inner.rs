@@ -9,6 +9,7 @@ use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
+use crate::automerge::HistoryUpdate;
 use crate::clock::{ReadAt, VisibleClock};
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
@@ -97,7 +98,7 @@ impl TransactionInner {
         args: TransactionArgs,
         message: Option<String>,
         time: Option<i64>,
-    ) -> ChangeHash {
+    ) -> (ChangeHash, HistoryUpdate) {
         Self::new(args).commit_impl(doc, message, time)
     }
 
@@ -122,8 +123,10 @@ impl TransactionInner {
         Ok(obj)
     }
 
-    /// Commit the operations performed in this transaction, returning the hashes corresponding to
-    /// the new heads.
+    /// Commit the operations performed in this transaction, returning the hash corresponding to
+    /// the new head and whether the committed change resolved a pending write-frontier boundary
+    /// (which the caller must publish via [`Automerge::republish_mask`] once its patch log's
+    /// view has been advanced past this commit).
     ///
     /// Returns `None` if there were no operations to commit.
     #[tracing::instrument(skip(self, doc))]
@@ -132,7 +135,7 @@ impl TransactionInner {
         doc: &mut Automerge,
         message: Option<String>,
         time: Option<i64>,
-    ) -> Option<ChangeHash> {
+    ) -> Option<(ChangeHash, HistoryUpdate)> {
         if self.pending_ops() == 0 {
             if self.seq == 1 {
                 // we added an actor for this tx - now roll it back
@@ -149,7 +152,7 @@ impl TransactionInner {
         doc: &mut Automerge,
         message: Option<String>,
         time: Option<i64>,
-    ) -> ChangeHash {
+    ) -> (ChangeHash, HistoryUpdate) {
         if message.is_some() {
             self.message = message;
         }
@@ -167,9 +170,12 @@ impl TransactionInner {
             let ops = change.iter_ops().collect::<Vec<_>>();
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
-        doc.update_history(&change);
+        // A locally reconstructed byte-identical change can be the pending
+        // write-frontier boundary; the caller publishes the resolved visibility
+        // once its patch log's view has moved past this commit.
+        let history = doc.update_history(&change);
         doc.remove_unused_actors(true);
-        hash
+        (hash, history)
     }
 
     pub(crate) fn change_meta<'a>(
