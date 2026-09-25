@@ -112,6 +112,21 @@ impl VisibleClock {
     pub(crate) fn isolate(&mut self, actor: usize) {
         self.0.isolate(actor)
     }
+
+    /// Add the clock slot for an actor just inserted into the actor table.
+    pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
+        self.0 .0.insert(shift, 0)
+    }
+
+    /// Drop the clock slot for an actor just removed from the actor table.
+    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
+        self.0 .0.remove(removal);
+    }
+
+    /// Number of actors this clock covers.
+    pub(crate) fn len(&self) -> usize {
+        self.0 .0.len()
+    }
 }
 
 /// The snapshot of a clock for a given document, either current or historical.
@@ -331,5 +346,14 @@ mod tests {
 
         assert_eq!(after_clock.partial_cmp(&new_actor_clock), None);
         assert_eq!(new_actor_clock.partial_cmp(&after_clock), None);
+    }
+
+    #[test]
+    fn visible_clock_actor_migration() {
+        let mut v = VisibleClock::new(Clock::from_counters([Some(5), Some(7)]));
+        v.insert_actor(&ActorShift::for_test(1));
+        assert_eq!(v.clock(), &Clock::from_counters([Some(5), None, Some(7)]));
+        v.remove_actor(&ActorRemoval::for_test(0));
+        assert_eq!(v.clock(), &Clock::from_counters([None, Some(7)]));
     }
 }

@@ -35,6 +35,42 @@ fn doc_with_actor(actor: &[u8]) -> Automerge {
 }
 
 #[test]
+fn make_patches_migrates_log_after_inactive_actor_insertion() {
+    // Bind an active log to a document whose only actor sorts high.
+    let mut doc = Automerge::new().with_actor(ActorId::from(&[0xffu8][..]));
+    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    tx.put(ROOT, "x", 1).unwrap();
+    let (_, mut log) = tx.commit();
+
+    // Import a lexically earlier actor through an inactive log, shifting the
+    // bound actor to index 1 without updating the caller-held log.
+    let mut other = Automerge::new().with_actor(ActorId::from(&[0u8][..]));
+    let mut tx = other.transaction();
+    tx.put(ROOT, "y", 2).unwrap();
+    tx.commit();
+    doc.apply_changes(other.get_changes(&[])).unwrap();
+
+    // Materialization must align the held log with the grown actor list.
+    let patches = doc.make_patches(&mut log);
+    assert_eq!(
+        patches.len(),
+        1,
+        "expected only the logged put: {patches:?}"
+    );
+    match &patches[0].action {
+        PatchAction::PutMap { key, value, .. } => {
+            assert_eq!(key, "x");
+            assert_eq!(
+                value.1.to_string(),
+                "1@ff",
+                "the logged op must stay attributed to actor ff"
+            );
+        }
+        other => panic!("expected the logged put of x, got {other:?}"),
+    }
+}
+
+#[test]
 fn applying_changes_with_patch_log_from_another_document_returns_error_not_panic() {
     let mut patch_log = patch_log_from_actor(b"bbbbbb");
     let mut source = AutoCommit::new();
@@ -3939,6 +3975,98 @@ fn diff_from_integrated_to_isolated_heads_reconstructs_target() {
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn inactive_incremental_diff_starts_from_empty_at_isolated_heads() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "x", 1).unwrap();
+    let heads = doc.get_heads();
+    doc.put(ROOT, "y", 2).unwrap();
+    doc.commit();
+    doc.isolate(&heads);
+
+    // Initial and reset cursors must report only the isolated historical view.
+    let expected = doc.diff(&[], &heads);
+    assert_eq!(expected.len(), 1);
+    assert_eq!(doc.diff_incremental(), expected);
+    assert!(doc.diff_incremental().is_empty());
+    doc.reset_diff_cursor();
+    assert_eq!(doc.diff_incremental(), expected);
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn incremental_diff_reports_deletion_when_isolating_at_empty_heads() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "x", 1).unwrap();
+    doc.update_diff_cursor();
+
+    // Moving an already observed view to empty heads must report its deletion.
+    doc.isolate(&[]);
+    let patches = doc.diff_incremental();
+    assert_eq!(patches.len(), 1);
+    assert!(matches!(&patches[0].action, PatchAction::DeleteMap { key } if key == "x"));
+    assert!(doc.diff_cursor().is_empty());
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn incremental_diff_consolidates_puts_after_cursor_reaches_empty_heads() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "x", 1).unwrap();
+    doc.update_diff_cursor();
+    doc.isolate(&[]);
+    let _ = doc.diff_incremental();
+    assert!(doc.diff_cursor().is_empty());
+
+    // An empty cursor uses a historical diff, not raw per-operation events.
+    doc.put(ROOT, "key1", 1).unwrap();
+    doc.put(ROOT, "key1", 2).unwrap();
+    doc.put(ROOT, "key2", 3).unwrap();
+    let patches = doc.diff_incremental();
+    assert_eq!(
+        patches.len(),
+        2,
+        "expected consolidated patches: {patches:?}"
+    );
+    for (expected_key, expected_value) in [("key1", 2), ("key2", 3)] {
+        assert!(patches.iter().any(|patch| matches!(
+            &patch.action,
+            PatchAction::PutMap { key, value, .. }
+                if key == expected_key && value.0 == Value::int(expected_value)
+        )));
+    }
+    assert!(doc.diff_incremental().is_empty());
+}
+
+#[test]
+fn diff_cursor_view_survives_earlier_actor_insertion() {
+    // A stored cursor must remain bound to the same actor identities when a
+    // local commit inserts a lexically earlier actor into the actor table.
+    let encoding = TextEncoding::UnicodeCodePoint;
+    let mut seed = AutoCommit::new_with_encoding(encoding).with_actor(ActorId::from(&[0xffu8][..]));
+    seed.put(ROOT, "x", 1).unwrap();
+    seed.commit();
+
+    let mut doc = seed.fork();
+    doc.set_actor(ActorId::from(&[0u8][..]));
+    doc.update_diff_cursor();
+    doc.put(ROOT, "y", 2).unwrap();
+    doc.commit();
+    let patches = doc.diff_incremental();
+
+    // Hydration alone would not detect an unnecessary replay of x's old put.
+    assert_eq!(patches.len(), 1, "expected only the new put: {patches:?}");
+    assert!(matches!(
+        &patches[0].action,
+        PatchAction::PutMap { key, value, .. }
+            if key == "y" && value.0 == Value::int(2) && value.1.to_string() == "2@00"
+    ));
+    let mut model = seed.document().hydrate(None);
+    model.apply_patches(encoding, patches).unwrap();
+    assert_eq!(model, doc.document().hydrate(None));
+    assert!(doc.diff_incremental().is_empty());
 }
 
 #[test]
