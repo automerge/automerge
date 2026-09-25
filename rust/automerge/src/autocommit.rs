@@ -391,6 +391,12 @@ impl AutoCommit {
         self.update_write_frontiers(|doc, patch_log| doc.mask_author(author, heads, patch_log))
     }
 
+    /// Whether `author` is currently masked, e.g. so an application can
+    /// disable editing for a masked local author.
+    pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
+        self.doc.is_author_masked(author)
+    }
+
     /// Reveal all the changes of `author`.
     ///
     /// Use [`Self::update_diff_cursor()`] before revealing the author to track
