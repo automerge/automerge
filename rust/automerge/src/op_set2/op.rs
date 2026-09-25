@@ -210,6 +210,10 @@ pub(crate) struct TxOp {
     pub(crate) index: usize,
     pub(crate) pos: usize,
     pub(crate) noop: bool,
+    /// Whether the visibility mask hides this op (the transaction's actor
+    /// belongs to a masked author). Mirrors `ChangeOp::masked`: a masked
+    /// op is recorded but never indexed as visible.
+    pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
     pub(crate) undo: Vec<SuccUndo>,
     // Pre-insert register range for scoped transactions. When present,
@@ -301,6 +305,12 @@ impl TxOp {
         self.bld.id
     }
 
+    /// Modify the `masked` flag of this [`TxOp`].
+    pub(crate) fn masked(mut self, masked: bool) -> Self {
+        self.masked = masked;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn list(
         id: OpId,
@@ -321,6 +331,7 @@ impl TxOp {
             pos,
             index,
             noop,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -355,6 +366,7 @@ impl TxOp {
             index: 0,
             pos,
             noop,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -385,6 +397,7 @@ impl TxOp {
             pos,
             index,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -415,6 +428,7 @@ impl TxOp {
             index: 0,
             obj_type: obj.typ,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -446,6 +460,7 @@ impl TxOp {
             pos,
             index,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -476,6 +491,7 @@ impl TxOp {
             pos: 0,
             index,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -528,7 +544,7 @@ impl OpLike for &TxOp {
         Self: 'b;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        <TxOp as OpLike>::mark_index(op)
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -536,7 +552,7 @@ impl OpLike for &TxOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !op.bld.is_inc()
+        <TxOp as OpLike>::visible(op)
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -607,7 +623,12 @@ impl OpLike for TxOp {
     type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        // A hidden mark must not enter the mark index.
+        if op.masked {
+            None
+        } else {
+            op.bld.mark_index()
+        }
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -615,7 +636,7 @@ impl OpLike for TxOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !op.bld.is_inc()
+        !op.masked && !op.bld.is_inc()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {

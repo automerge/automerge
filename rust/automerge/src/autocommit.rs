@@ -380,6 +380,10 @@ impl AutoCommit {
 
     /// Mask all changes made by `author` after `heads`.
     ///
+    /// Changes beyond a masked author's write-frontier — including this
+    /// document's own author — are still recorded and synced but hidden.
+    /// Positions in sequence operations refer to the visible document.
+    ///
     /// Use [`Self::update_diff_cursor()`] before masking the author to track
     /// the resulting patches, then retrieve them with
     /// [`Self::diff_incremental()`].

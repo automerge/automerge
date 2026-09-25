@@ -1090,6 +1090,10 @@ fn load_incremental_into_empty_doc_preserves_author() {
         tx.put(ROOT, "x", 1)
     })
     .unwrap();
+    assert!(
+        doc.get(ROOT, "x").unwrap().is_none(),
+        "the masked local author's edit must stay hidden"
+    );
     let change = doc.get_last_local_change().expect("local change exists");
     assert_eq!(
         change.author(),
