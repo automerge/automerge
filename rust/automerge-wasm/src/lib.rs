@@ -1524,6 +1524,27 @@ impl Automerge {
         Some(self.doc.get_author()?.to_string())
     }
 
+    #[wasm_bindgen(js_name = maskAuthor)]
+    pub fn mask_author(&mut self, author: String, heads: JsValue) -> Result<(), JsValue> {
+        let heads = get_heads(heads)?.unwrap_or_default();
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        self.doc.mask_author(author, &heads);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = revealAuthor)]
+    pub fn reveal_author(&mut self, author: String) -> Result<(), JsValue> {
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        self.doc.reveal_author(&author);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = isAuthorMasked)]
+    pub fn is_author_masked(&self, author: String) -> Result<bool, JsValue> {
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        Ok(self.doc.is_author_masked(&author))
+    }
+
     #[wasm_bindgen(js_name = getAuthors, unchecked_return_type="Author[]")]
     pub fn get_authors(&self) -> Array {
         self.doc
