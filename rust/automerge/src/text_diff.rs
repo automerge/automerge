@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::automerge::Automerge;
 use crate::iter::Span;
 use crate::{
-    clock::Clock,
+    clock::ReadAt,
     iter::{SpanInternal, SpansInternal},
     transaction::TransactionInner,
     ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
@@ -19,7 +19,7 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
-    let old = doc.text_for(text_obj, tx.get_scope().clone())?;
+    let old = doc.text_for(text_obj, tx.read_at())?;
     let new = new.as_ref();
     let old_graphemes = old.graphemes(true).collect::<Vec<&str>>();
     let new_graphemes = new.graphemes(true).collect::<Vec<&str>>();
@@ -142,7 +142,7 @@ pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     config: &crate::marks::UpdateSpansConfig,
 ) -> Result<(), crate::AutomergeError> {
     let text_obj_meta = doc.exid_to_obj(text_obj)?;
-    let old = spans_as_grapheme(doc, &text_obj_meta.id, None)?;
+    let old = spans_as_grapheme(doc, &text_obj_meta.id, ReadAt::current())?;
     let new_spans: Vec<Span> = new.into_iter().collect();
     let new = span_as_grapheme(new_spans.iter().cloned());
 
@@ -198,7 +198,7 @@ fn apply_marks_diff(
     }
 
     // Get current marks on the text
-    let current_marks = doc.marks_for(text_obj, None)?;
+    let current_marks = doc.marks_for(text_obj, ReadAt::current())?;
 
     // Determine which marks to remove (those not in the new set)
     let mut marks_to_remove = Vec::new();
@@ -227,7 +227,7 @@ fn apply_marks_diff(
 
     // Add new marks that don't already exist
     for (mark_name, mark_value, start, end) in new_marks {
-        let already_exists = doc.marks_for(text_obj, None)?.iter().any(|m| {
+        let already_exists = doc.marks_for(text_obj, ReadAt::current())?.iter().any(|m| {
             m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
         });
 
@@ -446,16 +446,15 @@ impl myers::DiffHook for BlockDiffHook<'_> {
 fn spans_as_grapheme(
     doc: &Automerge,
     text: &crate::types::ObjId,
-    clock: Option<Clock>,
+    read: ReadAt<'_>,
 ) -> Result<Vec<BlockOrGrapheme>, crate::AutomergeError> {
     let range = doc.ops.scope_to_obj(text);
-    let spans_internal = SpansInternal::new(doc.ops(), range, clock.clone(), doc.text_encoding());
+    let spans_internal = SpansInternal::new(doc.ops(), range, read.clone(), doc.text_encoding());
     let mut result = Vec::with_capacity(spans_internal.size_hint().0);
     for span in spans_internal {
         match span {
             SpanInternal::Obj(b, _, _) => {
-                let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), clock.as_ref())
-                else {
+                let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), &read) else {
                     tracing::warn!("unexpected non map object in text");
                     result.push(BlockOrGrapheme::Block(crate::hydrate::Map::new()));
                     continue;

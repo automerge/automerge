@@ -2,7 +2,7 @@ use std::ops::RangeBounds;
 
 use crate::author::Author;
 use crate::automerge::SaveOptions;
-use crate::clock::Clock;
+use crate::clock::ReadAt;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
@@ -791,25 +791,25 @@ impl AutoCommit {
         self.doc.hash_for_opid(opid)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
+    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> ReadAt<'_> {
         // heads arg takes priority
         if let Some(h) = heads {
             // the heads == current-heads shortcut (an unscoped read) is only
             // sound with no transaction in flight: pending ops are already in
             // the op set but not yet under the graph's heads
             return if self.transaction.is_none() {
-                self.doc.clock_at(h)
+                self.doc.read_at(Some(h))
             } else {
-                Some(self.doc.change_graph.clock_at(h))
+                ReadAt::at(self.doc.visible(h))
             };
         }
         match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
-            (Some(_), Some((_, t))) => t.get_scope().clone(),
+            (Some(_), Some((_, t))) => t.read_at(),
             // then look at clock for isolation (no transaction is open, so
             // isolation at the current heads can read unscoped)
-            (Some(i), None) => self.doc.clock_at(i),
-            _ => None,
+            (Some(i), None) => self.doc.read_at(Some(i)),
+            _ => ReadAt::current(),
         }
     }
 

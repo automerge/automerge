@@ -1,12 +1,13 @@
 use crate::actor::{ActorInsert, ActorRefs, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::automerge::Automerge;
+use crate::clock::ReadAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::SpanInternal;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::transaction::TransactionArgs;
-use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
+use crate::types::{ActorId, ObjId, ObjType, OpId, Prop, SequenceType, TextEncoding};
 use crate::{ChangeHash, Patch};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
@@ -473,22 +474,25 @@ impl PatchLog {
     }
 
     fn make_current_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        let clock = self.heads.as_ref().map(|h| doc.change_graph.clock_at(h));
+        let read = match self.heads.as_ref() {
+            Some(h) => ReadAt::at(doc.visible(h)),
+            None => ReadAt::current(),
+        };
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
         self.events
             .sort_by(|(obj_a, _), (obj_b, _)| obj_a.cmp(obj_b));
         let mut expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
-        let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
+        let mut patch_builder = PatchBuilder::new(doc, path_map, read.clone(), text_encoding);
         for (obj, event) in self.events.iter() {
             let key = doc.id_to_exid(obj.0);
-            expose.pump_queue(&key, &mut patch_builder, doc, clock.as_ref());
+            expose.pump_queue(&key, &mut patch_builder, doc, &read);
             if expose.should_skip(&key) {
                 continue;
             }
             patch_builder.log_event(doc, key, event);
         }
-        expose.flush_queue(&mut patch_builder, doc, clock.as_ref());
+        expose.flush_queue(&mut patch_builder, doc, &read);
         patch_builder.take_patches()
     }
 
@@ -650,13 +654,13 @@ impl ExposeQueue {
         obj: &ExId,
         patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) {
         while let Some(exposed) = self.0.first() {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), patch_builder, doc, clock);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read);
         }
     }
 
@@ -664,10 +668,10 @@ impl ExposeQueue {
         &mut self,
         patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), patch_builder, doc, clock);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read);
         }
     }
 
@@ -684,13 +688,13 @@ impl ExposeQueue {
         exid: ExId,
         patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
-                for span in doc.ops().spans(&id, clock.cloned()) {
+                for span in doc.ops().spans(&id, read.borrow()) {
                     match span {
                         SpanInternal::Text(text, index, marks) => {
                             patch_builder.splice_text(exid.clone(), index, &text, marks.export());
@@ -709,7 +713,7 @@ impl ExposeQueue {
                 }
             }
             ObjType::List => {
-                for item in doc.list_range_for(&exid, .., clock.cloned()) {
+                for item in doc.list_range_for(&exid, .., read.borrow()) {
                     let value = item.value.to_value();
                     let id = item.id();
                     let conflict = item.conflict;
@@ -721,7 +725,7 @@ impl ExposeQueue {
                 }
             }
             ObjType::Map | ObjType::Table => {
-                for m in doc.map_range_for(&exid, .., clock.cloned()) {
+                for m in doc.map_range_for(&exid, .., read.borrow()) {
                     let value = m.value.to_value();
                     let id = m.id();
                     if value.is_object() {

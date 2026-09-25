@@ -9,12 +9,13 @@ use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
+use crate::clock::{ReadAt, VisibleClock};
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, PropRef, SuccInsert, TxOp};
 use crate::patches::PatchLog;
-use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
+use crate::types::{ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
 use crate::Automerge;
 use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
@@ -27,7 +28,7 @@ pub(crate) struct TransactionInner {
     time: i64,
     message: Option<String>,
     deps: Vec<ChangeHash>,
-    scope: Option<Clock>,
+    scope: Option<VisibleClock>,
     pending: Vec<TxOp>,
     author: Option<Author<'static>>,
 }
@@ -59,7 +60,7 @@ pub(crate) struct TransactionArgs {
     /// The dependencies of the change this transaction will create
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
-    pub(crate) scope: Option<Clock>,
+    pub(crate) scope: Option<VisibleClock>,
     /// The author of the change
     pub(crate) author: Option<Author<'static>>,
 }
@@ -377,7 +378,7 @@ impl TransactionInner {
 
         let query = doc
             .ops()
-            .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
+            .query_insert_at(&obj.id, index, seq_type, &self.read_at())?;
 
         let marks = query.marks;
         let pos = query.pos;
@@ -455,7 +456,7 @@ impl TransactionInner {
 
         let mut query = doc
             .ops()
-            .seek_ops_by_map_key(&obj.id, &prop, self.scope.as_ref());
+            .seek_ops_by_map_key(&obj.id, &prop, &self.read_at());
 
         let Some(resolved_action) = query.resolve_action(action) else {
             return Ok(None);
@@ -505,7 +506,7 @@ impl TransactionInner {
         };
         let mut query = doc
             .ops()
-            .seek_ops_by_index(&obj.id, index, seq_type, self.scope.as_ref());
+            .seek_ops_by_index(&obj.id, index, seq_type, &self.read_at());
         let id = self.next_id();
         let eid = query
             .ops
@@ -695,7 +696,7 @@ impl TransactionInner {
         let inserted_width = if !splice_type.is_empty() {
             let query = doc
                 .ops()
-                .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
+                .query_insert_at(&obj.id, index, seq_type, &self.read_at())?;
 
             index = query.index;
 
@@ -761,7 +762,7 @@ impl TransactionInner {
 
             let query =
                 doc.ops()
-                    .seek_ops_by_index(&obj.id, delete_index, seq_type, self.scope.as_ref());
+                    .seek_ops_by_index(&obj.id, delete_index, seq_type, &self.read_at());
 
             let step = if let Some(op) = query.ops.last() {
                 op.width(seq_type, doc.text_encoding())
@@ -840,7 +841,7 @@ impl TransactionInner {
             // above does.
             let end_pos = doc
                 .ops()
-                .query_insert_at(&obj.id, mark.end, SequenceType::Text, self.scope.clone())?
+                .query_insert_at(&obj.id, mark.end, SequenceType::Text, &self.read_at())?
                 .pos;
             if end_pos > begin.pos {
                 self.do_insert(
@@ -904,7 +905,7 @@ impl TransactionInner {
 
         let query =
             doc.ops()
-                .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?;
+                .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at())?;
 
         let pos = query.pos;
         let index = query.index;
@@ -948,7 +949,7 @@ impl TransactionInner {
 
         let target = doc
             .ops()
-            .seek_ops_by_index(&text_obj.id, index, SequenceType::Text, self.scope.as_ref())
+            .seek_ops_by_index(&text_obj.id, index, SequenceType::Text, &self.read_at())
             .ops
             .into_iter()
             .next_back()
@@ -960,12 +961,7 @@ impl TransactionInner {
         // FIXME - no clock?
         let found = doc
             .ops()
-            .seek_list_opid(
-                &text_obj.id,
-                block_id,
-                SequenceType::Text,
-                self.scope.as_ref(),
-            )
+            .seek_list_opid(&text_obj.id, block_id, SequenceType::Text, &self.read_at())
             .unwrap();
 
         let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
@@ -1104,7 +1100,7 @@ impl TransactionInner {
         let obj = self.exid_to_obj(doc, map)?;
         let current_vals = doc
             .ops()
-            .map_range(&obj.id, .., self.scope.clone())
+            .map_range(&obj.id, .., self.read_at())
             .map(|m| (m.key.to_string(), m.value.to_value(), m.id()))
             .collect::<Vec<_>>();
 
@@ -1379,8 +1375,17 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn get_scope(&self) -> &Option<Clock> {
+    pub(crate) fn get_scope(&self) -> &Option<VisibleClock> {
         &self.scope
+    }
+
+    /// The read position of this transaction: its isolation scope if any,
+    /// otherwise the current document.
+    pub(crate) fn read_at(&self) -> ReadAt<'_> {
+        match &self.scope {
+            Some(scope) => ReadAt::At(std::borrow::Cow::Borrowed(scope)),
+            None => ReadAt::current(),
+        }
     }
 
     pub(crate) fn get_deps(&self) -> Vec<ChangeHash> {
