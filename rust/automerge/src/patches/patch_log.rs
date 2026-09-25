@@ -545,7 +545,7 @@ impl PatchLog {
         let view = self.view.clone();
         let read = match view.as_ref() {
             Some(v) => doc.read_visible(v),
-            None => ReadAt::current(),
+            None => doc.read_current(),
         };
         let path_map = self.get_path_map();
         let text_encoding = doc.text_encoding();
@@ -844,7 +844,7 @@ mod tests {
     fn actor_migration_keeps_view_events_and_expose_aligned() {
         let mut log = PatchLog::active();
         log.actors = actors(&[2]);
-        log.view = Some(VisibleClock::new(Clock::from_counters([Some(7)])));
+        log.view = Some(VisibleClock::new(Clock::from_counters([Some(7)]), None));
         let id = OpId::new(7, 0);
         log.increment_seq(ObjId(id), 0, 1, id);
         log.expose.insert(id);
@@ -887,7 +887,7 @@ mod tests {
     #[test]
     fn actor_migration_grows_a_view_bound_to_an_empty_document() {
         let mut log = PatchLog::active();
-        log.view = Some(VisibleClock::new(Clock::from_counters([])));
+        log.view = Some(VisibleClock::new(Clock::from_counters([]), None));
         let table = actors(&[1, 2]);
 
         log.migrate_actors(&table).unwrap();
@@ -906,7 +906,10 @@ mod tests {
     fn actor_migration_mismatch_leaves_the_log_unchanged() {
         let mut log = PatchLog::active();
         log.actors = actors(&[2, 4]);
-        log.view = Some(VisibleClock::new(Clock::from_counters([Some(5), Some(7)])));
+        log.view = Some(VisibleClock::new(
+            Clock::from_counters([Some(5), Some(7)]),
+            None,
+        ));
         let id = OpId::new(7, 1);
         log.increment_seq(ObjId(id), 0, 1, id);
         log.expose.insert(id);
