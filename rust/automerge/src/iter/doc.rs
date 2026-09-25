@@ -63,7 +63,8 @@ pub(crate) struct DocIterInternal<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct DiffIter<'a> {
-    next_objs: BTreeMap<ObjId, IterType>,
+    doc: &'a Automerge,
+    next_objs: BTreeMap<ObjId, (IterType, Option<ClockRange<'a>>)>,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     obj_id_iter: ObjIdIter<'a>,
     map_iter: MapDiff<'a>,
@@ -72,6 +73,14 @@ pub(crate) struct DiffIter<'a> {
     iter_type: IterType,
     recursive: bool,
     obj: ObjId,
+    /// The range the current object is being walked under.
+    ///
+    /// Initially, it is initialized to the be the same as the
+    /// `Self::root_clock`. It may then become narrowed descendant of
+    /// `root_clock` (see [`ClockRange::descend`]).
+    clock: ClockRange<'a>,
+    /// The range the iteration started with.
+    root_clock: ClockRange<'a>,
 }
 
 impl<'a> DiffIter<'a> {
@@ -103,10 +112,11 @@ impl<'a> DiffIter<'a> {
         let scope = obj_id_iter.seek_to_value(obj);
         let map_iter = MapDiff::new(op_set, scope.clone(), clock.clone());
         let list_iter = ListDiff::new(op_set, scope.clone(), clock.clone());
-        let span_iter = SpansDiff::new(op_set, scope, clock, doc.text_encoding());
+        let span_iter = SpansDiff::new(op_set, scope, clock.clone(), doc.text_encoding());
         let path_map = BTreeMap::new();
         let next_objs = BTreeMap::new();
         DiffIter {
+            doc,
             map_iter,
             list_iter,
             span_iter,
@@ -116,6 +126,8 @@ impl<'a> DiffIter<'a> {
             next_objs,
             path_map,
             recursive,
+            root_clock: clock.clone(),
+            clock,
         }
     }
 
@@ -123,7 +135,15 @@ impl<'a> DiffIter<'a> {
         if let Some((next_obj, next_typ)) = item.make_obj() {
             let prop = item.prop();
             if self.recursive {
-                self.next_objs.insert(next_obj, next_typ);
+                // Narrow relative to the range this object is walked under
+                // so nested narrowing composes. A child that inherits an
+                // already-narrowed range must pin it explicitly: `None`
+                // means "walk under the original range" once dequeued.
+                let narrowed = self
+                    .clock
+                    .descend(&next_obj.0)
+                    .or_else(|| (self.clock != self.root_clock).then(|| self.clock.clone()));
+                self.next_objs.insert(next_obj, (next_typ, narrowed));
             }
             self.path_map.insert(next_obj, (prop, self.obj));
         }
@@ -141,12 +161,45 @@ impl<'a> DiffIter<'a> {
         }
     }
 
+    /// Rebuild the sub-iterators over `range` under `clock`, which becomes
+    /// the range future children are narrowed from.
+    fn rebuild(&mut self, range: Range<usize>, clock: ClockRange<'a>) {
+        let op_set = self.doc.ops();
+        self.map_iter = MapDiff::new(op_set, range.clone(), clock.clone());
+        self.list_iter = ListDiff::new(op_set, range.clone(), clock.clone());
+        self.span_iter = SpansDiff::new(op_set, range, clock.clone(), self.doc.text_encoding());
+        self.clock = clock;
+    }
+
+    /// The first item from a freshly rebuilt sub-iterator of `next_type`.
+    fn first(&mut self, next_type: IterType) -> Option<DocDiffItem<'a>> {
+        match next_type {
+            IterType::Map => Some(DocDiffItem::Map(self.map_iter.next()?)),
+            IterType::List => Some(DocDiffItem::List(self.list_iter.next()?)),
+            IterType::Text => Some(DocDiffItem::Text(self.span_iter.next()?)),
+        }
+    }
+
     fn next_object(&mut self) -> Option<Option<DocObjDiffItem<'a>>> {
-        let (next, next_type) = self.next_objs.pop_first()?;
+        let (next, (next_type, narrowed)) = self.next_objs.pop_first()?;
         let next_range = self.obj_id_iter.seek_to_value(next);
         if next_range.is_empty() {
-            Some(None)
-        } else if let Some(item) = self.shift(next_type, next_range) {
+            return Some(None);
+        }
+        let item = match narrowed {
+            Some(clock) => {
+                self.rebuild(next_range, clock);
+                self.first(next_type)
+            }
+            None if self.clock != self.root_clock => {
+                // We were inside a narrowed subtree, so restore the original range.
+                let clock = self.root_clock.clone();
+                self.rebuild(next_range, clock);
+                self.first(next_type)
+            }
+            None => self.shift(next_type, next_range),
+        };
+        if let Some(item) = item {
             self.obj = next;
             self.iter_type = next_type;
             Some(self.process_item(item))
