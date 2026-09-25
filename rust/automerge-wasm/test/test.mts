@@ -2728,5 +2728,87 @@ describe("Automerge", () => {
       assert.equal(doc.getAuthorForActor(actor2),"ffff");
       assert.deepEqual(doc.getActorsForAuthor("ffff"),[actor2]);
     });
+
+    it("authors can be masked", () => {
+      const doc = create();
+      doc.setAuthor("ffff");
+      doc.put("/", "key1", "val1");
+
+      doc.setAuthor("aaaa");
+      doc.put("/", "key2", "val2");
+      let heads1 = doc.getHeads();
+      doc.put("/", "key3", "val3");
+
+      doc.updateDiffCursor();
+      assert.equal(doc.isAuthorMasked("aaaa"), false);
+      assert.equal(doc.maskAuthor("aaaa", heads1), undefined);
+      assert.equal(doc.isAuthorMasked("aaaa"), true);
+      let patches1 = doc.diffIncremental();
+      assert.deepEqual(patches1, [{action:'del',path:['key3']}]);
+      assert.deepEqual(doc.diffIncremental(), []);
+
+      assert.equal(doc.revealAuthor("aaaa"), undefined);
+      assert.equal(doc.isAuthorMasked("aaaa"), false);
+      let patches2 = doc.diffIncremental();
+      assert.deepEqual(patches2, [{action:'put',path:['key3'],value:'val3'}])
+
+      let heads2 = doc.getHeads();
+      doc.setAuthor("bbbb");
+      doc.put("/", "key2", "val2a");
+      doc.put("/", "key3", "val3a");
+
+      doc.updateDiffCursor();
+      doc.maskAuthor("aaaa", heads1);
+      let patches3 = doc.diffIncremental();
+      assert.deepEqual(patches3, []);
+
+      doc.revealAuthor("aaaa");
+      let patches4 = doc.diffIncremental();
+      assert.deepEqual(patches4, [])
+
+      doc.maskAuthor("bbbb", heads2);
+      let patches5 = doc.diffIncremental();
+      assert.deepEqual(patches5, [{action:'put',path:['key2'],value:'val2'},
+                                  {action:'put',path:['key3'],value:'val3'}]);
+
+      doc.revealAuthor("bbbb");
+      let patches6 = doc.diffIncremental();
+      assert.deepEqual(patches6, [{action:'put',path:['key2'],value:'val2a'},
+                                  {action:'put',path:['key3'],value:'val3a'}]);
+    })
+
+    it("masked values are reflected in materialize", () => {
+      let d1 = {
+        counter: 11, key1: 'val1', list: [ 1, 2, 3, 4 ], text: 'hello world'
+      }
+      let d2 = {
+        counter: 13, key1: 'val2', list: [ 1, 2, 3, 'cat', 4 ], text: 'hello big world'
+      }
+
+      const doc = create();
+      doc.setAuthor("ffff");
+      doc.put("/", "key1", "val1");
+      doc.put("/", "counter", 10, "counter");
+      doc.increment("/", "counter", 1);
+      let list = doc.putObject("/", "list", [1,2,3,4]);
+      let text = doc.putObject("/", "text", "hello world");
+      let heads1 = doc.getHeads();
+
+      assert.deepEqual(doc.materialize(), d1);
+
+      doc.setAuthor("aaaa");
+      doc.put("/", "key1", "val2");
+      doc.increment("/", "counter", 2);
+      doc.insert(list, 3, "cat");
+      doc.splice(text, 6, 0, "big ");
+
+      assert.deepEqual(doc.materialize(), d2);
+
+      doc.maskAuthor("aaaa", heads1);
+      assert.deepEqual(doc.materialize(), d1);
+
+      doc.revealAuthor("aaaa");
+      assert.deepEqual(doc.materialize(), d2);
+    })
   });
 });
