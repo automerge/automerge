@@ -110,6 +110,16 @@ impl VisibleClock {
     pub(crate) fn len(&self) -> usize {
         self.0 .0.len()
     }
+
+    /// Create new, empty [`Clock`] which is the same size as this clock.
+    fn empty_like(&self) -> Clock {
+        Clock(vec![0; self.0 .0.len()])
+    }
+
+    /// Returns `true` if some operation is potentially covered, i.e. all values are `> 0`.
+    fn covers_something(&self) -> bool {
+        self.0 .0.iter().any(|c| *c > 0)
+    }
 }
 
 /// The snapshot of a clock for a given document, either current or historical.
@@ -191,6 +201,35 @@ impl<'a> ClockRange<'a> {
         match self {
             Self::Diff(before, _) => before.covers(id),
             _ => false,
+        }
+    }
+
+    /// The range for children of the object created by `parent`. `None`
+    /// when the children can keep the parent's range.
+    ///
+    /// When diffing, an object whose creation op is absent from `before`
+    /// did not exist before, so its children must all emit as inserts:
+    /// they are walked with an empty `before`.
+    ///
+    /// This prepares for when a write-frontier can hide a parent, without
+    /// hiding its children.
+    ///
+    /// `after` never needs narrowing: [`DiffIter::process_item`]'s `make_obj`
+    /// only queues objects that are visible in `after`, so a parent absent
+    /// from `after` is never descended into.
+    ///
+    /// [`DiffIter::process_item`]: crate::iter::DiffIter
+    pub(crate) fn descend(&self, parent: &OpId) -> Option<ClockRange<'a>> {
+        match self {
+            // An already-empty `before` cannot be narrowed further, so keep
+            // the cheap shifting path for diffs from the empty document.
+            Self::Diff(before, after) if before.covers_something() && !before.covers(parent) => {
+                Some(Self::Diff(
+                    VisibleClock::new(before.empty_like()),
+                    after.clone(),
+                ))
+            }
+            _ => None,
         }
     }
 }
@@ -326,6 +365,28 @@ mod tests {
 
         assert_eq!(after_clock.partial_cmp(&new_actor_clock), None);
         assert_eq!(new_actor_clock.partial_cmp(&after_clock), None);
+    }
+
+    #[test]
+    fn descend_narrows_before_only_when_nonempty_before_lacks_parent() {
+        let before = VisibleClock::new(Clock(vec![2, 5]));
+        let after = VisibleClock::new(Clock(vec![9, 9]));
+        let range = ClockRange::Diff(before.clone(), after.clone());
+        // parent covered by before: identity
+        assert!(range.descend(&OpId::new(2, 0)).is_none());
+        // parent not covered by before: the children's before empties out
+        // (everything emits as an insert) while after stays untouched
+        let narrowed = range.descend(&OpId::new(3, 0)).unwrap();
+        assert!(!narrowed.predates(&OpId::new(1, 1)));
+        assert!(narrowed.visible_after(&OpId::new(9, 1)));
+        assert!(!narrowed.visible_after(&OpId::new(10, 1)));
+        // an already-empty before cannot be narrowed further
+        let empty = ClockRange::Diff(VisibleClock::new(Clock(vec![0, 0])), after);
+        assert!(empty.descend(&OpId::new(3, 0)).is_none());
+        // Current never narrows. A parent absent from `after` needs no case
+        // of its own: DiffIter::process_item's make_obj never descends into
+        // it (its diff item is a delete), so descend never sees one.
+        assert!(ClockRange::default().descend(&OpId::new(3, 0)).is_none());
     }
 
     #[test]
