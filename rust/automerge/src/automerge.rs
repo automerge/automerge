@@ -28,11 +28,14 @@ use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
     TransactionArgs,
 };
+use crate::write_frontier::WriteFrontier;
 
-use crate::clock::{Clock, ClockRange, ReadAt, VisibleClock};
+use crate::clock::{self, Clock, ClockRange, Mask, ReadAt, VisibleClock};
 use crate::hydrate;
+use crate::op_set2::ActorIdx;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
+use std::borrow::Cow;
 
 pub(crate) mod current_state;
 
@@ -94,6 +97,7 @@ pub struct LoadOptions<'a> {
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
     author: Option<Author<'static>>,
+    write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -168,6 +172,16 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    /// The write-frontier to apply to the loaded document.
+    ///
+    /// See [`Automerge::set_write_frontier`].
+    pub fn write_frontier(self, write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>) -> Self {
+        Self {
+            write_frontier,
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -179,6 +193,7 @@ impl std::default::Default for LoadOptions<'static> {
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
             author: None,
+            write_frontier: HashMap::new(),
         }
     }
 }
@@ -221,6 +236,26 @@ impl std::default::Default for LoadOptions<'static> {
 /// Author IDs are set on document construction. If you don't set an author then changes produced
 /// by the document will have no author ([`Change::author`] will return `None`).
 ///
+/// ## Masking and Revealing Author Changes
+///
+/// Use [`Automerge::mask_author`] to restrict an author's contribution to
+/// the materialized view of a document. The supplied heads define that
+/// author's write-frontier: their changes within the causal history of
+/// those heads, including the heads themselves, remain eligible to
+/// contribute to the view. Their other changes are hidden.
+///
+/// If any of the write-frontier's heads have not yet been received, all
+/// of the author's changes are hidden until the complete frontier can
+/// be resolved. This can happen when the write-frontier is received
+/// separately from the changes it references.
+///
+/// Use [`Automerge::reveal_author`] to remove the author's write-frontier
+/// restriction. Their changes are then subject to the document's usual
+/// visibility rules.
+///
+/// Masking affects the materialized view, not the stored history:
+/// hidden changes remain in the change graph.
+///
 /// ### Example
 ///
 /// ```rust
@@ -251,6 +286,11 @@ pub struct Automerge {
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
     authors: Authors,
+    /// Authors whose changes are hidden past a heads boundary.
+    write_frontier: WriteFrontier,
+    /// Visibility mask derived from `write_frontier`; `None` when no author is
+    /// masked. Only [`Automerge::republish_mask`] may change it.
+    mask: Option<Mask>,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
@@ -301,6 +341,8 @@ impl Automerge {
             queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(&ops.actors),
             authors: Authors::new(&ops.actors),
+            write_frontier: WriteFrontier::new(),
+            mask: None,
             ops,
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
@@ -310,18 +352,34 @@ impl Automerge {
 
     // TODO(finto): document that there are various invariants on the
     // relationships between OpSet, ChangeGraph, and Authors.
-    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph, authors: Authors) -> Self {
+    pub(crate) fn from_parts(
+        ops: OpSet,
+        change_graph: ChangeGraph,
+        authors: Authors,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) -> Self {
         let deps = change_graph.heads().collect();
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
             change_graph,
             authors,
+            write_frontier: WriteFrontier::new(),
+            mask: None,
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
         };
+        for (author, from) in write_frontier {
+            doc.apply_write_frontier(author, &from);
+        }
+        doc.rebuild_mask();
         doc.remove_unused_actors(false);
+        // Load applies the mask once at the end, never during.
+        if doc.mask.is_some() {
+            let visible = doc.visible_current();
+            doc.ops.recompute_indexes(visible.clock());
+        }
         doc
     }
 
@@ -369,6 +427,48 @@ impl Automerge {
         self
     }
 
+    /// Set the write-frontier for this document.
+    pub fn with_write_frontier(
+        mut self,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) -> Self {
+        self.set_write_frontier(write_frontier);
+        self
+    }
+
+    /// For each [`Author`] key in the map, mask all changes for that author
+    /// after their corresponding heads value.
+    ///
+    /// This clears all previous write-frontier state and publishes the resulting
+    /// visibility exactly once, even when `write_frontier` is empty.
+    pub fn set_write_frontier(
+        &mut self,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) {
+        self.set_write_frontier_log_patches(write_frontier, &mut PatchLog::inactive())
+            .expect("a fresh patch log belongs to any document");
+    }
+
+    /// Like [`Automerge::set_write_frontier`], but records the visibility
+    /// transition from the old policy to the new one in `log`.
+    ///
+    /// Returns [`PatchLogMismatch`] if the log's actors are incompatible with
+    /// this document, without changing write-frontier.
+    ///
+    /// [`PatchLogMismatch`]: crate::PatchLogMismatch
+    pub fn set_write_frontier_log_patches(
+        &mut self,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+        log: &mut PatchLog,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.republish_mask(log, |doc| {
+            doc.write_frontier.clear();
+            for (author, from) in write_frontier {
+                doc.apply_write_frontier(author, &from);
+            }
+        })
+    }
+
     /// Set the actor id for this document.
     pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
         self.set_author(author);
@@ -395,6 +495,147 @@ impl Automerge {
     /// Get the current author of this document.
     pub fn get_author(&self) -> Option<&Author<'static>> {
         self.author.as_ref()
+    }
+
+    /// Mask all changes made by `author` after the `from` heads.
+    ///
+    /// Heads not yet present in the document are recorded as pending, and until
+    /// they are witnessed the author is hidden entirely.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PatchLogMismatch`] if the log's actors are incompatible with
+    /// this document, without changing the write frontier.
+    ///
+    /// [`PatchLogMismatch`]: crate::PatchLogMismatch
+    pub fn mask_author(
+        &mut self,
+        author: Author<'static>,
+        from: &[ChangeHash],
+        log: &mut PatchLog,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.republish_mask(log, |doc| doc.apply_write_frontier(author, from))
+    }
+
+    /// Record a write-frontier of `author` at `from` without touching the mask
+    /// or the indexes.
+    ///
+    /// Callers must go through [`Automerge::republish_mask`] (or, on load,
+    /// rebuild once at the end).
+    fn apply_write_frontier(&mut self, author: Author<'static>, from: &[ChangeHash]) {
+        let seq_clock = self.boundary_seq_clock(from);
+        self.write_frontier
+            .extend_pending_changes(self.change_graph.missing_hashes(from));
+        self.write_frontier
+            .mask(author, from.to_vec(), &seq_clock, &self.authors);
+    }
+
+    /// Return the [`SeqClock`] for the given write-frontier.
+    ///
+    /// A frontier only resolves if every [`ChangeHash`] is present in the
+    /// change graph. If any of them are not present, then an empty clock is
+    /// returned.
+    /// This is required because a partial clock could make the author's pending
+    /// changes visible, that may still be part of the pending portion of the
+    /// write-frontier.
+    ///
+    /// Otherwise, the clock calculated for the given heads is returned.
+    ///
+    /// [`SeqClock`]: clock::SeqClock
+    pub(crate) fn boundary_seq_clock(&self, heads: &[ChangeHash]) -> clock::SeqClock {
+        if self.change_graph.missing_hashes(heads).next().is_some() {
+            clock::SeqClock::new(self.actors())
+        } else {
+            self.change_graph.seq_clock_for_heads(heads)
+        }
+    }
+
+    /// Reveal the `author`, restoring their changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PatchLogMismatch`] if the log's actors are incompatible with
+    /// this document, without changing the write-frontier.
+    ///
+    /// [`PatchLogMismatch`]: crate::PatchLogMismatch
+    pub fn reveal_author(
+        &mut self,
+        author: &Author<'static>,
+        log: &mut PatchLog,
+    ) -> Result<(), crate::PatchLogMismatch> {
+        self.republish_mask(log, |doc| {
+            doc.write_frontier.reveal(author, &doc.authors);
+        })
+    }
+
+    /// Re-calculate the mask for this document.
+    ///
+    /// It must be the only place where the mask is modified, and callers must
+    /// call it when the write-frontier information is updated.
+    ///
+    /// This ensures that the log is set to the current visibility, and captures
+    /// the mask before the update to the document.
+    /// After the update, the mask is rebuilt, the op-set indexes are rebuilt,
+    /// and the log is transitioned to the new visibility.
+    ///
+    /// If the after mask is the same as the before, then the indexes are not
+    /// recomputed, and the log does not need to transition its visibility.
+    pub(crate) fn republish_mask(
+        &mut self,
+        log: &mut PatchLog,
+        update: impl FnOnce(&mut Self),
+    ) -> Result<(), crate::PatchLogMismatch> {
+        log.transition_to(self, |d| d.visible_current())?;
+        let before = self.mask.clone();
+        update(self);
+        self.rebuild_mask();
+        // An update that leaves the mask as it was (e.g. setting an empty
+        // policy on a document that had none) changes no visibility: the
+        // indexes are already correct and the first transition already
+        // bound the log, so the expensive reindex can be skipped.
+        if self.mask == before {
+            return Ok(());
+        }
+        let after = self.visible_current();
+        self.ops.recompute_indexes(after.clock());
+        log.transition_to(self, |_| after)
+    }
+
+    /// Derive the visibility [`Mask`] from the stored write-frontier.
+    fn rebuild_mask(&mut self) {
+        if self.write_frontier.is_empty() {
+            self.mask = None;
+            return;
+        }
+        let clock = Clock::from_actor_fn(self.actors(), |actor| {
+            match self.write_frontier.get_mask_for(&ActorIdx::from(actor)) {
+                // Bounded: everything up to the boundary seq stays visible.
+                Some(Some(seq)) => self.change_graph.max_op_for_seq(actor, *seq).unwrap_or(0),
+                // Fully masked (e.g. pending boundary): nothing visible.
+                Some(None) => 0,
+                // Not masked: unrestricted.
+                None => u32::MAX,
+            }
+        });
+        self.mask = Some(Mask::new(clock));
+    }
+
+    /// The active visibility mask, if any author is masked.
+    pub(crate) fn mask(&self) -> Option<&Mask> {
+        self.mask.as_ref()
+    }
+
+    /// Return the write-frontier, per [`Author`].
+    pub fn get_write_frontier(&self) -> HashMap<Author<'static>, Vec<ChangeHash>> {
+        self.write_frontier.get_write_frontier().clone()
+    }
+
+    /// Whether `author` is currently masked, e.g. so an application can
+    /// disable editing for a masked local author.
+    pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
+        self.write_frontier
+            .get_write_frontier()
+            .contains_key(author)
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
@@ -428,6 +669,10 @@ impl Automerge {
         self.actor.remove_actor(&removal, removed);
         self.change_graph.remove_actor(&removal);
         self.authors.remove_actor(&removal);
+        self.write_frontier.remove_actor(&removal);
+        if let Some(mask) = self.mask.as_mut() {
+            mask.remove_actor(&removal);
+        }
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -706,7 +951,12 @@ impl Automerge {
 
     /// Fork this document at the given heads
     ///
-    /// This will create a new actor ID for the forked document
+    /// This will create a new actor ID for the forked document.
+    ///
+    /// Like [`Automerge::fork`], the process-local write-frontier policy is
+    /// carried into the fork: a masked author stays hidden in the forked
+    /// document. A boundary that is not reachable from `heads` is simply
+    /// pending in the fork.
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         let mut seen = HashSet::new();
         let mut heads = heads
@@ -730,6 +980,7 @@ impl Automerge {
         f.set_actor(ActorId::random());
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
+        f.set_write_frontier(self.get_write_frontier());
         Ok(f)
     }
 
@@ -909,7 +1160,12 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
+            let mut doc =
+                Self::new_with_encoding(options.text_encoding).with_author(options.author);
+            if !options.write_frontier.is_empty() {
+                doc.set_write_frontier(options.write_frontier);
+            }
+            return Ok(doc);
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -920,11 +1176,19 @@ impl Automerge {
 
         let mut changes = vec![];
         let mut first_chunk_was_doc = false;
+        // If `first_chunk` is `storage::Chunk::Document`, then these
+        // write-frontier is consumed. For every other variant, the
+        // write-frontier is applied after the match.
+        let mut write_frontier = Some(options.write_frontier);
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                match d.reconstruct(options.verification_mode, options.text_encoding) {
+                match d.reconstruct(
+                    options.verification_mode,
+                    options.text_encoding,
+                    write_frontier.take().unwrap_or_default(),
+                ) {
                     Ok(doc) => doc,
                     Err(ReconstructError::InvalidMarkOrderDoc {
                         doc,
@@ -990,6 +1254,14 @@ impl Automerge {
         if let StringMigration::ConvertToText = options.string_migration {
             am.convert_scalar_strings_to_text()?;
         }
+        // For non-document chunks the write-frontier was not threaded through
+        // `reconstruct`; apply them now, before any current-state patches are
+        // logged, so the logged state is masked.
+        if let Some(write_frontier) = write_frontier.take() {
+            if !write_frontier.is_empty() {
+                am.set_write_frontier(write_frontier);
+            }
+        }
         if let Some(patch_log) = options.patch_log {
             if patch_log.is_active() {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
@@ -1042,7 +1314,11 @@ impl Automerge {
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check),
             )?;
+            // Ensure that the author, actor, and write-frontier state are carried
+            // over for an empty document.
+            doc.set_author(self.get_author().cloned());
             doc = doc.with_actor(self.actor_id().clone());
+            doc.set_write_frontier(self.get_write_frontier());
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
@@ -1074,7 +1350,7 @@ impl Automerge {
         recursive: bool,
     ) {
         patch_log.set_view(self, self.visible_current());
-        let clock = ClockRange::default();
+        let clock = ClockRange::current(self.read_current());
         let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
         patch_log.path_hint(path_map);
     }
@@ -1235,10 +1511,9 @@ impl Automerge {
         ClockRange::Diff(self.visible(before), self.visible(after))
     }
 
-    /// The clock a read at `heads` observes: the causal clock at those
-    /// heads.
+    /// The clock a read at `heads` observes: causal(heads) ∩ mask.
     pub(crate) fn visible(&self, heads: &[ChangeHash]) -> VisibleClock {
-        VisibleClock::new(self.change_graph.clock_at(heads))
+        VisibleClock::new(self.change_graph.clock_at(heads), self.mask())
     }
 
     /// The visible clock at the current heads.
@@ -1255,16 +1530,26 @@ impl Automerge {
     pub(crate) fn read_at(&self, heads: Option<&[ChangeHash]>) -> ReadAt<'_> {
         match heads {
             Some(h) if !self.change_graph.heads_are_current(h) => ReadAt::at(self.visible(h)),
-            _ => ReadAt::current(),
+            _ => self.read_current(),
+        }
+    }
+
+    /// Return a [`ReadAt`] for the current state of the document, carrying
+    /// the active write-frontier [`Mask`], if any.
+    ///
+    /// Equivalent to `doc.read_at(None)`.
+    pub(crate) fn read_current(&self) -> ReadAt<'_> {
+        ReadAt::Current {
+            mask: self.mask().map(Cow::Borrowed),
         }
     }
 
     /// Read at a stored view: `Current` when it equals today's visible clock.
     pub(crate) fn read_visible<'a>(&'a self, v: &'a VisibleClock) -> ReadAt<'a> {
         if *v == self.visible_current() {
-            ReadAt::current()
+            self.read_current()
         } else {
-            ReadAt::At(std::borrow::Cow::Borrowed(v))
+            ReadAt::At(Cow::Borrowed(v))
         }
     }
 
@@ -1280,17 +1565,30 @@ impl Automerge {
 
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = VisibleClock::new(self.change_graph.clock_at(heads));
+        let mut clock = self.visible(heads);
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
+            let masked = self
+                .mask
+                .as_ref()
+                .is_some_and(|m| m.hides(&OpId::new(max_op + 1, actor_index)))
+                || (max_op == 0
+                    && self.author.as_ref().is_some_and(|a| {
+                        self.write_frontier
+                            .get_write_frontier_for_author(a)
+                            .is_some()
+                    }));
+            if masked {
+                break;
+            }
             if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
                 clock.isolate(actor_index);
                 break;
             }
             actor_index = self.get_isolated_actor_index(i);
             // need to recompute the clock b/c the actor indexes may have changed
-            clock = VisibleClock::new(self.change_graph.clock_at(heads));
+            clock = self.visible(heads);
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
@@ -1332,6 +1630,10 @@ impl Automerge {
                 self.change_graph.insert_actor(&shift);
                 self.actor.shift(&shift);
                 self.authors.insert_actor(&shift);
+                self.write_frontier.insert_actor(&shift);
+                if let Some(mask) = self.mask.as_mut() {
+                    mask.insert_actor(&shift);
+                }
                 shift.index()
             }
         }
@@ -1653,8 +1955,15 @@ impl Automerge {
         obj: &crate::ObjId,
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
+        self.hydrate_obj_for(obj, self.read_at(heads))
+    }
+
+    pub(crate) fn hydrate_obj_for(
+        &self,
+        obj: &crate::ObjId,
+        read: ReadAt<'_>,
+    ) -> Result<hydrate::Value, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let read = self.read_at(heads);
         Ok(match obj.typ {
             ObjType::Map | ObjType::Table => self.hydrate_map(&obj.id, &read),
             ObjType::List => self.hydrate_list(&obj.id, &read),
@@ -1994,7 +2303,7 @@ impl Automerge {
                                         &obj.id,
                                         op.id,
                                         SequenceType::List,
-                                        &ReadAt::current(),
+                                        &self.read_current(),
                                     ) else {
                                         continue;
                                     };
@@ -2074,7 +2383,7 @@ impl Automerge {
 
 impl ReadDoc for Automerge {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        self.parents_for(obj.as_ref(), ReadAt::current())
+        self.parents_for(obj.as_ref(), self.read_current())
     }
 
     fn parents_at<O: AsRef<ExId>>(
@@ -2086,7 +2395,7 @@ impl ReadDoc for Automerge {
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.keys_for(obj.as_ref(), ReadAt::current())
+        self.keys_for(obj.as_ref(), self.read_current())
     }
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
@@ -2103,7 +2412,7 @@ impl ReadDoc for Automerge {
         obj: O,
         range: R,
     ) -> MapRange<'a> {
-        self.map_range_for(obj.as_ref(), range, ReadAt::current())
+        self.map_range_for(obj.as_ref(), range, self.read_current())
     }
 
     fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
@@ -2116,7 +2425,7 @@ impl ReadDoc for Automerge {
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
-        self.list_range_for(obj.as_ref(), range, ReadAt::current())
+        self.list_range_for(obj.as_ref(), range, self.read_current())
     }
 
     fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
@@ -2129,7 +2438,7 @@ impl ReadDoc for Automerge {
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.values_for(obj.as_ref(), ReadAt::current())
+        self.values_for(obj.as_ref(), self.read_current())
     }
 
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
@@ -2137,7 +2446,7 @@ impl ReadDoc for Automerge {
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.length_for(obj.as_ref(), ReadAt::current())
+        self.length_for(obj.as_ref(), self.read_current())
     }
 
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
@@ -2145,11 +2454,11 @@ impl ReadDoc for Automerge {
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.text_for(obj.as_ref(), ReadAt::current())
+        self.text_for(obj.as_ref(), self.read_current())
     }
 
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
-        self.spans_for(obj.as_ref(), ReadAt::current())
+        self.spans_for(obj.as_ref(), self.read_current())
     }
 
     fn spans_at<O: AsRef<ExId>>(
@@ -2202,7 +2511,7 @@ impl ReadDoc for Automerge {
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
-        self.marks_for(obj.as_ref(), ReadAt::current())
+        self.marks_for(obj.as_ref(), self.read_current())
     }
 
     fn marks_at<O: AsRef<ExId>>(
@@ -2241,7 +2550,7 @@ impl ReadDoc for Automerge {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.get_for(obj.as_ref(), prop.into(), ReadAt::current())
+        self.get_for(obj.as_ref(), prop.into(), self.read_current())
     }
 
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -2258,7 +2567,7 @@ impl ReadDoc for Automerge {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.get_all_for(obj.as_ref(), prop.into(), ReadAt::current())
+        self.get_all_for(obj.as_ref(), prop.into(), self.read_current())
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(

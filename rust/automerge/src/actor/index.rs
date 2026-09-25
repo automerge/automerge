@@ -69,7 +69,7 @@ impl<T> ActorIndexed<T> {
     }
 
     /// One slot per actor in `actors`, filled by `f(actor_index)`.
-    fn build_from(actors: &ActorTable, f: impl FnMut(usize) -> T) -> Self {
+    pub(crate) fn build_from(actors: &ActorTable, f: impl FnMut(usize) -> T) -> Self {
         Self {
             slots: (0..actors.len()).map(f).collect(),
         }
@@ -123,6 +123,21 @@ impl<T> ActorIndexed<T> {
     #[inline]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self.slots
+    }
+
+    /// Zip two [`ActorIndexed`] collections together.
+    ///
+    /// The `T` in the tuple is mutable, while the `U` is borrowed by reference.
+    ///
+    /// # Panics
+    ///
+    /// If the two [`ActorIndexed`] collections are not the same size.
+    pub(crate) fn zip_mut<'a, U>(
+        &mut self,
+        other: &'a ActorIndexed<U>,
+    ) -> impl Iterator<Item = (&mut T, &'a U)> {
+        assert_eq!(self.slots.len(), other.slots.len());
+        self.slots.iter_mut().zip(other.slots.iter())
     }
 }
 

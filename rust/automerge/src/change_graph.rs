@@ -35,6 +35,8 @@ pub(crate) struct ChangeGraph {
     actors: ActorRefs<Vec<ActorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
+    /// A mapping from a [`NodeIdx`] to the maximum op-counter in a given
+    /// commit.
     max_ops: Vec<u32>,
     max_op: u32,
     num_ops: hexane::Column<u64>,
@@ -150,9 +152,33 @@ impl ChangeGraph {
             .map(|h| self.nodes_by_hash.get(h).unwrap().0 as u64)
     }
 
+    /// The subset of `heads` not yet witnessed by this graph.
+    pub(crate) fn missing_hashes<'a, 'b>(
+        &'a self,
+        heads: &'b [ChangeHash],
+    ) -> impl Iterator<Item = ChangeHash> + 'a
+    where
+        'b: 'a,
+    {
+        heads
+            .iter()
+            .filter(|h| !self.nodes_by_hash.contains_key(h))
+            .copied()
+    }
+
+    /// Get the maximum operation of the `actor` and `seq` number.
+    pub(crate) fn max_op_for_seq(&self, actor: usize, seq: NonZeroU32) -> Option<u32> {
+        self.seq_index
+            .get(actor)
+            .and_then(|v| v.get(seq.get() as usize - 1))
+            .and_then(|n| self.max_ops.get(n.0 as usize))
+            .copied()
+    }
+
     /// Make room for an actor just inserted into the document's actor table.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
         self.actors.shift_actors(shift);
+
         for clock in self.clock_cache.values_mut() {
             clock.shift_actor(shift)
         }
@@ -540,46 +566,6 @@ impl ChangeGraph {
         }
     }
 
-    fn add_changes<'a, I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone>(
-        &mut self,
-        iter: I,
-        authors: &mut Authors,
-    ) -> Result<(), MissingDep> {
-        let node = NodeIdx(self.hashes.len() as u32);
-
-        self.add_nodes(iter.clone());
-
-        for (i, (change, actor)) in iter.enumerate() {
-            let node_idx = node + i;
-            let hash = change.hash();
-            self.max_op = std::cmp::max(self.max_op, change.max_op() as u32);
-            self.hashes.push(hash);
-            debug_assert!(!self.nodes_by_hash.contains_key(&hash));
-            self.nodes_by_hash.insert(hash, node_idx);
-            self.update_heads(change);
-
-            if let Some(author) = change.author() {
-                assert!(change.seq() == 1);
-                authors.assign_author(author.into_owned(), actor)
-            }
-
-            assert!(actor < self.seq_index.len());
-            assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
-            self.seq_index.as_mut_slice()[actor].push(node_idx);
-
-            for parent_hash in change.deps().iter() {
-                self.add_parent(node_idx, parent_hash);
-            }
-
-            if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
-                self.cache_clock(node_idx);
-            }
-
-            self.cache_fragment(node_idx);
-        }
-        Ok(())
-    }
-
     pub(crate) fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
         let n = self.nodes_by_hash.get(&head).copied()?;
         if head.fragment_level() == 0 {
@@ -708,11 +694,11 @@ impl ChangeGraph {
         change: &Change,
         actor: usize,
         authors: &mut Authors,
-    ) -> Result<(), MissingDep> {
+    ) -> Result<ChangeHash, MissingDep> {
         let hash = change.hash();
 
         if self.nodes_by_hash.contains_key(&hash) {
-            return Ok(());
+            return Ok(hash);
         }
 
         for h in change.deps().iter() {
@@ -721,7 +707,36 @@ impl ChangeGraph {
             }
         }
 
-        self.add_changes([(change, actor)].into_iter(), authors)
+        let node_idx = NodeIdx(self.hashes.len() as u32);
+
+        self.add_nodes([(change, actor)].into_iter());
+
+        self.max_op = std::cmp::max(self.max_op, change.max_op() as u32);
+        self.hashes.push(hash);
+        debug_assert!(!self.nodes_by_hash.contains_key(&hash));
+        self.nodes_by_hash.insert(hash, node_idx);
+        self.update_heads(change);
+
+        if let Some(author) = change.author() {
+            assert!(change.seq() == 1);
+            authors.assign_author(author.into_owned(), actor)
+        }
+
+        assert!(actor < self.seq_index.len());
+        assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
+        self.seq_index.as_mut_slice()[actor].push(node_idx);
+
+        for parent_hash in change.deps().iter() {
+            self.add_parent(node_idx, parent_hash);
+        }
+
+        if (node_idx + 1).0.is_multiple_of(CACHE_STEP) {
+            self.cache_clock(node_idx);
+        }
+
+        self.cache_fragment(node_idx);
+
+        Ok(hash)
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
@@ -904,7 +919,12 @@ impl ChangeGraphCols {
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
             if let Some(author) = c.author() {
-                authors.assign_author(author.into_owned(), graph.actors[idx].into());
+                // Saved documents written by an honest encoder only carry the
+                // author footer on seq=1. Skip rather than panic on bad data
+                // — any further validation is the apply path's job.
+                if c.seq() == 1 {
+                    authors.assign_author(author.into_owned(), graph.actors[idx].into());
+                }
             }
         }
 
@@ -1087,6 +1107,28 @@ mod tests {
 
         let clock = graph.seq_clock_for_heads(&[change4]);
         assert_eq!(clock, expected_clock);
+    }
+
+    #[test]
+    fn max_op_for_seq_translates_a_seq_to_that_changes_max_op() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+        let change1 = builder.change(&actor1, 10, &[]); // ops 1..=10
+        builder.change(&actor1, 5, &[change1]); // ops 11..=15
+        let graph = builder.build();
+        let a1 = builder.index(&actor1);
+        let a2 = builder.index(&actor2);
+        let seq = |n: u32| std::num::NonZeroU32::new(n).unwrap();
+        // a known seq maps to the max op counter of that change
+        assert_eq!(graph.max_op_for_seq(a1, seq(1)), Some(10));
+        assert_eq!(graph.max_op_for_seq(a1, seq(2)), Some(15));
+        // a seq past the actor's recorded history has no translation
+        assert_eq!(graph.max_op_for_seq(a1, seq(3)), None);
+        // an actor with no changes has none either
+        assert_eq!(graph.max_op_for_seq(a2, seq(1)), None);
+        // as does an actor the graph has never seen
+        assert_eq!(graph.max_op_for_seq(99, seq(1)), None);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::{ObjId, ObjMeta};
+use crate::types::ObjMeta;
 use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -51,7 +51,7 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// [`AutoCommit`] allows you to generate [`Patch`]es representing changes to the current state of
 /// the document which you can use to maintain a materialized view of the current state. There are
-/// several ways to use this. See the documentation on [`Self::diff()`] for more details, but the key
+/// several ways to use this. See the documentation on [`Self::diff_incremental()`] for more details, but the key
 /// point to remember is that [`AutoCommit`] manages an internal "diff cursor" for you. This is a
 /// representation of the heads of the document last time you called [`Self::diff_incremental()`]
 /// but you can also manage it directly using [`Self::update_diff_cursor()`] and
@@ -66,7 +66,6 @@ pub struct AutoCommit {
     transaction: Option<(PatchLog, TransactionInner)>,
     patch_log: PatchLog,
     diff_cursor: Vec<ChangeHash>,
-    diff_cache: Option<(OpRange, ObjId, bool, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
 }
@@ -81,7 +80,6 @@ impl Default for AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
-            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         }
@@ -104,7 +102,6 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
-            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         }
@@ -118,7 +115,6 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
-            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
@@ -131,7 +127,6 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
-            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
@@ -144,7 +139,6 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
-            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
@@ -174,28 +168,25 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
-            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
     }
 
-    /// Erases the diff cursor created by [`Self::update_diff_cursor()`] and no
-    /// longer indexes changes to the document.
+    /// Erases the diff cursor created by [`Self::update_diff_cursor()`] and
+    /// stops recording patches for [`Self::diff_incremental()`].
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
         self.patch_log = PatchLog::inactive();
         self.diff_cursor = Vec::new();
     }
 
-    /// Sets the [`Self::diff_cursor()`] to current heads of the document and will begin
-    /// building an index with every change moving forward.
+    /// Sets the [`Self::diff_cursor()`] to the current view heads, discards any
+    /// accumulated patches, and begins recording subsequent view changes for
+    /// [`Self::diff_incremental()`]. This includes write-frontier visibility
+    /// changes and transitions into or out of isolation.
     ///
-    /// If [`Self::diff()`] is called with [`Self::diff_cursor()`] as `before` and
-    /// [`Self::get_heads`()] as `after` - the index will be used
-    ///
-    /// If the cursor is no longer needed it can be reset with
-    /// [`Self::reset_diff_cursor()`]
+    /// Tracking can be disabled with [`Self::reset_diff_cursor()`].
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
@@ -214,103 +205,55 @@ impl AutoCommit {
         self.doc.make_patches(patch_log)
     }
 
-    /// Generates a diff from `before` to `after`
+    /// Compares the document at historical heads `before` and `after`, using
+    /// the current write-frontier state for both. Equal heads produce no
+    /// patches, even if write-frontier visibility has changed since those heads
+    /// were observed. The heads need not be chronological, and isolation does
+    /// not change the meaning of these explicit heads.
     ///
-    /// By default the diff requires a sequental scan of all the ops in the doc.
+    /// This comparison does not consume or use the accumulated patch log. Use
+    /// [`Self::diff_incremental()`] to update a previously observed view,
+    /// including visibility changes caused by the write-frontier.
     ///
-    /// To do a fast indexed diff `before` must equal [`Self::diff_cursor()`] and
-    /// `after` must equal [`Self::get_heads()`]. The diff cursor is managed with
-    /// [`Self::update_diff_cursor()`] and [`Self::reset_diff_cursor()`]
-    ///
-    /// Managing the diff index has a small but non-zero overhead.  It should be
-    /// disabled if no longer needed.  If a signifigantly large change is applied
-    /// to the document it may be faster to reset the index before applying it,
-    /// doing an unindxed diff afterwards and then reenable the index.
-    ///
-    /// # Arguments
-    ///
-    /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
-    /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
-    ///
-    /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
-    /// Normal use might look like:
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use automerge::{ AutoCommit };
-    ///
-    /// let mut doc = AutoCommit::new(); // or AutoCommit::load(data)
-    /// // make some changes - use and update the index
-    /// let heads = doc.get_heads();
-    /// let diff_cursor = doc.diff_cursor();
-    /// let patches = doc.diff(&diff_cursor, &heads);
-    /// doc.update_diff_cursor();
-    /// ```
-    ///
-    /// See [`Self::diff_incremental()`] for encapsulating this pattern.
+    /// Diffs generally require a sequential scan of the document's operations.
     pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
-        self.diff_inner(&ExId::Root, ObjMeta::root(), before, after, true)
+        self.diff_inner(ObjMeta::root(), before, after, true)
     }
 
     fn diff_inner(
         &mut self,
-        exid: &ExId,
         obj: ObjMeta,
         before: &[ChangeHash],
         after: &[ChangeHash],
         recursive: bool,
     ) -> Vec<Patch> {
         self.ensure_transaction_closed();
-        let range = OpRange::new(before, after);
-        if let Some((r, id, rec, patches)) = &self.diff_cache {
-            if r == &range && id == &obj.id && *rec == recursive {
-                // we could skip this clone and return &[Patch]
-                return patches.clone();
-            }
+        if before == after {
+            return Vec::new();
         }
         let heads = self.doc.get_heads();
-        let patches = if range.after() == heads
-            && range.before() == self.diff_cursor
-            && self.patch_log.is_active()
-        {
-            if obj.id.is_root() && recursive {
-                self.patch_log.make_patches(&self.doc)
-            } else {
-                self.patch_log
-                    .make_patches(&self.doc)
-                    .into_iter()
-                    .filter(|p| p.has(exid, recursive))
-                    .collect()
-            }
-        } else if range.before().is_empty() && range.after() == heads {
+        if before.is_empty() && after == heads {
+            // The view set by `log_current_state` equals the current visible
+            // clock, so patches are generated fast: no historical clocks are
+            // needed.
             let mut patch_log = PatchLog::active();
-            // This if statement is only active if the current heads are the same as `after`
-            // so the view set by `log_current_state` equals the current visible clock and
-            // patches are generated very fast as no historical clocks are needed
             self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
-            let clock = self.doc.clock_range(range.before(), range.after());
+            let clock = self.doc.clock_range(before, after);
             let mut patch_log = PatchLog::active();
-            patch_log.set_view(&self.doc, self.doc.visible(range.after()));
+            patch_log.set_view(&self.doc, self.doc.visible(after));
             DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
-        };
-        self.diff_cache = Some((range, obj.id, recursive, patches.clone()));
-        patches
+        }
     }
 
-    /// Generates a diff from `before` to `after` for a given `object`
+    /// Compares historical heads for a given object, using the current
+    /// write-frontier state for both, as in [`Self::diff()`]. The accumulated
+    /// patch log is not used or consumed.
     ///
-    /// By default the diff requires a sequental scan of all the ops in the doc.
-    ///
-    /// [Self::diff()] is the equivelent to [Self::diff_obj(&ROOT, before, after)]
-    ///
-    /// Managing the diff index has a small but non-zero overhead.  It should be
-    /// disabled if no longer needed.  If a signifigantly large change is applied
-    /// to the document it may be faster to reset the index before applying it,
-    /// doing an unindxed diff afterwards and then reenable the index.
+    /// `diff(before, after)` is equivalent to
+    /// `diff_obj(&ROOT, before, after, true)`.
     ///
     /// # Arguments
     ///
@@ -319,7 +262,7 @@ impl AutoCommit {
     /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
     /// * `recursive` - if false, do not also diff child objects
     ///
-    /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
+    /// Note: `before` and `after` do not have to be chronological. Document state can move backward.
     pub fn diff_obj(
         &mut self,
         obj: &ExId,
@@ -328,28 +271,23 @@ impl AutoCommit {
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let meta = self.doc.exid_to_obj(obj)?;
-        Ok(self.diff_inner(obj, meta, before, after, recursive))
+        Ok(self.diff_inner(meta, before, after, recursive))
     }
 
-    /// This is a convience function that encapsulates the following common pattern
-    /// ```
-    /// use automerge::AutoCommit;
-    /// let mut doc = AutoCommit::new();
-    /// // make some changes
-    /// let heads = doc.get_heads();
-    /// let diff_cursor = doc.diff_cursor();
-    /// let patches = doc.diff(&diff_cursor, &heads);
-    /// doc.update_diff_cursor();
-    /// ```
-    /// While tracking is active, this returns the accumulated view
-    /// transitions since the last cursor update, resolved under the patch
-    /// log's recorded endpoint.
+    /// Returns patches updating the view observed at the diff cursor to the
+    /// current view, then advances the cursor and begins tracking again.
     ///
-    /// Before tracking starts, after [`Self::reset_diff_cursor()`], or while the
-    /// cursor is still at the empty document, this falls back to a historical
-    /// diff from the empty document to the current view.
-    /// Call [`Self::update_diff_cursor()`] to start tracking from an existing
-    /// view without returning its patches.
+    /// While tracking is active, this returns accumulated view transitions,
+    /// including write-frontier visibility changes even when the heads are
+    /// unchanged. Unlike [`Self::diff()`], it preserves changes from the
+    /// previously observed write-frontier state rather than comparing both
+    /// histories under today's state.
+    ///
+    /// Before tracking starts, after [`Self::reset_diff_cursor()`], or while
+    /// the cursor is still at the empty document, this falls back to a
+    /// historical diff from the empty document to the current view. Call
+    /// [`Self::update_diff_cursor()`] to start tracking from an existing view
+    /// without returning its patches.
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let patches = if self.patch_log.is_active() && !self.diff_cursor.is_empty() {
@@ -372,7 +310,6 @@ impl AutoCommit {
             transaction: self.transaction.clone(),
             patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
-            diff_cache: None,
             save_cursor: vec![],
             isolation: None,
         }
@@ -385,7 +322,6 @@ impl AutoCommit {
             transaction: self.transaction.clone(),
             patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
-            diff_cache: None,
             save_cursor: vec![],
             isolation: None,
         })
@@ -442,6 +378,70 @@ impl AutoCommit {
         self.doc.get_authors()
     }
 
+    /// Mask all changes made by `author` after `heads`.
+    ///
+    /// Use [`Self::update_diff_cursor()`] before masking the author to track
+    /// the resulting patches, then retrieve them with
+    /// [`Self::diff_incremental()`].
+    pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
+        self.update_write_frontiers(|doc, patch_log| doc.mask_author(author, heads, patch_log))
+    }
+
+    /// Reveal all the changes of `author`.
+    ///
+    /// Use [`Self::update_diff_cursor()`] before revealing the author to track
+    /// the resulting patches, then retrieve them with
+    /// [`Self::diff_incremental()`].
+    pub fn reveal_author(&mut self, author: &Author<'static>) {
+        self.update_write_frontiers(|doc, patch_log| doc.reveal_author(author, patch_log))
+    }
+
+    fn update_write_frontiers(
+        &mut self,
+        update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<(), crate::PatchLogMismatch>,
+    ) {
+        self.with_patch_log(update)
+            .expect("AutoCommit's patch log always belongs to its document");
+    }
+
+    /// Run a document mutation, recording its effect on the observed view.
+    ///
+    /// Closes any pending transaction first. When not isolated, passes the
+    /// existing patch log directly to `update`.
+    ///
+    /// When isolated, runs `update` with an inactive log and reconciles the
+    /// existing log with the isolated view before and after the mutation.
+    /// This excludes ordinary import patches while recording changes to
+    /// visibility at the isolated heads, such as write-frontier changes or
+    /// resolution of a pending write-frontier boundary.
+    ///
+    /// Reconciliation happens even if `update` returns an error, since the
+    /// mutation may have made partial progress. It does not enable inactive
+    /// patch tracking.
+    fn with_patch_log<T, E>(
+        &mut self,
+        update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.ensure_transaction_closed();
+        if let Some(heads) = self.isolation.clone() {
+            self.patch_log
+                .transition_to(&self.doc, |d| d.visible(&heads))
+                .expect("AutoCommit's patch log always belongs to its document");
+            let result = update(&mut self.doc, &mut PatchLog::inactive());
+            // Reconcile even when an import reports an error after partial progress.
+            self.patch_log
+                .transition_to(&self.doc, |d| d.visible(&heads))
+                .expect("AutoCommit's patch log always belongs to its document");
+            result
+        } else {
+            update(&mut self.doc, &mut self.patch_log)
+        }
+    }
+
+    /// Pin the document's causal history to `heads`. Incoming changes are not
+    /// visible until integration, but resolving a pending write-frontier
+    /// boundary can change visibility at these heads. When diff tracking is
+    /// active, these visibility changes are recorded immediately.
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
         self.patch_to(heads);
@@ -493,55 +493,27 @@ impl AutoCommit {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .load_incremental_log_patches(data, &mut PatchLog::null())
-        } else {
-            self.doc
-                .load_incremental_log_patches(data, &mut self.patch_log)
-        }
+        self.with_patch_log(|doc, log| doc.load_incremental_log_patches(data, log))
     }
 
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .apply_changes_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_log_patches(changes, &mut self.patch_log)
-        }
+        self.with_patch_log(|doc, log| doc.apply_changes_log_patches(changes, log))
     }
 
     pub fn apply_changes_batch(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .apply_changes_batch_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_batch_log_patches(changes, &mut self.patch_log)
-        }
+        self.with_patch_log(|doc, log| doc.apply_changes_batch_log_patches(changes, log))
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut PatchLog::null())
-        } else {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
-        }
+        self.with_patch_log(|doc, log| doc.merge_and_log_patches(&mut other.doc, log))
     }
 
     /// Save the entirety of this document in a compact form.
@@ -830,11 +802,11 @@ impl AutoCommit {
         }
         match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
-            (Some(_), Some((_, t))) => t.read_at(),
+            (Some(_), Some((_, t))) => t.read_at(&self.doc),
             // then look at clock for isolation (no transaction is open, so
             // isolation at the current heads can read unscoped)
             (Some(i), None) => self.doc.read_at(Some(i)),
-            _ => ReadAt::current(),
+            _ => self.doc.read_current(),
         }
     }
 
@@ -1029,7 +1001,11 @@ impl ReadDoc for AutoCommit {
         obj: O,
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
-        self.doc.hydrate_obj(obj.as_ref(), heads)
+        // Like every other read, hydration goes through `get_scope` so an
+        // isolated document (or one with a transaction in flight) hydrates
+        // the view the other reads see.
+        self.doc
+            .hydrate_obj_for(obj.as_ref(), self.get_scope(heads))
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1334,20 +1310,9 @@ impl SyncDoc for SyncWrapper<'_> {
         sync_state: &mut sync::State,
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
-        self.inner.ensure_transaction_closed();
-        if self.inner.isolation.is_some() {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut PatchLog::null(),
-            )
-        } else {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut self.inner.patch_log,
-            )
-        }
+        self.inner.with_patch_log(|doc, log| {
+            doc.receive_sync_message_log_patches(sync_state, message, log)
+        })
     }
 
     // I dont like this function - it makes sense on automerge but not autocommit
@@ -1361,35 +1326,6 @@ impl SyncDoc for SyncWrapper<'_> {
         self.inner
             .doc
             .receive_sync_message_log_patches(sync_state, message, patch_log)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct OpRange {
-    before_len: usize,
-    hashes: Vec<ChangeHash>,
-}
-
-impl OpRange {
-    fn new(before: &[ChangeHash], after: &[ChangeHash]) -> Self {
-        let mut hashes = Vec::with_capacity(before.len() + after.len());
-        hashes.extend(before);
-        hashes.extend(after);
-        let range = Self {
-            before_len: before.len(),
-            hashes,
-        };
-        assert_eq!(before, range.before());
-        assert_eq!(after, range.after());
-        range
-    }
-
-    fn before(&self) -> &[ChangeHash] {
-        &self.hashes[0..self.before_len]
-    }
-
-    fn after(&self) -> &[ChangeHash] {
-        &self.hashes[self.before_len..]
     }
 }
 

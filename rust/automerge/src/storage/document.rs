@@ -1,5 +1,5 @@
 use hexane::PackError;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
@@ -12,7 +12,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{Automerge, Change, ChangeHash, TextEncoding};
+use crate::{Author, Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -331,6 +331,7 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
@@ -356,7 +357,7 @@ impl<'a> Document<'a> {
 
         debug_assert!(op_set.validate_top_index());
 
-        let doc = Automerge::from_parts(op_set, change_graph, authors);
+        let doc = Automerge::from_parts(op_set, change_graph, authors, write_frontier);
 
         if let Some(err) = mark_order_validator.take_error() {
             Err(ReconstructError::InvalidMarkOrderDoc {

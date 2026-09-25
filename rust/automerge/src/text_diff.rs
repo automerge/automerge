@@ -19,7 +19,7 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
-    let old = doc.text_for(text_obj, tx.read_at())?;
+    let old = doc.text_for(text_obj, tx.read_at(doc))?;
     let new = new.as_ref();
     let old_graphemes = old.graphemes(true).collect::<Vec<&str>>();
     let new_graphemes = new.graphemes(true).collect::<Vec<&str>>();
@@ -142,7 +142,7 @@ pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     config: &crate::marks::UpdateSpansConfig,
 ) -> Result<(), crate::AutomergeError> {
     let text_obj_meta = doc.exid_to_obj(text_obj)?;
-    let old = spans_as_grapheme(doc, &text_obj_meta.id, ReadAt::current())?;
+    let old = spans_as_grapheme(doc, &text_obj_meta.id, doc.read_current())?;
     let new_spans: Vec<Span> = new.into_iter().collect();
     let new = span_as_grapheme(new_spans.iter().cloned());
 
@@ -198,7 +198,7 @@ fn apply_marks_diff(
     }
 
     // Get current marks on the text
-    let current_marks = doc.marks_for(text_obj, ReadAt::current())?;
+    let current_marks = doc.marks_for(text_obj, doc.read_current())?;
 
     // Determine which marks to remove (those not in the new set)
     let mut marks_to_remove = Vec::new();
@@ -227,9 +227,12 @@ fn apply_marks_diff(
 
     // Add new marks that don't already exist
     for (mark_name, mark_value, start, end) in new_marks {
-        let already_exists = doc.marks_for(text_obj, ReadAt::current())?.iter().any(|m| {
-            m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
-        });
+        let already_exists = doc
+            .marks_for(text_obj, doc.read_current())?
+            .iter()
+            .any(|m| {
+                m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
+            });
 
         if !already_exists {
             let expand = config
