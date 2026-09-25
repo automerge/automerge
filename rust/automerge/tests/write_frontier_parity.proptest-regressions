@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 04e40200b0e97ca325f98c5a8ec015d803bce8109e5f333046c02fdec201331a # shrinks to ops = [PeerPut { peer: 0, key: 0, val: 0 }, PeerPut { peer: 0, key: 0, val: 0 }, PeerNested { peer: 0, key: 228, child: 0, val: 0 }, PeerPut { peer: 1, key: 28, val: 0 }, PeerPut { peer: 0, key: 0, val: 0 }, PeerPut { peer: 0, key: 0, val: 0 }, PeerNested { peer: 1, key: 128, child: 0, val: 0 }, PeerPut { peer: 0, key: 0, val: 0 }, PeerPut { peer: 0, key: 0, val: 0 }, Revoke { peer: 1, at_history: 17019696409930546263 }, Merge { peer: 1 }, Sync, Merge { peer: 0 }]
+cc 97af37964113eac476731fb4770f92c57182713f98d91190aa583dbedf2efb89 # shrinks to ops = [Isolate { at_history: 0 }, LocalEdit { key: 0, val: 0 }]
