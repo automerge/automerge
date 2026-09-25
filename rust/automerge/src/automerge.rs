@@ -522,6 +522,10 @@ impl Automerge {
     /// Heads not yet present in the document are recorded as pending, and until
     /// they are witnessed the author is hidden entirely.
     ///
+    /// Changes beyond a masked author's write-frontier — including this
+    /// document's own author — are still recorded and synced but hidden.
+    /// Positions in sequence operations refer to the visible document.
+    ///
     /// # Errors
     ///
     /// Returns [`PatchLogMismatch`] if the log's actors are incompatible with
@@ -834,6 +838,19 @@ impl Automerge {
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
         let author = if seq == 1 { self.author.clone() } else { None };
+        // If the author is part of the write-frontier, assign the actor to the
+        // author now, entering the fresh actor into the mask at the author's
+        // boundary. Otherwise, no mask entry is needed, and the committed
+        // change still carries the author footer.
+        if let Some(author) = &author {
+            if self.is_author_masked(author) {
+                self.assign_author(author.clone(), actor_index);
+            }
+        }
+        let masked = self
+            .mask
+            .as_ref()
+            .is_some_and(|m| m.hides(&OpId::new(start_op.get(), actor_index)));
         TransactionArgs {
             actor_index,
             seq,
@@ -841,6 +858,7 @@ impl Automerge {
             deps,
             scope,
             author,
+            masked,
         }
     }
 
@@ -1597,21 +1615,25 @@ impl Automerge {
 
         for i in 1.. {
             let max_op = self.change_graph.max_op_for_actor(actor_index);
-            let masked = self
-                .mask
-                .as_ref()
-                .is_some_and(|m| m.hides(&OpId::new(max_op + 1, actor_index)))
-                || (max_op == 0
-                    && self.author.as_ref().is_some_and(|a| {
-                        self.write_frontier
-                            .get_write_frontier_for_author(a)
-                            .is_some()
-                    }));
-            if masked {
-                break;
-            }
+            // Only actors whose latest change is in the isolation scope can safely
+            // advance their sequence under it. Masked actors can also be selected,
+            // but their counter is not isolated: doing so would unmask their own
+            // ops. A fresh actor belongs to a masked local author if `transaction_args`
+            // would mark it masked.
             if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
-                clock.isolate(actor_index);
+                let masked = self
+                    .mask
+                    .as_ref()
+                    .is_some_and(|m| m.hides(&OpId::new(max_op + 1, actor_index)))
+                    || (max_op == 0
+                        && self.author.as_ref().is_some_and(|a| {
+                            self.write_frontier
+                                .get_write_frontier_for_author(a)
+                                .is_some()
+                        }));
+                if !masked {
+                    clock.isolate(actor_index);
+                }
                 break;
             }
             actor_index = self.get_isolated_actor_index(i);
