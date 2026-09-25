@@ -1,4 +1,4 @@
-use crate::clock::{Clock, ClockRange};
+use crate::clock::{ClockRange, ReadAt};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
@@ -65,11 +65,13 @@ impl Default for SpansActionValue<'_> {
 }
 
 impl<'a> SpansActionValue<'a> {
-    fn new(op_set: &'a OpSet, clock: &ClockRange, range: Range<usize>) -> Self {
+    fn new(op_set: &'a OpSet, clock: &ClockRange<'a>, range: Range<usize>) -> Self {
         let value = op_set.value_iter_range(&range);
         let action = op_set.action_iter_range(&range);
         let iter = ActionValueIter::new(action, value);
-        if matches!(clock, ClockRange::Current(None)) && op_set.all_of_range_is_top(&range) {
+        if matches!(clock, ClockRange::Current(read) if read.filter().is_none())
+            && op_set.all_of_range_is_top(&range)
+        {
             Self::Current(Unshift::new(iter))
         } else {
             Self::Diff(Unshift::new(DiffIter::new_top(
@@ -81,7 +83,7 @@ impl<'a> SpansActionValue<'a> {
         }
     }
 
-    fn shift(&mut self, op_set: &'a OpSet, clock: &ClockRange, range: Range<usize>) {
+    fn shift(&mut self, op_set: &'a OpSet, clock: &ClockRange<'a>, range: Range<usize>) {
         if matches!(self, Self::Current(_)) && !op_set.all_of_range_is_top(&range) {
             *self = Self::new(op_set, clock, range);
         } else {
@@ -112,7 +114,7 @@ pub(crate) struct SpansDiff<'a> {
     op_id: OpIdIter<'a>,
     marks: RichTextDiff<'a>,
     op_set: Option<&'a OpSet>,
-    clock: ClockRange,
+    clock: ClockRange<'a>,
     state: SpanState,
     pos: usize,
 }
@@ -162,7 +164,7 @@ impl<'a> SpansDiff<'a> {
     pub(crate) fn new(
         op_set: &'a OpSet,
         range: Range<usize>,
-        clock: ClockRange,
+        clock: ClockRange<'a>,
         encoding: TextEncoding,
     ) -> Self {
         let pos = range.start;
@@ -256,10 +258,6 @@ impl<'a> SpansInternal<'a> {
         Some(self.iter.shift_next(range)?.span)
     }
 
-    pub(crate) fn clock(&self) -> Option<&Clock> {
-        self.iter.clock.after()
-    }
-
     pub(crate) fn encoding(&self) -> TextEncoding {
         self.iter.state.encoding
     }
@@ -267,15 +265,10 @@ impl<'a> SpansInternal<'a> {
     pub(crate) fn new(
         op_set: &'a OpSet,
         range: Range<usize>,
-        clock: Option<Clock>,
+        read: ReadAt<'a>,
         encoding: TextEncoding,
     ) -> Self {
-        let iter = SpansDiff::new(
-            op_set,
-            range.clone(),
-            ClockRange::current(clock.clone()),
-            encoding,
-        );
+        let iter = SpansDiff::new(op_set, range, ClockRange::current(read), encoding);
         Self { iter }
     }
 }
@@ -603,19 +596,14 @@ impl Iterator for SpansInternal<'_> {
 }
 
 impl SpanInternal {
-    pub(crate) fn export(
-        self,
-        op_set: &OpSet,
-        clock: Option<&Clock>,
-        encoding: TextEncoding,
-    ) -> Span {
+    pub(crate) fn export(self, op_set: &OpSet, read: &ReadAt<'_>, encoding: TextEncoding) -> Span {
         match self {
             SpanInternal::Text(text, _, marks) => Span::Text {
                 text,
                 marks: marks.export(),
             },
             SpanInternal::Obj(opid, _, _) => {
-                let value = op_set.hydrate_map(&opid.into(), clock, encoding);
+                let value = op_set.hydrate_map(&opid.into(), read, encoding);
                 let Value::Map(value) = value else {
                     tracing::warn!("unexpected non map object in text");
                     return Span::Block(crate::hydrate::Map::new());
@@ -636,9 +624,14 @@ impl Iterator for Spans<'_> {
     type Item = Span;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(self.internal.next()?.export(
+        let item = self.internal.next()?;
+        let read = match &self.internal.iter.clock {
+            ClockRange::Current(read) => read.borrow(),
+            ClockRange::Diff(_, after) => ReadAt::At(Cow::Borrowed(after)),
+        };
+        Some(item.export(
             self.internal.iter.op_set?,
-            self.internal.iter.clock.after(),
+            &read,
             self.internal.iter.state.encoding,
         ))
     }
