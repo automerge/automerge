@@ -55,14 +55,19 @@ impl VisibleClock {
         self.0 .0.remove(index);
     }
 
+    /// Number of actors this clock covers.
+    pub(crate) fn len(&self) -> usize {
+        self.0 .0.len()
+    }
+
     /// Create new, empty [`Clock`] which is the same size as this clock.
     pub(crate) fn empty_like(&self) -> Clock {
         Clock(vec![0; self.0 .0.len()])
     }
 
-    /// Returns `true` if no operation is covered, i.e. all values are `0`.
-    pub(crate) fn covers_nothing(&self) -> bool {
-        self.0 .0.iter().all(|c| *c == 0)
+    /// Returns `true` if any operation is covered.
+    pub(crate) fn covers_something(&self) -> bool {
+        self.0 .0.iter().any(|c| *c > 0)
     }
 }
 
@@ -243,10 +248,15 @@ impl<'a> ClockRange<'a> {
     /// The range for children of the object created by `parent`. `None`
     /// when the children can keep the parent's range.
     ///
-    /// When diffing, an object whose creation op is absent from `before`
-    /// did not exist before, so its children must all emit as inserts:
-    /// they are walked with an empty `before`. Without a mask the visible
-    /// set is causally closed and this is the identity.
+    /// When diffing, an object whose creation op is absent from `before` was
+    /// not visible in the before view, so its children must all emit as
+    /// inserts: they are walked with an empty `before`.
+    ///
+    /// Without a write-frontier, the visible set is causally closed: covering a
+    /// child operation implies covering the object's creation operation.
+    /// Emptying `before` does not change the resulting child diff.
+    /// A write-frontier can hide the creation operation without hiding its
+    /// children, making this adjustment necessary.
     ///
     /// `after` never needs narrowing: [`DiffIter::process_item`]'s `make_obj`
     /// only queues objects that are visible in `after`, so a parent absent
@@ -258,7 +268,7 @@ impl<'a> ClockRange<'a> {
             // An already-empty `before` cannot be narrowed further, so keep
             // the cheap shifting path for diffs from the empty document.
             RangeInner::Diff(before, after)
-                if !before.covers_nothing() && !before.covers(parent) =>
+                if before.covers_something() && !before.covers(parent) =>
             {
                 Some(Self(RangeInner::Diff(
                     VisibleClock::new(before.empty_like(), None),

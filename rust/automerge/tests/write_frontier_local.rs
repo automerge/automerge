@@ -390,3 +390,31 @@ fn masked_edit_at_earlier_heads_preserves_actor_chain() {
     let reloaded = Automerge::load(&doc.document().save()).expect("saved document reloads");
     assert_eq!(reloaded.get_heads(), doc.get_heads());
 }
+
+/// Hydrating inside a transaction isolated at earlier heads must show the
+/// isolated view, not the current document: the `ReadDoc::hydrate` route
+/// for transactions has to honour the transaction's scope.
+#[test]
+fn hydrate_inside_isolated_transaction_sees_isolated_view() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    tx.put(ROOT, "x", 1).unwrap();
+    tx.commit();
+    let h1 = doc.get_heads();
+    let mut tx = doc.transaction();
+    tx.put(ROOT, "x", 2).unwrap();
+    tx.commit();
+
+    let at_h1 = doc.hydrate(Some(&h1));
+    let current = doc.hydrate(None);
+    assert_ne!(at_h1, current, "the two states must differ for this test");
+
+    let tx = doc
+        .transaction_at(PatchLog::inactive(), &h1)
+        .expect("a fresh patch log belongs to any document");
+    let inside = tx.hydrate(ROOT, None).unwrap();
+    assert_eq!(
+        inside, at_h1,
+        "hydrate inside an isolated transaction must see the isolated view"
+    );
+}

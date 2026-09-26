@@ -1,8 +1,8 @@
 use std::ops::RangeBounds;
 
 use crate::author::Author;
+use crate::automerge::view::ReadAt;
 use crate::automerge::{HistoryUpdate, SaveOptions};
-use crate::clock::ReadAt;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
@@ -841,7 +841,8 @@ impl AutoCommit {
             return if self.transaction.is_none() {
                 self.doc.read_at(Some(h))
             } else {
-                ReadAt::at(self.doc.visible(h))
+                self.doc
+                    .read_scoped(std::borrow::Cow::Owned(self.doc.visible(h)))
             };
         }
         match (&self.isolation, &self.transaction) {

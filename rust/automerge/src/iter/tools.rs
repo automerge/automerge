@@ -1,4 +1,4 @@
-use crate::clock::ClockRange;
+use crate::automerge::view::{ClockRange, RangeView};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{TopIter, VisIter};
 use crate::op_set2::OpSet;
@@ -403,11 +403,11 @@ impl<S: Default> Default for DiffSkipper<S> {
 
 impl<'a> DiffSkipper<VisIter<'a>> {
     fn new(op_set: &'a OpSet, clock: ClockRange<'_>, range: Range<usize>) -> Self {
-        match clock {
-            ClockRange::Current(read) => {
+        match clock.view() {
+            RangeView::Current(read) => {
                 DiffSkipper::Current(VisIter::new(op_set, read.filter(), range))
             }
-            ClockRange::Diff(before, after) => {
+            RangeView::Diff { before, after } => {
                 let before = VisIter::new(op_set, Some(before.clock()), range.clone());
                 let after = VisIter::new(op_set, Some(after.clock()), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
@@ -418,11 +418,11 @@ impl<'a> DiffSkipper<VisIter<'a>> {
 
 impl<'a> DiffSkipper<TopIter<'a>> {
     fn new_top(op_set: &'a OpSet, clock: ClockRange<'_>, range: Range<usize>) -> Self {
-        match clock {
-            ClockRange::Current(read) => {
+        match clock.view() {
+            RangeView::Current(read) => {
                 DiffSkipper::Current(TopIter::new(op_set, read.filter().cloned(), range))
             }
-            ClockRange::Diff(before, after) => {
+            RangeView::Diff { before, after } => {
                 let before = TopIter::new(op_set, Some(before.clock().clone()), range.clone());
                 let after = TopIter::new(op_set, Some(after.clock().clone()), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))

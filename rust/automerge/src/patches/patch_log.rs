@@ -1,5 +1,5 @@
+use crate::automerge::view::{ClockRange, ReadAt, VisibleClock};
 use crate::automerge::Automerge;
-use crate::clock::{ClockRange, ReadAt, VisibleClock};
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{DiffIter, SpanInternal};
@@ -319,7 +319,7 @@ impl PatchLog {
                 DiffIter::log(
                     doc,
                     ObjMeta::root(),
-                    ClockRange::Diff(before, after.clone()),
+                    ClockRange::diff(before, after.clone()),
                     self,
                     true,
                 );

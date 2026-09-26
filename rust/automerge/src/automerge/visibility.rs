@@ -2,9 +2,10 @@
 
 use std::collections::HashSet;
 
+use super::view::Mask;
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
-use crate::clock::{Clock, Mask};
+use crate::clock::Clock;
 use crate::types::OpId;
 use crate::write_frontier::WriteFrontier;
 use crate::ChangeHash;
@@ -104,7 +105,8 @@ mod tests {
     //! clock translation.
 
     use super::FrontierVisibility;
-    use crate::clock::{Clock, Mask};
+    use crate::automerge::view::Mask;
+    use crate::clock::Clock;
     use crate::transaction::Transactable;
     use crate::write_frontier::WriteFrontier;
     use crate::{Author, AutoCommit, ChangeHash, ROOT};

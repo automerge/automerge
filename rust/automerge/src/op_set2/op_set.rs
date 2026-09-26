@@ -1,5 +1,6 @@
 use super::parents::Parents;
-use crate::clock::{Clock, ClockRange, ReadAt};
+use crate::automerge::view::{ClockRange, ReadAt};
+use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
@@ -1651,7 +1652,7 @@ impl SuccUndo {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use crate::{
@@ -1757,17 +1758,19 @@ mod tests {
         doc
     }
 
+    /// Test-only op description, shared with `automerge::view`'s relocated
+    /// iteration test (see [`with_test_ops`]).
     #[derive(Debug, Clone)]
-    struct TestOp {
-        id: OpId,
-        obj: ObjId,
-        action: Action,
-        value: ScalarValue<'static>,
-        key: KeyRef<'static>,
-        insert: bool,
-        succs: Vec<OpId>,
-        expand: bool,
-        mark_name: Option<&'static str>,
+    pub(crate) struct TestOp {
+        pub(crate) id: OpId,
+        pub(crate) obj: ObjId,
+        pub(crate) action: Action,
+        pub(crate) value: ScalarValue<'static>,
+        pub(crate) key: KeyRef<'static>,
+        pub(crate) insert: bool,
+        pub(crate) succs: Vec<OpId>,
+        pub(crate) expand: bool,
+        pub(crate) mark_name: Option<&'static str>,
     }
 
     impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
@@ -1785,7 +1788,8 @@ mod tests {
         }
     }
 
-    fn with_test_ops<F>(actors: Vec<ActorId>, test_ops: &[TestOp], f: F)
+    /// Build an [`OpSet`] from `test_ops` and hand it to `f`.
+    pub(crate) fn with_test_ops<F>(actors: Vec<ActorId>, test_ops: &[TestOp], f: F)
     where
         F: FnOnce(super::OpSet),
     {
@@ -1922,183 +1926,6 @@ mod tests {
             assert_eq!(ops[4], op);
             let op = iter.next();
             assert!(op.is_none());
-        });
-    }
-
-    #[test]
-    fn column_data_op_iterators() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
-
-        let test_ops = vec![
-            TestOp {
-                id: OpId::new(1, 1),
-                obj: ObjId::root(),
-                action: Action::MakeMap,
-                value: ScalarValue::Null,
-                key: KeyRef::Map("map".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(2, 1),
-                obj: ObjId::root(),
-                action: Action::MakeMap,
-                value: ScalarValue::Null,
-                key: KeyRef::Map("list".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(3, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value1"),
-                key: KeyRef::Map("key1".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(4, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value2a"),
-                key: KeyRef::Map("key2".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(4, 2),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value2b"),
-                key: KeyRef::Map("key2".into()),
-                insert: false,
-                succs: vec![OpId::new(5, 2)],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(5, 2),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value2c"),
-                key: KeyRef::Map("key2".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(6, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value3a"),
-                key: KeyRef::Map("key3".into()),
-                insert: false,
-                succs: vec![OpId::new(7, 2)],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(7, 2),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value3b"),
-                key: KeyRef::Map("key3".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(8, 1),
-                obj: ObjId(OpId::new(2, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("a"),
-                key: KeyRef::Seq(ElemId::head()),
-                insert: true,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(9, 1),
-                obj: ObjId(OpId::new(2, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("b"),
-                key: KeyRef::Seq(ElemId(OpId::new(8, 1))),
-                insert: true,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-        ];
-
-        with_test_ops(actors, &test_ops, |opset| {
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.collect::<Vec<_>>();
-            assert_eq!(&test_ops[2..8], ops.as_slice());
-
-            let range = opset.prop_range(&ObjId(OpId::new(1, 1)), "key2");
-            let iter = opset.iter_range(&range);
-            let ops = iter.collect::<Vec<_>>();
-            assert_eq!(&test_ops[3..6], ops.as_slice());
-
-            let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
-            let read = ReadAt::at(crate::clock::VisibleClock::new(clock.clone(), None));
-            let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), read.borrow())
-                .collect::<Vec<_>>();
-            assert_eq!(&test_ops[2], &ops[0]);
-            assert_eq!(&test_ops[5], &ops[1]);
-            assert_eq!(&test_ops[7], &ops[2]);
-            assert_eq!(3, ops.len());
-
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter
-                .key_ops()
-                .map(|n| n.collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-            let key1 = ops.first().unwrap().as_slice();
-            let key2 = ops.get(1).unwrap().as_slice();
-            let key3 = ops.get(2).unwrap().as_slice();
-            let key4 = ops.get(3);
-            assert_eq!(&test_ops[2..3], key1);
-            assert_eq!(&test_ops[3..6], key2);
-            assert_eq!(&test_ops[6..8], key3);
-            assert!(key4.is_none());
-
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter
-                .visible_slow(None)
-                .key_ops()
-                .map(|n| n.collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-            let key1 = ops.first().unwrap().as_slice();
-            let key2 = ops.get(1).unwrap().as_slice();
-            let key3 = ops.get(2).unwrap().as_slice();
-            let key4 = ops.get(3);
-            let key2test = vec![test_ops[3].clone(), test_ops[5].clone()];
-            assert_eq!(&test_ops[2..3], key1);
-            assert_eq!(&key2test, key2);
-            assert_eq!(&test_ops[7..8], key3);
-            assert!(key4.is_none());
-
-            let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), read)
-                .collect::<Vec<_>>();
-            assert_eq!(&test_ops[2], &ops[0]);
-            assert_eq!(&test_ops[5], &ops[1]);
-            assert_eq!(&test_ops[7], &ops[2]);
-            assert_eq!(3, ops.len());
         });
     }
 }

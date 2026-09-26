@@ -2,7 +2,7 @@ use super::{
     ListDiff, ListDiffItem, ListRange, ListRangeItem, MapDiff, MapDiffItem, MapRange, MapRangeItem,
     Span, SpanDiff, SpanInternal, SpansDiff, SpansInternal,
 };
-use crate::clock::{ClockRange, ReadAt};
+use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
@@ -17,35 +17,60 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct DocIter<'a> {
-    op_set: Option<&'a OpSet>,
+    inner: DocIterInner<'a>,
+    encoding: TextEncoding,
+}
+
+#[derive(Debug, Clone)]
+enum DocIterInner<'a> {
+    Empty,
+    Reading(DocReader<'a>),
+}
+
+/// A [`DocIter`] over an existing object: the read position, the op set the
+/// items resolve against, and the walk itself.
+#[derive(Debug, Clone)]
+struct DocReader<'a> {
+    op_set: &'a OpSet,
     obj_export: Arc<ExId>,
     read: ReadAt<'a>,
-    inner: DocIterInternal<'a>,
+    walk: DocIterInternal<'a>,
 }
 
 impl<'a> DocIter<'a> {
-    pub(crate) fn empty(encoding: TextEncoding) -> Self {
+    pub(crate) const fn empty(encoding: TextEncoding) -> Self {
         Self {
-            op_set: None,
-            obj_export: Arc::new(ExId::Root),
-            read: ReadAt::unmasked(),
-            inner: DocIterInternal::empty(encoding),
+            inner: DocIterInner::Empty,
+            encoding,
         }
-    }
-
-    fn encoding(&self) -> TextEncoding {
-        self.inner.span_iter.encoding()
     }
 
     pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, read: ReadAt<'a>) -> Self {
-        let obj_export = Arc::new(doc.ops().id_to_exid(obj.id.0));
-        let op_set = Some(doc.ops());
+        let op_set = doc.ops();
+        let obj_export = Arc::new(op_set.id_to_exid(obj.id.0));
+        let walk = DocIterInternal::new(doc, obj, read.clone());
         Self {
-            op_set,
-            obj_export,
-            inner: DocIterInternal::new(doc, obj, read.clone()),
-            read,
+            inner: DocIterInner::Reading(DocReader {
+                op_set,
+                obj_export,
+                read,
+                walk,
+            }),
+            encoding: doc.text_encoding(),
         }
+    }
+}
+
+impl<'a> DocReader<'a> {
+    fn next(&mut self, encoding: TextEncoding) -> Option<DocObjItem<'a>> {
+        let DocObjItemInternal { obj, item } = self.walk.next()?;
+        if *self.obj_export != obj {
+            self.obj_export = Arc::new(self.op_set.id_to_exid(self.walk.obj.0));
+        }
+        Some(DocObjItem {
+            obj: self.obj_export.clone(),
+            item: item.export(self.op_set, &self.read, encoding),
+        })
     }
 }
 
@@ -250,19 +275,6 @@ impl<'a> DocIterInternal<'a> {
         }
     }
 
-    fn empty(encoding: TextEncoding) -> Self {
-        Self {
-            next_objs: BTreeMap::default(),
-            path_map: BTreeMap::default(),
-            obj_id_iter: ObjIdIter::default(),
-            map_iter: MapRange::default(),
-            list_iter: ListRange::default(),
-            span_iter: SpansInternal::empty(encoding),
-            iter_type: IterType::Map,
-            obj: ObjId::root(),
-        }
-    }
-
     fn process_item(&mut self, item: DocItemInternal<'a>) -> Option<DocObjItemInternal<'a>> {
         if let Some((next_obj, next_typ)) = item.make_obj() {
             let prop = item.prop();
@@ -344,14 +356,10 @@ impl<'a> Iterator for DocIter<'a> {
     type Item = DocObjItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let DocObjItemInternal { obj, item } = self.inner.next()?;
-        if *self.obj_export != obj {
-            self.obj_export = Arc::new(self.op_set?.id_to_exid(self.inner.obj.0));
-        }
-        Some(DocObjItem {
-            obj: self.obj_export.clone(),
-            item: item.export(self.op_set?, &self.read, self.encoding()),
-        })
+        let DocIterInner::Reading(reader) = &mut self.inner else {
+            return None;
+        };
+        reader.next(self.encoding)
     }
 }
 
