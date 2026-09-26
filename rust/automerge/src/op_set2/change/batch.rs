@@ -703,12 +703,23 @@ impl BatchApply {
     }
 
     fn insert_new_actors(&self, doc: &mut Automerge) {
+        // Insert every new actor first: a later insertion would shift the
+        // indices collected for the earlier ones. The second pass is pure
+        // lookup. Registration is bulk: one visibility derivation per batch,
+        // not one per new actor.
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
-            let actor_idx = doc.put_actor_ref(c.actor_id());
-            if let Some(a) = c.author() {
-                doc.assign_author(a.into_owned(), actor_idx);
-            }
+            doc.put_actor_ref(c.actor_id());
         }
+        let pairs: Vec<_> = self
+            .changes
+            .iter()
+            .filter(|c| c.seq() == 1)
+            .filter_map(|c| {
+                let author = c.author()?.into_owned();
+                Some((author, doc.put_actor_ref(c.actor_id())))
+            })
+            .collect();
+        doc.register_actors(pairs);
     }
 
     /// Flag every incoming op against the mask snapshot and import it. The
@@ -740,6 +751,8 @@ impl BatchApply {
         log.transition_to(doc, |d| d.visible_current())?;
         self.insert_new_actors(doc);
         log.migrate_actors(&doc.ops().actors)?;
+
+        doc.assert_mask_derived();
         let mask0 = doc.mask().cloned();
 
         // Mark whether a pending boundary has been resolved by any of the
