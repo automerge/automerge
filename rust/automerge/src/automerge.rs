@@ -32,12 +32,12 @@ use crate::write_frontier::WriteFrontier;
 
 use crate::clock::{Clock, ClockRange, Mask, ReadAt, VisibleClock};
 use crate::hydrate;
-use crate::op_set2::ActorIdx;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use std::borrow::Cow;
 
 pub(crate) mod current_state;
+mod visibility;
 
 // FIXME
 //#[cfg(test)]
@@ -82,8 +82,8 @@ impl Actor {
 pub(crate) enum HistoryUpdate {
     /// The change did not resolve a pending write-frontier boundary.
     Unchanged,
-    /// The change was a pending write-frontier boundary: the stored seq-mask has
-    /// been recomputed and the caller must publish the visibility change.
+    /// The change was a pending write-frontier boundary: the caller must publish
+    /// the visibility change once the op set is consistent again.
     BoundaryResolved,
 }
 
@@ -303,10 +303,14 @@ pub struct Automerge {
     pub(crate) change_graph: ChangeGraph,
     authors: Authors,
     /// Authors whose changes are hidden past a heads boundary.
+    ///
+    /// The visibility based on these policies is derived in one place as
+    /// [`Automerge::visibility`].
     write_frontier: WriteFrontier,
-    /// Visibility mask derived from `write_frontier`; `None` when no author is
-    /// masked. Only [`Automerge::republish_mask`] may change it.
-    mask: Option<Mask>,
+    /// Visibility derived from the write-frontier, the change graph, and the
+    /// author set. Written only by [`Automerge::republish_mask`], registration,
+    /// and actor column shifts.
+    visibility: visibility::FrontierVisibility,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
@@ -320,17 +324,7 @@ pub struct Automerge {
 impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
-        Automerge {
-            queue: ChangeQueue::new(),
-            change_graph: ChangeGraph::new(0),
-            authors: Authors::with_actors(0),
-            write_frontier: WriteFrontier::new(),
-            mask: None,
-            ops: OpSet::new(TextEncoding::platform_default()),
-            deps: Default::default(),
-            actor: Actor::Unused(ActorId::random()),
-            author: None,
-        }
+        Self::new_with_encoding(TextEncoding::platform_default())
     }
 
     /// Return a copy of this document with its data anonymized using a fresh random seed.
@@ -362,12 +356,17 @@ impl Automerge {
     }
 
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
+        let change_graph = ChangeGraph::new(0);
+        let authors = Authors::with_actors(0);
+        let write_frontier = WriteFrontier::new();
+        let visibility =
+            visibility::FrontierVisibility::new(&write_frontier, &change_graph, &authors);
         Automerge {
             queue: ChangeQueue::new(),
-            change_graph: ChangeGraph::new(0),
-            authors: Authors::with_actors(0),
-            write_frontier: WriteFrontier::new(),
-            mask: None,
+            change_graph,
+            authors,
+            write_frontier,
+            visibility,
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
@@ -384,26 +383,23 @@ impl Automerge {
         write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
     ) -> Self {
         let deps = change_graph.heads().collect();
+        let write_frontier = WriteFrontier::from(write_frontier);
+        let visibility =
+            visibility::FrontierVisibility::new(&write_frontier, &change_graph, &authors);
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
             change_graph,
             authors,
-            write_frontier: WriteFrontier::new(),
-            mask: None,
+            write_frontier,
+            visibility,
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
         };
-        for (author, from) in write_frontier {
-            doc.apply_write_frontier(author, &from);
-        }
-        doc.rebuild_mask();
         doc.remove_unused_actors(false);
-        // Load applies the mask once at the end, never during.
-        if doc.mask.is_some() {
-            let visible = doc.visible_current();
-            doc.ops.recompute_indexes(visible.clock());
+        if doc.visibility.mask().is_some() {
+            doc.ops.recompute_indexes(doc.visible_current().clock());
         }
         doc
     }
@@ -481,12 +477,7 @@ impl Automerge {
         write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
         log: &mut PatchLog,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.republish_mask(log, |doc| {
-            doc.write_frontier.clear();
-            for (author, from) in write_frontier {
-                doc.apply_write_frontier(author, &from);
-            }
-        })
+        self.republish_mask(log, |policy| *policy = WriteFrontier::from(write_frontier))
     }
 
     /// Set the actor id for this document.
@@ -538,20 +529,7 @@ impl Automerge {
         from: &[ChangeHash],
         log: &mut PatchLog,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.republish_mask(log, |doc| doc.apply_write_frontier(author, from))
-    }
-
-    /// Record a write-frontier of `author` at `from` without touching the mask
-    /// or the indexes.
-    ///
-    /// Callers must go through [`Automerge::republish_mask`] (or, on load,
-    /// rebuild once at the end).
-    fn apply_write_frontier(&mut self, author: Author<'static>, from: &[ChangeHash]) {
-        let seq_clock = self.change_graph.seq_clock_for_local_heads(from);
-        self.write_frontier
-            .extend_pending_changes(self.change_graph.missing_hashes(from));
-        self.write_frontier
-            .mask(author, from.to_vec(), &seq_clock, &self.authors);
+        self.republish_mask(log, |policy| policy.mask_author(author, from.to_vec()))
     }
 
     /// Reveal the `author`, restoring their changes.
@@ -567,68 +545,49 @@ impl Automerge {
         author: &Author<'static>,
         log: &mut PatchLog,
     ) -> Result<(), crate::PatchLogMismatch> {
-        self.republish_mask(log, |doc| {
-            doc.write_frontier.reveal(author, &doc.authors);
-        })
+        self.republish_mask(log, |policy| policy.reveal_author(author))
     }
 
-    /// Re-calculate the mask for this document.
+    /// Apply `update` to the write-frontier policy and publish the result.
     ///
-    /// It must be the only place where the mask is modified, and callers must
-    /// call it when the write-frontier information is updated.
+    /// Re-derives the visibility from the updated policy, rebuilds the op-set
+    /// indexes under the new mask, and records the change from the current
+    /// visibility to the new one as a single transition in `log`. If the
+    /// derived mask is unchanged, the rebuild and transition are skipped.
     ///
-    /// This ensures that the log is set to the current visibility, and captures
-    /// the mask before the update to the document.
-    /// After the update, the mask is rebuilt, the op-set indexes are rebuilt,
-    /// and the log is transitioned to the new visibility.
-    ///
-    /// If the after mask is the same as the before, then the indexes are not
-    /// recomputed, and the log does not need to transition its visibility.
+    /// This is the only path that changes visibility in a way that affects
+    /// existing ops. The other writers of `visibility`, actor registration and
+    /// actor column shifts, only touch actors that have no ops yet.
     pub(crate) fn republish_mask(
         &mut self,
         log: &mut PatchLog,
-        update: impl FnOnce(&mut Self),
+        update: impl FnOnce(&mut WriteFrontier),
     ) -> Result<(), crate::PatchLogMismatch> {
         log.transition_to(self, |d| d.visible_current())?;
-        let before = self.mask.clone();
-        update(self);
-        self.rebuild_mask();
+        update(&mut self.write_frontier);
+        let visibility = visibility::FrontierVisibility::new(
+            &self.write_frontier,
+            &self.change_graph,
+            &self.authors,
+        );
         // An update that leaves the mask as it was (e.g. setting an empty
-        // policy on a document that had none) changes no visibility: the
-        // indexes are already correct and the first transition already
-        // bound the log, so the expensive reindex can be skipped.
-        if self.mask == before {
-            return Ok(());
+        // policy on a document that had none, or re-witnessing a resolved
+        // boundary) changes no visibility: the indexes are already correct
+        // and the first transition already bound the log, so the expensive
+        // reindex can be skipped.
+        let changed = visibility.mask() != self.visibility.mask();
+        self.visibility = visibility;
+        if changed {
+            let after = self.visible_current();
+            self.ops.recompute_indexes(after.clock());
+            log.transition_to(self, |_| after)?;
         }
-        let after = self.visible_current();
-        self.ops.recompute_indexes(after.clock());
-        log.transition_to(self, |_| after)
-    }
-
-    /// Derive the visibility [`Mask`] from the stored write-frontier.
-    fn rebuild_mask(&mut self) {
-        if self.write_frontier.is_empty() {
-            self.mask = None;
-            return;
-        }
-        let clock = (0..self.change_graph.num_actors())
-            .map(|actor| {
-                match self.write_frontier.get_mask_for(&ActorIdx::from(actor)) {
-                    // Bounded: everything up to the boundary seq stays visible.
-                    Some(Some(seq)) => self.change_graph.max_op_for_seq(actor, *seq).unwrap_or(0),
-                    // Fully masked (e.g. pending boundary): nothing visible.
-                    Some(None) => 0,
-                    // Not masked: unrestricted.
-                    None => u32::MAX,
-                }
-            })
-            .collect::<Vec<u32>>();
-        self.mask = Some(Mask::new(Clock(clock)));
+        Ok(())
     }
 
     /// The active visibility mask, if any author is masked.
     pub(crate) fn mask(&self) -> Option<&Mask> {
-        self.mask.as_ref()
+        self.visibility.mask()
     }
 
     /// Return the write-frontier, per [`Author`].
@@ -642,30 +601,67 @@ impl Automerge {
         self.write_frontier.is_author_masked(author)
     }
 
-    /// See [`Authors::assign_author`].
+    /// Record that `actor` belongs to `author` and re-derive the visibility.
     ///
-    /// If the `author` is masked, the new `actor` is added to the mask at
-    /// the author's write-frontier boundary (fully masked when the actor has no
-    /// entry at that boundary).
-    pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
-        // `rebuild_mask` below does not recompute the op-set indexes, which
-        // is only sound because a freshly assigned actor has no ops yet.
-        debug_assert_eq!(
-            self.change_graph.seq_for_actor(actor),
-            0,
-            "assign_author must run before the actor records any ops"
-        );
-        if let Some(heads) = self
-            .write_frontier
-            .get_write_frontier_for_author(&author)
-            .map(|h| h.to_vec())
-        {
-            let clock = self.change_graph.seq_clock_for_local_heads(&heads);
-            self.write_frontier
-                .insert_mask_for(ActorIdx::from(actor), clock.get_for_actor(&actor));
-        }
+    /// Must be called before `actor` records any ops. Because the actor has no
+    /// ops yet, the derived mask cannot change the visibility of anything in
+    /// the op set, so no index rebuild is needed.
+    ///
+    /// Used by [`Automerge::transaction_args`] so that a new actor of a masked
+    /// author is entered into the mask before the transaction opens.
+    fn register_actor(&mut self, author: Author<'static>, actor: usize) {
+        debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
         self.authors.assign_author(author, actor);
-        self.rebuild_mask();
+        self.rederive_visibility();
+    }
+
+    /// Bulk form of [`Automerge::register_actor`] for the batch importer:
+    /// assign all authors, derive once. Registering nothing derives
+    /// nothing: the mask already equals its derivation (an actor inserted
+    /// without an author gets `u32::MAX` from the column shift, exactly
+    /// what `derive` gives an unmasked actor).
+    pub(crate) fn register_actors(
+        &mut self,
+        pairs: impl IntoIterator<Item = (Author<'static>, usize)>,
+    ) {
+        let mut pairs = pairs.into_iter().peekable();
+        let should_derive = pairs.peek().is_some();
+        for (author, actor) in pairs {
+            debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
+            self.authors.assign_author(author, actor);
+        }
+        if should_derive {
+            self.rederive_visibility();
+        }
+    }
+
+    /// Re-derive `visibility` from the unchanged policy, without an
+    /// index rebuild. Sound only when no op's visibility can have changed
+    /// (registration of zero-op actors).
+    fn rederive_visibility(&mut self) {
+        self.visibility = visibility::FrontierVisibility::new(
+            &self.write_frontier,
+            &self.change_graph,
+            &self.authors,
+        );
+    }
+
+    /// Assert the mask-constant invariant: outside the transient window
+    /// between an actor column shift and the registration or installer run
+    /// that follows it, `mask` equals its derivation from the policy.
+    pub(crate) fn assert_mask_derived(&self) {
+        // Compare only the mask: `pending` is intentionally stale between
+        // derivations so `update_history` can recognise a boundary it was
+        // waiting for (see the note there).
+        debug_assert_eq!(
+            self.visibility.mask(),
+            visibility::FrontierVisibility::new(
+                &self.write_frontier,
+                &self.change_graph,
+                &self.authors
+            )
+            .mask()
+        );
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
@@ -695,10 +691,7 @@ impl Automerge {
     pub(crate) fn remove_actor(&mut self, actor: usize) {
         self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
-        self.write_frontier.remove_actor(actor);
-        if let Some(mask) = self.mask.as_mut() {
-            mask.remove_actor(actor);
-        }
+        self.visibility.remove_actor(actor);
         self.change_graph.remove_actor(actor);
         self.authors.remove_actor(actor);
     }
@@ -843,13 +836,12 @@ impl Automerge {
         // change still carries the author footer.
         if let Some(author) = &author {
             if self.is_author_masked(author) {
-                self.assign_author(author.clone(), actor_index);
+                self.register_actor(author.clone(), actor_index);
             }
         }
         let masked = self
-            .mask
-            .as_ref()
-            .is_some_and(|m| m.hides(&OpId::new(start_op.get(), actor_index)));
+            .visibility
+            .hides(&OpId::new(start_op.get(), actor_index));
         TransactionArgs {
             actor_index,
             seq,
@@ -1620,10 +1612,7 @@ impl Automerge {
             // ops. A fresh actor belongs to a masked local author if `transaction_args`
             // would mark it masked.
             if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
-                let masked = self
-                    .mask
-                    .as_ref()
-                    .is_some_and(|m| m.hides(&OpId::new(max_op + 1, actor_index)))
+                let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
                     || (max_op == 0
                         && self.author.as_ref().is_some_and(|a| {
                             self.write_frontier
@@ -1672,12 +1661,9 @@ impl Automerge {
             .add_change(change, actor_index, &mut self.authors)
             .expect("Change's deps should already be in the document");
 
-        if self.write_frontier.pop_pending_change(&hash) {
-            let graph = &self.change_graph;
-            self.write_frontier
-                .recompute_write_frontiers(&self.authors, |heads| {
-                    graph.seq_clock_for_local_heads(heads)
-                });
+        // This change was a pending boundary head. Report it so the caller
+        // republishes the visibility once the op set is consistent.
+        if self.visibility.is_pending(&hash) {
             HistoryUpdate::BoundaryResolved
         } else {
             HistoryUpdate::Unchanged
@@ -1688,10 +1674,7 @@ impl Automerge {
         self.ops.insert_actor(index, actor);
         self.change_graph.insert_actor(index);
         self.actor.rewrite_with_new_actor(index);
-        self.write_frontier.insert_actor(index);
-        if let Some(mask) = self.mask.as_mut() {
-            mask.insert_actor(index);
-        }
+        self.visibility.insert_actor(index);
         self.authors.insert_actor(index);
         index
     }

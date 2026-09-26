@@ -824,24 +824,6 @@ impl ChangeGraph {
         self.calculate_clock(nodes.collect())
     }
 
-    /// Return the [`SeqClock`] for the given frontier.
-    ///
-    /// A frontier only resolves if every [`ChangeHash`] is present in the
-    /// change graph. If any of them are not present, then an empty clock is
-    /// returned.
-    /// This is required because a partial clock could make the author's pending
-    /// changes visible, that may still be part of the pending portion of the
-    /// frontier.
-    ///
-    /// Otherwise, the clock calculated for the given heads is returned.
-    pub(crate) fn seq_clock_for_local_heads(&self, heads: &[ChangeHash]) -> SeqClock {
-        if self.missing_hashes(heads).next().is_some() {
-            SeqClock::new(self.num_actors())
-        } else {
-            self.seq_clock_for_heads(heads)
-        }
-    }
-
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
         Some(*self.seq.get(idx.0 as usize)?)
     }
