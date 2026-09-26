@@ -94,16 +94,20 @@ impl OwnedTransaction {
     /// Rollback the transaction, returning the document and number of cancelled ops.
     pub fn rollback(mut self) -> (Automerge, usize) {
         let cancelled = self.inner.take().unwrap().rollback(&mut self.doc);
-        self.patch_log.finish_transaction(self.doc.actors());
+        self.patch_log.abandon_transaction(self.doc.actors());
         (self.doc, cancelled)
     }
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
+        F: for<'e> FnOnce(
+            &mut TransactionInner,
+            &mut Automerge,
+            &mut crate::patches::Events<'e>,
+        ) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        f(tx, &mut self.doc, &mut self.patch_log)
+        f(tx, &mut self.doc, &mut self.patch_log.events())
     }
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> view::ReadAt<'_> {

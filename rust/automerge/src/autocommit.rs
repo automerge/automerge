@@ -191,7 +191,9 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         let heads = self.get_heads();
         self.patch_log.truncate();
-        self.patch_log.set_view(&self.doc, self.doc.visible(&heads));
+        self.patch_log
+            .transition_to(&self.doc, |d| d.visible(&heads))
+            .expect("AutoCommit's patch log always belongs to its document");
         self.diff_cursor = heads;
     }
 
@@ -242,8 +244,15 @@ impl AutoCommit {
         } else {
             let clock = self.doc.clock_range(before, after);
             let mut patch_log = PatchLog::active();
-            patch_log.set_view(&self.doc, self.doc.visible(after));
-            DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
+            patch_log
+                .record(
+                    &self.doc,
+                    |events| {
+                        DiffIter::log(&self.doc, obj, clock, events, recursive);
+                    },
+                    |d| d.visible(after),
+                )
+                .expect("a fresh patch log belongs to any document");
             patch_log.make_patches(&self.doc)
         }
     }
@@ -485,7 +494,6 @@ impl AutoCommit {
                 Some((hash, history)) => (Some(hash), history),
                 None => (None, HistoryUpdate::Unchanged),
             };
-            self.patch_log.finish_transaction(self.doc.actors());
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
@@ -494,9 +502,7 @@ impl AutoCommit {
                 .clone()
                 .unwrap_or_else(|| self.doc.get_heads());
             self.patch_log
-                .set_view_with(&self.doc, || self.doc.visible(&heads));
-            self.patch_log
-                .set_view_with(&self.doc, || self.doc.visible(&heads));
+                .finish_transaction(&self.doc, |d| d.visible(&heads));
             self.publish_resolved_boundary(history, &heads);
         }
     }
@@ -759,7 +765,6 @@ impl AutoCommit {
             Some((hash, history)) => (Some(hash), history),
             None => (None, HistoryUpdate::Unchanged),
         };
-        self.patch_log.finish_transaction(self.doc.actors());
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
         }
@@ -768,7 +773,7 @@ impl AutoCommit {
             .clone()
             .unwrap_or_else(|| self.doc.get_heads());
         self.patch_log
-            .set_view_with(&self.doc, || self.doc.visible(&heads));
+            .finish_transaction(&self.doc, |d| d.visible(&heads));
         self.publish_resolved_boundary(history, &heads);
         hash
     }
@@ -779,7 +784,7 @@ impl AutoCommit {
             .take()
             .map(|(_, tx)| {
                 let num = tx.rollback(&mut self.doc);
-                self.patch_log.finish_transaction(self.doc.actors());
+                self.patch_log.abandon_transaction(self.doc.actors());
                 num
             })
             .unwrap_or(0)
@@ -800,8 +805,7 @@ impl AutoCommit {
             log.begin_transaction(doc, &args)?;
             let (result, history) =
                 TransactionInner::empty(doc, args, options.message, options.time);
-            log.finish_transaction(doc.actors());
-            log.set_view_with(doc, || doc.visible_current());
+            log.finish_transaction(doc, |d| d.visible_current());
             if let HistoryUpdate::BoundaryResolved = history {
                 // The empty change is fully recorded and the log's view has
                 // been advanced past it, so the resolved boundary's
@@ -1124,7 +1128,13 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.put(&mut self.doc, patch_log, obj.as_ref(), prop, value)
+        tx.put(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            prop,
+            value,
+        )
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1135,7 +1145,13 @@ impl Transactable for AutoCommit {
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.put_object(&mut self.doc, patch_log, obj.as_ref(), prop, value)
+        tx.put_object(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            prop,
+            value,
+        )
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -1146,7 +1162,13 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.insert(&mut self.doc, patch_log, obj.as_ref(), index, value)
+        tx.insert(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            index,
+            value,
+        )
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -1157,7 +1179,13 @@ impl Transactable for AutoCommit {
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.insert_object(&mut self.doc, patch_log, obj.as_ref(), index, value)
+        tx.insert_object(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            index,
+            value,
+        )
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1168,7 +1196,13 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.increment(&mut self.doc, patch_log, obj.as_ref(), prop, value)
+        tx.increment(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            prop,
+            value,
+        )
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1178,7 +1212,7 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.delete(&mut self.doc, patch_log, obj.as_ref(), prop)
+        tx.delete(&mut self.doc, &mut patch_log.events(), obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence
@@ -1191,7 +1225,14 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice(&mut self.doc, patch_log, obj.as_ref(), pos, del, vals)
+        tx.splice(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            pos,
+            del,
+            vals,
+        )
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -1203,7 +1244,14 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice_text(&mut self.doc, patch_log, obj.as_ref(), pos, del, text)?;
+        tx.splice_text(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            pos,
+            del,
+            text,
+        )?;
         Ok(())
     }
 
@@ -1215,7 +1263,13 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.mark(&mut self.doc, patch_log, obj.as_ref(), mark, expand)
+        tx.mark(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            mark,
+            expand,
+        )
     }
 
     fn unmark<O: AsRef<ExId>>(
@@ -1230,7 +1284,7 @@ impl Transactable for AutoCommit {
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
         tx.unmark(
             &mut self.doc,
-            patch_log,
+            &mut patch_log.events(),
             obj.as_ref(),
             key,
             start,
@@ -1245,13 +1299,13 @@ impl Transactable for AutoCommit {
     {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index)
+        tx.split_block(&mut self.doc, &mut patch_log.events(), obj.as_ref(), index)
     }
 
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.join_block(&mut self.doc, patch_log, text.as_ref(), index)
+        tx.join_block(&mut self.doc, &mut patch_log.events(), text.as_ref(), index)
     }
 
     fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
@@ -1260,7 +1314,7 @@ impl Transactable for AutoCommit {
     {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.replace_block(&mut self.doc, patch_log, text.as_ref(), index)
+        tx.replace_block(&mut self.doc, &mut patch_log.events(), text.as_ref(), index)
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
@@ -1278,7 +1332,7 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
+        crate::text_diff::myers_diff(&mut self.doc, tx, &mut patch_log.events(), obj, new_text)
     }
 
     fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
@@ -1292,7 +1346,7 @@ impl Transactable for AutoCommit {
         crate::text_diff::myers_block_diff(
             &mut self.doc,
             tx,
-            patch_log,
+            &mut patch_log.events(),
             text.as_ref(),
             new_text,
             &config,
@@ -1306,7 +1360,12 @@ impl Transactable for AutoCommit {
     ) -> Result<(), crate::error::UpdateObjectError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.update_object(&mut self.doc, patch_log, obj.as_ref(), new_value)
+        tx.update_object(
+            &mut self.doc,
+            &mut patch_log.events(),
+            obj.as_ref(),
+            new_value,
+        )
     }
 
     fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1320,7 +1379,7 @@ impl Transactable for AutoCommit {
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
         tx.batch_create_object(
             &mut self.doc,
-            patch_log,
+            &mut patch_log.events(),
             obj.as_ref(),
             prop.into(),
             value,
@@ -1334,7 +1393,7 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.batch_init_root_map(&mut self.doc, patch_log, value)?;
+        tx.batch_init_root_map(&mut self.doc, &mut patch_log.events(), value)?;
         Ok(())
     }
 }

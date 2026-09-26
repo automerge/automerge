@@ -5,8 +5,9 @@ use crate::iter::Span;
 use crate::{
     automerge::view::ReadAt,
     iter::{SpanInternal, SpansInternal},
+    patches::Events,
     transaction::TransactionInner,
-    ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
+    ObjId as ExId, ReadDoc, TextEncoding,
 };
 mod myers;
 mod replace;
@@ -15,7 +16,7 @@ mod utils;
 pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &mut PatchLog,
+    patch_log: &mut Events<'_>,
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
@@ -43,10 +44,10 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     )
 }
 
-struct TxHook<'a> {
+struct TxHook<'a, 'e> {
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &'a mut PatchLog,
+    patch_log: &'a mut Events<'e>,
     old: &'a [&'a str],
     new: &'a [&'a str],
     obj: &'a ExId,
@@ -54,7 +55,7 @@ struct TxHook<'a> {
     text_encoding: TextEncoding,
 }
 
-impl myers::DiffHook for TxHook<'_> {
+impl myers::DiffHook for TxHook<'_, '_> {
     type Error = crate::AutomergeError;
 
     fn equal(
@@ -136,7 +137,7 @@ impl myers::DiffHook for TxHook<'_> {
 pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &mut PatchLog,
+    patch_log: &mut Events<'_>,
     text_obj: &crate::ObjId,
     new: I,
     config: &crate::marks::UpdateSpansConfig,
@@ -165,7 +166,7 @@ pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
 fn apply_marks_diff(
     doc: &mut Automerge,
     tx: &mut TransactionInner,
-    patch_log: &mut PatchLog,
+    patch_log: &mut Events<'_>,
     text_obj: &crate::ObjId,
     new_spans: &[Span],
     config: &crate::marks::UpdateSpansConfig,
@@ -250,10 +251,10 @@ fn apply_marks_diff(
     Ok(())
 }
 
-struct BlockDiffHook<'a> {
+struct BlockDiffHook<'a, 'e> {
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
-    patch_log: &'a mut PatchLog,
+    patch_log: &'a mut Events<'e>,
     old: &'a [BlockOrGrapheme],
     new: &'a [BlockOrGrapheme],
     obj: &'a ExId,
@@ -275,7 +276,7 @@ impl BlockOrGrapheme {
     }
 }
 
-impl myers::DiffHook for BlockDiffHook<'_> {
+impl myers::DiffHook for BlockDiffHook<'_, '_> {
     type Error = crate::AutomergeError;
 
     fn equal(
@@ -492,7 +493,7 @@ fn span_as_grapheme<I: Iterator<Item = Span>>(iter: I) -> Vec<BlockOrGrapheme> {
 fn split_block(
     doc: &mut Automerge,
     tx: &mut TransactionInner,
-    patch_log: &mut PatchLog,
+    patch_log: &mut Events<'_>,
     obj: &crate::ObjId,
     index: usize,
     block: &crate::hydrate::Map,
@@ -504,7 +505,7 @@ fn split_block(
 fn update_block(
     doc: &mut Automerge,
     tx: &mut TransactionInner,
-    patch_log: &mut PatchLog,
+    patch_log: &mut Events<'_>,
     obj: &crate::ObjId,
     index: usize,
     new_block: &crate::hydrate::Map,

@@ -1378,6 +1378,11 @@ impl Automerge {
             doc.set_author(self.get_author().cloned());
             doc = doc.with_actor(self.actor_id().clone());
             doc.set_write_frontier(self.get_write_frontier());
+            // Finish the log's pending segment against the OLD document
+            // before it is replaced: its observed view and events name this
+            // document's actors and views, which cannot be resolved once
+            // `self` is the loaded document.
+            patch_log.transition_to(self, |d| d.visible_current())?;
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
@@ -1408,9 +1413,16 @@ impl Automerge {
         patch_log: &mut PatchLog,
         recursive: bool,
     ) {
-        patch_log.set_view(self, self.visible_current());
-        let clock = ClockRange::current(self.read_current());
-        let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
+        let path_map = patch_log
+            .record(
+                self,
+                |events| {
+                    let clock = ClockRange::current(self.read_current());
+                    DiffIter::log(self, obj, clock, events, recursive)
+                },
+                |d| d.visible_current(),
+            )
+            .expect("patch log actors must match the document when binding a view");
         patch_log.path_hint(path_map);
     }
 
@@ -1608,7 +1620,7 @@ impl Automerge {
     /// given clock is the current visible clock.
     ///
     /// Use this only for a view that was fully resolved against the committed
-    /// document, such as a patch log's stored endpoint. Do not use it while a
+    /// document, such as a patch log's observed view. Do not use it while a
     /// transaction is open or for an isolation scope: in both cases the indexes
     /// can include ops that the clock does not, so the fast path would expose
     /// them. Use [`Self::read_scoped`] there instead.
@@ -1828,8 +1840,15 @@ impl Automerge {
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
-        patch_log.set_view(self, self.visible(after_heads));
-        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
+        patch_log
+            .record(
+                self,
+                |events| {
+                    DiffIter::log(self, ObjMeta::root(), clock, events, true);
+                },
+                |d| d.visible(after_heads),
+            )
+            .expect("a fresh patch log belongs to any document");
         patch_log.make_patches(self)
     }
 
@@ -1859,8 +1878,15 @@ impl Automerge {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
-        patch_log.set_view(self, self.visible(after_heads));
-        DiffIter::log(self, obj, clock, &mut patch_log, recursive);
+        patch_log
+            .record(
+                self,
+                |events| {
+                    DiffIter::log(self, obj, clock, events, recursive);
+                },
+                |d| d.visible(after_heads),
+            )
+            .expect("a fresh patch log belongs to any document");
         Ok(patch_log.make_patches(self))
     }
 
