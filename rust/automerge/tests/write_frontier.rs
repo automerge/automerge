@@ -5,6 +5,9 @@ use automerge::{
     TextEncoding, ROOT,
 };
 
+#[path = "support/rich_model.rs"]
+mod rich_model;
+
 // ============================= reads =============================
 
 fn two_authors() -> (Automerge, Author<'static>, Vec<automerge::ChangeHash>) {
@@ -1122,4 +1125,51 @@ fn fork_and_fork_at_carry_write_frontier() {
         fork_at.get(ROOT, "y").unwrap().is_none(),
         "fork_at must not materialize the masked author"
     );
+}
+
+/// The forced-slow oracle materialises the current view through the
+/// filtered (non-indexed) path; under a write-frontier mask it must agree with
+/// the indexed fast path used by `hydrate(None)`.
+#[test]
+fn forced_slow_hydrate_matches_current_under_mask() {
+    let (mut doc, alice, epoch) = two_authors();
+    doc.mask_author(alice, &epoch, &mut PatchLog::inactive())
+        .unwrap();
+    assert_eq!(
+        doc.hydrate(None),
+        doc.read_forced_slow_hydrate(),
+        "indexed fast path disagrees with the forced-slow filtered path"
+    );
+}
+
+/// Replaying mark/block patches into the rich-text model reproduces the
+/// document's own `spans()`; `hydrate::Value` cannot hold marks or block
+/// markers, so this model is the oracle for `Mark`/`SplitBlock` replay.
+#[test]
+fn rich_model_replays_mark_patches() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "hello").unwrap();
+    doc.update_diff_cursor();
+
+    let mut model = rich_model::RichText::from_doc(doc.document(), &text);
+    doc.mark(
+        &text,
+        Mark {
+            start: 0,
+            end: 5,
+            name: "bold".into(),
+            value: true.into(),
+        },
+        ExpandMark::Both,
+    )
+    .unwrap();
+    doc.split_block(&text, 2).unwrap();
+
+    for patch in doc.diff_incremental() {
+        if patch.obj == text {
+            model.apply(&patch);
+        }
+    }
+    assert_eq!(model, rich_model::RichText::from_doc(doc.document(), &text));
 }
