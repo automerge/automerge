@@ -2011,6 +2011,17 @@ impl Automerge {
         self.hydrate_map(&ObjId::root(), &read)
     }
 
+    /// Test oracle: the current view materialised through the filtered
+    /// (non-indexed) path. Never use for production reads.
+    ///
+    /// `read_at(Some(heads))` collapses to the indexed `ReadAt::Current`
+    /// when `heads` are current, so tests cannot force the filtered path
+    /// through heads; this method reads under `ReadAt::At` explicitly.
+    #[doc(hidden)]
+    pub fn read_forced_slow_hydrate(&self) -> hydrate::Value {
+        self.hydrate_map(&ObjId::root(), &ReadAt::at(self.visible_current()))
+    }
+
     pub(crate) fn hydrate_obj(
         &self,
         obj: &crate::ObjId,
