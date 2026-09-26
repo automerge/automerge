@@ -1,6 +1,6 @@
 use crate::op_set2::OpSet;
 use crate::types::{ObjId, ObjType};
-use crate::{clock::ReadAt, exid::ExId, Prop};
+use crate::{automerge::view::ReadAt, exid::ExId, Prop};
 
 /// An iterator over the "parents" of an object
 ///

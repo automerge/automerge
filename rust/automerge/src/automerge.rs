@@ -17,8 +17,10 @@ pub(crate) use crate::read::ReadDoc;
 
 use crate::change_graph::ChangeGraph;
 use crate::change_queue::ChangeQueue;
+use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
+use crate::hydrate;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
@@ -28,15 +30,14 @@ use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
     TransactionArgs,
 };
-use crate::write_frontier::WriteFrontier;
-
-use crate::clock::{Clock, ClockRange, Mask, ReadAt, VisibleClock};
-use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
+use crate::write_frontier::WriteFrontier;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use std::borrow::Cow;
+use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
 pub(crate) mod current_state;
+pub(crate) mod view;
 mod visibility;
 
 // FIXME
@@ -1545,7 +1546,7 @@ impl Automerge {
         before: &[ChangeHash],
         after: &[ChangeHash],
     ) -> ClockRange<'static> {
-        ClockRange::Diff(self.visible(before), self.visible(after))
+        ClockRange::diff(self.visible(before), self.visible(after))
     }
 
     /// The clock a read at `heads` observes: causal(heads) ∩ mask.
@@ -1560,13 +1561,16 @@ impl Automerge {
 
     /// Return a [`ReadAt`] that depends on the provided `heads`.
     ///
-    /// If `heads` is `None` or is the current set of heads, then
-    /// [`ReadAt::Current`] is returned.
+    /// If `heads` is `None` or is the current set of heads, then a current
+    /// read ([`ReadAt::current`]) is returned, carrying the active mask.
     ///
-    /// Otherwise, a historical snapshot is take with the provided `heads`.
+    /// Otherwise, a historical snapshot ([`ReadAt::at`]) is taken with the
+    /// provided `heads`.
     pub(crate) fn read_at(&self, heads: Option<&[ChangeHash]>) -> ReadAt<'_> {
         match heads {
-            Some(h) if !self.change_graph.heads_are_current(h) => ReadAt::at(self.visible(h)),
+            Some(h) if !self.change_graph.heads_are_current(h) => {
+                ReadAt::at(Cow::Owned(self.visible(h)))
+            }
             _ => self.read_current(),
         }
     }
@@ -1576,18 +1580,33 @@ impl Automerge {
     ///
     /// Equivalent to `doc.read_at(None)`.
     pub(crate) fn read_current(&self) -> ReadAt<'_> {
-        ReadAt::Current {
-            mask: self.mask().map(Cow::Borrowed),
-        }
+        ReadAt::current(self.mask().map(Cow::Borrowed))
     }
 
-    /// Read at a stored view: `Current` when it equals today's visible clock.
+    /// Read at the given [`VisibleClock`], taking the indexed fast path when the
+    /// given clock is the current visible clock.
+    ///
+    /// Use this only for a view that was fully resolved against the committed
+    /// document, such as a patch log's stored endpoint. Do not use it while a
+    /// transaction is open or for an isolation scope: in both cases the indexes
+    /// can include ops that the clock does not, so the fast path would expose
+    /// them. Use [`Self::read_scoped`] there instead.
     pub(crate) fn read_visible<'a>(&'a self, v: &'a VisibleClock) -> ReadAt<'a> {
         if *v == self.visible_current() {
             self.read_current()
         } else {
-            ReadAt::At(Cow::Borrowed(v))
+            ReadAt::at(Cow::Borrowed(v))
         }
+    }
+
+    /// Read at a caller-held scope, which is always a historical snapshot.
+    ///
+    /// This is the producer for in-flight-transaction scopes: pending ops are
+    /// indexed but absent from the graph heads, and a masked isolated actor's
+    /// scope can equal [`Automerge::visible_current`], so the fast paths of
+    /// [`Automerge::read_at`] and [`Automerge::read_visible`] must not apply.
+    pub(crate) fn read_scoped<'a>(&self, scope: Cow<'a, VisibleClock>) -> ReadAt<'a> {
+        ReadAt::at(scope)
     }
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
@@ -2012,15 +2031,10 @@ impl Automerge {
     /// through heads; this method reads under `ReadAt::At` explicitly.
     #[doc(hidden)]
     pub fn read_forced_slow_hydrate(&self) -> hydrate::Value {
-        self.hydrate_map(&ObjId::root(), &ReadAt::at(self.visible_current()))
-    }
-
-    pub(crate) fn hydrate_obj(
-        &self,
-        obj: &crate::ObjId,
-        heads: Option<&[ChangeHash]>,
-    ) -> Result<hydrate::Value, AutomergeError> {
-        self.hydrate_obj_for(obj, self.read_at(heads))
+        self.hydrate_map(
+            &ObjId::root(),
+            &ReadAt::at(Cow::Owned(self.visible_current())),
+        )
     }
 
     pub(crate) fn hydrate_obj_for(
@@ -2069,7 +2083,7 @@ impl Automerge {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.map_range(&obj.id, range, read))
-            .unwrap_or_default()
+            .unwrap_or_else(MapRange::empty)
     }
 
     pub(crate) fn list_range_for<'a, R: RangeBounds<usize>>(
@@ -2081,7 +2095,7 @@ impl Automerge {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.list_range(&obj.id, range, read))
-            .unwrap_or_default()
+            .unwrap_or_else(ListRange::empty)
     }
 
     pub(crate) fn values_for(&self, obj: &ExId, read: ReadAt<'_>) -> Values<'_> {

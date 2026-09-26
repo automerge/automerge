@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::automerge::Automerge;
 use crate::iter::Span;
 use crate::{
-    clock::ReadAt,
+    automerge::view::ReadAt,
     iter::{SpanInternal, SpansInternal},
     transaction::TransactionInner,
     ObjId as ExId, PatchLog, ReadDoc, TextEncoding,

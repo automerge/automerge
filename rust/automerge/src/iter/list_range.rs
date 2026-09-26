@@ -1,4 +1,4 @@
-use crate::clock::{ClockRange, ReadAt};
+use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::iter::tools::{DiffIter, ExIdPromise, Shiftable, Unshift};
 use crate::iter::Diff;
@@ -37,12 +37,18 @@ impl ListRangeItem<'_> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ListDiff<'a> {
-    op_set: Option<&'a OpSet>,
-    iter: Unshift<DiffIter<'a, ListIter<'a>>>,
-    index: usize,
-    clock: ClockRange<'a>,
+#[derive(Debug, Clone)]
+pub(crate) struct ListDiff<'a>(ListDiffInner<'a>);
+
+#[derive(Clone, Debug)]
+enum ListDiffInner<'a> {
+    Empty,
+    Reading {
+        op_set: &'a OpSet,
+        iter: Box<Unshift<DiffIter<'a, ListIter<'a>>>>,
+        index: usize,
+        clock: ClockRange<'a>,
+    },
 }
 
 impl<'a> ListDiff<'a> {
@@ -60,20 +66,38 @@ impl<'a> ListDiff<'a> {
         };
 
         let skip = DiffIter::new(op_set, list_iter, clock.clone(), range);
-        let iter = Unshift::new(skip);
+        let iter = Box::new(Unshift::new(skip));
 
-        Self {
-            op_set: Some(op_set),
+        Self(ListDiffInner::Reading {
+            op_set,
             iter,
             clock,
             index: 0,
-        }
+        })
+    }
+
+    #[inline]
+    const fn empty() -> Self {
+        Self(ListDiffInner::Empty)
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.iter.shift(range);
-        self.index = 0;
+        self.shift(range);
         self.next()
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        if let ListDiffInner::Reading { iter, index, .. } = &mut self.0 {
+            iter.shift(range);
+            *index = 0;
+        }
+    }
+
+    fn op_set(&self) -> Option<&'a OpSet> {
+        match self.0 {
+            ListDiffInner::Empty => None,
+            ListDiffInner::Reading { op_set, .. } => Some(op_set),
+        }
     }
 }
 
@@ -114,15 +138,20 @@ impl<'a> Iterator for ListDiff<'a> {
     type Item = ListDiffItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let op_set = self.op_set.as_mut()?;
+        let Self(ListDiffInner::Reading {
+            op_set,
+            iter,
+            index,
+            clock,
+        }) = self
+        else {
+            return None;
+        };
         let mut last_is_same = false;
-        //let mut expose;
         let mut last_visible: Option<Self::Item> = None;
-        //let mut num_new = 0;
-        //let mut num_old = 0;
         let mut state = ListState::default();
 
-        while let Some((diff, list)) = self.iter.next() {
+        while let Some((diff, list)) = iter.next() {
             match diff {
                 Diff::Del => {
                     state.num_old += 1;
@@ -137,12 +166,12 @@ impl<'a> Iterator for ListDiff<'a> {
                 Diff::Add => {
                     last_is_same = false;
                     state.num_new += 1;
-                    state.expose = self.clock.predates(&list.id);
+                    state.expose = clock.predates(&list.id);
                 }
             }
 
             let value = if let ScalarValue::Counter(c) = &list.value {
-                let (inc1, inc2) = op_set.get_increment_diff_at_pos(list.pos, &self.clock);
+                let (inc1, inc2) = op_set.get_increment_diff_at_pos(list.pos, clock);
                 state.inc = inc2 - inc1;
                 ValueRef::from_action_value(list.action, ScalarValue::Counter(*c + inc2))
             } else {
@@ -153,10 +182,10 @@ impl<'a> Iterator for ListDiff<'a> {
             let old_conflict = diff == Diff::Same && state.num_old > 1;
             state.conflict = state.num_new > 1 && !old_conflict;
 
-            if let Some((next_diff, next_list)) = self.iter.peek() {
+            if let Some((next_diff, next_list)) = iter.peek() {
                 if next_list.inserts == list.inserts {
                     if diff.is_visible() && next_diff.is_del() {
-                        last_visible = Some(state.diff_item(list.id, value, self.index, diff));
+                        last_visible = Some(state.diff_item(list.id, value, *index, diff));
                     }
                     continue;
                 }
@@ -169,11 +198,11 @@ impl<'a> Iterator for ListDiff<'a> {
                 // patch must carry the remaining register's conflict state.
                 last.conflict = state.num_new > 1;
                 if last.diff.is_visible() {
-                    self.index += 1;
+                    *index += 1;
                 }
                 return Some(last);
             } else {
-                let mut item = state.diff_item(list.id, value, self.index, diff);
+                let mut item = state.diff_item(list.id, value, *index, diff);
                 if diff == Diff::Same && state.num_old > 1 && state.num_new == 1 {
                     // The surviving value is unchanged, but removing the other
                     // visible values clears its conflict flag. Emit a Put and,
@@ -181,7 +210,7 @@ impl<'a> Iterator for ListDiff<'a> {
                     item.update(true);
                 }
                 if item.diff.is_visible() {
-                    self.index += 1;
+                    *index += 1;
                 }
                 return Some(item);
             }
@@ -252,10 +281,21 @@ impl<'a> ListDiffItem<'a> {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct ListRange<'a> {
     iter: ListDiff<'a>,
     range: Range<usize>,
+}
+
+impl<'a> ListRange<'a> {
+    /// A range over no document; yields nothing.
+    #[inline]
+    pub(crate) const fn empty() -> Self {
+        Self {
+            iter: ListDiff::empty(),
+            range: 0..0,
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -330,14 +370,13 @@ impl<'a> ListRange<'a> {
         let (start, end) = normalize_range(range);
         let range = start..end;
 
-        let clock = ClockRange::Current(read);
+        let clock = read.into_range();
         let iter = ListDiff::new(op_set, obj_range, clock);
         Self { range, iter }
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.iter.iter.shift(range);
-        self.iter.index = 0;
+        self.iter.shift(range);
         self.next()
     }
 }
@@ -351,7 +390,7 @@ impl<'a> Iterator for ListRange<'a> {
             if !self.range.contains(&item.index) {
                 continue;
             }
-            return Some(item.export(self.iter.op_set?));
+            return Some(item.export(self.iter.op_set()?));
         }
     }
 }

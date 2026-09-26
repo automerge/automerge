@@ -246,7 +246,10 @@ macro_rules! impl_read_doc_for_tx {
                 obj: O,
                 heads: Option<&[crate::ChangeHash]>,
             ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
-                self.doc.hydrate_obj(obj.as_ref(), heads)
+                // Use the transaction read scope to correctly handle isolated
+                // views, and not the `doc`'s scope.
+                self.doc
+                    .hydrate_obj_for(obj.as_ref(), self.get_scope(heads))
             }
 
             fn get_marks<O: AsRef<crate::exid::ExId>>(

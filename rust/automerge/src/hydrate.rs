@@ -1,4 +1,4 @@
-use crate::clock::ReadAt;
+use crate::automerge::view::ReadAt;
 use crate::op_set2::{Op, OpSet, OpType};
 use crate::types::{ObjId, ScalarValue, SequenceType};
 use crate::TextEncoding;
