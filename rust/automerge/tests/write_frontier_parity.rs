@@ -304,14 +304,15 @@ impl Runner {
             None => self.main.hydrate(ROOT, None).unwrap(),
         };
         prop_assert_eq!(&self.model, &expected, "patches: {:?}", patches);
-        // Fast/slow parity against a genuinely independent oracle: a fresh
+        // Reload parity against an independent materialisation: a fresh
         // `Automerge::load` of the saved bytes under the same write_frontier
         // policy re-materializes through `from_parts` + index recomputation.
         // (Comparing `hydrate(Some(current_heads))` was vacuous: `read_at`
         // maps the current heads back to `ReadAt::Current`, so both sides
-        // shared the indexed fast path.) Note the reload oracle shares the
-        // positional *read* path with the live document, so read-path bugs
-        // still need the `slow_path_assertions` feature to surface.
+        // shared the indexed fast path.) The reload oracle shares the
+        // positional *read* path with the live document: whole-result
+        // fast/slow comparisons run only under
+        // `--features slow_path_assertions` (CI: `scripts/ci/build-test`).
         if self.isolated.is_none() {
             let reload = Automerge::load(&self.main.save())
                 .expect("saved document reloads")
