@@ -11,8 +11,9 @@
 
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
+use crate::patches::Events;
 use crate::types::{ObjId, OpId, Prop, ScalarValue, SequenceType};
-use crate::{PatchLog, TextEncoding};
+use crate::TextEncoding;
 
 #[cfg(test)]
 mod tests;
@@ -161,7 +162,7 @@ impl ValueTransition {
     }
 
     /// Encode the transition of map property `key` into the patch log.
-    pub(super) fn emit_map(self, obj: ObjId, key: &str, log: &mut PatchLog) {
+    pub(super) fn emit_map(self, obj: ObjId, key: &str, log: &mut Events<'_>) {
         match self.0 {
             Transition::Absent => {}
             Transition::Appeared { after } | Transition::Replaced { after, .. } => {
@@ -196,7 +197,7 @@ impl ValueTransition {
         seq_type: SequenceType,
         encoding: TextEncoding,
         marks: &RichTextDiff<'_>,
-        log: &mut PatchLog,
+        log: &mut Events<'_>,
     ) {
         let is_text = matches!(seq_type, SequenceType::Text);
         match self.0 {
@@ -278,7 +279,7 @@ fn expose(candidate: &Candidate) -> bool {
 }
 
 /// Put the after winner at `key` with its final conflict state.
-fn put_map(obj: ObjId, key: &str, after: PresentCandidates, log: &mut PatchLog) {
+fn put_map(obj: ObjId, key: &str, after: PresentCandidates, log: &mut Events<'_>) {
     let conflict = after.conflicted();
     let expose = expose(&after.winner);
     let winner = after.winner;
@@ -297,7 +298,7 @@ fn replace(
     seq_type: SequenceType,
     encoding: TextEncoding,
     marks: &RichTextDiff<'_>,
-    log: &mut PatchLog,
+    log: &mut Events<'_>,
 ) {
     let conflict = after.conflicted();
     let expose = expose(&after.winner);
@@ -323,7 +324,7 @@ fn emit_text_marks(
     value: &Value,
     encoding: TextEncoding,
     marks: &RichTextDiff<'_>,
-    log: &mut PatchLog,
+    log: &mut Events<'_>,
 ) {
     if let Some(delta) = marks.current().export() {
         log.mark(

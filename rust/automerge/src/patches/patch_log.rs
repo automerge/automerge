@@ -49,14 +49,64 @@ pub struct PatchLog {
     active: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
-    /// The endpoint of the pending events, not the last delivered diff cursor.
-    /// Both paths and exposed contents must be resolved under this saved view.
-    view: Option<VisibleClock>,
-    pub(crate) actors: Vec<ActorId>,
+    /// How this log is bound to its document.
+    ///
+    /// The *observed view* is the visible clock the pending events have
+    /// been recorded up to. It is not the same as the diff cursor: the
+    /// cursor is the last view a caller drained patches for; the observed
+    /// view is where the log currently is. Paths and exposed contents are
+    /// resolved against the observed view when patches are made.
+    binding: Binding,
     /// Actors which were speculatively added to `actors` when a transaction was opened. If the
     /// transaction produces no ops the actor is removed from the document again on commit/rollback,
     /// so these must be removed from the patch log too (see [`PatchLog::finish_transaction`]).
     speculative_actor: Option<ActorId>,
+}
+
+/// How a [`PatchLog`] is bound to its document.
+///
+/// An observed view is only meaningful together with the actors behind its
+/// columns: storing one without the other would let a later actor
+/// insertion misattribute the clock's entries. `Bound` therefore always
+/// carries both. A `Bound` log over an empty document is legitimate (no
+/// actors, a zero-length view); growth from there uses the ordinary actor
+/// migration path. Length or identity mismatches against a document are
+/// still checked at runtime ([`PatchLog::validate`]).
+#[derive(Clone, Debug)]
+enum Binding {
+    /// A fresh log: no actors, no observed view.
+    Unbound,
+    /// The log knows its document's actors but has no observed view. This
+    /// is the state of an inactive log, or an active one after `truncate`.
+    Actors(Vec<ActorId>),
+    /// The observed view and the actors behind its columns, always together.
+    Bound {
+        view: VisibleClock,
+        actors: Vec<ActorId>,
+    },
+}
+
+impl Binding {
+    fn actors(&self) -> &[ActorId] {
+        match self {
+            Binding::Unbound => &[],
+            Binding::Actors(actors) | Binding::Bound { actors, .. } => actors,
+        }
+    }
+
+    fn view(&self) -> Option<&VisibleClock> {
+        match self {
+            Binding::Bound { view, .. } => Some(view),
+            Binding::Unbound | Binding::Actors(_) => None,
+        }
+    }
+
+    fn take_actors(&mut self) -> Vec<ActorId> {
+        match std::mem::replace(self, Binding::Unbound) {
+            Binding::Unbound => Vec::new(),
+            Binding::Actors(actors) | Binding::Bound { actors, .. } => actors,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -234,10 +284,9 @@ impl PatchLog {
             events: Vec::new(),
             expose: HashSet::new(),
             completed_patches: Vec::new(),
-            view: None,
+            binding: Binding::Unbound,
             path_map: Default::default(),
             path_hint: 0,
-            actors: vec![],
             speculative_actor: None,
         }
     }
@@ -272,33 +321,31 @@ impl PatchLog {
         self.events.len()
     }
 
-    /// Advance the endpoint after recording ordinary forward events. This does
-    /// not log a diff: the transaction or import walk already recorded it.
+    /// Move the observed view forward after recording ordinary events.
     ///
-    /// The stored view is always bound together with the document's actor
-    /// list: a clock is meaningless without the identities behind its
-    /// columns, so recording one without the other would let a later actor
-    /// insertion misattribute the clock's entries. Actor migration runs even
-    /// on an inactive log (mirroring [`Self::transition_to`]); only the view
-    /// itself is skipped.
-    pub(crate) fn set_view(&mut self, doc: &Automerge, view: VisibleClock) {
-        self.set_view_with(doc, || view)
-    }
-
-    /// Like [`Self::set_view`] but computes the view lazily, so an inactive
-    /// log skips the clock computation entirely.
-    pub(crate) fn set_view_with(&mut self, doc: &Automerge, view: impl FnOnce() -> VisibleClock) {
+    /// This does not log a diff: the events for the move have already been
+    /// recorded. Actor migration runs even on an inactive log, mirroring
+    /// [`Self::transition_to`]; only the view itself is skipped, and it is
+    /// computed lazily so an inactive log pays nothing for it.
+    fn advance_view_with(&mut self, doc: &Automerge, view: impl FnOnce() -> VisibleClock) {
         self.migrate_actors(&doc.ops.actors)
             .expect("patch log actors must match the document when binding a view");
         if self.active {
-            self.view = Some(view());
+            self.adopt_view(view());
         }
     }
 
-    /// Reconcile the recorded endpoint with another view: finish the current
-    /// segment, log the diff from the recorded endpoint to `after`, adopt
-    /// `after` and finish again. An unbound log (view == `None`) just adopts
-    /// `after` without recording its contents.
+    fn actors(&self) -> &[ActorId] {
+        self.binding.actors()
+    }
+
+    /// Move the observed view to `after`, recording the difference.
+    ///
+    /// Finishes the pending segment at the current observed view, logs the
+    /// diff from that view to `after`, adopts `after` as the new observed
+    /// view and finishes again so the transition is resolved in isolation.
+    /// A log with no observed view simply adopts `after` without recording
+    /// anything.
     ///
     /// `after` is a closure so the clock is only computed when the log is
     /// active; actor migration still runs unconditionally.
@@ -312,7 +359,7 @@ impl PatchLog {
             return Ok(());
         }
         let after = after(doc);
-        match self.view.clone() {
+        match self.binding.view().cloned() {
             Some(before) if before == after => Ok(()),
             Some(before) => {
                 self.finish_view(doc);
@@ -320,21 +367,69 @@ impl PatchLog {
                     doc,
                     ObjMeta::root(),
                     ClockRange::diff(before, after.clone()),
-                    self,
+                    &mut self.events(),
                     true,
                 );
-                self.view = Some(after);
+                self.adopt_view(after);
                 // Do not sort across view transitions. Resolve exposed
-                // subtrees and paths at this endpoint before subsequent
+                // subtrees and paths at the new observed view before later
                 // events move them.
                 self.finish_view(doc);
                 Ok(())
             }
             None => {
-                self.view = Some(after);
+                self.adopt_view(after);
                 Ok(())
             }
         }
+    }
+
+    /// Adopt `view` as the observed view, keeping the actors already bound.
+    ///
+    /// Callers must have migrated the actors against the document `view`
+    /// was computed from, so the clock's columns and `actors` line up.
+    fn adopt_view(&mut self, view: VisibleClock) {
+        let actors = self.binding.take_actors();
+        debug_assert_eq!(
+            view.len(),
+            actors.len(),
+            "an observed view must have one column per bound actor"
+        );
+        self.binding = Binding::Bound { view, actors };
+    }
+
+    /// An event-only handle over this log, for recording paths that manage
+    /// the log's lifecycle themselves (transactions between
+    /// [`Self::begin_transaction`] and [`Self::finish_transaction`]).
+    pub(crate) fn events(&mut self) -> Events<'_> {
+        Events(self)
+    }
+
+    /// Record forward progress under `doc`.
+    ///
+    /// Validates and migrates the actors, runs `record` with an event-only
+    /// handle, then adopts `after` as the new observed view. `after` is
+    /// computed lazily, so an inactive log skips the clock computation.
+    ///
+    /// Forward progress does not finalize the pending segment: events stay
+    /// pending and are resolved together at the observed view they end up
+    /// at, where an event addressed to a since-superseded object is
+    /// dropped. Only a visibility transition ([`Self::transition_to`] with
+    /// a different clock) finalizes a segment.
+    pub(crate) fn record<T>(
+        &mut self,
+        doc: &Automerge,
+        record: impl FnOnce(&mut Events<'_>) -> T,
+        after: impl FnOnce(&Automerge) -> VisibleClock,
+    ) -> Result<T, crate::PatchLogMismatch> {
+        self.migrate_actors(&doc.ops.actors)?;
+        if !self.active {
+            return Ok(record(&mut self.events()));
+        }
+        let after = after(doc);
+        let result = record(&mut self.events());
+        self.adopt_view(after);
+        Ok(result)
     }
 
     /// Finalize one segment of events under the log's saved view, even if the
@@ -351,7 +446,7 @@ impl PatchLog {
     /// indexes may identify different objects after the transition. Finalizing
     /// concrete patches here preserves both their ordering and their paths, and
     /// lets them be safely concatenated with patches from subsequent views.
-    pub(crate) fn finish_view(&mut self, doc: &Automerge) {
+    fn finish_view(&mut self, doc: &Automerge) {
         if !self.events.is_empty() || !self.expose.is_empty() {
             self.migrate_actors(&doc.ops.actors)
                 .expect("patch log actors must be validated before finalizing a view");
@@ -364,22 +459,22 @@ impl PatchLog {
         }
     }
 
-    pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
+    fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
         self.push_event(obj, Event::DeleteSeq { index, num })
     }
 
-    pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
+    fn delete_map(&mut self, obj: ObjId, key: &str) {
         self.push_event(obj, Event::DeleteMap { key: key.into() })
     }
 
-    pub(crate) fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
+    fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
         match prop {
             PropRef::Map(key) => self.increment_map(obj, &key, value, id),
             PropRef::Seq(index) => self.increment_seq(obj, index, value, id),
         }
     }
 
-    pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
+    fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
         self.events.push((
             obj,
             Event::IncrementMap {
@@ -394,22 +489,22 @@ impl PatchLog {
         self.push_event(obj, Event::IncrementSeq { index, n, id })
     }
 
-    pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
+    fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
         match prop {
             Prop::Map(key) => self.flag_conflict_map(obj, key),
             Prop::Seq(index) => self.flag_conflict_seq(obj, *index),
         }
     }
 
-    pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
+    fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
         self.push_event(obj, Event::FlagConflictMap { key: key.into() })
     }
 
-    pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
+    fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
         self.push_event(obj, Event::FlagConflictSeq { index })
     }
 
-    pub(crate) fn put(
+    fn put(
         &mut self,
         obj: ObjId,
         prop: PropRef<'_>,
@@ -424,7 +519,7 @@ impl PatchLog {
         }
     }
 
-    pub(crate) fn put_map(
+    fn put_map(
         &mut self,
         obj: ObjId,
         key: &str,
@@ -447,7 +542,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn put_seq(
+    fn put_seq(
         &mut self,
         obj: ObjId,
         index: usize,
@@ -471,7 +566,7 @@ impl PatchLog {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn replace_seq(
+    fn replace_seq(
         &mut self,
         obj: ObjId,
         index: usize,
@@ -497,13 +592,7 @@ impl PatchLog {
         }
     }
 
-    pub(crate) fn splice(
-        &mut self,
-        obj: ObjId,
-        index: usize,
-        text: &str,
-        marks: Option<Arc<MarkSet>>,
-    ) {
+    fn splice(&mut self, obj: ObjId, index: usize, text: &str, marks: Option<Arc<MarkSet>>) {
         self.events.push((
             obj,
             Event::Splice {
@@ -514,7 +603,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+    fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -524,7 +613,7 @@ impl PatchLog {
         self.push_event(obj, Event::Mark { marks: acc })
     }
 
-    pub(crate) fn insert_and_maybe_expose(
+    fn insert_and_maybe_expose(
         &mut self,
         obj: ObjId,
         index: usize,
@@ -578,7 +667,7 @@ impl PatchLog {
         // fails for a log from a different document lineage.
         self.migrate_actors(&doc.ops.actors)
             .expect("patch log actors must match the document when making patches");
-        let view = self.view.clone();
+        let view = self.binding.view().cloned();
         let read = match view.as_ref() {
             Some(v) => doc.read_visible(v),
             None => doc.read_current(),
@@ -606,7 +695,7 @@ impl PatchLog {
         self.events.clear();
         self.expose.clear();
         self.completed_patches.clear();
-        self.view = None;
+        self.binding = Binding::Actors(self.binding.take_actors());
         self.path_hint = 0;
         self.path_map = Default::default();
     }
@@ -619,15 +708,25 @@ impl PatchLog {
             completed_patches: Vec::new(),
             path_map: Default::default(),
             path_hint: 0,
-            view: self.view.clone(),
-            actors: self.actors.clone(),
+            binding: self.binding.clone(),
             speculative_actor: None,
         }
     }
 
-    pub(crate) fn migrate_actor(&mut self, index: usize) {
-        if let Some(view) = &mut self.view {
-            view.insert_actor(index);
+    /// Insert `actor` into the binding at `index`, growing the stored view
+    /// alongside it. When `remap_events` is set the event indices are
+    /// shifted too; a trailing append shifts no event indices.
+    fn insert_actor(&mut self, index: usize, actor: ActorId, remap_events: bool) {
+        match &mut self.binding {
+            Binding::Unbound => self.binding = Binding::Actors(vec![actor]),
+            Binding::Actors(actors) => actors.insert(index, actor),
+            Binding::Bound { view, actors } => {
+                actors.insert(index, actor);
+                view.insert_actor(index);
+            }
+        }
+        if !remap_events {
+            return;
         }
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
@@ -642,9 +741,15 @@ impl PatchLog {
     }
 
     fn remove_actor(&mut self, index: usize) {
-        self.actors.remove(index);
-        if let Some(view) = &mut self.view {
-            view.remove_actor(index);
+        match &mut self.binding {
+            Binding::Unbound => {}
+            Binding::Actors(actors) => {
+                actors.remove(index);
+            }
+            Binding::Bound { view, actors } => {
+                actors.remove(index);
+                view.remove_actor(index);
+            }
         }
         let dirty = std::mem::take(&mut self.events);
         self.events = dirty
@@ -688,21 +793,57 @@ impl PatchLog {
         Ok(())
     }
 
-    /// Notify the patch log that the transaction has finished
+    /// Notify the patch log that the transaction has been committed.
     ///
-    /// This allows the patch log to clean up any speculative actors that were added
-    /// when the transaction began. This method should be called after the transaction
-    /// has been committed or rolled back.
-    pub(crate) fn finish_transaction(&mut self, doc_actors: &[ActorId]) {
+    /// Removes any speculative actor added when the transaction began, then
+    /// adopts `after` as the observed view for the events the transaction
+    /// recorded. `after` is computed lazily, so an inactive log skips it.
+    pub(crate) fn finish_transaction(
+        &mut self,
+        doc: &Automerge,
+        after: impl FnOnce(&Automerge) -> VisibleClock,
+    ) {
+        self.remove_speculative_actor(&doc.ops.actors);
+        self.advance_view_with(doc, || after(doc));
+    }
+
+    /// Notify the patch log that the transaction was rolled back.
+    ///
+    /// Removes any speculative actor without changing the observed view: a
+    /// rollback reverts the document, so the view recorded before the
+    /// transaction began is still the state the log has seen.
+    pub(crate) fn abandon_transaction(&mut self, doc_actors: &[ActorId]) {
+        self.remove_speculative_actor(doc_actors);
+    }
+
+    fn remove_speculative_actor(&mut self, doc_actors: &[ActorId]) {
         let Some(speculative_actor) = self.speculative_actor.take() else {
             return;
         };
         if !doc_actors.contains(&speculative_actor) {
-            if let Ok(index) = self.actors.binary_search(&speculative_actor) {
+            if let Ok(index) = self.actors().binary_search(&speculative_actor) {
                 self.remove_actor(index);
             }
         }
-        debug_assert_eq!(self.actors.as_slice(), doc_actors);
+        debug_assert_eq!(self.actors(), doc_actors);
+    }
+
+    /// Read-only compatibility check: every actor this log knows must still
+    /// exist in `doc_actors`. Both lists are sorted, so this is a
+    /// subsequence test. The importer calls this before draining the change
+    /// queue, so a rejected log leaves previously queued changes available
+    /// for a retry with a compatible log.
+    pub(crate) fn validate(&self, doc_actors: &[ActorId]) -> Result<(), crate::PatchLogMismatch> {
+        let mut remaining = doc_actors.iter();
+        if self
+            .actors()
+            .iter()
+            .all(|actor| remaining.any(|other| other == actor))
+        {
+            Ok(())
+        } else {
+            Err(crate::PatchLogMismatch)
+        }
     }
 
     // Re-align this patch log's actor list (and the event indices into it) with the document's
@@ -711,62 +852,34 @@ impl PatchLog {
     // The document's actor list can grow between uses of a patch log (e.g. applying changes adds
     // new actors). Because actor lists are sorted, inserting a new actor shifts the indices of the
     // actors after it, so the event ids stored in the patch log have to be re-indexed to match.
-    pub(crate) fn migrate_actors(
-        &mut self,
-        others: &[ActorId],
-    ) -> Result<(), crate::PatchLogMismatch> {
-        if self.actors.as_slice() == others {
+    fn migrate_actors(&mut self, others: &[ActorId]) -> Result<(), crate::PatchLogMismatch> {
+        if self.actors() == others {
             return Ok(());
         }
-        if self.actors.is_empty() {
-            // A view is only ever bound together with the actor list
-            // ([`Self::set_view_with`]), so a log that has never seen an
-            // actor list can only hold a view recorded against an empty
-            // document; it grows from zero as the actors arrive.
-            if let Some(view) = &mut self.view {
-                debug_assert!(view.len() == 0);
-                for i in 0..others.len() {
-                    view.insert_actor(i);
-                }
-            }
-            self.actors = others.to_vec();
-            return Ok(());
-        }
-        // Every old actor must still exist. Check before mutating the log so a
-        // mismatch (including a missing trailing actor) leaves it usable with
-        // its original document.
-        let mut remaining = others.iter();
-        if !self
-            .actors
-            .iter()
-            .all(|actor| remaining.any(|other| other == actor))
-        {
-            return Err(crate::PatchLogMismatch);
-        }
+        // Validate before mutating the log so a mismatch (including a
+        // missing trailing actor) leaves it usable with its original
+        // document.
+        self.validate(others)?;
         for i in 0..others.len() {
-            match (self.actors.get(i), others.get(i)) {
-                (Some(a), Some(b)) if a == b => {}
-                (Some(a), Some(b)) if b < a => {
-                    self.actors.insert(i, b.clone());
-                    self.migrate_actor(i);
-                }
-                (None, Some(b)) => {
-                    self.actors.insert(i, b.clone());
-                    // A trailing append shifts no event indices, but the
-                    // stored view still gains the actor.
-                    if let Some(view) = &mut self.view {
-                        view.insert_actor(i);
-                    }
-                }
+            let remap_events = match (self.actors().get(i), others.get(i)) {
+                (Some(a), Some(b)) if a == b => continue,
+                (Some(a), Some(b)) if b < a => true,
+                // A trailing append shifts no event indices, but the
+                // stored view still gains the actor.
+                (None, Some(_)) => false,
+                // `validate` admits only subsequences of `others`, so the
+                // remaining shapes cannot occur.
                 _ => return Err(crate::PatchLogMismatch),
-            }
+            };
+            self.insert_actor(i, others[i].clone(), remap_events);
         }
         Ok(())
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
-        if other.view.is_some() {
-            self.view = other.view;
+        debug_assert_eq!(self.actors(), other.actors());
+        if matches!(other.binding, Binding::Bound { .. }) {
+            self.binding = other.binding;
         }
         self.completed_patches.extend(other.completed_patches);
         self.events.extend(other.events);
@@ -776,6 +889,155 @@ impl PatchLog {
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
         self.path_map = hint;
         self.path_hint = self.events_len();
+    }
+}
+
+/// A handle for recording events into a [`PatchLog`].
+///
+/// Exposes only the emission methods, so code that records events cannot
+/// also bind the log, move its observed view, or drain its patches. Obtain a
+/// handle to [`Events`] from [`PatchLog::record`] or [`PatchLog::events`].
+#[derive(Debug)]
+pub(crate) struct Events<'a>(&'a mut PatchLog);
+
+impl Events<'_> {
+    /// Whether the underlying log records events.
+    pub(crate) fn is_active(&self) -> bool {
+        self.0.is_active()
+    }
+
+    pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
+        self.0.delete_seq(obj, index, num)
+    }
+
+    pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
+        self.0.delete_map(obj, key)
+    }
+
+    pub(crate) fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
+        self.0.increment(obj, prop, value, id)
+    }
+
+    pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
+        self.0.increment_map(obj, key, n, id)
+    }
+
+    pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
+        self.0.increment_seq(obj, index, n, id)
+    }
+
+    pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
+        self.0.flag_conflict(obj, prop)
+    }
+
+    pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
+        self.0.flag_conflict_map(obj, key)
+    }
+
+    pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
+        self.0.flag_conflict_seq(obj, index)
+    }
+
+    pub(crate) fn put(
+        &mut self,
+        obj: ObjId,
+        prop: PropRef<'_>,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        self.0.put(obj, prop, value, id, conflict, expose)
+    }
+
+    pub(crate) fn put_map(
+        &mut self,
+        obj: ObjId,
+        key: &str,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        self.0.put_map(obj, key, value, id, conflict, expose)
+    }
+
+    pub(crate) fn put_seq(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        self.0.put_seq(obj, index, value, id, conflict, expose)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn replace_seq(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        old_value: &Value,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+        seq_type: SequenceType,
+        text_encoding: TextEncoding,
+        marks: Option<Arc<MarkSet>>,
+    ) {
+        self.0.replace_seq(
+            obj,
+            index,
+            old_value,
+            value,
+            id,
+            conflict,
+            expose,
+            seq_type,
+            text_encoding,
+            marks,
+        )
+    }
+
+    pub(crate) fn splice(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        text: &str,
+        marks: Option<Arc<MarkSet>>,
+    ) {
+        self.0.splice(obj, index, text, marks)
+    }
+
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+        self.0.mark(obj, index, len, marks)
+    }
+
+    pub(crate) fn insert_and_maybe_expose(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        self.0
+            .insert_and_maybe_expose(obj, index, value, id, conflict, expose)
+    }
+
+    pub(crate) fn insert(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+    ) {
+        self.0.insert(obj, index, value, id, conflict)
     }
 }
 

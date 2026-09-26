@@ -4,7 +4,7 @@ use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
 use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, TopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
-use crate::patches::PatchLog;
+use crate::patches::Events;
 use crate::types::{ObjId, OpId, TextEncoding};
 use crate::value;
 
@@ -19,7 +19,7 @@ pub(crate) struct SpanDiff {
 }
 
 impl SpanDiff {
-    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
         match (self.diff, self.span) {
             (Diff::Add, SpanInternal::Text(text, index, marks)) => {
                 log.splice(obj, index, &text, marks.export());

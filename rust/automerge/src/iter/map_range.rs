@@ -3,7 +3,7 @@ use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
-use crate::patches::PatchLog;
+use crate::patches::Events;
 use crate::types::{ObjId, OpId, TextEncoding};
 
 use std::borrow::Cow;
@@ -69,7 +69,7 @@ impl<'a> MapDiffItem<'a> {
         }
     }
 
-    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
         match self.diff {
             Diff::Add => log.put_map(
                 obj,
