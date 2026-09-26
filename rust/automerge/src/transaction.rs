@@ -32,8 +32,7 @@ fn commit_transaction(
         Some(heads) => hash.map_or(heads, |hash| vec![hash]),
         None => doc.get_heads(),
     };
-    patch_log.finish_transaction(doc.actors());
-    patch_log.set_view_with(doc, || doc.visible(&heads));
+    patch_log.finish_transaction(doc, |d| d.visible(&heads));
     if let HistoryUpdate::BoundaryResolved = history {
         // The commit's op-set mutation is complete and the log's view has
         // moved past it, so the mask may now change: publish the resolved
@@ -335,6 +334,8 @@ macro_rules! impl_read_doc_for_tx {
     };
 }
 
+pub(crate) use impl_read_doc_for_tx;
+
 /// Generate a `Transactable` impl for `Transaction` and `OwnedTransaction`, which are expected
 /// to have `inner: Option<TransactionInner>` and a `do_tx` method.
 macro_rules! impl_transactable_for_tx {
@@ -547,6 +548,4 @@ macro_rules! impl_transactable_for_tx {
         }
     };
 }
-
-pub(crate) use impl_read_doc_for_tx;
 pub(crate) use impl_transactable_for_tx;

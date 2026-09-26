@@ -300,7 +300,7 @@ fn fixture_marks_match_real_mark_op_state_and_encoding() {
             SequenceType::Text,
             doc.text_encoding(),
             marks,
-            &mut log,
+            &mut log.events(),
         );
         let actions: Vec<_> = doc
             .make_patches(&mut log)

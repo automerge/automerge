@@ -5,7 +5,7 @@ use crate::iter::Diff;
 use crate::op_set2::op_set::{ActionIter, InsertAcc, OpIdIter, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::op_set2::OpSet;
-use crate::patches::PatchLog;
+use crate::patches::Events;
 use crate::types::{ObjId, OpId, TextEncoding};
 
 use std::fmt::Debug;
@@ -241,7 +241,7 @@ impl<'a> ListDiffItem<'a> {
             maybe_exid,
         }
     }
-    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
         let Self {
             diff,
             update,

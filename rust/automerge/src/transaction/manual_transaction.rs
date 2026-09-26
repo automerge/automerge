@@ -108,16 +108,20 @@ impl Transaction<'_> {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(mut self) -> usize {
-        self.patch_log.finish_transaction(self.doc.actors());
+        self.patch_log.abandon_transaction(self.doc.actors());
         self.inner.take().unwrap().rollback(self.doc)
     }
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
+        F: for<'e> FnOnce(
+            &mut TransactionInner,
+            &mut Automerge,
+            &mut crate::patches::Events<'e>,
+        ) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        f(tx, self.doc, &mut self.patch_log)
+        f(tx, self.doc, &mut self.patch_log.events())
     }
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> view::ReadAt<'_> {

@@ -57,7 +57,7 @@ fn map_patches(
     after: CandidateSummary,
 ) -> Vec<PatchAction> {
     let mut log = PatchLog::active();
-    ValueTransition::new(before, after).emit_map(ObjId::root(), "n", &mut log);
+    ValueTransition::new(before, after).emit_map(ObjId::root(), "n", &mut log.events());
     patches(fx, &mut log)
 }
 
@@ -73,7 +73,7 @@ fn list_patches(
         SequenceType::List,
         fx.doc.text_encoding(),
         &RichTextDiff::default(),
-        &mut log,
+        &mut log.events(),
     );
     patches(fx, &mut log)
 }
@@ -91,7 +91,7 @@ fn text_patches(
         SequenceType::Text,
         fx.doc.text_encoding(),
         marks,
-        &mut log,
+        &mut log.events(),
     );
     patches(fx, &mut log)
 }

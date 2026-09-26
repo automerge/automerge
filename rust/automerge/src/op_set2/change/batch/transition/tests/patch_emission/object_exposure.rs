@@ -29,7 +29,7 @@ fn map_retained_existing_object_conflict_clear_exposes_children_once() {
     before.add_existing(lower, Value::scalar(false));
     let after = summary(child_id, Value::map());
     let mut log = PatchLog::active();
-    ValueTransition::new(before, after).emit_map(ObjId::root(), "obj", &mut log);
+    ValueTransition::new(before, after).emit_map(ObjId::root(), "obj", &mut log.events());
     let patches = doc.make_patches(&mut log);
 
     let mut expected = doc.hydrate(None);
@@ -100,7 +100,7 @@ fn map_replaced_by_existing_survivor_exposes_it_despite_incoming_loser() {
     let mut after = summary(child_id, Value::map());
     after.add_incoming(incoming_lower, Value::scalar(true));
     let mut log = PatchLog::active();
-    ValueTransition::new(before, after).emit_map(ObjId::root(), "obj", &mut log);
+    ValueTransition::new(before, after).emit_map(ObjId::root(), "obj", &mut log.events());
     let patches = doc.make_patches(&mut log);
 
     let mut expected = doc.hydrate(None);
@@ -200,10 +200,10 @@ impl ObjectFixture {
                 SequenceType::List,
                 self.doc.text_encoding(),
                 &RichTextDiff::default(),
-                &mut log,
+                &mut log.events(),
             );
         } else {
-            transition.emit_map(ObjId::root(), "obj", &mut log);
+            transition.emit_map(ObjId::root(), "obj", &mut log.events());
         }
         log
     }
@@ -348,7 +348,7 @@ fn map_incoming_object_is_not_exposed() {
     ValueTransition::new(CandidateSummary::default(), after).emit_map(
         ObjId::root(),
         "obj",
-        &mut log,
+        &mut log.events(),
     );
     let actions: Vec<_> = doc
         .make_patches(&mut log)
