@@ -617,7 +617,37 @@ fn partially_unknown_multi_head_boundary_hides_author() {
     );
 }
 
-/// `reveal` clears the author's heads from the pending set: importing the
+/// The pending set is read-only between derivations: witnessing the
+/// boundary resolves it in the same `apply_changes` call (nothing pops it
+/// early), and a later duplicate delivery of the boundary change is not
+/// another visibility transition (the installer's unchanged-mask guard
+/// makes any re-run free).
+#[test]
+fn pending_set_is_read_only_between_derivations() {
+    let mut case = PendingMask::new();
+    case.doc.update_diff_cursor();
+
+    case.doc.apply_changes([case.boundary.clone()]).unwrap();
+    assert_eq!(
+        case.doc
+            .get_at(ROOT, "x", &case.original_heads)
+            .unwrap()
+            .unwrap()
+            .0,
+        1.into(),
+        "the first delivery must resolve the boundary"
+    );
+    let patches = case.doc.diff_incremental();
+    assert!(puts_x(&patches), "missing restoration: {patches:?}");
+
+    case.doc.apply_changes([case.boundary.clone()]).unwrap();
+    assert!(
+        case.doc.diff_incremental().is_empty(),
+        "a duplicate delivery of a resolved boundary must not log a transition"
+    );
+}
+
+/// `reveal_author` clears the author's heads from the pending set: importing the
 /// former boundary afterwards must not log a spurious visibility transition
 /// (only the imported content itself appears in the incremental diff).
 #[test]
