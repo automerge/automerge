@@ -1,6 +1,6 @@
 use crate::actor::{ActorInsert, ActorRefs, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
+use crate::automerge::view::{ClockRange, ReadAt, VisibleClock};
 use crate::automerge::Automerge;
-use crate::clock::{ClockRange, ReadAt, VisibleClock};
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{DiffIter, SpanInternal};
@@ -283,7 +283,7 @@ impl PatchLog {
                 DiffIter::log(
                     doc,
                     ObjMeta::root(),
-                    ClockRange::Diff(before, after.clone()),
+                    ClockRange::diff(before, after.clone()),
                     self,
                     true,
                 );
@@ -835,6 +835,21 @@ impl ExposeQueue {
 mod tests {
     use super::*;
     use crate::clock::Clock;
+    use crate::transaction::Transactable;
+    use crate::ROOT;
+
+    fn document(changes: &[(u8, usize)]) -> Automerge {
+        let mut doc = Automerge::new();
+        for &(actor, ops) in changes {
+            doc.set_actor(ActorId::from(vec![actor]));
+            let mut tx = doc.transaction();
+            for value in 0..ops {
+                tx.put(ROOT, "key", value as i64).unwrap();
+            }
+            tx.commit();
+        }
+        doc
+    }
 
     fn actors(ids: &[u8]) -> ActorTable {
         ActorTable::from_actors(ids.iter().map(|id| ActorId::from(vec![*id])))
@@ -842,9 +857,9 @@ mod tests {
 
     #[test]
     fn actor_migration_keeps_view_events_and_expose_aligned() {
+        let doc = document(&[(2, 7)]);
         let mut log = PatchLog::active();
-        log.actors = actors(&[2]);
-        log.view = Some(VisibleClock::new(Clock::from_counters([Some(7)]), None));
+        log.set_view(&doc, doc.visible_current());
         let id = OpId::new(7, 0);
         log.increment_seq(ObjId(id), 0, 1, id);
         log.expose.insert(id);
@@ -886,8 +901,9 @@ mod tests {
 
     #[test]
     fn actor_migration_grows_a_view_bound_to_an_empty_document() {
+        let doc = document(&[]);
         let mut log = PatchLog::active();
-        log.view = Some(VisibleClock::new(Clock::from_counters([]), None));
+        log.set_view(&doc, doc.visible_current());
         let table = actors(&[1, 2]);
 
         log.migrate_actors(&table).unwrap();
@@ -904,12 +920,9 @@ mod tests {
 
     #[test]
     fn actor_migration_mismatch_leaves_the_log_unchanged() {
+        let doc = document(&[(2, 5), (4, 2)]);
         let mut log = PatchLog::active();
-        log.actors = actors(&[2, 4]);
-        log.view = Some(VisibleClock::new(
-            Clock::from_counters([Some(5), Some(7)]),
-            None,
-        ));
+        log.set_view(&doc, doc.visible_current());
         let id = OpId::new(7, 1);
         log.increment_seq(ObjId(id), 0, 1, id);
         log.expose.insert(id);

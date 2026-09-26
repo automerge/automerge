@@ -9,8 +9,8 @@ use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
+use crate::automerge::view::{ReadAt, VisibleClock};
 use crate::automerge::HistoryUpdate;
-use crate::clock::{ReadAt, VisibleClock};
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
@@ -787,8 +787,8 @@ impl TransactionInner {
 
         // delete `del` items - performing the query for each one.
         //
-        // Deletion targets are selected from the visible sequence. In an
-        // unmasked transaction the inserted items are visible (the targets
+        // Deletion targets are selected from the visible sequence. In a
+        // maskless transaction the inserted items are visible (the targets
         // sit after them) and each deletion collapses the sequence back
         // onto the cursor. A masked transaction's inserts have no visible
         // width and its deletes do not collapse positions, so the cursor
@@ -1442,7 +1442,7 @@ impl TransactionInner {
     /// otherwise the current document (which carries the write-frontier mask).
     pub(crate) fn read_at<'a>(&'a self, doc: &'a Automerge) -> ReadAt<'a> {
         match &self.scope {
-            Some(scope) => ReadAt::At(std::borrow::Cow::Borrowed(scope)),
+            Some(scope) => doc.read_scoped(std::borrow::Cow::Borrowed(scope)),
             None => doc.read_current(),
         }
     }

@@ -1,10 +1,10 @@
-
 use std::borrow::Cow;
 
+use crate::automerge::view;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
-use crate::{clock, ChangeHash, PatchLogMismatch};
+use crate::{ChangeHash, PatchLogMismatch};
 
 use super::{CommitOptions, TransactionInner};
 
@@ -106,19 +106,19 @@ impl OwnedTransaction {
         f(tx, &mut self.doc, &mut self.patch_log)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> clock::ReadAt<'_> {
+    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> view::ReadAt<'_> {
         if let Some(h) = heads {
             // a transaction is in flight: its pending ops are in the op set
             // but not under the graph's heads, so the current-heads
             // shortcut in `read_at` would wrongly expose them
-            clock::ReadAt::at(self.doc.visible(h))
+            self.doc.read_scoped(Cow::Owned(self.doc.visible(h)))
         } else {
             self.inner
                 .as_ref()
                 .and_then(|i| i.get_scope().as_ref())
                 .map_or_else(
                     || self.doc.read_current(),
-                    |scope| clock::ReadAt::At(Cow::Borrowed(scope)),
+                    |scope| self.doc.read_scoped(Cow::Borrowed(scope)),
                 )
         }
     }
