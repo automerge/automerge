@@ -1,4 +1,5 @@
-use crate::clock::{Clock, ReadAt};
+use crate::automerge::view::ReadAt;
+use crate::clock::Clock;
 use crate::iter::tools::{BoolColumnSkipper, PeekShift, Shiftable, SkipIter, Skipper};
 use crate::marks::MarkSet;
 use crate::op_set2::op::SuccCursors;

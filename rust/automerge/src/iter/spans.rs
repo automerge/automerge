@@ -1,4 +1,4 @@
-use crate::clock::{ClockRange, ReadAt};
+use crate::automerge::view::{ClockRange, RangeView, ReadAt};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
@@ -69,7 +69,7 @@ impl<'a> SpansActionValue<'a> {
         let value = op_set.value_iter_range(&range);
         let action = op_set.action_iter_range(&range);
         let iter = ActionValueIter::new(action, value);
-        if matches!(clock, ClockRange::Current(read) if read.filter().is_none())
+        if matches!(clock.view(), RangeView::Current(read) if read.filter().is_none())
             && op_set.all_of_range_is_top(&range)
         {
             Self::Current(Unshift::new(iter))
@@ -113,7 +113,7 @@ pub(crate) struct SpansDiff<'a> {
     mark_info: MarkInfoIter<'a>,
     op_id: OpIdIter<'a>,
     marks: RichTextDiff<'a>,
-    op_set: Option<&'a OpSet>,
+    op_set: &'a OpSet,
     clock: ClockRange<'a>,
     state: SpanState,
     pos: usize,
@@ -137,30 +137,6 @@ impl Iterator for SpansDiff<'_> {
 }
 
 impl<'a> SpansDiff<'a> {
-    pub(crate) fn empty(encoding: TextEncoding) -> Self {
-        Self {
-            action_value: Default::default(),
-            mark_info: Default::default(),
-            op_id: Default::default(),
-            marks: Default::default(),
-            op_set: Default::default(),
-            clock: Default::default(),
-            state: SpanState::empty(encoding),
-            pos: Default::default(),
-        }
-    }
-
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.mark_info.set_max(range.end);
-        self.op_id.set_max(range.end);
-        self.action_value
-            .shift(self.op_set?, &self.clock, range.clone());
-
-        self.marks = Default::default();
-        self.state = SpanState::empty(self.state.encoding);
-        self.next()
-    }
-
     pub(crate) fn new(
         op_set: &'a OpSet,
         range: Range<usize>,
@@ -170,22 +146,36 @@ impl<'a> SpansDiff<'a> {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
         let mark_info = op_set.mark_info_iter_range(&range);
-
-        let action_value = SpansActionValue::new(op_set, &clock, range.clone());
-        let marks = Default::default();
-        let state = SpanState::empty(encoding);
-        let op_set = Some(op_set);
+        let action_value = SpansActionValue::new(op_set, &clock, range);
 
         Self {
-            state,
             action_value,
             mark_info,
             op_id,
+            marks: Default::default(),
             op_set,
             clock,
-            marks,
+            state: SpanState::empty(encoding),
             pos,
         }
+    }
+
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.mark_info.set_max(range.end);
+        self.op_id.set_max(range.end);
+        self.action_value.shift(self.op_set, &self.clock, range);
+        self.marks = Default::default();
+        self.state = SpanState::empty(self.state.encoding);
+        self.next()
+    }
+
+    pub(crate) fn encoding(&self) -> TextEncoding {
+        self.state.encoding
+    }
+
+    /// The op set and read position exported items resolve against.
+    fn read_context(&self) -> (&'a OpSet, ReadAt<'_>) {
+        (self.op_set, self.clock.read_after())
     }
 
     fn push_block(&mut self, diff: Diff) -> Option<SpanDiff> {
@@ -248,18 +238,8 @@ pub(crate) struct SpansInternal<'a> {
 }
 
 impl<'a> SpansInternal<'a> {
-    pub(crate) fn empty(encoding: TextEncoding) -> Self {
-        Self {
-            iter: SpansDiff::empty(encoding),
-        }
-    }
-
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         Some(self.iter.shift_next(range)?.span)
-    }
-
-    pub(crate) fn encoding(&self) -> TextEncoding {
-        self.iter.state.encoding
     }
 
     pub(crate) fn new(
@@ -268,7 +248,7 @@ impl<'a> SpansInternal<'a> {
         read: ReadAt<'a>,
         encoding: TextEncoding,
     ) -> Self {
-        let iter = SpansDiff::new(op_set, range, ClockRange::current(read), encoding);
+        let iter = SpansDiff::new(op_set, range, read.into_range(), encoding);
         Self { iter }
     }
 }
@@ -625,15 +605,9 @@ impl Iterator for Spans<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.internal.next()?;
-        let read = match &self.internal.iter.clock {
-            ClockRange::Current(read) => read.borrow(),
-            ClockRange::Diff(_, after) => ReadAt::At(Cow::Borrowed(after)),
-        };
-        Some(item.export(
-            self.internal.iter.op_set?,
-            &read,
-            self.internal.iter.state.encoding,
-        ))
+        let encoding = self.internal.iter.encoding();
+        let (op_set, read) = self.internal.iter.read_context();
+        Some(item.export(op_set, &read, encoding))
     }
 }
 

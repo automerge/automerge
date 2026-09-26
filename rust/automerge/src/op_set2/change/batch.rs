@@ -1,6 +1,6 @@
+use crate::automerge::view::Mask;
 use crate::automerge::HistoryUpdate;
 use crate::change_queue::ChangeBatch;
-use crate::clock::Mask;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::op::SuccessorValue;
@@ -614,7 +614,7 @@ impl<'a> ValueState<'a> {
             _ => {
                 if self.masked_visible(doc_op) {
                     // OpIter yields stored counter bases, not their current
-                    // totals; under a mask only unmasked increments count.
+                    // totals. Under a mask only un-hidden increments count.
                     let mut doc_op = doc_op.clone();
                     doc_op.fix_counter(self.mask.map(Mask::clock));
                     let mut value = doc_op.hydrate_value(self.text_encoding);
