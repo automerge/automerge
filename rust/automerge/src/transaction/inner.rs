@@ -15,7 +15,7 @@ use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, PropRef, SuccInsert, TxOp};
-use crate::patches::PatchLog;
+use crate::patches::Events;
 use crate::types::{ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
 use crate::Automerge;
 use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc};
@@ -106,7 +106,7 @@ impl TransactionInner {
     /// Returns `true` if ops should be recorded in `patch_log`.
     ///
     /// The log must be active, and the ops must be visible.
-    fn logs(&self, patch_log: &PatchLog) -> bool {
+    fn logs(&self, patch_log: &Events<'_>) -> bool {
         patch_log.is_active() && !self.masked
     }
 
@@ -266,7 +266,7 @@ impl TransactionInner {
     pub(crate) fn put<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         prop: P,
         value: V,
@@ -300,7 +300,7 @@ impl TransactionInner {
     pub(crate) fn put_object<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         prop: P,
         value: ObjType,
@@ -335,7 +335,7 @@ impl TransactionInner {
     fn insert_local_op(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         mut op: TxOp,
         succ: &[SuccInsert],
         range: Range<usize>,
@@ -358,7 +358,7 @@ impl TransactionInner {
     pub(crate) fn insert<V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         index: usize,
         value: V,
@@ -376,7 +376,7 @@ impl TransactionInner {
     pub(crate) fn insert_object(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         index: usize,
         value: ObjType,
@@ -394,7 +394,7 @@ impl TransactionInner {
     fn do_insert(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ObjMeta,
         seq_type: SequenceType,
         index: usize,
@@ -429,7 +429,7 @@ impl TransactionInner {
     fn insert_mark_end_after(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ObjMeta,
         begin: &InsertedOp,
         expand: bool,
@@ -458,7 +458,7 @@ impl TransactionInner {
     pub(crate) fn local_op(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ObjMeta,
         prop: Prop,
         action: OpType,
@@ -472,7 +472,7 @@ impl TransactionInner {
     fn local_map_op(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ObjMeta,
         prop: String,
         action: OpType,
@@ -525,7 +525,7 @@ impl TransactionInner {
     fn local_list_op(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ObjMeta,
         index: usize,
         action: OpType,
@@ -592,7 +592,7 @@ impl TransactionInner {
     pub(crate) fn increment<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ExId,
         prop: P,
         value: i64,
@@ -605,7 +605,7 @@ impl TransactionInner {
     pub(crate) fn delete<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
@@ -638,7 +638,7 @@ impl TransactionInner {
     pub(crate) fn splice(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         index: usize,
         del: isize,
@@ -680,7 +680,7 @@ impl TransactionInner {
     pub(crate) fn splice_text(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         index: usize,
         del: isize,
@@ -705,7 +705,7 @@ impl TransactionInner {
     fn inner_splice(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         SpliceArgs {
             obj,
             mut index,
@@ -850,7 +850,7 @@ impl TransactionInner {
     pub(crate) fn mark(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         mark: Mark,
         expand: ExpandMark,
@@ -928,7 +928,7 @@ impl TransactionInner {
     pub(crate) fn unmark(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         name: &str,
         start: usize,
@@ -942,7 +942,7 @@ impl TransactionInner {
     pub(crate) fn split_block(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_obj: &ExId,
         index: usize,
     ) -> Result<ExId, AutomergeError> {
@@ -983,7 +983,7 @@ impl TransactionInner {
     pub(crate) fn join_block(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         text: &ExId,
         index: usize,
     ) -> Result<(), AutomergeError> {
@@ -1039,7 +1039,7 @@ impl TransactionInner {
     pub(crate) fn replace_block(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         text: &ExId,
         index: usize,
     ) -> Result<ExId, AutomergeError> {
@@ -1050,7 +1050,7 @@ impl TransactionInner {
     fn finalize_op(
         &mut self,
         encoding: TextEncoding,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         op: &TxOp,
         marks: Option<Arc<MarkSet>>,
         replaced: Option<&hydrate::Value>,
@@ -1123,7 +1123,7 @@ impl TransactionInner {
     pub(crate) fn update_object(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         obj: &ExId,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError> {
@@ -1151,7 +1151,7 @@ impl TransactionInner {
     pub(crate) fn update_map(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         map: &crate::ObjId,
         new_value: &crate::hydrate::Map,
     ) -> Result<(), AutomergeError> {
@@ -1203,7 +1203,7 @@ impl TransactionInner {
     pub(crate) fn update_list(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         list: &crate::ObjId,
         new_value: &crate::hydrate::List,
     ) -> Result<(), AutomergeError> {
@@ -1258,7 +1258,7 @@ impl TransactionInner {
     fn update_value(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         parent: &crate::ObjId,
         key: Prop,
         new_value: &crate::hydrate::Value,
@@ -1324,7 +1324,7 @@ impl TransactionInner {
     pub(crate) fn batch_create_object(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         ex_parent: &ExId,
         prop: Prop,
         value: &hydrate::Value,
@@ -1389,7 +1389,7 @@ impl TransactionInner {
     pub(crate) fn batch_init_root_map(
         &mut self,
         doc: &mut Automerge,
-        patch_log: &mut PatchLog,
+        patch_log: &mut Events<'_>,
         value: &hydrate::Map,
     ) -> Result<(), AutomergeError> {
         let root_meta = ObjMeta {
@@ -1496,19 +1496,19 @@ struct SpliceArgs<'a> {
     splice_type: SpliceType<'a>,
 }
 
-struct BatchInsertion<'a> {
+struct BatchInsertion<'a, 'e> {
     inner: &'a mut TransactionInner,
     doc: &'a mut Automerge,
-    patch_log: &'a mut PatchLog,
+    patch_log: &'a mut Events<'e>,
     pending_start: usize,
     insert_pos: usize,
 }
 
-impl<'a> BatchInsertion<'a> {
+impl<'a, 'e> BatchInsertion<'a, 'e> {
     fn new(
         inner: &'a mut TransactionInner,
         doc: &'a mut Automerge,
-        patch_log: &'a mut PatchLog,
+        patch_log: &'a mut Events<'e>,
         start_pos: usize,
     ) -> Self {
         let pending_start = inner.pending.len();
@@ -1602,7 +1602,7 @@ fn value_to_op_type(value: &hydrate::Value) -> (Option<ObjType>, OpType) {
 /// This is the shared logic used by `batch_create_object`, `batch_init_map`,
 /// and `inner_splice` to populate the children of container objects.
 fn batch_bfs(
-    batch: &mut BatchInsertion<'_>,
+    batch: &mut BatchInsertion<'_, '_>,
     queue: &mut VecDeque<(ObjMeta, &'_ hydrate::Value)>,
 ) -> Result<(), AutomergeError> {
     while let Some((container_meta, container_value)) = queue.pop_front() {

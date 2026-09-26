@@ -55,11 +55,6 @@ impl VisibleClock {
         self.0 .0.remove(index);
     }
 
-    /// Number of actors this clock covers.
-    pub(crate) fn len(&self) -> usize {
-        self.0 .0.len()
-    }
-
     /// Create new, empty [`Clock`] which is the same size as this clock.
     pub(crate) fn empty_like(&self) -> Clock {
         Clock(vec![0; self.0 .0.len()])
@@ -68,6 +63,11 @@ impl VisibleClock {
     /// Returns `true` if any operation is covered.
     pub(crate) fn covers_something(&self) -> bool {
         self.0 .0.iter().any(|c| *c > 0)
+    }
+
+    /// Number of actor columns in this clock.
+    pub(crate) fn len(&self) -> usize {
+        self.0 .0.len()
     }
 }
 

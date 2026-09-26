@@ -6,6 +6,7 @@ use crate::iter::RichTextDiff;
 use crate::op_set2::op::SuccessorValue;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
+use crate::patches::Events;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
 };
@@ -63,14 +64,14 @@ struct Untangler<'a> {
 }
 
 impl<'a> Untangler<'a> {
-    fn flush(&mut self, log: &mut PatchLog) {
+    fn flush(&mut self, log: &mut Events<'_>) {
         self.value.list_flush(self.index, log);
         self.top.reset(self.conflicts);
         self.index += self.width;
         self.width = 0;
     }
 
-    fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut PatchLog) {
+    fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut Events<'_>) {
         let effect @ SuccessorEffect { deleted, .. } = process_pred(doc_op, self.pred, succ);
 
         if doc_op.insert {
@@ -133,13 +134,13 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    fn finish_inserts(&mut self, log: &mut PatchLog) {
+    fn finish_inserts(&mut self, log: &mut Events<'_>) {
         while !self.stack.is_empty() {
             self.untangle_inner(self.max, log);
         }
     }
 
-    fn finish(mut self, log: &mut PatchLog) {
+    fn finish(mut self, log: &mut Events<'_>) {
         self.finish_updates();
 
         self.flush(log);
@@ -160,7 +161,7 @@ impl<'a> Untangler<'a> {
         });
     }
 
-    fn untangle_inserts(&mut self, id: OpId, insert_pos: usize, log: &mut PatchLog) {
+    fn untangle_inserts(&mut self, id: OpId, insert_pos: usize, log: &mut Events<'_>) {
         self.flush(log);
 
         if let Err(n) = self
@@ -179,7 +180,7 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    fn untangle_inner(&mut self, insert_pos: usize, log: &mut PatchLog) -> Option<()> {
+    fn untangle_inner(&mut self, insert_pos: usize, log: &mut Events<'_>) -> Option<()> {
         let mut pos = self.stack.pop()?;
         let op = self.change_ops.get_mut(pos)?;
 
@@ -324,7 +325,7 @@ fn walk_list<'a>(
     mut ut: Untangler<'a>,
     doc_ops: OpIter<'a>,
     succ: &mut Vec<SuccInsert>,
-    log: &mut PatchLog,
+    log: &mut Events<'_>,
 ) {
     for op in doc_ops {
         ut.element_update(&op);
@@ -339,9 +340,9 @@ fn walk_list<'a>(
     ut.finish(log);
 }
 
-struct MapWalker<'a, 'b> {
+struct MapWalker<'a, 'b, 'c> {
     ops: OpIter<'a>,
-    log: &'b mut PatchLog,
+    log: &'b mut Events<'c>,
     pred: &'b mut PredCache,
     succ: &'b mut Vec<SuccInsert>,
     value: ValueState<'a>,
@@ -402,13 +403,13 @@ impl Top {
     }
 }
 
-impl<'a, 'b> MapWalker<'a, 'b> {
+impl<'a, 'b, 'c> MapWalker<'a, 'b, 'c> {
     fn new(
         value: ValueState<'a>,
         mut ops: OpIter<'a>,
         pred: &'b mut PredCache,
         succ: &'b mut Vec<SuccInsert>,
-        log: &'b mut PatchLog,
+        log: &'b mut Events<'c>,
         conflicts: &'b mut Vec<Adjust>,
     ) -> Self {
         let pos = ops.pos();
@@ -660,7 +661,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn map_flush(&mut self, log: &mut PatchLog) {
+    fn map_flush(&mut self, log: &mut Events<'_>) {
         let before = std::mem::take(&mut self.before);
         let after = std::mem::take(&mut self.after);
         if let Some(PropRef::Map(key)) = self.key.take() {
@@ -668,7 +669,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
+    fn list_flush(&mut self, index: usize, log: &mut Events<'_>) {
         if self.key.take().is_none() {
             return;
         }
@@ -685,7 +686,7 @@ impl<'a> ValueState<'a> {
     }
 }
 
-fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
+fn walk_map(mw: &mut MapWalker<'_, '_, '_>, change_ops: &mut [ChangeOp]) {
     for pos in 0..change_ops.len() {
         mw.change_op(change_ops, pos);
     }
@@ -750,8 +751,6 @@ impl BatchApply {
         // the mask before the op set mutation.
         log.transition_to(doc, |d| d.visible_current())?;
         self.insert_new_actors(doc);
-        log.migrate_actors(&doc.ops().actors)?;
-
         doc.assert_mask_derived();
         let mask0 = doc.mask().cloned();
 
@@ -771,51 +770,68 @@ impl BatchApply {
 
         let mut succ = vec![];
 
-        let mut walker = ObjWalker::new(doc.ops());
-
         let mut conflicts = vec![];
 
-        for os in &self.obj_spans {
-            let obj_range = walker.seek_to_obj(os.obj);
-            let doc_ops = doc.ops().iter_range(&obj_range);
-            match obj_info.object_type(&os.obj) {
-                Some(ObjType::Map) => {
-                    let value = ValueState::new(
-                        os.obj,
-                        SequenceType::List,
-                        doc.text_encoding(),
-                        mask0.as_ref(),
-                    );
-                    let mut walker = MapWalker::new(
-                        value,
-                        doc_ops,
-                        &mut self.pred,
-                        &mut succ,
-                        log,
-                        &mut conflicts,
-                    );
-                    let change_ops = &mut self.ops[os.span.clone()];
-                    walk_map(&mut walker, change_ops);
-                }
-                Some(otype) if otype.is_sequence() => {
-                    let sequence_type = match otype {
-                        ObjType::Text => SequenceType::Text,
-                        ObjType::List => SequenceType::List,
-                        _ => unreachable!(),
-                    };
-                    let value =
-                        ValueState::new(os.obj, sequence_type, doc.text_encoding(), mask0.as_ref());
-                    let ut = Untangler::new(
-                        value,
-                        &mut conflicts,
-                        &mut self.ops[os.span.clone()],
-                        &mut self.pred,
-                        doc_ops.end_pos(),
-                    );
-                    walk_list(ut, doc_ops, &mut succ, log);
-                }
-                _ => panic!("Obj {:?} Missing from Index", os.obj),
-            }
+        // The walk records the batch's events and moves the observed view
+        // past it in one operation. That view only depends on the change
+        // graph (updated in step 4) and the mask (constant), so computing it
+        // here — before the deferred op-set mutations below — names the same
+        // view as after them. Step 1's transition already aligned the log
+        // with the pre-insertion actors, so migrating onto the superset
+        // cannot fail.
+        {
+            let ops = &mut self.ops;
+            let pred = &mut self.pred;
+            let obj_spans = &self.obj_spans;
+            let succ = &mut succ;
+            let conflicts = &mut conflicts;
+            log.record(
+                doc,
+                |log| {
+                    let mut walker = ObjWalker::new(doc.ops());
+                    for os in obj_spans {
+                        let obj_range = walker.seek_to_obj(os.obj);
+                        let doc_ops = doc.ops().iter_range(&obj_range);
+                        match obj_info.object_type(&os.obj) {
+                            Some(ObjType::Map) => {
+                                let value = ValueState::new(
+                                    os.obj,
+                                    SequenceType::List,
+                                    doc.text_encoding(),
+                                    mask0.as_ref(),
+                                );
+                                let mut walker =
+                                    MapWalker::new(value, doc_ops, pred, succ, log, conflicts);
+                                let change_ops = &mut ops[os.span.clone()];
+                                walk_map(&mut walker, change_ops);
+                            }
+                            Some(otype) if otype.is_sequence() => {
+                                let sequence_type = match otype {
+                                    ObjType::Text => SequenceType::Text,
+                                    ObjType::List => SequenceType::List,
+                                    _ => unreachable!(),
+                                };
+                                let value = ValueState::new(
+                                    os.obj,
+                                    sequence_type,
+                                    doc.text_encoding(),
+                                    mask0.as_ref(),
+                                );
+                                let ut = Untangler::new(
+                                    value,
+                                    conflicts,
+                                    &mut ops[os.span.clone()],
+                                    pred,
+                                    doc_ops.end_pos(),
+                                );
+                                walk_list(ut, doc_ops, succ, log);
+                            }
+                            _ => panic!("Obj {:?} Missing from Index", os.obj),
+                        }
+                    }
+                },
+                |d| d.visible_current(),
+            )?;
         }
 
         #[cfg(feature = "slow_path_assertions")]
@@ -842,10 +858,6 @@ impl BatchApply {
         doc.ops.add_succ(&succ);
 
         self.insert_runs_of_ops(doc);
-
-        // Advance the log past the batch without a diff: the walk above
-        // already recorded these events under the snapshot.
-        log.set_view_with(doc, || doc.visible_current());
 
         // If the batch witnessed a pending write-frontier boundary, publish the
         // mask change once, as its own visibility transition between two
@@ -961,13 +973,11 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         // Validate the observer before any change is taken from the queue: a
         // rejected log must leave previously queued changes available for a
-        // retry with a compatible log. `migrate_actors` checks compatibility
-        // before mutating, and on success aligns the log with the document's
-        // actors, so the later `transition_to`/`migrate_actors` calls in
-        // `BatchApply::apply` cannot fail: applying a batch only *adds*
-        // actors, and migrating onto a superset of the log's actors always
-        // succeeds.
-        log.migrate_actors(&self.ops.actors)?;
+        // retry with a compatible log. `validate` is read-only, and once it
+        // passes the migrations inside `BatchApply::apply` cannot fail:
+        // applying a batch only *adds* actors, and migrating onto a superset
+        // of the log's actors always succeeds.
+        log.validate(&self.ops.actors)?;
 
         let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();

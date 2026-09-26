@@ -32,8 +32,7 @@ fn commit_transaction(
         Some(heads) => hash.map_or(heads, |hash| vec![hash]),
         None => doc.get_heads(),
     };
-    patch_log.finish_transaction(&doc.ops().actors);
-    patch_log.set_view_with(doc, || doc.visible(&heads));
+    patch_log.finish_transaction(doc, |d| d.visible(&heads));
     if let HistoryUpdate::BoundaryResolved = history {
         // The commit's op-set mutation is complete and the log's view has
         // moved past it, so the mask may now change: publish the resolved
