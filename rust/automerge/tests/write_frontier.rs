@@ -487,6 +487,61 @@ fn cached_mask_handles_multi_op_changes() {
     );
 }
 
+/// Shrunk from `patches_replay_to_hydrate` (seed `d9712cca…`): alice marks
+/// a range after her write-frontier boundary, so the mark is masked. A local
+/// text insert at the mark's position must not stick to the invisible mark:
+/// `InsertQuery` considered non-visible mark ops as sticky insertion
+/// candidates, moving the insert past the masked mark's boundary op and
+/// returning the mark op itself as the insert's predecessor element —
+/// diverging from the (mask-aware) indexed fast path.
+#[test]
+fn regression_masked_mark_does_not_attract_inserts() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let carol = Author::try_from("cccc").unwrap();
+    let mut main = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint)
+        .with_author(Some(carol.clone()))
+        .with_actor(ActorId::from(vec![0x01]));
+    let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
+    main.commit();
+    let mut peer = main
+        .fork()
+        .with_author(Some(alice.clone()))
+        .with_actor(ActorId::from(vec![0xA0]));
+    peer.split_block(&text, 0).unwrap();
+    peer.commit();
+    let boundary = peer.get_heads();
+    peer.mark(
+        &text,
+        Mark::new("bold".into(), 0i64, 0, 1),
+        ExpandMark::None,
+    )
+    .unwrap();
+    peer.commit();
+    main.mask_author(alice.clone(), &boundary);
+    main.merge(&mut peer).unwrap();
+    // Visible text is just the block marker; insert after it.
+    main.splice_text(&text, 1, 0, "a").unwrap();
+    assert_eq!(main.text(&text).unwrap(), "\u{fffc}a");
+    // The insert's recorded predecessor is a real element, not a mark op:
+    // the history round-trips and reads back identically.
+    let reload = Automerge::load(&main.save()).expect("saved document reloads");
+    assert_eq!(
+        main.document().hydrate(None),
+        reload
+            .clone()
+            .with_write_frontier(main.document().get_write_frontier())
+            .hydrate(None)
+    );
+    // Unmasking the mark reveals it without disturbing the inserted text.
+    main.reveal_author(&alice);
+    assert_eq!(main.text(&text).unwrap(), "\u{fffc}a");
+    assert_eq!(
+        main.document().hydrate(None),
+        reload.hydrate(None),
+        "unmasked view equals a fresh load without the policy"
+    );
+}
+
 // ======================= authors & actors =======================
 
 #[test]
