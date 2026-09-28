@@ -287,6 +287,10 @@ impl PartialEq for MarkDiff {
 }
 
 impl MarkDiff {
+    /// Normalize this mark diff for a run of the given `diff` class.
+    ///
+    /// An added run carries its full after-marks, a retained run carries the
+    /// before/after delta, and other runs carry no marks.
     fn with(&self, diff: Diff) -> Self {
         match (diff, self) {
             (Diff::Add, MarkDiff::Diff(_, m)) => MarkDiff::After(m.clone()),
@@ -466,7 +470,9 @@ impl SpanState {
         debug_assert!(self.next_diff.is_none());
 
         let flush_needed = match &self.next_text {
-            Some(next) => diff != next.diff || self.marks != next.marks,
+            // Normalize the active marks the same way `next.marks` was when
+            // its run started, so both sides compare like for like.
+            Some(next) => diff != next.diff || self.marks.with(diff) != next.marks,
             None => false,
         };
 

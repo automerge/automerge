@@ -7,11 +7,18 @@
 //! document at the currently observed heads.
 
 use automerge::{
-    hydrate, transaction::Transactable, ActorId, Author, AutoCommit, Automerge, ChangeHash,
-    ObjType, ReadDoc, ScalarValue, TextEncoding, Value, ROOT,
+    hydrate,
+    marks::{ExpandMark, Mark as TextMark},
+    transaction::Transactable,
+    ActorId, Author, AutoCommit, Automerge, ChangeHash, ObjType, ReadDoc, ScalarValue,
+    TextEncoding, Value, ROOT,
 };
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
+
+#[path = "support/rich_model.rs"]
+mod rich_model;
+use rich_model::RichText;
 
 const ENCODING: TextEncoding = TextEncoding::UnicodeCodePoint;
 
@@ -379,4 +386,54 @@ proptest! {
     fn patches_replay_to_hydrate(ops in proptest::collection::vec(gen_op(), 0..40)) {
         run(ops)?;
     }
+}
+
+/// Distilled from `regression_shrunk_reveal_sequence_replays`: masked text
+/// revealed under a mark that stays visible across the transition must
+/// carry that mark in its `SpliceText` patch. The spans-diff state machine
+/// compared active marks by their before/after *delta* when deciding
+/// whether a new text run starts, so an unchanged mark (empty delta) merged
+/// newly visible marked text into the surrounding unmarked run. This clock
+/// shape — a mark visible while the text it covers is hidden — only arises
+/// under masks; causally a mark always follows the text it marks.
+#[test]
+fn regression_reveal_under_visible_mark_carries_the_mark() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let carol = Author::try_from("cccc").unwrap();
+    let mut main = AutoCommit::new_with_encoding(ENCODING)
+        .with_author(Some(carol.clone()))
+        .with_actor(ActorId::from(vec![0x01]));
+    let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
+    main.commit();
+    let boundary = main.get_heads();
+    main.splice_text(&text, 0, 0, "aaa").unwrap();
+    main.commit();
+    // alice marks the middle character; her mark is never masked.
+    let mut peer = main
+        .fork()
+        .with_author(Some(alice.clone()))
+        .with_actor(ActorId::from(vec![0xA0]));
+    peer.mark(
+        &text,
+        TextMark::new("bold".into(), 0i64, 1, 2),
+        ExpandMark::None,
+    )
+    .unwrap();
+    peer.commit();
+    main.merge(&mut peer).unwrap();
+    // Mask carol's text; the mark stays visible over hidden chars.
+    main.mask_author(carol.clone(), &boundary);
+    assert_eq!(main.text(&text).unwrap(), "");
+    main.update_diff_cursor();
+    let mut rich = RichText::from_doc(main.document(), &text);
+    main.reveal_author(&carol);
+    for patch in main.diff_incremental() {
+        assert_eq!(patch.obj, text, "only the text object changes");
+        rich.apply(&patch);
+    }
+    assert_eq!(
+        rich,
+        RichText::from_doc(main.document(), &text),
+        "patch-replayed rich text disagrees with spans() after the reveal"
+    );
 }
