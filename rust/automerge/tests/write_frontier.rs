@@ -1041,24 +1041,11 @@ fn mask_tracks_the_isolated_view() {
 
 // ============================ policy ============================
 
-#[test]
-fn replacing_write_frontier_equals_fresh_load_with_new_policy() {
-    use std::collections::HashMap;
-
-    let (mut doc, alice, epoch) = two_authors();
-    let bob = Author::try_from("bbbb").unwrap();
-    let bytes = doc.save();
-    doc.set_write_frontier(HashMap::from([(alice.clone(), epoch.clone())]));
-
-    let new_policy = HashMap::from([(bob, Vec::new())]);
-    doc.set_write_frontier(new_policy.clone());
-
-    let fresh = Automerge::load(&bytes)
-        .unwrap()
-        .with_write_frontier(new_policy.clone());
-    assert_eq!(doc.get_write_frontier(), new_policy);
-    assert_eq!(doc.hydrate(None), fresh.hydrate(None));
-}
+// `replacing_write_frontier_equals_fresh_load_with_new_policy` lived here; it
+// is superseded by the generated `BulkReplacePolicy` op in
+// `tests/write_frontier_parity.rs`, which checks the same fresh-load
+// equivalence (and the logged-transition replay) against generated
+// documents and policies on every occurrence.
 
 #[test]
 fn set_write_frontier_log_patches_replays_to_hydrate() {
