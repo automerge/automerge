@@ -835,8 +835,7 @@ impl Automerge {
         let actor = self.ops.actors[actor_index].clone();
         self.queue.remove_actor_branch_from(&actor, seq);
 
-        // SAFETY: this unwrap is safe as we always add 1
-        let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
+        let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
         let author = if seq == 1 { self.author.clone() } else { None };
         // If the author is part of the write-frontier, assign the actor to the
         // author now, entering the fresh actor into the mask at the author's
