@@ -48,8 +48,57 @@ impl AsBuilder for &TxOp {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct SuccessorValue {
+    id: OpId,
+    increment: Option<i64>,
+    masked: bool,
+}
+
+impl SuccessorValue {
+    /// Construct a new [`SuccessorValue`].
+    pub(crate) fn new(id: OpId, counter: Option<i64>, masked: bool) -> Self {
+        Self {
+            id,
+            increment: counter,
+            masked,
+        }
+    }
+
+    /// Reset the increment, by setting its value to `None`.
+    pub(crate) fn reset_increment(&mut self) {
+        self.increment.take();
+    }
+
+    /// Return the increment value, if there is one, and the successor is not
+    /// masked.
+    fn increment(&self) -> Option<i64> {
+        self.increment.filter(|_| !self.masked)
+    }
+
+    /// Returns `true` if the successor has no increment and is not masked.
+    fn has_succ(&self) -> bool {
+        self.increment.is_none() && !self.masked
+    }
+
+    /// Return the [`OpId`] of the successor.
+    pub(crate) fn get_id(&self) -> OpId {
+        self.id
+    }
+
+    /// Return the increment value of the successor, regardless of masking.
+    pub(crate) fn get_increment(&self) -> Option<i64> {
+        self.increment
+    }
+
+    /// Returns `true` if the successor is masked.
+    pub(crate) fn is_masked(&self) -> bool {
+        self.masked
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
-    pub(crate) succ: Vec<(OpId, Option<i64>, bool)>,
+    pub(crate) succ: Vec<SuccessorValue>,
     pub(crate) pos: Option<usize>,
     pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
@@ -87,11 +136,7 @@ impl ChangeOp {
     ) -> hydrate::Value {
         if self.bld.action == Action::Set {
             if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self
-                    .succ
-                    .iter()
-                    .filter_map(|(_, inc, rev)| (*inc).filter(|_| !rev))
-                    .sum();
+                let inc: i64 = self.succ.iter().filter_map(|value| value.increment()).sum();
                 hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
             } else {
                 hydrate::Value::Scalar(self.bld.value.to_owned())
@@ -110,9 +155,7 @@ impl ChangeOp {
     }
 
     pub(crate) fn has_succ(&self) -> bool {
-        self.succ
-            .iter()
-            .any(|(_, inc, masked)| inc.is_none() && !masked)
+        self.succ.iter().any(|value| value.has_succ())
     }
 
     pub(crate) fn insert(&self) -> bool {
@@ -680,11 +723,15 @@ impl OpLike for ChangeOp {
     }
 
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
-        Box::new(op.succ.iter().map(|o| o.1))
+        Box::new(
+            op.succ
+                .iter()
+                .map(|SuccessorValue { increment, .. }| *increment),
+        )
     }
 
     fn succ(&self) -> Self::SuccIter<'_> {
-        Box::new(self.succ.iter().map(|o| o.0))
+        Box::new(self.succ.iter().map(|SuccessorValue { id, .. }| *id))
     }
 
     fn id(&self) -> OpId {

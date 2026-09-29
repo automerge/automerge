@@ -3,6 +3,7 @@ use crate::change_queue::ChangeBatch;
 use crate::clock::Mask;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
+use crate::op_set2::op::SuccessorValue;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::types::{
@@ -22,7 +23,7 @@ use std::ops::Range;
 mod transition;
 use transition::{CandidateSummary, ValueTransition};
 
-type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>, bool)>>;
+type PredCache = SmallHashMap<OpId, Vec<SuccessorValue>>;
 
 #[derive(Debug, Clone, Default)]
 struct BatchApply {
@@ -499,10 +500,10 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 /// For a non-counter predecessor, replace increment amounts with `None` so
 /// those successors are treated as overwrites. Counter predecessors retain
 /// their increment amounts.
-fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>, bool)]) {
+fn normalize_increment_successors(is_counter: bool, successors: &mut [SuccessorValue]) {
     if !is_counter {
-        for (_, increment, _) in successors {
-            let _ = increment.take();
+        for value in successors {
+            value.reset_increment();
         }
     }
 }
@@ -525,17 +526,19 @@ fn process_pred(d: &Op<'_>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) ->
     let mut effect = SuccessorEffect::default();
     if let Some(mut successors) = pred.remove(&d.id) {
         normalize_increment_successors(d.is_counter(), &mut successors);
-        for (id, inc, masked) in successors {
-            if masked {
-                succ.push(d.add_succ_with_mask(id, inc, true));
+        for value in successors {
+            let id = value.get_id();
+            let increment = value.get_increment();
+            if value.is_masked() {
+                succ.push(d.add_succ_with_mask(id, increment, true));
                 continue;
             }
-            if let Some(n) = inc {
+            if let Some(n) = increment {
                 effect.increment += n;
             } else {
                 effect.deleted = true;
             }
-            succ.push(d.add_succ(id, inc));
+            succ.push(d.add_succ(id, increment));
         }
     }
     effect
@@ -881,10 +884,11 @@ impl BatchApply {
         let mut last_obj = None;
         for (i, o) in self.ops.iter().enumerate() {
             for p in o.pred().iter() {
-                self.pred
-                    .entry(*p)
-                    .or_default()
-                    .push((o.id(), o.get_increment_value(), o.masked));
+                self.pred.entry(*p).or_default().push(SuccessorValue::new(
+                    o.id(),
+                    o.get_increment_value(),
+                    o.masked,
+                ))
             }
             if let Some(info) = o.obj_info() {
                 obj_info.insert(o.id(), info)
