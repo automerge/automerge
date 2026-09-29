@@ -1508,6 +1508,7 @@ impl OpSet {
     pub(crate) fn remove_actor(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
         let (actor, removal) = self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
+        self.cols.index.mark.remove_actor(&removal);
         self.obj_info
             .0
             .remove_actor(&removal)
