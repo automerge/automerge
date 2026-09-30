@@ -27,6 +27,5 @@ fn present(summary: &CandidateSummary) -> &PresentCandidates {
 
 mod bounded_summary;
 mod patch_emission;
-mod retained_encoding;
 mod summary_accumulation;
 mod value_transition;
