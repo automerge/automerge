@@ -1,3 +1,12 @@
+## Unreleased
+
+### Fixed
+
+* Validating loaders reject overflowing RLE counts, slab and column lengths,
+  and RLE tail metadata instead of panicking or wrapping. Boolean loader drain
+  paths now check length arithmetic too. Counts and string/byte lengths that
+  do not fit `usize` are rejected on 32-bit targets rather than truncated.
+
 ## 1.0.0-alpha.2 - 7th July 2026
 
 ### Breaking

@@ -1937,7 +1937,11 @@ where
             while self.try_next_run()?.is_some() {}
         }
         let slabs = self.iter.finalize()?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        // Individual slabs can fit while the whole column does not. Check
+        // before building weights or an index with infallible merge arithmetic.
+        let total_len = slabs.iter().try_fold(0usize, |len, slab| {
+            len.checked_add(slab.len).ok_or(PackError::BadFormat)
+        })?;
         if let Some(expected) = self.length {
             if total_len != expected {
                 return Err(PackError::InvalidLength(total_len, expected));
