@@ -513,7 +513,7 @@ impl AutoCommit {
     /// [`Self::save`], choosing the format — see [`SaveOptions`].
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
-        if options.legacy_format {
+        if options.format == crate::SaveFormat::Legacy {
             self.doc.remove_unused_actors(false);
         }
         let bytes = self.doc.save_with_options(options);

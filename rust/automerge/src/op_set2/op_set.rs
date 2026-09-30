@@ -2517,7 +2517,7 @@ mod tests {
         doc.delete(crate::ROOT, "key2").unwrap();
         // this test reads the document chunk's op columns directly
         let saved = doc.save_with_options(crate::SaveOptions {
-            legacy_format: true,
+            format: crate::SaveFormat::Legacy,
             ..Default::default()
         });
         let doc_chunk = load_document_chunk(&saved);

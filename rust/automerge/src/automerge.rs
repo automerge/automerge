@@ -1045,11 +1045,9 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     ///
-    /// A whole-document fragment by default;
-    /// [`SaveOptions::legacy_format`] writes the pre-fragment document
-    /// chunk instead, for readers that predate change sets.
+    /// A whole-document change set by default; see [`SaveFormat`].
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        let mut bytes = if options.legacy_format {
+        let mut bytes = if options.format == SaveFormat::Legacy {
             // this format writes the actor table verbatim, so a stray
             // entry lands in the saved bytes. `AutoCommit` sweeps them
             // before getting here; a bare `Automerge` cannot (this takes
@@ -1063,7 +1061,7 @@ impl Automerge {
             Vec::new()
         } else {
             let change_set = self
-                .change_set_document()
+                .change_set_document(options.format)
                 .expect("a document's own changes can always be made into a change set");
             if options.deflate {
                 change_set.bytes()
@@ -1112,12 +1110,12 @@ impl Automerge {
     /// what lets the receiver rebuild the fragment structure this
     /// document had; without them it would know only the fragments its
     /// own heads form.
-    pub fn change_set_document(&self) -> Result<ChangeSet, AutomergeError> {
+    pub fn change_set_document(&self, format: SaveFormat) -> Result<ChangeSet, AutomergeError> {
         let nodes = self.change_graph.all_nodes();
         let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
         let heads = self.get_head_hashes();
         // a whole document depends on nothing outside itself
-        self.assemble_change_set(&heads, &[], &nodes, storage)
+        self.assemble_change_set(&heads, &[], &nodes, storage, format)
     }
 
     /// The changes `heads` does not already cover, as one fragment.
@@ -1128,6 +1126,7 @@ impl Automerge {
     pub fn change_set_after(
         &self,
         heads: &[ChangeId],
+        format: SaveFormat,
     ) -> Result<Option<ChangeSet>, AutomergeError> {
         let nodes: Vec<_> = heads
             .iter()
@@ -1137,7 +1136,7 @@ impl Automerge {
         let fresh = self.change_graph.get_build_indexes(clock);
         // the boundary the receiver must already have
         let boundary = self.change_ids_to_hashes_lossy(heads);
-        self.change_set_nodes(fresh, &boundary)
+        self.change_set_nodes(fresh, &boundary, format)
     }
 
     /// Wrap `nodes` as a fragment whose boundary is `boundary` — the
@@ -1147,6 +1146,7 @@ impl Automerge {
         &self,
         nodes: Vec<crate::change_graph::NodeIdx>,
         boundary: &[ChangeHash],
+        format: SaveFormat,
     ) -> Result<Option<ChangeSet>, AutomergeError> {
         if nodes.is_empty() {
             return Ok(None);
@@ -1174,9 +1174,9 @@ impl Automerge {
                     .is_some_and(|n| nodes.binary_search(&n).is_err())
             })
             .collect();
-        Ok(Some(
-            self.assemble_change_set(&heads, &boundary, &nodes, storage)?,
-        ))
+        Ok(Some(self.assemble_change_set(
+            &heads, &boundary, &nodes, storage, format,
+        )?))
     }
 
     /// [`Self::save_with_options`] with the defaults.
@@ -1185,7 +1185,7 @@ impl Automerge {
     }
 
     /// The changes since `heads`, as one fragment — or, with
-    /// [`SaveOptions::legacy_format`], as a series of change chunks.
+    /// [`SaveFormat::Legacy`], as a series of change chunks.
     /// Empty when `heads` already covers the document.
     pub fn save_after(&self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
         self.save_after_with_options(heads, SaveOptions::default())
@@ -1197,7 +1197,7 @@ impl Automerge {
         heads: &[ChangeId],
         options: SaveOptions,
     ) -> Result<Vec<u8>, AutomergeError> {
-        if options.legacy_format {
+        if options.format == SaveFormat::Legacy {
             let mut bytes = vec![];
             for c in self.get_changes(heads)? {
                 bytes.extend(c.raw_bytes());
@@ -1205,7 +1205,7 @@ impl Automerge {
             return Ok(bytes);
         }
         Ok(self
-            .change_set_after(heads)?
+            .change_set_after(heads, options.format)?
             .map(|b| {
                 if options.deflate {
                     b.bytes()
@@ -1273,7 +1273,7 @@ impl Automerge {
         // the change's own deps are its boundary: everything else the
         // receiver must already have
         let boundary = self.change_graph.parent_hashes(node);
-        self.change_set_nodes(vec![node], &boundary)
+        self.change_set_nodes(vec![node], &boundary, SaveFormat::Fast)
     }
 
     /// Clock range for diffing between two head sets, resolved with the
@@ -1659,7 +1659,13 @@ impl Automerge {
             .collect::<Result<Vec<_>, _>>()?;
 
         let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, members.clone())?;
-        self.assemble_change_set(&head_hashes, &boundary_hashes, &members, storage)
+        self.assemble_change_set(
+            &head_hashes,
+            &boundary_hashes,
+            &members,
+            storage,
+            SaveFormat::Fast,
+        )
     }
 
     /// [`Self::make_change_set`] for a [`Fragment`]. Debug builds check
@@ -1719,7 +1725,7 @@ impl Automerge {
     pub fn change_set_for_fragment(&self, f: &Fragment) -> Result<ChangeSet, AutomergeError> {
         let nodes = self.fragment_nodes(f)?;
         let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
-        self.assemble_change_set(&[f.head], &f.boundary, &nodes, storage)
+        self.assemble_change_set(&[f.head], &f.boundary, &nodes, storage, SaveFormat::Fast)
     }
 
     /// Wrap collected change storage in its fragment metadata.
@@ -1728,13 +1734,15 @@ impl Automerge {
     /// document delivers every head the document has, where a fragment
     /// delivers exactly one.
     /// Checkpoints are derived: the members at fragment level > 0 that
-    /// are not already delivered as heads.
+    /// are not already delivered as heads. So are the retained hashes —
+    /// see [`ChangeGraph::hashes_to_retain`].
     fn assemble_change_set(
         &self,
         heads: &[ChangeHash],
         boundary: &[ChangeHash],
         nodes: &[crate::change_graph::NodeIdx],
         storage: crate::storage::ChangeSetStorage<'static, crate::storage::change::Verified>,
+        format: SaveFormat,
     ) -> Result<ChangeSet, AutomergeError> {
         let checkpoints: Vec<ChangeHash> = {
             let mut v: Vec<ChangeHash> = nodes
@@ -1746,6 +1754,12 @@ impl Automerge {
             v
         };
         let checkpoints = &checkpoints[..];
+        let retained: Vec<(usize, ChangeHash)> = self
+            .change_graph
+            .hashes_to_retain(nodes, format)
+            .into_iter()
+            .filter(|(_, h)| h.fragment_level() == 0 && !heads.contains(h))
+            .collect();
         let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
         // member indexes are positions in the change set's (topologically
         // ordered) change list, which is node order
@@ -1784,15 +1798,16 @@ impl Automerge {
         // one does
         let (member_actors, member_seqs) = storage.member_ids().map_err(|_| unknown())?;
 
-        Ok(ChangeSet::new(
+        Ok(ChangeSet {
             heads,
             checkpoints,
+            retained,
             boundary,
             dep_ids,
             member_actors,
             member_seqs,
             storage,
-        ))
+        })
     }
 
     pub fn change_sets_for_fragments<I: IntoIterator<Item = Fragment>>(
@@ -1814,7 +1829,7 @@ impl Automerge {
             .zip(storages)
             .map(|((f, n), storage)| {
                 Ok(self
-                    .assemble_change_set(&[f.head], &f.boundary, n, storage)?
+                    .assemble_change_set(&[f.head], &f.boundary, n, storage, SaveFormat::Fast)?
                     .bytes())
             })
             .collect()
@@ -2079,6 +2094,11 @@ impl Automerge {
             .iter()
             .filter_map(|(i, hash)| member_node(*i).map(|n| (n, *hash)))
             .collect();
+        let retained_nodes: Vec<_> = change_set
+            .retained
+            .iter()
+            .filter_map(|(i, hash)| member_node(*i).map(|n| (n, *hash)))
+            .collect();
 
         // ── commit ──────────────────────────────────────────────────
         //
@@ -2156,12 +2176,65 @@ impl Automerge {
         for (node, hash) in checkpoint_nodes {
             owes_gc |= self.change_graph.record_node_hash(node, hash);
         }
+        for (node, hash) in retained_nodes {
+            owes_gc |= self.change_graph.record_node_hash(node, hash);
+        }
+        ops.commit(self, resolved);
+        // reads the delivered ops, so it waits for the commit
+        self.rebuild_missing_hashes(base..self.change_graph.len() as u32);
         if owes_gc {
             self.change_graph.gc_after_batch();
         }
-
-        ops.commit(self, resolved);
         Ok(())
+    }
+
+    /// Rehash the nodes in `delivered` that the retention rule keeps but
+    /// nothing named — every loose commit is exported as a fragment of
+    /// its own ([`Self::fragments`]) and needs its own and its parents'
+    /// hashes to do it.
+    ///
+    /// Nothing to do for [`SaveFormat::Fast`], which names them all.
+    fn rebuild_missing_hashes(&mut self, delivered: std::ops::Range<u32>) {
+        let missing = self.change_graph.unhashed_retained_nodes(delivered);
+        if missing.is_empty() {
+            return;
+        }
+        let nodes = self
+            .change_graph
+            .nodes_back_to_retained(missing.iter().copied());
+        // The delivered anchors floor this walk. Without them it descends
+        // into a fragment's interior and rehashes most of the document,
+        // so a change set that fails to name them panics in debug and
+        // pays the full walk in release.
+        debug_assert_eq!(
+            nodes
+                .iter()
+                .filter(|n| self.change_graph.is_below_fragment_top(**n))
+                .count(),
+            0,
+            "rebuild walked below fragment_top ({} nodes)",
+            nodes.len(),
+        );
+        let Ok(storage) =
+            ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())
+        else {
+            return;
+        };
+        // members come back in the order they went in, which is node
+        // order, which is topological — so each change's deps are hashed
+        // before it is
+        let Ok(changes) = storage.to_changes() else {
+            return;
+        };
+        let mut owes_gc = false;
+        for (node, change) in nodes.iter().zip(changes.iter()) {
+            if missing.binary_search(node).is_ok() {
+                owes_gc |= self.change_graph.record_node_hash(*node, change.hash());
+            }
+        }
+        if owes_gc {
+            self.change_graph.gc_after_batch();
+        }
     }
 
     /// Test-support deep validation of the document.
@@ -2256,7 +2329,7 @@ impl Automerge {
         if let Some(h) = self.change_graph.hash_for_node(node) {
             return Some(h);
         }
-        let nodes = self.change_graph.nodes_back_to_retained(node);
+        let nodes = self.change_graph.nodes_back_to_retained([node]);
         let pos = nodes.binary_search(&node).ok()?;
         let storage = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes).ok()?;
         // members come back in the order they went in, which is node
@@ -2598,7 +2671,7 @@ impl Automerge {
         // the boundary is what we already have and they build on: our
         // heads, as far as they are known to `other`
         let boundary = self.get_head_hashes();
-        other.change_set_nodes(nodes, &boundary)
+        other.change_set_nodes(nodes, &boundary, SaveFormat::Fast)
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -3446,6 +3519,32 @@ impl Default for Automerge {
     }
 }
 
+/// The format a save writes, and what a change set names.
+///
+/// [`SaveFormat::Small`] and [`SaveFormat::Fast`] both write a change
+/// set. They differ in how much of the *loose commits* they name — the
+/// level-0 changes no fragment covers yet. Whatever is left out the load
+/// rehashes; both name the anchors under them, so that rehash is floored
+/// at the fragment frontier and never walks the whole document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SaveFormat {
+    /// Name only the anchors and let the load rehash the loose commits
+    /// from them.
+    #[default]
+    Small,
+    /// Name every loose commit too, so the load rehashes nothing.
+    ///
+    /// ~34 bytes and ~1.5us of load each. How many there are does not
+    /// track the document's size — it is the distance back to the last
+    /// level >= 1 fragment head, 9 to 1129 over one sweep. `cargo run
+    /// --release --example bench_minimize` measures both.
+    Fast,
+    /// The pre-fragment **document chunk**, for readers that predate
+    /// change sets. Carries the same history but no fragment structure:
+    /// a round trip through it comes back with an empty fragment index.
+    Legacy,
+}
+
 /// Options to pass to [`Automerge::save_with_options()`] and [`crate::AutoCommit::save_with_options()`]
 #[derive(Debug)]
 pub struct SaveOptions {
@@ -3453,14 +3552,8 @@ pub struct SaveOptions {
     pub deflate: bool,
     /// Whether to save changes which we do not have the dependencies for
     pub retain_orphans: bool,
-    /// Write the pre-fragment **document chunk** instead of a
-    /// whole-document fragment.
-    ///
-    /// The two carry the same history. The document chunk is what
-    /// readers older than the fragment format understand; the fragment
-    /// is self-contained, needs no change hashes, and keeps the
-    /// document's fragment structure across a round trip.
-    pub legacy_format: bool,
+    /// What to write — see [`SaveFormat`].
+    pub format: SaveFormat,
 }
 
 impl SaveOptions {
@@ -3476,7 +3569,7 @@ impl SaveOptions {
 impl std::default::Default for SaveOptions {
     fn default() -> Self {
         Self {
-            legacy_format: false,
+            format: SaveFormat::default(),
             deflate: true,
             retain_orphans: true,
         }
@@ -5536,7 +5629,7 @@ mod actor_hygiene_tests {
 
         // the formats themselves, below the save entry points (which
         // assert the state this test is deliberately in)
-        let change_set = doc.change_set_document().unwrap();
+        let change_set = doc.change_set_document(SaveFormat::Fast).unwrap();
         assert_eq!(
             change_set.actors().len(),
             clean,
@@ -5630,5 +5723,53 @@ mod actor_hygiene_tests {
         let err = dst.apply_changes(b.get_changes(&[]).unwrap());
         assert!(err.is_err(), "expected the equivocating change to fail");
         assert_clean(&dst, "change apply that failed on an equivocation");
+    }
+}
+
+#[cfg(test)]
+mod retained_hash_tests {
+    use super::*;
+    use crate::transaction::{CommitOptions, Transactable};
+    use crate::{AutoCommit, ROOT};
+    use std::collections::BTreeSet;
+
+    /// A change set names every hash its receiver's retention rule will
+    /// keep. The rest of that rule — the loose commits, their anchors,
+    /// the actor tips — is not derivable from the carried changes
+    /// without rehashing them, so a change set that left them out would
+    /// force the receiver down [`Automerge::rebuild_missing_hashes`].
+    #[test]
+    fn change_sets_name_every_retained_hash() {
+        let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));
+        for i in 0..2000 {
+            doc.put(ROOT, "k", i as i64).unwrap();
+            doc.commit_with(CommitOptions::default().with_time(0));
+        }
+        let doc = doc.document();
+        assert!(
+            !doc.fragments(1..).is_empty(),
+            "fixture needs both fragment bands"
+        );
+
+        let cs = doc.change_set_document(SaveFormat::Fast).unwrap();
+        let named: BTreeSet<ChangeHash> = cs
+            .heads()
+            .chain(cs.checkpoints.iter().map(|(_, h)| *h))
+            .chain(cs.retained.iter().map(|(_, h)| *h))
+            .collect();
+
+        let nodes = doc.change_graph.all_nodes();
+        let expected = doc.change_graph.hashes_to_retain(&nodes, SaveFormat::Fast);
+        assert!(!expected.is_empty());
+        let unnamed: Vec<_> = expected
+            .iter()
+            .filter(|(_, h)| !named.contains(h))
+            .collect();
+        assert!(
+            unnamed.is_empty(),
+            "{} of {} retained hashes unnamed",
+            unnamed.len(),
+            expected.len(),
+        );
     }
 }

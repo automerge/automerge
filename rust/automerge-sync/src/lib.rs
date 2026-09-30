@@ -132,7 +132,7 @@ impl MessageVersion {
 /// moves to fragments as its own change.
 fn legacy_opts() -> automerge::SaveOptions {
     automerge::SaveOptions {
-        legacy_format: true,
+        format: automerge::SaveFormat::Legacy,
         ..Default::default()
     }
 }

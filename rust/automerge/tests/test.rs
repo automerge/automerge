@@ -156,7 +156,7 @@ fn fork_at_with_increment_over_conflicted_counter_survives_save_load_from_fuzz_t
     let mut fork = doc.fork_at(&heads).unwrap();
     let before = fork.hydrate(&ROOT, None).unwrap();
     let bytes = fork.save_with_options(automerge::SaveOptions {
-        legacy_format: true,
+        format: automerge::SaveFormat::Legacy,
         deflate: false,
         ..Default::default()
     });
@@ -2015,12 +2015,12 @@ fn test_compressed_doc_cols() {
         expected.push(i as u64);
     }
     let uncompressed = doc.save_with_options(automerge::SaveOptions {
-        legacy_format: true,
+        format: automerge::SaveFormat::Legacy,
         deflate: false,
         ..Default::default()
     });
     let compressed = doc.save_with_options(automerge::SaveOptions {
-        legacy_format: true,
+        format: automerge::SaveFormat::Legacy,
         ..Default::default()
     });
     assert!(compressed.len() < uncompressed.len());

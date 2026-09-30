@@ -330,12 +330,13 @@ fn disabled_hash_lookups() {
     let opid = doc.get(ROOT, "k").unwrap().unwrap().1;
     assert_eq!(doc.hash_for_opid(&opid).unwrap(), Some(head));
 
-    // the document chunk carries no interior hashes: an earlier
-    // change's hash means nothing to a default load
-    assert!(matches!(
-        doc.hashes_to_change_ids(&[early]),
-        Err(AutomergeError::MissingHash(_)) | Err(AutomergeError::AuditModeRequired)
-    ));
+    // a small doc's whole history is loose commits, so the retained set
+    // covers all of it: an earlier change's hash resolves just as it does
+    // on the live document
+    assert_eq!(
+        doc.hashes_to_change_ids(&[early]).unwrap(),
+        orig.hashes_to_change_ids(&[early]).unwrap()
+    );
 
     // an op from a covered, freed interior change errors rather than
     // guessing

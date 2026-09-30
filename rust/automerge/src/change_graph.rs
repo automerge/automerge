@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Add;
-use std::ops::RangeBounds;
+use std::ops::{Range, RangeBounds};
 
 use crate::change_id::ChangeId;
 use crate::storage::{ChangeSetMetadata, DepRef};
@@ -281,6 +281,18 @@ pub(crate) enum ChangeSetDep {
     Node(NodeIdx),
 }
 
+/// Ops above which a loose commit keeps its hash even under
+/// [`SaveFormat::Small`].
+///
+/// Omitting one trades 33 bytes of save file for a rehash, and a rehash
+/// costs ~0.6us per op whatever the change holds — measured 0.39us/op on
+/// text splices and 0.91us/op on map writes, while bytes-per-op varies a
+/// hundredfold between them. So ops, not bytes, is what the threshold
+/// reads. Those 33 bytes cost ~0.8us to load, which puts break-even near
+/// 2 ops; the bar sits well above it so that ordinary small changes —
+/// the ones `Small` exists to shrink — still lose their hashes.
+const REHASHABLE_OPS: u64 = 16;
+
 impl ChangeGraph {
     pub(crate) fn new(num_actors: usize) -> Self {
         Self {
@@ -468,58 +480,122 @@ impl ChangeGraph {
         (0..end).map(NodeIdx)
     }
 
-    /// Whether the fragment frontier has reached node `n` — i.e. some
-    /// cached fragment's clock covers it. A clock comparison against the
-    /// node's own `(actor, seq)`, not an ancestry walk.
-    fn is_covered(&self, n: NodeIdx) -> bool {
+    /// Whether `frontier` has reached node `n` — i.e. some cached
+    /// fragment's clock covers it. A clock comparison against the node's
+    /// own `(actor, seq)`, not an ancestry walk.
+    fn is_covered_by(&self, n: NodeIdx, frontier: &SeqClock) -> bool {
         let i = n.0 as usize;
         let actor = usize::from(self.actors[i]);
-        self.fragment_top.get_for_actor(&actor) >= NonZeroU32::new(self.seq[i])
+        frontier.get_for_actor(&actor) >= NonZeroU32::new(self.seq[i])
     }
 
-    /// The retention rule: which known-hash nodes must keep their hashes
-    /// outside audit mode. Fragment heads and checkpoints (any node with
+    pub(crate) fn is_below_fragment_top(&self, node: NodeIdx) -> bool {
+        self.is_covered_by(node, &self.fragment_top)
+    }
+
+    /// The retention rule: which nodes must keep their hashes outside
+    /// audit mode. Fragment heads and checkpoints (any node with
     /// `fragment_level() > 0`), loose commits (level-0 nodes above the
     /// fragment frontier) plus their covered level-0 parents (anchors —
     /// their fragment boundaries need them). Heads are not included; add
     /// them when the caller needs the full retained set.
-    ///
-    /// Driven by the *hashes*, not by the node range. Only a node whose
-    /// hash is still known can be retained, so iterating the retained map
-    /// visits every candidate — where walking `0..len()` spent a hash
-    /// lookup per node in the graph to find the same few hundred. On a
-    /// 93k-change document that walk was the entire cost of the retention
-    /// GC (and of every `save`), and it recomputed a set the map already
-    /// delimited.
     fn retained_nodes(&self) -> BTreeSet<NodeIdx> {
+        self.retained_from(
+            self.retention_candidates(&self.fragment_top),
+            &self.fragment_top,
+        )
+    }
+
+    /// Every node the rule can act on: the hashes, plus the loose
+    /// commits above `frontier`.
+    ///
+    /// Both, because a hashless loose commit keeps no hash of its own but
+    /// still anchors its parents — and `add_change_set_members` appends
+    /// nodes with no hash. Neither source is `0..len()`: that walk cost a
+    /// hash lookup per node to find the same few hundred, and on a
+    /// 93k-change document was the whole cost of the GC and of `save`.
+    fn retention_candidates<'a>(
+        &'a self,
+        frontier: &'a SeqClock,
+    ) -> impl Iterator<Item = NodeIdx> + 'a {
+        let loose = self.seq_index.iter().enumerate().flat_map(|(a, seqs)| {
+            let covered = frontier
+                .get_for_actor(&a)
+                .map_or(0, |s| s.get() as usize)
+                .min(seqs.len());
+            seqs[covered..].iter().copied()
+        });
+        self.hashes.iter().map(|(n, _)| n).chain(loose)
+    }
+
+    /// The retention rule applied to `candidates`, plus the anchors and
+    /// actor tips it pulls in — which may fall outside them.
+    ///
+    /// A candidate with no hash counts as level 0, since a fragment
+    /// head's hash is never freed. So the result reads either way: the
+    /// hashes to keep, or the hashes that are missing.
+    fn retained_from(
+        &self,
+        candidates: impl Iterator<Item = NodeIdx>,
+        frontier: &SeqClock,
+    ) -> BTreeSet<NodeIdx> {
         let mut keep = BTreeSet::new();
-        for (n, hash) in self.hashes.iter() {
-            if hash.fragment_level() > 0 {
+        for n in candidates {
+            if self.fragment_level(n) > 0 {
                 keep.insert(n);
-            } else if !self.is_covered(n) {
+            } else if !self.is_covered_by(n, frontier) {
                 // a loose commit — plus its covered level-0 parents
                 // (anchors), which its fragment boundary will need
                 keep.insert(n);
-                for p in self.parents(n) {
-                    if self.is_covered(p)
-                        && self
-                            .hashes
-                            .get(p)
-                            .is_some_and(|ph| ph.fragment_level() == 0)
-                    {
-                        keep.insert(p);
-                    }
-                }
+                keep.extend(
+                    self.parents(n).filter(|p| {
+                        self.is_covered_by(*p, frontier) && self.fragment_level(*p) == 0
+                    }),
+                );
             }
         }
-        // every actor's tip: committing as an actor names its latest
-        // change by hash
-        for changes in &self.seq_index {
-            if let Some(tip) = changes.last() {
-                keep.insert(*tip);
-            }
-        }
+        // committing as an actor names its latest change by hash
+        keep.extend(self.seq_index.iter().filter_map(|c| c.last()).copied());
         keep
+    }
+
+    /// 0 when the hash was freed — see [`Self::retained_from`].
+    fn fragment_level(&self, node: NodeIdx) -> usize {
+        self.hashes.get(node).map_or(0, |h| h.fragment_level())
+    }
+
+    /// The hashes among `nodes` a receiver of them must retain, each
+    /// paired with its position in `nodes`. Non-members are dropped — a
+    /// change set names those in its deps instead.
+    ///
+    /// [`SaveFormat::Fast`] names the whole set; anything else names the
+    /// part below the receiver's frontier (the anchors), which it cannot
+    /// rehash for itself, plus anything over [`REHASHABLE_OPS`].
+    ///
+    /// Run against the frontier the *receiver* will have — the fragments
+    /// it can cache are the level > 0 nodes among `nodes`. This graph's
+    /// own `fragment_top` would under-ship: a member it covers with a
+    /// fragment it is not sending is still loose over there.
+    pub(crate) fn hashes_to_retain(
+        &self,
+        nodes: &[NodeIdx],
+        format: crate::SaveFormat,
+    ) -> Vec<(usize, ChangeHash)> {
+        let carried = nodes
+            .iter()
+            .copied()
+            .filter(|n| self.fragment_level(*n) > 0)
+            .collect();
+        let frontier = self.calculate_clock(carried);
+        self.retained_from(nodes.iter().copied(), &frontier)
+            .into_iter()
+            .filter(|n| {
+                format == crate::SaveFormat::Fast
+                    || self.is_covered_by(*n, &frontier)
+                    || self.num_ops.get(n.0 as usize).unwrap_or_default() > REHASHABLE_OPS
+            })
+            .filter_map(|n| Some((nodes.binary_search(&n).ok()?, self.hashes.get(n)?)))
+            .collect()
     }
 
     /// Drop every hash outside the retained set and switch to (or stay
@@ -863,12 +939,15 @@ impl ChangeGraph {
         changes
     }
 
-    /// `node` and every ancestor whose hash the GC freed, ascending —
-    /// the set a rebuild must reconstruct.
-    pub(crate) fn nodes_back_to_retained(&self, node: NodeIdx) -> Vec<NodeIdx> {
-        let mut members: BTreeSet<NodeIdx> = BTreeSet::new();
-        members.insert(node);
-        let mut pending = vec![node];
+    /// `seeds` and every ancestor whose hash the GC freed, ascending —
+    /// the set a rebuild must reconstruct. Seeded with the whole run at
+    /// once so the walk stays linear in it.
+    pub(crate) fn nodes_back_to_retained(
+        &self,
+        seeds: impl IntoIterator<Item = NodeIdx>,
+    ) -> Vec<NodeIdx> {
+        let mut members: BTreeSet<NodeIdx> = seeds.into_iter().collect();
+        let mut pending: Vec<NodeIdx> = members.iter().copied().collect();
         while let Some(n) = pending.pop() {
             for p in self.parent_slice(n).to_vec() {
                 if members.contains(&p) || self.hashes.get(p).is_some() {
@@ -880,6 +959,15 @@ impl ChangeGraph {
         }
         // NodeIdx order is insertion order, which is topological
         members.into_iter().collect()
+    }
+
+    /// Nodes the retention rule keeps that `delivered` left unnamed —
+    /// the set a change set apply owes a rehash.
+    pub(crate) fn unhashed_retained_nodes(&self, delivered: Range<u32>) -> Vec<NodeIdx> {
+        self.retained_from(delivered.map(NodeIdx), &self.fragment_top)
+            .into_iter()
+            .filter(|n| self.hashes.get(*n).is_none())
+            .collect()
     }
 
     /// Whether every dep falling outside `nodes` still has its hash, and

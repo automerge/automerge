@@ -453,7 +453,7 @@ macro_rules! log {
 /// formats until the JS API is ported deliberately.
 fn legacy_opts() -> automerge::SaveOptions {
     automerge::SaveOptions {
-        legacy_format: true,
+        format: am::SaveFormat::Legacy,
         ..Default::default()
     }
 }
@@ -1347,7 +1347,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = saveNoCompress)]
     pub fn save_nocompress(&mut self) -> Uint8Array {
         let bytes = self.doc.save_with_options(automerge::SaveOptions {
-            legacy_format: true,
+            format: am::SaveFormat::Legacy,
             deflate: false,
             ..Default::default()
         });

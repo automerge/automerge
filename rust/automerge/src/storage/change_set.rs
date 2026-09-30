@@ -37,6 +37,10 @@ pub(crate) use storage::ChangeSetStorage;
 ///   standing in for a whole document
 /// * the **checkpoint** hashes (interior fragment-level hashes), each
 ///   paired with its member index
+/// * the **retained** hashes: the level-0 members whose hashes the
+///   receiver's retention rule keeps — loose commits, their anchors and
+///   the actor tips — each paired with its member index. Without them
+///   the receiver has to rebuild every one by rehashing
 /// * the fragment's **boundary** hashes, each paired with its
 ///   [`ChangeId`]
 /// * for every external dep of the carried changes (in the same
@@ -51,6 +55,7 @@ pub(crate) use storage::ChangeSetStorage;
 ///             actors the prefix itself references)
 /// heads       uleb count, then per entry: 32-byte hash + uleb member index
 /// checkpoints uleb count, then per entry: uleb member index + 32-byte hash
+/// retained    uleb count, then per entry: uleb member index + 32-byte hash
 /// boundary    uleb count, then per entry: 32-byte hash + uleb actor + uleb seq
 /// deps        uleb count, then per entry: uleb actor + uleb seq
 /// changes     a complete legacy change set chunk, header and all — the
@@ -76,6 +81,10 @@ pub struct ChangeSet {
     pub(crate) heads: Vec<(ChangeHash, usize)>,
     /// `(member index, hash)`
     pub(crate) checkpoints: Vec<(usize, ChangeHash)>,
+    /// The level-0 hashes the receiver has to retain, `(member index,
+    /// hash)`. Disjoint from [`Self::heads`] and, by level, from
+    /// [`Self::checkpoints`].
+    pub(crate) retained: Vec<(usize, ChangeHash)>,
     /// each boundary hash paired with the change it names
     pub(crate) boundary: Vec<(ChangeHash, ChangeId)>,
     /// the change id of each external dep, aligned with [`Self::deps`]
@@ -94,26 +103,6 @@ pub struct ChangeSet {
 }
 
 impl ChangeSet {
-    pub(crate) fn new(
-        heads: Vec<(ChangeHash, usize)>,
-        checkpoints: Vec<(usize, ChangeHash)>,
-        boundary: Vec<(ChangeHash, ChangeId)>,
-        dep_ids: Vec<ChangeId>,
-        member_actors: Vec<ActorIdx>,
-        member_seqs: Vec<NonZeroU64>,
-        storage: ChangeSetStorage<'static, Verified>,
-    ) -> Self {
-        Self {
-            heads,
-            checkpoints,
-            boundary,
-            dep_ids,
-            member_actors,
-            member_seqs,
-            storage,
-        }
-    }
-
     /// The member change columns, for the columnar apply path.
     pub(crate) fn change_cols(&self) -> ChangeSetChangeCols<'_> {
         self.storage
@@ -419,6 +408,11 @@ impl ChangeSet {
             leb128::write::unsigned(&mut data, *i as u64).unwrap();
             data.extend_from_slice(h.as_bytes());
         }
+        leb128::write::unsigned(&mut data, self.retained.len() as u64).unwrap();
+        for (i, h) in &self.retained {
+            leb128::write::unsigned(&mut data, *i as u64).unwrap();
+            data.extend_from_slice(h.as_bytes());
+        }
         leb128::write::unsigned(&mut data, boundary.len() as u64).unwrap();
         for (h, a, s) in &boundary {
             data.extend_from_slice(h.as_bytes());
@@ -478,6 +472,16 @@ impl ChangeSet {
             i = j;
         }
 
+        // a retained hash is encoded like a checkpoint
+        let (mut i, n_retained) = parse::leb128_u64(i)?;
+        let mut retained = Vec::with_capacity(entry_capacity(&i, n_retained, 33));
+        for _ in 0..n_retained {
+            let (j, idx) = parse::leb128_u64(i)?;
+            let (j, h) = parse::change_hash(j)?;
+            retained.push((idx as usize, h));
+            i = j;
+        }
+
         // a boundary entry is a 32-byte hash plus two ulebs
         let (i, n_boundary) = parse::leb128_u64(i)?;
         let mut i = i;
@@ -507,6 +511,7 @@ impl ChangeSet {
                 actors,
                 heads,
                 checkpoints,
+                retained,
                 boundary,
                 deps,
             },
@@ -544,6 +549,7 @@ pub(crate) struct ParsedPrefix {
     actors: Vec<ActorId>,
     heads: Vec<(ChangeHash, usize)>,
     checkpoints: Vec<(usize, ChangeHash)>,
+    retained: Vec<(usize, ChangeHash)>,
     boundary: Vec<(ChangeHash, u64, u64)>,
     deps: Vec<(u64, u64)>,
 }
@@ -702,10 +708,27 @@ impl ChangeSet {
         {
             return Err(bad("checkpoint duplicates a delivered head"));
         }
+        if prefix.retained.iter().any(|(i, _)| *i >= num_members) {
+            return Err(bad("retained hash index out of range"));
+        }
+        // the level > 0 hashes travel as checkpoints; a retained entry
+        // claiming to be one would be a second, unchecked channel into
+        // the fragment index
+        if prefix.retained.iter().any(|(_, h)| h.fragment_level() > 0) {
+            return Err(bad("retained hash is a fragment head"));
+        }
+        if prefix
+            .retained
+            .iter()
+            .any(|(_, r)| prefix.heads.iter().any(|(h, _)| h == r))
+        {
+            return Err(bad("retained hash duplicates a delivered head"));
+        }
 
         Ok(ChangeSet {
             heads: prefix.heads,
             checkpoints: prefix.checkpoints,
+            retained: prefix.retained,
             boundary,
             dep_ids,
             member_actors,
@@ -860,16 +883,16 @@ mod tests {
         out
     }
 
-    /// A prefix whose counts are wire-supplied lies. Each of the four
-    /// counted sections (heads, checkpoints, boundary, deps) claims more
-    /// entries than exist; none may turn into an allocation of the size
-    /// it asked for.
+    /// A prefix whose counts are wire-supplied lies. Each of the five
+    /// counted sections (heads, checkpoints, retained, boundary, deps)
+    /// claims more entries than exist; none may turn into an allocation
+    /// of the size it asked for.
     #[test]
     fn absurd_counts_error_instead_of_allocating() {
-        for section in 0..4 {
+        for section in 0..5 {
             let mut data = Vec::new();
             leb(0, &mut data); // no actors
-            for s in 0..4 {
+            for s in 0..5 {
                 // the section under test claims u64::MAX/64 entries; the
                 // ones before it are empty so parsing reaches it
                 leb(if s == section { u64::MAX / 64 } else { 0 }, &mut data);
@@ -965,6 +988,11 @@ mod tests {
         }
         let n_checkpoints = read(&bytes, &mut at);
         for _ in 0..n_checkpoints {
+            read(&bytes, &mut at);
+            at += 32;
+        }
+        let n_retained = read(&bytes, &mut at);
+        for _ in 0..n_retained {
             read(&bytes, &mut at);
             at += 32;
         }
