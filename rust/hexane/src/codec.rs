@@ -191,7 +191,7 @@ pub trait Codec: std::fmt::Debug + 'static {
     #[inline]
     fn read_count(data: &[u8]) -> Option<(usize, usize)> {
         let (n, v) = Self::read_unsigned(data)?;
-        Some((n, v as usize))
+        Some((n, usize::try_from(v).ok()?))
     }
 
     /// Compute the byte range of the signed value at `pos` in `buf`.
