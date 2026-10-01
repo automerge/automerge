@@ -3,7 +3,7 @@ use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
-use crate::patches::Events;
+use crate::patches::{winner_unchanged, Events};
 use crate::types::{ObjId, OpId, TextEncoding};
 
 use std::borrow::Cow;
@@ -45,7 +45,7 @@ pub(crate) struct MapDiffItem<'a> {
     pub(crate) key: &'a str,
     pub(crate) value: ValueRef<'a>,
     pub(crate) inc: i64,
-    pub(crate) conflict: bool,
+    conflict: winner_unchanged::Conflict,
     pub(crate) expose: bool,
     pub(crate) pos: usize,
     pub(crate) id: OpId,
@@ -57,7 +57,7 @@ impl<'a> MapDiffItem<'a> {
         MapRangeItem {
             key: Cow::Borrowed(self.key),
             value: self.value,
-            conflict: self.conflict,
+            conflict: self.conflict.after_conflicted(),
             pos: self.pos,
             maybe_exid,
         }
@@ -76,16 +76,14 @@ impl<'a> MapDiffItem<'a> {
                 self.key,
                 self.value.hydrate(encoding),
                 self.id,
-                self.conflict,
+                self.conflict.after_conflicted(),
                 self.expose,
             ),
-            Diff::Same => {
-                if self.inc != 0 {
-                    log.increment_map(obj, self.key, self.inc, self.id);
-                } else if self.conflict {
-                    log.flag_conflict_map(obj, self.key);
-                }
+            Diff::Same => winner_unchanged::Facts {
+                conflict: self.conflict,
+                counter_delta: winner_unchanged::CounterDelta::new(self.inc),
             }
+            .emit_map(obj, self.key, self.id, self.value.hydrate(encoding), log),
             Diff::Del => log.delete_map(obj, self.key),
         }
     }
@@ -153,7 +151,7 @@ impl<'a> MapEntry<'a> {
         value: ValueRef<'a>,
         inc: i64,
         mut diff: Diff,
-        conflict: bool,
+        conflict: winner_unchanged::Conflict,
         expose: bool,
     ) -> MapDiffItem<'a> {
         let key = self.key;
@@ -281,8 +279,7 @@ impl<'a> Iterator for MapDiff<'a> {
                 inc = 0;
             }
 
-            let old_conflict = diff == Diff::Same && num_old > 1;
-            let conflict = num_new > 1 && !old_conflict;
+            let conflict = winner_unchanged::Conflict::new(num_old > 1, num_new > 1);
 
             if let Some((next_diff, next_map)) = iter.peek() {
                 if next_map.key == map.key {
@@ -300,19 +297,11 @@ impl<'a> Iterator for MapDiff<'a> {
                     // Deleting the winning value exposes `last`, so its put
                     // patch must describe the conflict state after deletion,
                     // not merely whether the conflict is newly created.
-                    last.conflict = num_new > 1;
+                    last.conflict = last.conflict.with_after(num_new > 1);
                     return Some(last);
                 }
             }
-            let mut item = map.diff_item(value, inc, diff, conflict, expose);
-            if diff == Diff::Same && num_old > 1 && num_new == 1 {
-                // The surviving value is unchanged, but removing the other
-                // visible values clears its conflict flag. Emit a Put so a
-                // hydrated-state consumer can observe that metadata change.
-                // If it is an object, its unchanged children will not produce
-                // events of their own, so expose its complete state.
-                item.update(true);
-            }
+            let item = map.diff_item(value, inc, diff, conflict, expose);
             return Some(item);
         }
         None
