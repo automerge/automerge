@@ -262,7 +262,7 @@ impl std::default::Default for LoadOptions {
 ///
 /// ## Sync
 ///
-/// This type implements [`crate::sync::SyncDoc`]
+/// The sync protocol in the `automerge-sync` crate operates on this type.
 ///
 #[derive(Debug, Clone)]
 pub struct Automerge {

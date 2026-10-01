@@ -42,13 +42,13 @@ pub struct State {
     /// The hashes we have sent in this session
     pub sent_hashes: BTreeSet<ChangeHash>,
 
-    /// [`SyncDoc::generate_sync_message()`] should return [`None`] if there are no new changes
+    /// [`Sync::generate_sync_message()`](crate::Sync::generate_sync_message) should return [`None`] if there are no new changes
     /// to send. In particular, if there are changes in flight which the other end has not yet
     /// acknowledged we do not wish to generate duplicate sync messages. This field tracks whether
     /// the changes we expect to send to the peer based on this sync state have been sent or not. If
-    /// [`Self::in_flight`] is [`false`] then [`SyncDoc::generate_sync_message()`] will return a new
+    /// [`Self::in_flight`] is [`false`] then [`Sync::generate_sync_message()`](crate::Sync::generate_sync_message) will return a new
     /// message (provided there are in fact changes to send). If it is [`true`] then we don't. This
-    /// flag is cleared in [`SyncDoc::receive_sync_message()`].
+    /// flag is cleared in [`Sync::receive_sync_message()`](crate::Sync::receive_sync_message).
     pub in_flight: bool,
 
     /// Whether we have ever responded to the other end. This is used to ensure that we always send

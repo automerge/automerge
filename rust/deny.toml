@@ -161,6 +161,7 @@ skip = [
     # is still on roxmltree 0.20; both come from resvg, used by
     # benchmark-battery to render benchmark graphs
     { crate = "roxmltree@0.20.0", reason = "brought in by fontconfig-parser via resvg; usvg uses 0.21" },
+    { crate = "miniz_oxide@0.8.9", reason = "brought in by png via resvg (benchmark-battery only); flate2 uses 0.9" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

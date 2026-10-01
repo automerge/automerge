@@ -535,7 +535,7 @@ impl OpSet {
     ///
     /// The entry carries everything a mark op contributes (its id, and
     /// whether it begins or ends the mark); pair it with
-    /// [`Self::mark_data`] for the name and value. Nothing here decodes
+    /// [`MarkIndexColumn::mark_data`] for the name and value. Nothing here decodes
     /// an op. Yields the row each entry sits on.
     pub(crate) fn mark_index_entries(
         &self,
@@ -2092,7 +2092,7 @@ impl OpSet {
     }
 
     /// Map every actor index through `map` in one pass — the batched
-    /// form of [`Self::rewrite_with_new_actor`] for inserting several
+    /// form of `rewrite_with_new_actor` for inserting several
     /// actors at once.
     /// The op columns are not touched — their renumbering is deferred
     /// through [`ActorMap`]; this rewrites the eager sidecars (mark

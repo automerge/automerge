@@ -430,9 +430,6 @@ impl MarkIndexColumn {
         self.data = new_data;
     }
 
-    /// Splice a range of another mark column's rows in at `at` — the
-    /// mark half of a fragment merge. The cache travels separately (see
-    /// [`Self::absorb_cache`]) since one union covers every run.
     /// Splice ranges of another mark column's rows in at the given
     /// insertion points — the mark half of a fragment merge. Consumes
     /// `other`: the data column moves into the copy and the cache

@@ -35,7 +35,7 @@ pub(super) fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
     })
 }
 
-/// [`untangle_order`] over a slice of indexes into `ops`: the ops stay
+/// Untangle order over a slice of indexes into `ops`: the ops stay
 /// put and the `u32` indexes are permuted instead.
 pub(super) fn untangle_order_idx(
     ops: &[ChangeOp],
@@ -54,7 +54,7 @@ pub(super) fn untangle_order_idx(
     ut.finish();
 }
 
-/// [`UntangleLite`] operating on span positions of an index slice: all
+/// Lightweight untangler operating on span positions of an index slice: all
 /// op lookups indirect through `idxs`, and `finish` permutes the
 /// indexes rather than the ops.
 struct UntangleLiteIdx<'a> {
@@ -292,7 +292,7 @@ impl BatchApply {
     /// code path. The ops vec is never sorted or compacted — a `u32`
     /// index vec is filtered, sorted and untangled instead, then the
     /// ops are encoded into change set columns in index order and handed to
-    /// [`ChangeSetApply`], which decodes and applies them exactly like a
+    /// [`ChangeSetApply`](super::change_set::ChangeSetApply), which decodes and applies them exactly like a
     /// received fragment. Measures the conversion tax of making the
     /// compressed columns canonical.
     fn apply_v2(&mut self, doc: &mut Automerge) -> Result<(), AutomergeError> {

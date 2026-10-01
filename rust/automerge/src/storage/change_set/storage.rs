@@ -184,7 +184,7 @@ fn primed<T>(value: T) -> OnceLock<T> {
 impl<'a> ChangeSetStorage<'a, Unverified> {
     /// Parse the column section of a change set chunk — everything after the
     /// fragment metadata prefix. There is no nested chunk header: these
-    /// columns are part of chunk [`ChunkType::ChangeSet`], not a chunk of
+    /// columns are part of chunk [`ChunkType::ChangeSet`](crate::storage::ChunkType::ChangeSet), not a chunk of
     /// their own.
     pub(crate) fn parse_columns(
         input: parse::Input<'a>,

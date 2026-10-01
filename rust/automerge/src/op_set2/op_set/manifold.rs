@@ -4,10 +4,10 @@
 //!
 //! [`ApplyManifold`] holds every piece of streaming state — one
 //! forward-only iterator per column plus the object/key/element
-//! scoping — so a batch can be fed op by op ([`apply_op`]) and
+//! scoping — so a batch can be fed op by op ([`apply_change_set_ops`]) and
 //! resolved at the end ([`finish`]).
 //!
-//! [`apply_op`]: ApplyManifold::apply_op
+//! [`apply_change_set_ops`]: ApplyManifold::apply_change_set_ops
 //! [`finish`]: ApplyManifold::finish
 
 use crate::op_set2::op::DocSucc;

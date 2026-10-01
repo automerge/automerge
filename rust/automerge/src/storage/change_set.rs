@@ -66,7 +66,7 @@ pub(crate) use storage::ChangeSetStorage;
 /// topological order.
 ///
 /// The inner chunk is still written and read in the legacy
-/// ([`ChunkType::BundleV0`]) encoding so that a reader which only knows
+/// (`ChunkType::BundleV0`) encoding so that a reader which only knows
 /// that format can find the changes; nothing but the prefix distinguishes
 /// the two.
 ///

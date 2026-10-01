@@ -61,10 +61,10 @@ pub(crate) struct ChangeGraph {
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
     /// Whether a new fragment frees its covered hashes immediately
-    /// ([`GcMode::Auto`], the default) or waits to be asked
-    /// ([`GcMode::Manual`]).
+    /// ([`GcMode::Auto`](crate::GcMode::Auto), the default) or waits to be asked
+    /// ([`GcMode::Manual`](crate::GcMode::Manual)).
     gc_mode: crate::GcMode,
-    /// Set when a GC was skipped under [`GcMode::Manual`].
+    /// Set when a GC was skipped under [`GcMode::Manual`](crate::GcMode::Manual).
     gc_owed: bool,
 }
 
@@ -282,7 +282,7 @@ pub(crate) enum ChangeSetDep {
 }
 
 /// Ops above which a loose commit keeps its hash even under
-/// [`SaveFormat::Small`].
+/// [`SaveFormat::Small`](crate::SaveFormat::Small).
 ///
 /// Omitting one trades 33 bytes of save file for a rehash, and a rehash
 /// costs ~0.6us per op whatever the change holds — measured 0.39us/op on
@@ -568,7 +568,7 @@ impl ChangeGraph {
     /// paired with its position in `nodes`. Non-members are dropped — a
     /// change set names those in its deps instead.
     ///
-    /// [`SaveFormat::Fast`] names the whole set; anything else names the
+    /// [`SaveFormat::Fast`](crate::SaveFormat::Fast) names the whole set; anything else names the
     /// part below the receiver's frontier (the anchors), which it cannot
     /// rehash for itself, plus anything over [`REHASHABLE_OPS`].
     ///
@@ -1405,7 +1405,7 @@ impl ChangeGraph {
     /// popped largest-index-first, so this visits nodes in strictly
     /// descending node index. Only parents are ever pushed, and a
     /// parent's node index is always lower than its child's (see
-    /// [`Self::add_parent`]), so the popped index can only decrease and
+    /// [`Self::push_parents`]), so the popped index can only decrease and
     /// the output is a reverse topological order — every node is
     /// emitted before any of its parents. Reverse it for causal order.
     ///
@@ -1453,7 +1453,7 @@ impl ChangeGraph {
     /// a GC firing mid-batch would free dep hashes that later changes
     /// in the same batch still resolve by hash.
     ///
-    /// Under [`GcMode::Manual`] this only records that a GC is owed:
+    /// Under [`GcMode::Manual`](crate::GcMode::Manual) this only records that a GC is owed:
     /// freeing here would drop hashes that a later minimal
     /// `save_incremental` still needs to name its boundary. The owner
     /// runs [`Self::run_gc`] once it has saved.
@@ -1485,7 +1485,7 @@ impl ChangeGraph {
     }
 
     /// Whether a deferred GC is pending — a fragment freed coverage
-    /// while in [`GcMode::Manual`].
+    /// while in [`GcMode::Manual`](crate::GcMode::Manual).
     pub(crate) fn gc_owed(&self) -> bool {
         self.gc_owed
     }

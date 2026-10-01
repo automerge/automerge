@@ -124,10 +124,15 @@ pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
 /// actor_id must be a valid pointer to an AMactorId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
-    to_result(match actor_id.as_ref() {
+    let mut doc = match actor_id.as_ref() {
         Some(actor_id) => am::AutoCommit::new().with_actor(actor_id.as_ref().clone()),
         None => am::AutoCommit::new(),
-    })
+    };
+    // C documents are always in audit mode so that the hash-based APIs
+    // (sync included) keep working.
+    doc.enable_audit_mode()
+        .expect("an empty document has no hashes to verify");
+    to_result(doc)
 }
 
 /// \memberof AMdoc
@@ -695,7 +700,10 @@ pub unsafe extern "C" fn AMkeys(
 #[no_mangle]
 pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
-    to_result(am::AutoCommit::load(data))
+    to_result(am::AutoCommit::load_with_options(
+        data,
+        am::LoadOptions::new().with_audit_mode(),
+    ))
 }
 
 /// \memberof AMdoc

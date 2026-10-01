@@ -84,7 +84,7 @@ impl<'a> ChangeSetApply<'a> {
     /// decoded, filtered against `clock` and re-encoded (rare).
     /// `change_set_ops` is the change set's op columns as the parse left them —
     /// decoded, validated, still in change set actor space. All that remains
-    /// is the document-dependent half ([`OpSet::index_change_set`]): rebase the
+    /// is the document-dependent half ([`OpSet::index_change_set`](crate::op_set2::OpSet::index_change_set)): rebase the
     /// actors and build the indexes against `doc_ops`.
     pub(crate) fn new(
         change_set: &'a ChangeSet,
@@ -129,7 +129,7 @@ impl<'a> ChangeSetApply<'a> {
 }
 
 /// Load a change set source's op columns as a fully indexed op set in
-/// document actor space (see [`OpSet::load_change_set`]).
+/// document actor space (see [`OpSet::load_change_set`](crate::op_set2::OpSet::load_change_set)).
 fn load_change_set(
     src: &ChangeSetSrc<'_>,
     actor_map: &[usize],
@@ -141,7 +141,7 @@ fn load_change_set(
 }
 
 impl<'a> ChangeSetApply<'a> {
-    /// Resolve the change set with [`crate::op_set2::op_set::ApplyManifold`]:
+    /// Resolve the change set with [`ApplyManifold`](crate::op_set2::op_set::manifold::ApplyManifold):
     /// the change set's ops are already in document order — the manifold's
     /// exact contract — so positions, succ and top/text adjustments come
     /// from seeks over the touched scopes only.

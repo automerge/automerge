@@ -21,7 +21,7 @@ use crate::op_set2::types::MarkData;
 ///   the start of the object.
 ///
 /// Visibility is decided by the clock alone: mark ops are excluded from
-/// delete targets ([`OpSet::seek_ops_by`]'s `action != Action::Mark`),
+/// delete targets (`OpSet::seek_ops_by_*`'s `action != Action::Mark`),
 /// so a mark has no succ and `covers` is the whole story. That is what
 /// lets this agree with a diff derived from the op stream.
 #[derive(Debug, Clone, Default)]

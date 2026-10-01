@@ -8,17 +8,16 @@
 //! the same data structure.
 //!
 //! In addition to the core data structure (which we generally refer to as a
-//! "document"), we also provide an implementation of a sync protocol (in
-//! [`crate::sync`]) which can be used over any reliable in-order transport; and
+//! "document"), we also provide an implementation of a sync protocol (in the
+//! `automerge-sync` crate) which can be used over any reliable in-order transport; and
 //! an efficient binary storage format.
 //!
 //! This crate is organised around two representations of a document -
 //! [`Automerge`] and [`AutoCommit`]. The difference between the two is that
 //! [`AutoCommit`] manages transactions for you. Both of these representations
-//! implement [`ReadDoc`] for reading values from a document and provide access
-//! to a [`sync::SyncDoc`] implementation (`Automerge` implements it directly
-//! whilst [`AutoCommit`] provides [`AutoCommit::sync`]) for taking part in the
-//! sync protocol. [`AutoCommit`] directly implements
+//! implement [`ReadDoc`] for reading values from a document. The sync
+//! protocol in `automerge-sync` works on an [`Automerge`]; an [`AutoCommit`]
+//! hands one over with [`AutoCommit::document`] / [`AutoCommit::document_mut`]. [`AutoCommit`] directly implements
 //! [`transaction::Transactable`] for making changes to a document, whilst
 //! [`Automerge`] requires you to explicitly create a
 //! [`transaction::Transaction`].
@@ -90,7 +89,7 @@
 //!
 //! ## Sync Protocol
 //!
-//! See the [`sync`] module.
+//! See the `automerge-sync` crate.
 //!
 //! ## Patches, maintaining materialized state
 //!
