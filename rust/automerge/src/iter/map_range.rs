@@ -15,8 +15,8 @@ pub struct MapRangeItem<'a> {
     pub key: Cow<'a, str>,
     pub value: ValueRef<'a>,
     pub conflict: bool,
-    pub(crate) pos: usize,
     pub(crate) maybe_exid: ExIdPromise<'a>,
+    pos: usize,
 }
 
 impl MapRangeItem<'_> {
@@ -43,12 +43,12 @@ impl MapRangeItem<'_> {
 pub(crate) struct MapDiffItem<'a> {
     pub(crate) diff: Diff,
     pub(crate) key: &'a str,
-    pub(crate) value: ValueRef<'a>,
-    pub(crate) inc: i64,
-    conflict: winner_unchanged::Conflict,
-    pub(crate) expose: bool,
-    pub(crate) pos: usize,
     pub(crate) id: OpId,
+    pub(crate) value: ValueRef<'a>,
+    inc: i64,
+    conflict: winner_unchanged::Conflict,
+    expose: bool,
+    pos: usize,
 }
 
 impl<'a> MapDiffItem<'a> {
