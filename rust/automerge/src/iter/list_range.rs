@@ -5,7 +5,7 @@ use crate::iter::Diff;
 use crate::op_set2::op_set::{ActionIter, InsertAcc, OpIdIter, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::op_set2::OpSet;
-use crate::patches::Events;
+use crate::patches::{winner_unchanged, Events};
 use crate::types::{ObjId, OpId, TextEncoding};
 
 use std::fmt::Debug;
@@ -105,7 +105,6 @@ impl<'a> ListDiff<'a> {
 struct ListState {
     num_old: usize,
     num_new: usize,
-    conflict: bool,
     expose: bool,
     inc: i64,
 }
@@ -121,13 +120,14 @@ impl ListState {
             diff = Diff::Add;
         }
         let update = diff == Diff::Add && self.num_old > 0;
+        let conflict = winner_unchanged::Conflict::new(self.num_old > 1, self.num_new > 1);
         ListDiffItem {
             diff,
             value,
             inc: self.inc,
             index,
             update,
-            conflict: self.conflict,
+            conflict,
             expose: self.expose,
             id,
         }
@@ -179,9 +179,6 @@ impl<'a> Iterator for ListDiff<'a> {
                 ValueRef::from_action_value(list.action, list.value.clone())
             };
 
-            let old_conflict = diff == Diff::Same && state.num_old > 1;
-            state.conflict = state.num_new > 1 && !old_conflict;
-
             if let Some((next_diff, next_list)) = iter.peek() {
                 if next_list.inserts == list.inserts {
                     if diff.is_visible() && next_diff.is_del() {
@@ -196,19 +193,13 @@ impl<'a> Iterator for ListDiff<'a> {
                 last.update(state.expose || newly_visible);
                 // Deleting the winning value exposes `last`, so its put
                 // patch must carry the remaining register's conflict state.
-                last.conflict = state.num_new > 1;
+                last.conflict = last.conflict.with_after(state.num_new > 1);
                 if last.diff.is_visible() {
                     *index += 1;
                 }
                 return Some(last);
             } else {
-                let mut item = state.diff_item(list.id, value, *index, diff);
-                if diff == Diff::Same && state.num_old > 1 && state.num_new == 1 {
-                    // The surviving value is unchanged, but removing the other
-                    // visible values clears its conflict flag. Emit a Put and,
-                    // for objects, expose children which are unchanged too.
-                    item.update(true);
-                }
+                let item = state.diff_item(list.id, value, *index, diff);
                 if item.diff.is_visible() {
                     *index += 1;
                 }
@@ -225,7 +216,7 @@ pub(crate) struct ListDiffItem<'a> {
     pub(crate) value: ValueRef<'a>,
     pub(crate) inc: i64,
     pub(crate) index: usize,
-    pub(crate) conflict: bool,
+    conflict: winner_unchanged::Conflict,
     pub(crate) update: bool,
     pub(crate) expose: bool,
     pub(crate) id: OpId,
@@ -237,10 +228,11 @@ impl<'a> ListDiffItem<'a> {
         ListRangeItem {
             index: self.index,
             value: self.value,
-            conflict: self.conflict,
+            conflict: self.conflict.after_conflicted(),
             maybe_exid,
         }
     }
+
     pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
         let Self {
             diff,
@@ -255,6 +247,7 @@ impl<'a> ListDiffItem<'a> {
         match diff {
             Diff::Add => {
                 let value = value.hydrate(encoding);
+                let conflict = conflict.after_conflicted();
                 if update {
                     log.put_seq(obj, index, value, id, conflict, expose);
                 } else {
@@ -262,11 +255,14 @@ impl<'a> ListDiffItem<'a> {
                 }
             }
             Diff::Same => {
-                if inc != 0 {
-                    log.increment_seq(obj, index, inc, id);
-                } else if conflict {
-                    log.flag_conflict_seq(obj, index);
+                let elem = winner_unchanged::Seq::List {
+                    after: value.hydrate(encoding),
+                };
+                winner_unchanged::Facts {
+                    conflict,
+                    counter_delta: winner_unchanged::CounterDelta::new(inc),
                 }
+                .emit_sequence(obj, index, id, elem, log);
             }
             Diff::Del => log.delete_seq(obj, index, 1),
         }
