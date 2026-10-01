@@ -273,6 +273,22 @@ impl PatchLog {
         self.events.len()
     }
 
+    /// A branch holding this log's last event, which a mark event may extend, and where that
+    /// event is in this log.
+    #[cfg(feature = "slow_path_assertions")]
+    pub(crate) fn branch_tail(&mut self) -> (Self, usize) {
+        let start = self.events.len().saturating_sub(1);
+        let mut branch = self.branch();
+        branch.events.extend_from_slice(&self.events[start..]);
+        (branch, start)
+    }
+
+    #[cfg(feature = "slow_path_assertions")]
+    pub(crate) fn assert_events_since(&self, start: usize, other: &Self) {
+        assert_eq!(self.events[start..], other.events);
+        assert!(other.expose.is_subset(&self.expose));
+    }
+
     /// Finalizes the events recorded for the current view before moving the
     /// document to another point in history.
     ///

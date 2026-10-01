@@ -4448,3 +4448,40 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
         .unwrap();
     assert_eq!(actual, expected);
 }
+
+// An empty transaction adds its actor to the document and removes it again on commit. The mark
+// index must follow both, or a mark begun later by another actor takes the place of an existing
+// one.
+#[test]
+fn marks_survive_an_empty_transaction_by_an_earlier_actor() {
+    let actor = |s: &str| ActorId::from(s.as_bytes());
+    let mut base = AutoCommit::new().with_actor(actor("aa"));
+    let text = base.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    base.commit();
+    let mut dd = base.fork().with_actor(actor("dd"));
+    dd.put(&ROOT, "x", 1).unwrap();
+    dd.commit();
+    let dd_joins = dd.get_last_local_change().unwrap();
+    base.splice_text(&text, 0, 0, "abcdefgh").unwrap();
+    base.commit();
+    let mut cc = base.fork().with_actor(actor("cc"));
+    let bold = Mark::new("bold".into(), true, 0, 2);
+    cc.mark(&text, bold.clone(), ExpandMark::None).unwrap();
+    cc.commit();
+    // dd's mark gets the same counter as cc's
+    dd.merge(&mut base).unwrap();
+    let italic = Mark::new("italic".into(), "x", 4, 6);
+    dd.mark(&text, italic.clone(), ExpandMark::None).unwrap();
+    dd.commit();
+
+    let mut doc = base.fork().with_actor(actor("bb"));
+    doc.apply_changes([dd_joins]).unwrap();
+    doc.merge(&mut cc).unwrap();
+    doc.splice_text(&text, 0, 0, "").unwrap();
+    doc.commit();
+    doc.merge(&mut dd).unwrap();
+
+    assert_eq!(doc.marks(&text).unwrap(), vec![bold, italic]);
+    let loaded = AutoCommit::load(&doc.save()).unwrap();
+    assert_eq!(doc.marks(&text).unwrap(), loaded.marks(&text).unwrap());
+}

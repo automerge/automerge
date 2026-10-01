@@ -57,7 +57,14 @@ struct Untangler<'a> {
     index: usize,
     max: usize,
     width: usize,
+    // predecessors in this object the walk must find before it may stop early
+    targets: Vec<OpId>,
+    // the walk may end once the rest of it would change nothing (not so for the oracle's walk)
+    stop_early: bool,
 }
+
+// A walk seeks at most this many ops to find where the change begins.
+const MAX_WINDOW_SEEKS: usize = 16;
 
 impl<'a> Untangler<'a> {
     fn flush(&mut self, log: &mut PatchLog) {
@@ -159,7 +166,7 @@ impl<'a> Untangler<'a> {
         if let Some(v) = self.entry.remove(&id) {
             self.stack.extend(v);
         }
-        if let Some(u) = self.updates.get(&ElemId(id)) {
+        if let Some(u) = self.updates.remove(&ElemId(id)) {
             self.updates_stack.extend(u.iter().rev());
         }
     }
@@ -288,6 +295,8 @@ impl<'a> Untangler<'a> {
         }
         let updates_stack = Vec::with_capacity(change_ops.len());
         Self {
+            targets: Vec::new(),
+            stop_early: true,
             gosub,
             entry,
             stack,
@@ -306,6 +315,63 @@ impl<'a> Untangler<'a> {
             max,
         }
     }
+
+    /// Every change op is placed, every predecessor found, and any marks the change makes are
+    /// closed again, so the rest of the walk would change nothing.
+    fn is_done(&self) -> bool {
+        self.stop_early
+            && self.stack.is_empty()
+            && self.entry.is_empty()
+            && self.updates.is_empty()
+            && self.updates_stack.is_empty()
+            && !self.targets.iter().any(|id| self.pred.contains_key(id))
+            && self.value.marks.before == self.value.marks.after
+    }
+
+    /// Where the walk of `range` can begin: the first element the change touches, with the
+    /// index and marks a walk from the start would have there. The start of `range` otherwise.
+    fn window_start(&mut self, ops: &OpSet, range: &Range<usize>) -> usize {
+        let seeks = self.entry.len() + self.updates.len() + self.pred.len();
+        if seeks > MAX_WINDOW_SEEKS {
+            self.stop_early = false;
+            return range.start;
+        }
+        let seek = |id: &OpId| ops.get_op_id_pos(*id).filter(|p| range.contains(p));
+        let elems = self.entry.keys().copied();
+        let elems = elems.chain(self.updates.keys().map(|e| e.0));
+        let elems = elems.map(|id| (id, seek(&id))).collect::<HashMap<_, _>>();
+        // only a predecessor in this object can be found by its walk, whole or windowed
+        let mut first_target = usize::MAX;
+        let targets = self.pred.keys().filter(|id| {
+            let pos = elems.get(id).copied().unwrap_or_else(|| seek(id));
+            pos.inspect(|p| first_target = first_target.min(*p))
+                .is_some()
+        });
+        self.targets = targets.copied().collect();
+        match elems.values().min().copied().flatten() {
+            Some(start)
+                if self.stack.is_empty()
+                    && first_target >= start
+                    && self.seed(ops, range, start) =>
+            {
+                start
+            }
+            _ => range.start,
+        }
+    }
+
+    /// Take the state a walk of `range` from its start has on reaching the element at `pos`.
+    fn seed(&mut self, ops: &OpSet, range: &Range<usize>, pos: usize) -> bool {
+        let Some((index, marks)) = ops.seq_state_at(range, pos, self.seq_type) else {
+            return false;
+        };
+        self.index = index;
+        for (id, data) in marks.map {
+            self.value.marks.before.mark_begin(id, data.clone());
+            self.value.marks.after.mark_begin(id, data);
+        }
+        true
+    }
 }
 
 fn walk_list<'a>(
@@ -315,6 +381,9 @@ fn walk_list<'a>(
     log: &mut PatchLog,
 ) {
     for op in doc_ops {
+        if op.insert && ut.is_done() {
+            break;
+        }
         ut.element_update(&op);
 
         if op.insert {
@@ -678,9 +747,9 @@ impl BatchApply {
 
         for os in &self.obj_spans {
             let obj_range = walker.seek_to_obj(os.obj);
-            let doc_ops = doc.ops().iter_range(&obj_range);
             match obj_info.object_type(&os.obj) {
                 Some(ObjType::Map) => {
+                    let doc_ops = doc.ops().iter_range(&obj_range);
                     let mut walker = MapWalker::new(
                         os.obj,
                         doc_ops,
@@ -699,16 +768,53 @@ impl BatchApply {
                         ObjType::List => SequenceType::List,
                         _ => unreachable!(),
                     };
-                    let ut = Untangler::new(
+                    #[cfg(feature = "slow_path_assertions")]
+                    let oracle = (self.ops[os.span.clone()].to_vec(), self.pred.clone());
+                    #[cfg(feature = "slow_path_assertions")]
+                    let (mut o_log, before) = (log.branch_tail(), (succ.len(), conflicts.len()));
+                    let mut ut = Untangler::new(
                         os.obj,
                         sequence_type,
                         doc.text_encoding(),
                         &mut conflicts,
                         &mut self.ops[os.span.clone()],
                         &mut self.pred,
-                        doc_ops.end_pos(),
+                        obj_range.end,
                     );
-                    walk_list(ut, doc_ops, &mut succ, log);
+                    let start = ut.window_start(doc.ops(), &obj_range);
+                    let window = doc.ops().iter_range(&(start..obj_range.end));
+                    walk_list(ut, window, &mut succ, log);
+                    #[cfg(feature = "slow_path_assertions")]
+                    {
+                        // the whole walk of the object must agree with the window
+                        let (mut ops, mut pred) = oracle;
+                        let (mut o_succ, mut o_conflicts) = (vec![], vec![]);
+                        let mut ut = Untangler::new(
+                            os.obj,
+                            sequence_type,
+                            doc.text_encoding(),
+                            &mut o_conflicts,
+                            &mut ops,
+                            &mut pred,
+                            obj_range.end,
+                        );
+                        ut.stop_early = false;
+                        let doc_ops = doc.ops().iter_range(&obj_range);
+                        walk_list(ut, doc_ops, &mut o_succ, &mut o_log.0);
+                        let placed = |ops: &[ChangeOp]| {
+                            let ops = ops.iter();
+                            let ops = ops.map(|o| (o.id(), o.pos, o.subsort, o.conflicted));
+                            format!("{:?}", ops.collect::<Vec<_>>())
+                        };
+                        assert_eq!(placed(&ops), placed(&self.ops[os.span.clone()]));
+                        assert_eq!(
+                            format!("{:?}", o_conflicts),
+                            format!("{:?}", &conflicts[before.1..])
+                        );
+                        assert_eq!(o_succ, succ[before.0..]);
+                        assert_eq!(pred, self.pred);
+                        log.assert_events_since(o_log.1, &o_log.0);
+                    }
                 }
                 _ => panic!("Obj {:?} Missing from Index", os.obj),
             }
@@ -953,12 +1059,14 @@ impl Automerge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exid::ExId;
     use crate::marks::{ExpandMark, Mark};
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
     use crate::types;
     use crate::{make_rng, ActorId, AutoCommit, ROOT};
     use rand::prelude::*;
+    use rand::rngs::SmallRng;
 
     /// InsertQuery::resolve had a bug where an increment op before a trailing
     /// insert made the insert resolve to the wrong position. That corrupted the
@@ -1830,5 +1938,321 @@ mod tests {
 
             doc.validate_top_index();
         }
+    }
+
+    /// A walk seeded from the indexes at an element agrees with a walk from the start of the
+    /// sequence there: the same index, and the same marks before and after the change.
+    fn assert_seeds_agree(doc: &Automerge) {
+        let (ops, enc) = (doc.ops(), doc.text_encoding());
+        for (obj, _) in ops.iter_objs() {
+            let seq = match obj.typ {
+                ObjType::Text => SequenceType::Text,
+                ObjType::List => SequenceType::List,
+                _ => continue,
+            };
+            let range = ops.scope_to_obj(&obj.id);
+            let (mut conflicts, mut pred, mut none) = (vec![], PredCache::default(), vec![]);
+            let mut walk = Untangler::new(
+                obj.id,
+                seq,
+                enc,
+                &mut conflicts,
+                &mut none,
+                &mut pred,
+                range.end,
+            );
+            let (mut succ, mut log) = (vec![], PatchLog::inactive());
+            for op in ops.iter_range(&range) {
+                if op.insert {
+                    walk.untangle_inserts(op.id, op.pos, &mut log);
+                    let (mut c, mut p, mut n) = (vec![], PredCache::default(), vec![]);
+                    let mut seeded =
+                        Untangler::new(obj.id, seq, enc, &mut c, &mut n, &mut p, range.end);
+                    assert!(seeded.seed(ops, &range, op.pos));
+                    assert_eq!(walk.index, seeded.index, "index at {}", op.pos);
+                    assert_eq!(walk.value.marks.before, seeded.value.marks.before);
+                    assert_eq!(walk.value.marks.after, seeded.value.marks.after);
+                }
+                walk.handle_doc_op(&op, &mut succ, &mut log);
+            }
+        }
+    }
+
+    fn env_or(name: &str, default: u64) -> u64 {
+        std::env::var(name)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(default)
+    }
+
+    /// Replicas edit text and a list concurrently and receive each other's changes one at a
+    /// time, so most changes take the windowed walk. With `slow_path_assertions` every window
+    /// is checked against the whole walk.
+    #[test]
+    fn fuzz_windowed_apply() {
+        let seeds = env_or("AUTOMERGE_WINDOW_SEEDS", 2);
+        let rounds = env_or("AUTOMERGE_WINDOW_ROUNDS", 60) as usize;
+        let first = env_or("AUTOMERGE_WINDOW_FIRST_SEED", 0);
+        for seed in first..first + seeds {
+            for enc in [
+                TextEncoding::UnicodeCodePoint,
+                TextEncoding::Utf8CodeUnit,
+                TextEncoding::Utf16CodeUnit,
+                TextEncoding::GraphemeCluster,
+            ] {
+                windowed_apply_run(seed, enc, rounds);
+            }
+        }
+    }
+
+    fn windowed_apply_run(seed: u64, enc: TextEncoding, rounds: usize) {
+        println!("windowed_apply_run seed={seed} enc={enc:?} rounds={rounds}");
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let mut base = AutoCommit::new_with_encoding(enc).with_actor(rng.random());
+        let text = base.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        base.splice_text(&text, 0, 0, "hello e\u{301} 👩🏿‍🚒 world")
+            .unwrap();
+        let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
+        for i in 0..6 {
+            base.insert(&list, i, ScalarValue::counter(i as i64))
+                .unwrap();
+        }
+        base.commit();
+        let mut docs = (0..4)
+            .map(|_| base.fork().with_actor(rng.random()))
+            .collect::<Vec<_>>();
+        for _ in 0..rounds {
+            let i = rng.random_range(0..docs.len());
+            let edits = if rng.random_ratio(1, 10) { 12 } else { 3 };
+            for _ in 0..rng.random_range(1..=edits) {
+                random_edit(&mut docs[i], [&text, &list], &mut rng);
+            }
+            docs[i].commit();
+            let r = rng.random_range(0..docs.len());
+            let s = rng.random_range(0..docs.len());
+            let changes = docs[r].doc.get_changes_added(&docs[s].doc);
+            let take = rng.random_range(0..=changes.len());
+            for c in changes.into_iter().take(take) {
+                apply_and_check(&mut docs[r], c);
+            }
+        }
+        for r in 0..docs.len() {
+            for s in 0..docs.len() {
+                for c in docs[r].doc.get_changes_added(&docs[s].doc) {
+                    apply_and_check(&mut docs[r], c);
+                }
+            }
+        }
+        // op for op (saves can differ in how columns are split into runs)
+        let ops = |d: &AutoCommit| {
+            let ops = d.doc.ops().iter();
+            let ops = ops.map(|o| (o.succ().collect(), o.id, o.obj, o.key, o.action, o.value));
+            format!("{:?}", ops.collect::<Vec<(Vec<_>, _, _, _, _, _)>>())
+        };
+        assert!(docs.iter().all(|d| ops(d) == ops(&docs[0])));
+    }
+
+    fn apply_and_check(doc: &mut AutoCommit, change: Change) {
+        // an active patch log, so the oracle compares patches too
+        doc.update_diff_cursor();
+        doc.apply_changes([change]).unwrap();
+        assert!(doc.validate_top_index());
+        assert_seeds_agree(doc.document());
+    }
+
+    fn random_edit(doc: &mut AutoCommit, [text, list]: [&ExId; 2], rng: &mut SmallRng) {
+        const STRS: [&str; 7] = ["a", "xy", "é", "e\u{301}", "👩🏿‍🚒", "🙂", "abc"];
+        const NAMES: [&str; 3] = ["bold", "link", "em"];
+        let expand = [
+            ExpandMark::Before,
+            ExpandMark::After,
+            ExpandMark::Both,
+            ExpandMark::None,
+        ][rng.random_range(0..4)];
+        let tlen = doc.length(text);
+        let llen = doc.length(list);
+        let ti = rng.random_range(0..=tlen);
+        let li = rng.random_range(0..=llen);
+        let s = STRS[rng.random_range(0..STRS.len())];
+        let name = NAMES[rng.random_range(0..NAMES.len())].to_string();
+        // an edit that errors (an index inside a character, incrementing a non-counter) is skipped.
+        // No `put` on text: it corrupts the indexes independently of this change
+        let _ = match rng.random_range(0..21) {
+            0..=3 => doc.splice_text(text, ti, 0, s),
+            4 | 5 => doc.splice_text(text, ti, rng.random_range(1..3i64) as isize, ""),
+            6 => doc.splice_text(text, ti, 1, s),
+            7 | 8 => {
+                let end = rng.random_range(ti..=tlen);
+                let value = match rng.random_range(0..3) {
+                    0 => ScalarValue::from(true),
+                    1 => ScalarValue::from(rng.random_range(0..3) as i64),
+                    _ => ScalarValue::Null,
+                };
+                doc.mark(text, Mark::new(name, value, ti, end), expand)
+            }
+            9 => {
+                let end = rng.random_range(ti..=tlen);
+                doc.unmark(text, &name, ti, end, expand)
+            }
+            10 => doc
+                .split_block(text, ti)
+                .and_then(|b| doc.put(&b, "type", s)),
+            11 => doc.insert(list, li, ScalarValue::counter(0)),
+            12 => doc.insert(list, li, s),
+            13 if llen > 0 => doc.put(list, li % llen, rng.random_range(0..9) as i64),
+            14 if llen > 0 => doc.delete(list, li % llen),
+            15 if llen > 0 => doc.increment(list, li % llen, 1),
+            16 => doc.splice_text(text, ti, rng.random_range(2..24i64) as isize, ""),
+            17 => doc.splice(
+                list,
+                li,
+                rng.random_range(0..12i64) as isize,
+                [ScalarValue::from(1)],
+            ),
+            19 => doc.join_block(text, ti),
+            20 => doc.replace_block(text, ti).map(|_| ()),
+            _ => Ok(()),
+        };
+    }
+
+    /// A malformed change: a map delete whose predecessor is a character of a text. A predecessor
+    /// is found only by the walk of the object holding it, so the character is deleted when the
+    /// text is walked in the same batch and kept otherwise. The window must find it wherever it lies.
+    #[test]
+    fn predecessor_in_another_object_is_found_by_the_windowed_walk() {
+        let text_of = |at: usize, gone: usize| {
+            let mut s = "abcdefghij".repeat(100);
+            s.insert(at, 'z');
+            s.remove(gone + usize::from(gone >= at));
+            format!("y{s}")
+        };
+        // (insert 'z' at, predecessor at, patches, bold)
+        let cases = [
+            (
+                1000,
+                1,
+                [
+                    "DeleteSeq { index: 1, length: 1 }",
+                    "SpliceText { index: 999,",
+                ],
+                1..5,
+            ),
+            (
+                3,
+                998,
+                [
+                    "SpliceText { index: 3,",
+                    "DeleteSeq { index: 999, length: 1 }",
+                ],
+                1..7,
+            ),
+        ];
+        for (at, gone, expected_patches, bold) in cases {
+            let actor = |s: &str| ActorId::from(s.as_bytes());
+            let mut base = AutoCommit::new().with_actor(actor("aa"));
+            let text = base.put_object(&ROOT, "text", ObjType::Text).unwrap();
+            base.splice_text(&text, 0, 0, &"abcdefghij".repeat(100))
+                .unwrap();
+            let mark = Mark::new("bold".into(), true, 0, 5);
+            base.mark(&text, mark, ExpandMark::None).unwrap();
+            let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
+            base.put(&map, "k", "v").unwrap();
+            base.commit();
+            let target = base.get(&text, gone).unwrap().unwrap().1;
+
+            // insert into the text, and delete "k" naming a character of the text as predecessor
+            let mut other = base.fork().with_actor(actor("bb"));
+            other.splice_text(&text, at, 0, "z").unwrap();
+            other.delete(&map, "k").unwrap();
+            other.commit();
+            let mut bad = other.get_last_local_change().unwrap().decode();
+            let delete = bad.operations.iter_mut().find(|op| op.pred.len() == 1);
+            let delete = delete.expect("the change deletes k");
+            delete.pred = vec![target.to_string().parse().unwrap()].into();
+            let bad: Change = bad.into();
+            let mut head = base.fork().with_actor(actor("cc"));
+            head.splice_text(&text, 0, 0, "y").unwrap();
+            let head = head.get_last_local_change().unwrap();
+
+            // one at a time, with patches
+            let mut doc = base.fork().with_actor(actor("dd"));
+            doc.update_diff_cursor();
+            let before = doc.hydrate(&ROOT, None).unwrap();
+            doc.apply_changes([bad.clone()]).unwrap();
+            let patches = doc.diff_incremental();
+            let after = doc.hydrate(&ROOT, None).unwrap();
+            doc.apply_changes([head.clone()]).unwrap();
+            // together: the insert at the head of the text makes every walk of it start there
+            let mut together = base.fork().with_actor(actor("dd"));
+            together.apply_changes([bad, head]).unwrap();
+
+            let expected = text_of(at, gone);
+            assert_eq!(doc.text(&text).unwrap(), expected);
+            assert_eq!(together.text(&text).unwrap(), expected);
+            assert_eq!(doc.get(&map, "k").unwrap().unwrap().0, "v".into());
+            let marks = vec![Mark::new("bold".into(), true, bold.start, bold.end)];
+            assert_eq!(doc.marks(&text).unwrap(), marks);
+            assert_eq!(together.marks(&text).unwrap(), marks);
+            doc.doc.debug_cmp(&together.doc);
+            assert!(doc.validate_top_index());
+
+            let actions = patches.iter().map(|p| format!("{:?}", p.action));
+            let actions = actions.collect::<Vec<_>>();
+            assert_eq!(actions.len(), 2, "{actions:?}");
+            for (a, e) in actions.iter().zip(expected_patches) {
+                assert!(a.starts_with(e), "{actions:?}");
+            }
+            let mut patched = before;
+            patched
+                .apply_patches(TextEncoding::platform_default(), patches)
+                .unwrap();
+            assert_eq!(patched, after);
+
+            // and the same after save and load
+            let (saved, together_saved) = (doc.save(), together.save());
+            let loaded =
+                |bytes: &[u8]| format!("{:?}", AutoCommit::load(bytes).map(|mut d| d.save()));
+            assert_eq!(loaded(&saved), loaded(&together_saved));
+        }
+    }
+
+    /// A change with more elements and predecessors than a walk seeks walks the whole sequence
+    /// without keeping the early-stop bookkeeping: testing every pending predecessor at every
+    /// element would cost the walk more than it saves.
+    #[test]
+    fn a_change_past_the_seek_cap_walks_without_early_stop() {
+        let actor = |s: &str| ActorId::from(s.as_bytes());
+        let mut base = AutoCommit::new().with_actor(actor("aa"));
+        let text = base.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        base.splice_text(&text, 0, 0, &"x".repeat(100)).unwrap();
+        base.commit();
+        let mut other = base.fork().with_actor(actor("bb"));
+        other.splice_text(&text, 0, 20, "").unwrap();
+        other.commit();
+        let change = other.get_last_local_change().unwrap();
+
+        let mut doc = base.fork().with_actor(actor("cc"));
+        let mut batch = BatchApply::new(vec![change]);
+        batch.insert_new_actors(&mut doc.doc);
+        batch.import_ops(&mut doc.doc);
+        let mut obj_info = doc.doc.ops().obj_info.clone();
+        batch.order_ops_for_doc(&mut obj_info);
+        let os = batch.obj_spans.iter().find(|os| os.obj != ObjId::root());
+        let os = os.expect("the change touches the text").clone();
+        let range = doc.doc.ops().scope_to_obj(&os.obj);
+        let mut conflicts = vec![];
+        let mut ut = Untangler::new(
+            os.obj,
+            SequenceType::Text,
+            doc.doc.text_encoding(),
+            &mut conflicts,
+            &mut batch.ops[os.span.clone()],
+            &mut batch.pred,
+            range.end,
+        );
+        assert!(ut.updates.len() + ut.pred.len() > MAX_WINDOW_SEEKS);
+        assert_eq!(ut.window_start(doc.doc.ops(), &range), range.start);
+        assert!(!ut.stop_early);
+        assert!(ut.targets.is_empty());
     }
 }

@@ -827,7 +827,7 @@ impl OpSet {
         Some((elemid, last_pos))
     }
 
-    fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
+    pub(crate) fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         self.cols
             .id_ctr
             .find_by_value(id.counter() as u32)
@@ -873,6 +873,31 @@ impl OpSet {
             index = prefix.delta as usize;
         }
         Some(FoundOpId { op, index, visible })
+    }
+
+    /// The index and open marks a walk of `range` has on reaching the element beginning at `pos`;
+    /// `None` if `pos` is not an element start or marks are open at `range.start`.
+    pub(crate) fn seq_state_at(
+        &self,
+        range: &Range<usize>,
+        pos: usize,
+        seq_type: SequenceType,
+    ) -> Option<(usize, RichTextQueryState<'static>)> {
+        if !range.contains(&pos) || !self.get(pos)?.insert {
+            return None;
+        }
+        let index = match seq_type {
+            SequenceType::List => self.cols.index.top.delta(range.start, pos)?.delta,
+            SequenceType::Text => self.cols.index.text.delta(range.start, pos)?.delta as usize,
+        };
+        let marks_before = |p: usize| match p.checked_sub(1) {
+            Some(p) => self.cols.index.mark.rich_text_at(p, None),
+            None => RichTextQueryState::default(),
+        };
+        if !marks_before(range.start).map.is_empty() {
+            return None;
+        }
+        Some((index, marks_before(pos)))
     }
 
     pub(crate) fn seek_list_opid_slow(
@@ -1419,6 +1444,7 @@ impl OpSet {
     pub(crate) fn remove_actor(&mut self, idx: usize) {
         self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
+        self.cols.index.mark.rewrite_without_actor(idx);
         self.obj_info = ObjIndex(
             self.obj_info
                 .0
