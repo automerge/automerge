@@ -27,6 +27,7 @@ impl ListRangeItem<'_> {
     pub fn id(&self) -> ExId {
         self.maybe_exid.exid()
     }
+
     pub fn into_owned(self) -> ListRangeItem<'static> {
         ListRangeItem {
             index: self.index,
@@ -108,6 +109,7 @@ struct ListState {
     expose: bool,
     inc: i64,
 }
+
 impl ListState {
     fn diff_item<'a>(
         &self,
@@ -213,13 +215,13 @@ impl<'a> Iterator for ListDiff<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListDiffItem<'a> {
     pub(crate) diff: Diff,
-    pub(crate) value: ValueRef<'a>,
-    pub(crate) inc: i64,
     pub(crate) index: usize,
-    conflict: winner_unchanged::Conflict,
-    pub(crate) update: bool,
-    pub(crate) expose: bool,
     pub(crate) id: OpId,
+    pub(crate) value: ValueRef<'a>,
+    inc: i64,
+    conflict: winner_unchanged::Conflict,
+    update: bool,
+    expose: bool,
 }
 
 impl<'a> ListDiffItem<'a> {
