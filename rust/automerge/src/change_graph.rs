@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Add;
 use std::ops::{Range, RangeBounds};
 
+use crate::author::Authors;
 use crate::change_id::ChangeId;
 use crate::storage::{ChangeSetMetadata, DepRef};
 use crate::{
@@ -24,7 +25,6 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
-
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
     hashes: Hashes,
@@ -792,6 +792,7 @@ impl ChangeGraph {
         }
     }
 
+    #[cfg(debug_assertions)]
     pub(crate) fn get_change_set_metadata<I>(
         &self,
         hashes: I,
@@ -816,6 +817,71 @@ impl ChangeGraph {
         let err = missing.into_iter().map(Err);
         let ok = if err.len() > 0 { Vec::new() } else { nodes };
         self.change_set_metadata_for_nodes(ok).chain(err)
+    }
+
+    /// The authors recorded among `nodes`, as (actor index, author)
+    /// pairs. An actor's author is carried in the extra bytes of its
+    /// first (seq 1) change, so only those nodes are decoded.
+    fn authors_in(
+        &self,
+        nodes: Range<usize>,
+    ) -> impl Iterator<Item = (usize, crate::Author<'_>)> + '_ {
+        // one sequential pass: a prefix column's `get` walks from the
+        // start, so per-node lookups would be quadratic
+        self.extra_bytes_meta
+            .iter_range(nodes.clone())
+            .zip(nodes)
+            .filter(|(_, i)| self.seq[*i] == 1)
+            .filter_map(|(meta, i)| {
+                let extra = &self.extra_bytes_raw[meta.prefix() as usize..meta.total() as usize];
+                let author = crate::change::decode_author_footer(extra)?;
+                Some((self.actors[i].into(), author))
+            })
+    }
+
+    /// Record in `authors` the authors carried by `nodes` — every add
+    /// path calls this on the nodes it appended. Decoding from the stored
+    /// extra bytes covers the paths that never build a [`Change`].
+    fn assign_authors(&self, nodes: Range<usize>, authors: &mut Authors) {
+        for (actor, author) in self.authors_in(nodes) {
+            authors.assign_author(author.into_owned(), actor);
+        }
+    }
+
+    /// The authors change set members assign, as (actor index, author)
+    /// pairs to record once the members are appended — the same seq-1
+    /// rule as [`Self::authors_in`], decoded in the one pass that also
+    /// validates. Rejects members naming a second author for an actor —
+    /// one that already has an author, or that an earlier member claimed —
+    /// as `apply_changes` rejects such changes. Members are
+    /// `(document actor index, seq, extra bytes)`. Runs before anything
+    /// is appended, so a rejected change set leaves the graph untouched.
+    fn member_authors<'b>(
+        members: impl Iterator<Item = (usize, u64, &'b [u8])>,
+        authors: &Authors,
+        actor_ids: &[crate::ActorId],
+    ) -> Result<Vec<(usize, crate::Author<'b>)>, AutomergeError> {
+        let mut claimed = HashSet::new();
+        let mut assigned = Vec::new();
+        for (actor, seq, extra) in members {
+            if extra.is_empty() {
+                continue;
+            }
+            let Some(author) = crate::change::decode_author_footer(extra) else {
+                continue;
+            };
+            if authors.get_author_for_actor(actor).is_some() || !claimed.insert(actor) {
+                return Err(AutomergeError::DuplicateAuthor(
+                    author.into_owned(),
+                    actor_ids[actor].clone(),
+                    seq,
+                ));
+            }
+            if seq == 1 {
+                assigned.push((actor, author));
+            }
+        }
+        Ok(assigned)
     }
 
     /// Change set metadata for a set of member nodes, deps pre-resolved to
@@ -1095,11 +1161,13 @@ impl ChangeGraph {
     >(
         &mut self,
         iter: I,
+        authors: &mut Authors,
     ) -> Result<(), AddChangeError> {
         let node = NodeIdx(self.len() as u32);
         let mut new_fragment = false;
 
         self.add_nodes(iter.clone());
+        self.assign_authors(node.0 as usize..self.len(), authors);
 
         for (i, (change, actor)) in iter.enumerate() {
             let node_idx = node + i;
@@ -1300,7 +1368,7 @@ impl ChangeGraph {
         let checkpoints = nodes
             .iter()
             .filter_map(|n| self.hashes.get(*n))
-            .filter(|h| h.fragment_level() > 0)
+            .filter(|h| *h != head && h.fragment_level() > 0)
             .collect();
         let members = nodes.iter().map(|n| self.change_id(*n, actors)).collect();
         Fragment {
@@ -1549,7 +1617,20 @@ impl ChangeGraph {
     /// outside audit mode (audit-mode fragment application converts to
     /// changes instead); the new nodes have no hash, so they cannot
     /// appear in `nodes_by_hash`, `heads` or the fragment index yet.
-    pub(crate) fn add_change_set_members(&mut self, members: Vec<ChangeSetMember<'_>>) {
+    pub(crate) fn add_change_set_members(
+        &mut self,
+        members: Vec<ChangeSetMember<'_>>,
+        authors: &mut Authors,
+        actor_ids: &[crate::ActorId],
+    ) -> Result<(), AutomergeError> {
+        let new_authors: Vec<_> = Self::member_authors(
+            members.iter().map(|m| (m.actor, m.seq, m.extra.as_ref())),
+            authors,
+            actor_ids,
+        )?
+        .into_iter()
+        .map(|(actor, author)| (actor, author.into_owned()))
+        .collect();
         let base = NodeIdx(self.len() as u32);
 
         self.hashes.extend_without_hashes(members.len());
@@ -1596,6 +1677,10 @@ impl ChangeGraph {
         // one forward sweep over the appended range, instead of an
         // ancestry walk every CACHE_STEP nodes
         self.cache_clocks_from(base.0 as usize);
+        for (actor, author) in new_authors {
+            authors.assign_author(author.into_owned(), actor);
+        }
+        Ok(())
     }
 
     /// Append a change set's member changes straight from its columns.
@@ -1620,6 +1705,7 @@ impl ChangeGraph {
     /// The columns are validated where they are read, and every read that
     /// can fail happens before the graph is touched: a malformed change set
     /// leaves the graph exactly as it was.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn add_change_set_members_cols(
         &mut self,
         cols: &crate::storage::ChangeSetChangeCols<'_>,
@@ -1627,6 +1713,8 @@ impl ChangeGraph {
         member_seqs: &[NonZeroU64],
         actor_map: &[usize],
         ext_nodes: &[NodeIdx],
+        authors: &mut Authors,
+        actor_ids: &[crate::ActorId],
     ) -> Result<(), AutomergeError> {
         let bad = |s: &'static str| AutomergeError::MalformedChangeSet(s);
         let base = NodeIdx(self.len() as u32);
@@ -1657,6 +1745,17 @@ impl ChangeGraph {
         if extra_end > cols.extra.len() {
             return Err(bad("member extra bytes overrun the column"));
         }
+        let new_authors = Self::member_authors(
+            extra_meta.iter().take(n).enumerate().map(|(i, m)| {
+                (
+                    actor_map[usize::from(member_actors[i])],
+                    member_seqs[i].get(),
+                    &cols.extra[m.prefix() as usize..m.total() as usize],
+                )
+            }),
+            authors,
+            actor_ids,
+        )?;
 
         // `max_ops` is a plain `Vec` in the graph (the clock walks index
         // it), so unlike the columns above it is decoded
@@ -1760,6 +1859,9 @@ impl ChangeGraph {
         // one forward sweep over the appended range, instead of an
         // ancestry walk every CACHE_STEP nodes
         self.cache_clocks_from(base.0 as usize);
+        for (actor, author) in new_authors {
+            authors.assign_author(author.into_owned(), actor);
+        }
         Ok(())
     }
 
@@ -1816,6 +1918,7 @@ impl ChangeGraph {
         &mut self,
         change: &Change,
         actor: usize,
+        authors: &mut Authors,
     ) -> Result<(), AddChangeError> {
         let hash = change.hash();
 
@@ -1829,7 +1932,7 @@ impl ChangeGraph {
             }
         }
 
-        self.add_changes([(change, actor)].into_iter())
+        self.add_changes([(change, actor)].into_iter(), authors)
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
@@ -2236,8 +2339,13 @@ impl ChangeGraphCols {
         self.graph.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
+    pub(crate) fn num_actors(&self) -> usize {
+        self.graph.num_actors()
+    }
+
+    pub(crate) fn finalize(self, changes: &[Change], authors: &mut Authors) -> ChangeGraph {
         let mut graph = self.graph;
+        graph.assign_authors(0..graph.len(), authors);
         debug_assert_eq!(changes.len(), graph.len());
         debug_assert!(graph.hashes.len() == 0);
         // a full (audit) load: every hash is known
@@ -2253,7 +2361,7 @@ impl ChangeGraphCols {
             let hash = c.hash();
             let node_idx = NodeIdx(i as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
-            graph.hashes.push(hash)
+            graph.hashes.push(hash);
         }
 
         // The heads loaded from the document header are untrusted: replace
@@ -2287,8 +2395,10 @@ impl ChangeGraphCols {
         self,
         heads: &[ChangeHash],
         head_indexes: &[u64],
+        authors: &mut Authors,
     ) -> Result<ChangeGraph, BadHeadIndexes> {
         let mut graph = self.graph;
+        graph.assign_authors(0..graph.len(), authors);
         debug_assert!(graph.hashes.len() == 0);
 
         if heads.len() != head_indexes.len() {
@@ -2486,10 +2596,7 @@ pub(crate) enum AddChangeError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeMap, HashSet},
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::collections::{BTreeMap, HashSet};
 
     use crate::{
         make_rng,
@@ -2597,6 +2704,7 @@ mod tests {
         changes: Vec<Change>,
         graph: ChangeGraph,
         seqs_by_actor: BTreeMap<ActorId, u64>,
+        rng: rand::rngs::SmallRng,
     }
 
     impl TestGraphBuilder {
@@ -2610,11 +2718,13 @@ mod tests {
                 changes: Vec::new(),
                 graph,
                 seqs_by_actor: BTreeMap::new(),
+                rng: crate::make_rng(),
             }
         }
 
         fn actor(&mut self) -> ActorId {
-            let actor = ActorId::random();
+            use rand::RngExt;
+            let actor = ActorId::from(self.rng.random::<[u8; 16]>().to_vec());
             self.graph.insert_actor(self.actors.len());
             self.actors.push(actor.clone());
             actor
@@ -2663,10 +2773,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64;
+            let timestamp = 0;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
             let meta = BuildChangeMetadata {
                 actor: actor_idx,
@@ -2685,7 +2792,9 @@ mod tests {
             let change = Change::new(build_change(&ops, &meta, &self.graph, &osd.actors));
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
-            self.graph.add_change(&change, actor_idx).unwrap();
+            self.graph
+                .add_change(&change, actor_idx, &mut Authors::default())
+                .unwrap();
             self.changes.push(change);
             hash
         }
@@ -2696,9 +2805,10 @@ mod tests {
             // resolve hashes freely, and random change hashes can
             // otherwise form fragments and free them
             graph.hashes = Hashes::Full(Vec::new());
+            let mut authors = Authors::with_actors(self.actors.len());
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
-                graph.add_change(change, actor_idx).unwrap();
+                graph.add_change(change, actor_idx, &mut authors).unwrap();
             }
             graph
         }
@@ -2721,6 +2831,38 @@ mod tests {
                 .map(|c| ((c.actor_id().clone(), c.seq()), c.hash()))
                 .collect()
         }
+    }
+
+    #[test]
+    fn member_authors_rejects_a_second_author() {
+        let actors = vec![ActorId::from(&[1][..]), ActorId::from(&[2][..])];
+        let x = crate::Author::from(vec![1, 1]);
+        let y = crate::Author::from(vec![2, 2]);
+        let footer = |a: &crate::Author<'static>| {
+            crate::change::encode_author_footer(&Some(a.clone())).into_owned()
+        };
+        let (fx, fy) = (footer(&x), footer(&y));
+
+        // no prior author, one claim per actor: fine; non-footer extra
+        // bytes are not claims
+        let authors = Authors::with_actors(2);
+        let ok = [(0, 1, &fx[..]), (1, 1, &fy[..]), (0, 2, &[9, 9][..])];
+        ChangeGraph::member_authors(ok.into_iter(), &authors, &actors).unwrap();
+
+        // the actor already has an author
+        let mut authors = Authors::with_actors(2);
+        authors.assign_author(x.clone(), 0);
+        let err = ChangeGraph::member_authors([(0, 2, &fy[..])].into_iter(), &authors, &actors)
+            .unwrap_err();
+        assert!(
+            matches!(err, AutomergeError::DuplicateAuthor(a, actor, 2) if a == y && actor == actors[0])
+        );
+
+        // two members of the change set claim the same actor
+        let authors = Authors::with_actors(2);
+        let twice = [(1, 1, &fx[..]), (1, 2, &fy[..])];
+        let err = ChangeGraph::member_authors(twice.into_iter(), &authors, &actors).unwrap_err();
+        assert!(matches!(err, AutomergeError::DuplicateAuthor(_, actor, 2) if actor == actors[1]));
     }
 
     fn member_hash(hash_of: &BTreeMap<(ActorId, u64), ChangeHash>, id: &ChangeId) -> ChangeHash {
@@ -2786,6 +2928,19 @@ mod tests {
                 f.head
             );
 
+            // Checkpoints must exclude both the head and the boundary.
+            assert!(!f.checkpoints.contains(&f.head));
+            for boundary in &f.boundary {
+                assert!(!f.checkpoints.contains(boundary));
+            }
+            for checkpoint in &f.checkpoints {
+                assert!(f
+                    .members
+                    .iter()
+                    .any(|m| member_hash(hash_of, m) == *checkpoint));
+                assert!(checkpoint.fragment_level() > 0);
+            }
+
             // deps must be equal or higher level than the fragment
             for dep in &f.boundary {
                 assert!(
@@ -2827,6 +2982,41 @@ mod tests {
         let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
 
         assert_fragment_invariants(&fragments, &builder.hash_of());
+    }
+
+    #[test]
+    fn fragment_checkpoints_exclude_head_and_boundary() {
+        // Fix the actor and change contents so fragment levels are deterministic.
+        let mut doc = AutoCommit::new().with_actor(ActorId::from(&[1][..]));
+        for value in 0..1500 {
+            doc.put(ROOT, "counter", value).unwrap();
+            doc.commit();
+        }
+
+        let fragments = doc.fragments(1..);
+        assert!(!fragments.is_empty(), "expected bundled fragments");
+        assert!(
+            fragments.iter().any(|f| !f.boundary.is_empty()),
+            "expected a fragment with a boundary to exercise boundary exclusion",
+        );
+        for fragment in fragments {
+            let head_id = doc.hash_to_change_id(&fragment.head).unwrap().unwrap();
+            assert!(fragment.members.contains(&head_id));
+            assert!(
+                !fragment.checkpoints.contains(&fragment.head),
+                "fragment {:?} contains its own head as a checkpoint",
+                fragment.head,
+            );
+            for boundary in &fragment.boundary {
+                assert!(
+                    !fragment.checkpoints.contains(boundary),
+                    "fragment {:?} contains boundary {:?} as a checkpoint",
+                    fragment.head,
+                    boundary,
+                );
+            }
+            assert_eq!(doc.get_fragment(fragment.head), Some(fragment));
+        }
     }
 
     #[test]
@@ -3095,11 +3285,18 @@ mod tests {
 
         // loose + cached partition the full range
         assert_eq!(loose.len() + cached.len(), all.len());
-        assert!(!loose.is_empty());
         assert!(
             !cached.is_empty(),
             "expected at least one cached fragment from 5000 changes",
         );
+        // ~1 run in 256 the head hash itself has a leading zero byte:
+        // the head is then a cached fragment head, every change is
+        // covered, and an empty loose set is the correct answer
+        if heads.iter().all(|h| h.fragment_level() > 0) {
+            assert!(loose.is_empty(), "cached head must cover everything");
+        } else {
+            assert!(!loose.is_empty());
+        }
 
         for f in &loose {
             assert_eq!(f.level, 0, "0..=0 returned a non-zero level fragment");
@@ -3110,6 +3307,42 @@ mod tests {
 
         // empty range yields nothing
         assert_eq!(graph.fragments(&heads, 0..0, &builder.actors).len(), 0);
+    }
+
+    #[test]
+    fn fragments_with_cached_head() {
+        // force the rare branch the two tests above only hit by luck:
+        // rebuild small graphs until the head hash has a leading zero
+        // byte (expected ~256 tries), then loose must be empty and the
+        // cached fragments must cover every change
+        for _ in 0..10_000 {
+            let mut builder = TestGraphBuilder::new();
+            let actor = builder.actor();
+            let mut prev = vec![];
+            for _ in 0..8 {
+                let h = builder.change(&actor, 1, &prev);
+                prev = vec![h];
+            }
+            if prev[0].fragment_level() == 0 {
+                continue;
+            }
+            let graph = builder.build();
+            let heads: Vec<_> = graph.heads().collect();
+
+            let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
+            assert!(loose.is_empty(), "cached head must cover everything");
+
+            let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
+            let hash_of = builder.hash_of();
+            let covered: BTreeSet<ChangeHash> = cached
+                .iter()
+                .flat_map(|f| f.members.iter().map(|m| member_hash(&hash_of, m)))
+                .collect();
+            let all: BTreeSet<ChangeHash> = builder.all_hashes().into_iter().collect();
+            assert_eq!(covered, all, "cached fragments must cover all changes");
+            return;
+        }
+        panic!("no level>=1 head hash in 10k tries (p ~ 1e-17)");
     }
 
     #[test]
@@ -3126,13 +3359,17 @@ mod tests {
 
         let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
         let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
-        assert!(!loose.is_empty());
         assert!(!cached.is_empty(), "expected at least one cached fragment");
 
-        // get_fragment on a loose (level 0) commit hash returns an equivalent Fragment
-        let l = &loose[0];
-        let got = graph.get_fragment(l.head, &builder.actors).unwrap();
-        assert_eq!(got, *l);
+        // get_fragment on a loose (level 0) commit hash returns an
+        // equivalent Fragment. Loose can be legitimately empty (~1 run
+        // in 256) when the head hash itself is a fragment head
+        if let Some(l) = loose.first() {
+            let got = graph.get_fragment(l.head, &builder.actors).unwrap();
+            assert_eq!(got, *l);
+        } else {
+            assert!(heads.iter().all(|h| h.fragment_level() > 0));
+        }
 
         // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
         let c = &cached[0];
@@ -3348,6 +3585,7 @@ pub struct Fragment {
     pub head: ChangeHash,
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
+    /// Non-zero-level members of the fragment, excluding its head.
     pub checkpoints: Vec<ChangeHash>,
     /// The changes this fragment covers. Identified by [`ChangeId`]
     /// rather than hash so fragments can be produced outside audit

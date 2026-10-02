@@ -163,8 +163,10 @@ impl ChangeSet {
     }
 
     /// Build the carried-change storage from a set of change hashes.
+    /// Only the debug cross-check in the change collector uses it.
     /// No hint column: hints need a clock, which only the node-keyed
     /// path has.
+    #[cfg(debug_assertions)]
     pub(crate) fn storage_for_hashes<I>(
         op_set: &OpSet,
         change_graph: &ChangeGraph,
@@ -338,6 +340,7 @@ impl ChangeSet {
     }
 
     /// The hash-keyed path, which has no clock and so writes no hints.
+    #[cfg(debug_assertions)]
     fn storage_from_meta(
         op_set: &OpSet,
         changes: Vec<ChangeSetMetadata<'_>>,

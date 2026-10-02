@@ -3,6 +3,7 @@ mod utility_impls;
 
 use std::num::NonZeroU64;
 
+pub(crate) use crate::author::Author;
 pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, ScalarValue};
 pub(crate) use crate::value::DataType;
 
@@ -318,7 +319,7 @@ impl Op {
     }
 
     pub fn to_i64(&self) -> Option<i64> {
-        self.primitive_value().as_ref().and_then(|v| v.to_i64())
+        self.primitive_value().as_ref().and_then(|v| v.as_i64())
     }
 }
 
@@ -347,6 +348,8 @@ pub struct Change {
     pub deps: Vec<ChangeHash>,
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default = "Default::default")]
+    pub author: Option<Author<'static>>,
 }
 
 impl PartialEq for Change {

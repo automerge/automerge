@@ -3,7 +3,11 @@ set -eoux pipefail
 
 cd rust
 cargo deny --version
-cargo deny check advisories
-cargo deny check licenses
-cargo deny check bans
-cargo deny check sources
+if [ "$#" -gt 0 ]; then
+    cargo deny check "$@"
+else
+    cargo deny check advisories
+    cargo deny check licenses
+    cargo deny check bans
+    cargo deny check sources
+fi

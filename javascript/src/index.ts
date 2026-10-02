@@ -80,25 +80,17 @@
  *
  * // Make a clone of the document at this point, maybe this is actually on another
  * // peer.
- * let doc2 = automerge.clone < any > doc
+ * let doc2 = automerge.clone<any>(doc)
  *
  * let heads = automerge.getHeads(doc)
  *
- * doc =
- *   automerge.change <
- *   any >
- *   (doc,
- *   d => {
+ * doc = automerge.change<any>(doc, (d) => {
  *     d.key2 = "value2"
- *   })
+ * })
  *
- * doc =
- *   automerge.change <
- *   any >
- *   (doc,
- *   d => {
+ * doc = automerge.change<any>(doc, (d) => {
  *     d.key3 = "value3"
- *   })
+ * })
  *
  * // At this point we've generated two separate changes, now we want to send
  * // just those changes to someone else

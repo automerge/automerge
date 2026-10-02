@@ -327,7 +327,7 @@ fn rollback_delete_object() {
             .unwrap()
             .unwrap()
             .0
-            .to_str()
+            .as_str()
             .unwrap(),
         "nested_value"
     );

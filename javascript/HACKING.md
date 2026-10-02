@@ -39,7 +39,9 @@ The build also passes `-C llvm-args=-wasm-use-legacy-eh`. Current nightlies
 otherwise emit modern (`exnref`) exception handling; legacy EH lets
 wasm-bindgen provide its `WebAssembly.JSTag` polyfill on runtimes such as Node
 20 that do not provide `JSTag` natively. `WASM_TOOLCHAIN` can select a specific
-nightly when a reproducible build is required.
+nightly when a reproducible build is required. Environments without rustup can
+set `WASM_CARGO` to a Cargo executable that already selects the required
+nightly; the repository's Nix flake uses this mechanism.
 
 Any time you change the rust code in `../rust/*` you'll need to re-run the
 `npm run build` command.
@@ -212,5 +214,6 @@ module. This prepending is achieved in the `javascript/build.mjs` script in a
 function called `prependWebcryptoPolyfill`.
 
 This unfortunately requires some slightly more complicated testing to make sure
-it continues to work. In `scripts/ci/node_18_packaging_test` there is some code
-which uses `fnm` to run the node_cjs_fullfat` test in a Node 18 environment.
+it continues to work. `scripts/ci/node_18_packaging_test` runs the
+`node_cjs_fullfat` test when Node 18 is active, or uses `fnm` to select Node 18.
+The `nix run .#ci-node18-packaging-test` entry point supplies Node 18 directly.

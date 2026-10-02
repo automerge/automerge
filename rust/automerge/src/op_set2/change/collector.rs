@@ -11,6 +11,7 @@ use super::super::ValueMeta;
 use super::{length_prefixed_bytes, shift_range};
 use super::{ActorMapper, ChangeOpsColumns};
 
+use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
@@ -685,6 +686,7 @@ impl<'a> ChangeCollector<'a> {
     pub(crate) fn exclude_hashes_meta(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
+        authors: &'a Authors,
         have_deps: &[ChangeHash],
     ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError> {
         let changes = change_graph.get_build_metadata_clock(have_deps)?;
@@ -693,6 +695,7 @@ impl<'a> ChangeCollector<'a> {
             .map(|c| {
                 Ok(ChangeMetadata {
                     actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                    author: authors.get_author_for_actor(c.actor),
                     seq: c.seq,
                     start_op: c.start_op,
                     max_op: c.max_op,
@@ -719,6 +722,7 @@ impl<'a> ChangeCollector<'a> {
     pub(crate) fn meta_for_hashes<I>(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
+        authors: &'a Authors,
         hashes: I,
     ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError>
     where
@@ -730,6 +734,7 @@ impl<'a> ChangeCollector<'a> {
             .map(|c| -> Result<_, AutomergeError> {
                 Ok(ChangeMetadata {
                     actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                    author: authors.get_author_for_actor(c.actor),
                     seq: c.seq,
                     start_op: c.start_op,
                     max_op: c.max_op,

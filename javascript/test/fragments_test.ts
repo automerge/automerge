@@ -4,7 +4,7 @@ import * as Automerge from "../src/entrypoints/fullfat_node.js"
 type CounterDoc = { counter: number }
 
 function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
-  let doc = Automerge.from<CounterDoc>({ counter: 0 })
+  let doc = Automerge.from<CounterDoc>({ counter: 0 }, { actor: "0123456789abcdef" })
   // the tests cross-check fragment metadata against per-change lookups
   // (getChangeMetaByHash), which needs the hashes audit mode keeps
   Automerge.enableAuditMode(doc)
@@ -67,6 +67,24 @@ describe("the fragments API", () => {
       const { bytes, ...metadata } = fragments[i]
       assert.deepEqual(metadata, fragmentMetadata[i])
       assert.deepEqual(bytes, Automerge.getBackend(doc).bundleFragmentMetadata([fragmentMetadata[i]])[0])
+    }
+  })
+
+  it("excludes fragment heads and boundaries from checkpoints", () => {
+    const doc = makeDoc()
+    const fragments = Automerge.getFragments(doc)
+
+    assert.ok(fragments.length > 0)
+    assert.ok(fragments.some(fragment => fragment.boundary.length > 0))
+    for (const fragment of fragments) {
+      assert.ok(!fragment.checkpoints.includes(fragment.head))
+      for (const boundary of fragment.boundary) {
+        assert.ok(!fragment.checkpoints.includes(boundary))
+      }
+      assert.deepEqual(
+        Automerge.getFragmentMeta(doc, fragment.head)?.checkpoints,
+        fragment.checkpoints,
+      )
     }
   })
 

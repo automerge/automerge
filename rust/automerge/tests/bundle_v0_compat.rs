@@ -36,8 +36,8 @@ fn v0_bundle_loads_with_expected_content() {
 
     let (_, list) = doc.get(ROOT, "list").unwrap().unwrap();
     assert_eq!(doc.length(&list), 3);
-    assert_eq!(doc.get(&list, 0).unwrap().unwrap().0.to_i64(), Some(1));
-    assert_eq!(doc.get(&list, 1).unwrap().unwrap().0.to_i64(), Some(2));
+    assert_eq!(doc.get(&list, 0).unwrap().unwrap().0.as_i64(), Some(1));
+    assert_eq!(doc.get(&list, 1).unwrap().unwrap().0.as_i64(), Some(2));
     assert_eq!(
         doc.get(&list, 2).unwrap().unwrap().0.into_string().unwrap(),
         "three"
@@ -55,7 +55,7 @@ fn v0_bundle_loads_with_expected_content() {
 
     // counter with an increment applied on top
     let (counter, _) = doc.get(ROOT, "counter").unwrap().unwrap();
-    assert_eq!(counter.to_i64(), Some(12));
+    assert_eq!(counter.as_i64(), Some(12));
 }
 
 #[test]

@@ -29,8 +29,6 @@ macro_rules! to_expand_mark {
     }};
 }
 
-pub(crate) use to_expand_mark;
-
 /// \ingroup enumerations
 /// \enum AMmarkExpand
 /// \installed_headerfile

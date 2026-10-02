@@ -32,7 +32,7 @@ fn readme_example() -> Result<(), automerge::AutomergeError> {
         }
     }
 
-    assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.to_str(), Some("value"));
+    assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.as_str(), Some("value"));
     Ok(())
 }
 
@@ -64,7 +64,7 @@ fn sync_state_round_trips_and_loss_is_recoverable() -> Result<(), automerge::Aut
     let mut peer1_state = State::new();
     let mut peer2_state = State::new();
     sync(&mut peer1, &mut peer1_state, &mut peer2, &mut peer2_state);
-    assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.to_str(), Some("value"));
+    assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.as_str(), Some("value"));
 
     // encode/decode is lossless
     let encoded = peer1_state.encode();
@@ -76,7 +76,7 @@ fn sync_state_round_trips_and_loss_is_recoverable() -> Result<(), automerge::Aut
     peer1.commit();
     let mut fresh = State::new();
     sync(&mut peer1, &mut fresh, &mut peer2, &mut State::new());
-    assert_eq!(peer2.get(ROOT, "key2")?.unwrap().0.to_str(), Some("value2"));
+    assert_eq!(peer2.get(ROOT, "key2")?.unwrap().0.as_str(), Some("value2"));
     Ok(())
 }
 

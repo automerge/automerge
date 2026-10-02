@@ -101,7 +101,7 @@ fn default_load_is_disabled_and_reads_work() {
 
     // current state reads
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(2));
+    assert_eq!(v.as_i64(), Some(2));
 
     // the heads are known and match the audit doc
     let mut heads = doc.get_heads();
@@ -112,7 +112,7 @@ fn default_load_is_disabled_and_reads_work() {
 
     // historical reads at the load heads work
     let (v, _) = doc.get_at(ROOT, "k", &heads).unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(2));
+    assert_eq!(v.as_i64(), Some(2));
 
     // ids this document has never seen are an error in the `*_at`
     // methods, exactly like in audit mode
@@ -194,7 +194,7 @@ fn disabled_save_incremental_is_infallible() {
     let mut audit = AutoCommit::load_with_options(&bytes, audit_opts()).unwrap();
     audit.load_incremental(&incr).unwrap();
     let (v, _) = audit.get(ROOT, "k").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(100));
+    assert_eq!(v.as_i64(), Some(100));
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn enable_disable_enable_cycle() {
     ));
     // heads and current reads keep working
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(3999));
+    assert_eq!(v.as_i64(), Some(3999));
     let head = doc.get_head_hashes()[0];
     assert!(doc.get_change_by_hash(&head).unwrap().is_some());
 
@@ -605,7 +605,7 @@ fn disabled_lifecycle_all_fallible_functions() {
     let mut fork = doc.fork();
     fork.merge(&mut other).unwrap();
     let (v, _) = fork.get(ROOT, "x").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(1));
+    assert_eq!(v.as_i64(), Some(1));
     drop(fork);
 
     // ── referencing the load heads or post-load ids works ──
@@ -673,7 +673,7 @@ fn disabled_lifecycle_all_fallible_functions() {
     assert!(doc.get_changes_added(&mut other).unwrap().is_some());
     doc.merge(&mut other).unwrap();
     let (v, _) = doc.get(ROOT, "x").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(1));
+    assert_eq!(v.as_i64(), Some(1));
 
     // the fragment index survives the transition: identical to the
     // fragments of the same document loaded in audit mode
@@ -748,7 +748,7 @@ fn bit_flipped_head_loads_disabled_but_fails_audit() {
     let mut doc = AutoCommit::load(&bytes).unwrap();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(2));
+    assert_eq!(v.as_i64(), Some(2));
     assert_ne!(
         doc.get_head_hashes(),
         vec![head],
@@ -916,7 +916,7 @@ fn unlucky_commit_frees_loose_hashes() {
 
     // the document itself is unaffected — only hash-keyed emission is
     let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
-    assert_eq!(v.to_i64(), Some(200_000));
+    assert_eq!(v.as_i64(), Some(200_000));
 }
 
 /// `merge` must work outside audit mode even when the retention GC has

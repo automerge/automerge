@@ -1,5 +1,6 @@
 import * as assert from "assert"
 import { beforeEach } from "mocha"
+import "../src/entrypoints/fullfat_node.js"
 import { type Doc, from, change } from "../src/index.js"
 
 type DocType = {
@@ -21,6 +22,43 @@ describe("Proxies", () => {
           d.doc = doc
         }, /Cannot create a reference to an existing document object/)
       })
+    })
+  })
+
+  describe("__proto__ handling", () => {
+    it("should throw a useful RangeError when assigning a scalar to __proto__ in a change callback", () => {
+      const doc = from<Record<string, unknown>>({})
+      assert.throws(() => {
+        change(doc, d => {
+          d["__proto__"] = "somestring"
+        })
+      }, /"__proto__" is not allowed/)
+    })
+
+    it("should throw and not pollute the prototype when assigning an object to __proto__", () => {
+      const doc = from<Record<string, unknown>>({})
+      assert.throws(() => {
+        change(doc, d => {
+          d["__proto__"] = { x: 1 }
+        })
+      }, /"__proto__" is not allowed/)
+      assert.strictEqual(Object.getPrototypeOf(doc), Object.prototype)
+      assert.strictEqual((doc as { x?: number }).x, undefined)
+    })
+
+    it("should throw when the initial state passed to `from` contains a __proto__ key", () => {
+      assert.throws(() => {
+        from({ ["__proto__"]: false } as Record<string, unknown>)
+      }, /"__proto__" is not allowed/)
+    })
+
+    it("should throw when a nested object assigned in a change contains a __proto__ key", () => {
+      const doc = from<Record<string, unknown>>({})
+      assert.throws(() => {
+        change(doc, d => {
+          d["nested"] = { ["__proto__"]: { x: 1 } }
+        })
+      }, /"__proto__" is not allowed/)
     })
   })
 

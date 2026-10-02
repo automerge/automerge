@@ -464,7 +464,9 @@ EH lets wasm-bindgen provide its `WebAssembly.JSTag` polyfill on runtimes such
 as Node 20 that do not provide `JSTag` natively. `WASM_TOOLCHAIN` can select a
 specific nightly for reproducible builds. The rest of the workspace still
 builds with the pinned stable toolchain in `rust/rust-toolchain.toml`; nightly
-is only used for this wasm build.
+is only used for this wasm build. Environments without rustup can set
+`WASM_CARGO` to a Cargo executable that already selects the required nightly;
+the repository's Nix flake uses this mechanism.
 
 ### Appendix: WASM and Memory Allocation
 

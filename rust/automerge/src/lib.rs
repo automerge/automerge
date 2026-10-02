@@ -210,7 +210,6 @@
     dead_code,
     improper_ctypes,
     non_shorthand_field_patterns,
-    no_mangle_generic_items,
     overflowing_literals,
     path_statements,
     patterns_in_fns_without_body,
@@ -227,8 +226,7 @@
 macro_rules! log {
      ( $( $t:tt )* ) => {
           {
-            use $crate::__log;
-            __log!( $( $t )* );
+            $crate::__log!( $( $t )* );
           }
      }
  }
@@ -252,6 +250,7 @@ macro_rules! __log {
  }
 
 pub mod anonymize;
+mod author;
 mod autocommit;
 pub(crate) mod automerge;
 mod autoserde;
@@ -288,6 +287,7 @@ pub use crate::automerge::{
     AuditMode, Automerge, GcMode, LoadOptions, OnPartialLoad, SaveFormat, SaveOptions,
     StringMigration,
 };
+pub use author::Author;
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};

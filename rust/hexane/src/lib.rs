@@ -5,8 +5,7 @@
 macro_rules! log {
      ( $( $t:tt )* ) => {
           {
-            use $crate::__log;
-            __log!( $( $t )* );
+            $crate::__log!( $( $t )* );
           }
      }
  }
@@ -613,6 +612,25 @@ impl RleValue for u32 {
     }
     fn pack<C: Codec>(value: u32, out: &mut Vec<u8>) -> bool {
         out.extend(C::encode_unsigned(value as u64));
+        true
+    }
+}
+
+impl ColumnValue for i32 {
+    type Encoding<C: Codec> = RleEncoding<i32, C>;
+}
+
+impl RleValue for i32 {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, i32), PackError> {
+        let (n, v) = C::try_read_signed(data)?;
+        let v = i32::try_from(v).map_err(|_| PackError::InvalidValue("i32 overflow".into()))?;
+        Ok((n, v))
+    }
+    fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
+        C::signed_len(data)
+    }
+    fn pack<C: Codec>(value: i32, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_signed(value.into()));
         true
     }
 }

@@ -4,15 +4,25 @@ use benchmark_battery::automerge::transaction::Transactable;
 use benchmark_battery::automerge::{Automerge, ObjId, ReadDoc, ROOT};
 use benchmark_battery::{rand, text_splice_100};
 use std::cmp::{max, min};
+use std::hint::black_box;
 
 const N: u64 = 100_000;
 
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
         SampledBenchmark::no_setup("marks", "marks/add_mark", add_mark),
+        SampledBenchmark::no_setup("marks", "marks/get_marks_at_end", get_marks_at_end),
         splice_with_marks(),
         splice_without_marks(),
     ]
+}
+
+fn get_marks_at_end() -> Box<dyn FnMut()> {
+    let (doc, text) = doc_and_text(10);
+    let index = doc.length(&text) - 1;
+    Box::new(move || {
+        black_box(doc.get_marks(&text, index, None).unwrap());
+    })
 }
 
 fn add_mark() -> Box<dyn FnMut()> {

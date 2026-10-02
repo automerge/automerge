@@ -67,6 +67,7 @@ pub(crate) enum GenericColIter<'a> {
     Group(GroupIter<'a>),
 }
 
+#[allow(dead_code)]
 impl GenericColIter<'_> {
     fn try_next(&mut self) -> Result<Option<CellValue>, DecodeColumnError> {
         match self {

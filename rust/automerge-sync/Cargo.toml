@@ -9,7 +9,7 @@ description = "The automerge sync protocol: efficient replication of an automerg
 readme = "./README.md"
 
 [dependencies]
-automerge = { version = "0.11.0", path = "../automerge" }
+automerge = { version = "0.12.0", path = "../automerge" }
 itertools = "0.15.0"
 leb128 = "^0.2.5"
 serde = { version = "^1.0", features = ["derive"] }
