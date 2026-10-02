@@ -1,6 +1,6 @@
 use crate::op_set2::OpSet;
 use crate::types::{ObjId, ObjType};
-use crate::{clock::Clock, exid::ExId, Prop};
+use crate::{automerge::view::ReadAt, exid::ExId, Prop};
 
 /// An iterator over the "parents" of an object
 ///
@@ -14,7 +14,7 @@ use crate::{clock::Clock, exid::ExId, Prop};
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,
     pub(crate) ops: &'a OpSet,
-    pub(crate) clock: Option<Clock>,
+    pub(crate) read: ReadAt<'a>,
 }
 
 impl Parents<'_> {
@@ -59,10 +59,7 @@ impl Iterator for Parents<'_> {
             prop,
             visible,
             ..
-        } = self
-            .ops
-            .parent_object(&self.obj, self.clock.as_ref())
-            .unwrap();
+        } = self.ops.parent_object(&self.obj, &self.read).unwrap();
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);
         Some(Parent {

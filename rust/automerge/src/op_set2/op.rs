@@ -48,11 +48,63 @@ impl AsBuilder for &TxOp {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct SuccessorValue {
+    id: OpId,
+    increment: Option<i64>,
+    masked: bool,
+}
+
+impl SuccessorValue {
+    /// Construct a new [`SuccessorValue`].
+    pub(crate) fn new(id: OpId, counter: Option<i64>, masked: bool) -> Self {
+        Self {
+            id,
+            increment: counter,
+            masked,
+        }
+    }
+
+    /// Reset the increment, by setting its value to `None`.
+    pub(crate) fn reset_increment(&mut self) {
+        self.increment.take();
+    }
+
+    /// Return the increment value, if there is one, and the successor is not
+    /// masked.
+    fn increment(&self) -> Option<i64> {
+        self.increment.filter(|_| !self.masked)
+    }
+
+    /// Returns `true` if the successor has no increment and is not masked.
+    fn has_succ(&self) -> bool {
+        self.increment.is_none() && !self.masked
+    }
+
+    /// Return the [`OpId`] of the successor.
+    pub(crate) fn get_id(&self) -> OpId {
+        self.id
+    }
+
+    /// Return the increment value of the successor, regardless of masking.
+    pub(crate) fn get_increment(&self) -> Option<i64> {
+        self.increment
+    }
+
+    /// Returns `true` if the successor is masked.
+    pub(crate) fn is_masked(&self) -> bool {
+        self.masked
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
-    pub(crate) succ: Vec<(OpId, Option<i64>)>,
+    pub(crate) succ: Vec<SuccessorValue>,
     pub(crate) pos: Option<usize>,
     pub(crate) subsort: usize,
     pub(crate) conflicted: bool,
+    /// Whether this incoming op is hidden by the mask snapshot the batch
+    /// walks under. An import-time fact only; never stored on a doc op.
+    pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -84,7 +136,7 @@ impl ChangeOp {
     ) -> hydrate::Value {
         if self.bld.action == Action::Set {
             if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self.succ.iter().filter_map(|(_, inc)| *inc).sum();
+                let inc: i64 = self.succ.iter().filter_map(|value| value.increment()).sum();
                 hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
             } else {
                 hydrate::Value::Scalar(self.bld.value.to_owned())
@@ -99,11 +151,11 @@ impl ChangeOp {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+        !(self.masked || self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
 
     pub(crate) fn has_succ(&self) -> bool {
-        self.succ.iter().any(|(_, inc)| inc.is_none())
+        self.succ.iter().any(|value| value.has_succ())
     }
 
     pub(crate) fn insert(&self) -> bool {
@@ -158,6 +210,10 @@ pub(crate) struct TxOp {
     pub(crate) index: usize,
     pub(crate) pos: usize,
     pub(crate) noop: bool,
+    /// Whether the visibility mask hides this op (the transaction's actor
+    /// belongs to a masked author). Mirrors `ChangeOp::masked`: a masked
+    /// op is recorded but never indexed as visible.
+    pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
     pub(crate) undo: Vec<SuccUndo>,
     // Pre-insert register range for scoped transactions. When present,
@@ -249,6 +305,12 @@ impl TxOp {
         self.bld.id
     }
 
+    /// Modify the `masked` flag of this [`TxOp`].
+    pub(crate) fn masked(mut self, masked: bool) -> Self {
+        self.masked = masked;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn list(
         id: OpId,
@@ -269,6 +331,7 @@ impl TxOp {
             pos,
             index,
             noop,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -303,6 +366,7 @@ impl TxOp {
             index: 0,
             pos,
             noop,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -333,6 +397,7 @@ impl TxOp {
             pos,
             index,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -363,6 +428,7 @@ impl TxOp {
             index: 0,
             obj_type: obj.typ,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -394,6 +460,7 @@ impl TxOp {
             pos,
             index,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -424,6 +491,7 @@ impl TxOp {
             pos: 0,
             index,
             noop: false,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -476,7 +544,7 @@ impl OpLike for &TxOp {
         Self: 'b;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        <TxOp as OpLike>::mark_index(op)
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -484,7 +552,7 @@ impl OpLike for &TxOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !op.bld.is_inc()
+        <TxOp as OpLike>::visible(op)
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -555,7 +623,12 @@ impl OpLike for TxOp {
     type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        // A hidden mark must not enter the mark index.
+        if op.masked {
+            None
+        } else {
+            op.bld.mark_index()
+        }
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -563,7 +636,7 @@ impl OpLike for TxOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !op.bld.is_inc()
+        !op.masked && !op.bld.is_inc()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -634,11 +707,15 @@ impl OpLike for ChangeOp {
     type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        if op.masked {
+            None
+        } else {
+            op.bld.mark_index()
+        }
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
-        if Self::visible(op) {
+        if op.visible() {
             op.bld.width(seq_type, text_encoding) as u64
         } else {
             0
@@ -646,11 +723,11 @@ impl OpLike for ChangeOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+        op.visible()
     }
 
     fn top(op: &Self) -> bool {
-        !op.conflicted && Self::visible(op)
+        !op.conflicted && op.visible()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -667,11 +744,15 @@ impl OpLike for ChangeOp {
     }
 
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
-        Box::new(op.succ.iter().map(|o| o.1))
+        Box::new(
+            op.succ
+                .iter()
+                .map(|SuccessorValue { increment, .. }| *increment),
+        )
     }
 
     fn succ(&self) -> Self::SuccIter<'_> {
-        Box::new(self.succ.iter().map(|o| o.0))
+        Box::new(self.succ.iter().map(|SuccessorValue { id, .. }| *id))
     }
 
     fn id(&self) -> OpId {
@@ -929,6 +1010,9 @@ pub(crate) struct SuccInsert {
     pub(crate) inc: Option<i64>,
     pub(crate) len: u64,
     pub(crate) sub_pos: usize,
+    /// A masked successor keeps the link in the index but must not change
+    /// the predecessor's visibility or counter total.
+    pub(crate) masked: bool,
 }
 
 impl<'a> Op<'a> {
@@ -945,7 +1029,16 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
+        self.add_succ_with_mask(id, inc, false)
+    }
+
+    pub(crate) fn add_succ_with_mask(
+        &self,
+        id: OpId,
+        mut inc: Option<i64>,
+        masked: bool,
+    ) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
         if inc.is_some() && !self.is_counter() {
@@ -965,6 +1058,7 @@ impl<'a> Op<'a> {
             inc,
             len,
             sub_pos,
+            masked,
         }
     }
 

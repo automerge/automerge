@@ -71,54 +71,21 @@ impl SeqClock {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ClockRange {
-    Current(Option<Clock>),
-    Diff(Clock, Clock),
-}
-
-impl Default for ClockRange {
-    fn default() -> Self {
-        Self::Current(None)
-    }
-}
-
-impl ClockRange {
-    pub(crate) fn current(clock: Option<Clock>) -> Self {
-        Self::Current(clock)
-    }
-
-    pub(crate) fn after(&self) -> Option<&Clock> {
-        match self {
-            Self::Diff(_, after) => Some(after),
-            Self::Current(Some(after)) => Some(after),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn visible_after(&self, id: &OpId) -> bool {
-        match self {
-            Self::Current(Some(after)) => after.covers(id),
-            Self::Diff(_, after) => after.covers(id),
-            _ => true,
-        }
-    }
-
-    pub(crate) fn visible_before(&self, id: &OpId) -> bool {
-        self.predates(id)
-    }
-
-    pub(crate) fn predates(&self, id: &OpId) -> bool {
-        match self {
-            Self::Diff(before, _) => before.covers(id),
-            _ => false,
-        }
-    }
-}
-
 impl Clock {
     pub(crate) fn isolate(&mut self, actor_index: usize) {
         self.set_counter_of(actor_index, u32::MAX);
+    }
+
+    /// Get the minimum bound intersection of two [`Clock`]s.
+    ///
+    /// # Panics
+    ///
+    /// If the size of both [`Clock`]s are not equal.
+    pub(crate) fn intersect(&mut self, other: &Self) {
+        assert_eq!(self.0.len(), other.0.len());
+        for (counter, bound) in self.0.iter_mut().zip(&other.0) {
+            *counter = (*counter).min(*bound);
+        }
     }
 
     /// An [`OpId`] is covered by a [`Clock`] if the operation happened within

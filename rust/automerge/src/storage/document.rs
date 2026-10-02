@@ -1,5 +1,5 @@
 use hexane::PackError;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
@@ -11,7 +11,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{ActorId, Author, Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -325,6 +325,7 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
@@ -344,13 +345,13 @@ impl<'a> Document<'a> {
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::with_actors(change_cols.len());
-        let change_graph = change_cols.finalize(&changes.changes, &mut authors);
+        let change_graph = change_cols.finalize(&changes.changes, &mut authors)?;
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
         debug_assert!(op_set.validate_top_index());
 
-        let doc = Automerge::from_parts(op_set, change_graph, authors);
+        let doc = Automerge::from_parts(op_set, change_graph, authors, write_frontier);
 
         if let Some(err) = mark_order_validator.take_error() {
             Err(ReconstructError::InvalidMarkOrderDoc {
@@ -407,6 +408,8 @@ pub(crate) enum ReconstructError {
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]
     InvalidMaxOp,
+    #[error("author provided for change with non-initial sequence number: {0}")]
+    AuthorOnNonInitialSeq(u64, ActorId),
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderDoc {
         doc: Box<Automerge>,

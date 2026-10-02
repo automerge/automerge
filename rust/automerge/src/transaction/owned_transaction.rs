@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use crate::automerge::view;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
@@ -91,26 +94,36 @@ impl OwnedTransaction {
     /// Rollback the transaction, returning the document and number of cancelled ops.
     pub fn rollback(mut self) -> (Automerge, usize) {
         let cancelled = self.inner.take().unwrap().rollback(&mut self.doc);
-        self.patch_log.finish_transaction(&self.doc.ops().actors);
+        self.patch_log.abandon_transaction(&self.doc.ops().actors);
         (self.doc, cancelled)
     }
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
+        F: for<'e> FnOnce(
+            &mut TransactionInner,
+            &mut Automerge,
+            &mut crate::patches::Events<'e>,
+        ) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        f(tx, &mut self.doc, &mut self.patch_log)
+        f(tx, &mut self.doc, &mut self.patch_log.events())
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<crate::types::Clock> {
+    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> view::ReadAt<'_> {
         if let Some(h) = heads {
             // a transaction is in flight: its pending ops are in the op set
             // but not under the graph's heads, so the current-heads
-            // shortcut in `scope_at` would wrongly expose them
-            Some(self.doc.change_graph.clock_at(h))
+            // shortcut in `read_at` would wrongly expose them
+            self.doc.read_scoped(Cow::Owned(self.doc.visible(h)))
         } else {
-            self.inner.as_ref().and_then(|i| i.get_scope().clone())
+            self.inner
+                .as_ref()
+                .and_then(|i| i.get_scope().as_ref())
+                .map_or_else(
+                    || self.doc.read_current(),
+                    |scope| self.doc.read_scoped(Cow::Borrowed(scope)),
+                )
         }
     }
 }
