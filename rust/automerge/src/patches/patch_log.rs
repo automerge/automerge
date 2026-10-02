@@ -489,13 +489,6 @@ impl PatchLog {
         self.push_event(obj, Event::IncrementSeq { index, n, id })
     }
 
-    fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.flag_conflict_map(obj, key),
-            Prop::Seq(index) => self.flag_conflict_seq(obj, *index),
-        }
-    }
-
     fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
         self.push_event(obj, Event::FlagConflictMap { key: key.into() })
     }
@@ -924,10 +917,6 @@ impl Events<'_> {
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
         self.0.increment_seq(obj, index, n, id)
-    }
-
-    pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
-        self.0.flag_conflict(obj, prop)
     }
 
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
