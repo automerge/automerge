@@ -2,6 +2,7 @@ use core::fmt;
 use std::borrow::Cow;
 use std::str::FromStr;
 
+use crate::actor::{ActorIndexed, ActorRemoval, ActorShift, ActorTable};
 use crate::error;
 
 /// [`Authors`] records change authorship in an Automerge document.
@@ -17,7 +18,7 @@ use crate::error;
 ///
 /// [`Authors`] will also keep track of the current [`Author`] that is acting on
 /// the document, if set.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct Authors {
     /// Previously recorded [`Author`]s.
     ///
@@ -37,17 +38,28 @@ pub(crate) struct Authors {
     ///
     /// Each index of the `Vec` is the same as the index into an actors set, and
     /// the entry at the index corresponds to an entry in [`Authors::authors`].
-    actor_to_author: Vec<Option<AuthorIdx>>,
+    actor_to_author: ActorIndexed<Option<AuthorIdx>>,
 }
 
 impl Authors {
-    /// Initialize the [`Authors`] set with a known size of actors, setting all
-    /// mapping entries to `None`.
+    /// Initialize the [`Authors`] set for the actors in `actors`, with no
+    /// author assigned to any of them.
+    pub(crate) fn new(actors: &ActorTable) -> Self {
+        Self {
+            authors: Vec::default(),
+            current: None,
+            actor_to_author: ActorIndexed::new(actors),
+        }
+    }
+
+    /// An [`Authors`] for `actors` unnamed actors, for tests which model the
+    /// actor table implicitly.
+    #[cfg(test)]
     pub(crate) fn with_actors(actors: usize) -> Self {
         Self {
             authors: Vec::default(),
             current: None,
-            actor_to_author: vec![None; actors],
+            actor_to_author: ActorIndexed::from_slots_for_test(vec![None; actors]),
         }
     }
 
@@ -87,22 +99,22 @@ impl Authors {
     /// Assign the given `actor` to the given `author`.
     pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
         let author_id = self.put_author(author);
-        self.actor_to_author[actor] = Some(author_id);
+        self.actor_to_author.as_mut_slice()[actor] = Some(author_id);
     }
 
-    /// Insert the `actor` into the actor-to-author mapping, setting the author
-    /// as `None`.
-    pub(crate) fn insert_actor(&mut self, actor: usize) {
-        self.actor_to_author.insert(actor, None);
+    /// Make room for an actor just inserted into the document's actor table,
+    /// with no author assigned.
+    pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
+        self.actor_to_author.insert(shift, None);
     }
 
-    /// Remove the `actor` from the actor to author mapping.
+    /// Forget an actor just removed from the document's actor table.
     ///
     /// Note that this may leave a dangling [`Author`] in the set of authors,
     /// once the final actor has been removed. In reality, actors are only
     /// removed as part of rollback semantics, so that should never happen.
-    pub(crate) fn remove_actor(&mut self, actor: usize) {
-        self.actor_to_author.remove(actor);
+    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
+        self.actor_to_author.remove(removal);
     }
 
     /// [`Author`] is inserted into the set of authors, and the [`Author`] is
@@ -114,7 +126,7 @@ impl Authors {
         match self.authors.binary_search(&author) {
             Err(index) => {
                 self.authors.insert(index, author);
-                for a in self.actor_to_author.iter_mut().flatten() {
+                for a in self.actor_to_author.as_mut_slice().iter_mut().flatten() {
                     a.with_new_author(index)
                 }
                 if let Some(a) = self.current.as_mut() {
@@ -243,7 +255,7 @@ impl From<usize> for AuthorIdx {
 
 #[cfg(test)]
 mod tests {
-    use super::{Author, Authors};
+    use super::{ActorRemoval, ActorShift, Author, Authors};
     use proptest::prelude::*;
 
     // === Generators ===
@@ -418,7 +430,7 @@ mod tests {
                 }
                 Op::InsertActor { at } => {
                     let at = at % (model.len() + 1);
-                    authors.insert_actor(at);
+                    authors.insert_actor(&ActorShift::for_test(at));
                     model.insert(at, None);
                 }
                 Op::RemoveActor { at } => {
@@ -426,7 +438,7 @@ mod tests {
                         continue;
                     }
                     let at = at % model.len();
-                    authors.remove_actor(at);
+                    authors.remove_actor(&ActorRemoval::for_test(at));
                     model.remove(at);
                 }
             }
@@ -534,7 +546,7 @@ mod tests {
             if model.is_empty() {
                 // The ops may have removed every actor slot; restore one so
                 // `assign_author`'s precondition holds.
-                authors.insert_actor(0);
+                authors.insert_actor(&ActorShift::for_test(0));
                 model.push(None);
             }
             let actor = actor % model.len();

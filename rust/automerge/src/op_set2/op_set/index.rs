@@ -1,3 +1,4 @@
+use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
@@ -75,7 +76,7 @@ impl MarkOrderValidator {
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct ObjIndex(pub(crate) HashMap<OpId, ObjInfo>);
+pub(crate) struct ObjIndex(pub(crate) ActorRefs<HashMap<OpId, ObjInfo>>);
 
 impl ObjIndex {
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
@@ -109,17 +110,17 @@ pub(crate) struct ObjInfo {
     pub(crate) obj_type: ObjType,
 }
 
-impl ObjInfo {
-    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+impl HasActorIndices for ObjInfo {
+    fn shifted(self, shift: &ActorShift) -> Self {
         Self {
-            parent: self.parent.with_new_actor(idx),
+            parent: self.parent.shifted(shift),
             obj_type: self.obj_type,
         }
     }
 
-    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
         Some(Self {
-            parent: self.parent.without_actor(idx)?,
+            parent: self.parent.removed(removal)?,
             obj_type: self.obj_type,
         })
     }
