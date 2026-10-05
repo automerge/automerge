@@ -438,7 +438,7 @@ impl OpSet {
         read: &ReadAt<'_>,
     ) -> usize {
         let range = self.scope_to_obj(obj);
-        let vis = VisIter::new(self, read.filter(), range.clone());
+        let vis = VisIter::new(self, read.historical(), range.clone());
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
             if read.historical().is_none() {
@@ -1079,7 +1079,7 @@ impl OpSet {
         // only the action and value columns are needed: the `TopIter`
         // skipper jumps between top ops without materializing full ops
         let range = self.scope_to_obj(obj);
-        self.action_value_top_iter(range, read.filter().cloned())
+        self.action_value_top_iter(range, read.historical().cloned())
             .map(|(action, value, _)| match (action, value) {
                 (Action::Set, ScalarValue::Str(s)) => s,
                 (Action::Mark, _) => Cow::Borrowed(""),

@@ -69,7 +69,7 @@ impl<'a> SpansActionValue<'a> {
         let value = op_set.value_iter_range(&range);
         let action = op_set.action_iter_range(&range);
         let iter = ActionValueIter::new(action, value);
-        if matches!(clock.view(), RangeView::Current(read) if read.filter().is_none())
+        if matches!(clock.view(), RangeView::Current(read) if read.historical().is_none())
             && op_set.all_of_range_is_top(&range)
         {
             Self::Current(Unshift::new(iter))
