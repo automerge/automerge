@@ -1,7 +1,7 @@
 use super::SampledBenchmark;
 use benchmark_battery::automerge::transaction::Transactable;
 use benchmark_battery::automerge::{PatchLog, ReadDoc, ScalarValue, ROOT};
-use benchmark_battery::{list_splice_100, rand};
+use benchmark_battery::{list_splice_100, masked, rand};
 use std::hint::black_box;
 
 const N: u64 = 100_000;
@@ -18,7 +18,7 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
 }
 
 fn list_cursor_now() -> Box<dyn FnMut()> {
-    let doc = list_splice_100(N);
+    let doc = masked(list_splice_100(N));
     let len = N as usize;
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
@@ -29,7 +29,7 @@ fn list_cursor_now() -> Box<dyn FnMut()> {
 }
 
 fn list_cursor_at() -> Box<dyn FnMut()> {
-    let mut doc = list_splice_100(N);
+    let mut doc = masked(list_splice_100(N));
     let len = N as usize;
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     let heads = doc.get_heads();
@@ -57,7 +57,7 @@ fn list_cursor_at() -> Box<dyn FnMut()> {
 }
 
 fn list_update_at() -> Box<dyn FnMut()> {
-    let mut doc = list_splice_100(N);
+    let mut doc = masked(list_splice_100(N));
     let len = N as usize;
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     let head = doc.get_heads();
@@ -73,7 +73,7 @@ fn list_update_at() -> Box<dyn FnMut()> {
 }
 
 fn list_update_now() -> Box<dyn FnMut()> {
-    let mut doc = list_splice_100(N);
+    let mut doc = masked(list_splice_100(N));
     let len = N as usize;
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
@@ -85,7 +85,7 @@ fn list_update_now() -> Box<dyn FnMut()> {
 }
 
 fn list_splice_index_now() -> Box<dyn FnMut()> {
-    let mut doc = list_splice_100(N);
+    let mut doc = masked(list_splice_100(N));
     let len = N as usize;
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
@@ -97,7 +97,7 @@ fn list_splice_index_now() -> Box<dyn FnMut()> {
 }
 
 fn list_splice_index_at() -> Box<dyn FnMut()> {
-    let mut doc = list_splice_100(N);
+    let mut doc = masked(list_splice_100(N));
     let len = N as usize;
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     let heads = doc.get_heads();

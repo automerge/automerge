@@ -1,5 +1,6 @@
 use super::SampledBenchmark;
-use benchmark_battery::automerge::{transaction::Transactable, Automerge, ReadDoc, ROOT};
+use benchmark_battery::automerge::{Automerge, ReadDoc, ROOT};
+use benchmark_battery::{masked, wide_map_doc};
 use std::hint::black_box;
 
 pub fn benchmarks() -> Vec<SampledBenchmark> {
@@ -12,13 +13,7 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
 }
 
 fn doc(n: u64) -> Automerge {
-    let mut doc = Automerge::new();
-    let mut tx = doc.transaction();
-    for i in 0..n {
-        tx.put(ROOT, i.to_string(), i.to_string()).unwrap();
-    }
-    tx.commit();
-    doc
+    masked(wide_map_doc(n))
 }
 
 fn range_10000() -> Box<dyn FnMut()> {
