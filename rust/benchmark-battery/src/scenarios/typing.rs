@@ -2,10 +2,10 @@ use super::SeriesBenchmark;
 use benchmark_battery::automerge::sync;
 use benchmark_battery::automerge::sync::SyncDoc;
 use benchmark_battery::automerge::transaction::Transactable;
-use benchmark_battery::automerge::{AutoCommit, ObjType, ReadDoc, ROOT};
-use rand::distr::Alphanumeric;
+use benchmark_battery::automerge::{AutoCommit, ReadDoc, ROOT};
+use benchmark_battery::{masked_autocommit, seeded_text_doc};
 use rand::rngs::StdRng;
-use rand::{Rng, RngExt, SeedableRng};
+use rand::{Rng, SeedableRng};
 
 const INITIAL_CHARS: u64 = 100_000;
 const STEPS: usize = 1_000;
@@ -49,7 +49,7 @@ pub fn benchmarks() -> Vec<SeriesBenchmark> {
 
 fn single_char_sync() -> Box<dyn FnMut(usize)> {
     let mut rng = StdRng::seed_from_u64(2);
-    let mut doc = gen_text_doc(INITIAL_CHARS, 1, &mut rng);
+    let mut doc = masked_autocommit(seeded_text_doc(INITIAL_CHARS, 1, &mut rng));
     let mut remote = doc.fork();
     let mut doc_state = sync::State::new();
     let mut remote_state = sync::State::new();
@@ -68,7 +68,7 @@ fn single_char_sync() -> Box<dyn FnMut(usize)> {
 
 fn single_char_apply_change() -> Box<dyn FnMut(usize)> {
     let mut rng = StdRng::seed_from_u64(3);
-    let mut doc = gen_text_doc(INITIAL_CHARS, 1, &mut rng);
+    let mut doc = masked_autocommit(seeded_text_doc(INITIAL_CHARS, 1, &mut rng));
     let mut remote = doc.fork();
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
 
@@ -83,7 +83,7 @@ fn single_char_apply_change() -> Box<dyn FnMut(usize)> {
 
 fn single_char_100_bulk_incremental_load() -> Box<dyn FnMut(usize)> {
     let mut rng = StdRng::seed_from_u64(4);
-    let mut doc = gen_text_doc(INITIAL_CHARS, 1, &mut rng);
+    let mut doc = masked_autocommit(seeded_text_doc(INITIAL_CHARS, 1, &mut rng));
     let mut remote = doc.fork();
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
 
@@ -99,7 +99,7 @@ fn single_char_100_bulk_incremental_load() -> Box<dyn FnMut(usize)> {
 
 fn single_char_100_incremental_loads() -> Box<dyn FnMut(usize)> {
     let mut rng = StdRng::seed_from_u64(5);
-    let mut doc = gen_text_doc(INITIAL_CHARS, 1, &mut rng);
+    let mut doc = masked_autocommit(seeded_text_doc(INITIAL_CHARS, 1, &mut rng));
     let mut remote = doc.fork();
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
 
@@ -115,7 +115,7 @@ fn single_char_100_incremental_loads() -> Box<dyn FnMut(usize)> {
 
 fn single_char_merge() -> Box<dyn FnMut(usize)> {
     let mut rng = StdRng::seed_from_u64(6);
-    let mut doc = gen_text_doc(INITIAL_CHARS, 1, &mut rng);
+    let mut doc = masked_autocommit(seeded_text_doc(INITIAL_CHARS, 1, &mut rng));
     let mut remote = doc.fork();
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
 
@@ -136,27 +136,4 @@ fn sync_docs(d1: &mut AutoCommit, s1: &mut sync::State, d2: &mut AutoCommit, s2:
             d1.sync().receive_sync_message(s1, msg).unwrap();
         }
     }
-}
-
-fn gen_text_doc(n: u64, chunk: u64, rng: &mut StdRng) -> AutoCommit {
-    let mut doc = AutoCommit::new();
-    let text = doc.put_object(ROOT, "content", ObjType::Text).unwrap();
-    doc.splice_text(&text, 0, 0, &random_string(chunk, rng))
-        .unwrap();
-    let mut len = chunk;
-    for _ in 0..(n / chunk) {
-        let pos = (rng.next_u32() as u64 % len) as usize;
-        doc.splice_text(&text, pos, 0, &random_string(chunk, rng))
-            .unwrap();
-        len += chunk;
-    }
-    assert_eq!(doc.stats().num_ops, n + 1 + chunk);
-    doc
-}
-
-fn random_string(n: u64, rng: &mut StdRng) -> String {
-    rng.sample_iter(&Alphanumeric)
-        .take(n as usize)
-        .map(char::from)
-        .collect()
 }

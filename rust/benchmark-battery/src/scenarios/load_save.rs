@@ -2,8 +2,8 @@ use super::SampledBenchmark;
 use benchmark_battery::automerge::{Author, AutoCommit, Automerge, ChangeHash, LoadOptions};
 use benchmark_battery::Transactable;
 use benchmark_battery::{
-    author, big_paste_doc, big_random_doc, deep_history_doc, maps_in_maps_doc,
-    poorly_simulated_typing_doc, text_splice_100, ROOT,
+    author, big_paste_doc, big_random_doc, deep_history_doc, maps_in_maps_doc, masked,
+    policy_masked_for_bytes, poorly_simulated_typing_doc, text_splice_100, ROOT,
 };
 use std::collections::HashMap;
 use std::hint::black_box;
@@ -89,100 +89,71 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
     benchmarks
 }
 
-fn load_typing() -> Box<dyn FnMut()> {
-    let data = poorly_simulated_typing_doc(N).save();
+/// A measured load of the bytes of `doc`, under the frontier the bytes
+/// produce. The policy is resolved in setup so that only the load is timed.
+fn load_masked_doc(doc: Automerge) -> Box<dyn FnMut()> {
+    let data = doc.save();
+    let policy = policy_masked_for_bytes(&data);
     Box::new(move || {
-        let doc = Automerge::load(&data).unwrap();
-        black_box(doc);
+        let options = LoadOptions::new().write_frontier(policy.clone());
+        black_box(Automerge::load_with_options(&data, options).unwrap());
     })
+}
+
+/// A measured save of `doc` under the masked frontier.
+fn save_masked_doc(doc: Automerge) -> Box<dyn FnMut()> {
+    let doc = masked(doc);
+    Box::new(move || {
+        black_box(doc.save());
+    })
+}
+
+fn load_typing() -> Box<dyn FnMut()> {
+    load_masked_doc(poorly_simulated_typing_doc(N))
 }
 
 fn save_typing() -> Box<dyn FnMut()> {
-    let doc = poorly_simulated_typing_doc(N);
-    Box::new(move || {
-        let data = doc.save();
-        black_box(data);
-    })
+    save_masked_doc(poorly_simulated_typing_doc(N))
 }
 
 fn load_big_paste() -> Box<dyn FnMut()> {
-    let data = big_paste_doc(N).save();
-    Box::new(move || {
-        let doc = Automerge::load(&data).unwrap();
-        black_box(doc);
-    })
+    load_masked_doc(big_paste_doc(N))
 }
 
 fn save_big_paste() -> Box<dyn FnMut()> {
-    let doc = big_paste_doc(N);
-    Box::new(move || {
-        let data = doc.save();
-        black_box(data);
-    })
+    save_masked_doc(big_paste_doc(N))
 }
 
 fn load_text_splice_100() -> Box<dyn FnMut()> {
-    let data = text_splice_100(N).save();
-    Box::new(move || {
-        let doc = Automerge::load(&data).unwrap();
-        black_box(doc);
-    })
+    load_masked_doc(text_splice_100(N))
 }
 
 fn save_text_splice_100() -> Box<dyn FnMut()> {
-    let doc = text_splice_100(N);
-    Box::new(move || {
-        let data = doc.save();
-        black_box(data);
-    })
+    save_masked_doc(text_splice_100(N))
 }
 
 fn load_maps_in_maps() -> Box<dyn FnMut()> {
-    let data = maps_in_maps_doc(N).save();
-    Box::new(move || {
-        let doc = Automerge::load(&data).unwrap();
-        black_box(doc);
-    })
+    load_masked_doc(maps_in_maps_doc(N))
 }
 
 fn save_maps_in_maps() -> Box<dyn FnMut()> {
-    let doc = maps_in_maps_doc(N);
-    Box::new(move || {
-        let data = doc.save();
-        black_box(data);
-    })
+    save_masked_doc(maps_in_maps_doc(N))
 }
 
 fn load_big_random() -> Box<dyn FnMut()> {
-    let data = big_random_doc(N).save();
-    Box::new(move || {
-        let doc = Automerge::load(&data).unwrap();
-        black_box(doc);
-    })
+    load_masked_doc(big_random_doc(N))
 }
 
 fn save_big_random() -> Box<dyn FnMut()> {
-    let doc = big_random_doc(N);
-    Box::new(move || {
-        let data = doc.save();
-        black_box(data);
-    })
+    save_masked_doc(big_random_doc(N))
 }
 
 fn load_deep_history() -> Box<dyn FnMut()> {
-    let data = deep_history_doc(N).save();
-    Box::new(move || {
-        let doc = Automerge::load(&data).unwrap();
-        black_box(doc);
-    })
+    load_masked_doc(deep_history_doc(N))
 }
 
 fn save_deep_history() -> Box<dyn FnMut()> {
-    let doc = deep_history_doc(N);
-    Box::new(move || {
-        let data = doc.save();
-        black_box(data);
-    })
+    save_masked_doc(deep_history_doc(N))
 }
 
 fn name(operation: &str, n: usize) -> &'static str {

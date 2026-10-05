@@ -1,5 +1,5 @@
 use automerge::transaction::Transaction;
-use automerge::{Author, ChangeHash, ObjId};
+use automerge::{Author, ChangeHash, ObjId, ReadDoc};
 use rand::distr::Alphanumeric;
 use rand::{rng, Rng, RngExt};
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use std::ops::Range;
 pub use automerge;
 
 pub use automerge::{
-    transaction::Transactable, Automerge, LoadOptions, ObjType, ScalarValue, ROOT,
+    transaction::Transactable, AutoCommit, Automerge, LoadOptions, ObjType, ScalarValue, ROOT,
 };
 
 pub const N_AUTHORS: usize = 4;
@@ -96,6 +96,19 @@ pub fn policy_masked_for(heads: &[ChangeHash]) -> HashMap<Author<'static>, Vec<C
 pub fn masked(doc: Automerge) -> Automerge {
     let write_frontier = policy_masked_at_heads(&doc);
     doc.with_write_frontier(write_frontier)
+}
+
+/// [`masked`] for an [`AutoCommit`]: every author except the [`local_user`]
+/// is masked at the document's current heads.
+///
+/// [`AutoCommit`] has no `set_write_frontier`, so the policy is applied one
+/// author at a time.
+pub fn masked_autocommit(mut doc: AutoCommit) -> AutoCommit {
+    let heads = doc.get_heads();
+    for author in maskable_authors() {
+        doc.mask_author(author, &heads);
+    }
+    doc
 }
 
 /// The [`policy_masked_for`] policy for the heads that `bytes` will produce.
@@ -313,6 +326,51 @@ pub fn wide_map_doc(n: u64) -> Automerge {
     doc
 }
 
+/// A text document of `n + chunk` characters built by `n / chunk` random
+/// `chunk`-wide splices from a seeded `rng`, so that the typing and apply
+/// series start from the same document on every run.
+///
+/// The splices are the single transaction of an [`AutoCommit`] per author
+/// block; the first `chunk` characters are the [`local_user`]'s together with
+/// the container.
+#[inline(never)]
+pub fn seeded_text_doc(n: u64, chunk: u64, rng: &mut impl Rng) -> AutoCommit {
+    let mut doc = AutoCommit::new().with_author(Some(local_user()));
+    let text = doc.put_object(ROOT, "content", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, &seeded_string(chunk, rng))
+        .unwrap();
+    doc.commit();
+
+    let splices = (n / chunk) as usize;
+    let block_len = splices / N_BLOCKS;
+    let mut len = chunk;
+    for b in 0..N_BLOCKS {
+        doc.set_author(Some(author(b % N_AUTHORS)));
+        let end = if b + 1 == N_BLOCKS {
+            splices
+        } else {
+            (b + 1) * block_len
+        };
+        for _ in b * block_len..end {
+            let pos = (rng.next_u32() as u64 % len) as usize;
+            doc.splice_text(&text, pos, 0, &seeded_string(chunk, rng))
+                .unwrap();
+            len += chunk;
+        }
+        doc.commit();
+    }
+    doc.set_author(Some(local_user()));
+    assert_eq!(doc.stats().num_ops, n + 1 + chunk);
+    doc
+}
+
+fn seeded_string(n: u64, rng: &mut impl Rng) -> String {
+    rng.sample_iter(&Alphanumeric)
+        .take(n as usize)
+        .map(char::from)
+        .collect()
+}
+
 #[inline(never)]
 pub fn deep_history_doc(n: u64) -> Automerge {
     let mut doc = Automerge::new();
@@ -335,9 +393,10 @@ mod tests {
 
     use super::{
         author, authors, big_paste_doc, big_random_doc, deep_history_doc, in_author_transactions,
-        list_splice_100, load_masked, local_user, maps_in_maps_doc, masked, policy_hiding_half,
-        policy_masked_at_heads, policy_masked_for, policy_masked_for_bytes, policy_pending_half,
-        poorly_simulated_typing_doc, text_splice_100, wide_map_doc, N_AUTHORS, N_ROUNDS,
+        list_splice_100, load_masked, local_user, maps_in_maps_doc, masked, masked_autocommit,
+        policy_hiding_half, policy_masked_at_heads, policy_masked_for, policy_masked_for_bytes,
+        policy_pending_half, poorly_simulated_typing_doc, seeded_text_doc, text_splice_100,
+        wide_map_doc, N_AUTHORS, N_ROUNDS,
     };
     use automerge::transaction::Transactable;
     use automerge::{Author, Automerge, ChangeHash, LoadOptions, ObjType, ReadDoc, ROOT};
@@ -527,6 +586,53 @@ mod tests {
         for a in authors().into_iter().skip(1) {
             assert!(receiver.is_author_masked(&a));
         }
+    }
+
+    #[test]
+    fn seeded_text_doc_has_the_author_layout_and_is_reproducible() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut a = seeded_text_doc(N, 1, &mut StdRng::seed_from_u64(7));
+        let b = seeded_text_doc(N, 1, &mut StdRng::seed_from_u64(7));
+
+        let (_, ta) = a.get(ROOT, "content").unwrap().unwrap();
+        let (_, tb) = b.get(ROOT, "content").unwrap().unwrap();
+        assert_eq!(
+            a.text(&ta).unwrap(),
+            b.text(&tb).unwrap(),
+            "same seed, same text"
+        );
+
+        let doc = a.document();
+        let mut recorded = doc.get_authors().to_vec();
+        recorded.sort();
+        let mut expected = authors();
+        expected.sort();
+        assert_eq!(recorded, expected);
+        assert_eq!(doc.get_author(), Some(&local_user()));
+        for author in authors() {
+            assert!(doc.get_actors_for_author(&author).len() >= N_ROUNDS);
+        }
+    }
+
+    #[test]
+    fn masked_autocommit_matches_masked() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut doc = seeded_text_doc(N, 1, &mut StdRng::seed_from_u64(8));
+        let expected = policy_masked_at_heads(doc.document());
+
+        let mut doc = masked_autocommit(doc);
+        assert_eq!(doc.document().get_write_frontier(), expected);
+        assert!(!doc.is_author_masked(&local_user()));
+
+        let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
+        let before = doc.length(&text);
+        doc.splice_text(&text, 0, 0, "local").unwrap();
+        doc.commit();
+        assert_eq!(doc.length(&text), before + 5, "local write visible");
     }
 
     #[test]
