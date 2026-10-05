@@ -54,15 +54,31 @@ pub fn authors() -> Vec<Author<'static>> {
     (0..N_AUTHORS).map(author).collect()
 }
 
-/// Produce a write-frontier which contains every author, and the document's
-/// current heads is the frontier.
+/// The local user of a generated document: `author(0)`.
 ///
-/// Nothing is hidden unless the document's heads advance.
+/// The local user creates the `"content"` container, is the current author of
+/// every generator's result so that benchmark writes are theirs, and is never
+/// named by a policy — so their writes stay visible under any frontier. A
+/// fresh actor of a masked author is masked too, so this has to be an author
+/// the policies exclude, not merely a new actor.
+pub fn local_user() -> Author<'static> {
+    author(0)
+}
+
+/// The authors a policy may mask: every author except the [`local_user`].
+fn maskable_authors() -> impl Iterator<Item = Author<'static>> {
+    authors().into_iter().skip(1)
+}
+
+/// Produce a write-frontier which contains every author except the
+/// [`local_user`], and the document's current heads is the frontier.
+///
+/// Nothing is hidden unless the document's heads advance, and writes by the
+/// [`local_user`] after the frontier is set remain visible.
 pub fn policy_masked_at_heads(doc: &Automerge) -> HashMap<Author<'static>, Vec<ChangeHash>> {
     let current = doc.get_heads();
-    authors()
-        .iter()
-        .map(|author| (author.clone(), current.clone()))
+    maskable_authors()
+        .map(|author| (author, current.clone()))
         .collect()
 }
 
@@ -72,8 +88,8 @@ pub fn policy_masked_at_heads(doc: &Automerge) -> HashMap<Author<'static>, Vec<C
 /// The frontier for each author is `[]`, meaning that every op written by that
 /// author is masked.
 ///
-/// Note that the second half is chosen because `author(0)` (the first author)
-/// creates the initial object in the generators.
+/// Note that the second half is chosen because the [`local_user`] is in the
+/// first half.
 pub fn policy_hiding_half() -> HashMap<Author<'static>, Vec<ChangeHash>> {
     authors()
         .into_iter()
@@ -89,8 +105,8 @@ pub fn policy_hiding_half() -> HashMap<Author<'static>, Vec<ChangeHash>> {
 /// will be a pending change (unless the produced hash manages to be in the
 /// graph, which is unlikely.)
 ///
-/// Note that the second half is chosen because `author(0)` (the first author)
-/// creates the initial object in the generators.
+/// Note that the second half is chosen because the [`local_user`] is in the
+/// first half.
 pub fn policy_pending_half() -> HashMap<Author<'static>, Vec<ChangeHash>> {
     authors()
         .into_iter()
@@ -125,6 +141,10 @@ pub fn rand() -> usize {
 /// `block` receives the op indices for its block and the document, and is
 /// responsible for its own transactions: most generators open one per block,
 /// `deep_history_doc` opens one per op.
+///
+/// Afterwards the document's author is the [`local_user`], so that anything a
+/// benchmark writes is theirs. Setting the author binds nothing until the
+/// first write, so this adds no actor to documents that are only read.
 fn in_author_blocks(
     doc: &mut Automerge,
     ops: usize,
@@ -135,6 +155,7 @@ fn in_author_blocks(
         doc.set_author(Some(author(b % N_AUTHORS)));
         block(doc, b * block_len..(b + 1) * block_len);
     }
+    doc.set_author(Some(local_user()));
 }
 
 /// Like [`in_author_blocks`], with one transaction per block.
@@ -150,11 +171,11 @@ fn in_author_transactions(
     });
 }
 
-/// Create the `"content"` container in its own change by `author(0)`, who is
-/// never hidden by [`policy_hiding_half`]. Block 0 is also `author(0)`, so
-/// this adds a change but no extra actor.
+/// Create the `"content"` container in its own change by the [`local_user`],
+/// who is never masked. Block 0 is also `author(0)`, so this adds a change but
+/// no extra actor.
 fn content_container(doc: &mut Automerge, ty: ObjType) -> ObjId {
-    doc.set_author(Some(author(0)));
+    doc.set_author(Some(local_user()));
     let mut tx = doc.transaction();
     let obj = tx.put_object(ROOT, "content", ty).unwrap();
     tx.commit();
@@ -261,10 +282,12 @@ mod tests {
 
     use super::{
         author, authors, big_paste_doc, big_random_doc, deep_history_doc, list_splice_100,
-        maps_in_maps_doc, policy_hiding_half, policy_masked_at_heads, policy_pending_half,
-        poorly_simulated_typing_doc, text_splice_100, N_AUTHORS, N_ROUNDS,
+        local_user, maps_in_maps_doc, policy_hiding_half, policy_masked_at_heads,
+        policy_pending_half, poorly_simulated_typing_doc, text_splice_100, N_AUTHORS, N_ROUNDS,
     };
-    use automerge::{Author, Automerge, ReadDoc, ROOT};
+    use automerge::transaction::Transactable;
+    use automerge::{Author, Automerge, ChangeHash, ReadDoc, ROOT};
+    use std::collections::HashMap;
 
     /// Divisible by `N_AUTHORS * N_ROUNDS` blocks and by the 100-wide splices.
     const N: u64 = 800;
@@ -355,21 +378,55 @@ mod tests {
     }
 
     #[test]
-    fn masked_at_heads_masks_every_author_and_hides_nothing() {
+    fn every_generator_ends_as_the_local_user() {
+        for (name, doc) in generators() {
+            assert_eq!(doc.get_author(), Some(&local_user()), "{name}");
+        }
+    }
+
+    #[test]
+    fn masked_at_heads_masks_every_author_but_the_local_user_and_hides_nothing() {
         let mut doc = text_splice_100(N);
         let heads = doc.get_heads();
         let policy = policy_masked_at_heads(&doc);
 
-        assert_eq!(policy.len(), N_AUTHORS);
-        for a in authors() {
+        assert_eq!(policy.len(), N_AUTHORS - 1);
+        assert!(!policy.contains_key(&local_user()));
+        for a in authors().into_iter().skip(1) {
             assert_eq!(policy[&a], heads, "author {a:?} bounded at current heads");
         }
 
         doc.set_write_frontier(policy);
-        for a in authors() {
+        assert!(!doc.is_author_masked(&local_user()));
+        for a in authors().into_iter().skip(1) {
             assert!(doc.is_author_masked(&a));
         }
         assert_eq!(content_len(&doc), N as usize, "mask at heads hides nothing");
+    }
+
+    /// The invariant that makes an always-on frontier sound for benchmarks that
+    /// write: the generator leaves the local user as the author, no policy
+    /// names the local user, so a write after the frontier is set is visible.
+    #[test]
+    fn local_user_writes_are_visible_under_every_policy() {
+        type Policy = fn(&Automerge) -> HashMap<Author<'static>, Vec<ChangeHash>>;
+        let policies: [(&str, Policy); 3] = [
+            ("masked", |doc| policy_masked_at_heads(doc)),
+            ("hidden", |_| policy_hiding_half()),
+            ("pending", |_| policy_pending_half()),
+        ];
+        for (name, policy) in policies {
+            let mut doc = text_splice_100(N);
+            doc.set_write_frontier(policy(&doc));
+            let before = content_len(&doc);
+            let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
+
+            let mut tx = doc.transaction();
+            tx.splice_text(&text, 0, 0, "local").unwrap();
+            tx.commit();
+
+            assert_eq!(content_len(&doc), before + 5, "{name}: local write visible");
+        }
     }
 
     #[test]
