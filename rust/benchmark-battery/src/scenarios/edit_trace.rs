@@ -1,6 +1,9 @@
 use super::SampledBenchmark;
 use benchmark_battery::automerge::{transaction::Transactable, AutoCommit, ObjId, ObjType, ROOT};
 
+// Deliberately unmasked: the trace is replayed into an empty document inside
+// the measured operation, so there are no heads to pin a frontier at. See
+// build.rs.
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
         SampledBenchmark::batched(

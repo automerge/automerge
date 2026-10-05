@@ -1,5 +1,6 @@
 use super::SampledBenchmark;
-use benchmark_battery::automerge::{AutoCommit, ReadDoc, ROOT};
+use benchmark_battery::automerge::{AutoCommit, LoadOptions, ReadDoc, ROOT};
+use benchmark_battery::policy_masked_for_bytes;
 use std::hint::black_box;
 
 const FILES: [&str; 6] = ["S1.am", "S3.am", "A1.am", "A2.am", "C1.am", "C2.am"];
@@ -26,15 +27,18 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
 
 fn load(filename: &str) -> Box<dyn FnMut()> {
     let bytes = read_file(filename);
+    let policy = policy_masked_for_bytes(&bytes);
     Box::new(move || {
-        let doc = AutoCommit::load(&bytes).unwrap();
-        black_box(doc);
+        let options = LoadOptions::new().write_frontier(policy.clone());
+        black_box(AutoCommit::load_with_options(&bytes, options).unwrap());
     })
 }
 
 fn get_text(filename: &str) -> Box<dyn FnMut()> {
     let bytes = read_file(filename);
-    let doc = AutoCommit::load(&bytes).unwrap();
+    let policy = policy_masked_for_bytes(&bytes);
+    let doc =
+        AutoCommit::load_with_options(&bytes, LoadOptions::new().write_frontier(policy)).unwrap();
     Box::new(move || {
         let (_, text_id) = doc.get(ROOT, "text").unwrap().unwrap();
         let result = doc.text(text_id).unwrap();
