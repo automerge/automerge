@@ -2,13 +2,19 @@ use super::{Benchmark, SampledBenchmark, SeriesBenchmark};
 use benchmark_battery::automerge::{
     sync::{self, Message, SyncDoc},
     transaction::Transactable,
-    Automerge, ReadDoc, ScalarValue, ROOT,
+    Author, Automerge, ChangeHash, ReadDoc, ScalarValue, ROOT,
 };
-use benchmark_battery::{list_splice_100, rand, text_splice_100};
+use benchmark_battery::{
+    in_author_blocks, in_author_transactions, list_splice_100, masked, policy_masked_for, rand,
+    text_splice_100,
+};
+use std::collections::HashMap;
 
 const FULL_SYNC_SIZE: u64 = 10_000;
 const TINY_SYNC_INITIAL_SIZE: u64 = 100_000;
 const TINY_SYNC_STEPS: usize = 1_000;
+
+type Policy = HashMap<Author<'static>, Vec<ChangeHash>>;
 
 pub fn benchmarks() -> Vec<Benchmark> {
     vec![
@@ -16,21 +22,21 @@ pub fn benchmarks() -> Vec<Benchmark> {
         SampledBenchmark::batched(
             "sync",
             "sync/full_one_tx/100",
-            || (one_tx_increasing_put(100), DocWithSync::default()),
+            || peers(one_tx_increasing_put(100)),
             run_full_sync,
         )
         .into(),
         SampledBenchmark::batched(
             "sync",
             "sync/full_one_tx/1000",
-            || (one_tx_increasing_put(1_000), DocWithSync::default()),
+            || peers(one_tx_increasing_put(1_000)),
             run_full_sync,
         )
         .into(),
         SampledBenchmark::batched(
             "sync",
             "sync/full_one_tx",
-            || (one_tx_increasing_put(10_000), DocWithSync::default()),
+            || peers(one_tx_increasing_put(10_000)),
             run_full_sync,
         )
         .into(),
@@ -80,6 +86,14 @@ impl DocWithSync {
             }
         }
     }
+
+    /// An empty peer that already carries the frontier pinned at this
+    /// document's heads, as a receiver that knows about the revocations would.
+    fn empty_peer(&self) -> DocWithSync {
+        Automerge::new()
+            .with_write_frontier(policy_masked_for(&self.doc.get_heads()))
+            .into()
+    }
 }
 
 impl From<Automerge> for DocWithSync {
@@ -91,11 +105,18 @@ impl From<Automerge> for DocWithSync {
     }
 }
 
+/// A masked origin and an empty peer carrying the same frontier.
+fn peers(origin: Automerge) -> (DocWithSync, DocWithSync) {
+    let origin: DocWithSync = masked(origin).into();
+    let peer = origin.empty_peer();
+    (origin, peer)
+}
+
 fn full_many_tx() -> Box<dyn FnMut()> {
-    let doc = many_tx_increasing_put(FULL_SYNC_SIZE);
+    let (doc, peer) = peers(many_tx_increasing_put(FULL_SYNC_SIZE));
     Box::new(move || {
         let mut doc1 = doc.clone();
-        let mut doc2 = DocWithSync::default();
+        let mut doc2 = peer.clone();
         doc1.sync(&mut doc2);
     })
 }
@@ -105,6 +126,9 @@ fn run_full_sync((mut doc1, mut doc2): (DocWithSync, DocWithSync)) -> (DocWithSy
     (doc1, doc2)
 }
 
+// Deliberately unmasked: both peers start empty and the origin is built
+// inside the measured operation, so there are no heads to pin a frontier at.
+// See build.rs.
 fn every_change(n: u64) -> Box<dyn FnMut()> {
     Box::new(move || {
         let mut doc1 = DocWithSync::default();
@@ -131,8 +155,7 @@ fn every_change_10000() -> Box<dyn FnMut()> {
 }
 
 fn tiny_text_sync() -> Box<dyn FnMut(usize)> {
-    let mut doc1: DocWithSync = text_splice_100(TINY_SYNC_INITIAL_SIZE).into();
-    let mut doc2: DocWithSync = Automerge::new().into();
+    let (mut doc1, mut doc2) = peers(text_splice_100(TINY_SYNC_INITIAL_SIZE));
     let len = TINY_SYNC_INITIAL_SIZE as usize;
     doc1.sync(&mut doc2);
     let (_, text) = doc1.doc.get(ROOT, "content").unwrap().unwrap();
@@ -146,8 +169,7 @@ fn tiny_text_sync() -> Box<dyn FnMut(usize)> {
 }
 
 fn tiny_list_sync() -> Box<dyn FnMut(usize)> {
-    let mut doc1: DocWithSync = list_splice_100(TINY_SYNC_INITIAL_SIZE).into();
-    let mut doc2: DocWithSync = Automerge::new().into();
+    let (mut doc1, mut doc2) = peers(list_splice_100(TINY_SYNC_INITIAL_SIZE));
     let len = TINY_SYNC_INITIAL_SIZE as usize;
     doc1.sync(&mut doc2);
     let (_, list) = doc1.doc.get(ROOT, "content").unwrap().unwrap();
@@ -167,32 +189,41 @@ fn big_chunky_sync_message() -> Box<dyn FnMut()> {
         "/data/slowSyncMessage.amrgsync"
     ))
     .unwrap();
-    Box::new(move || {
+    // The receiver's frontier is pinned at the heads the message produces,
+    // which are only known after receiving it once.
+    let policy: Policy = {
         let mut peer_state = sync::State::default();
         let mut doc = Automerge::new();
+        let message = Message::decode(&data).unwrap();
+        doc.receive_sync_message(&mut peer_state, message).unwrap();
+        policy_masked_for(&doc.get_heads())
+    };
+    Box::new(move || {
+        let mut peer_state = sync::State::default();
+        let mut doc = Automerge::new().with_write_frontier(policy.clone());
         let message = Message::decode(&data).unwrap();
         doc.receive_sync_message(&mut peer_state, message).unwrap();
     })
 }
 
-fn one_tx_increasing_put(n: u64) -> DocWithSync {
+fn one_tx_increasing_put(n: u64) -> Automerge {
     let mut doc = Automerge::new();
-    let mut tx = doc.transaction();
-    for i in 0..n {
-        tx.put(ROOT, i.to_string(), i).unwrap();
-    }
-    tx.commit();
-    doc.into()
+    in_author_transactions(&mut doc, n as usize, |tx, range| {
+        for i in range {
+            tx.put(ROOT, i.to_string(), i as u64).unwrap();
+        }
+    });
+    doc
 }
 
-fn many_tx_increasing_put(n: u64) -> DocWithSync {
-    let mut doc = Automerge::default();
-
-    for i in 0..n {
-        let mut tx = doc.transaction();
-        tx.put(ROOT, i.to_string(), i).unwrap();
-        tx.commit();
-    }
-
-    doc.into()
+fn many_tx_increasing_put(n: u64) -> Automerge {
+    let mut doc = Automerge::new();
+    in_author_blocks(&mut doc, n as usize, |doc, range| {
+        for i in range {
+            let mut tx = doc.transaction();
+            tx.put(ROOT, i.to_string(), i as u64).unwrap();
+            tx.commit();
+        }
+    });
+    doc
 }
