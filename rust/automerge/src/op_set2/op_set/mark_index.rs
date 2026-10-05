@@ -258,6 +258,15 @@ impl MarkIndexColumn {
             .collect();
     }
 
+    pub(crate) fn rewrite_without_actor(&mut self, idx: usize) {
+        let f = |id: OpId| id.without_actor(idx).expect("a removed actor has no marks");
+        self.remap_values(|m| match m {
+            MarkIdx::Start(id) => MarkIdx::Start(f(id)),
+            MarkIdx::End(id) => MarkIdx::End(f(id)),
+        });
+        self.cache = self.cache.drain().map(|(id, mark)| (f(id), mark)).collect();
+    }
+
     /// Rebuild the data column with `f` applied to every mark idx —
     /// run at a time, so an unmarked document (all-null runs) costs a
     /// handful of run headers rather than a per-row materialize.
