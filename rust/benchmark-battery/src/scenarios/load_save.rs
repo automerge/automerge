@@ -1,10 +1,11 @@
 use super::SampledBenchmark;
-use benchmark_battery::automerge::{Author, Automerge, ChangeHash, LoadOptions};
+use benchmark_battery::automerge::{Author, AutoCommit, Automerge, ChangeHash, LoadOptions};
 use benchmark_battery::Transactable;
 use benchmark_battery::{
-    big_paste_doc, big_random_doc, deep_history_doc, maps_in_maps_doc, poorly_simulated_typing_doc,
-    text_splice_100,
+    author, big_paste_doc, big_random_doc, deep_history_doc, maps_in_maps_doc,
+    poorly_simulated_typing_doc, text_splice_100, ROOT,
 };
+use std::collections::HashMap;
 use std::hint::black_box;
 
 const N: u64 = 100_000;
@@ -188,29 +189,28 @@ fn name(operation: &str, n: usize) -> &'static str {
     Box::leak(format!("{operation}/{n}").into_boxed_str())
 }
 
-fn author(i: usize) -> Author<'static> {
-    Author::try_from(format!("{i:08x}")).unwrap()
-}
-
+/// A document with `n` authors, each contributing one change from its own
+/// actor.
 fn saved_doc_with_actors(n: usize) -> Vec<u8> {
     let mut bytes = Vec::new();
     for i in 0..n {
-        let mut doc = benchmark_battery::automerge::AutoCommit::new().with_author(Some(author(i)));
-        doc.put(benchmark_battery::ROOT, format!("k{i}"), i as i64)
-            .unwrap();
+        let mut doc = AutoCommit::new().with_author(Some(author(i)));
+        doc.put(ROOT, format!("k{i}"), i as i64).unwrap();
         doc.commit();
         bytes.extend(doc.save());
     }
 
-    let mut doc = benchmark_battery::automerge::AutoCommit::new();
+    let mut doc = AutoCommit::new();
     doc.load_incremental(&bytes).unwrap();
     doc.save()
 }
 
+/// Mask the first `n / 2` of the `n` authors in [`saved_doc_with_actors`] at
+/// `heads`.
 fn policy_masking_half(
     n: usize,
     heads: &[ChangeHash],
-) -> std::collections::HashMap<Author<'static>, Vec<ChangeHash>> {
+) -> HashMap<Author<'static>, Vec<ChangeHash>> {
     (0..n / 2).map(|i| (author(i), heads.to_vec())).collect()
 }
 
