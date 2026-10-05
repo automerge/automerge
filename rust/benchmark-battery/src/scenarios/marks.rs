@@ -2,7 +2,7 @@ use super::SampledBenchmark;
 use benchmark_battery::automerge::marks::{ExpandMark, Mark};
 use benchmark_battery::automerge::transaction::Transactable;
 use benchmark_battery::automerge::{Automerge, ObjId, ReadDoc, ROOT};
-use benchmark_battery::{rand, text_splice_100};
+use benchmark_battery::{masked, rand, text_splice_100};
 use std::cmp::{max, min};
 use std::hint::black_box;
 
@@ -26,7 +26,7 @@ fn get_marks_at_end() -> Box<dyn FnMut()> {
 }
 
 fn add_mark() -> Box<dyn FnMut()> {
-    let mut doc = text_splice_100(N);
+    let mut doc = masked(text_splice_100(N));
     Box::new(move || {
         add_random_marks(&mut doc, 1);
     })
@@ -80,7 +80,7 @@ fn splice_without_marks() -> SampledBenchmark {
 }
 
 fn doc_and_text(marks: usize) -> (Automerge, ObjId) {
-    let mut doc = text_splice_100(N);
+    let mut doc = masked(text_splice_100(N));
     add_random_marks(&mut doc, marks);
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
     (doc, text)

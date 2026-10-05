@@ -8,7 +8,9 @@ use std::ops::Range;
 
 pub use automerge;
 
-pub use automerge::{transaction::Transactable, Automerge, ObjType, ScalarValue, ROOT};
+pub use automerge::{
+    transaction::Transactable, Automerge, LoadOptions, ObjType, ScalarValue, ROOT,
+};
 
 pub const N_AUTHORS: usize = 4;
 pub const N_ROUNDS: usize = 2;
@@ -94,6 +96,24 @@ pub fn policy_masked_for(heads: &[ChangeHash]) -> HashMap<Author<'static>, Vec<C
 pub fn masked(doc: Automerge) -> Automerge {
     let write_frontier = policy_masked_at_heads(&doc);
     doc.with_write_frontier(write_frontier)
+}
+
+/// The [`policy_masked_for`] policy for the heads that `bytes` will produce.
+///
+/// The heads are not known until the bytes are parsed, so this costs one
+/// unmasked load. Resolve it once in setup; a measured load is then
+/// `Automerge::load_with_options(bytes, LoadOptions::new().write_frontier(policy.clone()))`
+/// ([`LoadOptions`] is not `Clone`, the policy is).
+pub fn policy_masked_for_bytes(bytes: &[u8]) -> HashMap<Author<'static>, Vec<ChangeHash>> {
+    policy_masked_for(&Automerge::load(bytes).unwrap().get_heads())
+}
+
+/// Load `bytes` under [`policy_masked_for_bytes`], so that the loaded document
+/// is in the same state as [`masked`] would leave it. For setup, not for a
+/// measured load.
+pub fn load_masked(bytes: &[u8]) -> Automerge {
+    let policy = policy_masked_for_bytes(bytes);
+    Automerge::load_with_options(bytes, LoadOptions::new().write_frontier(policy)).unwrap()
 }
 
 /// Produce a write-frontier for the second half of the [`authors`], i.e.
@@ -280,6 +300,19 @@ pub fn poorly_simulated_typing_doc(n: u64) -> Automerge {
     doc
 }
 
+/// A map with `n` distinct keys on `ROOT`, `"key0"` through `"key{n-1}"`.
+#[inline(never)]
+pub fn wide_map_doc(n: u64) -> Automerge {
+    let mut doc = Automerge::new();
+    in_author_transactions(&mut doc, n as usize, |tx, range| {
+        for i in range {
+            tx.put(ROOT, format!("key{i}"), format!("value{i}"))
+                .unwrap();
+        }
+    });
+    doc
+}
+
 #[inline(never)]
 pub fn deep_history_doc(n: u64) -> Automerge {
     let mut doc = Automerge::new();
@@ -302,9 +335,9 @@ mod tests {
 
     use super::{
         author, authors, big_paste_doc, big_random_doc, deep_history_doc, in_author_transactions,
-        list_splice_100, local_user, maps_in_maps_doc, masked, policy_hiding_half,
-        policy_masked_at_heads, policy_masked_for, policy_pending_half,
-        poorly_simulated_typing_doc, text_splice_100, N_AUTHORS, N_ROUNDS,
+        list_splice_100, load_masked, local_user, maps_in_maps_doc, masked, policy_hiding_half,
+        policy_masked_at_heads, policy_masked_for, policy_masked_for_bytes, policy_pending_half,
+        poorly_simulated_typing_doc, text_splice_100, wide_map_doc, N_AUTHORS, N_ROUNDS,
     };
     use automerge::transaction::Transactable;
     use automerge::{Author, Automerge, ChangeHash, LoadOptions, ObjType, ReadDoc, ROOT};
@@ -326,6 +359,7 @@ mod tests {
                 "poorly_simulated_typing_doc",
                 poorly_simulated_typing_doc(N),
             ),
+            ("wide_map_doc", wide_map_doc(N)),
             ("deep_history_doc", deep_history_doc(N)),
         ]
     }
@@ -379,6 +413,8 @@ mod tests {
         assert_eq!(content_len(&text_splice_100(N)), N as usize);
         assert_eq!(content_len(&list_splice_100(N)), N as usize);
         assert_eq!(content_len(&poorly_simulated_typing_doc(N)), N as usize);
+
+        assert_eq!(wide_map_doc(N).length(ROOT), N as usize);
 
         let deep = deep_history_doc(N);
         assert_eq!(deep.length(ROOT), 2, "deep_history keeps x and y");
@@ -491,6 +527,24 @@ mod tests {
         for a in authors().into_iter().skip(1) {
             assert!(receiver.is_author_masked(&a));
         }
+    }
+
+    #[test]
+    fn load_masked_matches_masked_on_the_same_bytes() {
+        let source = text_splice_100(N);
+        let bytes = source.save();
+
+        let expected = masked(source);
+        let loaded = load_masked(&bytes);
+
+        assert_eq!(loaded.get_write_frontier(), expected.get_write_frontier());
+        assert_eq!(
+            policy_masked_for_bytes(&bytes),
+            expected.get_write_frontier()
+        );
+        let (_, e) = expected.get(ROOT, "content").unwrap().unwrap();
+        let (_, l) = loaded.get(ROOT, "content").unwrap().unwrap();
+        assert_eq!(loaded.text(&l).unwrap(), expected.text(&e).unwrap());
     }
 
     #[test]
