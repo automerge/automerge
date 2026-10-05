@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 160dc9c9e832d98f4e69c6ce81f8b0b94bc3d060119b314d7bc212e1a4383408 # shrinks to ops = [Splice { pos: 0, del: 0, text: "a" }, Fork { sort_byte: 0 }, ChangeAt { heads_idx: 2364357902384590476, pos: 0, text: "a" }]
