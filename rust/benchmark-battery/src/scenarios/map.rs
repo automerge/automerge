@@ -5,6 +5,7 @@ use benchmark_battery::automerge::{
 use std::hint::black_box;
 
 const SIZES: [u64; 3] = [100, 1_000, 10_000];
+
 pub fn benchmarks() -> Vec<Benchmark> {
     let mut benchmarks = Vec::new();
     for n in SIZES {
