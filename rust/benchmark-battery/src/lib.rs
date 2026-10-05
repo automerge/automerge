@@ -76,10 +76,24 @@ fn maskable_authors() -> impl Iterator<Item = Author<'static>> {
 /// Nothing is hidden unless the document's heads advance, and writes by the
 /// [`local_user`] after the frontier is set remain visible.
 pub fn policy_masked_at_heads(doc: &Automerge) -> HashMap<Author<'static>, Vec<ChangeHash>> {
-    let current = doc.get_heads();
+    policy_masked_for(&doc.get_heads())
+}
+
+/// Produce a write-frontier which contains every author except the
+/// [`local_user`], and the given `heads` is the frontier.
+///
+/// Nothing is hidden unless the document's heads advance, and writes by the
+/// [`local_user`] after the frontier is set remain visible.
+pub fn policy_masked_for(heads: &[ChangeHash]) -> HashMap<Author<'static>, Vec<ChangeHash>> {
     maskable_authors()
-        .map(|author| (author, current.clone()))
+        .map(|author| (author, heads.to_vec()))
         .collect()
+}
+
+/// Sets the write-frontier of `doc` using [`policy_masked_at_heads`].
+pub fn masked(doc: Automerge) -> Automerge {
+    let write_frontier = policy_masked_at_heads(&doc);
+    doc.with_write_frontier(write_frontier)
 }
 
 /// Produce a write-frontier for the second half of the [`authors`], i.e.
@@ -145,7 +159,7 @@ pub fn rand() -> usize {
 /// Afterwards the document's author is the [`local_user`], so that anything a
 /// benchmark writes is theirs. Setting the author binds nothing until the
 /// first write, so this adds no actor to documents that are only read.
-fn in_author_blocks(
+pub fn in_author_blocks(
     doc: &mut Automerge,
     ops: usize,
     mut block: impl FnMut(&mut Automerge, Range<usize>),
@@ -153,13 +167,19 @@ fn in_author_blocks(
     let block_len = ops / N_BLOCKS;
     for b in 0..N_BLOCKS {
         doc.set_author(Some(author(b % N_AUTHORS)));
-        block(doc, b * block_len..(b + 1) * block_len);
+        let start = b * block_len;
+        let end = if b + 1 == N_BLOCKS {
+            ops
+        } else {
+            start + block_len
+        };
+        block(doc, start..end);
     }
     doc.set_author(Some(local_user()));
 }
 
 /// Like [`in_author_blocks`], with one transaction per block.
-fn in_author_transactions(
+pub fn in_author_transactions(
     doc: &mut Automerge,
     ops: usize,
     mut block: impl FnMut(&mut Transaction<'_>, Range<usize>),
@@ -281,12 +301,13 @@ mod tests {
     //! only place the layout is checked.
 
     use super::{
-        author, authors, big_paste_doc, big_random_doc, deep_history_doc, list_splice_100,
-        local_user, maps_in_maps_doc, policy_hiding_half, policy_masked_at_heads,
-        policy_pending_half, poorly_simulated_typing_doc, text_splice_100, N_AUTHORS, N_ROUNDS,
+        author, authors, big_paste_doc, big_random_doc, deep_history_doc, in_author_transactions,
+        list_splice_100, local_user, maps_in_maps_doc, masked, policy_hiding_half,
+        policy_masked_at_heads, policy_masked_for, policy_pending_half,
+        poorly_simulated_typing_doc, text_splice_100, N_AUTHORS, N_ROUNDS,
     };
     use automerge::transaction::Transactable;
-    use automerge::{Author, Automerge, ChangeHash, ReadDoc, ROOT};
+    use automerge::{Author, Automerge, ChangeHash, LoadOptions, ObjType, ReadDoc, ROOT};
     use std::collections::HashMap;
 
     /// Divisible by `N_AUTHORS * N_ROUNDS` blocks and by the 100-wide splices.
@@ -375,6 +396,119 @@ mod tests {
             depth += 1;
         }
         assert_eq!(depth, N as usize);
+    }
+
+    /// `map/` sizes (100, 1000, 10000) are not multiples of `N_BLOCKS`; the
+    /// remainder must not be dropped.
+    #[test]
+    fn author_blocks_cover_every_op_when_not_a_multiple_of_the_block_count() {
+        for ops in [1usize, 7, 100, 1000] {
+            let mut doc = Automerge::new();
+            let list = {
+                let mut tx = doc.transaction();
+                let list = tx.put_object(ROOT, "content", ObjType::List).unwrap();
+                tx.commit();
+                list
+            };
+            let mut seen = Vec::new();
+            in_author_transactions(&mut doc, ops, |tx, range| {
+                for i in range.clone() {
+                    tx.insert(&list, i, i as i64).unwrap();
+                }
+                seen.push(range);
+            });
+
+            assert_eq!(doc.length(&list), ops, "{ops} ops: all inserted");
+            let covered: Vec<usize> = seen.iter().flat_map(|r| r.clone()).collect();
+            assert_eq!(
+                covered,
+                (0..ops).collect::<Vec<_>>(),
+                "{ops} ops: contiguous"
+            );
+            assert_eq!(
+                doc.get_author(),
+                Some(&local_user()),
+                "{ops} ops: ends as local user"
+            );
+        }
+    }
+
+    #[test]
+    fn masked_puts_every_generator_under_the_masked_at_heads_policy() {
+        for (name, doc) in generators() {
+            let expected = policy_masked_at_heads(&doc);
+            let doc = masked(doc);
+
+            assert_eq!(doc.get_write_frontier(), expected, "{name}: policy");
+            assert!(!doc.is_author_masked(&local_user()), "{name}: local user");
+            for a in authors().into_iter().skip(1) {
+                assert!(doc.is_author_masked(&a), "{name}: author {a:?}");
+            }
+            assert_eq!(
+                doc.get_author(),
+                Some(&local_user()),
+                "{name}: still the local user"
+            );
+        }
+    }
+
+    #[test]
+    fn masked_hides_nothing() {
+        let plain = text_splice_100(N);
+        let (_, text) = plain.get(ROOT, "content").unwrap().unwrap();
+        let expected = plain.text(&text).unwrap();
+
+        let doc = masked(plain);
+        let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
+        assert_eq!(doc.text(&text).unwrap(), expected);
+    }
+
+    /// A receiving document (`apply_changes`, `sync`, `load`) has no heads of
+    /// its own yet, so its policy is pinned to the *source* document's heads.
+    #[test]
+    fn masked_for_matches_masked_at_heads_of_the_source() {
+        let source = text_splice_100(N);
+        let heads = source.get_heads();
+        assert_eq!(policy_masked_for(&heads), policy_masked_at_heads(&source));
+    }
+
+    #[test]
+    fn masked_for_lets_a_receiver_apply_the_source_without_hiding_it() {
+        let source = text_splice_100(N);
+        let (_, text) = source.get(ROOT, "content").unwrap().unwrap();
+        let expected = source.text(&text).unwrap();
+
+        let mut receiver =
+            Automerge::new().with_write_frontier(policy_masked_for(&source.get_heads()));
+        receiver.apply_changes(source.get_changes(&[])).unwrap();
+
+        let (_, text) = receiver.get(ROOT, "content").unwrap().unwrap();
+        assert_eq!(
+            receiver.text(&text).unwrap(),
+            expected,
+            "everything up to heads is visible"
+        );
+        for a in authors().into_iter().skip(1) {
+            assert!(receiver.is_author_masked(&a));
+        }
+    }
+
+    #[test]
+    fn masked_for_loads_the_source_bytes_without_hiding_them() {
+        let source = text_splice_100(N);
+        let (_, text) = source.get(ROOT, "content").unwrap().unwrap();
+        let expected = source.text(&text).unwrap();
+        let bytes = source.save();
+
+        let loaded = Automerge::load_with_options(
+            &bytes,
+            LoadOptions::new().write_frontier(policy_masked_for(&source.get_heads())),
+        )
+        .unwrap();
+
+        let (_, text) = loaded.get(ROOT, "content").unwrap().unwrap();
+        assert_eq!(loaded.text(&text).unwrap(), expected);
+        assert_eq!(loaded.get_write_frontier(), policy_masked_at_heads(&source));
     }
 
     #[test]
