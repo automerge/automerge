@@ -24,15 +24,21 @@ pub(crate) struct TopOps<'a> {
 }
 
 impl<'a> TopOps<'a> {
+    /// Iterate over the top op of each key or element in `range`, marking an
+    /// op as a conflict when other visible ops share its key.
+    ///
+    /// The `read` decides how visibility is determined. A current read, with
+    /// or without a write-frontier mask, uses the op set's indexes: the mask
+    /// is already applied to them by [`OpSet::recompute_indexes`]. A
+    /// historical read scans the ops against its clock instead. Counter values
+    /// are summed from successors at read time, so the clock from
+    /// [`ReadAt::filter`] is applied to them on either path.
     pub(crate) fn new(op_set: &'a OpSet, read: &ReadAt<'_>, range: Range<usize>) -> Self {
-        let clock = read.filter().cloned();
+        let scan = read.historical().cloned();
         let visible_pos = range.start;
-        let visible = VisIter::new(op_set, clock.as_ref(), range.clone());
-        let iter = SkipIter::new(
-            op_set.iter_range(&range),
-            TopIter::new(op_set, clock.clone(), range),
-        );
-        let inner = FixCounters::new(iter, clock);
+        let visible = VisIter::new(op_set, scan.as_ref(), range.clone());
+        let iter = SkipIter::new(op_set.iter_range(&range), TopIter::new(op_set, scan, range));
+        let inner = FixCounters::new(iter, read.filter().cloned());
         Self {
             inner,
             visible,
@@ -359,4 +365,70 @@ fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) ->
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    //! A current read must use the indexes whether or not a write-frontier
+    //! mask is present: the mask is baked into the indexes by
+    //! `recompute_indexes`. Only a historical read scans. These tests pin the
+    //! dispatch, which is otherwise visible only as a 10–60× slowdown.
+
+    use super::TopOps;
+    use crate::op_set2::op_set::VisIter;
+    use crate::transaction::Transactable;
+    use crate::{Author, AutoCommit, ObjType, ReadDoc, ROOT};
+
+    fn author(n: u8) -> Author<'static> {
+        Author::from(vec![n])
+    }
+
+    /// A two-author text document, masked at its heads so that nothing is
+    /// hidden but a mask is present.
+    fn masked_doc() -> AutoCommit {
+        let mut doc = AutoCommit::new().with_author(Some(author(1)));
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "one ").unwrap();
+        doc.commit();
+        doc.set_author(Some(author(2)));
+        doc.splice_text(&text, 4, 0, "two").unwrap();
+        doc.commit();
+        let heads = doc.get_heads();
+        doc.mask_author(author(2), &heads);
+        doc
+    }
+
+    fn top_ops_for(doc: &mut AutoCommit, historical: bool) -> TopOps<'_> {
+        // The first change: strictly in the past, so `read_at` is historical
+        // rather than collapsing to a current read at the heads.
+        let heads = vec![doc.get_changes(&[])[0].hash()];
+        let (_, text) = doc.get(ROOT, "text").unwrap().unwrap();
+        let am = doc.document();
+        let obj = am.exid_to_obj(&text).unwrap();
+        let range = am.ops().scope_to_obj(&obj.id);
+        let read = if historical {
+            am.read_at(Some(&heads))
+        } else {
+            am.read_current()
+        };
+        TopOps::new(am.ops(), &read, range)
+    }
+
+    #[test]
+    fn masked_current_read_uses_the_indexes() {
+        let mut doc = masked_doc();
+        assert!(doc.is_author_masked(&author(2)), "mask is present");
+        let top = top_ops_for(&mut doc, false);
+        assert!(
+            matches!(top.visible, VisIter::Indexed(_)),
+            "VisIter must be indexed under a mask"
+        );
+    }
+
+    #[test]
+    fn historical_read_scans() {
+        let mut doc = masked_doc();
+        let top = top_ops_for(&mut doc, true);
+        assert!(matches!(top.visible, VisIter::Scan(_)));
+    }
 }
