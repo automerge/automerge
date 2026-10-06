@@ -102,6 +102,11 @@ impl Clock {
         self.0.insert(shift, counter)
     }
 
+    /// Counters in actor-table order.
+    pub(crate) fn counters(&self) -> impl Iterator<Item = u32> + '_ {
+        self.0.iter().copied()
+    }
+
     /// Number of actors this clock covers.
     pub(crate) fn len(&self) -> usize {
         self.0.len()

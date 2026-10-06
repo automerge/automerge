@@ -1105,6 +1105,74 @@ fn load_change_chunks_applies_write_frontier() {
         .any(|p| matches!(&p.action, PatchAction::PutMap { key, .. } if key == "y")));
 }
 
+/// A frontier at the document's heads hides no existing op, so the indexes
+/// built during load are already correct and the masked reindex is skipped.
+/// The mask must still be present — a fresh op by the masked author is hidden
+/// — and the document must read identically to an unmasked load.
+#[test]
+fn load_with_write_frontier_at_heads_hides_nothing() {
+    use std::collections::HashMap;
+
+    let (doc, alice, _) = two_authors();
+    let bytes = doc.save();
+    let heads = doc.get_heads();
+    let write_frontier: HashMap<_, _> = [(alice.clone(), heads)].into_iter().collect();
+
+    let mut loaded = Automerge::load_with_options(
+        &bytes,
+        automerge::LoadOptions::new().write_frontier(write_frontier.clone()),
+    )
+    .unwrap()
+    .with_author(Some(alice.clone()));
+
+    assert!(loaded.is_author_masked(&alice));
+    assert_eq!(loaded.get_write_frontier(), write_frontier);
+    assert_eq!(
+        loaded.keys(ROOT).collect::<Vec<_>>(),
+        doc.keys(ROOT).collect::<Vec<_>>()
+    );
+    assert!(
+        loaded.get(ROOT, "y").unwrap().is_some(),
+        "y is at the boundary"
+    );
+
+    loaded
+        .transact(|tx| {
+            use automerge::transaction::Transactable;
+            tx.put(ROOT, "after", 1)
+        })
+        .unwrap();
+    assert!(
+        loaded.get(ROOT, "after").unwrap().is_none(),
+        "alice's op after the boundary is hidden"
+    );
+}
+
+/// A frontier before the document's heads hides existing ops, so the indexes
+/// built during load must be rebuilt under the mask.
+#[test]
+fn load_with_write_frontier_before_heads_hides_later_ops() {
+    use std::collections::HashMap;
+
+    let (doc, alice, epoch) = two_authors();
+    let bytes = doc.save();
+    let write_frontier: HashMap<_, _> = [(alice.clone(), epoch)].into_iter().collect();
+
+    let loaded = Automerge::load_with_options(
+        &bytes,
+        automerge::LoadOptions::new().write_frontier(write_frontier),
+    )
+    .unwrap();
+
+    assert!(
+        loaded.get(ROOT, "x").unwrap().is_some(),
+        "x is at the boundary"
+    );
+    assert!(loaded.get(ROOT, "y").unwrap().is_none(), "y is after it");
+    assert!(loaded.get(ROOT, "z").unwrap().is_some(), "bob is unmasked");
+    assert_eq!(loaded.keys(ROOT).count(), 2);
+}
+
 /// The `load_incremental` empty-document fast path replaces the document
 /// wholesale; it must carry over the local author (before the actor, so the
 /// actor is not regenerated) as well as the actor and write-frontier policy.
