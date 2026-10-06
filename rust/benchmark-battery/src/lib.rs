@@ -1,5 +1,5 @@
 use automerge::transaction::Transaction;
-use automerge::{Author, ChangeHash, ObjId, ReadDoc};
+use automerge::{Author, Change, ChangeHash, ObjId, ReadDoc};
 use rand::distr::Alphanumeric;
 use rand::{rng, Rng, RngExt};
 use std::collections::HashMap;
@@ -164,6 +164,45 @@ pub fn policy_pending_half() -> HashMap<Author<'static>, Vec<ChangeHash>> {
             (author, vec![ChangeHash(bytes)])
         })
         .collect()
+}
+
+/// The `hidden` regime: `doc` under `policy_hiding_half`.
+pub fn hidden(plain: Automerge) -> Automerge {
+    plain.with_write_frontier(policy_hiding_half())
+}
+
+/// Commit one more change to `doc` after the frontier, written by whoever
+/// `doc`'s current author is — the [`local_user`] for every generator — and
+/// return the changes a peer that forked `doc` before the call would receive.
+///
+/// `write` is the tail's content. The frontier is not moved, so the tail
+/// stays visible under it.
+pub fn tail(doc: &mut Automerge, write: impl FnOnce(&mut Transaction<'_>)) -> Vec<Change> {
+    let heads = doc.get_heads();
+    let mut tx = doc.transaction();
+    write(&mut tx);
+    tx.commit();
+    doc.get_changes(&heads)
+}
+
+/// [`tail`] for a text document: append `chars` random characters to
+/// `"content"`.
+pub fn tail_text(doc: &mut Automerge, chars: usize) -> Vec<Change> {
+    let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
+    tail(doc, |tx| {
+        let len = tx.length(&text);
+        tx.splice_text(&text, len, 0, &random_string(chars as u64))
+            .unwrap();
+    })
+}
+
+/// An empty peer that holds `source`'s policy but none of its history, so
+/// every boundary head is pending until the source's changes arrive.
+///
+/// This is the `pending` regime for apply and sync: the receiver knows about
+/// the revocations before it has seen the changes they refer to.
+pub fn pending_receiver(source: &Automerge) -> Automerge {
+    Automerge::new().with_write_frontier(policy_masked_for(&source.get_heads()))
 }
 
 fn random_string(n: u64) -> String {
@@ -392,10 +431,11 @@ mod tests {
     //! only place the layout is checked.
 
     use super::{
-        author, authors, big_paste_doc, big_random_doc, deep_history_doc, in_author_transactions,
-        list_splice_100, load_masked, local_user, maps_in_maps_doc, masked, masked_autocommit,
-        policy_hiding_half, policy_masked_at_heads, policy_masked_for, policy_masked_for_bytes,
-        policy_pending_half, poorly_simulated_typing_doc, seeded_text_doc, text_splice_100,
+        author, authors, big_paste_doc, big_random_doc, deep_history_doc, hidden,
+        in_author_transactions, list_splice_100, load_masked, local_user, maps_in_maps_doc, masked,
+        masked_autocommit, pending_receiver, policy_hiding_half, policy_masked_at_heads,
+        policy_masked_for, policy_masked_for_bytes, policy_pending_half,
+        poorly_simulated_typing_doc, seeded_text_doc, tail, tail_text, text_splice_100,
         wide_map_doc, N_AUTHORS, N_ROUNDS,
     };
     use automerge::transaction::Transactable;
@@ -633,6 +673,110 @@ mod tests {
         doc.splice_text(&text, 0, 0, "local").unwrap();
         doc.commit();
         assert_eq!(doc.length(&text), before + 5, "local write visible");
+    }
+
+    /// The `hidden` regime: half the authors hidden entirely, so half the
+    /// content disappears; the local user is in the visible half.
+    #[test]
+    fn hidden_hides_half_the_content_and_not_the_local_user() {
+        let plain = text_splice_100(N);
+        let full = content_len(&plain);
+        let doc = hidden(plain);
+
+        assert_eq!(doc.get_write_frontier(), policy_hiding_half());
+        assert!(!doc.is_author_masked(&local_user()));
+        assert_eq!(content_len(&doc), full / 2);
+        assert_eq!(doc.get_author(), Some(&local_user()));
+    }
+
+    /// `tail` is the post-boundary work a peer receives: changes by the local
+    /// user, made after the frontier, that stay visible under it.
+    #[test]
+    fn tail_appends_visible_local_changes_after_the_frontier() {
+        let mut source = masked(text_splice_100(N));
+        let before_heads = source.get_heads();
+        let before_len = content_len(&source);
+        let before_changes = source.get_changes(&[]).len();
+
+        let changes = tail_text(&mut source, 50);
+
+        assert_eq!(changes.len(), 1, "one change carrying the tail");
+        assert_eq!(
+            changes[0].author().map(|a| a.into_owned()),
+            Some(local_user()),
+            "written by the local user"
+        );
+        assert_eq!(source.get_changes(&[]).len(), before_changes + 1);
+        assert_eq!(content_len(&source), before_len + 50, "the tail is visible");
+        assert_ne!(source.get_heads(), before_heads);
+        assert_eq!(
+            source.get_write_frontier(),
+            policy_masked_for(&before_heads),
+            "the frontier does not move"
+        );
+    }
+
+    /// The generic `tail` takes whatever the scenario's post-boundary work is.
+    #[test]
+    fn tail_takes_the_scenario_s_own_write() {
+        let mut source = masked(wide_map_doc(N));
+        let before = source.length(ROOT);
+
+        let changes = tail(&mut source, |tx| {
+            for i in 0..10 {
+                tx.put(ROOT, format!("tail{i}"), i).unwrap();
+            }
+        });
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(source.length(ROOT), before + 10);
+    }
+
+    /// A fork of a masked source already holds the boundary heads: nothing is
+    /// pending, and applying the tail shows it. This is the `masked` receiver.
+    #[test]
+    fn fork_of_masked_source_applies_the_tail_without_pending_resolution() {
+        let mut source = masked(text_splice_100(N));
+        let mut receiver = source.fork();
+        let changes = tail_text(&mut source, 50);
+
+        assert_eq!(receiver.get_write_frontier(), source.get_write_frontier());
+        for a in authors().into_iter().skip(1) {
+            assert!(receiver.is_author_masked(&a));
+        }
+
+        let before = content_len(&receiver);
+        receiver.apply_changes(changes).unwrap();
+
+        assert_eq!(content_len(&receiver), before + 50);
+        assert_eq!(receiver.get_heads(), source.get_heads());
+    }
+
+    /// `pending_receiver` is the empty peer that knows the policy but has
+    /// none of the history: every boundary head is pending.
+    #[test]
+    fn pending_receiver_has_the_policy_but_no_history() {
+        let source = masked(text_splice_100(N));
+        let receiver = pending_receiver(&source);
+
+        assert!(receiver.get_heads().is_empty());
+        assert_eq!(receiver.get_write_frontier(), source.get_write_frontier());
+        for a in authors().into_iter().skip(1) {
+            assert!(receiver.is_author_masked(&a));
+        }
+    }
+
+    /// Applying the whole source to a pending receiver resolves the boundary:
+    /// the result reads the same as the source.
+    #[test]
+    fn pending_receiver_resolves_on_applying_the_source() {
+        let source = masked(text_splice_100(N));
+        let mut receiver = pending_receiver(&source);
+
+        receiver.apply_changes(source.get_changes(&[])).unwrap();
+
+        assert_eq!(receiver.get_heads(), source.get_heads());
+        assert_eq!(content_len(&receiver), content_len(&source));
     }
 
     #[test]
