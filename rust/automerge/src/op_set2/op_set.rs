@@ -103,6 +103,14 @@ impl OpSet {
         }
     }
 
+    /// Whether the op at `pos` is visible under the current indexes.
+    ///
+    /// The indexes are built under the write-frontier mask, so this already
+    /// accounts for successors the mask hides.
+    pub(crate) fn indexed_visible(&self, pos: usize) -> bool {
+        self.cols.index.visible.get(pos).unwrap_or(false)
+    }
+
     pub(crate) fn index_builder(&self) -> IndexBuilder {
         IndexBuilder::new(self, self.text_encoding)
     }
