@@ -1,12 +1,12 @@
 //! The [`FrontierVisibility`] that is derived from a [`WriteFrontier`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::view::Mask;
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
-use crate::clock::Clock;
+use crate::clock::{Clock, SeqClock};
 use crate::types::OpId;
 use crate::write_frontier::WriteFrontier;
 use crate::ChangeHash;
@@ -45,10 +45,16 @@ impl FrontierVisibility {
         }
         let mut pending = HashSet::new();
         let mut bounds = vec![u32::MAX; actors.len()];
+        // Authors are commonly bounded at the same heads ("revoke these
+        // authors as of now"), and the clock at a set of heads is a graph
+        // traversal, so compute each distinct set once.
+        let mut clocks: HashMap<&[ChangeHash], SeqClock> = HashMap::new();
         for (author, heads) in policy.get_write_frontier() {
             let missing: Vec<ChangeHash> = graph.missing_hashes(heads).collect();
             if missing.is_empty() {
-                let clock = graph.seq_clock_for_heads(heads);
+                let clock = clocks
+                    .entry(heads.as_slice())
+                    .or_insert_with(|| graph.seq_clock_for_heads(heads));
                 for actor in authors.get_actors_for_author(author) {
                     bounds[actor] = match clock.get_for_actor(&actor) {
                         // A seq the graph handed out always names a change, so
