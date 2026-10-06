@@ -5,8 +5,8 @@ use benchmark_battery::automerge::{
     Author, Automerge, ChangeHash, ReadDoc, ScalarValue, ROOT,
 };
 use benchmark_battery::{
-    in_author_blocks, in_author_transactions, list_splice_100, masked, policy_masked_for, rand,
-    text_splice_100,
+    hidden, in_author_blocks, in_author_transactions, list_splice_100, masked, pending_receiver,
+    policy_masked_for, rand, tail, text_splice_100,
 };
 use std::collections::HashMap;
 
@@ -22,21 +22,42 @@ pub fn benchmarks() -> Vec<Benchmark> {
         SampledBenchmark::batched(
             "sync",
             "sync/full_one_tx/100",
-            || peers(one_tx_increasing_put(100)),
+            || peers_with_tail(one_tx_increasing_put(100), 100),
             run_full_sync,
         )
         .into(),
         SampledBenchmark::batched(
             "sync",
             "sync/full_one_tx/1000",
-            || peers(one_tx_increasing_put(1_000)),
+            || peers_with_tail(one_tx_increasing_put(1_000), 1_000),
             run_full_sync,
         )
         .into(),
         SampledBenchmark::batched(
             "sync",
             "sync/full_one_tx",
-            || peers(one_tx_increasing_put(10_000)),
+            || peers_with_tail(one_tx_increasing_put(10_000), 10_000),
+            run_full_sync,
+        )
+        .into(),
+        // The same, with half the authors' puts hidden on both peers.
+        SampledBenchmark::batched(
+            "sync",
+            "sync/full_one_tx_hidden",
+            || peers_with_tail_under(one_tx_increasing_put(10_000), 10_000, hidden),
+            run_full_sync,
+        )
+        .into(),
+        // An empty peer that knows the frontier receives the whole origin;
+        // every boundary head is pending until it arrives.
+        SampledBenchmark::batched(
+            "sync",
+            "sync/full_one_tx_pending",
+            || {
+                let origin = masked(one_tx_increasing_put(10_000));
+                let peer = pending_receiver(&origin).into();
+                (origin.into(), peer)
+            },
             run_full_sync,
         )
         .into(),
@@ -86,14 +107,6 @@ impl DocWithSync {
             }
         }
     }
-
-    /// An empty peer that already carries the frontier pinned at this
-    /// document's heads, as a receiver that knows about the revocations would.
-    fn empty_peer(&self) -> DocWithSync {
-        Automerge::new()
-            .with_write_frontier(policy_masked_for(&self.doc.get_heads()))
-            .into()
-    }
 }
 
 impl From<Automerge> for DocWithSync {
@@ -105,15 +118,39 @@ impl From<Automerge> for DocWithSync {
     }
 }
 
-/// A masked origin and an empty peer carrying the same frontier.
-fn peers(origin: Automerge) -> (DocWithSync, DocWithSync) {
-    let origin: DocWithSync = masked(origin).into();
-    let peer = origin.empty_peer();
-    (origin, peer)
+/// Two peers that both hold an `n`-key `origin` under the frontier, after
+/// which the origin writes `n` more keys for the sync to carry across. This
+/// is a peer that knows the frontier receiving new work.
+fn peers_with_tail(origin: Automerge, n: u64) -> (DocWithSync, DocWithSync) {
+    peers_with_tail_under(origin, n, masked)
+}
+
+fn peers_with_tail_under(
+    origin: Automerge,
+    n: u64,
+    regime: fn(Automerge) -> Automerge,
+) -> (DocWithSync, DocWithSync) {
+    let mut origin = regime(origin);
+    let peer = origin.fork();
+    // Keys `0..n` exist (some possibly hidden); the tail is `n..2n`.
+    tail(&mut origin, |tx| {
+        for i in n..2 * n {
+            tx.put(ROOT, i.to_string(), i).unwrap();
+        }
+    });
+    (origin.into(), peer.into())
+}
+
+/// Two peers that both hold `origin` under the frontier. The series
+/// benchmarks write their own tail, one edit per step.
+fn forked_peers(origin: Automerge) -> (DocWithSync, DocWithSync) {
+    let origin = masked(origin);
+    let peer = origin.fork();
+    (origin.into(), peer.into())
 }
 
 fn full_many_tx() -> Box<dyn FnMut()> {
-    let (doc, peer) = peers(many_tx_increasing_put(FULL_SYNC_SIZE));
+    let (doc, peer) = peers_with_tail(many_tx_increasing_put(FULL_SYNC_SIZE), FULL_SYNC_SIZE);
     Box::new(move || {
         let mut doc1 = doc.clone();
         let mut doc2 = peer.clone();
@@ -155,7 +192,7 @@ fn every_change_10000() -> Box<dyn FnMut()> {
 }
 
 fn tiny_text_sync() -> Box<dyn FnMut(usize)> {
-    let (mut doc1, mut doc2) = peers(text_splice_100(TINY_SYNC_INITIAL_SIZE));
+    let (mut doc1, mut doc2) = forked_peers(text_splice_100(TINY_SYNC_INITIAL_SIZE));
     let len = TINY_SYNC_INITIAL_SIZE as usize;
     doc1.sync(&mut doc2);
     let (_, text) = doc1.doc.get(ROOT, "content").unwrap().unwrap();
@@ -169,7 +206,7 @@ fn tiny_text_sync() -> Box<dyn FnMut(usize)> {
 }
 
 fn tiny_list_sync() -> Box<dyn FnMut(usize)> {
-    let (mut doc1, mut doc2) = peers(list_splice_100(TINY_SYNC_INITIAL_SIZE));
+    let (mut doc1, mut doc2) = forked_peers(list_splice_100(TINY_SYNC_INITIAL_SIZE));
     let len = TINY_SYNC_INITIAL_SIZE as usize;
     doc1.sync(&mut doc2);
     let (_, list) = doc1.doc.get(ROOT, "content").unwrap().unwrap();
@@ -226,4 +263,53 @@ fn many_tx_increasing_put(n: u64) -> Automerge {
         }
     });
     doc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{benchmarks, one_tx_increasing_put, peers_with_tail, peers_with_tail_under};
+    use benchmark_battery::automerge::{ReadDoc, ROOT};
+    use benchmark_battery::hidden;
+
+    #[test]
+    fn sync_registers_the_full_one_tx_regimes() {
+        let names: Vec<&'static str> = benchmarks().into_iter().map(|b| b.name()).collect();
+        for name in [
+            "sync/full_one_tx",
+            "sync/full_one_tx_hidden",
+            "sync/full_one_tx_pending",
+        ] {
+            assert!(names.contains(&name), "expected {name} to be registered");
+        }
+    }
+
+    /// Both peers start from the same base; the sync carries only the tail.
+    #[test]
+    fn peers_share_the_base_and_sync_carries_the_tail() {
+        let (mut origin, mut peer) = peers_with_tail(one_tx_increasing_put(80), 80);
+        assert_eq!(peer.doc.length(ROOT), 80, "peer holds the base");
+        assert_eq!(origin.doc.length(ROOT), 160, "origin holds base + tail");
+        assert_eq!(
+            peer.doc.get_write_frontier(),
+            origin.doc.get_write_frontier()
+        );
+
+        origin.sync(&mut peer);
+
+        assert_eq!(peer.doc.length(ROOT), 160);
+        assert_eq!(peer.doc.get_heads(), origin.doc.get_heads());
+    }
+
+    /// Under `hidden`, half the base keys are invisible on both sides; the
+    /// tail is the local user's and stays visible.
+    #[test]
+    fn hidden_peers_hide_half_the_base_but_not_the_tail() {
+        let (mut origin, mut peer) = peers_with_tail_under(one_tx_increasing_put(80), 80, hidden);
+        assert_eq!(peer.doc.length(ROOT), 40);
+
+        origin.sync(&mut peer);
+
+        assert_eq!(peer.doc.length(ROOT), 40 + 80);
+        assert_eq!(peer.doc.length(ROOT), origin.doc.length(ROOT));
+    }
 }
