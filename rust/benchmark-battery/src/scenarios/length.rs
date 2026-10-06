@@ -1,31 +1,43 @@
 use super::SampledBenchmark;
 use benchmark_battery::automerge::transaction::Transactable;
+use benchmark_battery::automerge::Automerge;
 use benchmark_battery::automerge::{ReadDoc, ROOT};
-use benchmark_battery::{list_splice_100, masked, rand, text_splice_100, wide_map_doc};
+use benchmark_battery::{hidden, list_splice_100, masked, rand, text_splice_100, wide_map_doc};
 use std::hint::black_box;
 
 const N: u64 = 100_000;
 
+/// Each current-read benchmark runs under the always-on `masked` frontier and,
+/// as `_hidden`, with half the authors' content invisible.
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
-        SampledBenchmark::no_setup("length", "length/text_len_now", text_len_now),
-        SampledBenchmark::no_setup("length", "length/list_len_now", list_len_now),
+        SampledBenchmark::no_setup("length", "length/text_len_now", || text_len_now(masked)),
+        SampledBenchmark::no_setup("length", "length/text_len_now_hidden", || {
+            text_len_now(hidden)
+        }),
+        SampledBenchmark::no_setup("length", "length/list_len_now", || list_len_now(masked)),
+        SampledBenchmark::no_setup("length", "length/list_len_now_hidden", || {
+            list_len_now(hidden)
+        }),
         SampledBenchmark::no_setup("length", "length/text_len_at", text_len_at),
-        SampledBenchmark::no_setup("length", "length/map_len_now", map_len_now),
+        SampledBenchmark::no_setup("length", "length/map_len_now", || map_len_now(masked)),
+        SampledBenchmark::no_setup("length", "length/map_len_now_hidden", || {
+            map_len_now(hidden)
+        }),
         SampledBenchmark::no_setup("length", "length/map_len_at", map_len_at),
     ]
 }
 
-fn text_len_now() -> Box<dyn FnMut()> {
-    let doc = masked(text_splice_100(N));
+fn text_len_now(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let doc = regime(text_splice_100(N));
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
         black_box(doc.length(&text));
     })
 }
 
-fn list_len_now() -> Box<dyn FnMut()> {
-    let doc = masked(list_splice_100(N));
+fn list_len_now(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let doc = regime(list_splice_100(N));
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
         black_box(doc.length(&list));
@@ -45,8 +57,8 @@ fn text_len_at() -> Box<dyn FnMut()> {
     })
 }
 
-fn map_len_now() -> Box<dyn FnMut()> {
-    let doc = masked(wide_map_doc(N));
+fn map_len_now(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let doc = regime(wide_map_doc(N));
     Box::new(move || {
         black_box(doc.length(&ROOT));
     })

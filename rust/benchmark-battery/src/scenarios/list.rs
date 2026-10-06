@@ -1,25 +1,40 @@
 use super::SampledBenchmark;
 use benchmark_battery::automerge::transaction::Transactable;
+use benchmark_battery::automerge::Automerge;
 use benchmark_battery::automerge::{PatchLog, ReadDoc, ScalarValue, ROOT};
-use benchmark_battery::{list_splice_100, masked, rand};
+use benchmark_battery::{hidden, list_splice_100, masked, rand};
 use std::hint::black_box;
 
 const N: u64 = 100_000;
 
+/// Each current-read benchmark runs under the always-on `masked` frontier and,
+/// as `_hidden`, with half the authors' content invisible. Writes are the
+/// local user's and stay visible under either.
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
-        SampledBenchmark::no_setup("list", "list/list_cursor_now", list_cursor_now),
+        SampledBenchmark::no_setup("list", "list/list_cursor_now", || list_cursor_now(masked)),
+        SampledBenchmark::no_setup("list", "list/list_cursor_now_hidden", || {
+            list_cursor_now(hidden)
+        }),
         SampledBenchmark::no_setup("list", "list/list_cursor_at", list_cursor_at),
         SampledBenchmark::no_setup("list", "list/list_update_at", list_update_at),
-        SampledBenchmark::no_setup("list", "list/list_update_now", list_update_now),
-        SampledBenchmark::no_setup("list", "list/list_splice_index_now", list_splice_index_now),
+        SampledBenchmark::no_setup("list", "list/list_update_now", || list_update_now(masked)),
+        SampledBenchmark::no_setup("list", "list/list_update_now_hidden", || {
+            list_update_now(hidden)
+        }),
+        SampledBenchmark::no_setup("list", "list/list_splice_index_now", || {
+            list_splice_index_now(masked)
+        }),
+        SampledBenchmark::no_setup("list", "list/list_splice_index_now_hidden", || {
+            list_splice_index_now(hidden)
+        }),
         SampledBenchmark::no_setup("list", "list/list_splice_index_at", list_splice_index_at),
     ]
 }
 
-fn list_cursor_now() -> Box<dyn FnMut()> {
-    let doc = masked(list_splice_100(N));
-    let len = N as usize;
+fn list_cursor_now(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let doc = regime(list_splice_100(N));
+    let len = doc.length(doc.get(ROOT, "content").unwrap().unwrap().1);
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
         let pos = rand() % len;
@@ -72,9 +87,9 @@ fn list_update_at() -> Box<dyn FnMut()> {
     })
 }
 
-fn list_update_now() -> Box<dyn FnMut()> {
-    let mut doc = masked(list_splice_100(N));
-    let len = N as usize;
+fn list_update_now(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let mut doc = regime(list_splice_100(N));
+    let len = doc.length(doc.get(ROOT, "content").unwrap().unwrap().1);
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
         let pos = rand() % len;
@@ -84,9 +99,9 @@ fn list_update_now() -> Box<dyn FnMut()> {
     })
 }
 
-fn list_splice_index_now() -> Box<dyn FnMut()> {
-    let mut doc = masked(list_splice_100(N));
-    let len = N as usize;
+fn list_splice_index_now(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let mut doc = regime(list_splice_100(N));
+    let len = doc.length(doc.get(ROOT, "content").unwrap().unwrap().1);
     let (_, list) = doc.get(ROOT, "content").unwrap().unwrap();
     Box::new(move || {
         let pos = rand() % len;
