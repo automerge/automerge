@@ -243,10 +243,20 @@ fn anchors_floor_the_rebuild_on_a_concurrent_document() {
 /// rehash costs ~0.6us per op, so past a point the trade stops paying.
 #[test]
 fn small_keeps_hashes_for_op_heavy_changes() {
-    // ops per change either side of the threshold
+    // ops per change either side of the threshold.
+    //
+    // The actor is pinned: fragment formation is hash-dependent, so a random
+    // actor changes which commits end up loose and how far apart they sit —
+    // and `Small`'s rehash-cost estimate is a function of that span.
+    //
+    // 400 changes keeps the loose band's id span inside `REHASH_BUDGET_US`
+    // (~540us estimated at 2 ops/change), so the op count is the only thing
+    // deciding whether a hash is omitted. A much larger document would be
+    // declined by the budget instead, which this test is not about.
     let build = |ops: usize| {
-        let mut doc = automerge::AutoCommit::new();
-        for c in 0..(16_000 / ops).max(600) {
+        let mut doc = automerge::AutoCommit::new()
+            .with_actor(automerge::ActorId::from(&b"frag"[..]));
+        for c in 0..400 {
             for o in 0..ops {
                 doc.put(&ROOT, format!("k{o}"), (c * ops + o) as i64)
                     .unwrap();

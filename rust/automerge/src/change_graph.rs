@@ -284,14 +284,25 @@ pub(crate) enum ChangeSetDep {
 /// Ops above which a loose commit keeps its hash even under
 /// [`SaveFormat::Small`](crate::SaveFormat::Small).
 ///
-/// Omitting one trades 33 bytes of save file for a rehash, and a rehash
-/// costs ~0.6us per op whatever the change holds — measured 0.39us/op on
-/// text splices and 0.91us/op on map writes, while bytes-per-op varies a
-/// hundredfold between them. So ops, not bytes, is what the threshold
-/// reads. Those 33 bytes cost ~0.8us to load, which puts break-even near
-/// 2 ops; the bar sits well above it so that ordinary small changes —
-/// the ones `Small` exists to shrink — still lose their hashes.
-const REHASHABLE_OPS: u64 = 16;
+/// Omitting one trades ~34 bytes of save file for a rehash, which costs
+/// ~0.6us per op the change holds — so ops, not bytes, is the axis.
+const REHASHABLE_OPS: u64 = 8;
+
+/// Microseconds of extra load an omission may cost before
+/// [`SaveFormat::Small`](crate::SaveFormat::Small) names the hashes instead.
+///
+/// The rehash reads the omitted changes' ops in one walk of the convex
+/// hull of their id span, so the span is the dominant term and a single
+/// straggler stretches it across the document while saving only its own
+/// 34 bytes. Estimating the cost bounds the load regression however the
+/// omitted commits are spread.
+const REHASH_BUDGET_US: u64 = 1_000;
+
+/// Estimated rehash nanoseconds per op of id span swept.
+const SWEEP_NS_PER_OP: u64 = 400;
+
+/// Estimated rehash nanoseconds per op the omitted changes carry.
+const CARRY_NS_PER_OP: u64 = 760;
 
 impl ChangeGraph {
     pub(crate) fn new(num_actors: usize) -> Self {
@@ -570,7 +581,9 @@ impl ChangeGraph {
     ///
     /// [`SaveFormat::Fast`](crate::SaveFormat::Fast) names the whole set; anything else names the
     /// part below the receiver's frontier (the anchors), which it cannot
-    /// rehash for itself, plus anything over [`REHASHABLE_OPS`].
+    /// rehash for itself, plus anything over [`REHASHABLE_OPS`] — and
+    /// then only while rehashing what is left costs the receiver under
+    /// [`REHASH_BUDGET_US`].
     ///
     /// Run against the frontier the *receiver* will have — the fragments
     /// it can cache are the level > 0 nodes among `nodes`. This graph's
@@ -587,15 +600,36 @@ impl ChangeGraph {
             .filter(|n| self.fragment_level(*n) > 0)
             .collect();
         let frontier = self.calculate_clock(carried);
-        self.retained_from(nodes.iter().copied(), &frontier)
+        let retained = self.retained_from(nodes.iter().copied(), &frontier);
+        let omittable = |n: &NodeIdx| {
+            !self.is_covered_by(*n, &frontier)
+                && self.num_ops.get(n.0 as usize).unwrap_or_default() <= REHASHABLE_OPS
+        };
+        let name_all = format == crate::SaveFormat::Fast
+            || self.rehash_cost_us(retained.iter().filter(|n| omittable(n)))
+                > REHASH_BUDGET_US;
+        retained
             .into_iter()
-            .filter(|n| {
-                format == crate::SaveFormat::Fast
-                    || self.is_covered_by(*n, &frontier)
-                    || self.num_ops.get(n.0 as usize).unwrap_or_default() > REHASHABLE_OPS
-            })
+            .filter(|n| name_all || !omittable(n))
             .filter_map(|n| Some((nodes.binary_search(&n).ok()?, self.hashes.get(n)?)))
             .collect()
+    }
+
+    /// Estimated microseconds a receiver spends rehashing `omitted`: the
+    /// id span they cover, swept as one range, plus the ops they carry.
+    fn rehash_cost_us<'n>(&self, omitted: impl Iterator<Item = &'n NodeIdx>) -> u64 {
+        let (mut lo, mut hi, mut carried) = (u64::MAX, 0u64, 0u64);
+        for n in omitted {
+            let max_op = self.max_ops[n.0 as usize] as u64;
+            let ops = self.num_ops.get(n.0 as usize).unwrap_or_default();
+            lo = lo.min((max_op + 1).saturating_sub(ops));
+            hi = hi.max(max_op);
+            carried += ops;
+        }
+        if carried == 0 {
+            return 0;
+        }
+        ((hi + 1 - lo) * SWEEP_NS_PER_OP + carried * CARRY_NS_PER_OP) / 1_000
     }
 
     /// Drop every hash outside the retained set and switch to (or stay
