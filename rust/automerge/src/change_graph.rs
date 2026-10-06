@@ -229,7 +229,7 @@ impl ChangeGraph {
         self.max_op as u64
     }
 
-    pub(crate) fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
+    pub(crate) fn max_op_for_actor(&self, actor_index: usize) -> u64 {
         self.seq_index
             .get(actor_index)
             .and_then(|s| s.last())

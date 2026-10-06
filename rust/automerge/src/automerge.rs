@@ -407,10 +407,26 @@ impl Automerge {
             author: None,
         };
         doc.remove_unused_actors(false);
-        if doc.visibility.mask().is_some() {
+        if doc.mask_hides_existing_ops() {
             doc.ops.recompute_indexes(doc.visible_current().clock());
         }
         doc
+    }
+
+    /// Whether the mask hides any op the document currently holds.
+    ///
+    /// A mask bounds each masked actor at the counter of its last op before
+    /// the write-frontier. When that is also the actor's last op overall, the
+    /// bound restricts only ops that do not exist yet: indexes built without
+    /// the mask are correct under it, while a fresh op by that actor is still
+    /// hidden by [`Automerge::transaction_args`].
+    fn mask_hides_existing_ops(&self) -> bool {
+        self.visibility.mask().is_some_and(|mask| {
+            mask.clock()
+                .counters()
+                .enumerate()
+                .any(|(actor, bound)| u64::from(bound) < self.change_graph.max_op_for_actor(actor))
+        })
     }
 
     pub(crate) fn ops_mut(&mut self) -> &mut OpSet {
