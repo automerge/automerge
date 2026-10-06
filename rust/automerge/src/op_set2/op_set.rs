@@ -622,7 +622,7 @@ impl OpSet {
         let range = self.prop_range(obj, key);
         let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
-        let ops = iter.visible(self, read.filter()).collect::<Vec<_>>();
+        let ops = iter.visible(self, read).collect::<Vec<_>>();
         assert_eq!(end_pos, range.end);
         OpsFound {
             index: 0,
@@ -720,14 +720,7 @@ impl OpSet {
         if let Some(tx) = top_iter.advance_prefix(index) {
             let range = self.list_register_at_pos(tx.pos, range);
             let end_pos = range.end;
-            // The `top` index gave us the element's position (it is rebuilt
-            // under the write-frontier mask), but register selection and counter
-            // aggregation within the element must also honour the mask:
-            // a delete or increment from a masked author must not count.
-            let ops = self
-                .iter_range(&range)
-                .visible(self, read.filter())
-                .collect();
+            let ops = self.iter_range(&range).visible(self, read).collect();
             OpsFound {
                 index,
                 ops,
