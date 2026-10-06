@@ -40,6 +40,7 @@ export type PatchSource =
   | "revealAuthor"
   | "addCommits"
   | "addFragments"
+  | "addSignatures"
   | "receiveSyncMessage"
 export type PatchInfo<T> = {
   before: Doc<T>

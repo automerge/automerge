@@ -58,6 +58,8 @@ import type {
   Commit,
   Fragment,
   FragmentLevelRange,
+  SignatureInput,
+  SigningRequest,
   DecodedChange,
   DiffOptions,
   Heads,
@@ -74,6 +76,8 @@ export type {
   Commit,
   Fragment,
   FragmentLevelRange,
+  SignatureInput,
+  SigningRequest,
   PutPatch,
   DelPatch,
   DiffOptions,
@@ -208,6 +212,23 @@ export type InitOptions<T> = {
   actor?: ActorId
   /** The author for this document */
   author?: Author
+  /** Require detached-signature authentication for imported remote changes. */
+  signatures?: "legacy" | "authenticated"
+  /**
+   * Assert that these bytes are this application's own storage.
+   *
+   * An authenticated load requires a signature for every actor's greatest
+   * sequence in a document chunk. A document the application saved itself is the
+   * one case where that is too strong, because its own unsigned commits have
+   * nothing to verify yet; with this they are admitted when they carry the
+   * `author` given below, and so can still be signed after a restart.
+   *
+   * Only the application knows where bytes came from, and an author is a public
+   * key which any chain can claim, so do not pass this for bytes from a peer:
+   * that peer could then put unsigned history into the document under this
+   * application's own author.
+   */
+  ownStorage?: boolean
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
@@ -275,7 +296,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor })
+  const handle = ApiHandler.create({ actor, signatures: opts.signatures })
   if (typeof opts.author == "string") {
     handle.setAuthor(opts.author)
   }
@@ -337,6 +358,13 @@ export function clone<T>(
   const state = _state(doc)
   const heads = state.heads
   const opts = importOpts(_opts)
+  if (opts.signatures !== undefined) {
+    throw new RangeError(
+      "The signature mode is fixed when a document is created: a fork or clone " +
+        "inherits it. Use Automerge.init({ signatures }) or " +
+        "Automerge.load(bytes, { signatures }) instead.",
+    )
+  }
   const handle = state.handle.fork(opts.actor, heads)
   if (typeof opts.author == "string") {
     handle.setAuthor(opts.author)
@@ -770,6 +798,11 @@ export function load<T>(
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
+    signatures: opts.signatures,
+    ownStorage: opts.ownStorage,
+    // Passed into the load rather than set after it: `ownStorage` admits this
+    // author's unsigned history, so it has to be known as the chunk is checked.
+    author: typeof opts.author == "string" ? opts.author : undefined,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
@@ -929,6 +962,41 @@ function applyVisibilityMutation<T>(
   return next
 }
 
+/** Return local fragment-frontier changes which need opaque signatures. */
+export function signingRequests<T>(doc: Doc<T>): SigningRequest[] {
+  return _state(doc).handle.signingRequests()
+}
+
+/**
+ * Attach signature records. Ed25519 records are verified here and now and, in
+ * authenticated mode, may admit held history; custom records are retained and
+ * relayed without ever authenticating anything.
+ */
+export function addSignatures<T>(
+  doc: Doc<T>,
+  signatures: SignatureInput[],
+  opts: ApplyOptions<T> = {},
+): Doc<T> {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  state.handle.addSignatures(signatures)
+  state.heads = heads
+  return progressDocument(
+    doc,
+    "addSignatures",
+    heads,
+    opts.patchCallback || state.patchCallback,
+  )
+}
+
 /**
  * Merge `remote` into `local`
  * @typeParam T - The type of values contained in each document
@@ -977,7 +1045,10 @@ export function getAuthors<T>(doc: Doc<T>): Author[] {
   return state.handle.getAuthors()
 }
 
-export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+export function getAuthorForActor<T>(
+  doc: Doc<T>,
+  actor: ActorId,
+): Author | null {
   const state = _state(doc)
   return state.handle.getAuthorForActor(actor)
 }
@@ -2016,6 +2087,7 @@ export function getFragmentMeta(
   return state.handle.getFragmentMeta(head)
 }
 
+
 /**
  * EXPERIMENTAL: Encode fragments as the blob bytes expected by Subduction's
  * `addFragments` path. Level-0 fragments are encoded as individual Automerge
@@ -2034,7 +2106,8 @@ export function bundleFragmentMetadata(
 
 /**
  * EXPERIMENTAL: Return level-0 fragments in the object shape expected by
- * Subduction's `addCommits` path.
+ * Subduction's `addCommits` path. When present, detached signatures are
+ * automatically appended to each commit's `bytes` as a trailing chunk.
  *
  * @experimental
  * @hidden
@@ -2052,8 +2125,10 @@ export function getCommits(doc: Doc<unknown>): Commit[] {
 
 /**
  * EXPERIMENTAL: Return bundled Automerge fragments in the object shape
- * expected by Subduction's `addFragments` path. By default this excludes
- * level-0 loose commits; use {@link getCommits} for those.
+ * expected by Subduction's `addFragments` path. When present, detached
+ * signatures are automatically appended to each fragment's `bytes` as a
+ * trailing chunk. By default this excludes level-0 loose commits; use
+ * {@link getCommits} for those.
  *
  * @experimental
  * @hidden
@@ -2077,8 +2152,9 @@ export function getFragments(
  * EXPERIMENTAL: Add commit-shaped Automerge changes to a document.
  *
  * This mirrors Subduction's `addCommits` shape: each input carries the commit
- * head, its parents, and the encoded change bytes. The encoded bytes are
- * authoritative and are checked against the supplied metadata.
+ * head, its parents, and an encoded chunk stream. The first change chunk is
+ * authoritative and checked against the supplied metadata; trailing detached
+ * signature chunks are imported automatically.
  *
  * @experimental
  * @hidden
@@ -2115,8 +2191,9 @@ export function addCommits<T>(
  * EXPERIMENTAL: Add fragment-shaped Automerge bundles to a document.
  *
  * This mirrors Subduction's `addFragments` shape: each input contains fragment
- * metadata plus encoded bytes from {@link bundleFragmentMetadata}. Fragment bytes are
- * loaded incrementally, so this can ingest bundles and loose level-0 changes.
+ * metadata plus encoded chunk-stream bytes. Fragment bytes are loaded
+ * incrementally, so this can ingest bundles, loose level-0 changes, and
+ * trailing detached signature chunks.
  *
  * @experimental
  * @hidden
