@@ -2,7 +2,7 @@ use super::SampledBenchmark;
 use benchmark_battery::automerge::marks::{ExpandMark, Mark};
 use benchmark_battery::automerge::transaction::Transactable;
 use benchmark_battery::automerge::{Automerge, ObjId, ReadDoc, ROOT};
-use benchmark_battery::{masked, rand, text_splice_100};
+use benchmark_battery::{hidden, masked, rand, text_splice_100};
 use std::cmp::{max, min};
 use std::hint::black_box;
 
@@ -11,14 +11,20 @@ const N: u64 = 100_000;
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
         SampledBenchmark::no_setup("marks", "marks/add_mark", add_mark),
-        SampledBenchmark::no_setup("marks", "marks/get_marks_at_end", get_marks_at_end),
+        SampledBenchmark::no_setup("marks", "marks/get_marks_at_end", || {
+            get_marks_at_end(masked)
+        }),
+        // Half the text is hidden; the marks are the local user's and are not.
+        SampledBenchmark::no_setup("marks", "marks/get_marks_at_end_hidden", || {
+            get_marks_at_end(hidden)
+        }),
         splice_with_marks(),
         splice_without_marks(),
     ]
 }
 
-fn get_marks_at_end() -> Box<dyn FnMut()> {
-    let (doc, text) = doc_and_text(10);
+fn get_marks_at_end(regime: fn(Automerge) -> Automerge) -> Box<dyn FnMut()> {
+    let (doc, text) = doc_and_text_under(10, regime);
     let index = doc.length(&text) - 1;
     Box::new(move || {
         black_box(doc.get_marks(&text, index, None).unwrap());
@@ -80,7 +86,11 @@ fn splice_without_marks() -> SampledBenchmark {
 }
 
 fn doc_and_text(marks: usize) -> (Automerge, ObjId) {
-    let mut doc = masked(text_splice_100(N));
+    doc_and_text_under(marks, masked)
+}
+
+fn doc_and_text_under(marks: usize, regime: fn(Automerge) -> Automerge) -> (Automerge, ObjId) {
+    let mut doc = regime(text_splice_100(N));
     add_random_marks(&mut doc, marks);
     let (_, text) = doc.get(ROOT, "content").unwrap().unwrap();
     (doc, text)
