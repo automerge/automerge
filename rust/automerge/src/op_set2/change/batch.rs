@@ -562,6 +562,10 @@ struct ValueState<'a> {
     /// The mask snapshot the batch walks under; fixed for the whole walk.
     /// A doc op it hides is not a candidate in either summary.
     mask: Option<&'a Mask>,
+    /// The op set the batch walks over, for its visibility index. The walk
+    /// completes before the batch mutates the op set, so the index is the
+    /// one derived under `mask`.
+    op_set: &'a OpSet,
 }
 
 impl<'a> ValueState<'a> {
@@ -570,6 +574,7 @@ impl<'a> ValueState<'a> {
         encoding: SequenceType,
         text_encoding: TextEncoding,
         mask: Option<&'a Mask>,
+        op_set: &'a OpSet,
     ) -> Self {
         Self {
             obj,
@@ -580,6 +585,7 @@ impl<'a> ValueState<'a> {
             after: CandidateSummary::default(),
             marks: RichTextDiff::default(),
             mask,
+            op_set,
         }
     }
 
@@ -590,14 +596,10 @@ impl<'a> ValueState<'a> {
 
     /// Whether this doc op is visible under the mask snapshot: a stored
     /// successor only overwrites it if the mask does not hide that
-    /// successor too.
+    /// successor too. The visibility index is built under the mask, so it
+    /// holds the answer.
     fn masked_visible(&self, doc_op: &Op<'a>) -> bool {
-        match self.mask {
-            None => doc_op.visible(),
-            Some(mask) => !doc_op
-                .succ_inc()
-                .any(|(id, inc)| inc.is_none() && !mask.hides(&id)),
-        }
+        self.op_set.indexed_visible(doc_op.pos)
     }
 
     fn process_doc_op(&mut self, doc_op: &Op<'a>, effect: SuccessorEffect) {
@@ -798,6 +800,7 @@ impl BatchApply {
                                     SequenceType::List,
                                     doc.text_encoding(),
                                     mask0.as_ref(),
+                                    doc.ops(),
                                 );
                                 let mut walker =
                                     MapWalker::new(value, doc_ops, pred, succ, log, conflicts);
@@ -815,6 +818,7 @@ impl BatchApply {
                                     sequence_type,
                                     doc.text_encoding(),
                                     mask0.as_ref(),
+                                    doc.ops(),
                                 );
                                 let ut = Untangler::new(
                                     value,
