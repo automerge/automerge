@@ -191,6 +191,24 @@ export type Fragment = FragmentMeta & {
   bytes: Uint8Array;
 };
 
+export type SignatureInput = {
+  hash: Hash;
+  scheme: "ed25519" | "custom";
+  signature: Uint8Array;
+};
+
+export type SigningRequest = {
+  hash: Hash;
+  author: Author;
+  bytesToSign: Uint8Array;
+};
+
+export type SignatureReport = {
+  admittedChunks: number;
+  appliedChanges: Heads;
+  pendingChunks: number;
+};
+
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 export type ChangeToEncode = PartialBy<DecodedChange, "hash">;
 
@@ -370,6 +388,9 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  signatures?: "legacy" | "authenticated";
+  author?: Author;
+  ownStorage?: boolean;
 };
 
 // if recursive is false do not diff child objects
@@ -379,6 +400,7 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
+  signatures?: "legacy" | "authenticated";
 };
 
 export function create(options?: InitOptions): Automerge;
@@ -453,7 +475,18 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
+        Self::new_with_signature_mode(actor, am::SignatureMode::Legacy)
+    }
+
+    fn new_with_signature_mode(
+        actor: Option<String>,
+        signature_mode: am::SignatureMode,
+    ) -> Result<Automerge, error::BadActorId> {
+        let mut doc = AutoCommit::new_with_config(
+            am::Config::new()
+                .text_encoding(TextEncoding::Utf16CodeUnit)
+                .signature_mode(signature_mode),
+        );
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -1477,17 +1510,59 @@ impl Automerge {
             .collect())
     }
 
+    #[wasm_bindgen(js_name = signingRequests, unchecked_return_type = "SigningRequest[]")]
+    pub fn signing_requests(&self) -> Array {
+        self.doc
+            .signing_requests()
+            .iter()
+            .map(signing_request_to_js)
+            .collect()
+    }
+
+    /// Attach signature records. Ed25519 records are verified here and now, and
+    /// in authenticated mode may admit held history.
+    #[wasm_bindgen(js_name = addSignatures, unchecked_return_type = "SignatureReport")]
+    pub fn add_signatures(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "SignatureInput[]")] signatures: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let signatures = Vec::<JsSignatureInput>::try_from(JS(signatures)).map_err(to_js_err)?;
+        let signatures = signatures
+            .into_iter()
+            .map(JsSignatureInput::into_am)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(to_js_err)?;
+        let report = self.doc.add_signatures(signatures).map_err(to_js_err)?;
+        Ok(signature_report_to_js(&report))
+    }
+
     #[wasm_bindgen(js_name = addCommits)]
     pub fn add_commits(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
     ) -> Result<(), error::AddCommits> {
         let commits = Vec::<Commit>::try_from(JS(commits))?;
-        let changes = commits
-            .into_iter()
-            .map(|commit| commit.into_change())
-            .collect::<Result<Vec<_>, _>>()?;
-        self.doc.apply_changes(changes)?;
+        let mut imported = self.doc.clone();
+        if imported.signature_mode() == am::SignatureMode::Authenticated {
+            // Each commit is its own chunk, with its own signature set. Handing
+            // the whole stream over keeps that boundary intact; the core decides
+            // what the chunk needs and holds it until the signatures verify.
+            for commit in &commits {
+                commit.split()?;
+                imported.load_incremental(&commit.bytes)?;
+            }
+        } else {
+            let mut changes = Vec::with_capacity(commits.len());
+            for commit in &commits {
+                let (change, signatures) = commit.split()?;
+                changes.push(change);
+                if let Some(signatures) = signatures {
+                    imported.load_incremental(signatures)?;
+                }
+            }
+            imported.apply_changes(changes)?;
+        }
+        self.doc = imported;
         Ok(())
     }
 
@@ -1497,14 +1572,38 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
     ) -> Result<(), error::AddFragments> {
         let fragments = Vec::<FragmentInput>::try_from(JS(fragments))?;
-        let mut bytes = Vec::new();
+        let mut imported = self.doc.clone();
         for fragment in fragments {
-            // Touch the metadata so parsing validates the whole input shape even
-            // though the bundle bytes remain the authoritative representation.
-            let _metadata = fragment.fragment;
-            bytes.extend(fragment.bytes);
+            // Check the declared head against the bytes, which the loaders below
+            // cannot do for us: they validate the stream, not the metadata JS
+            // paired with it.
+            let first_chunk_len = encoded_chunk_len(&fragment.bytes)
+                .map_err(|_| error::AddFragments::InvalidStream)?;
+            let primary = &fragment.bytes[..first_chunk_len];
+            let head = fragment.fragment.head;
+            let contains_head = match fragment.bytes[8] {
+                1 | 2 => Change::try_from(primary).is_ok_and(|change| change.hash() == head),
+                3 => am::Bundle::try_from(primary)
+                    .ok()
+                    .and_then(|bundle| bundle.to_changes().ok())
+                    .is_some_and(|changes| changes.iter().any(|change| change.hash() == head)),
+                _ => return Err(error::AddFragments::InvalidStream),
+            };
+            if !contains_head {
+                return Err(error::AddFragments::HeadMissing(head.to_string()));
+            }
+
+            if imported.signature_mode() == am::SignatureMode::Authenticated {
+                // One fragment, one signature set, one chunk. The core decides
+                // what the chunk requires and holds it until that verifies.
+                imported.load_incremental(&fragment.bytes)?;
+            } else {
+                // A legacy load skips detached signature chunks while still
+                // retaining their records, so the whole stream goes in as is.
+                imported.load_incremental(&fragment.bytes)?;
+            }
         }
-        self.doc.load_incremental(&bytes)?;
+        self.doc = imported;
         Ok(())
     }
 
@@ -1904,12 +2003,34 @@ fn on_start() {
     let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
 }
 
+fn parse_signature_mode(mode: &str) -> Result<am::SignatureMode, error::BadSignatureMode> {
+    match mode {
+        "legacy" => Ok(am::SignatureMode::Legacy),
+        "authenticated" => Ok(am::SignatureMode::Authenticated),
+        other => Err(error::BadSignatureMode(other.to_owned())),
+    }
+}
+
+fn signature_mode_option(options: &JsValue) -> Result<am::SignatureMode, error::BadSignatureMode> {
+    let Some(value) = js_get(options, "signatures")
+        .ok()
+        .filter(|value| !value.is_undefined())
+    else {
+        return Ok(am::SignatureMode::Legacy);
+    };
+    let mode = value
+        .as_string()
+        .ok_or_else(|| error::BadSignatureMode("expected a string".to_owned()))?;
+    parse_signature_mode(&mode)
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
-pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
+pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    Automerge::new(actor)
+    let signature_mode = signature_mode_option(&options)?;
+    Ok(Automerge::new_with_signature_mode(actor, signature_mode)?)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
@@ -1936,6 +2057,19 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         OnPartialLoad::Error
     };
+    let signature_mode = signature_mode_option(&options)?;
+    let own_storage = js_get(&options, "ownStorage")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    // `ownStorage` admits this author's unsigned history, so the author has to be
+    // known before the document chunk is checked, not set afterwards.
+    let author = js_get(&options, "author")
+        .ok()
+        .and_then(|a| a.as_string())
+        .map(Author::try_from)
+        .transpose()
+        .map_err(error::BadAuthor::from)?;
     let string_migration = if js_get(&options, "convertImmutableStringsToText")
         .ok()
         .and_then(|v| v.as_bool())
@@ -1945,14 +2079,17 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
-    let mut doc = am::AutoCommit::load_with_options(
-        &data,
-        am::LoadOptions::new()
-            .on_partial_load(on_partial_load)
-            .verification_mode(verification_mode)
-            .migrate_strings(string_migration)
-            .text_encoding(TextEncoding::Utf16CodeUnit),
-    )?;
+    let mut load_options = am::LoadOptions::new()
+        .on_partial_load(on_partial_load)
+        .verification_mode(verification_mode)
+        .migrate_strings(string_migration)
+        .text_encoding(TextEncoding::Utf16CodeUnit)
+        .signature_mode(signature_mode)
+        .own_storage(own_storage);
+    if let Some(author) = author {
+        load_options = load_options.author(author);
+    }
+    let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
@@ -2137,6 +2274,27 @@ fn js_usize(n: f64) -> Option<usize> {
     }
 }
 
+fn signing_request_to_js(request: &am::SigningRequest) -> JsValue {
+    let obj = Object::new();
+    js_set(&obj, "hash", request.change_hash().to_string()).unwrap();
+    js_set(&obj, "author", request.author().to_string()).unwrap();
+    js_set(
+        &obj,
+        "bytesToSign",
+        Uint8Array::from(request.bytes_to_sign()),
+    )
+    .unwrap();
+    obj.into()
+}
+
+fn signature_report_to_js(report: &am::SignatureReport) -> JsValue {
+    let obj = Object::new();
+    js_set(&obj, "admittedChunks", report.admitted_chunks() as f64).unwrap();
+    js_set(&obj, "appliedChanges", AR::from(report.applied_changes())).unwrap();
+    js_set(&obj, "pendingChunks", report.pending_chunks() as f64).unwrap();
+    obj.into()
+}
+
 fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
     let obj: JsValue = Object::new().into();
     js_set(&obj, "head", fragment.head.to_string()).unwrap();
@@ -2152,6 +2310,77 @@ fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
     obj
 }
 
+struct JsSignatureInput {
+    hash: am::ChangeHash,
+    scheme: String,
+    signature: Vec<u8>,
+}
+
+impl JsSignatureInput {
+    fn into_am(self) -> Result<am::SignatureInput, String> {
+        match self.scheme.as_str() {
+            "ed25519" => {
+                let signature: [u8; 64] =
+                    self.signature.try_into().map_err(|signature: Vec<u8>| {
+                        format!(
+                            "ed25519 signature must contain 64 bytes, found {}",
+                            signature.len()
+                        )
+                    })?;
+                Ok(am::SignatureInput::ed25519(self.hash, signature))
+            }
+            "custom" => Ok(am::SignatureInput::custom(self.hash, self.signature)),
+            scheme => Err(format!(
+                "unsupported signature scheme `{scheme}`; expected `ed25519` or `custom`"
+            )),
+        }
+    }
+}
+
+impl TryFrom<JS> for JsSignatureInput {
+    type Error = String;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let hash = js_get(&value.0, "hash")
+            .map_err(|e| e.to_string())?
+            .try_into()
+            .map_err(|e: interop::error::BadChangeHash| e.to_string())?;
+        let scheme = js_get(&value.0, "scheme")
+            .map_err(|e| e.to_string())?
+            .0
+            .as_string()
+            .ok_or_else(|| "signature scheme must be a string".to_string())?;
+        let signature = js_get(&value.0, "signature")
+            .map_err(|e| e.to_string())?
+            .try_into()
+            .map_err(|e: interop::error::BadUint8Array| e.to_string())?;
+        Ok(Self {
+            hash,
+            scheme,
+            signature,
+        })
+    }
+}
+
+impl TryFrom<JS> for Vec<JsSignatureInput> {
+    type Error = String;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Array>()
+            .map_err(|_| "signatures must be an array".to_string())?;
+        value
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                JsSignatureInput::try_from(JS(value))
+                    .map_err(|error| format!("bad signature at index {index}: {error}"))
+            })
+            .collect()
+    }
+}
+
 struct Commit {
     head: am::ChangeHash,
     parents: Vec<am::ChangeHash>,
@@ -2159,8 +2388,11 @@ struct Commit {
 }
 
 impl Commit {
-    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
-        let change = Change::try_from(self.bytes.as_slice())?;
+    /// Validate the declared metadata against the encoded bytes, returning the
+    /// primary change and any trailing detached signature chunk.
+    fn split(&self) -> Result<(Change, Option<&[u8]>), error::BadCommitBytes> {
+        let first_chunk_len = encoded_chunk_len(&self.bytes)?;
+        let change = Change::try_from(&self.bytes[..first_chunk_len])?;
         // Validate that JS metadata lines up with the supplied bytes. This keeps
         // Automerge's API shaped like Subduction's addCommits input while still
         // treating the encoded change as authoritative.
@@ -2173,8 +2405,50 @@ impl Commit {
         if change.deps() != self.parents.as_slice() {
             return Err(error::BadCommitBytes::ParentsMismatch);
         }
-        Ok(change)
+        let trailing = &self.bytes[first_chunk_len..];
+        if !trailing.is_empty()
+            && (trailing.get(8) != Some(&4)
+                || encoded_chunk_len(trailing).ok() != Some(trailing.len()))
+        {
+            return Err(error::BadCommitBytes::InvalidStream);
+        }
+        let signatures = (!trailing.is_empty()).then_some(trailing);
+        Ok((change, signatures))
     }
+}
+
+fn encoded_chunk_len(bytes: &[u8]) -> Result<usize, error::BadCommitBytes> {
+    const MAGIC: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
+    if bytes.len() < 10 || bytes[..4] != MAGIC {
+        return Err(error::BadCommitBytes::InvalidStream);
+    }
+
+    let mut data_len = 0usize;
+    let mut shift = 0u32;
+    let mut offset = 9usize;
+    loop {
+        let byte = *bytes
+            .get(offset)
+            .ok_or(error::BadCommitBytes::InvalidStream)?;
+        offset += 1;
+        let part = usize::from(byte & 0x7f)
+            .checked_shl(shift)
+            .ok_or(error::BadCommitBytes::InvalidStream)?;
+        data_len = data_len
+            .checked_add(part)
+            .ok_or(error::BadCommitBytes::InvalidStream)?;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift = shift
+            .checked_add(7)
+            .filter(|shift| *shift < usize::BITS)
+            .ok_or(error::BadCommitBytes::InvalidStream)?;
+    }
+    offset
+        .checked_add(data_len)
+        .filter(|end| *end <= bytes.len())
+        .ok_or(error::BadCommitBytes::InvalidStream)
 }
 
 impl TryFrom<JS> for Commit {
@@ -2435,6 +2709,8 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum BadCommitBytes {
+        #[error("commit bytes are not a complete Automerge chunk stream")]
+        InvalidStream,
         #[error("bad commit bytes: {0}")]
         Load(#[from] automerge::LoadChangeError),
         #[error("commit input head mismatch: expected {expected}, actual {actual}")]
@@ -2503,6 +2779,10 @@ pub mod error {
     pub enum AddFragments {
         #[error(transparent)]
         BadInputs(#[from] BadJSFragmentInputs),
+        #[error("fragment bytes must begin with one complete change or bundle chunk and contain only an optional trailing signature chunk")]
+        InvalidStream,
+        #[error("fragment head {0} is not present in its encoded bytes")]
+        HeadMissing(String),
         #[error("error loading fragment bundles: {0}")]
         Load(#[from] AutomergeError),
     }
@@ -2886,11 +3166,39 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
+    #[error("invalid signature mode `{0}`; expected `legacy` or `authenticated`")]
+    pub struct BadSignatureMode(pub String);
+
+    impl From<BadSignatureMode> for JsValue {
+        fn from(e: BadSignatureMode) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Create {
+        #[error(transparent)]
+        BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        SignatureMode(#[from] BadSignatureMode),
+    }
+
+    impl From<Create> for JsValue {
+        fn from(e: Create) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
     pub enum Load {
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        SignatureMode(#[from] BadSignatureMode),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
     }
 
     impl From<Load> for JsValue {
