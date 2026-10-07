@@ -493,7 +493,7 @@ impl SpanState {
         debug_assert!(self.next_diff.is_none());
 
         let flush_needed = match &self.next_text {
-            Some(next) => diff != next.diff || self.marks != next.marks,
+            Some(next) => diff != next.diff || self.marks.with(diff) != next.marks,
             None => false,
         };
 
