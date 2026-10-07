@@ -3,10 +3,15 @@ import * as Automerge from "../src/entrypoints/fullfat_node.js"
 
 type CounterDoc = { counter: number }
 
+// A fixed actor and a fixed time per change, so the change hashes are the same
+// on every run. Fragment levels are decided by those hashes, and roughly one
+// change in 256 forms a fragment, so with a wall-clock timestamp these tests
+// would ask whether ~6 fragments happened to turn up and occasionally find
+// fewer.
 function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
   let doc = Automerge.from<CounterDoc>({ counter: 0 }, { actor: "0123456789abcdef" })
   for (let i = 1; i <= numChanges; i++) {
-    doc = Automerge.change(doc, d => {
+    doc = Automerge.change(doc, { time: i }, d => {
       d.counter = i
     })
   }
