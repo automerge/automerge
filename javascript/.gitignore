@@ -1,6 +1,7 @@
 /node_modules
 /package-lock.json
 dist
+temp/
 docs/
 .vim
 deno_dist/

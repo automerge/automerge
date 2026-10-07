@@ -1,0 +1,59 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+
+  // API Extractor guards the public type surface of `@automerge/automerge`.
+  //
+  // It analyses the built entry point (`dist/index.d.ts`) and writes a report
+  // of the entire reachable public API to `etc/automerge.api.md`, which is
+  // committed to git. CI runs `npm run api-check`, which fails if the report
+  // is out of date - so any change to the public surface (a new method, a
+  // changed signature, a newly re-exported type) must be reviewed and the
+  // report regenerated with `npm run api-update`.
+  //
+  // The report also records "forgotten exports": types that are reachable
+  // through the public API but not themselves exported from the entry point
+  // (see the trailing comments in etc/automerge.api.md). These are recorded
+  // as a baseline for now rather than failing the build; the intent is to burn
+  // that list down and then promote `ae-forgotten-export` to an error.
+
+  "projectFolder": "..",
+
+  "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
+
+  "apiReport": {
+    "enabled": true,
+    "reportFolder": "<projectFolder>/etc/",
+    "reportTempFolder": "<projectFolder>/temp/"
+  },
+
+  "docModel": { "enabled": false },
+  "dtsRollup": { "enabled": false },
+  "tsdocMetadata": { "enabled": false },
+
+  "messages": {
+    "compilerMessageReporting": {
+      "default": { "logLevel": "warning" }
+    },
+
+    "extractorMessageReporting": {
+      "default": { "logLevel": "warning" },
+
+      // Recorded as a baseline in the report rather than failing the build.
+      // Burn this list down, then switch to "error" + addToApiReportFile:false.
+      "ae-forgotten-export": {
+        "logLevel": "warning",
+        "addToApiReportFile": true
+      },
+
+      // This package does not use TSDoc release tags (@public/@beta/...).
+      "ae-missing-release-tag": { "logLevel": "none" },
+
+      // Pre-existing broken {@link} references in the source docs.
+      "ae-unresolved-link": { "logLevel": "none" }
+    },
+
+    "tsdocMessageReporting": {
+      "default": { "logLevel": "none" }
+    }
+  }
+}
