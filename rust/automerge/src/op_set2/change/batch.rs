@@ -517,6 +517,16 @@ struct SuccessorEffect {
     increment: i64,
 }
 
+impl SuccessorEffect {
+    fn increment(&mut self, n: i64) {
+        self.increment += n
+    }
+
+    fn deleted(&mut self) {
+        self.deleted = true;
+    }
+}
+
 /// Collect the incoming successors of `d`, append their links to the deferred
 /// successor buffer, and return their combined effect on `d`.
 ///
@@ -524,24 +534,28 @@ struct SuccessorEffect {
 /// `Some(n)` contributes a counter increment. A masked successor keeps its
 /// link in the index but contributes neither.
 fn process_pred(d: &Op<'_>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> SuccessorEffect {
-    let mut effect = SuccessorEffect::default();
-    if let Some(mut successors) = pred.remove(&d.id) {
-        normalize_increment_successors(d.is_counter(), &mut successors);
-        for value in successors {
-            let id = value.get_id();
-            let increment = value.get_increment();
-            if value.is_masked() {
-                succ.push(d.add_succ_with_mask(id, increment, true));
-                continue;
+    let Some(mut successors) = pred.remove(&d.id) else {
+        return SuccessorEffect::default();
+    };
+    normalize_increment_successors(d.is_counter(), &mut successors);
+    let (effect, items) = successors.iter().fold(
+        (
+            SuccessorEffect::default(),
+            Vec::with_capacity(successors.len()),
+        ),
+        |(mut effect, mut items), v| {
+            let inc = v.get_increment();
+            if !v.is_masked() {
+                match inc {
+                    Some(n) => effect.increment(n),
+                    None => effect.deleted(),
+                }
             }
-            if let Some(n) = increment {
-                effect.increment += n;
-            } else {
-                effect.deleted = true;
-            }
-            succ.push(d.add_succ(id, increment));
-        }
-    }
+            items.push(*v);
+            (effect, items)
+        },
+    );
+    succ.extend(d.add_succs(items));
     effect
 }
 

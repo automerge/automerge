@@ -47,7 +47,7 @@ impl AsBuilder for &TxOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SuccessorValue {
     id: OpId,
     increment: Option<i64>,
@@ -78,11 +78,6 @@ impl SuccessorValue {
     /// Returns `true` if the successor has no increment and is not masked.
     fn has_succ(&self) -> bool {
         self.increment.is_none() && !self.masked
-    }
-
-    /// Return the [`OpId`] of the successor.
-    pub(crate) fn get_id(&self) -> OpId {
-        self.id
     }
 
     /// Return the increment value of the successor, regardless of masking.
@@ -1029,10 +1024,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
-        self.add_succ_with_mask(id, inc, false)
-    }
-
     pub(crate) fn add_succ_with_mask(
         &self,
         id: OpId,
@@ -1060,6 +1051,71 @@ impl<'a> Op<'a> {
             sub_pos,
             masked,
         }
+    }
+
+    /// Computes where each of several new successors of this op should be
+    /// inserted into its successor list.
+    ///
+    /// An op's successors are stored sorted by [`OpId`]. To add a new
+    /// successor, the caller needs to know the position within that sorted list
+    /// where it belongs; this method yields one [`SuccInsert`] per incoming
+    /// successor, carrying that position (`sub_pos`) along with the data needed
+    /// to record it in the columns. The results are intended to be fed to
+    /// [`OpSet::add_succ`].
+    ///
+    /// `incoming` **must** be in strictly ascending `OpId` order. This is what
+    /// lets the method merge the two sorted sequences in a single pass, walking
+    /// the existing successor list only once.
+    pub(crate) fn add_succs<I>(
+        &self,
+        incoming: I,
+    ) -> impl Iterator<Item = SuccInsert> + use<'_, 'a, I>
+    where
+        I: IntoIterator<Item = SuccessorValue>,
+    {
+        let is_counter = self.is_counter();
+        let pos = self.pos;
+        let mut succ = self.succ_cursors.clone();
+        let len = succ.len() as u64;
+        let mut sub_pos = succ.pos();
+        let mut pending: Option<OpId> = None;
+        // Keep track of the last `OpId` to assert that the incoming values are
+        // in ascending order
+        let mut last: Option<OpId> = None;
+
+        incoming.into_iter().map(
+            move |SuccessorValue {
+                      id,
+                      increment,
+                      masked,
+                  }| {
+                debug_assert!(
+                    Some(id) > last,
+                    "incoming is not in ascending order: {id:?} <= {last:?}"
+                );
+                let inc = if is_counter { increment } else { None };
+                loop {
+                    let next = pending.take().or_else(|| succ.next());
+                    match next {
+                        Some(i) if i <= id => sub_pos = succ.pos(),
+                        Some(i) => {
+                            pending = Some(i);
+                            break;
+                        }
+                        None => break,
+                    }
+                }
+                last = Some(id);
+                SuccInsert {
+                    id,
+                    pos,
+                    inc,
+                    len,
+                    sub_pos,
+                    masked,
+                }
+            },
+        )
     }
 
     pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
@@ -1452,3 +1508,6 @@ impl Default for OpStepper<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
