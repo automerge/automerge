@@ -41,14 +41,14 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
     ///
     /// As in [`super::TopOps::new`], a current read uses the visibility index
     /// whether or not a mask is present, a historical read scans, and counter
-    /// values are fixed up against [`ReadAt::filter`] on either path.
+    /// values are fixed up against [`ReadAt::historical_slow`] on either path.
     fn visible(
         self,
         op_set: &'a OpSet,
         read: &ReadAt<'_>,
     ) -> FixCounters<'a, SkipIter<Self, VisIter<'a>>> {
         let vis = VisIter::new(op_set, read.historical(), self.range());
-        FixCounters::new(SkipIter::new(self, vis), read.filter().cloned())
+        FixCounters::new(SkipIter::new(self, vis), read.historical_slow().cloned())
     }
 }
 

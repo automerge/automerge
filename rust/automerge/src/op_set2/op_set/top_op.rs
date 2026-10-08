@@ -32,13 +32,13 @@ impl<'a> TopOps<'a> {
     /// is already applied to them by [`OpSet::recompute_indexes`]. A
     /// historical read scans the ops against its clock instead. Counter values
     /// are summed from successors at read time, so the clock from
-    /// [`ReadAt::filter`] is applied to them on either path.
+    /// [`ReadAt::historical_slow`] is applied to them on either path.
     pub(crate) fn new(op_set: &'a OpSet, read: &ReadAt<'_>, range: Range<usize>) -> Self {
         let scan = read.historical().cloned();
         let visible_pos = range.start;
         let visible = VisIter::new(op_set, scan.as_ref(), range.clone());
         let iter = SkipIter::new(op_set.iter_range(&range), TopIter::new(op_set, scan, range));
-        let inner = FixCounters::new(iter, read.filter().cloned());
+        let inner = FixCounters::new(iter, read.historical_slow().cloned());
         Self {
             inner,
             visible,

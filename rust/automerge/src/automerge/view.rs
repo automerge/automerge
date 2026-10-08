@@ -1,10 +1,7 @@
-//! Read contexts: the clocks and masks a read is performed under.
+//! Clocks and clock ranges produced by [`Automerge`] documents, which allow
+//! callers to check the visibility of operations.
 //!
-//! Everything here is *produced* only by [`Automerge`](super::Automerge)
-//! (see `read_current` / `read_at` / `read_visible` / `read_scoped`) or,
-//! for [`ClockRange::diff`], from two already-legitimate [`VisibleClock`]s.
-//! The rest of the crate only consumes these values, so a read can never
-//! forget the write-frontier mask or observe uncommitted transaction ops.
+//! [`Automerge`]: super::Automerge
 
 use crate::actor::{ActorRemoval, ActorShift};
 use crate::clock::Clock;
@@ -151,7 +148,7 @@ impl<'a> ReadAt<'a> {
     /// Return the [`Clock`] for op comparison on slow paths.
     ///
     /// `None` implies that there is no filtering required.
-    pub(crate) fn filter(&self) -> Option<&Clock> {
+    pub(crate) fn historical_slow(&self) -> Option<&Clock> {
         match &self.0 {
             Inner::At(v) => Some(v.clock()),
             Inner::Current { mask } => mask.as_deref().map(Mask::clock),
@@ -231,7 +228,7 @@ impl<'a> ClockRange<'a> {
     pub(crate) fn visible_after(&self, id: &OpId) -> bool {
         match &self.0 {
             RangeInner::Diff(_, after) => after.covers(id),
-            RangeInner::Current(r) => r.filter().is_none_or(|c| c.covers(id)),
+            RangeInner::Current(r) => r.historical_slow().is_none_or(|c| c.covers(id)),
         }
     }
 
