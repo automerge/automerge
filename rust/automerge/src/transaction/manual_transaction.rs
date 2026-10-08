@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::automerge::view;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
@@ -125,20 +123,7 @@ impl Transaction<'_> {
     }
 
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> view::ReadAt<'_> {
-        if let Some(h) = heads {
-            // a transaction is in flight: its pending ops are in the op set
-            // but not under the graph's heads, so the current-heads
-            // shortcut in `read_at` would wrongly expose them
-            self.doc.read_scoped(Cow::Owned(self.doc.visible(h)))
-        } else {
-            self.inner
-                .as_ref()
-                .and_then(|i| i.get_scope().as_ref())
-                .map_or_else(
-                    || self.doc.read_current(),
-                    |scope| self.doc.read_scoped(Cow::Borrowed(scope)),
-                )
-        }
+        super::get_scope(self.doc, self.inner.as_ref(), heads)
     }
 
     pub(crate) fn batch_init_root_map(
