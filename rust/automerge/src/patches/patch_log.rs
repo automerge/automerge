@@ -327,7 +327,7 @@ impl PatchLog {
                 DiffIter::log(
                     doc,
                     ObjMeta::root(),
-                    ClockRange::diff(before, after.clone()),
+                    ClockRange::between(before, after.clone()),
                     &mut self.events(),
                     true,
                 );

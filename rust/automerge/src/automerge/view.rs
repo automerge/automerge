@@ -160,7 +160,7 @@ impl<'a> ReadAt<'a> {
     /// Stays `pub(crate)` for the same reason as [`ClockRange::between`]:
     /// re-wrapping an already-legitimate read manufactures nothing.
     pub(crate) fn into_range(self) -> ClockRange<'a> {
-        ClockRange(RangeInner::Current(self))
+        ClockRange(RangeInner::To(self))
     }
 
     /// Return a borrowed reference of this [`ReadAt`].
@@ -181,54 +181,51 @@ pub(crate) struct ClockRange<'a>(RangeInner<'a>);
 
 #[derive(Debug, Clone, PartialEq)]
 enum RangeInner<'a> {
-    Current(ReadAt<'a>),
-    Diff(VisibleClock, VisibleClock),
+    To(ReadAt<'a>),
+    Between(VisibleClock, VisibleClock),
 }
 
-/// A borrowed view of a [`ClockRange`] for consumers that walk both
-/// endpoints. Holding one manufactures nothing: every clock it exposes was
-/// produced by `Automerge`.
+/// A borrowed view of a [`ClockRange`].
 #[derive(Debug)]
 pub(crate) enum RangeView<'r, 'a> {
-    Current(&'r ReadAt<'a>),
-    Diff {
+    To(&'r ReadAt<'a>),
+    Between {
         before: &'r VisibleClock,
         after: &'r VisibleClock,
     },
 }
 
 impl<'a> ClockRange<'a> {
-    /// Stays `pub(crate)`: a diff over two already-legitimate
-    /// [`VisibleClock`]s manufactures nothing, and
-    /// `patch_log::transition_to` builds one.
-    pub(crate) fn diff(before: VisibleClock, after: VisibleClock) -> Self {
-        Self(RangeInner::Diff(before, after))
+    /// A range between two [`VisibleClock`] points.
+    pub(crate) fn between(before: VisibleClock, after: VisibleClock) -> Self {
+        Self(RangeInner::Between(before, after))
     }
 
-    pub(super) fn current(read: ReadAt<'a>) -> Self {
-        Self(RangeInner::Current(read))
+    /// A range from the start of the document up to this point.
+    pub(super) fn to(read: ReadAt<'a>) -> Self {
+        Self(RangeInner::To(read))
     }
 
     /// Borrow the range's endpoints.
     pub(crate) fn view(&self) -> RangeView<'_, 'a> {
         match &self.0 {
-            RangeInner::Current(read) => RangeView::Current(read),
-            RangeInner::Diff(before, after) => RangeView::Diff { before, after },
+            RangeInner::To(read) => RangeView::To(read),
+            RangeInner::Between(before, after) => RangeView::Between { before, after },
         }
     }
 
     /// The read position at this range's `after` endpoint.
     pub(crate) fn read_after(&self) -> ReadAt<'_> {
         match &self.0 {
-            RangeInner::Current(read) => read.borrow(),
-            RangeInner::Diff(_, after) => ReadAt(Inner::At(Cow::Borrowed(after))),
+            RangeInner::To(read) => read.borrow(),
+            RangeInner::Between(_, after) => ReadAt(Inner::At(Cow::Borrowed(after))),
         }
     }
 
     pub(crate) fn visible_after(&self, id: &OpId) -> bool {
         match &self.0 {
-            RangeInner::Diff(_, after) => after.covers(id),
-            RangeInner::Current(r) => r.historical_slow().is_none_or(|c| c.covers(id)),
+            RangeInner::Between(_, after) => after.covers(id),
+            RangeInner::To(r) => r.historical_slow().is_none_or(|c| c.covers(id)),
         }
     }
 
@@ -238,8 +235,8 @@ impl<'a> ClockRange<'a> {
 
     pub(crate) fn predates(&self, id: &OpId) -> bool {
         match &self.0 {
-            RangeInner::Diff(before, _) => before.covers(id),
-            RangeInner::Current(_) => false,
+            RangeInner::Between(before, _) => before.covers(id),
+            RangeInner::To(_) => false,
         }
     }
 
@@ -265,10 +262,10 @@ impl<'a> ClockRange<'a> {
         match &self.0 {
             // An already-empty `before` cannot be narrowed further, so keep
             // the cheap shifting path for diffs from the empty document.
-            RangeInner::Diff(before, after)
+            RangeInner::Between(before, after)
                 if before.covers_something() && !before.covers(parent) =>
             {
-                Some(Self(RangeInner::Diff(
+                Some(Self(RangeInner::Between(
                     VisibleClock::new(before.empty_like(), None),
                     after.clone(),
                 )))
@@ -305,7 +302,7 @@ mod tests {
     fn descend_narrows_before_only_when_nonempty_before_lacks_parent() {
         let before = VisibleClock::new(Clock::from_counters([Some(2), Some(5)]), None);
         let after = VisibleClock::new(Clock::from_counters([Some(9), Some(9)]), None);
-        let range = ClockRange::diff(before.clone(), after.clone());
+        let range = ClockRange::between(before.clone(), after.clone());
         // parent covered by before: identity
         assert!(range.descend(&OpId::new(2, 0)).is_none());
         // parent not covered by before: the children's before empties out
@@ -315,7 +312,7 @@ mod tests {
         assert!(narrowed.visible_after(&OpId::new(9, 1)));
         assert!(!narrowed.visible_after(&OpId::new(10, 1)));
         // an already-empty before cannot be narrowed further
-        let empty = ClockRange::diff(
+        let empty = ClockRange::between(
             VisibleClock::new(Clock::from_counters([None, None]), None),
             after,
         );
@@ -323,7 +320,7 @@ mod tests {
         // Current never narrows. A parent absent from `after` needs no case
         // of its own: DiffIter::process_item's make_obj never descends into
         // it (its diff item is a delete), so descend never sees one.
-        let current = ClockRange::current(ReadAt::current(None));
+        let current = ClockRange::to(ReadAt::current(None));
         assert!(current.descend(&OpId::new(3, 0)).is_none());
     }
 

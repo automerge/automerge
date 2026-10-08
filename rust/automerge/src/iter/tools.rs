@@ -409,10 +409,10 @@ impl<S: Default> Default for DiffSkipper<S> {
 impl<'a> DiffSkipper<VisIter<'a>> {
     fn new(op_set: &'a OpSet, clock: ClockRange<'_>, range: Range<usize>) -> Self {
         match clock.view() {
-            RangeView::Current(read) => {
+            RangeView::To(read) => {
                 DiffSkipper::Current(VisIter::new(op_set, read.historical(), range))
             }
-            RangeView::Diff { before, after } => {
+            RangeView::Between { before, after } => {
                 let before = VisIter::new(op_set, Some(before.clock()), range.clone());
                 let after = VisIter::new(op_set, Some(after.clock()), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
@@ -424,10 +424,10 @@ impl<'a> DiffSkipper<VisIter<'a>> {
 impl<'a> DiffSkipper<TopIter<'a>> {
     fn new_top(op_set: &'a OpSet, clock: ClockRange<'_>, range: Range<usize>) -> Self {
         match clock.view() {
-            RangeView::Current(read) => {
+            RangeView::To(read) => {
                 DiffSkipper::Current(TopIter::new(op_set, read.historical().cloned(), range))
             }
-            RangeView::Diff { before, after } => {
+            RangeView::Between { before, after } => {
                 let before = TopIter::new(op_set, Some(before.clock().clone()), range.clone());
                 let after = TopIter::new(op_set, Some(after.clock().clone()), range);
                 DiffSkipper::Diff(PastSkipper::new(before, after))
