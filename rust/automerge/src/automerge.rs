@@ -1433,7 +1433,7 @@ impl Automerge {
             .record(
                 self,
                 |events| {
-                    let clock = ClockRange::current(self.read_current());
+                    let clock = ClockRange::to(self.read_current());
                     DiffIter::log(self, obj, clock, events, recursive)
                 },
                 |d| d.visible_current(),
@@ -1595,7 +1595,7 @@ impl Automerge {
         before: &[ChangeHash],
         after: &[ChangeHash],
     ) -> ClockRange<'static> {
-        ClockRange::diff(self.visible(before), self.visible(after))
+        ClockRange::between(self.visible(before), self.visible(after))
     }
 
     /// The clock a read at `heads` observes: causal(heads) ∩ mask.
