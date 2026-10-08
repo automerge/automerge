@@ -2226,7 +2226,7 @@ impl Automerge {
                     return Err(AutomergeError::InvalidCursor(cursor.clone()));
                 };
 
-                let opid = self.op_cursor_to_opid(op, read.filter())?;
+                let opid = self.op_cursor_to_opid(op, read.historical_slow())?;
 
                 let found = self
                     .ops

@@ -452,7 +452,7 @@ impl OpSet {
             if read.historical().is_none() {
                 self.cols.index.text.sum_range(range.clone()) as usize
             } else {
-                self.action_value_iter(range.clone(), read.filter())
+                self.action_value_iter(range.clone(), read.historical_slow())
                     .map(|(action, value, _)| match (action, &value) {
                         (Action::Set, ScalarValue::Str(s)) => text_encoding.width(s),
                         (Action::Mark, _) => 0,
@@ -601,7 +601,7 @@ impl OpSet {
                         index.get(),
                         seq_type,
                         self.text_encoding,
-                        read.filter().cloned(),
+                        read.historical_slow().cloned(),
                         Default::default()
                     )
                     .resolve(0)
@@ -615,7 +615,7 @@ impl OpSet {
             index,
             seq_type,
             self.text_encoding,
-            read.filter().cloned(),
+            read.historical_slow().cloned(),
             Default::default(),
         )
         .resolve(0)
@@ -659,7 +659,8 @@ impl OpSet {
             };
             #[cfg(feature = "slow_path_assertions")]
             {
-                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, read.filter());
+                let slow =
+                    self.seek_ops_by_index_slow(obj, index, seq_type, read.historical_slow());
                 assert_eq!(found, slow, "fast != slow");
             }
             found
@@ -799,7 +800,9 @@ impl OpSet {
                 }
                 end_pos = op.pos + 1;
                 range.end = op.pos + 1;
-                if Self::text_register_visible(&op, read.filter()) && op.action != Action::Mark {
+                if Self::text_register_visible(&op, read.historical_slow())
+                    && op.action != Action::Mark
+                {
                     ops.push(op);
                 }
             }
@@ -882,7 +885,7 @@ impl OpSet {
             let found = self.seek_list_opid_fast(obj, opid, seq_type);
             debug_assert_eq!(
                 found,
-                self.seek_list_opid_slow(obj, opid, seq_type, read.filter())
+                self.seek_list_opid_slow(obj, opid, seq_type, read.historical_slow())
             );
             found
         }
@@ -1124,7 +1127,7 @@ impl OpSet {
         let range = self.scope_to_obj(obj);
         let fast = TopOps::new(self, &read, range);
         #[cfg(feature = "slow_path_assertions")]
-        top_op::assert_matches_slow(self, obj, read.filter().cloned(), fast.clone());
+        top_op::assert_matches_slow(self, obj, read.historical_slow().cloned(), fast.clone());
         fast
     }
 
@@ -1144,7 +1147,10 @@ impl OpSet {
             self.find_op_by_id_and_vis_slow(id, Some(clock))
         } else {
             let result = self.find_op_by_id_and_vis_fast(id);
-            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, read.filter()));
+            debug_assert_eq!(
+                result,
+                self.find_op_by_id_and_vis_slow(id, read.historical_slow())
+            );
             result
         }
     }
