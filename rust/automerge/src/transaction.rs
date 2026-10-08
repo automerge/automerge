@@ -50,6 +50,26 @@ fn commit_transaction(
     hash
 }
 
+fn get_scope<'a>(
+    doc: &'a crate::Automerge,
+    inner: Option<&'a TransactionInner>,
+    heads: Option<&[crate::ChangeHash]>,
+) -> crate::automerge::view::ReadAt<'a> {
+    use std::borrow::Cow;
+
+    if let Some(h) = heads {
+        // a transaction is in flight: its pending ops are in the op set
+        // but not under the graph's heads, so the current-heads
+        // shortcut in `read_at` would wrongly expose them
+        doc.read_scoped(Cow::Owned(doc.visible(h)))
+    } else {
+        inner.and_then(|i| i.get_scope().as_ref()).map_or_else(
+            || doc.read_current(),
+            |scope| doc.read_scoped(Cow::Borrowed(scope)),
+        )
+    }
+}
+
 /// Generate a `ReadDoc` impl for `Transaction` and `OwnedTransaction`, which are expected to
 /// have `inner: Option<TransactionInner>`, `doc` (owned or borrowed `Automerge`), and a
 /// `get_scope` method.
