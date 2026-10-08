@@ -800,8 +800,8 @@ impl OpSet {
                 }
                 end_pos = op.pos + 1;
                 range.end = op.pos + 1;
-                if Self::text_register_visible(&op, read.historical_slow())
-                    && op.action != Action::Mark
+                if op.action != Action::Mark
+                    && Self::text_register_visible(&op, read.historical_slow())
                 {
                     ops.push(op);
                 }
