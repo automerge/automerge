@@ -260,10 +260,12 @@ impl std::default::Default for LoadOptions<'static> {
 /// those heads, including the heads themselves, remain eligible to
 /// contribute to the view. Their other changes are hidden.
 ///
-/// If any of the write-frontier's heads have not yet been received, all
-/// of the author's changes are hidden until the complete frontier can
-/// be resolved. This can happen when the write-frontier is received
-/// separately from the changes it references.
+/// If some of the write-frontier's heads have not yet been received, only
+/// the author's changes within the causal history of the known heads are
+/// eligible to contribute. As missing heads arrive, more changes may become
+/// eligible. If no heads are known, all of the author's changes are hidden.
+/// This can happen when the write-frontier is received separately from the
+/// changes it references.
 ///
 /// Use [`Automerge::reveal_author`] to remove the author's write-frontier
 /// restriction. Their changes are then subject to the document's usual

@@ -142,19 +142,15 @@ fn pending_change_hides_author_entirely() {
     assert_eq!(doc.get(ROOT, "z").unwrap().unwrap().0.as_i64(), Some(3));
 }
 
-/// A boundary resolves only when ALL of its heads are known: mixing one
-/// known head with one unknown head must still hide the author entirely,
-/// not derive a partial clock from the known subset.
+/// A partially known boundary reveals the known history, but does not
+/// allow the author's changes after the known head.
 #[test]
-fn partially_unknown_boundary_hides_author_entirely() {
+fn partially_unknown_boundary_reveals_known_history() {
     let (mut doc, alice, epoch) = two_authors();
     let unseen = automerge::ChangeHash([7; 32]);
     doc.mask_author(alice, &[epoch[0], unseen], &mut PatchLog::inactive())
         .unwrap();
-    assert!(
-        doc.get(ROOT, "x").unwrap().is_none(),
-        "alice must be fully hidden while part of her boundary is unknown"
-    );
+    assert_eq!(doc.get(ROOT, "x").unwrap().unwrap().0.as_i64(), Some(1));
     assert!(doc.get(ROOT, "y").unwrap().is_none());
     assert_eq!(doc.get(ROOT, "z").unwrap().unwrap().0.as_i64(), Some(3));
 }
