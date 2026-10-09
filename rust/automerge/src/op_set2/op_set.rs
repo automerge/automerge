@@ -873,6 +873,55 @@ impl OpSet {
             .find(|&pos| self.cols.id_actor.get(pos) == Some(id.actoridx()))
     }
 
+    pub(crate) fn op_pos_in(&self, id: OpId, range: &Range<usize>) -> Option<usize> {
+        self.get_op_id_pos(id).filter(|pos| range.contains(pos))
+    }
+
+    pub(crate) fn element_start(&self, pos: usize, obj_range: &Range<usize>) -> Option<usize> {
+        let op = self.get(pos)?;
+        if op.insert {
+            return Some(pos);
+        }
+        match op.key {
+            KeyRef::Seq(e) if !e.is_head() => self.op_pos_in(e.0, obj_range),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn seq_index_at(
+        &self,
+        obj_range: &Range<usize>,
+        pos: usize,
+        seq_type: SequenceType,
+    ) -> usize {
+        if pos <= obj_range.start {
+            return 0;
+        }
+        if seq_type == SequenceType::List {
+            self.cols.index.top.sum_range(obj_range.start..pos)
+        } else {
+            self.cols.index.text.sum_range(obj_range.start..pos) as usize
+        }
+    }
+
+    pub(crate) fn open_marks_at(
+        &self,
+        obj_range: &Range<usize>,
+        pos: usize,
+    ) -> Vec<(OpId, MarkData<'static>)> {
+        if pos <= obj_range.start || !self.cols.index.mark.has_any_marks() {
+            return vec![];
+        }
+        let state = self.cols.index.mark.rich_text_at(pos - 1, None);
+        let mut marks: Vec<_> = state
+            .map
+            .into_iter()
+            .filter(|(id, _)| self.op_pos_in(*id, &(obj_range.start..pos)).is_some())
+            .collect();
+        marks.sort_by_key(|(id, _)| *id);
+        marks
+    }
+
     pub(crate) fn seek_list_opid(
         &self,
         obj: &ObjId,
