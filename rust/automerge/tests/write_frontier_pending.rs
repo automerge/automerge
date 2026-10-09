@@ -582,12 +582,10 @@ fn isolation_preserves_empty_document_load_validation() {
     assert!(isolated.diff_incremental().is_empty());
 }
 
-/// A boundary with one known head and one unknown head is still pending:
-/// the author is hidden entirely (the known subset must not derive a
-/// partial clock). Once the missing head arrives the boundary resolves and
-/// the author's pre-boundary ops become visible again (inclusive bound).
+/// A missing head that adds no history for the masked author must not
+/// disturb contributions already visible through a known head.
 #[test]
-fn partially_unknown_multi_head_boundary_hides_author() {
+fn partially_unknown_multi_head_boundary_preserves_known_history() {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
     let mut a = AutoCommit::new().with_author(Some(alice.clone()));
@@ -595,7 +593,7 @@ fn partially_unknown_multi_head_boundary_hides_author() {
     a.commit();
     let h1 = a.get_heads()[0];
 
-    // Bob's concurrent change, not delivered to the observer yet.
+    // Bob's acknowledgement, not delivered to the observer yet.
     let mut b = a.fork().with_author(Some(bob));
     b.put(ROOT, "z", 9).unwrap();
     b.commit();
@@ -603,18 +601,98 @@ fn partially_unknown_multi_head_boundary_hides_author() {
 
     let mut obs = a.fork();
     obs.mask_author(alice, &[h1, h2]);
-    assert!(
-        obs.get(ROOT, "x").unwrap().is_none(),
-        "alice must be fully hidden while her boundary head H2 is unknown"
-    );
+    assert_eq!(obs.get(ROOT, "x").unwrap().unwrap().0, 1.into());
+    let mut view = obs.hydrate(ROOT, None).unwrap();
+    obs.update_diff_cursor();
 
-    // Delivering H2 completes the boundary (inclusive): x becomes visible.
+    // Delivering H2 completes the boundary without changing Alice's bound.
     obs.merge(&mut b).unwrap();
-    assert_eq!(
-        obs.get(ROOT, "x").unwrap().and_then(|v| v.0.as_i64()),
-        Some(1),
-        "once the boundary is complete, alice's pre-boundary op is visible"
-    );
+    assert_eq!(obs.get(ROOT, "x").unwrap().unwrap().0, 1.into());
+    let patches = obs.diff_incremental();
+    assert!(!puts_x(&patches), "x was already visible: {patches:?}");
+    view.apply_patches(ENCODING, patches).unwrap();
+    assert_eq!(view, obs.hydrate(ROOT, None).unwrap());
+}
+
+/// Each actor is bounded by the known heads independently. Resolving one
+/// missing head can reveal an existing actor's history even while another
+/// head remains pending, but never reveals post-boundary changes.
+#[test]
+fn partially_known_boundary_expands_per_actor_on_import() {
+    for mode in [
+        Import::Batch,
+        Import::Load,
+        Import::LoadDocument,
+        Import::Sync,
+    ] {
+        let alice = Author::try_from("aaaa").unwrap();
+        let bob = Author::try_from("bbbb").unwrap();
+        let mut a = AutoCommit::new_with_encoding(ENCODING)
+            .with_author(Some(alice.clone()))
+            .with_actor(ActorId::from(vec![0x80]));
+        a.put(ROOT, "x", 1).unwrap();
+        let h1 = a.get_heads()[0];
+
+        // A second actor for Alice, concurrent with the first actor's later op.
+        let mut b = a.fork().with_actor(ActorId::from(vec![0x90]));
+        b.put(ROOT, "y", 2).unwrap();
+        let before_boundary = b.get_heads();
+        let original = b.get_changes(&[]);
+        a.put(ROOT, "x_later", true).unwrap();
+        a.commit();
+
+        // Bob's acknowledgement bounds the second actor, but is initially absent.
+        b.set_author(Some(bob));
+        b.set_actor(ActorId::from(vec![0x10]));
+        b.put(ROOT, "ack", true).unwrap();
+        let h2 = b.get_heads()[0];
+        b.set_author(Some(alice.clone()));
+        b.set_actor(ActorId::from(vec![0x90]));
+        b.put(ROOT, "y_later", true).unwrap();
+        b.commit();
+
+        let mut obs = a.fork();
+        obs.apply_changes(original).unwrap();
+        // A third head stays missing even after H2 arrives.
+        obs.mask_author(alice, &[h1, h2, ChangeHash([7; 32])]);
+        assert_eq!(obs.get(ROOT, "x").unwrap().unwrap().0, 1.into());
+        for key in ["y", "x_later", "y_later"] {
+            assert!(obs.get(ROOT, key).unwrap().is_none(), "{key}");
+        }
+        let mut view = obs.hydrate(ROOT, None).unwrap();
+        obs.update_diff_cursor();
+
+        match mode {
+            Import::Batch => obs
+                .apply_changes_batch(b.get_changes(&before_boundary))
+                .unwrap(),
+            Import::Load => {
+                obs.load_incremental(&b.save_after(&before_boundary))
+                    .unwrap();
+            }
+            Import::LoadDocument => {
+                obs.load_incremental(&b.save()).unwrap();
+            }
+            Import::Sync => sync_docs(&mut b, &mut obs),
+        }
+
+        assert_eq!(obs.get(ROOT, "x").unwrap().unwrap().0, 1.into());
+        assert_eq!(obs.get(ROOT, "y").unwrap().unwrap().0, 2.into());
+        for key in ["x_later", "y_later"] {
+            assert!(obs.get(ROOT, key).unwrap().is_none(), "{key}");
+        }
+        let patches = obs.diff_incremental();
+        assert!(
+            patches.iter().any(|patch| {
+                matches!(&patch.action, PatchAction::PutMap { key, value, .. }
+                    if patch.obj == ROOT && key == "y" && value.0 == 2.into())
+            }),
+            "missing restoration: {patches:?}"
+        );
+        view.apply_patches(ENCODING, patches).unwrap();
+        assert_eq!(view, obs.hydrate(ROOT, None).unwrap());
+        assert!(obs.diff_incremental().is_empty());
+    }
 }
 
 /// The pending set is read-only between derivations: witnessing the
