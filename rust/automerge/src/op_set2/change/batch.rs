@@ -61,6 +61,8 @@ struct Untangler<'a> {
     index: usize,
     max: usize,
     width: usize,
+    stop_after: Option<usize>,
+    track_marks: bool,
 }
 
 impl<'a> Untangler<'a> {
@@ -317,7 +319,114 @@ impl<'a> Untangler<'a> {
             width: 0,
             value,
             max,
+            stop_after: None,
+            track_marks: true,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SeqReach {
+    first: usize,
+    last: usize,
+}
+
+impl SeqReach {
+    fn find(ops: &OpSet, obj_range: &Range<usize>, change_ops: &[ChangeOp]) -> Option<Self> {
+        let mut reach: Option<SeqReach> = None;
+        let mut touch = |pos: usize| {
+            reach = Some(match reach.take() {
+                None => SeqReach {
+                    first: pos,
+                    last: pos,
+                },
+                Some(r) => SeqReach {
+                    first: r.first.min(pos),
+                    last: r.last.max(pos),
+                },
+            })
+        };
+        let mut last_e = None;
+        for op in change_ops {
+            if let KeyRef::Seq(e) = op.key() {
+                if e.is_head() {
+                    if op.insert() {
+                        return None;
+                    }
+                } else if last_e != Some(*e) {
+                    if let Some(pos) = ops.op_pos_in(e.0, obj_range) {
+                        touch(pos);
+                    }
+                }
+                last_e = Some(*e);
+            }
+            for p in op.pred() {
+                if let Some(pos) = ops.op_pos_in(*p, obj_range) {
+                    touch(ops.element_start(pos, obj_range)?);
+                }
+            }
+        }
+        reach
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static WALKED_DOC_OPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl<'a> Untangler<'a> {
+    fn start_at(&mut self, ops: &OpSet, obj_range: &Range<usize>, reach: &SeqReach, marks: bool) {
+        self.index = ops.seq_index_at(obj_range, reach.first, self.seq_type);
+        if marks {
+            for (id, data) in ops.open_marks_at(obj_range, reach.first) {
+                self.value.marks.before.mark_begin(id, data.clone());
+                self.value.marks.after.mark_begin(id, data);
+            }
+        }
+        self.track_marks = marks;
+        self.stop_after = Some(reach.last);
+        #[cfg(any(test, feature = "slow_path_assertions"))]
+        self.check_start(ops, obj_range, reach.first, marks);
+    }
+
+    #[cfg(any(test, feature = "slow_path_assertions"))]
+    fn check_start(&self, ops: &OpSet, obj_range: &Range<usize>, first: usize, marks: bool) {
+        let mut index = 0;
+        let mut width = 0;
+        let mut state = RichTextDiff::default();
+        for op in ops.iter_range(&(obj_range.start..first)) {
+            if op.insert {
+                index += width;
+                width = 0;
+            }
+            let hidden = self.value.hides(&op.id);
+            if !hidden && self.value.masked_visible(&op) {
+                width = op.width(self.seq_type, self.text_encoding);
+            }
+            if op.action == Action::Mark && !hidden {
+                state.before.process(op.id, op.action());
+                state.after.process(op.id, op.action());
+            }
+        }
+        assert!(ops
+            .iter_range(&(first..first + 1))
+            .next()
+            .is_some_and(|op| op.insert));
+        assert_eq!(self.index, index + width);
+        if marks {
+            assert_eq!(self.value.marks.before, state.before);
+            assert_eq!(self.value.marks.after, state.after);
+        }
+    }
+
+    fn done_before(&self, doc_op: &Op<'_>) -> bool {
+        doc_op.insert
+            && self.stop_after.is_some_and(|last| doc_op.pos > last)
+            && self.stack.is_empty()
+            && self.updates_stack.is_empty()
+            && self.entry.is_empty()
+            && (!self.track_marks || self.value.marks.before == self.value.marks.after)
     }
 }
 
@@ -328,6 +437,11 @@ fn walk_list<'a>(
     log: &mut Events<'_>,
 ) {
     for op in doc_ops {
+        if ut.done_before(&op) {
+            break;
+        }
+        #[cfg(test)]
+        WALKED_DOC_OPS.with(|n| n.set(n.get() + 1));
         ut.element_update(&op);
 
         if op.insert {
@@ -820,13 +934,23 @@ impl BatchApply {
                                     mask0.as_ref(),
                                     doc.ops(),
                                 );
-                                let ut = Untangler::new(
+                                let change_ops = &mut ops[os.span.clone()];
+                                let reach = SeqReach::find(doc.ops(), &obj_range, change_ops);
+                                let mut ut = Untangler::new(
                                     value,
                                     conflicts,
-                                    &mut ops[os.span.clone()],
+                                    change_ops,
                                     pred,
                                     doc_ops.end_pos(),
                                 );
+                                let doc_ops = match reach {
+                                    Some(reach) => {
+                                        let marks = log.is_active();
+                                        ut.start_at(doc.ops(), &obj_range, &reach, marks);
+                                        doc.ops().iter_range(&(reach.first..obj_range.end))
+                                    }
+                                    None => doc_ops,
+                                };
                                 walk_list(ut, doc_ops, succ, log);
                             }
                             _ => panic!("Obj {:?} Missing from Index", os.obj),
@@ -1873,6 +1997,147 @@ mod tests {
         if pa != pb {
             panic!()
         }
+    }
+
+    fn walked<T>(f: impl FnOnce() -> T) -> (usize, T) {
+        let before = WALKED_DOC_OPS.with(|n| n.get());
+        let r = f();
+        (WALKED_DOC_OPS.with(|n| n.get()) - before, r)
+    }
+
+    fn long_text(len: usize) -> (Automerge, crate::ObjId) {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        let line: String = "the quick brown fox jumps over the lazy dog\n"
+            .chars()
+            .cycle()
+            .take(len)
+            .collect();
+        tx.splice_text(&text, 0, 0, &line).unwrap();
+        let mark = Mark::new("bold".into(), true, len / 4, len * 3 / 4);
+        tx.mark(&text, mark, ExpandMark::Both).unwrap();
+        tx.commit();
+        (doc, text)
+    }
+
+    #[test]
+    fn remote_change_to_long_text_walks_where_it_lands() {
+        type Edit = fn(&mut crate::transaction::Transaction<'_>, &crate::ObjId, usize);
+        let edits: [(&str, Edit); 5] = [
+            ("insert", |tx, text, len| {
+                tx.splice_text(text, len / 2, 0, "hello").unwrap();
+            }),
+            ("delete", |tx, text, len| {
+                tx.splice_text(text, len / 2, 3, "").unwrap();
+            }),
+            ("mark", |tx, text, len| {
+                let mark = Mark::new("italic".into(), true, len / 2, len / 2 + 5);
+                tx.mark(text, mark, ExpandMark::After).unwrap();
+            }),
+            ("unmark", |tx, text, len| {
+                tx.unmark(text, "bold", len / 2, len / 2 + 5, ExpandMark::Both)
+                    .unwrap();
+            }),
+            ("append", |tx, text, len| {
+                tx.splice_text(text, len, 0, "!").unwrap();
+            }),
+        ];
+        for (name, edit) in edits {
+            let mut counts = vec![];
+            for len in [1_000, 20_000] {
+                let (doc, text) = long_text(len);
+                let mut other = doc.fork();
+                let mut tx = other.transaction();
+                edit(&mut tx, &text, len);
+                tx.commit();
+                let change = other.get_last_local_change().unwrap().clone();
+
+                let mut quiet = doc.clone();
+                let (n_quiet, _) = walked(|| quiet.apply_changes([change.clone()]).unwrap());
+
+                let mut logged = doc.clone();
+                let mut log = PatchLog::active();
+                let (n_logged, _) = walked(|| {
+                    logged
+                        .apply_changes_log_patches([change.clone()], &mut log)
+                        .unwrap()
+                });
+                let patches = logged.make_patches(&mut log);
+                assert_eq!(
+                    patches,
+                    other.diff(&doc.get_heads(), &other.get_heads()),
+                    "{name}"
+                );
+                assert_eq!(quiet.save(), other.save(), "{name}");
+                assert_eq!(logged.save(), other.save(), "{name}");
+                counts.push((n_quiet, n_logged));
+            }
+            assert_eq!(counts[0], counts[1], "{name}: walk grows with the text");
+            assert!(counts[1].0 < 20 && counts[1].1 < 20, "{name}: {counts:?}");
+        }
+    }
+
+    #[test]
+    fn fuzz_small_remote_changes_to_text() {
+        let mut rng = make_rng();
+        let mut value = 0;
+        let mut val = move || {
+            value += 1;
+            value
+        };
+        let (base, text) = long_text(400);
+        let mut doc = AutoCommit::load(&base.save()).unwrap();
+        let mut doc_copy = doc.fork();
+        let mut forks: Vec<AutoCommit> = (0..3)
+            .map(|_| doc.fork().with_actor(rng.random()))
+            .collect();
+        for _ in 0..300 {
+            let f = &mut forks[rng.random::<u32>() as usize % 3];
+            let len = f.length(&text) as u32;
+            match rng.random::<u32>() % 5 {
+                0 | 1 => {
+                    let at = rng.random::<u32>() % (len + 1);
+                    f.splice_text(&text, at as usize, 0, &format!("<{}>", val()))
+                        .unwrap();
+                }
+                2 => {
+                    let at = rng.random::<u32>() % len;
+                    let del = std::cmp::min(rng.random::<u32>() % 4 + 1, len - at);
+                    f.splice_text(&text, at as usize, del as isize, "").unwrap();
+                }
+                3 => {
+                    let a = rng.random::<u32>() % len;
+                    let b = std::cmp::min(a + rng.random::<u32>() % 20 + 1, len);
+                    let name = ["bold", "italic"][rng.random::<u32>() as usize % 2];
+                    let mark = Mark::new(name.into(), val(), a as usize, b as usize);
+                    let expand = [ExpandMark::Before, ExpandMark::After, ExpandMark::Both]
+                        [rng.random::<u32>() as usize % 3];
+                    f.mark(&text, mark, expand).unwrap();
+                }
+                _ => {
+                    let a = rng.random::<u32>() % len;
+                    let b = std::cmp::min(a + rng.random::<u32>() % 20 + 1, len);
+                    f.unmark(&text, "bold", a as usize, b as usize, ExpandMark::After)
+                        .unwrap();
+                }
+            }
+            f.commit();
+            let change = f.get_last_local_change().unwrap();
+            merge_and_diff(&mut doc, &mut doc_copy, &[change]);
+            if rng.random::<u32>() % 8 == 0 {
+                let f = &mut forks[rng.random::<u32>() as usize % 3];
+                f.merge(&mut doc).unwrap();
+            }
+        }
+        let mut whole = AutoCommit::new();
+        whole.apply_changes(doc.get_changes(&[])).unwrap();
+        whole.doc.debug_cmp(&doc.doc);
+        assert_eq!(whole.text(&text).unwrap(), doc.text(&text).unwrap());
+        assert_eq!(
+            whole.spans(&text).unwrap().collect::<Vec<_>>(),
+            doc.spans(&text).unwrap().collect::<Vec<_>>()
+        );
     }
 
     #[test]
