@@ -1,13 +1,5 @@
-//! Byte-slice parser combinators for the sync wire format.
-//!
-//! Deliberately a private copy rather than a dependency on automerge's
-//! internal storage parser: the sync format and the document format are
-//! independent, and the only encoding they genuinely share is the
-//! 32-byte [`ChangeHash`], which automerge exposes publicly. Keeping our
-//! own copy means the document format's parser can change freely.
-//!
-//! Only what the sync messages, bloom filters and sync state need is
-//! here; there is no ambition for this to be a general parser library.
+//! Byte-slice parser combinators for the sync wire format, kept separate from
+//! automerge's storage parser so the document format can change independently.
 
 use automerge::ChangeHash;
 use std::num::NonZeroUsize;
@@ -16,8 +8,6 @@ const HASH_SIZE: usize = 32;
 
 pub(crate) type ParseResult<'a, O, E> = Result<(Input<'a>, O), ParseError<E>>;
 
-/// A byte slice plus a cursor into it. Cheap to copy — parsers take it
-/// by value and hand back the advanced input alongside their output.
 #[derive(PartialEq, Clone, Copy)]
 pub(crate) struct Input<'a> {
     bytes: &'a [u8],
@@ -44,7 +34,6 @@ impl<'a> Input<'a> {
         self.bytes.is_empty()
     }
 
-    /// The bytes not yet consumed.
     #[cfg(test)]
     pub(crate) fn bytes(&self) -> &'a [u8] {
         self.bytes
@@ -69,15 +58,11 @@ impl<'a> Input<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ParseError<E> {
-    /// An error from the parser itself
     Error(E),
-    /// The input ran out before the parser was satisfied
     Incomplete(Needed),
 }
 
 impl<E> ParseError<E> {
-    /// Convert the inner error, for composing parsers with different
-    /// error types.
     pub(crate) fn lift<F: From<E>>(self) -> ParseError<F> {
         match self {
             Self::Error(e) => ParseError::Error(F::from(e)),
@@ -97,7 +82,6 @@ impl<E: std::fmt::Display> std::fmt::Display for ParseError<E> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Needed {
-    /// At least this much more input is required
     Size(NonZeroUsize),
 }
 
@@ -110,7 +94,6 @@ pub(crate) fn take_n<E>(n: usize, input: Input<'_>) -> ParseResult<'_, &[u8], E>
     input.advance(n)
 }
 
-/// A uleb128-prefixed run of `g`.
 pub(crate) fn length_prefixed<'a, G, O, E>(
     mut g: G,
 ) -> impl FnMut(Input<'a>) -> ParseResult<'a, Vec<O>, E>
@@ -120,8 +103,7 @@ where
 {
     move |input: Input<'a>| {
         let (i, count) = leb128_u64(input).map_err(|e| e.lift())?;
-        // `count` is wire-supplied: grow the vec as entries actually
-        // parse rather than reserving what it claims
+        // `count` is untrusted: don't reserve capacity from it
         let mut out = Vec::new();
         let mut input = i;
         for _ in 0..count {
@@ -133,7 +115,6 @@ where
     }
 }
 
-/// A uleb128-prefixed byte string.
 pub(crate) fn length_prefixed_bytes<E>(input: Input<'_>) -> ParseResult<'_, &[u8], E>
 where
     E: From<leb128::Error>,
@@ -175,8 +156,7 @@ pub(crate) mod leb128 {
                         return Err(ParseError::Error(E::from(Error::Leb128TooLarge)));
                     }
                     let low = (byte & 0x7f) as $ty;
-                    // the last byte must not shift bits off the top, and
-                    // must not be a redundant zero continuation
+                    // the final byte must not carry bits past the top of $ty
                     if shift + 7 > $bits && (low >> ($bits - shift)) != 0 {
                         return Err(ParseError::Error(E::from(Error::Leb128TooLarge)));
                     }
@@ -218,12 +198,10 @@ mod tests {
 
     #[test]
     fn leb128_rejects_overlong_and_oversized() {
-        // 0x80 0x00 is a non-minimal encoding of zero
         assert!(matches!(
             u64_of(&[0x80, 0x00]),
             Err(ParseError::Error(leb128::Error::Leb128Overlong))
         ));
-        // eleven continuation bytes cannot fit in a u64
         let too_big = [0xff; 11];
         assert!(matches!(
             u64_of(&too_big),
@@ -242,7 +220,6 @@ mod tests {
 
     #[test]
     fn length_prefixed_reads_exactly_the_claimed_count() {
-        // count 2, then two single bytes
         let bytes = [0x02, 0xaa, 0xbb, 0xcc];
         let (rest, out) =
             length_prefixed::<_, _, leb128::Error>(take1)(Input::new(&bytes)).unwrap();
@@ -250,7 +227,6 @@ mod tests {
         assert_eq!(rest.bytes(), &[0xcc]);
     }
 
-    /// A count far larger than the input must fail, not allocate.
     #[test]
     fn length_prefixed_does_not_trust_the_count() {
         let mut bytes = Vec::new();

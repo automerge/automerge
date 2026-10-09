@@ -50,11 +50,8 @@ pub enum Error {
     BadChecksum,
 }
 
-/// One chunk the loader recovered.
-///
-/// A change set stays a change set: inflating it to changes would need its
-/// members' dep hashes, which is exactly what a hashless document does
-/// not have — and would take the slow path even when it does.
+/// Change sets are kept whole: expanding them into changes needs dep hashes
+/// a hashless document may not have.
 pub(crate) enum LoadedChunk {
     Change(Box<Change>),
     ChangeSet(Box<crate::storage::ChangeSet>),
@@ -84,10 +81,10 @@ pub(crate) enum LoadedChanges<'a> {
 /// chunks are valid. This function returns a `LoadedChanges` which you can examine to determine if
 /// this is the case.
 #[instrument(skip(data))]
-pub(crate) fn load_changes<'a>(
+pub(crate) fn load_changes<'a, H: crate::hash_retention::HashRetention>(
     mut data: parse::Input<'a>,
     text_encoding: TextEncoding,
-    current: &ChangeGraph,
+    current: &ChangeGraph<H>,
     mark_order: MarkOrderValidation,
 ) -> LoadedChanges<'a> {
     let mut changes: Vec<LoadedChunk> = Vec::new();
@@ -108,11 +105,11 @@ pub(crate) fn load_changes<'a>(
     LoadedChanges::Complete(changes)
 }
 
-fn load_next_change<'a>(
+fn load_next_change<'a, H: crate::hash_retention::HashRetention>(
     data: parse::Input<'a>,
     changes: &mut Vec<LoadedChunk>,
     text_encoding: TextEncoding,
-    current: &ChangeGraph,
+    current: &ChangeGraph<H>,
     mark_order: MarkOrderValidation,
 ) -> Result<parse::Input<'a>, Error> {
     let (remaining, chunk) = storage::Chunk::parse(data).map_err(|e| Error::Parse(Box::new(e)))?;
@@ -122,9 +119,7 @@ fn load_next_change<'a>(
     match chunk {
         storage::Chunk::Document(d) => {
             tracing::trace!("loading document chunk");
-            // on an unchecked graph we can't always tell whether we have a
-            // head; conservatively reconstruct, the apply path will
-            // deduplicate or error
+            // an unknown answer reconstructs; the apply path deduplicates
             if !d
                 .heads()
                 .iter()

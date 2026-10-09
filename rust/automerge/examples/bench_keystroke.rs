@@ -1,18 +1,13 @@
-// Keystroke latency: apply ONE text-insert op to a large document,
-// three ways — a single-change v2 fragment via apply_change_set_opsment, the
-// single raw change via load_incremental, and (for context) the same
-// via apply_changes. This is the single-keystroke-commit path that
-// hurts on main.
+// Keystroke latency: apply one text-insert change to a large document as a
+// change set, via load_incremental, and via apply_changes.
 //
 //   cargo run --release -p automerge --example bench_keystroke [S1 S2 S3 ...]
-use automerge::transaction::Transactable;
-use automerge::{
-    Automerge, ChangeHash, ChangeId, ChangeSet, Fragment, ObjType, ReadDoc, Value, ROOT,
-};
+use automerge::next::transaction::Transactable;
+use automerge::next::{Automerge, Fragment, ReadDoc};
+use automerge::{ChangeHash, ChangeId, ChangeSet, ObjType, Value, ROOT};
 use std::time::Instant;
 
 fn find_text(doc: &Automerge) -> automerge::ObjId {
-    // breadth-first hunt for the first text object
     let mut queue = vec![ROOT];
     while let Some(obj) = queue.pop() {
         for key in doc.keys(&obj) {
@@ -44,14 +39,10 @@ fn main() {
         let text = find_text(&base);
         let pos = base.length(&text) / 2;
 
-        // two keystrokes on a fork: applying the first brings the
-        // fork's (new) actor into the doc — the "first keystroke from
-        // a new peer" case, which pays the actor-column rewrite.
-        // Applying the second is steady-state typing.
-        let mut src = base.fork();
-        // src emits the changes/change sets, which needs its full hash set;
-        // the measured targets (base clones) stay in the default mode
-        src.enable_audit_mode().unwrap();
+        // the first keystroke brings in a new actor; the second is steady-state typing
+        let src = base.fork();
+        // emitting changes needs every hash; the measured targets stay in default mode
+        let mut src = src.enable_audit_mode().unwrap();
         for ch in ["x", "y"] {
             let mut tx = src.transaction();
             tx.splice_text(&text, pos, 0, ch).unwrap();
@@ -59,7 +50,6 @@ fn main() {
         }
         let changes = src.get_changes(&heads).unwrap();
 
-        // the same keystrokes as single-member fragments
         let v2_bytes: Vec<Vec<u8>> = changes
             .iter()
             .map(|change| {

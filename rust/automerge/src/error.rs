@@ -78,8 +78,7 @@ pub enum AutomergeError {
     /// cannot resolve.
     #[error("invalid fragment: {0}")]
     InvalidFragment(&'static str),
-    /// A change set could not be decoded, or its metadata contradicts its
-    /// contents — i.e. the sender's bytes are malformed or forged.
+    /// A change set is malformed or its metadata contradicts its contents.
     #[error("malformed change set: {0}")]
     MalformedChangeSet(&'static str),
 }

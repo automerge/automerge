@@ -1,5 +1,43 @@
 ## Unreleased
 
+### Breaking Changes
+
+* `PatchLog` is gone, along with `make_patches`, the `*_log_patches` methods,
+  `transaction_log_patches`, `transact_and_log_patches(_with)`,
+  `LoadOptions::patch_log`, `Success::patch_log` and `PatchLogMismatch`. To see
+  what an operation changed, take the heads before it and call
+  `diff(&before, &after)` afterwards. `Transaction::commit` now returns just the
+  change hash, `OwnedTransaction::commit` the document and the hash,
+  `Automerge::transaction_at` and `into_transaction` no longer take a patch log,
+  and `LoadOptions` no longer has a lifetime parameter.
+* Patches describe the net change between two states of the document. Their
+  order and grouping can differ from the operation-by-operation patches the
+  patch log produced (for example a conflict may arrive as a put marked
+  `conflict: true`), but applying them still takes the old state to the new.
+* The sync protocol has moved to the `automerge-sync` crate. Its types and
+  `SyncDoc` trait are unchanged apart from `receive_sync_message_log_patches`:
+  change `automerge::sync::…` imports to `automerge_sync::…`, and import
+  `automerge_sync::AutoCommitSync` for `AutoCommit::sync()` and
+  `has_our_changes()`.
+* The experimental bundle API (`bundle`, `bundle_fragments`, `Bundle`,
+  `BundleChange`, `BundleChangeIter` and `AutomergeError::Unbundle`) is gone.
+  Bundles saved by 0.12 still load.
+* `AutomergeError` has new variants (`AuditModeRequired`, `InvalidChangeId`,
+  `DecodeChangeSet`, `InvalidFragment`, `MalformedChangeSet`).
+
+### Added
+
+* `automerge::next`: `Automerge` and `AutoCommit` types which keep only the
+  change hashes a document needs rather than the hash of every change in its
+  history, which makes them smaller and faster to load. They name history by
+  `ChangeId` (an actor and sequence number), return errors where an operation
+  needs history the document has not kept, and save in a compact change set
+  format by default (`SaveFormat::Legacy` writes the document format older
+  versions read). The default types convert with `into_next()`, and next
+  documents back with `into_audit()`, which recomputes every hash.
+* `ChangeId`, `ChangeSet` and the change set loader: every type loads change
+  sets as well as everything earlier versions saved.
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character

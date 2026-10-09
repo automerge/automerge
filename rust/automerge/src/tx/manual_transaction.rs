@@ -1,3 +1,4 @@
+use super::TxDoc;
 use crate::exid::ExId;
 use crate::ChangeHash;
 use crate::{automerge::Automerge, AutomergeError};
@@ -17,15 +18,18 @@ use super::{CommitOptions, TransactionArgs, TransactionInner};
 /// intermediate state.
 /// This is consistent with [`?`][std::ops::Try] error handling.
 #[derive(Debug)]
-pub struct Transaction<'a> {
+pub struct Transaction<
+    'a,
+    H: crate::hash_retention::HashRetention = crate::hash_retention::Retained,
+> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     inner: Option<TransactionInner>,
-    doc: &'a mut Automerge,
+    doc: &'a mut Automerge<H>,
 }
 
-impl<'a> Transaction<'a> {
-    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs) -> Self {
+impl<'a, H: crate::hash_retention::HashRetention> Transaction<'a, H> {
+    pub(crate) fn new(doc: &'a mut Automerge<H>, args: TransactionArgs) -> Self {
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
@@ -43,9 +47,9 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl<'a> Transaction<'a> {
+impl<'a, H: crate::hash_retention::HashRetention> Transaction<'a, H> {
     pub(crate) fn empty(
-        doc: &'a mut Automerge,
+        doc: &'a mut Automerge<H>,
         args: TransactionArgs,
         opts: CommitOptions,
     ) -> ChangeHash {
@@ -53,7 +57,7 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl Transaction<'_> {
+impl<H: crate::hash_retention::HashRetention> Transaction<'_, H> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<crate::ChangeId> {
         self.doc.get_heads()
@@ -95,32 +99,21 @@ impl Transaction<'_> {
             .expect("hash of a newly committed change is always known")
     }
 
+    pub(crate) fn commit_hash(mut self, options: CommitOptions) -> Option<ChangeHash> {
+        self.inner
+            .take()
+            .unwrap()
+            .commit(self.doc, options.message, options.time)
+    }
+
+    pub(crate) fn doc_ref(&self) -> &Automerge<H> {
+        self.doc
+    }
+
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(mut self) -> usize {
         self.inner.take().unwrap().rollback(self.doc)
-    }
-
-    fn do_tx<F, O>(&mut self, f: F) -> O
-    where
-        F: FnOnce(&mut TransactionInner, &mut Automerge) -> O,
-    {
-        let tx = self.inner.as_mut().unwrap();
-        f(tx, self.doc)
-    }
-
-    fn get_scope(
-        &self,
-        heads: Option<&[crate::ChangeId]>,
-    ) -> Result<Option<crate::types::Clock>, AutomergeError> {
-        if let Some(h) = heads {
-            // a transaction is in flight, so the current-heads shortcut is
-            // never sound here: always resolve a concrete clock
-            let nodes = self.doc.nodes_for_change_ids(h)?;
-            Ok(Some(self.doc.change_graph.clock_for_nodes(nodes)))
-        } else {
-            Ok(self.inner.as_ref().and_then(|i| i.get_scope().clone()))
-        }
     }
 
     pub(crate) fn batch_init_root_map(
@@ -131,10 +124,23 @@ impl Transaction<'_> {
     }
 }
 
-super::impl_read_doc_for_tx!(Transaction<'_>);
-super::impl_transactable_for_tx!(Transaction<'_>);
+impl<H: crate::hash_retention::HashRetention> super::TxDoc for Transaction<'_, H> {
+    type Retention = H;
 
-impl Drop for Transaction<'_> {
+    fn doc(&self) -> &Automerge<H> {
+        self.doc
+    }
+
+    fn inner(&self) -> Option<&TransactionInner> {
+        self.inner.as_ref()
+    }
+
+    fn parts_mut(&mut self) -> (&mut TransactionInner, &mut Automerge<H>) {
+        (self.inner.as_mut().expect("an open transaction"), self.doc)
+    }
+}
+
+impl<H: crate::hash_retention::HashRetention> Drop for Transaction<'_, H> {
     /// If a transaction is not commited or rolled back manually then it can leave the document in
     /// an intermediate state.
     /// This defaults to rolling back the transaction to be compatible with [`?`][std::ops::Try]

@@ -8,7 +8,6 @@ use automerge::marks::{MarkSet, UpdateSpansConfig};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
-#[cfg(feature = "sync")]
 use automerge_sync::{ChunkList, MessageFlags, MessageVersion};
 use itertools::Itertools;
 use js_sys::{Array, BigInt, Function, JsString, Number, Object, Reflect, Uint8Array};
@@ -89,7 +88,6 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
     }
 }
 
-#[cfg(feature = "sync")]
 impl From<automerge_sync::State> for JS {
     fn from(state: automerge_sync::State) -> Self {
         let shared_heads: JS = state.shared_heads.into();
@@ -374,7 +372,6 @@ impl TryFrom<JS> for Vec<u8> {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for automerge_sync::State {
     type Error = error::BadSyncState;
 
@@ -449,7 +446,6 @@ impl TryFrom<JS> for automerge_sync::State {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for automerge_sync::Have {
     type Error = error::BadHave;
 
@@ -464,7 +460,6 @@ impl TryFrom<JS> for automerge_sync::Have {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for Option<Vec<automerge_sync::Have>> {
     type Error = error::BadHaves;
 
@@ -477,7 +472,6 @@ impl TryFrom<JS> for Option<Vec<automerge_sync::Have>> {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for Vec<automerge_sync::Have> {
     type Error = error::BadHaves;
 
@@ -495,7 +489,6 @@ impl TryFrom<JS> for Vec<automerge_sync::Have> {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for automerge_sync::BloomFilter {
     type Error = error::BadBloom;
 
@@ -510,7 +503,6 @@ impl TryFrom<JS> for automerge_sync::BloomFilter {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for automerge_sync::Message {
     type Error = error::BadSyncMessage;
 
@@ -608,7 +600,6 @@ impl From<&[Change]> for AR {
     }
 }
 
-#[cfg(feature = "sync")]
 impl From<&ChunkList> for AR {
     fn from(value: &ChunkList) -> Self {
         let chunks: Array = value.iter().map(Uint8Array::from).collect();
@@ -616,7 +607,6 @@ impl From<&ChunkList> for AR {
     }
 }
 
-#[cfg(feature = "sync")]
 impl From<&[automerge_sync::Have]> for AR {
     fn from(value: &[automerge_sync::Have]) -> Self {
         AR(value
@@ -638,7 +628,6 @@ impl From<&[automerge_sync::Have]> for AR {
     }
 }
 
-#[cfg(feature = "sync")]
 impl From<&[automerge_sync::Capability]> for AR {
     fn from(value: &[automerge_sync::Capability]) -> Self {
         AR(value
@@ -652,7 +641,6 @@ impl From<&[automerge_sync::Capability]> for AR {
     }
 }
 
-#[cfg(feature = "sync")]
 impl From<automerge_sync::MessageFlags> for AR {
     fn from(flags: automerge_sync::MessageFlags) -> Self {
         let mut arr = Vec::new();
@@ -669,7 +657,6 @@ impl From<automerge_sync::MessageFlags> for AR {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for ChunkList {
     type Error = error::BadChunkList;
 
@@ -692,7 +679,6 @@ impl TryFrom<JS> for ChunkList {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for Option<MessageFlags> {
     type Error = error::BadCapabilities;
 
@@ -705,7 +691,6 @@ impl TryFrom<JS> for Option<MessageFlags> {
     }
 }
 
-#[cfg(feature = "sync")]
 impl TryFrom<JS> for MessageFlags {
     type Error = error::BadCapabilities;
 
@@ -1009,21 +994,18 @@ pub(crate) fn import_obj(
     }
 }
 
-/// Parse a JS array of `"seq@actor"` strings as heads ([`am::ChangeId`]s).
-pub(crate) fn get_heads(heads: JsValue) -> Result<Option<Vec<am::ChangeId>>, error::BadChangeIds> {
+pub(crate) fn get_heads(heads: JsValue) -> Result<Option<Vec<ChangeHash>>, error::BadChangeHashes> {
     if heads.is_undefined() || heads.is_null() {
         return Ok(None);
     }
     let Ok(heads) = heads.dyn_into::<js_sys::Array>() else {
-        return Err(error::BadChangeIds::NotArray);
+        return Err(error::BadChangeHashes::NotArray);
     };
     heads
         .iter()
         .enumerate()
         .map(|(i, v)| {
-            let s = v.as_string().ok_or(error::BadChangeIds::NotAString(i))?;
-            s.parse::<am::ChangeId>()
-                .map_err(|e| error::BadChangeIds::BadElem(i, e))
+            ChangeHash::try_from(JS(v)).map_err(|e| error::BadChangeHashes::BadElem(i, e))
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Some)
@@ -2038,22 +2020,6 @@ pub(crate) mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    pub enum BadChangeIds {
-        #[error("the heads were not an array of change id strings")]
-        NotArray,
-        #[error("head {0} was not a string")]
-        NotAString(usize),
-        #[error("could not parse change id {0}: {1}")]
-        BadElem(usize, automerge::ParseChangeIdError),
-    }
-
-    impl From<BadChangeIds> for JsValue {
-        fn from(e: BadChangeIds) -> Self {
-            JsValue::from(e.to_string())
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
     pub enum BadChangeHashSet {
         #[error("not an object")]
         NotObject,
@@ -2079,7 +2045,6 @@ pub(crate) mod error {
         }
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadSyncState {
         #[error(transparent)]
@@ -2102,7 +2067,6 @@ pub(crate) mod error {
         BadTheirCapabilities(BadCapabilities),
     }
 
-    #[cfg(feature = "sync")]
     impl From<BadSyncState> for JsValue {
         fn from(e: BadSyncState) -> Self {
             JsValue::from(e.to_string())
@@ -2135,7 +2099,6 @@ pub(crate) mod error {
         }
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadHave {
         #[error("bad lastSync: {0}")]
@@ -2146,7 +2109,6 @@ pub(crate) mod error {
         GetHaveProp(#[from] GetProp),
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadHaves {
         #[error("value was not an array")]
@@ -2155,7 +2117,6 @@ pub(crate) mod error {
         BadElem(usize, BadHave),
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadBloom {
         #[error("the value was not a Uint8Array")]
@@ -2244,7 +2205,6 @@ pub(crate) mod error {
         }
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadSyncMessage {
         #[error(transparent)]
@@ -2267,7 +2227,6 @@ pub(crate) mod error {
         WholeDocInV1,
     }
 
-    #[cfg(feature = "sync")]
     impl From<BadSyncMessage> for JsValue {
         fn from(e: BadSyncMessage) -> Self {
             JsValue::from(e.to_string())
@@ -2331,7 +2290,6 @@ pub(crate) mod error {
     #[error("not a Uint8Array")]
     pub struct BadUint8Array;
 
-    #[cfg(feature = "sync")]
     #[derive(thiserror::Error, Debug)]
     pub enum BadCapabilities {
         #[error("capabilities was not an array")]
@@ -2342,7 +2300,6 @@ pub(crate) mod error {
         ElemNotValid(usize, String),
     }
 
-    #[cfg(feature = "sync")]
     #[derive(thiserror::Error, Debug)]
     pub enum BadChunkList {
         #[error("chunk list was not an array")]

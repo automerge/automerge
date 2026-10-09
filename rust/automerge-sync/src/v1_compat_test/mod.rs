@@ -7,10 +7,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::parse::{self, Input};
 use crate::{State as V2State, Sync};
-use automerge::{
-    transaction::Transactable, AutoCommit, Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
-    ROOT,
-};
+use automerge::next::AuditedAutomerge as Automerge;
+use automerge::next::{transaction::Transactable, AutoCommit, ReadDoc};
+use automerge::{AutomergeError, Change, ChangeHash, ROOT};
 
 mod bloom;
 mod state;
@@ -461,10 +460,8 @@ fn advance_heads(
 
 #[test]
 fn sync_from_v1_to_v2() {
-    let mut doc1 = AutoCommit::new();
-    doc1.enable_audit_mode().unwrap();
-    let mut doc2 = AutoCommit::new();
-    doc2.enable_audit_mode().unwrap();
+    let mut doc1 = AutoCommit::new().enable_audit_mode().unwrap();
+    let mut doc2 = AutoCommit::new().enable_audit_mode().unwrap();
 
     doc1.put(ROOT, "foo", "bar").unwrap();
     doc2.put(ROOT, "baz", "quux").unwrap();
@@ -486,10 +483,8 @@ fn sync_from_v1_to_v2() {
 
 #[test]
 fn sync_from_v2_to_v1() {
-    let mut doc1 = AutoCommit::new();
-    doc1.enable_audit_mode().unwrap();
-    let mut doc2 = AutoCommit::new();
-    doc2.enable_audit_mode().unwrap();
+    let mut doc1 = AutoCommit::new().enable_audit_mode().unwrap();
+    let mut doc2 = AutoCommit::new().enable_audit_mode().unwrap();
 
     doc1.put(ROOT, "foo", "bar").unwrap();
     doc2.put(ROOT, "baz", "quux").unwrap();
@@ -513,8 +508,7 @@ fn sync_from_v2_to_v1() {
 fn sync_v1_to_v2_with_compressed_change() {
     // Reproduce an issue where the v2 peer was sending changes as compressed bytes rather than
     // uncompressed, which the old implementation couldn't handle.
-    let mut doc1 = AutoCommit::new();
-    doc1.enable_audit_mode().unwrap();
+    let mut doc1 = AutoCommit::new().enable_audit_mode().unwrap();
     let list = doc1
         .put_object(ROOT, "list", automerge::ObjType::List)
         .unwrap();
@@ -523,8 +517,7 @@ fn sync_v1_to_v2_with_compressed_change() {
     }
     doc1.commit().unwrap();
 
-    let mut doc2 = AutoCommit::new();
-    doc2.enable_audit_mode().unwrap();
+    let mut doc2 = AutoCommit::new().enable_audit_mode().unwrap();
 
     let mut sync_state2 = V2State::new();
     let mut sync_state1 = State::new();

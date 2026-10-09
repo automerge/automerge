@@ -1,41 +1,22 @@
-//! Lazy actor renumbering.
-//!
-//! The op columns compare actors by index, which requires indexes to
-//! order consistently with the (sorted) actor list. Inserting an actor
-//! mid-list renumbers every index at or after it — historically an
-//! O(document) re-encode of all four actor columns per new actor.
-//!
-//! [`ActorMap`] defers that: the columns keep their existing *stored*
-//! codes (a new actor takes a fresh appended code), and an O(#actors)
-//! side table maps stored ↔ *logical* (the true sorted index). This is
-//! sound because the actor columns are RLE — a bijection on values
-//! preserves equality, so runs, slabs and tree structure are all
-//! remap-invariant; only the value interpretation shifts.
-//!
-//! [`MappedColumn`] / [`MappedIter`] wrap the raw hexane column and
-//! iterator behind the same surface, translating at the boundary:
-//! reads come out logical, writes go in logical, equality searches
-//! translate the target once, order searches walk runs translating per
-//! run (their windows are counter-narrowed and tiny). After a load the
-//! map is identity (the wire is canonical) and everything delegates
-//! straight through; only documents with deferred inserts pay the
-//! translation.
+//! Lazy actor renumbering: inserting an actor mid-list would renumber
+//! every actor index in the op columns, an O(document) re-encode. Instead
+//! the columns keep their stored codes and an [`ActorMap`] translates
+//! stored <-> logical (sorted) indexes. A bijection preserves run equality,
+//! so slabs are untouched.
 
 use crate::op_set2::types::ActorIdx;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-/// The stored ↔ logical actor-index bijection, shared (via `Arc`) by
-/// the four actor columns of an op set. Copy-on-write: an actor
-/// insert builds the successor map and the op set swaps the `Arc`s.
+/// The stored <-> logical actor-index bijection, shared by the actor
+/// columns of an op set.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct ActorMap {
-    /// stored code -> logical index; empty while the map is identity
+    /// empty while the map is identity
     to_logical: Vec<u32>,
-    /// logical index -> stored code; empty while the map is identity
+    /// empty while the map is identity
     to_stored: Vec<u32>,
-    /// bumped on every non-append change — [`MappedColumn::copy_ranges`]
-    /// requires equal versions before adopting slabs
+    /// bumped on every non-append change; not unique across independent maps
     version: u64,
 }
 
@@ -52,9 +33,8 @@ impl ActorMap {
         self.version
     }
 
-    /// stored -> logical
     #[inline]
-    pub(crate) fn log(&self, s: ActorIdx) -> ActorIdx {
+    pub(crate) fn logical(&self, s: ActorIdx) -> ActorIdx {
         if self.to_logical.is_empty() {
             s
         } else {
@@ -62,9 +42,8 @@ impl ActorMap {
         }
     }
 
-    /// logical -> stored
     #[inline]
-    pub(crate) fn sto(&self, l: ActorIdx) -> ActorIdx {
+    pub(crate) fn stored(&self, l: ActorIdx) -> ActorIdx {
         if self.to_stored.is_empty() {
             l
         } else {
@@ -72,14 +51,10 @@ impl ActorMap {
         }
     }
 
-    /// The successor map after inserting a new actor at sorted position
-    /// `logical`, with `len` actors existing before the insert. The new
-    /// actor takes a fresh appended stored code; every logical index at
-    /// or after the insertion point shifts up. Appending (`logical ==
-    /// len`) onto an identity map stays identity.
+    /// The map after inserting a new actor at sorted position `logical`,
+    /// with `len` actors existing before the insert. O(actors).
     pub(crate) fn insert(&self, logical: usize, len: usize) -> Arc<Self> {
         if self.is_identity() && logical == len {
-            // appended actors keep stored == logical
             return Arc::new(self.clone());
         }
         let mut to_logical = if self.to_logical.is_empty() {
@@ -98,7 +73,6 @@ impl ActorMap {
                 *l += 1;
             }
         }
-        // fresh stored code for the new actor
         to_logical.push(logical as u32);
         to_stored.insert(logical, len as u32);
         Arc::new(ActorMap {
@@ -128,9 +102,7 @@ impl MapActor for Option<ActorIdx> {
     }
 }
 
-/// An actor column in *stored* space presenting a logical-space
-/// surface, duck-typed to the subset of the raw [`hexane::Column`] API
-/// the op columns use.
+/// An actor column whose reads and writes are in logical space.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MappedColumn<T>
 where
@@ -151,8 +123,7 @@ where
         }
     }
 
-    /// Wrap a column whose values are already canonical (identity map)
-    /// — the load paths.
+    /// Wrap a column whose values are already logical.
     pub(crate) fn identity(col: hexane::Column<T>) -> Self {
         MappedColumn {
             col,
@@ -160,13 +131,10 @@ where
         }
     }
 
-    /// [`hexane::Column::load`], wrapped with the identity map (the
-    /// wire is canonical).
     pub(crate) fn load(data: &[u8]) -> Result<Self, hexane::PackError> {
         Ok(Self::identity(hexane::Column::load(data)?))
     }
 
-    /// [`hexane::Column::load_with`], wrapped with the identity map.
     pub(crate) fn load_with<'a, F>(
         data: &'a [u8],
         opts: hexane::LoadOpts<F>,
@@ -181,17 +149,15 @@ where
         &self.map
     }
 
-    /// The column itself, for a cursor edit. Identity-mapped only: a
-    /// value written through the cursor goes in verbatim, which is only
-    /// right where stored and logical space are the same — the fragment
-    /// load paths, which are the only editors.
+    /// The raw column, for a cursor edit.
+    ///
+    /// Panics unless the map is identity.
     pub(crate) fn identity_mut(&mut self) -> &mut hexane::Column<T> {
         assert!(self.map.is_identity(), "cursor edit on a mapped column");
         &mut self.col
     }
 
-    /// Install the successor map after an actor insert — O(1), no slab
-    /// access. Stored codes are unchanged; their interpretation shifts.
+    /// O(1): stored codes are unchanged, only their interpretation shifts.
     pub(crate) fn set_map(&mut self, map: Arc<ActorMap>) {
         self.map = map;
     }
@@ -208,8 +174,7 @@ where
     T: for<'a> hexane::ColumnValueRef<Get<'a> = T>,
     T: hexane::AsColumnRef<T>,
 {
-    /// Build from logical-space values, adopting `map` (translating
-    /// each value to stored space on the way in).
+    /// Build from logical values, adopting `map`.
     pub(crate) fn from_logical_values(vals: Vec<T>, map: Arc<ActorMap>) -> Self {
         let col = if map.is_identity() {
             hexane::Column::from_values(vals)
@@ -217,7 +182,7 @@ where
             let m = map.clone();
             hexane::Column::from_values(
                 vals.into_iter()
-                    .map(|v| v.map_actor(|a| m.sto(a)))
+                    .map(|v| v.map_actor(|a| m.stored(a)))
                     .collect::<Vec<_>>(),
             )
         };
@@ -230,12 +195,12 @@ where
     }
 
     #[inline]
-    fn log_val(&self, v: T) -> T {
+    pub(crate) fn log_val(&self, v: T) -> T {
         if self.map.is_identity() {
             v
         } else {
             let map = &self.map;
-            v.map_actor(|a| map.log(a))
+            v.map_actor(|a| map.logical(a))
         }
     }
 
@@ -245,6 +210,11 @@ where
             iter: self.col.iter(),
             map: self.map.clone(),
         }
+    }
+
+    /// Yields stored values: map them through [`Self::log_val`].
+    pub(crate) fn stored_iter(&self) -> hexane::Iter<'_, T> {
+        self.col.iter()
     }
 
     #[inline]
@@ -263,7 +233,6 @@ where
     pub(crate) fn splice<I>(&mut self, index: usize, del: usize, values: I)
     where
         I: IntoIterator<Item = T>,
-        // EXPERIMENT: required because hexane's splice now goes through edit()
         T::Encoding<hexane::Leb128>: hexane::edit::SlabEdit<Value = T>,
     {
         if self.map.is_identity() {
@@ -273,25 +242,15 @@ where
             self.col.splice(
                 index,
                 del,
-                values.into_iter().map(move |v| v.map_actor(|a| map.sto(a))),
+                values
+                    .into_iter()
+                    .map(move |v| v.map_actor(|a| map.stored(a))),
             );
         }
     }
 
-    /// Multi-point copy. Adopting the source's slabs is only sound when
-    /// both sides read their stored codes through the same bijection —
-    /// so the test is that the maps *agree*, not merely that they have
-    /// the same `version()`. (Versions count edits to one lineage, so
-    /// two maps built independently can share a version and disagree on
-    /// every code.)
-    ///
-    /// Pointer equality is the common case — every producer shares the
-    /// document's map — but it is not the only one: an empty document
-    /// and a freshly loaded fragment each mint their own identity map,
-    /// and those are interchangeable. Comparing the maps catches that,
-    /// and costs nothing when both are identity (two empty vecs).
-    /// Getting this wrong is silent and expensive rather than incorrect:
-    /// the fallback below translates per value.
+    /// Multi-point copy. Adopts `src`'s slabs when both maps agree;
+    /// otherwise translates value by value, which is much slower.
     pub(crate) fn copy_ranges<I>(&mut self, src: MappedColumn<T>, splices: I)
     where
         I: IntoIterator<Item = hexane::Splice>,
@@ -309,7 +268,7 @@ where
                         if self.map.is_identity() {
                             v
                         } else {
-                            v.map_actor(|a| self.map.sto(a))
+                            v.map_actor(|a| self.map.stored(a))
                         }
                     })
                     .collect();
@@ -319,21 +278,18 @@ where
         }
     }
 
-    /// Rewrite into a (possibly different) target space: values become
-    /// `target.sto(f(logical))` and the column adopts `target`'s map.
-    /// This is the fragment-load remap — the same single O(fragment)
-    /// pass the change set→doc translation always needed.
+    /// Map every logical value through `f` and adopt `target`'s map.
     pub(crate) fn remap_into<F>(&mut self, f: &F, target: Arc<ActorMap>)
     where
         F: Fn(ActorIdx) -> ActorIdx,
     {
         let map = self.map.clone();
         self.col
-            .remap(|v: T| v.map_actor(|a| target.sto(f(map.log(a)))));
+            .remap(|v: T| v.map_actor(|a| target.stored(f(map.logical(a)))));
         self.map = target;
     }
 
-    /// Logical-space rewrite in place (keeps the current map).
+    /// Map every logical value through `f`, keeping the current map.
     pub(crate) fn remap<F>(&mut self, f: &F)
     where
         F: Fn(ActorIdx) -> ActorIdx,
@@ -342,23 +298,21 @@ where
         self.remap_into(f, target);
     }
 
-    /// A canonical (logical-space) column — the save paths. Identity
-    /// maps hand back a cheap clone (Arc'd slabs).
     fn canonical(&self) -> hexane::Column<T> {
         let mut c = self.col.clone();
         if !self.map.is_identity() {
             let map = self.map.clone();
-            c.remap(move |v: T| v.map_actor(|a| map.log(a)));
+            c.remap(move |v: T| v.map_actor(|a| map.logical(a)));
         }
         c
     }
 
-    /// Rewrite stored codes to logical and drop the map. Rare paths
-    /// (actor removal) that must see raw == logical call this first.
+    /// Rewrite stored codes to logical and drop the map. O(column) unless
+    /// the map is already identity.
     pub(crate) fn flush(&mut self) {
         if !self.map.is_identity() {
             let map = self.map.clone();
-            self.col.remap(move |v: T| v.map_actor(|a| map.log(a)));
+            self.col.remap(move |v: T| v.map_actor(|a| map.logical(a)));
         }
         self.map = ActorMap::identity();
     }
@@ -388,10 +342,8 @@ where
         self.canonical().save_to_unless(out, unless)
     }
 
-    /// Narrow `range` to the rows holding `value`. Rows in the range
-    /// are sorted by *logical* value (a counter-narrowed group), so the
-    /// mapped path walks its (few) runs translating per run; identity
-    /// delegates to the raw binary search.
+    /// Narrow `range`, sorted by logical value, to the rows holding
+    /// `value`. O(log n) for an identity map, O(runs in range) otherwise.
     pub(crate) fn scope_to_value(
         &self,
         value: T,
@@ -414,7 +366,7 @@ where
         let mut pos = start;
         let mut found: Option<std::ops::Range<usize>> = None;
         while let Some(run) = it.next_run() {
-            match run.value.map_actor(|a| self.map.log(a)).cmp(&value) {
+            match run.value.map_actor(|a| self.map.logical(a)).cmp(&value) {
                 std::cmp::Ordering::Less => pos += run.count,
                 std::cmp::Ordering::Equal => {
                     let f = found.get_or_insert(pos..pos);
@@ -427,8 +379,6 @@ where
         found.unwrap_or(pos..pos)
     }
 }
-
-// ── the mapped iterator: hexane::Iter's surface, logical values ──────
 
 #[derive(Debug, Clone)]
 pub(crate) struct MappedIter<'a, T>
@@ -446,12 +396,12 @@ where
     T: hexane::AsColumnRef<T>,
 {
     #[inline]
-    fn log_val(&self, v: T) -> T {
+    pub(crate) fn log_val(&self, v: T) -> T {
         if self.map.is_identity() {
             v
         } else {
             let map = &self.map;
-            v.map_actor(|a| map.log(a))
+            v.map_actor(|a| map.logical(a))
         }
     }
 
@@ -502,10 +452,9 @@ where
         })
     }
 
-    /// Order search within a (small, counter-narrowed) window: walk
-    /// runs translating per run; identity delegates to the raw binary
-    /// search. Returns the matching sub-range, or an empty range at
-    /// the insertion point on a miss.
+    /// The sub-range of `range` holding `target`, or an empty range at the
+    /// insertion point on a miss; leaves the iterator at its start.
+    /// O(log n) for an identity map, O(runs in range) otherwise.
     pub(crate) fn seek_to_value(
         &mut self,
         target: T,
@@ -514,8 +463,6 @@ where
         if self.map.is_identity() {
             return self.iter.seek_to_value(target, range);
         }
-        // mirror the raw path exactly: scan on a max-clamped clone,
-        // leave self parked at the found range's start
         let start = match range.start_bound() {
             std::ops::Bound::Unbounded => 0,
             std::ops::Bound::Included(&s) => s,
@@ -534,7 +481,7 @@ where
         let mut pos = checkpoint.pos();
         let mut found: Option<std::ops::Range<usize>> = None;
         while let Some(run) = checkpoint.next_run() {
-            match run.value.map_actor(|a| self.map.log(a)).cmp(&target) {
+            match run.value.map_actor(|a| self.map.logical(a)).cmp(&target) {
                 std::cmp::Ordering::Less => pos += run.count,
                 std::cmp::Ordering::Equal => {
                     let f = found.get_or_insert(pos..pos);
@@ -561,7 +508,6 @@ where
     T: for<'x> hexane::ColumnValueRef<Get<'x> = T>,
     T: hexane::AsColumnRef<T>,
 {
-    /// Wrap a raw iterator with the identity map (test helpers).
     #[cfg(test)]
     pub(crate) fn raw(iter: hexane::Iter<'a, T>) -> Self {
         MappedIter {
@@ -653,7 +599,7 @@ mod tests {
         let m = m.insert(0, 0);
         let m = m.insert(1, 1);
         assert!(m.is_identity());
-        assert_eq!(m.log(ActorIdx(1)), ActorIdx(1));
+        assert_eq!(m.logical(ActorIdx(1)), ActorIdx(1));
     }
 
     #[test]
@@ -663,31 +609,23 @@ mod tests {
         let m = m.insert(1, 1); // actor C -> stored 1, logical 1
         let m = m.insert(1, 2); // actor B between them -> stored 2, logical 1
         assert!(!m.is_identity());
-        assert_eq!(m.log(ActorIdx(0)), ActorIdx(0)); // A
-        assert_eq!(m.log(ActorIdx(1)), ActorIdx(2)); // C shifted
-        assert_eq!(m.log(ActorIdx(2)), ActorIdx(1)); // B fresh
+        assert_eq!(m.logical(ActorIdx(0)), ActorIdx(0)); // A
+        assert_eq!(m.logical(ActorIdx(1)), ActorIdx(2)); // C shifted
+        assert_eq!(m.logical(ActorIdx(2)), ActorIdx(1)); // B fresh
         for l in 0..3u32 {
-            assert_eq!(m.log(m.sto(ActorIdx(l))), ActorIdx(l));
+            assert_eq!(m.logical(m.stored(ActorIdx(l))), ActorIdx(l));
         }
     }
 
-    /// Two maps built independently from the same starting point end up
-    /// with the same `version` but disagree on every code — the reason
-    /// [`MappedColumn::copy_ranges`] tests identity with `Arc::ptr_eq`
-    /// and not version equality.
     #[test]
     fn same_version_maps_are_not_interchangeable() {
         let a = ActorMap::identity().insert(0, 2);
         let b = ActorMap::identity().insert(1, 2);
         assert_eq!(a.version(), b.version(), "versions collide");
         assert!(!Arc::ptr_eq(&a, &b));
-        // ...and they really are different bijections
-        assert_ne!(a.log(ActorIdx(0)), b.log(ActorIdx(0)));
+        assert_ne!(a.logical(ActorIdx(0)), b.logical(ActorIdx(0)));
     }
 
-    /// A copy between columns on different maps must translate rather
-    /// than adopt slabs: the destination's logical values are what the
-    /// caller wrote on either side, never the raw stored codes.
     #[test]
     fn copy_ranges_translates_across_distinct_maps() {
         let dst_map = ActorMap::identity().insert(0, 2);
@@ -699,7 +637,6 @@ mod tests {
         let mut dst = MappedColumn::from_logical_values(logical(&[0, 1]), dst_map.clone());
         let src = MappedColumn::from_logical_values(logical(&[2, 1, 0]), src_map);
 
-        // append src's rows 1..3 to the end of dst
         dst.copy_ranges(
             src,
             [hexane::Splice {
@@ -709,16 +646,10 @@ mod tests {
             }],
         );
 
-        // the values that went in are the values that come out — a
-        // version-equality check here would have adopted src's slabs and
-        // reinterpreted its stored codes through dst's map
         assert_eq!(dst.to_vec(), logical(&[0, 1, 1, 0]));
         assert!(Arc::ptr_eq(dst.actor_map(), &dst_map), "map unchanged");
     }
 
-    /// A column written pre-insert, read post-insert: the stored slabs
-    /// never change, the surface renumbers, and every access path
-    /// (get, iter, run walk, order search, save) agrees.
     #[test]
     fn mapped_column_round_trip() {
         // two actors (stored 0, 1), then a third sorts between them
@@ -732,11 +663,9 @@ mod tests {
         assert_eq!(col.get(2), Some(ActorIdx(2)));
         assert_eq!(col.iter().collect::<Vec<_>>(), logical);
 
-        // writes go in logical, come back logical
         col.splice(5, 0, [ActorIdx(1)]);
         assert_eq!(col.get(5), Some(ActorIdx(1)));
 
-        // run walk translates per run
         let runs: Vec<_> = {
             let mut it = col.iter();
             std::iter::from_fn(move || it.next_run()).collect()
@@ -747,15 +676,12 @@ mod tests {
             .collect();
         assert_eq!(flat, col.to_vec());
 
-        // order search in a sorted window: rows 2..3 hold logical 2
         assert_eq!(col.scope_to_value(ActorIdx(2), 2..4), 2..4);
         assert_eq!(col.scope_to_value(ActorIdx(1), 2..4), 2..2);
 
-        // save is canonical (logical) — equal to a plain column's
         let plain = hexane::Column::<ActorIdx>::from_values(col.to_vec());
         assert_eq!(col.save(), plain.save());
 
-        // flush rewrites in place without changing the surface
         let before = col.to_vec();
         col.flush();
         assert!(col.actor_map().is_identity());

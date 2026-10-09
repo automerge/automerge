@@ -397,8 +397,7 @@ impl<'a> OpIdIter<'a> {
 }
 
 impl OpIdIter<'_> {
-    // FIXME this needs test
-    // this is only valid on a range of sorted op ids
+    /// Only valid on a range of sorted op ids.
     pub(crate) fn seek_to_value(&mut self, target: &OpId) -> Range<usize> {
         let range = self.ctr.seek_to_value(target.counter() as u32, ..);
         let range = self.actor.seek_to_value(target.actoridx(), range);
@@ -406,10 +405,8 @@ impl OpIdIter<'_> {
         range
     }
 
-    /// A scan miss parks whichever sub-cursor ran ahead at its window
-    /// end; the pair must leave in step or every later advance (which
-    /// moves both by the same count, keyed off the actor position)
-    /// carries the skew forward and later windows resolve garbage.
+    // the cursors must leave a miss in step: later advances move both by
+    // the same count
     fn park_miss(&mut self) {
         let max = self.actor.end_pos();
         self.actor.advance_to(max);
@@ -418,7 +415,7 @@ impl OpIdIter<'_> {
         debug_assert_eq!(self.ctr.end_pos(), self.actor.end_pos());
     }
 
-    // this will work on unsorted ids
+    /// Works on unsorted ids.
     pub(crate) fn scan_to_value(&mut self, target: &OpId) -> Option<usize> {
         loop {
             let Some(pos) = self.ctr.scan_to_value(target.counter() as u32) else {
@@ -435,15 +432,9 @@ impl OpIdIter<'_> {
         None
     }
 
-    /// Scan forward for the first op id *less than* `target` — the
-    /// insert-slot rule: a new element belongs immediately before the
-    /// first insert with a smaller id.
-    ///
-    /// Works on unsorted ids: any counter at or below the target's can
-    /// host a lesser id, so the counter column does an aggregate-pruned
-    /// interval scan and the actor column breaks equal-counter ties.
-    /// Returns the position and the id found there; on a hit both
-    /// columns have consumed through it.
+    /// Scan forward for the first op id less than `target`, returning its
+    /// position and id; on a hit the cursor is just past it. Works on
+    /// unsorted ids.
     pub(crate) fn scan_to_lesser(&mut self, target: OpId) -> Option<(usize, OpId)> {
         loop {
             let Some((pos, ctr)) = self.ctr.scan_to_range(..=target.counter() as u32) else {
@@ -456,7 +447,6 @@ impl OpIdIter<'_> {
             if found < target {
                 return Some((pos, found));
             }
-            // equal counter, actor at or above the target's — not lesser
         }
         self.park_miss();
         None
@@ -562,16 +552,11 @@ impl Iterator for InsertIter<'_> {
     }
 }
 
-/// Forward-only element-id reads at scattered rows: the key columns
-/// without the `key_str` half, which a sequence row never carries.
-///
-/// Used by the index builder's fragment register split, where only the
-/// non-insert rows are read and the insert rows in between are skipped.
+/// Forward-only element-id reads at scattered rows.
 #[derive(Clone, Debug)]
 pub(crate) struct ElemIdIter<'a> {
     key_actor: MappedIter<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaIter<'a, Option<u32>>,
-    /// the row both columns stand on
     pos: usize,
 }
 
@@ -996,13 +981,8 @@ impl Shiftable for ActionValueIter<'_> {
     }
 }
 
-/// Forward-only text widths: [`ActionValueIter`] plus the encoding to
-/// measure with.
-///
-/// A row's text width is a function of its action and value alone, so
-/// this reads only op columns — none that carry an index. That is what
-/// lets it be held open beside a `hexane::Edit` on the text index and
-/// stepped along with it, instead of materializing an [`Op`] per row.
+/// Forward-only text widths, read from the op columns alone (never the
+/// indexes) without materializing ops.
 #[derive(Clone, Debug)]
 pub(crate) struct WidthIter<'a> {
     ops: ActionValueIter<'a>,
@@ -1026,11 +1006,7 @@ impl<'a> WidthIter<'a> {
     }
 
     /// The text width of the row at `pos`, which must be at or after the
-    /// last row read.
-    ///
-    /// Mirrors `Op::width(SequenceType::Text, _)`: a mark measures zero,
-    /// a string measures itself, and everything else is one object
-    /// replacement character.
+    /// last row read; mirrors `Op::width(SequenceType::Text, _)`.
     ///
     /// Panics if `pos` is past the end of the columns.
     pub(crate) fn seek_to(&mut self, pos: usize) -> u32 {
@@ -1153,8 +1129,7 @@ impl Shiftable for ValueIter<'_> {
         self.meta.end_pos()
     }
 
-    // `raw` is byte-addressed and repositions itself from the meta
-    // prefix on every jump, so only the meta window needs truncating
+    // `raw` repositions itself from the meta prefix on every jump
     fn set_max(&mut self, pos: usize) {
         self.meta.set_max(pos);
     }
@@ -1271,15 +1246,13 @@ impl Shiftable for SuccIterIter<'_> {
         self.count.end_pos()
     }
 
-    // the sub-columns are succ-entry addressed and follow the count
-    // column's prefix, so only the count window needs truncating
+    // the sub-columns follow the count column's prefix
     fn set_max(&mut self, pos: usize) {
         self.count.set_max(pos);
     }
 
     fn shift(&mut self, range: Range<usize>) {
         self.count.shift(range);
-        // the count prefix at the new position locates the sub-columns
         let sub_start = self.count.total() as usize;
         self.actor.advance_to(sub_start);
         self.ctr.advance_to(sub_start);
@@ -1311,10 +1284,8 @@ impl Shiftable for SuccIterIter<'_> {
 }
 
 impl<'a> SuccIterIter<'a> {
+    /// [`Shiftable::shift_next`] without building the successor cursors.
     pub(crate) fn shift_skip_next(&mut self, range: Range<usize>) -> Option<()> {
-        // Like shift_next(), but used when the caller already knows this op is
-        // not visible and therefore does not need a SuccCursors value. Avoid
-        // cloning the successor sub-column cursors just to discard them.
         let pv = self.count.shift_next(range)?;
         let sub_pos = pv.total() as usize;
         self.actor.advance_to(sub_pos);
@@ -1359,9 +1330,8 @@ impl<'a> SuccIterIter<'a> {
         Ok(result)
     }
 
+    /// [`Iterator::next`] without building the successor cursors.
     pub(crate) fn skip_next(&mut self) -> Option<()> {
-        // Like next(), but only advances over the successor run. This is the
-        // sequential counterpart to shift_skip_next().
         let num_succ = self.count.next()?.value as usize;
         self.actor.advance_by(num_succ);
         self.ctr.advance_by(num_succ);
@@ -1438,20 +1408,20 @@ impl<'a> Iterator for SuccIterIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::automerge::Automerge;
     use crate::iter::tools::{SkipIter, SkipWrap};
-    use crate::transaction::Transactable;
+    use crate::tx::Transactable;
     use crate::types::{ActorId, OpId};
-    use crate::{Automerge, ROOT};
+    use crate::ROOT;
 
     #[test]
     fn scan_to_lesser_finds_first_smaller_id() {
-        // three actors' concurrent list inserts give unsorted ids in
-        // document order
+        // concurrent inserts give unsorted ids in document order
         let a1 = ActorId::try_from("aaaaaaaa").unwrap();
         let a2 = ActorId::try_from("bbbbbbbb").unwrap();
         let a3 = ActorId::try_from("cccccccc").unwrap();
 
-        let mut doc = crate::AutoCommit::new().with_actor(a1);
+        let mut doc = crate::autocommit::AutoCommit::new().with_actor(a1);
         let list = doc.put_object(&ROOT, "list", crate::ObjType::List).unwrap();
         for i in 0..8 {
             doc.insert(&list, i, i as i64).unwrap();
@@ -1486,7 +1456,6 @@ mod tests {
                 assert_eq!(got.map(|(p, _)| p), want, "from {from} target {target:?}");
                 if let Some((pos, id)) = got {
                     assert_eq!(id, ids[pos], "the id found at the hit");
-                    // both columns consumed through the hit
                     assert_eq!(iter.get_pos(), pos + 1);
                 }
             }

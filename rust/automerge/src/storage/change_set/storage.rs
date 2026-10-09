@@ -5,14 +5,17 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use crate::op_set2::change::ChangeCollector;
+use crate::op_set2::op::Op;
 use crate::op_set2::types::ActorIdx;
+use crate::op_set2::types::KeyRef;
 use crate::op_set2::OpSet;
 use crate::storage::change::{OpReadState, Unverified, Verified};
 use crate::storage::columns::compression;
 
 use crate::storage::{parse, RawColumns};
-use crate::types::{ActorId, ChangeHash};
+use crate::types::{ActorId, ChangeHash, ElemId, ObjId, OpId};
 use crate::Change;
+use std::collections::{HashMap, HashSet};
 
 use super::{
     ChangeSetChange, ChangeSetChangeCols, ChangeSetChangeIterUnverified, OpIterUnverified,
@@ -33,25 +36,11 @@ pub(crate) struct ChangeSetStorage<'a, OpReadState> {
     pub(crate) ops_data: Range<usize>,
     pub(crate) changes_meta: RawColumns<compression::Uncompressed>,
     pub(crate) changes_data: Range<usize>,
-    /// The member change metadata, decoded on demand and then shared.
-    ///
-    /// Decoding a member allocates a dep vector for it, so this is the
-    /// slow way to read members and nothing on the apply path uses it:
-    /// [`Self::member_ids`] gives the member index columnwise and the
-    /// change graph reads the rest of the columns directly. What is left
-    /// here is the row-shaped view — [`Self::to_changes`] and audit mode
-    /// — which wants every field of every member anyway.
+    /// Decoded on demand; allocates per member, so the apply path reads
+    /// [`Self::change_cols`] instead.
     pub(crate) changes: OnceLock<Vec<ChangeSetChange<'static>>>,
-    /// The op columns, decoded once, in *change set* actor space and without
-    /// indexes — everything [`OpSet::load_change_set_cols`] can establish
-    /// without a receiving document.
-    ///
-    /// The apply path takes this out and finishes it against the document
-    /// ([`OpSet::index_change_set`]), which is why `apply_change_set` consumes the
-    /// change set: the columns are moved into the document's op set, not read
-    /// from. Empty on the builder path (a change set being sent is never
-    /// applied) and after an apply has taken it; either way the next
-    /// reader re-loads from `bytes`.
+    /// The op columns in change set actor space, loaded at parse time.
+    /// Empty once taken, or if built locally; reloaded from `bytes` then.
     pub(crate) change_set_ops: OnceLock<OpSet>,
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
@@ -73,35 +62,12 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
         }
     }
 
-    /// The member change metadata as raw columns.
-    ///
-    /// The apply path reads members this way — one pass per column,
-    /// straight into the change graph's own columns — rather than through
-    /// [`Self::changes`], which materialises a struct (and a dep `Vec`)
-    /// per member.
     pub(crate) fn change_cols(&self) -> Result<ChangeSetChangeCols<'_>, ParseError> {
         ChangeSetChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
     }
 
-    /// Each member's actor and sequence number, read columnwise.
-    ///
-    /// This is the member index every applier needs first — to decide
-    /// which members the document already has, and to name a member's
-    /// node — so it is what a parse reads, in place of decoding every
-    /// member's full metadata into a [`ChangeSetChange`]. Two things are
-    /// checked, both of which a caller would otherwise have to guard on
-    /// every use:
-    ///
-    /// * actor indexes name an actor the change set carries
-    /// * sequence numbers are non-zero (a [`crate::ChangeId`] holds a
-    ///   `NonZeroU64`, and seq 0 would break the per-actor chain check)
-    ///
-    /// The member count is the `actor` column's length; the `seq` column
-    /// must match it. The rest of the member columns are validated where
-    /// they are read — see
-    /// [`ChangeGraph::add_change_set_members_cols`](crate::change_graph::ChangeGraph::add_change_set_members_cols)
-    /// and [`Self::changes`] — so that a malformed column costs one decode
-    /// rather than two.
+    /// Each member's actor and sequence number, checking that actors are
+    /// in range and sequence numbers non-zero. No other column is validated.
     pub(crate) fn member_ids(&self) -> Result<(Vec<ActorIdx>, Vec<NonZeroU64>), ParseError> {
         let bad = ParseError::InvalidChangeMetadata;
         let cols = self.change_cols()?;
@@ -125,7 +91,6 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
         Ok((actors, seqs))
     }
 
-    /// The member change metadata, decoding it on first call.
     pub(crate) fn changes(&self) -> Result<&[ChangeSetChange<'static>], ParseError> {
         if self.changes.get().is_none() {
             let decoded =
@@ -139,12 +104,7 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
             .expect("change metadata was just decoded"))
     }
 
-    /// The op columns in change set actor space, taken by value.
-    ///
-    /// The parse paths leave them here; this hands them over (the apply
-    /// merges them into a document, consuming them). A change set whose cache
-    /// is empty — built in-process, or applied once already — loads them
-    /// again from `bytes`.
+    /// Reloads from `bytes` if the op columns were already taken.
     pub(crate) fn take_change_set_ops(&mut self) -> Result<OpSet, ParseError> {
         if let Some(ops) = self.change_set_ops.take() {
             return Ok(ops);
@@ -162,8 +122,6 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
     }
 }
 
-/// Decode every member's change metadata, detached from `data` so the
-/// result can be cached next to the bytes it came from.
 fn decode_change_meta(
     changes_meta: &RawColumns<compression::Uncompressed>,
     data: &[u8],
@@ -173,8 +131,6 @@ fn decode_change_meta(
         .collect()
 }
 
-/// A pre-filled cache, for the parse paths to hand to the storage they
-/// build.
 fn primed<T>(value: T) -> OnceLock<T> {
     let cell = OnceLock::new();
     let _ = cell.set(value);
@@ -182,15 +138,9 @@ fn primed<T>(value: T) -> OnceLock<T> {
 }
 
 impl<'a> ChangeSetStorage<'a, Unverified> {
-    /// Parse the column section of a change set chunk — everything after the
-    /// fragment metadata prefix. There is no nested chunk header: these
-    /// columns are part of chunk [`ChunkType::ChangeSet`](crate::storage::ChunkType::ChangeSet), not a chunk of
-    /// their own.
     pub(crate) fn parse_columns(
         input: parse::Input<'a>,
     ) -> parse::ParseResult<'a, ChangeSetStorage<'a, Unverified>, ParseError> {
-        // positions tracked by the parser are absolute offsets within
-        // this buffer
         let full_bytes = input.bytes();
 
         // Parse the leading deps + actors, capturing the byte range so we
@@ -221,7 +171,6 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
         if let (Some(changes_meta), Some(ops_meta)) =
             (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
         {
-            // decoding the op columns is what validates them
             let change_set_ops = OpSet::load_change_set_cols(&ops_meta, ops.value, actors.len())
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
             return Ok((
@@ -272,7 +221,6 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
         out.extend_from_slice(&ops_data_buf);
         let new_ops_end = out.len();
 
-        // decoding the op columns is what validates them
         let change_set_ops =
             OpSet::load_change_set_cols(&ops_meta, &out[new_ops_start..new_ops_end], actors.len())
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
@@ -295,21 +243,9 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
         ))
     }
 
-    /// Promote to [`Verified`], checking anything parsing has not already
-    /// established.
-    ///
-    /// Nothing is left to check, and there is deliberately no row-by-row
-    /// walk here. `parse_columns` decodes the change metadata
-    /// (`Self::changes`) and the op columns (`Self::change_set_ops`, which runs
-    /// `column_validation`) — between them the same facts a document
-    /// establishes on its load path, reached the same way: by decoding the
-    /// columns once rather than materialising every row into a `ChangeSetOp`
-    /// and dropping it.
-    ///
-    /// Rows malformed in ways a column decode cannot see (a map op with a
-    /// null key, say) are caught by [`Self::to_changes`], which is the
-    /// path untrusted data takes — audit mode always reconstructs the
-    /// member changes rather than trusting the columns.
+    /// `parse_columns` has already validated the columns. Rows malformed in
+    /// ways a column decode cannot see (a map op with a null key, say) are
+    /// only caught by [`Self::to_changes`].
     pub(crate) fn verify(self) -> Result<ChangeSetStorage<'a, Verified>, ParseError> {
         Ok(ChangeSetStorage {
             bytes: self.bytes,
@@ -328,25 +264,12 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
 }
 
 impl ChangeSetStorage<'_, Verified> {
-    /// Rebuild the member [`Change`]s. The change set stores in-change set
-    /// relationships in the succ column (and elides delete ops whose
-    /// targets are all in-change set), so this inverts them back into pred
-    /// lists: a succ entry `(target -> s)` becomes a pred `target` on
-    /// op `s`, and a successor with no row of its own is an elided
-    /// delete, resurrected with its group's obj/key. Preds are merged
-    /// with the (external-only) pred column in ascending id order —
-    /// the order the document visits a group's rows in.
+    /// Rebuilds the member [`Change`]s, including the deletes that have no
+    /// row of their own.
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
-        use crate::op_set2::op::Op;
-        use crate::op_set2::types::KeyRef;
-        use crate::types::{ElemId, OpId};
-        use std::collections::{HashMap, HashSet};
-
         let change_meta = self.changes()?.to_vec();
         let mut collector = ChangeCollector::from_change_set_changes(change_meta, &self.actors);
 
-        // pass 1: row ids + the succ inversion (successor -> targets,
-        // accumulated in doc order = ascending id within a group)
         let mut rows: HashSet<OpId> = HashSet::new();
         let mut inverted: HashMap<OpId, Vec<OpId>> = HashMap::new();
         for bop in self.iter_ops_checked() {
@@ -357,11 +280,9 @@ impl ChangeSetStorage<'_, Verified> {
             }
         }
 
-        // pass 2: feed the rows with merged preds; emit each group's
-        // elided deletes when the group ends (their position within a
-        // change is fixed by their op counter, so only the group's
-        // obj/key needs to be current)
-        let mut last: Option<(crate::types::ObjId, KeyRef<'_>)> = None;
+        // an elided delete's position within its change is fixed by its
+        // counter, so it can be emitted whenever its key group ends
+        let mut last: Option<(ObjId, KeyRef<'_>)> = None;
         let mut group_dels: Vec<OpId> = Vec::new();
         for bop in self.iter_ops_checked() {
             let bop = bop?;
@@ -373,11 +294,7 @@ impl ChangeSetStorage<'_, Verified> {
             let next = Some((bop.op.obj, key));
             if last != next {
                 if let Some((obj, key)) = last.take() {
-                    for d in group_dels.drain(..) {
-                        let mut pred = inverted.remove(&d).unwrap_or_default();
-                        pred.sort_unstable();
-                        collector.add(Op::del(d, obj, key.clone()).build(pred));
-                    }
+                    add_elided_deletes(&mut collector, &mut inverted, &mut group_dels, obj, key);
                 }
                 last = next;
             }
@@ -387,18 +304,14 @@ impl ChangeSetStorage<'_, Verified> {
                 }
             }
             let mut op = bop.op;
-            if let Some(internal) = inverted.remove(&op.id) {
-                op.pred.extend(internal);
+            if let Some(member_preds) = inverted.remove(&op.id) {
+                op.pred.extend(member_preds);
                 op.pred.sort_unstable();
             }
             collector.add(op);
         }
         if let Some((obj, key)) = last.take() {
-            for d in group_dels.drain(..) {
-                let mut pred = inverted.remove(&d).unwrap_or_default();
-                pred.sort_unstable();
-                collector.add(Op::del(d, obj, key.clone()).build(pred));
-            }
+            add_elided_deletes(&mut collector, &mut inverted, &mut group_dels, obj, key);
         }
 
         let change_set = collector
@@ -407,12 +320,8 @@ impl ChangeSetStorage<'_, Verified> {
         Ok(change_set)
     }
 
-    /// Rows with their decode errors intact.
-    ///
-    /// `Verified` means the *columns* parsed, not that every row is
-    /// meaningful — a malformed row (a map op with a null key, say) only
-    /// shows up when it is read. Readers that may see untrusted data use
-    /// this and propagate; the fragment fast path takes rows on trust.
+    /// Yields an error for each malformed row (see [`Self::verify`]
+    /// for which rows the column validation misses).
     pub(crate) fn iter_ops_checked(&self) -> OpIterUnverified<'_> {
         let bytes = &self.bytes[self.ops_data.clone()];
         OpIterUnverified::new(&self.ops_meta, bytes)
@@ -420,5 +329,19 @@ impl ChangeSetStorage<'_, Verified> {
 
     pub(crate) fn deps(&self) -> &[ChangeHash] {
         &self.deps
+    }
+}
+
+fn add_elided_deletes<'a>(
+    collector: &mut ChangeCollector<'a>,
+    member_preds: &mut HashMap<OpId, Vec<OpId>>,
+    dels: &mut Vec<OpId>,
+    obj: ObjId,
+    key: KeyRef<'a>,
+) {
+    for d in dels.drain(..) {
+        let mut pred = member_preds.remove(&d).unwrap_or_default();
+        pred.sort_unstable();
+        collector.add(Op::del(d, obj, key.clone()).build(pred));
     }
 }

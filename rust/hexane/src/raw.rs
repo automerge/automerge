@@ -457,6 +457,31 @@ impl RawColumn {
         start..out.len()
     }
 
+    /// Append the bytes in `range` to `out`, across slab boundaries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range` extends past the end of the column.
+    pub fn extend_range_to(&self, range: Range<usize>, out: &mut Vec<u8>) {
+        assert!(
+            range.end <= self.total_len,
+            "range past the end of the column"
+        );
+        let mut pos = 0;
+        for slab in &self.slabs {
+            let slab_range = pos..pos + slab.data.len();
+            pos = slab_range.end;
+            let start = range.start.max(slab_range.start);
+            let end = range.end.min(slab_range.end);
+            if start < end {
+                out.extend_from_slice(&slab.data[start - slab_range.start..end - slab_range.start]);
+            }
+            if pos >= range.end {
+                break;
+            }
+        }
+    }
+
     /// Deserialize from `data`.  Everything lands in a single slab — the
     /// caller knows where value boundaries are and can splice further if
     /// they want splits.

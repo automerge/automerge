@@ -355,8 +355,7 @@ impl<'a> MapDiff<'a> {
         }
     }
 
-    /// Reposition onto `range`, forward only. The first item lands in
-    /// the lookahead, so plain iteration picks up from there.
+    /// Forward only.
     pub(crate) fn shift(&mut self, range: Range<usize>) {
         self.iter.shift(range.clone());
         if let Some(op_set) = self.op_set {

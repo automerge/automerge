@@ -35,10 +35,7 @@ const HEAD_STR: &str = "_head";
 /// An actor id is a sequence of bytes — by default a 16-byte uuid, though
 /// callers may use their own identifier of any length.
 ///
-/// The bytes live behind an [`Arc`], so cloning an `ActorId` is a refcount
-/// bump rather than a copy. That matters because actor ids are cloned
-/// constantly: every [`ChangeId`](crate::ChangeId) carries one, and the
-/// change graph hands them out per change.
+/// Cloning an `ActorId` is cheap: the bytes are reference counted.
 ///
 // Note that change encoding relies on the Ord implementation for the ActorId being implemented in
 // terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
@@ -668,8 +665,7 @@ pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 pub struct ChangeHash(pub [u8; HASH_SIZE]);
 
 impl ChangeHash {
-    /// The raw 32 bytes. The counterpart to `TryFrom<&[u8]>`, for
-    /// protocols which put hashes on the wire.
+    /// The raw 32 bytes; the inverse of `TryFrom<&[u8]>`.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }

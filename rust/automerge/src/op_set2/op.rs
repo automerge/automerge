@@ -840,22 +840,17 @@ pub(crate) struct SuccInsert {
     pub(crate) sub_pos: usize,
 }
 
-/// Batched document succ additions, accumulated in stream order: the
-/// three sub-column value streams plus the multi-point [`hexane::Splice`]s
-/// that place them, and the row-level count updates and visibility
-/// clears that ride along. Consumed whole by `OpSet::add_succ` — one
-/// `copy_ranges` per column instead of point splices per entry.
+/// A batch of document succ additions, consumed whole by `OpSet::add_succ`.
 #[derive(Debug, Default)]
 pub(crate) struct DocSucc {
-    /// where each run of new sub entries lands (pre-splice sub
-    /// coordinates, ascending; same-position entries merged)
+    /// pre-splice sub positions, ascending
     pub(crate) splices: Vec<hexane::Splice>,
     pub(crate) actors: Vec<ActorIdx>,
     pub(crate) ctrs: Vec<u32>,
     pub(crate) incs: Vec<Option<i64>>,
-    /// (row, new succ count) — ascending, one per touched row
+    /// (row, new succ count), ascending
     pub(crate) counts: Vec<(usize, u32)>,
-    /// rows whose visibility clears (an inc-None entry) — ascending
+    /// rows that become invisible, ascending
     pub(crate) clears: Vec<usize>,
 }
 
@@ -905,9 +900,8 @@ impl<'a> Op<'a> {
         }
     }
 
-    /// `inc` is trusted as given: callers own increment/counter
-    /// normalization (an increment acts as an ordinary overwrite —
-    /// `inc = None` — on a non-counter target).
+    /// `inc` is taken as given: pass `None` for an increment of a
+    /// non-counter target.
     pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
         self.succ_cursors.clone().add_succ(self.pos, id, inc)
     }

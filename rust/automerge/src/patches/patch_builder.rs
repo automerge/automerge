@@ -2,30 +2,34 @@ use core::fmt::Debug;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
+use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::iter::SpanInternal;
 use crate::marks::MarkSet;
 use crate::text_value::ConcreteTextValue;
 use crate::types::{Clock, ObjId, ObjType};
-use crate::{Automerge, Prop, TextEncoding, Value};
+use crate::{Prop, TextEncoding, Value};
 
 use super::{Event, Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone)]
-pub(crate) struct PatchBuilder<'a> {
+pub(crate) struct PatchBuilder<
+    'a,
+    H: crate::hash_retention::HashRetention = crate::hash_retention::Retained,
+> {
     patches: Vec<Patch>,
     last_mark_set: Option<Arc<MarkSet>>, // keep this around for a quick pointer equality test
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     seen: HashSet<ObjId>,
     text_encoding: TextEncoding,
     clock: Option<Clock>,
-    doc: &'a Automerge,
+    doc: &'a Automerge<H>,
 }
 
-impl<'a> PatchBuilder<'a> {
+impl<'a, H: crate::hash_retention::HashRetention> PatchBuilder<'a, H> {
     pub(crate) fn new(
-        doc: &'a Automerge,
+        doc: &'a Automerge<H>,
         path_map: BTreeMap<ObjId, (Prop, ObjId)>,
         clock: Option<Clock>,
         text_encoding: TextEncoding,
@@ -45,8 +49,8 @@ impl<'a> PatchBuilder<'a> {
     }
 }
 
-impl PatchBuilder<'_> {
-    pub(crate) fn log_event(&mut self, doc: &Automerge, exid: ExId, event: &Event) {
+impl<H: crate::hash_retention::HashRetention> PatchBuilder<'_, H> {
+    pub(crate) fn log_event(&mut self, doc: &Automerge<H>, exid: ExId, event: &Event) {
         match event {
             Event::PutMap {
                 key,
@@ -363,7 +367,9 @@ impl PatchBuilder<'_> {
     }
 }
 
-impl<'a> AsMut<PatchBuilder<'a>> for PatchBuilder<'a> {
+impl<'a, H: crate::hash_retention::HashRetention> AsMut<PatchBuilder<'a, H>>
+    for PatchBuilder<'a, H>
+{
     fn as_mut(&mut self) -> &mut Self {
         self
     }

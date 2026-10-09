@@ -30,10 +30,7 @@ use crate::{
 #[error("out of memory")]
 pub(crate) struct OutOfMemory;
 
-/// Test-only reference: drives a single op-at-a-time pass over the op
-/// set, building the op index the way the pre-fused loader did. The
-/// real index is built during column load ([`IndexBuilder`]'s column
-/// walk); the equality tests compare the two.
+/// Op-at-a-time reference for [`IndexBuilder::process_columns`].
 #[cfg(test)]
 pub(crate) struct IndexedChangeCollector<'a> {
     pub(crate) index: &'a mut IndexBuilder,
@@ -43,11 +40,7 @@ pub(crate) struct IndexedChangeCollector<'a> {
 
 #[cfg(test)]
 impl<'a> IndexedChangeCollector<'a> {
-    /// Build only the op index; ops are not buffered per change and
-    /// [`Self::collect`] may not be called.
-    ///
-    /// Kept as the op-at-a-time reference implementation for
-    /// [`IndexBuilder::process_columns`]; only used by its equality tests.
+    /// [`Self::collect`] may not be called on the result.
     #[cfg(test)]
     pub(crate) fn index_only(index: &'a mut IndexBuilder) -> Self {
         IndexedChangeCollector {
@@ -670,22 +663,20 @@ impl<'a> ChangeCollector<'a> {
         Self::try_from_change_meta(changes, actors).unwrap()
     }
 
-    /// Like [`Self::exclude_hashes_meta`] but keyed by a clock computed
-    /// without hashes, so the exclusion set can name pre-load changes on
-    /// an unchecked graph. Building the returned changes still requires their
-    /// deps' hashes to be known.
-    pub(crate) fn exclude_seq_clock(
+    /// Like [`Self::exclude_hashes_meta`] but keyed by a clock that needs no
+    /// hashes. Fails if a returned change's dep hashes are not known.
+    pub(crate) fn exclude_seq_clock<H: crate::hash_retention::HashRetention>(
         op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
+        change_graph: &'a ChangeGraph<H>,
         clock: crate::clock::SeqClock,
     ) -> Result<Vec<Change>, AutomergeError> {
         let changes = change_graph.get_build_metadata_for_seq_clock(clock);
         Self::from_build_meta(op_set, change_graph, changes)
     }
 
-    pub(crate) fn exclude_hashes_meta(
+    pub(crate) fn exclude_hashes_meta<H: crate::hash_retention::HashRetention>(
         op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
+        change_graph: &'a ChangeGraph<H>,
         authors: &'a Authors,
         have_deps: &[ChangeHash],
     ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError> {
@@ -719,9 +710,9 @@ impl<'a> ChangeCollector<'a> {
             .collect()
     }
 
-    pub(crate) fn meta_for_hashes<I>(
+    pub(crate) fn meta_for_hashes<I, H: crate::hash_retention::HashRetention>(
         op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
+        change_graph: &'a ChangeGraph<H>,
         authors: &'a Authors,
         hashes: I,
     ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError>
@@ -758,9 +749,9 @@ impl<'a> ChangeCollector<'a> {
             .collect::<Result<_, _>>()
     }
 
-    pub(crate) fn for_hashes<I>(
+    pub(crate) fn for_hashes<I, H: crate::hash_retention::HashRetention>(
         op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
+        change_graph: &'a ChangeGraph<H>,
         hashes: I,
     ) -> Result<Vec<Change>, AutomergeError>
     where
@@ -770,9 +761,9 @@ impl<'a> ChangeCollector<'a> {
         Self::from_build_meta(op_set, change_graph, changes)
     }
 
-    fn from_build_meta(
+    fn from_build_meta<H: crate::hash_retention::HashRetention>(
         op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
+        change_graph: &'a ChangeGraph<H>,
         changes: Vec<BuildChangeMetadata<'a>>,
     ) -> Result<Vec<Change>, AutomergeError> {
         // building a change embeds its deps' hashes, which must all be known
@@ -786,10 +777,7 @@ impl<'a> ChangeCollector<'a> {
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
         #[cfg(debug_assertions)]
         {
-            // the change set encoder sorts changes by (start_op, actor)
-            // before encoding columns, so the two paths produce the same
-            // set of changes but not necessarily in the same order.
-            // Compare as sets keyed by hash.
+            // the change set encoder reorders changes: compare as sets
             let change_set_changes = crate::storage::ChangeSet::storage_for_hashes(
                 op_set,
                 change_graph,
@@ -806,9 +794,9 @@ impl<'a> ChangeCollector<'a> {
         Ok(r1)
     }
 
-    fn from_build_meta_inner(
+    fn from_build_meta_inner<H: crate::hash_retention::HashRetention>(
         op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph,
+        change_graph: &'a ChangeGraph<H>,
         changes: Vec<BuildChangeMetadata<'a>>,
     ) -> Vec<Change> {
         let min = changes
@@ -894,13 +882,16 @@ impl<'a> ChangeCollector<'a> {
         }
     }
 
-    pub(crate) fn finish(self, change_graph: &ChangeGraph) -> Result<Vec<Change>, Error> {
+    pub(crate) fn finish<H: crate::hash_retention::HashRetention>(
+        self,
+        change_graph: &ChangeGraph<H>,
+    ) -> Result<Vec<Change>, Error> {
         self.finish_inner(change_graph, None)
     }
 
-    fn finish_inner(
+    fn finish_inner<H: crate::hash_retention::HashRetention>(
         mut self,
-        graph: &ChangeGraph,
+        graph: &ChangeGraph<H>,
         index: Option<&mut IndexBuilder>,
     ) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
@@ -950,9 +941,6 @@ impl<'a> ChangeCollector<'a> {
         Ok(changes)
     }
 
-    /// Walk every op, buffering them per change — the op-scan drive for
-    /// the checked load path. Index building happens during column load
-    /// now, so this only collects.
     pub(crate) fn process_all_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
         let mut iter = op_set.iter();
         while let Some(op) = iter.try_next()? {

@@ -2,7 +2,7 @@ use super::{Benchmark, SampledBenchmark, SeriesBenchmark};
 use benchmark_battery::automerge::{
     transaction::Transactable, Automerge, ReadDoc, ScalarValue, ROOT,
 };
-use benchmark_battery::sync::{self, Message, Sync};
+use benchmark_battery::sync::{self, Message, SyncDoc};
 use benchmark_battery::{list_splice_100, rand, text_splice_100};
 
 const FULL_SYNC_SIZE: u64 = 10_000;
@@ -59,7 +59,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
     ]
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct DocWithSync {
     doc: Automerge,
     peer_state: sync::State,
@@ -67,29 +67,22 @@ struct DocWithSync {
 
 impl DocWithSync {
     fn sync(&mut self, other: &mut DocWithSync) {
-        while let Some(message1) =
-            Sync::generate_sync_message(&self.doc, &mut self.peer_state).unwrap()
-        {
-            Sync::receive_sync_message(&mut other.doc, &mut other.peer_state, message1).unwrap();
-            if let Some(message2) =
-                Sync::generate_sync_message(&other.doc, &mut other.peer_state).unwrap()
-            {
-                Sync::receive_sync_message(&mut self.doc, &mut self.peer_state, message2).unwrap()
+        while let Some(message1) = self.doc.generate_sync_message(&mut self.peer_state) {
+            other
+                .doc
+                .receive_sync_message(&mut other.peer_state, message1)
+                .unwrap();
+            if let Some(message2) = other.doc.generate_sync_message(&mut other.peer_state) {
+                self.doc
+                    .receive_sync_message(&mut self.peer_state, message2)
+                    .unwrap()
             }
         }
     }
 }
 
-impl Default for DocWithSync {
-    fn default() -> Self {
-        Automerge::new().into()
-    }
-}
-
 impl From<Automerge> for DocWithSync {
-    fn from(mut doc: Automerge) -> Self {
-        // the protocol is hash-based throughout, so it needs every hash
-        doc.enable_audit_mode().unwrap();
+    fn from(doc: Automerge) -> Self {
         Self {
             doc,
             peer_state: sync::State::default(),
@@ -177,7 +170,7 @@ fn big_chunky_sync_message() -> Box<dyn FnMut()> {
         let mut peer_state = sync::State::default();
         let mut doc = Automerge::new();
         let message = Message::decode(&data).unwrap();
-        Sync::receive_sync_message(&mut doc, &mut peer_state, message).unwrap();
+        doc.receive_sync_message(&mut peer_state, message).unwrap();
     })
 }
 

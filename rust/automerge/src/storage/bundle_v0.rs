@@ -1,21 +1,10 @@
-//! DEPRECATED — the change set format as automerge 3.3.0-3.3.2 shipped it.
+//! DEPRECATED: the change set format written by automerge 3.3.0–3.3.2
+//! (chunk id 3), kept so those documents still load.
 //!
-//! This whole file is a frozen copy of that release's change set reader,
-//! reachable only from [`ChunkType::BundleV0`](crate::storage::ChunkType)
-//! (chunk id 3). Documents written by those versions are in circulation,
-//! so this must keep parsing them byte-for-byte as they were written.
-//!
-//! **Do not "improve" anything in here, and do not share code with
-//! `storage::change_set`.** The live change set format (chunk id 4, with its op
-//! columns in chunk id 5) has already diverged — its object counter is an
-//! integer column where this one is a delta column, it carries succ and
-//! hint columns this one has never seen, and it elides deletes into succ.
-//! Reading a 3.3.2 change set with the live reader silently drops every
-//! object id. That is exactly why this copy exists.
-//!
-//! When chunk id 3 no longer needs supporting, delete this file, the
-//! `BundleV0` chunk arm, and the `ChunkType::BundleV0` variant. Nothing
-//! else should need touching.
+//! Frozen: do not change it or share code with `storage::change_set`, whose
+//! format has diverged (its reader silently drops a 3.3.2 change set's
+//! object ids). When chunk id 3 no longer needs supporting, delete this
+//! file, the `BundleV0` chunk arm and the `ChunkType::BundleV0` variant.
 #![allow(dead_code)]
 
 use std::borrow::Cow;

@@ -26,16 +26,12 @@ bench = false
 
 [features]
 # default = ["console_error_panic_hook", "wee_alloc"]
-default = ["sync"]
-# The sync protocol. On by default; turn it off to build a wasm bundle
-# without any of the replication code. The JS surface it provides
-# (initSyncState, generateSyncMessage, ...) disappears with it.
-sync = ["dep:automerge-sync"]
+default = []
 
 [dependencies]
 # wee_alloc = { version = "^0.4", optional = true }
 automerge = { path = "../automerge", features = ["wasm", "utf16-indexing"] }
-automerge-sync = { path = "../automerge-sync", optional = true }
+automerge-sync = { path = "../automerge-sync" }
 hex = "^0.4.3"
 itertools = "0.15.0"
 js-sys = "^0.3"

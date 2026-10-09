@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::iter::*;
 use crate::op_tree::B;
-use crate::transaction::Transactable;
+use crate::tx::Transactable;
 use crate::*;
 use std::convert::TryInto;
 

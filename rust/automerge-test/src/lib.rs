@@ -9,16 +9,13 @@ use automerge::ReadDoc;
 use serde::ser::{SerializeMap, SerializeSeq};
 
 pub fn new_doc() -> automerge::AutoCommit {
-    new_doc_with_actor(automerge::ActorId::random())
+    let mut d = automerge::AutoCommit::new();
+    d.set_actor(automerge::ActorId::random());
+    d
 }
 
 pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::AutoCommit {
     let mut d = automerge::AutoCommit::new();
-    // the test harness enumerates history freely (get_changes, merge,
-    // save_after), which outside audit mode fails whenever a commit's
-    // hash happens to form a fragment
-    d.enable_audit_mode()
-        .expect("a fresh document can always enter audit mode");
     d.set_actor(actor);
     d
 }

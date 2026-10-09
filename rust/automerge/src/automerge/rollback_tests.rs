@@ -1,5 +1,7 @@
-use crate::transaction::Transactable;
-use crate::{ActorId, Automerge, ObjType, ReadDoc, ScalarValue, ROOT};
+use crate::tx::Transactable;
+use crate::{ActorId, ObjType, ScalarValue, ROOT};
+use crate::automerge::Automerge;
+use crate::read::ReadDoc;
 
 fn assert_checkpoint_eq(
     a: &std::collections::HashMap<&'static str, Vec<u8>>,
@@ -268,19 +270,19 @@ fn rollback_increment_counter_conflicted_by_non_counter() {
     {
         let mut tx = doc1.transaction();
         tx.put(ROOT, "val", ScalarValue::counter(0)).unwrap();
-        tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+        tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
     }
     doc2.merge(&mut doc1).unwrap();
 
     {
         let mut tx = doc1.transaction();
         tx.increment(ROOT, "val", 5).unwrap();
-        tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+        tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
     }
     {
         let mut tx = doc2.transaction();
         tx.put(ROOT, "val", "not a counter").unwrap();
-        tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+        tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
     }
     doc1.merge(&mut doc2).unwrap();
 

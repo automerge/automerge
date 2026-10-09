@@ -1,5 +1,6 @@
 use super::SampledBenchmark;
-use benchmark_battery::automerge::{AutoCommit, LoadOptions};
+use benchmark_battery::automerge;
+use benchmark_battery::automerge::next::{AuditedAutoCommit, AutoCommit};
 use std::hint::black_box;
 
 const FILES: [&str; 7] = [
@@ -48,33 +49,31 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
 
 fn load_all_at_once(bytes: Vec<u8>, audit: bool) -> Box<dyn FnMut()> {
     Box::new(move || {
-        let doc = AutoCommit::load_with_options(&bytes, options(audit)).unwrap();
-        black_box(doc);
+        if audit {
+            black_box(automerge::AutoCommit::load(&bytes).unwrap());
+        } else {
+            black_box(AutoCommit::load(&bytes).unwrap());
+        }
     })
 }
 
 /// Each fragment fed in on its own, in apply order.
 fn load_incrementally(change_sets: Vec<Vec<u8>>, audit: bool) -> Box<dyn FnMut()> {
     Box::new(move || {
-        // `load_with_options` on empty bytes drops the audit option, so the
-        // starting document has to be switched over explicitly
-        let mut doc = AutoCommit::new();
         if audit {
-            doc.enable_audit_mode().unwrap();
+            let mut doc = automerge::AutoCommit::new();
+            for change_set in &change_sets {
+                doc.load_incremental(change_set).unwrap();
+            }
+            black_box(doc);
+        } else {
+            let mut doc = AutoCommit::new();
+            for change_set in &change_sets {
+                doc.load_incremental(change_set).unwrap();
+            }
+            black_box(doc);
         }
-        for change_set in &change_sets {
-            doc.load_incremental(change_set).unwrap();
-        }
-        black_box(doc);
     })
-}
-
-fn options(audit: bool) -> LoadOptions {
-    if audit {
-        LoadOptions::new().with_audit_mode()
-    } else {
-        LoadOptions::new()
-    }
 }
 
 fn full_save(filename: &str) -> Vec<u8> {
@@ -89,12 +88,15 @@ fn change_sets(filename: &str) -> Vec<Vec<u8>> {
 
 /// The fixture in audit mode: fragments are only enumerable when the
 /// hashes naming them are known.
-fn source_doc(filename: &str) -> AutoCommit {
+fn source_doc(filename: &str) -> AuditedAutoCommit {
     let bytes = std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("egwalker-paper")
             .join(filename),
     )
     .unwrap();
-    AutoCommit::load_with_options(&bytes, LoadOptions::new().with_audit_mode()).unwrap()
+    AutoCommit::load(&bytes)
+        .unwrap()
+        .enable_audit_mode()
+        .unwrap()
 }

@@ -1,8 +1,8 @@
-// Apply each doc's whole history as a v2 fragment chain, once — with
-// and without an active patch log:
+// Apply each doc's whole history as a change set chain, with and without an
+// active patch log:
 //
 //   cargo run --release -p automerge --example profile_frag C1 A1 A2
-use automerge::Automerge;
+use automerge::next::Automerge;
 
 fn main() {
     for name in std::env::args().skip(1) {
@@ -10,8 +10,7 @@ fn main() {
         let bytes = std::fs::read(&path).unwrap();
         let doc = Automerge::load(&bytes).unwrap();
 
-        // bytes, not Change sets: apply_change set consumes each change set, and the
-        // chain is applied twice below
+        // bytes: applying consumes a change set, and the chain is applied twice
         let v2: Vec<Vec<u8>> = doc
             .change_sets_for_fragments(doc.fragments(..))
             .unwrap()
@@ -32,7 +31,6 @@ fn main() {
         );
         assert_eq!(d.get_heads(), doc.get_heads());
 
-        // same chain with an active patch log — the JS-facing path
         let t = std::time::Instant::now();
         let mut d2 = Automerge::new();
         for b in &v2 {

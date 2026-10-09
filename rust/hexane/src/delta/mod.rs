@@ -446,6 +446,28 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
         }
     }
 
+    /// Append the values of a [`DeltaRun`], in two appends however long the
+    /// run. `prefix` need not match the last value appended.
+    pub fn append_run(&mut self, buf: &mut Vec<u8>, run: DeltaRun) {
+        if run.count == 0 {
+            return;
+        }
+        let Some(delta) = run.delta else {
+            self.append_n(buf, T::null_value(), run.count);
+            return;
+        };
+        let first = run.prefix + delta;
+        self.append(buf, T::from_i64(first));
+        let rest = run.count - 1;
+        if rest > 0 {
+            if delta != 0 {
+                self.uniform = None;
+            }
+            self.inner.append_n_owned(buf, Some(delta), rest);
+            self.abs = first + delta * rest as i64;
+        }
+    }
+
     /// Flush any pending run into `buf`.
     pub fn finish(&mut self, buf: &mut Vec<u8>) {
         self.inner.finish(buf);
@@ -546,6 +568,11 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
     /// Append all values from an iterator.
     pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         self.state.extend(&mut self.data, iter);
+    }
+
+    /// See [`DeltaEncoderState::append_run`].
+    pub fn append_run(&mut self, run: DeltaRun) {
+        self.state.append_run(&mut self.data, run);
     }
 
     fn finish(&mut self) {
@@ -2381,6 +2408,76 @@ mod overflow_tests {
 #[allow(clippy::single_range_in_vec_init)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn append_run_matches_per_value_appends() {
+        let cases: Vec<(Vec<i64>, usize)> = vec![
+            (vec![10, 20, 30, 40, 5, 5, 5, 6, 7, 8], 0),
+            (vec![7, 7, 7, 7], 0),
+            (vec![1, 2, 3, 4, 5, 6], 3),
+            (vec![3, 1, 4, 1, 5, 9, 2, 6], 2),
+        ];
+        for (values, split) in cases {
+            let col = DeltaColumn::<i64>::from_values(values.clone());
+            // start the copy mid-column so the first run's prefix is not
+            // the encoder's own running value
+            let mut by_value = DeltaEncoder::<i64>::new();
+            let mut by_run = DeltaEncoder::<i64>::new();
+            by_value.append(-3);
+            by_run.append(-3);
+            by_value.extend(values[split..].iter().copied());
+            for run in col.iter_range(split..values.len()).runs() {
+                by_run.append_run(run);
+            }
+            assert_eq!(by_run.save(), by_value.save(), "{values:?} from {split}");
+        }
+    }
+
+    #[test]
+    fn append_run_keeps_uniform_and_nulls() {
+        let mut by_run = DeltaEncoder::<i64>::new();
+        by_run.append_run(DeltaRun {
+            prefix: 0,
+            delta: Some(4),
+            count: 1,
+        });
+        by_run.append_run(DeltaRun {
+            prefix: 4,
+            delta: Some(0),
+            count: 5,
+        });
+        assert_eq!(by_run.save_to_unless(&mut Vec::new(), 4), 0..0);
+
+        let mut by_run = DeltaEncoder::<i64>::new();
+        by_run.append_run(DeltaRun {
+            prefix: 0,
+            delta: Some(4),
+            count: 3,
+        });
+        assert_ne!(by_run.save_to_unless(&mut Vec::new(), 4), 0..0);
+
+        let mut by_value = DeltaEncoder::<Option<i64>>::new();
+        let mut by_run = DeltaEncoder::<Option<i64>>::new();
+        for v in [Some(2), None, None, Some(3), Some(4)] {
+            by_value.append(v);
+        }
+        by_run.append_run(DeltaRun {
+            prefix: 0,
+            delta: Some(2),
+            count: 1,
+        });
+        by_run.append_run(DeltaRun {
+            prefix: 2,
+            delta: None,
+            count: 2,
+        });
+        by_run.append_run(DeltaRun {
+            prefix: 2,
+            delta: Some(1),
+            count: 2,
+        });
+        assert_eq!(by_run.save(), by_value.save());
+    }
 
     // ── next_run / runs / splice_runs ──────────────────────────────────────
 

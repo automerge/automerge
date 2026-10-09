@@ -1,5 +1,6 @@
-use automerge::transaction::Transactable;
-use automerge::{Automerge, ObjType, ROOT};
+use automerge::next::transaction::Transactable;
+use automerge::next::Automerge;
+use automerge::{ObjType, ROOT};
 
 fn main() {
     let mut doc = Automerge::new();

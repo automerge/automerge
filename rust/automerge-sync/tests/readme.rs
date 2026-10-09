@@ -3,29 +3,31 @@
 //! If you change one, change the other.
 
 use automerge::{transaction::Transactable, AutoCommit, ReadDoc, ROOT};
-use automerge_sync::{State, Sync};
+use automerge_sync::{AutoCommitSync, State, SyncDoc};
 
 #[test]
 fn readme_example() -> Result<(), automerge::AutomergeError> {
     let mut peer1 = AutoCommit::new();
-    peer1.enable_audit_mode()?;
     peer1.put(ROOT, "key", "value")?;
 
     let mut peer2 = AutoCommit::new();
-    peer2.enable_audit_mode()?;
 
     // one State per peer you are talking to
     let mut peer1_state = State::new();
     let mut peer2_state = State::new();
 
     loop {
-        let one_to_two = Sync::generate_sync_message(peer1.document(), &mut peer1_state)?;
+        let one_to_two = peer1.sync().generate_sync_message(&mut peer1_state);
         if let Some(message) = one_to_two.clone() {
-            Sync::receive_sync_message(peer2.document_mut(), &mut peer2_state, message)?;
+            peer2
+                .sync()
+                .receive_sync_message(&mut peer2_state, message)?;
         }
-        let two_to_one = Sync::generate_sync_message(peer2.document(), &mut peer2_state)?;
+        let two_to_one = peer2.sync().generate_sync_message(&mut peer2_state);
         if let Some(message) = two_to_one.clone() {
-            Sync::receive_sync_message(peer1.document_mut(), &mut peer1_state, message)?;
+            peer1
+                .sync()
+                .receive_sync_message(&mut peer1_state, message)?;
         }
         if one_to_two.is_none() && two_to_one.is_none() {
             break;
@@ -36,30 +38,14 @@ fn readme_example() -> Result<(), automerge::AutomergeError> {
     Ok(())
 }
 
-/// The README's claim that syncing outside audit mode is refused.
-#[test]
-fn audit_mode_is_required() {
-    let mut doc = AutoCommit::new();
-    doc.put(ROOT, "key", "value").unwrap();
-    doc.commit();
-
-    let mut state = State::new();
-    assert!(matches!(
-        Sync::generate_sync_message(doc.document(), &mut state),
-        Err(automerge::AutomergeError::AuditModeRequired)
-    ));
-}
-
 /// The README's claim that a `State` round-trips through bytes, and that
 /// a peer which loses one still converges (it just re-syncs from scratch).
 #[test]
 fn sync_state_round_trips_and_loss_is_recoverable() -> Result<(), automerge::AutomergeError> {
     let mut peer1 = AutoCommit::new();
-    peer1.enable_audit_mode()?;
     peer1.put(ROOT, "key", "value")?;
 
     let mut peer2 = AutoCommit::new();
-    peer2.enable_audit_mode()?;
 
     let mut peer1_state = State::new();
     let mut peer2_state = State::new();
@@ -82,13 +68,13 @@ fn sync_state_round_trips_and_loss_is_recoverable() -> Result<(), automerge::Aut
 
 fn sync(a: &mut AutoCommit, a_state: &mut State, b: &mut AutoCommit, b_state: &mut State) {
     loop {
-        let a_to_b = Sync::generate_sync_message(a.document(), a_state).unwrap();
+        let a_to_b = a.sync().generate_sync_message(a_state);
         if let Some(m) = a_to_b.clone() {
-            Sync::receive_sync_message(b.document_mut(), b_state, m).unwrap();
+            b.sync().receive_sync_message(b_state, m).unwrap();
         }
-        let b_to_a = Sync::generate_sync_message(b.document(), b_state).unwrap();
+        let b_to_a = b.sync().generate_sync_message(b_state);
         if let Some(m) = b_to_a.clone() {
-            Sync::receive_sync_message(a.document_mut(), a_state, m).unwrap();
+            a.sync().receive_sync_message(a_state, m).unwrap();
         }
         if a_to_b.is_none() && b_to_a.is_none() {
             return;

@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use super::PatchBuilder;
 
-/// Internal accumulator used while converting diffs to patches.
 #[derive(Clone, Debug)]
 pub(crate) struct PatchAccumulator {
     pub(crate) events: Vec<(ObjId, Event)>,
@@ -18,8 +17,7 @@ pub(crate) struct PatchAccumulator {
     record_events: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
-    /// The clock of the after-side view the events describe (`None` =
-    /// the current document).
+    /// `None` means the current document.
     pub(crate) heads_clock: Option<crate::clock::Clock>,
 }
 
@@ -274,7 +272,10 @@ impl PatchAccumulator {
         std::mem::take(&mut self.path_map)
     }
 
-    pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
+    pub(crate) fn make_patches<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &Automerge<H>,
+    ) -> Vec<Patch> {
         self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let clock = self.heads_clock.clone();
@@ -283,31 +284,25 @@ impl PatchAccumulator {
         Self::make_patches_inner(&self.events, expose, path_map, doc, clock, text_encoding)
     }
 
-    fn make_patches_inner(
+    fn make_patches_inner<H: crate::hash_retention::HashRetention>(
         events: &[(ObjId, Event)],
         mut expose_queue: ExposeQueue,
         path_map: BTreeMap<ObjId, (Prop, ObjId)>,
-        doc: &Automerge,
+        doc: &Automerge<H>,
         clock: Option<Clock>,
         text_encoding: TextEncoding,
     ) -> Vec<Patch> {
         let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
-            // any objects exposed BEFORE exid get observed here — pump
-            // before the skip check so the expose observation lands in
-            // event order across history transitions
+            // pump before the skip check to keep expose observations in event order
             expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
-            // ignore events on objects in the expose queue
-            // incremental updates are ignored and a observation
-            // of the final state is used b/c observers did not see
-            // past state changes
+            // exposed objects are reported from their final state instead
             if expose_queue.should_skip(&exid) {
                 continue;
             }
             patch_builder.log_event(doc, exid, event);
         }
-        // any objects exposed AFTER all other events get exposed here
         expose_queue.flush_queue(&mut patch_builder, doc, clock.as_ref());
 
         patch_builder.take_patches()
@@ -339,11 +334,11 @@ impl ExposeQueue {
         }
     }
 
-    fn pump_queue(
+    fn pump_queue<H: crate::hash_retention::HashRetention>(
         &mut self,
         obj: &ExId,
-        patch_builder: &mut PatchBuilder<'_>,
-        doc: &Automerge,
+        patch_builder: &mut PatchBuilder<'_, H>,
+        doc: &Automerge<H>,
         clock: Option<&Clock>,
     ) {
         while let Some(exposed) = self.0.first() {
@@ -354,10 +349,10 @@ impl ExposeQueue {
         }
     }
 
-    fn flush_queue(
+    fn flush_queue<H: crate::hash_retention::HashRetention>(
         &mut self,
-        patch_builder: &mut PatchBuilder<'_>,
-        doc: &Automerge,
+        patch_builder: &mut PatchBuilder<'_, H>,
+        doc: &Automerge<H>,
         clock: Option<&Clock>,
     ) {
         while let Some(exposed) = self.0.first() {
@@ -373,11 +368,11 @@ impl ExposeQueue {
         self.0.remove(obj)
     }
 
-    fn flush_obj(
+    fn flush_obj<H: crate::hash_retention::HashRetention>(
         &mut self,
         exid: ExId,
-        patch_builder: &mut PatchBuilder<'_>,
-        doc: &Automerge,
+        patch_builder: &mut PatchBuilder<'_, H>,
+        doc: &Automerge<H>,
         clock: Option<&Clock>,
     ) -> Option<()> {
         let id = exid.to_internal_obj();

@@ -1,8 +1,4 @@
-// Patch-generation strategy benchmarks, written against the AutoCommit
-// API surface shared by main / patchless2 / apply_changes_rework so the
-// same scenarios can run on each branch (copy into the branch worktree
-// and fix small API deltas).
-//
+// Patch-generation benchmarks.
 // Scenarios per doc:
 //   local_typing      N × { splice 1 char; diff_incremental }
 //   remote_keystroke  N × { apply_changes(one 1-op change); diff_incremental }
@@ -10,8 +6,9 @@
 //   first_materialize fresh load; diff_incremental with empty cursor (full state)
 //
 //   cargo run --release -p automerge --example bench_patches [S1 S3 C2 ...]
-use automerge::transaction::Transactable;
-use automerge::{AutoCommit, ObjType, ReadDoc, Value, ROOT};
+use automerge::next::transaction::Transactable;
+use automerge::next::{AutoCommit, ReadDoc};
+use automerge::{ObjType, Value, ROOT};
 use std::time::Instant;
 
 fn find_text(doc: &AutoCommit) -> automerge::ObjId {
@@ -93,8 +90,7 @@ fn main() {
             );
         }
 
-        // ── remote_keystroke_nopatch: same loop, cursor never set, no
-        // diff — the pure apply cost with patch machinery idle ───────
+        // ── remote_keystroke_nopatch: apply cost with no diff ──
         {
             let mut recv = AutoCommit::load(&bytes).unwrap();
             let text = find_text(&recv);

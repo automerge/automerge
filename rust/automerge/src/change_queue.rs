@@ -63,7 +63,6 @@ impl ChangeQueue {
         self.changes.is_empty()
     }
 
-    /// O(1) check whether a change with this hash is in the queue.
     pub(crate) fn has_hash(&self, hash: &ChangeHash) -> bool {
         self.hashes.contains(hash)
     }
@@ -130,7 +129,10 @@ impl ChangeQueue {
 
     /// Return the causally ready (according to ChangeGraph) changes in
     /// topological order, removing them from the queue
-    pub(crate) fn pop_topo_sorted_ready(&mut self, change_graph: &ChangeGraph) -> Vec<Change> {
+    pub(crate) fn pop_topo_sorted_ready<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        change_graph: &ChangeGraph<H>,
+    ) -> Vec<Change> {
         // Kahn's algorithm: topological sort of the pool.
         let n = self.changes.len();
         let mut unsatisfied = vec![0u32; n];
@@ -138,8 +140,7 @@ impl ChangeQueue {
 
         for (i, c) in self.changes.iter().enumerate() {
             for dep in c.deps() {
-                // an unchecked graph can't tell whether it has this dep, so
-                // treat it as unsatisfied and leave the change in the queue
+                // unknown on an unchecked graph: leave the change queued
                 if !change_graph.has_change(dep).unwrap_or(false) {
                     unsatisfied[i] += 1;
                     waiting_on.entry(*dep).or_default().push(i);

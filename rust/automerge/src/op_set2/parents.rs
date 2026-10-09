@@ -94,14 +94,15 @@ pub struct Parent {
 #[cfg(test)]
 mod tests {
     use super::Parent;
-    use crate::{transaction::Transactable, ObjType, Prop, ReadDoc};
+    use crate::read::ReadDoc;
+    use crate::{tx::Transactable, ObjType, Prop};
 
     #[test]
     fn test_invisible_parents() {
         // Create a document with a list of objects, then delete one of the objects, then generate
         // a path to the deleted object.
 
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = crate::autocommit::AutoCommit::new();
         let list = doc
             .put_object(crate::ROOT, "list", crate::ObjType::List)
             .unwrap();

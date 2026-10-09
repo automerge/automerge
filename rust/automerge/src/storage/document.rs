@@ -5,13 +5,15 @@ use std::{borrow::Cow, ops::Range};
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
 use crate::author::Authors;
+use crate::automerge::AuditMode;
+use crate::automerge::Automerge;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, AuditMode, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{ActorId, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -29,9 +31,8 @@ pub(crate) struct Document<'a> {
     header: Header,
     actors: Vec<ActorId>,
     heads: Vec<ChangeHash>,
-    /// The node index of each head, positionally corresponding to `heads`.
-    /// `None` if the document was produced by an old implementation which
-    /// did not write the head-index suffix.
+    /// The node index of each head, aligned with `heads`. `None` for
+    /// documents written without the head-index suffix.
     head_indexes: Option<Vec<u64>>,
     pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
@@ -169,7 +170,7 @@ impl<'a> Document<'a> {
         })?;
 
         let change_metadata =
-            ChangeGraph::validate(change_bytes.len(), &changes).map_err(|error| {
+            <ChangeGraph>::validate(change_bytes.len(), &changes).map_err(|error| {
                 parse::ParseError::Error(ParseError::BadColumnLayout {
                     column_type: "changes",
                     error,
@@ -201,9 +202,9 @@ impl<'a> Document<'a> {
         &self.bytes[self.change_bytes.clone()]
     }
 
-    pub(crate) fn new(
+    pub(crate) fn new<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
-        change_graph: &ChangeGraph,
+        change_graph: &ChangeGraph<H>,
         compress: CompressConfig,
     ) -> Document<'static> {
         let (op_metadata, ops_out_b) = op_set.export();
@@ -336,32 +337,21 @@ impl<'a> Document<'a> {
         }
     }
 
-    pub(crate) fn reconstruct(
+    pub(crate) fn reconstruct<H: crate::hash_retention::HashRetention>(
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
-        audit: AuditMode,
-    ) -> Result<Automerge, ReconstructError> {
-        // the op indexes are built during column load, in the same
-        // decode pass (obj id validation happens inside the walk)
+        allow_invalid_marks: bool,
+    ) -> Result<Automerge<H>, ReconstructError> {
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self)?;
 
-        // audit mode always recomputes and verifies every hash; outside
-        // it only the heads are known, paired with their nodes by the
-        // head index suffix. A document old enough to lack that suffix
-        // falls back to computing once.
-        let compute_hashes = audit == AuditMode::Enabled || self.head_indexes().is_none();
+        let head_indexes = self
+            .head_indexes()
+            .filter(|_| H::AUDIT != AuditMode::Enabled);
+        let compute_hashes = head_indexes.is_none();
 
-        let head_indexes = if compute_hashes {
-            None
-        } else {
-            Some(self.head_indexes().expect("checked above"))
-        };
-
-        // structural checks the op scan doesn't cover (actor index
-        // ranges, succ / raw value totals) — cheap, and needed by both
-        // paths now that neither materializes every op for the index
+        // the op scan checks neither actor index ranges nor succ/value totals
         op_set.column_validation()?;
 
         let changes = if compute_hashes {
@@ -378,21 +368,14 @@ impl<'a> Document<'a> {
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::with_actors(change_cols.num_actors());
-        let mut change_graph = match &changes {
-            Some(changes) => change_cols.finalize(&changes.changes, &mut authors),
-            None => {
-                let head_indexes = head_indexes.expect("checked above");
-                change_cols
-                    .finalize_unchecked(self.heads(), head_indexes, &mut authors)
-                    .map_err(|_| ReconstructError::BadHeadIndexes)?
-            }
-        };
-
-        // the compute path builds a full hash set; outside audit mode
-        // only the retained set is kept
-        if audit == AuditMode::Disabled && compute_hashes {
-            change_graph.retain_hashes_only();
-        }
+        let change_graph = H::finish_load(
+            change_cols,
+            changes.as_ref().map(|c| c.changes.as_slice()),
+            self.heads(),
+            head_indexes,
+            &mut authors,
+        )
+        .map_err(|_| ReconstructError::BadHeadIndexes)?;
 
         if let Some(changes) = &changes {
             debug_assert_eq!(changes.changes.len(), change_graph.len());
@@ -402,13 +385,11 @@ impl<'a> Document<'a> {
 
         let doc = Automerge::from_parts(op_set, change_graph, authors);
 
-        if let Some(err) = mark_order_validator.take_error() {
-            Err(ReconstructError::InvalidMarkOrderDoc {
-                doc: Box::new(doc),
-                error_message: err,
-            })
-        } else {
-            Ok(doc)
+        match mark_order_validator.take_error() {
+            Some(error_message) if !allow_invalid_marks => {
+                Err(ReconstructError::InvalidMarkOrderDoc { error_message })
+            }
+            _ => Ok(doc),
         }
     }
 
@@ -464,10 +445,7 @@ pub(crate) enum ReconstructError {
     #[error("change dep index out of range")]
     InvalidDepIndex,
     #[error("invalid mark operation order: {error_message}")]
-    InvalidMarkOrderDoc {
-        doc: Box<Automerge>,
-        error_message: String,
-    },
+    InvalidMarkOrderDoc { error_message: String },
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderChanges {
         changes: Vec<Change>,

@@ -34,6 +34,7 @@ use am::VerificationMode;
 use automerge as am;
 use automerge::TextEncoding;
 use automerge::{AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
+use automerge_sync::{AutoCommitSync, SyncDoc};
 use interop::import_scalar;
 use js_sys::Reflect;
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -47,12 +48,10 @@ use wasm_bindgen::JsCast;
 
 mod export_cache;
 mod interop;
-#[cfg(feature = "sync")]
 mod sync;
 mod value;
 
 use interop::{alloc, get_heads, import_obj, js_get, js_set, to_js_err, to_prop, AR, JS};
-#[cfg(feature = "sync")]
 use sync::SyncState;
 use value::Datatype;
 
@@ -68,10 +67,7 @@ export type SyncMessage = Uint8Array;
 export type FragmentLevelRange = number | { start?: number; end?: number } | null | undefined;
 export type Prop = string | number;
 export type Hash = string;
-/** A change identified as "{seq}@{actor}", like object ids and cursors. */
-export type ChangeId = string;
-/** The heads of a document: the ChangeIds of the changes with no successors. */
-export type Heads = ChangeId[];
+export type Heads = Hash[];
 export type ScalarValue = string | number | boolean | null | Date | Uint8Array;
 export type Value = ScalarValue | object;
 export type MaterializeValue =
@@ -141,13 +137,13 @@ export type Datatype =
   | "list";
 
 export type SyncHave = {
-  lastSync: Hash[];
+  lastSync: Heads;
   bloom: Uint8Array;
 };
 
 export type DecodedSyncMessage = {
-  heads: Hash[];
-  need: Hash[];
+  heads: Heads;
+  need: Heads;
   have: SyncHave[];
   changes: Change[];
 };
@@ -159,7 +155,7 @@ export type DecodedChange = {
   startOp: number;
   time: number;
   message: string | null;
-  deps: Hash[];
+  deps: Heads;
   hash: Hash;
   ops: Op[];
 };
@@ -172,7 +168,7 @@ export type ChangeMetadata = {
   maxOp: number;
   time: number;
   message: string | null;
-  deps: Hash[];
+  deps: Heads;
   hash: Hash;
   extraBytes: string | null;
 };
@@ -180,14 +176,14 @@ export type ChangeMetadata = {
 export type FragmentMeta = {
   head: Hash;
   level: number;
-  boundary: Hash[];
-  checkpoints: Hash[];
-  members: ChangeId[];
+  boundary: Heads;
+  checkpoints: Heads;
+  members: Heads;
 };
 
 export type Commit = {
   head: Hash;
-  parents: Hash[];
+  parents: Heads;
   bytes: Uint8Array;
 };
 
@@ -361,7 +357,7 @@ interface Automerge {
 
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
 
-    getMissingDeps(heads?: Heads): Hash[];
+    getMissingDeps(heads?: Heads): Heads;
 
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
 
@@ -374,12 +370,6 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
-  /** Load in audit mode: every change is reconstructed, hashed and
-   * verified, and all change hashes are kept — required for the sync
-   * protocol. The default (false) trusts the hashes stored in the
-   * document and retains only the heads, loose commits and fragment
-   * hashes, which is much faster. */
-  auditMode?: boolean;
 };
 
 // if recursive is false do not diff child objects
@@ -395,19 +385,19 @@ export function create(options?: InitOptions): Automerge;
 export function load(data: Uint8Array, options?: LoadOptions): Automerge;
 
 export interface JsSyncState {
-  sharedHeads: Hash[];
-  lastSentHeads: Hash[];
-  theirHeads: Hash[] | undefined;
-  theirHeed: Hash[] | undefined;
+  sharedHeads: Heads;
+  lastSentHeads: Heads;
+  theirHeads: Heads | undefined;
+  theirHeed: Heads | undefined;
   theirHave: SyncHave[] | undefined;
-  sentHashes: Hash[];
+  sentHashes: Heads;
   readOnly: boolean;
   peerReadOnly: boolean;
 }
 
 export interface DecodedBundle {
   changes: DecodedChange[];
-  deps: Hash[];
+  deps: Heads;
 }
 
 export interface API {
@@ -450,16 +440,6 @@ macro_rules! log {
     ( $( $t:tt )* ) => {
           web_sys::console::log_1(&format!( $( $t )* ).into());
     };
-}
-
-/// The JS package's bytes are consumed by stored documents and by
-/// automerge-repo, so the JS save paths stay on the pre-fragment chunk
-/// formats until the JS API is ported deliberately.
-fn legacy_opts() -> automerge::SaveOptions {
-    automerge::SaveOptions {
-        format: am::SaveFormat::Legacy,
-        ..Default::default()
-    }
 }
 
 #[wasm_bindgen]
@@ -512,15 +492,14 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
+    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
-            let actor =
-                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+            let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
             automerge.doc.set_actor(actor);
         }
         Ok(automerge)
@@ -534,7 +513,8 @@ impl Automerge {
         actor: Option<String>,
         heads: JsValue,
     ) -> Result<Automerge, error::Fork> {
-        let doc = if let Ok(Some(heads)) = get_heads(heads) {
+        let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
+        let doc = if let Ok(heads) = heads {
             self.doc.fork_at(&heads)?
         } else {
             self.doc.fork()
@@ -566,20 +546,19 @@ impl Automerge {
         if let Some(time) = time {
             commit_opts.set_time(time as i64);
         }
-        let id = self.doc.commit_with(commit_opts);
-        match id {
-            Some(id) => JsValue::from_str(&id.to_string()),
+        let hash = self.doc.commit_with(commit_opts);
+        match hash {
+            Some(h) => JsValue::from_str(&hex::encode(h.0)),
             None => JsValue::NULL,
         }
     }
 
     #[wasm_bindgen(unchecked_return_type = "Heads")]
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
-        let mut heads = self.doc.merge(&mut other.doc)?;
-        heads.sort_unstable();
+        let heads = self.doc.merge(&mut other.doc)?;
         let heads: Array = heads
             .iter()
-            .map(|id| JsValue::from_str(&id.to_string()))
+            .map(|h| JsValue::from_str(&hex::encode(h.0)))
             .collect();
         Ok(heads)
     }
@@ -594,7 +573,7 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads)? {
             self.doc
-                .keys_at(&obj, &heads)?
+                .keys_at(&obj, &heads)
                 .map(|s| JsValue::from_str(&s))
                 .collect()
         } else {
@@ -1295,7 +1274,7 @@ impl Automerge {
             return Err(error::Isolate::NoHeads);
         };
 
-        self.doc.isolate(&heads)?;
+        self.doc.isolate(&heads);
         Ok(())
     }
 
@@ -1308,7 +1287,7 @@ impl Automerge {
     pub fn length(&self, obj: JsValue, heads: JsValue) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
-            Ok(self.doc.length_at(&obj, &heads)? as f64)
+            Ok(self.doc.length_at(&obj, &heads) as f64)
         } else {
             Ok(self.doc.length(&obj) as f64)
         }
@@ -1325,16 +1304,13 @@ impl Automerge {
         Ok(())
     }
 
-    // The JS package's bytes are consumed by stored documents and by
-    // automerge-repo, so save/saveIncremental stay on the legacy chunk
-    // formats until the JS API is ported deliberately.
     pub fn save(&mut self) -> Uint8Array {
-        Uint8Array::from(self.doc.save_with_options(legacy_opts()).as_slice())
+        Uint8Array::from(self.doc.save().as_slice())
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]
     pub fn save_incremental(&mut self) -> Uint8Array {
-        let bytes = self.doc.save_incremental_with_options(legacy_opts());
+        let bytes = self.doc.save_incremental();
         Uint8Array::from(bytes.as_slice())
     }
 
@@ -1342,19 +1318,15 @@ impl Automerge {
     pub fn save_since(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
-    ) -> Result<Uint8Array, error::Get> {
+    ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
         let heads = get_heads(heads)?.unwrap_or(Vec::new());
-        let bytes = self.doc.save_after_with_options(&heads, legacy_opts())?;
+        let bytes = self.doc.save_after(&heads);
         Ok(Uint8Array::from(bytes.as_slice()))
     }
 
     #[wasm_bindgen(js_name = saveNoCompress)]
     pub fn save_nocompress(&mut self) -> Uint8Array {
-        let bytes = self.doc.save_with_options(automerge::SaveOptions {
-            format: am::SaveFormat::Legacy,
-            deflate: false,
-            ..Default::default()
-        });
+        let bytes = self.doc.save_nocompress();
         Uint8Array::from(bytes.as_slice())
     }
 
@@ -1390,8 +1362,8 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
     ) -> Result<Array, error::Get> {
-        let deps = get_heads(have_deps)?.unwrap_or_default();
-        let changes = self.doc.get_changes(&deps)?;
+        let deps: Vec<_> = JS(have_deps).try_into()?;
+        let changes = self.doc.get_changes(&deps);
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
@@ -1404,63 +1376,19 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
     ) -> Result<Array, error::Get> {
-        let deps = get_heads(have_deps)?.unwrap_or_default();
-        let changes = self.doc.get_changes_meta(&deps)?;
+        let deps: Vec<_> = JS(have_deps).try_into()?;
+        let changes = self.doc.get_changes_meta(&deps);
         let changes: Array = changes.iter().map(JS::from).collect();
         Ok(changes)
-    }
-
-    /// Whether the document contains the change with the given
-    /// `"seq@actor"` id. Hash-free: works on unchecked hash graphs.
-    #[wasm_bindgen(js_name = hasChangeId)]
-    pub fn has_change_id(
-        &self,
-        #[wasm_bindgen(unchecked_param_type = "ChangeId")] id: String,
-    ) -> bool {
-        id.parse::<am::ChangeId>()
-            .map(|id| self.doc.has_change_id(&id))
-            .unwrap_or(false)
-    }
-
-    /// Convert a change hash to its `"seq@actor"` change id, or null if the
-    /// change is definitely not in this document. Throws if the answer
-    /// would need hashes only kept in audit mode.
-    #[wasm_bindgen(js_name = hashToChangeId, unchecked_return_type = "ChangeId | null")]
-    pub fn hash_to_change_id(
-        &self,
-        #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, error::GetChangeByHash> {
-        let hash = JS(hash).try_into()?;
-        match self.doc.hash_to_change_id(&hash)? {
-            Some(id) => Ok(JsValue::from_str(&id.to_string())),
-            None => Ok(JsValue::null()),
-        }
-    }
-
-    /// Convert a `"seq@actor"` change id to the change's hash, or null if
-    /// the change is not in this document. Throws if the change's hash
-    /// was freed (kept only in audit mode).
-    #[wasm_bindgen(js_name = changeIdToHash, unchecked_return_type = "Hash | null")]
-    pub fn change_id_to_hash(
-        &self,
-        #[wasm_bindgen(unchecked_param_type = "ChangeId")] id: String,
-    ) -> Result<JsValue, error::GetHashForChangeId> {
-        let id = id
-            .parse::<am::ChangeId>()
-            .map_err(error::GetHashForChangeId::BadChangeId)?;
-        match self.doc.change_id_to_hash(&id)? {
-            Some(h) => Ok(JsValue::from_str(&hex::encode(h.0))),
-            None => Ok(JsValue::null()),
-        }
     }
 
     #[wasm_bindgen(js_name = getChangeByHash, unchecked_return_type="Change | null")]
     pub fn get_change_by_hash(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, error::GetChangeByHash> {
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
         let hash = JS(hash).try_into()?;
-        let change = self.doc.get_change_by_hash(&hash)?;
+        let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
         } else {
@@ -1472,9 +1400,9 @@ impl Automerge {
     pub fn get_change_meta_by_hash(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
-    ) -> Result<JsValue, error::GetChangeByHash> {
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
         let hash = JS(hash).try_into()?;
-        let change_meta = self.doc.get_change_meta_by_hash(&hash)?;
+        let change_meta = self.doc.get_change_meta_by_hash(&hash);
         if let Some(c) = change_meta {
             Ok(JS::from(&c).0)
         } else {
@@ -1488,7 +1416,7 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
     ) -> Result<JsValue, error::GetDecodedChangeByHash> {
         let hash = JS(hash).try_into()?;
-        let change = self.doc.get_change_by_hash(&hash)?;
+        let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
             let change: am::ExpandedChange = c.decode();
             let serializer = serde_wasm_bindgen::Serializer::json_compatible();
@@ -1499,13 +1427,13 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getChangesAdded, unchecked_return_type="Change[]")]
-    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
-        let changes = self.doc.get_changes_added_legacy(&mut other.doc)?;
+    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
+        let changes = self.doc.get_changes_added(&mut other.doc);
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
-        Ok(changes)
+        changes
     }
 
     #[wasm_bindgen(js_name = getFragmentMetadata, unchecked_return_type = "FragmentMeta[]")]
@@ -1526,7 +1454,7 @@ impl Automerge {
     pub fn get_fragment_meta(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Hash")] head: JsValue,
-    ) -> Result<JsValue, error::GetChangeByHash> {
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
         let head = JS(head).try_into()?;
         Ok(self
             .doc
@@ -1555,14 +1483,18 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
     ) -> Result<(), error::AddCommits> {
         let commits = Vec::<Commit>::try_from(JS(commits))?;
-        let mut bytes = Vec::new();
+        let mut changes = Vec::new();
+        let mut change_sets = Vec::new();
         for commit in commits {
-            // Touch the metadata so parsing validates the whole input shape even
-            // though the commit bytes remain the authoritative representation.
-            let _metadata = (commit.head, commit.parents);
-            bytes.extend(commit.bytes);
+            match commit.into_bytes()? {
+                CommitBytes::Change(change) => changes.push(*change),
+                CommitBytes::ChangeSet(bytes) => change_sets.extend(bytes),
+            }
         }
-        self.doc.load_incremental(&bytes)?;
+        self.doc.apply_changes(changes)?;
+        if !change_sets.is_empty() {
+            self.doc.load_incremental(&change_sets)?;
+        }
         Ok(())
     }
 
@@ -1583,50 +1515,10 @@ impl Automerge {
         Ok(())
     }
 
-    /// The heads of the document as change ids (`"seq@actor"` strings).
     #[wasm_bindgen(js_name = getHeads, unchecked_return_type="Heads")]
     pub fn get_heads(&mut self) -> Array {
-        self.doc
-            .get_heads()
-            .iter()
-            .map(|id| JsValue::from_str(&id.to_string()))
-            .collect()
-    }
-
-    /// The heads of the document as change hashes (hex strings), sorted.
-    ///
-    /// Hashes are the currency of the sync protocol and storage; for
-    /// everything else prefer the change ids from `getHeads()`.
-    #[wasm_bindgen(js_name = getHeadHashes, unchecked_return_type="Hash[]")]
-    pub fn get_head_hashes(&mut self) -> Array {
-        let mut heads = self.doc.get_head_hashes();
-        heads.sort_unstable();
+        let heads = self.doc.get_heads();
         AR::from(heads).into()
-    }
-
-    /// Switch this document to audit mode: every change is reconstructed
-    /// and hashed, the hashes retained so far are verified against the
-    /// recomputed ones, and afterwards every hash-based API (including
-    /// sync) works. No-op if the document is already in audit mode.
-    #[wasm_bindgen(js_name = enableAuditMode)]
-    pub fn enable_audit_mode(&mut self) -> Result<(), error::Merge> {
-        self.doc.enable_audit_mode()?;
-        Ok(())
-    }
-
-    /// Switch this document out of audit mode, freeing every hash outside
-    /// the retained set (heads, loose commits, fragment heads and
-    /// checkpoints, and their deps).
-    #[wasm_bindgen(js_name = disableAuditMode)]
-    pub fn disable_audit_mode(&mut self) {
-        self.doc.disable_audit_mode();
-    }
-
-    /// Whether this document is in audit mode (all change hashes kept and
-    /// verified) — see `enableAuditMode()`.
-    #[wasm_bindgen(js_name = auditMode)]
-    pub fn audit_mode(&self) -> bool {
-        self.doc.audit_mode() == am::AuditMode::Enabled
     }
 
     #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
@@ -1676,11 +1568,11 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
-    pub fn get_last_local_change(&mut self) -> Result<JsValue, error::Merge> {
-        if let Some(change) = self.doc.get_last_local_change_legacy()? {
-            Ok(Uint8Array::from(change.raw_bytes()).into())
+    pub fn get_last_local_change(&mut self) -> JsValue {
+        if let Some(change) = self.doc.get_last_local_change() {
+            Uint8Array::from(change.raw_bytes()).into()
         } else {
-            Ok(JsValue::null())
+            JsValue::null()
         }
     }
 
@@ -1692,7 +1584,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = getMissingDeps, skip_typescript)]
     pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or_default();
-        let deps = self.doc.get_missing_deps(&heads)?;
+        let deps = self.doc.get_missing_deps(&heads);
         let deps: Array = deps
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(h.0)))
@@ -1700,7 +1592,6 @@ impl Automerge {
         Ok(deps)
     }
 
-    #[cfg(feature = "sync")]
     #[wasm_bindgen(js_name = receiveSyncMessage)]
     pub fn receive_sync_message(
         &mut self,
@@ -1710,24 +1601,20 @@ impl Automerge {
         let message = message.to_vec();
         //am::log!("receive sync message: {:?}", message.as_slice());
         let message = automerge_sync::Message::decode(message.as_slice())?;
-        automerge_sync::Sync::receive_sync_message(self.doc.document_mut(), &mut state.0, message)?;
+        self.doc
+            .sync()
+            .receive_sync_message(&mut state.0, message)?;
         Ok(())
     }
 
-    #[cfg(feature = "sync")]
     #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
-    pub fn generate_sync_message(
-        &mut self,
-        state: &mut SyncState,
-    ) -> Result<JsValue, error::Merge> {
-        let message =
-            automerge_sync::Sync::generate_sync_message(self.doc.document(), &mut state.0)?;
-        if let Some(message) = message {
+    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
+        if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
             let message = message.encode();
             //am::log!("generate sync message: {:?}", message.as_slice());
-            Ok(Uint8Array::from(message.as_slice()).into())
+            Uint8Array::from(message.as_slice()).into()
         } else {
-            Ok(JsValue::null())
+            JsValue::null()
         }
     }
 
@@ -1780,7 +1667,7 @@ impl Automerge {
         // note: negative indices are converted to `CursorPosition::Start` in
         // `impl TryFrom<JS> for CursorPosition`
         let len = match heads {
-            Some(ref heads) => self.doc.length_at(&obj, heads)?,
+            Some(ref heads) => self.doc.length_at(&obj, heads),
             None => self.doc.length(&obj),
         };
 
@@ -1828,8 +1715,8 @@ impl Automerge {
     pub fn empty_change(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let time = time.map(|f| f as i64);
         let options = CommitOptions { message, time };
-        let id = self.doc.empty_change(options);
-        JsValue::from_str(&id.to_string())
+        let hash = self.doc.empty_change(options);
+        JsValue::from_str(&hex::encode(hash))
     }
 
     // skip_typescript because the datatype argument is optional which can only
@@ -1926,7 +1813,7 @@ impl Automerge {
     pub(crate) fn text_at(
         &self,
         obj: &am::ObjId,
-        heads: Option<&[am::ChangeId]>,
+        heads: Option<&[am::ChangeHash]>,
     ) -> Result<String, am::AutomergeError> {
         if let Some(heads) = heads {
             Ok(self.doc.text_at(obj, heads)?)
@@ -1935,21 +1822,20 @@ impl Automerge {
         }
     }
 
-    #[cfg(feature = "sync")]
     #[wasm_bindgen(js_name = hasOurChanges)]
     pub fn has_our_changes(&mut self, state: &mut SyncState) -> bool {
-        automerge_sync::Sync::peer_has_our_changes(self.doc.document(), &state.0)
+        self.doc.has_our_changes(&state.0)
     }
 
     #[wasm_bindgen(js_name = topoHistoryTraversal, unchecked_return_type="Hash[]")]
-    pub fn topo_history_traversal(&mut self) -> Result<JsValue, error::Merge> {
+    pub fn topo_history_traversal(&mut self) -> JsValue {
         let hashes = self
             .doc
-            .get_changes(&[])?
+            .get_changes(&[])
             .into_iter()
             .map(|c| c.hash())
             .collect::<Vec<_>>();
-        Ok(AR::from(hashes).into())
+        AR::from(hashes).into()
     }
 
     #[wasm_bindgen(js_name = stats, unchecked_return_type="Stats")]
@@ -2035,22 +1921,11 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
-    let audit = match js_get(&options, "auditMode")
-        .ok()
-        .filter(|v| !v.is_undefined() && !v.is_null())
-        .map(|v| v.as_bool())
-    {
-        None => am::AuditMode::Disabled,
-        Some(Some(true)) => am::AuditMode::Enabled,
-        Some(Some(false)) => am::AuditMode::Disabled,
-        Some(None) => return Err(error::Load::BadAuditMode),
-    };
     let mut doc = am::AutoCommit::load_with_options(
         &data,
         am::LoadOptions::new()
             .on_partial_load(on_partial_load)
             .verification_mode(verification_mode)
-            .audit(audit)
             .migrate_strings(string_migration)
             .text_encoding(TextEncoding::Utf16CodeUnit),
     )?;
@@ -2115,34 +1990,29 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, error::DecodeChange>
     Ok(change.serialize(&serializer)?)
 }
 
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = initSyncState, unchecked_return_type="SyncState")]
 pub fn init_sync_state() -> SyncState {
     SyncState(automerge_sync::State::new())
 }
 
 // this is needed to be compatible with the automerge-js api
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = importSyncState)]
 pub fn import_sync_state(state: JsValue) -> Result<SyncState, interop::error::BadSyncState> {
     Ok(SyncState(JS(state).try_into()?))
 }
 
 // this is needed to be compatible with the automerge-js api
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = exportSyncState, unchecked_return_type="JsSyncState")]
 pub fn export_sync_state(state: &SyncState) -> JsValue {
     JS::from(state.0.clone()).into()
 }
 
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = encodeSyncMessage, unchecked_return_type="SyncMessage")]
 pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, interop::error::BadSyncMessage> {
     let message: automerge_sync::Message = JS(message).try_into()?;
     Ok(Uint8Array::from(message.encode().as_slice()))
 }
 
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = decodeSyncMessage, unchecked_return_type="DecodedSyncMessage")]
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMessage> {
     let data = msg.to_vec();
@@ -2175,13 +2045,11 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMes
     Ok(obj)
 }
 
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = encodeSyncState)]
 pub fn encode_sync_state(state: &SyncState) -> Uint8Array {
     Uint8Array::from(state.0.encode().as_slice())
 }
 
-#[cfg(feature = "sync")]
 #[wasm_bindgen(js_name = decodeSyncState, unchecked_return_type="SyncState")]
 pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSyncStateErr> {
     SyncState::decode(data)
@@ -2256,33 +2124,66 @@ fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
         AR::from(fragment.checkpoints.as_slice()),
     )
     .unwrap();
-    let members: Array = fragment
-        .members
-        .iter()
-        .map(|m| JsValue::from_str(&m.to_string()))
-        .collect();
-    js_set(&obj, "members", members).unwrap();
+    js_set(&obj, "members", AR::from(fragment.members.as_slice())).unwrap();
     obj
-}
-
-fn js_to_change_ids(value: JS) -> Result<Vec<am::ChangeId>, error::BadJSChangeIds> {
-    let arr = value
-        .0
-        .dyn_into::<Array>()
-        .map_err(|_| error::BadJSChangeIds::NotArray)?;
-    arr.iter()
-        .map(|v| {
-            let s = v.as_string().ok_or(error::BadJSChangeIds::NotAString)?;
-            s.parse::<am::ChangeId>()
-                .map_err(|_| error::BadJSChangeIds::BadChangeId(s))
-        })
-        .collect()
 }
 
 struct Commit {
     head: am::ChangeHash,
     parents: Vec<am::ChangeHash>,
     bytes: Vec<u8>,
+}
+
+/// A commit's bytes: an encoded change, or the change set `getCommits` produces
+/// for it. Either way they have been checked against the commit's metadata.
+enum CommitBytes {
+    Change(Box<Change>),
+    ChangeSet(Vec<u8>),
+}
+
+impl Commit {
+    fn into_bytes(self) -> Result<CommitBytes, error::BadCommitBytes> {
+        if let Ok(change_set) = am::ChangeSet::try_from(self.bytes.as_slice()) {
+            // validate the change set against the JS metadata as for a change
+            let heads: Vec<_> = change_set.heads().collect();
+            if heads != [self.head] {
+                return Err(error::BadCommitBytes::HeadMismatch {
+                    expected: self.head.to_string(),
+                    actual: heads
+                        .iter()
+                        .map(|h| h.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                });
+            }
+            let mut deps = change_set.deps().to_vec();
+            let mut parents = self.parents.clone();
+            deps.sort();
+            parents.sort();
+            if deps != parents {
+                return Err(error::BadCommitBytes::ParentsMismatch);
+            }
+            return Ok(CommitBytes::ChangeSet(self.bytes));
+        }
+        self.into_change().map(|c| CommitBytes::Change(Box::new(c)))
+    }
+
+    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
+        let change = Change::try_from(self.bytes.as_slice())?;
+        // Validate that JS metadata lines up with the supplied bytes. This keeps
+        // Automerge's API shaped like Subduction's addCommits input while still
+        // treating the encoded change as authoritative.
+        if change.hash() != self.head {
+            return Err(error::BadCommitBytes::HeadMismatch {
+                expected: self.head.to_string(),
+                actual: change.hash().to_string(),
+            });
+        }
+        if change.deps() != self.parents.as_slice() {
+            return Err(error::BadCommitBytes::ParentsMismatch);
+        }
+        Ok(change)
+    }
 }
 
 impl TryFrom<JS> for Commit {
@@ -2375,7 +2276,8 @@ impl TryFrom<JS> for am::Fragment {
         let checkpoints = js_get(&value.0, "checkpoints")?
             .try_into()
             .map_err(error::BadJSFragmentInput::BadCheckpoints)?;
-        let members = js_to_change_ids(js_get(&value.0, "members")?)
+        let members = js_get(&value.0, "members")?
+            .try_into()
             .map_err(error::BadJSFragmentInput::BadMembers)?;
         Ok(Self {
             head,
@@ -2512,8 +2414,6 @@ pub mod error {
     pub enum Fragments {
         #[error(transparent)]
         BadLevelRange(#[from] BadFragmentLevelRange),
-        #[error(transparent)]
-        Automerge(#[from] AutomergeError),
     }
 
     impl From<Fragments> for JsValue {
@@ -2543,11 +2443,23 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
+    pub enum BadCommitBytes {
+        #[error("bad commit bytes: {0}")]
+        Load(#[from] automerge::LoadChangeError),
+        #[error("commit input head mismatch: expected {expected}, actual {actual}")]
+        HeadMismatch { expected: String, actual: String },
+        #[error("commit input parents do not match encoded change dependencies")]
+        ParentsMismatch,
+    }
+
+    #[derive(Debug, thiserror::Error)]
     pub enum AddCommits {
         #[error(transparent)]
         BadInputs(#[from] BadJSCommits),
-        #[error("error loading commits: {0}")]
-        Load(#[from] AutomergeError),
+        #[error(transparent)]
+        BadBytes(#[from] BadCommitBytes),
+        #[error("error applying commits: {0}")]
+        Apply(#[from] AutomergeError),
     }
 
     impl From<AddCommits> for JsValue {
@@ -2569,7 +2481,7 @@ pub mod error {
         #[error("bad fragment checkpoints: {0}")]
         BadCheckpoints(BadChangeHashes),
         #[error("bad fragment members: {0}")]
-        BadMembers(super::error::BadJSChangeIds),
+        BadMembers(BadChangeHashes),
         #[error("bad fragment bytes: {0}")]
         BadBytes(BadUint8Array),
     }
@@ -2647,7 +2559,7 @@ pub mod error {
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error("bad heads: {0}")]
-        BadHeads(#[from] interop::error::BadChangeIds),
+        BadHeads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         InvalidProp(#[from] interop::error::InvalidProp),
         #[error(transparent)]
@@ -2854,14 +2766,12 @@ pub mod error {
         }
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum BadSyncMessage {
         #[error("could not decode sync message: {0}")]
         ReadMessage(#[from] automerge_sync::ReadMessageError),
     }
 
-    #[cfg(feature = "sync")]
     impl From<BadSyncMessage> for JsValue {
         fn from(e: BadSyncMessage) -> Self {
             RangeError::new(&e.to_string()).into()
@@ -2905,11 +2815,11 @@ pub mod error {
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error("invalid before heads: {0}")]
-        InvalidBeforeHeads(interop::error::BadChangeIds),
+        InvalidBeforeHeads(interop::error::BadChangeHashes),
         #[error("before heads were null or undefined")]
         MissingBeforeHeads,
         #[error("invalid after heads: {0}")]
-        InvalidAfterHeads(interop::error::BadChangeIds),
+        InvalidAfterHeads(interop::error::BadChangeHashes),
         #[error("after heads were null or undefined")]
         MissingAfterHeads,
     }
@@ -2923,11 +2833,9 @@ pub mod error {
     #[derive(Debug, thiserror::Error)]
     pub enum Isolate {
         #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeIds),
+        Heads(#[from] interop::error::BadChangeHashes),
         #[error("no heads specified")]
         NoHeads,
-        #[error(transparent)]
-        Automerge(#[from] AutomergeError),
     }
 
     impl From<Isolate> for JsValue {
@@ -2941,7 +2849,7 @@ pub mod error {
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeIds),
+        Heads(#[from] interop::error::BadChangeHashes),
     }
 
     impl From<Materialize> for JsValue {
@@ -2963,7 +2871,7 @@ pub mod error {
         #[error("cursors only valid on text - obj type: {0}")]
         InvalidObjType(ObjType),
         #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeIds),
+        Heads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
     }
@@ -2974,7 +2882,6 @@ pub mod error {
         }
     }
 
-    #[cfg(feature = "sync")]
     #[derive(Debug, thiserror::Error)]
     pub enum ReceiveSyncMessage {
         #[error(transparent)]
@@ -2983,7 +2890,6 @@ pub mod error {
         Automerge(#[from] AutomergeError),
     }
 
-    #[cfg(feature = "sync")]
     impl From<ReceiveSyncMessage> for JsValue {
         fn from(e: ReceiveSyncMessage) -> Self {
             RangeError::new(&e.to_string()).into()
@@ -2996,8 +2902,6 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
-        #[error("auditMode must be a boolean")]
-        BadAuditMode,
     }
 
     impl From<Load> for JsValue {
@@ -3107,7 +3011,7 @@ pub mod error {
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error(transparent)]
-        BadHeads(#[from] interop::error::BadChangeIds),
+        BadHeads(#[from] interop::error::BadChangeHashes),
     }
 
     impl From<GetBlock> for JsValue {
@@ -3121,7 +3025,7 @@ pub mod error {
         #[error("invalid object id: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
         #[error(transparent)]
-        BadHeads(#[from] interop::error::BadChangeIds),
+        BadHeads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error(transparent)]
@@ -3142,70 +3046,10 @@ pub mod error {
         BadChangeHash(#[from] super::interop::error::BadChangeHash),
         #[error(transparent)]
         SerdeWasm(#[from] serde_wasm_bindgen::Error),
-        #[error(transparent)]
-        Automerge(#[from] AutomergeError),
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum BadJSChangeIds {
-        #[error("members must be an array of \"seq@actor\" strings")]
-        NotArray,
-        #[error("change id must be a \"seq@actor\" string")]
-        NotAString,
-        #[error("invalid change id: {0}")]
-        BadChangeId(String),
-    }
-
-    impl From<BadJSChangeIds> for JsValue {
-        fn from(e: BadJSChangeIds) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum GetHashForChangeId {
-        #[error("invalid change id: {0}")]
-        BadChangeId(automerge::ParseChangeIdError),
-        #[error(transparent)]
-        Automerge(#[from] AutomergeError),
-    }
-
-    impl From<GetHashForChangeId> for JsValue {
-        fn from(e: GetHashForChangeId) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum GetChangeByHash {
-        #[error(transparent)]
-        BadChangeHash(#[from] super::interop::error::BadChangeHash),
-        #[error(transparent)]
-        Automerge(#[from] AutomergeError),
-    }
-
-    impl From<GetChangeByHash> for JsValue {
-        fn from(e: GetChangeByHash) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
     }
 
     impl From<GetDecodedChangeByHash> for JsValue {
         fn from(e: GetDecodedChangeByHash) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum SaveBundle {
-        #[error(transparent)]
-        BadChangeHashes(#[from] interop::error::BadChangeHashes),
-        #[error("error creating bundle: {0}")]
-        DoBundle(automerge::AutomergeError),
-    }
-
-    impl From<SaveBundle> for JsValue {
-        fn from(e: SaveBundle) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

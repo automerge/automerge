@@ -1,9 +1,10 @@
+use crate::automerge::Automerge;
 use crate::change_graph::ApplyLookup;
 use crate::change_queue::ChangeBatch;
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
 use crate::AutomergeError;
-use crate::{Automerge, Change, ChangeHash};
+use crate::{Change, ChangeHash};
 
 use super::super::op::{ChangeOp, OpBuilder};
 use super::super::op_set::{ObjIdIter, OpSet};
@@ -23,9 +24,7 @@ pub(crate) struct BatchApply {
     hashes: HashSet<ChangeHash>,
 }
 
-/// The batch sort order: objects ascending, keys/elemids within an
-/// object, ids within a group — document order for maps; sequences
-/// still need untangling afterward.
+/// Document order for map ops; sequence ops still need untangling.
 pub(super) fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
     a.bld.obj.cmp(&b.bld.obj).then_with(|| {
         match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
@@ -35,8 +34,6 @@ pub(super) fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
     })
 }
 
-/// Untangle order over a slice of indexes into `ops`: the ops stay
-/// put and the `u32` indexes are permuted instead.
 pub(super) fn untangle_order_idx(
     ops: &[ChangeOp],
     idxs: &mut [u32],
@@ -54,9 +51,6 @@ pub(super) fn untangle_order_idx(
     ut.finish();
 }
 
-/// Lightweight untangler operating on span positions of an index slice: all
-/// op lookups indirect through `idxs`, and `finish` permutes the
-/// indexes rather than the ops.
 struct UntangleLiteIdx<'a> {
     ops: &'a [ChangeOp],
     idxs: &'a mut [u32],
@@ -170,20 +164,21 @@ impl<'a> UntangleLiteIdx<'a> {
             self.untangle_inner();
         }
         debug_assert!(self.order.iter().all(|&o| o != u32::MAX));
-        // apply the permutation to the index slice by cycles
-        let mut order = std::mem::take(&mut self.order);
-        for i in 0..order.len() {
-            while order[i] as usize != i {
-                let j = order[i] as usize;
-                self.idxs.swap(i, j);
-                order.swap(i, j);
-            }
+        permute_in_place(self.idxs, std::mem::take(&mut self.order));
+    }
+}
+
+fn permute_in_place(items: &mut [u32], mut order: Vec<u32>) {
+    for i in 0..order.len() {
+        while order[i] as usize != i {
+            let j = order[i] as usize;
+            items.swap(i, j);
+            order.swap(i, j);
         }
     }
 }
 
-/// Increment operations preserve and update counter predecessors, but
-/// act as ordinary overwrites for non-counter predecessors.
+/// Increments on a non-counter target act as plain overwrites.
 pub(crate) fn normalize_increment_successors(
     is_counter: bool,
     successors: &mut [(OpId, Option<i64>)],
@@ -224,45 +219,34 @@ impl BatchApply {
             .unwrap_or(false)
     }
 
-    /// Take the actors this batch introduces, returning the ones the
-    /// document did not already have so a failed apply can put the table
-    /// back. Only a first change can introduce one; a later change's
-    /// actor is already here or the change is not ready.
-    pub(crate) fn insert_new_actors(&mut self, doc: &mut Automerge) -> Vec<crate::ActorId> {
+    /// Returns the actors that were new to the document.
+    pub(crate) fn insert_new_actors<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+    ) -> Vec<crate::ActorId> {
         let actors: Vec<crate::ActorId> = self
             .changes
             .iter()
-            .filter(|c| c.seq() == 1)
+            .filter(|c| c.seq() == 1) // only a first change can introduce an actor
             .map(|c| c.actor_id().clone())
             .collect();
         doc.put_actor_refs(&actors)
     }
 
-    /// Apply the batch: convert the v1 changes into the v2 succ-format
-    /// columns and run the v2 pipeline. Patch generation is deferred to
-    /// the dirty diff — the merge/succ/re-election writes mark exactly
-    /// the touched rows dirty as they land.
     /// Apply the batch, or nothing at all.
-    ///
-    /// Every fallible step reads the document and writes only locals, so
-    /// they all run before the first write. The actor table is the one
-    /// exception — importing an op maps its ids through it — and it is
-    /// put back exactly if anything after it fails.
-    pub(crate) fn apply(&mut self, doc: &mut Automerge) -> Result<(), AutomergeError> {
+    pub(crate) fn apply<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+    ) -> Result<(), AutomergeError> {
         let added = self.insert_new_actors(doc);
-        let result = self.apply_v2(doc);
+        let result = self.apply_as_change_set(doc);
         if result.is_err() {
             doc.undo_actor_refs(&added);
         }
         result
     }
 
-    /// Normalize to the succ-carrying shape fragment change sets arrive in:
-    /// preds targeting ops in this batch become succ entries on their
-    /// targets (sorted, increments normalized) and ops keep only
-    /// doc-row preds. Deletes left with no preds carry nothing beyond
-    /// the succ already stamped — callers drop them from the stream.
-    fn stamp_succ(&mut self, clock: &Clock) {
+    fn move_in_batch_preds_to_succ(&mut self, clock: &Clock) {
         let mut succ_map = PredCache::default();
         for op in self.ops.iter_mut() {
             let id = op.id();
@@ -287,25 +271,40 @@ impl BatchApply {
         debug_assert!(succ_map.is_empty(), "succ target missing from batch");
     }
 
-    /// EXPERIMENT (`BATCH_V2=1`): convert the v1 batch into the v2
-    /// succ-format columns as early as possible and continue on the v2
-    /// code path. The ops vec is never sorted or compacted — a `u32`
-    /// index vec is filtered, sorted and untangled instead, then the
-    /// ops are encoded into change set columns in index order and handed to
-    /// [`ChangeSetApply`](super::change_set::ChangeSetApply), which decodes and applies them exactly like a
-    /// received fragment. Measures the conversion tax of making the
-    /// compressed columns canonical.
-    fn apply_v2(&mut self, doc: &mut Automerge) -> Result<(), AutomergeError> {
+    fn apply_as_change_set<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+    ) -> Result<(), AutomergeError> {
         for c in &self.changes {
             doc.import_ops_to(c, &mut self.ops)?;
         }
-        // the clock as it is *before* this batch — what the manifold
-        // resolves against, and what `stamp_succ` reads
-        let clock = doc.change_graph.current_clock();
+        let clock_before_batch = doc.change_graph.current_clock();
+        self.move_in_batch_preds_to_succ(&clock_before_batch);
 
-        self.stamp_succ(&clock);
+        let idxs = self.doc_ordered_indexes(doc);
+        let (raw, data) =
+            encode_change_set_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
 
-        // sort and filter u32 indexes, not 200-byte ChangeOps
+        let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
+        let frag = super::change_set::ChangeSetApply::from_parts(
+            clock_before_batch,
+            actor_map,
+            super::change_set::ChangeSetSrc::Owned { raw, data },
+            doc.ops(),
+        )?;
+        // the last fallible step; nothing below can fail
+        let r = frag.resolve(doc)?;
+
+        doc.update_history_batch(&self.changes);
+        frag.commit(doc, r);
+        Ok(())
+    }
+
+    fn doc_ordered_indexes<H: crate::hash_retention::HashRetention>(
+        &self,
+        doc: &Automerge<H>,
+    ) -> Vec<u32> {
+        // sort indexes rather than the much larger ChangeOps
         let mut idxs: Vec<u32> = (0..self.ops.len() as u32)
             .filter(|&i| {
                 let op = &self.ops[i as usize];
@@ -321,7 +320,6 @@ impl BatchApply {
                 obj_info.insert(op.id(), info);
             }
         }
-        // untangle each sequence object's span of the index vec
         let mut walker = ObjWalker::new(doc.ops());
         let mut start = 0;
         while start < idxs.len() {
@@ -341,28 +339,7 @@ impl BatchApply {
             }
             start = end;
         }
-
-        // encode the v2 op columns in index (= document) order
-        let (raw, data) =
-            encode_change_set_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
-
-        // from here on this IS the v2 path: the columns are loaded back
-        // as an indexed op set, the streaming manifold resolves them,
-        // and the merge copies columns and indexes in wholesale
-        let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
-        let frag = super::change_set::ChangeSetApply::from_parts(
-            clock.clone(),
-            actor_map,
-            super::change_set::ChangeSetSrc::Owned { raw, data },
-            doc.ops(),
-        )?;
-        // reads only, and the last thing that can reject the batch
-        let r = frag.resolve(doc)?;
-
-        // ── commit ──────────────────────────────────────────────────
-        doc.update_history_batch(&self.changes);
-        frag.commit(doc, r);
-        Ok(())
+        idxs
     }
 }
 
@@ -382,10 +359,8 @@ impl<'a> ObjWalker<'a> {
     }
 }
 
-/// Encode a doc-ordered, succ-stamped op stream into the v2 op
-/// columns. This is an in-process handoff: actor indexes stay the
-/// document's (identity mapping), and the inverse column's members are
-/// synthesized as per-actor counter ranges.
+/// Encode doc-ordered, succ-stamped ops as change set op columns, keeping
+/// the document's actor indexes.
 pub(super) fn encode_change_set_ops<'x, I>(
     ops: I,
     op_set: &OpSet,
@@ -411,16 +386,13 @@ where
     (cols.raw_columns(), data)
 }
 
-impl Automerge {
+impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     pub fn apply_changes_batch<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
     ) -> Result<(), AutomergeError> {
-        // Add new changes, deduplicating and checking for duplicate seq numbers.
         let mut batch = ChangeBatch::new();
-        // actors already claiming an author in the queue or this batch;
-        // an actor's author is set once, by its first change
-        let mut actor_author: HashSet<ActorId> = self
+        let mut actors_with_author: HashSet<ActorId> = self
             .queue
             .iter()
             .filter(|c| c.author().is_some())
@@ -447,7 +419,7 @@ impl Automerge {
             }
             if c.author().is_some()
                 && (self.get_author_for_actor(c.actor_id()).is_some()
-                    || !actor_author.insert(c.actor_id().clone()))
+                    || !actors_with_author.insert(c.actor_id().clone()))
             {
                 return Err(AutomergeError::duplicate_author(&c));
             }
@@ -465,22 +437,17 @@ impl Automerge {
             chap.push(c);
         }
 
-        // All or nothing: on failure the batch applied none of its
-        // changes. They are *not* re-queued — one of them is the reason
-        // the batch failed, and a queue holding it would fail every
-        // apply after this one. The caller is told nothing landed and
-        // still has the changes.
+        // on failure the popped changes are not re-queued: one of them
+        // would fail every later apply
         chap.apply(self)?;
 
-        // A change still queued because a dep hash lookup was AMBIGUOUS
-        // (outside audit mode the dep may name a change we have whose
-        // hash was freed) can never become ready — fail loudly rather
-        // than silently dropping it. Genuinely absent deps (decidable
-        // in audit mode, or while the retained map is still complete)
-        // keep queueing as before.
+        self.check_queued_deps_decidable()
+    }
+
+    /// A queued change whose dep hash may have been freed can never become ready.
+    fn check_queued_deps_decidable(&self) -> Result<(), AutomergeError> {
         for queued in self.queue.iter() {
             for dep in queued.deps() {
-                // a dep that is itself queued is not ambiguous
                 if !self.queue.has_hash(dep) && self.change_graph.has_change(dep).is_err() {
                     return Err(AutomergeError::AuditModeRequired);
                 }
@@ -500,11 +467,7 @@ impl Automerge {
     }
 
     fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
-        // A ready change's referenced actors are all here: its own came
-        // in with it, and every other belongs to an op it names, which
-        // its deps brought. A change naming one we do not have is
-        // malformed, not merely early — and this is untrusted input, so
-        // it is an error rather than an unwrap.
+        // a ready change naming an unknown actor is malformed, untrusted input
         let actors: Vec<_> = change
             .actors()
             .map(|a| {
@@ -551,12 +514,13 @@ impl Automerge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autocommit::AutoCommit;
     use crate::marks::{ExpandMark, Mark};
     use crate::read::ReadDoc;
-    use crate::transaction::Transactable;
+    use crate::tx::Transactable;
     use crate::types;
     use crate::types::{ObjType, ScalarValue};
-    use crate::{make_rng, ActorId, AutoCommit, ROOT};
+    use crate::{make_rng, ActorId, ROOT};
     use rand::prelude::*;
 
     /// InsertQuery::resolve had a bug where an increment op before a trailing
@@ -590,7 +554,7 @@ mod tests {
         replayed.doc.debug_cmp(&doc.doc);
     }
 
-    impl AutoCommit {
+    impl<H: crate::hash_retention::HashRetention> AutoCommit<H> {
         fn apply_changes_iter(
             &mut self,
             changes: impl IntoIterator<Item = Change> + Clone,
@@ -606,11 +570,11 @@ mod tests {
 
     #[test]
     fn v1_increment_plus_child_insert_layout() {
-        // v1 batch apply must keep an element's updates ahead of its
-        // child inserts; a same-batch increment + insert-after on the
-        // same element must not interleave
-        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
-        doc.enable_audit_mode().unwrap();
+        // a same-batch increment and insert-after on one element must not interleave
+        let mut doc = AutoCommit::new()
+            .with_actor("aa".try_into().unwrap())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, ScalarValue::counter(5)).unwrap();
         let heads = doc.get_heads();
@@ -620,7 +584,7 @@ mod tests {
         f.insert(&list, 1, "x").unwrap();
 
         doc.merge(&mut f).unwrap();
-        // walking the merged doc's changes re-encounters the layout
+        // must not panic re-walking the merged layout
         let _ = doc.doc.get_changes(&heads).unwrap();
     }
 
@@ -628,8 +592,10 @@ mod tests {
     fn batch_apply_per_merge_validates() {
         let mut rng = make_rng();
         for _ in 0..10 {
-            let mut base = AutoCommit::new().with_actor(rng.random());
-            base.enable_audit_mode().unwrap();
+            let mut base = AutoCommit::new()
+                .with_actor(rng.random())
+                .enable_audit_mode()
+                .unwrap();
             let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
             let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
             base.put(&map, "c", ScalarValue::counter(0)).unwrap();
@@ -641,8 +607,6 @@ mod tests {
             let heads = base.get_heads();
             let mut src = base.fork().with_actor(rng.random());
             for _ in 0..6 {
-                // concurrent: every fork branches from base, so its
-                // changes land on a src that has moved on
                 let mut f = base.fork().with_actor(rng.random());
                 for _ in 0..rng.random_range(1..8u32) {
                     let len = f.length(&list);
@@ -685,12 +649,12 @@ mod tests {
 
     #[test]
     fn batch_apply_fuzz_validates() {
-        // random concurrent batches through the one pipeline; the doc
-        // must deep-validate (index rebuild + hash round-trip) after
         let mut rng = make_rng();
         for _ in 0..20 {
-            let mut base = AutoCommit::new().with_actor(rng.random());
-            base.enable_audit_mode().unwrap();
+            let mut base = AutoCommit::new()
+                .with_actor(rng.random())
+                .enable_audit_mode()
+                .unwrap();
             let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
             let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
             base.put(&map, "c", ScalarValue::counter(0)).unwrap();
@@ -746,7 +710,10 @@ mod tests {
         }
     }
 
-    fn changes_since(src: &mut AutoCommit, heads: &[crate::ChangeId]) -> Vec<Change> {
+    fn changes_since<H: crate::hash_retention::HashRetention>(
+        src: &mut AutoCommit<H>,
+        heads: &[crate::ChangeId],
+    ) -> Vec<Change> {
         src.get_changes(heads).unwrap()
     }
 
@@ -756,8 +723,10 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(actor1)
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", "val1").unwrap();
         doc1.put(&map1, "key2", "val2").unwrap();
@@ -802,8 +771,10 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(actor1)
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "val1").unwrap();
         doc1.insert(&list, 1, "val2").unwrap();
@@ -850,8 +821,10 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(actor1)
+            .enable_audit_mode()
+            .unwrap();
         let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc1.splice_text(&text, 0, 0, "the quick fox jumped over the lazy dog")
             .unwrap();
@@ -883,8 +856,10 @@ mod tests {
     #[test]
     fn multi_put_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -906,8 +881,10 @@ mod tests {
     #[test]
     fn multi_insert_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -919,7 +896,6 @@ mod tests {
         for i in 0..10 {
             let mut tmp = doc1.fork().with_actor(rng.random());
             tmp.insert(&list, 1, i).unwrap();
-            //let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
             doc2.merge(&mut tmp).unwrap();
         }
 
@@ -932,8 +908,10 @@ mod tests {
     #[test]
     fn multi_update_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -961,8 +939,10 @@ mod tests {
     )]
     fn fuzz_batch_list_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -1012,8 +992,10 @@ mod tests {
     #[test]
     fn fuzz_batch_map1_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1057,8 +1039,10 @@ mod tests {
     #[test]
     fn fuzz_batch_map2_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1108,7 +1092,7 @@ mod tests {
         assert_eq!(doc_a.save(), doc_b.save());
 
         let pa = doc_a.diff_incremental();
-        let pb = doc_b.diff(&heads, &final_heads);
+        let pb = doc_b.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1132,8 +1116,10 @@ mod tests {
     )]
     fn fuzz_batch_map_counter_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", ScalarValue::counter(10)).unwrap();
         doc1.increment(&map1, "key1", 15).unwrap();
@@ -1204,7 +1190,7 @@ mod tests {
         assert_eq!(doc_a.save(), doc_b.save());
 
         let pa = doc_a.diff_incremental();
-        let pb = doc_b.diff(&heads, &final_heads);
+        let pb = doc_b.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1229,8 +1215,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, ScalarValue::counter(val())).unwrap();
         doc1.insert(&list1, 1, ScalarValue::counter(val())).unwrap();
@@ -1284,8 +1272,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, val()).unwrap();
         doc1.insert(&list1, 1, val()).unwrap();
@@ -1333,8 +1323,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "--------").unwrap();
 
@@ -1375,8 +1367,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
-        doc1.enable_audit_mode().unwrap();
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "---------------------")
             .unwrap();
@@ -1430,7 +1424,11 @@ mod tests {
         merge_and_diff(&mut doc1, &mut doc1_copy, &changes);
     }
 
-    fn merge_and_diff(a: &mut AutoCommit, a_copy: &mut AutoCommit, changes: &[Change]) {
+    fn merge_and_diff<H: crate::hash_retention::HashRetention>(
+        a: &mut AutoCommit<H>,
+        a_copy: &mut AutoCommit<H>,
+        changes: &[Change],
+    ) {
         let heads = a.get_heads();
 
         a.update_diff_cursor();
@@ -1440,7 +1438,7 @@ mod tests {
         let final_heads = a.get_heads();
 
         a_copy.apply_changes_iter(changes.to_owned()).unwrap();
-        let pb = a_copy.diff(&heads, &final_heads);
+        let pb = a_copy.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1462,8 +1460,10 @@ mod tests {
     #[test]
     fn map_key_conflict() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
-        doc.enable_audit_mode().unwrap();
+        let mut doc = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         doc.put(&ROOT, "key1", "value1").unwrap();
 
@@ -1503,8 +1503,10 @@ mod tests {
     #[test]
     fn list_element_conflict() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
-        doc.enable_audit_mode().unwrap();
+        let mut doc = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
 
@@ -1544,8 +1546,10 @@ mod tests {
     #[test]
     fn conflicts_with_isolate() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
-        doc.enable_audit_mode().unwrap();
+        let mut doc = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         let map = doc.put_object(&ROOT, "map", ObjType::Map).unwrap();
@@ -1564,8 +1568,7 @@ mod tests {
 
         for _ in 0..CYCLES {
             for d in &mut docs {
-                // ids must name changes d contains: pull the central doc's
-                // changes before isolating at one of its historical heads
+                // isolating needs the central doc's historical heads
                 d.merge(&mut doc).unwrap();
                 let head = rng.random::<u32>() % (heads.len() as u32);
                 d.isolate(&heads[head as usize]).unwrap();

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
+use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::iter::SpanInternal;
 use crate::marks::{Mark, MarkSet};
@@ -10,7 +11,7 @@ use crate::types::{Clock, ObjId as InternalObjId, SequenceType};
 use crate::value::{ScalarValue, Value as PublicValue};
 #[cfg(test)]
 use crate::AutomergeError;
-use crate::{Automerge, ChangeId, ObjType, Patch, PatchAction, Prop, TextEncoding};
+use crate::{ChangeId, ObjType, Patch, PatchAction, Prop, TextEncoding};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectValue {
@@ -90,8 +91,8 @@ impl fmt::Display for PatchEffectError {
 impl std::error::Error for PatchEffectError {}
 
 #[track_caller]
-pub(crate) fn assert_patches_have_same_effect(
-    doc: &Automerge,
+pub(crate) fn assert_patches_have_same_effect<H: crate::hash_retention::HashRetention>(
+    doc: &Automerge<H>,
     before: &[ChangeId],
     after: &[ChangeId],
     left_label: &str,
@@ -118,8 +119,8 @@ pub(crate) fn assert_patches_have_same_effect(
 }
 
 #[track_caller]
-fn apply_patch_effects(
-    doc: &Automerge,
+fn apply_patch_effects<H: crate::hash_retention::HashRetention>(
+    doc: &Automerge<H>,
     mut value: EffectValue,
     label: &str,
     patches: &[Patch],
@@ -131,7 +132,10 @@ fn apply_patch_effects(
 }
 
 impl EffectValue {
-    pub(crate) fn from_doc(doc: &Automerge, heads: Option<&[ChangeId]>) -> Self {
+    pub(crate) fn from_doc<H: crate::hash_retention::HashRetention>(
+        doc: &Automerge<H>,
+        heads: Option<&[ChangeId]>,
+    ) -> Self {
         let clock = heads.and_then(|heads| {
             doc.clock_for_ids(heads)
                 .expect("effect heads must be change ids in the document")
@@ -140,8 +144,8 @@ impl EffectValue {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_doc_obj(
-        doc: &Automerge,
+    pub(crate) fn from_doc_obj<H: crate::hash_retention::HashRetention>(
+        doc: &Automerge<H>,
         obj: &ExId,
         heads: Option<&[ChangeId]>,
     ) -> Result<Self, AutomergeError> {
@@ -796,12 +800,15 @@ impl From<&MarkSet> for EffectMarks {
     }
 }
 
-struct EffectMaterializer<'a> {
-    doc: &'a Automerge,
+struct EffectMaterializer<
+    'a,
+    H: crate::hash_retention::HashRetention = crate::hash_retention::Retained,
+> {
+    doc: &'a Automerge<H>,
 }
 
-impl<'a> EffectMaterializer<'a> {
-    fn new(doc: &'a Automerge) -> Self {
+impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
+    fn new(doc: &'a Automerge<H>) -> Self {
         Self { doc }
     }
 
@@ -978,9 +985,10 @@ fn take_suffix(value: &ConcreteTextValue, start: usize) -> ConcreteTextValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autocommit::AutoCommit;
     use crate::marks::ExpandMark;
-    use crate::transaction::Transactable;
-    use crate::{AutoCommit, ROOT};
+    use crate::tx::Transactable;
+    use crate::ROOT;
 
     fn assert_diff_patches_have_effect(
         doc: &mut AutoCommit,
@@ -989,7 +997,7 @@ mod tests {
     ) {
         let mut materialized = EffectValue::from_doc(&doc.doc, Some(before));
         let expected = EffectValue::from_doc(&doc.doc, Some(after));
-        let patches = doc.diff(before, after);
+        let patches = doc.diff(before, after).unwrap();
         materialized
             .apply_patches(doc.doc.text_encoding(), patches)
             .expect("patches should apply to materialized before-state");
@@ -1120,10 +1128,8 @@ mod tests {
 
     #[test]
     fn materializer_applies_list_conflicts() {
-        // Pinned actor + timestamp so the hashes are a pure function of
-        // the ops: an unpinned commit can hash to a fragment head (1/256)
-        // and free hashes this test still needs. See HASHLESS.md.
-        let t0 = || crate::transaction::CommitOptions::default().with_time(0);
+        // pinned actor and time: a fragment-head commit would free hashes this test needs
+        let t0 = || crate::tx::CommitOptions::default().with_time(0);
         let mut doc1 = AutoCommit::new().with_actor(crate::ActorId::from(&b"mlc1"[..]));
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "one").unwrap();

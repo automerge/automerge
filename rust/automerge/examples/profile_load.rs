@@ -1,8 +1,7 @@
 // Load a doc repeatedly — profiler target for the full-load path.
 // Args: [doc] [iterations] [mode: audit|default]
-// default re-saves the doc first (the raw egwalker files predate the
-// head-index suffix the column-trusting load needs).
-use automerge::{AuditMode, Automerge, LoadOptions};
+// default re-saves the doc first: the raw egwalker files lack the head-index suffix.
+use automerge::next::Automerge;
 fn main() {
     let name = std::env::args().nth(1).unwrap_or_else(|| "S3".into());
     let n: usize = std::env::args()
@@ -14,17 +13,15 @@ fn main() {
     let bytes = if mode == "audit" {
         raw
     } else {
-        // re-save so the head-index suffix (and fragment hashes) exist
         Automerge::load(&raw).unwrap().save()
-    };
-    let audit = match mode.as_str() {
-        "audit" => AuditMode::Enabled,
-        _ => AuditMode::Disabled,
     };
     let t = std::time::Instant::now();
     for _ in 0..n {
-        let d = Automerge::load_with_options(&bytes, LoadOptions::new().audit(audit)).unwrap();
-        std::hint::black_box(&d);
+        if mode == "audit" {
+            std::hint::black_box(automerge::Automerge::load(&bytes).unwrap());
+        } else {
+            std::hint::black_box(Automerge::load(&bytes).unwrap());
+        }
     }
     eprintln!(
         "{} x{} mode={} avg {:.4}s",

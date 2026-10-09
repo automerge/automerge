@@ -131,9 +131,7 @@ impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable 
         self.iter.set_max(pos);
     }
 
-    // the skipper's first item decides how far `iter` jumps, so a
-    // position-only shift moves both to the range start and lets the
-    // next `next()` consume the first skip
+    // position-only: the next `next()` consumes the first skip
     fn shift(&mut self, range: Range<usize>) {
         self.skip.shift(range.clone());
         self.iter.shift(range);
@@ -283,10 +281,6 @@ where
 /// represnting ranges of `false` values in a boolean column. This can then
 /// be used by other iterators to skip past elements for which the boolean
 /// column is false
-///
-/// Only `pending` (trues still owed from a consumed run) and the
-/// exhaustion flag are real state — the cursor is derived as
-/// `iter.pos() - pending`, and the window end is the iter's own max.
 #[derive(Clone, Default, Debug)]
 pub(crate) struct BoolColumnSkipper<'a> {
     iter: hexane::Iter<'a, bool>,
@@ -303,7 +297,6 @@ impl<'a> BoolColumnSkipper<'a> {
         }
     }
 
-    /// The position of the next item this skipper will account for.
     fn cursor(&self) -> usize {
         self.iter.pos() - self.pending
     }
@@ -324,18 +317,8 @@ impl Shiftable for BoolColumnSkipper<'_> {
         self.iter.set_max(pos);
     }
 
-    // yields skip counts — reposition the state, don't consume.
-    // Entering a true-run consumes it whole from the inner iter, owing
-    // the tail as `pending`; a shift landing inside the owed span trims
-    // it and leaves the iter alone (it is already past). Only when
-    // nothing is owed does the iter really move.
-    //
-    // FIXME: forward-only. With `pending > 0` and `range.start` *behind*
-    // the cursor the subtraction saturates to zero, so the owed trues are
-    // kept and the inner iterator is never rewound — the skipper silently
-    // reports the window it was already in. Every caller shifts forward
-    // today, but nothing states or checks that; either assert it or make
-    // the backwards case rebuild from the column.
+    // a shift inside an already-consumed true-run only trims `pending`
+    // FIXME: forward only; shifting backwards silently keeps the current window
     fn shift(&mut self, range: Range<usize>) {
         self.pending = self
             .pending
@@ -373,7 +356,6 @@ impl Iterator for BoolColumnSkipper<'_> {
             }
             skipped += run.count;
         }
-        // no more trues: one final skip covering the remaining falses
         self.exhausted = true;
         Some(skipped)
     }
@@ -542,9 +524,7 @@ impl<S> Shiftable for PastSkipper<S>
 where
     S: Skipper + Shiftable + Debug,
 {
-    // the two streams sit at different positions while a run of
-    // adds/deletes is pending; the `after` stream is the document
-    // position
+    // the streams diverge mid-run; `after` is the document position
     fn get_pos(&self) -> usize {
         self.after.get_pos()
     }
@@ -702,16 +682,12 @@ mod tests {
         vals.extend([true; 4]);
         let col: hexane::Column<bool> = hexane::Column::from_values(vals);
 
-        // reference: a fresh skipper built directly over 2..8
         let fresh: Vec<usize> = BoolColumnSkipper::new(col.iter_range(2..8)).collect();
 
-        // entering the first true-run consumes it whole from the inner
-        // iter (pending = 4 after one next)...
+        // the first next() consumes the whole first true-run
         let mut skipper = BoolColumnSkipper::new(col.iter_range(0..12));
         assert_eq!(skipper.next(), Some(0));
 
-        // ...so a shift landing inside the consumed run must trim the
-        // owed trues, not discard them
         skipper.shift(2..8);
         let shifted: Vec<usize> = skipper.collect();
 
@@ -729,7 +705,7 @@ mod tests {
         let mut skipper = BoolColumnSkipper::new(col.iter_range(0..12));
         assert_eq!(skipper.next(), Some(0)); // pending = 4
 
-        // previously panicked: the inner iter is already past 2
+        // the inner iter is already past 2
         assert_eq!(skipper.shift_next(2..12), fresh.next());
         assert_eq!(
             skipper.collect::<Vec<_>>(),

@@ -16,7 +16,7 @@ use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
-use super::{ChangeSetChange, ChangeSetMetadata, ChangeSetStorage, ParseError};
+use super::{ChangeSetChange, ChangeSetStorage, ParseError};
 
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
@@ -49,51 +49,63 @@ pub(crate) struct ChangeSetBuilder<'a> {
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
     max_op: u64,
+    copier: Option<crate::op_set2::op_set::RowCopier<'a>>,
+    verbatim_rows: Option<Range<usize>>,
 }
 
 impl<'a> ChangeSetBuilder<'a> {
-    pub(super) fn from_change_meta(
-        mut changes: Vec<ChangeSetMetadata<'a>>,
+    pub(crate) fn from_graph<H: crate::hash_retention::HashRetention>(
+        op_set: &'a crate::op_set2::OpSet,
+        change_graph: &'a crate::change_graph::ChangeGraph<H>,
+        nodes: &[crate::change_graph::NodeIdx],
         mut mapper: ActorMapper<'a>,
-    ) -> ChangeSetBuilder<'a> {
-        // change[n].builder starts off as NodeIdx which is topo order
-        // writing the changes in topo order prevents un-needed hashes in the external buffer
-        changes.sort_by(|a, b| a.builder.cmp(&b.builder));
-
-        let mut builders: Vec<_> = changes
-            .iter()
-            .enumerate()
-            .map(|(index, e)| ChangeBuilder {
-                actor: e.actor,
-                seq: e.seq,
-                change: index,
-                start_op: e.start_op,
-                max_op: e.start_op + e.num_ops() as u64 - 1,
+    ) -> Result<ChangeSetBuilder<'a>, crate::change_graph::MissingDep> {
+        let mut change_writer = ChangeSetChangeWriter::new(nodes.len());
+        change_graph.write_change_set_changes(nodes, &mut change_writer, &mut mapper)?;
+        let mut builders: Vec<_> = change_graph
+            .op_spans(nodes)
+            .map(|(actor, seq, start_op, max_op)| ChangeBuilder {
+                actor,
+                seq,
+                start_op,
+                max_op,
             })
             .collect();
-
         builders.sort_unstable_by(|a, b| a.actor.cmp(&b.actor).then(a.seq.cmp(&b.seq)));
-
-        builders
-            .iter()
-            .enumerate()
-            .for_each(|(index, b)| changes[b.change].builder = index);
-
-        let mut change_writer = ChangeSetChangeWriter::new(changes.len());
-        for c in &changes {
-            change_writer.add(c, &mut mapper);
-        }
-
-        let op_writer = ChangeSetOpWriter::default();
-
-        ChangeSetBuilder {
+        Ok(ChangeSetBuilder {
             mapper,
             change_writer,
-            op_writer,
+            op_writer: ChangeSetOpWriter::default(),
             builders,
             last: None,
             preds: HashMap::default(),
             max_op: 0,
+            copier: Some(crate::op_set2::op_set::RowCopier::new(op_set)),
+            verbatim_rows: None,
+        })
+    }
+
+    pub(crate) fn op_counters(&self) -> Range<usize> {
+        let min = self.builders.iter().map(|b| b.start_op as usize).min();
+        let max = self.builders.iter().map(|b| b.max_op as usize).max();
+        min.unwrap_or(0)..max.unwrap_or(0) + 1
+    }
+
+    pub(crate) fn from_writers(
+        mapper: ActorMapper<'a>,
+        change_writer: ChangeSetChangeWriter<'a>,
+        op_writer: ChangeSetOpWriter<'a>,
+    ) -> ChangeSetBuilder<'a> {
+        ChangeSetBuilder {
+            mapper,
+            change_writer,
+            op_writer,
+            builders: Vec::new(),
+            last: None,
+            preds: HashMap::default(),
+            max_op: 0,
+            copier: None,
+            verbatim_rows: None,
         }
     }
 
@@ -118,27 +130,28 @@ impl<'a> ChangeSetBuilder<'a> {
         let pred = self.preds.remove(&op.id).unwrap_or_default();
 
         if let Some(index) = self.builders_index(op.id) {
-            // a member row carries its in-change set successors in the succ
-            // column; relationships to later, non-member ops are not the
-            // change set's business and are dropped
-            let internal_succ: Vec<OpId> = succ
+            // `op.key`, not `elemid_or_key`: an insert's target is its anchor
+            let target = self.hint_target(&op.key);
+            if self.copier.is_some()
+                && pred.is_empty()
+                && target.is_none()
+                && succ.iter().all(|s| self.is_member(*s))
+            {
+                self.push_verbatim_row(op.pos);
+                return;
+            }
+            self.flush_verbatim_rows();
+            let member_succ: Vec<OpId> = succ
                 .iter()
                 .copied()
-                .filter(|s| self.builders_index(*s).is_some())
+                .filter(|s| self.is_member(*s))
                 .collect();
-            // the RAW key: for an insert that is its anchor (the row
-            // the receiver's slot search must locate) — elemid_or_key
-            // would give the insert's own element instead
-            let target = self.hint_target(&op.key);
             let op = op.build(pred);
             self.op_writer
-                .add_with_target(&op, &internal_succ, index, &mut self.mapper, target);
+                .add_with_target(&op, &member_succ, index, &mut self.mapper, target);
         }
     }
 
-    /// The op's covered seq target: its key elem when that elem is a
-    /// doc row (non-head, not a member) — the row the receiver's
-    /// manifold will have to locate.
     fn hint_target(&self, key: &crate::op_set2::types::KeyRef<'_>) -> Option<OpId> {
         match key {
             crate::op_set2::types::KeyRef::Seq(e)
@@ -152,26 +165,21 @@ impl<'a> ChangeSetBuilder<'a> {
 
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
-        // only relationships that cross INTO the change set ride the pred
-        // column: an in-change set target carries the relationship in its
-        // succ column instead
-        if self.builders_index(op_id).is_none() && self.builders_index(succ_id).is_some() {
+        // member-to-member relationships ride the succ column instead
+        if !self.is_member(op_id) && self.is_member(succ_id) {
             self.preds.entry(succ_id).or_default().push(op_id);
         }
     }
 
-    /// Write the delete ops whose preds crossed into the change set from
-    /// outside. Deletes whose targets are all in-change set never reach
-    /// `preds` — they have no row; their ids live in the targets' succ
-    /// column.
+    /// Deletes whose targets are all members get no row: their ids live in
+    /// the targets' succ column.
     pub(crate) fn flush_deletes(&mut self) {
+        // the copied rows precede the deletes of their key group
+        self.flush_verbatim_rows();
         if let Some((obj, key)) = self.last.take() {
             let target = self.hint_target(&key);
-            // `preds` is a HashMap, whose iteration order is seeded per
-            // instance — emitting in that order would make a change set's
-            // bytes depend on which allocation it happened to get rather
-            // than on its content. Within a key group document order is
-            // by op id, so sort.
+            // `HashMap` order is seeded per instance; sort so the bytes
+            // depend only on content
             let mut pending: Vec<(OpId, Vec<OpId>)> = self.preds.drain().collect();
             pending.sort_unstable_by_key(|(id, _)| *id);
             for (id, pred) in pending {
@@ -185,16 +193,28 @@ impl<'a> ChangeSetBuilder<'a> {
         }
     }
 
-    /// The covered seq targets referenced by the member ops — the rows
-    /// whose covered-rank the hint column carries.
-    /// The covered seq targets, grouped by the object each lives in —
-    /// the unit the rank walk scans.
+    fn push_verbatim_row(&mut self, pos: usize) {
+        match &mut self.verbatim_rows {
+            Some(run) if run.end == pos => run.end += 1,
+            _ => {
+                self.flush_verbatim_rows();
+                self.verbatim_rows = Some(pos..pos + 1);
+            }
+        }
+    }
+
+    fn flush_verbatim_rows(&mut self) {
+        if let (Some(rows), Some(copier)) = (self.verbatim_rows.take(), &mut self.copier) {
+            copier.copy(rows, &mut self.op_writer, &mut self.mapper);
+        }
+    }
+
     pub(crate) fn hint_targets_by_obj(
         &self,
     ) -> std::collections::HashMap<crate::types::ObjId, rustc_hash::FxHashSet<OpId>> {
         let mut by_obj: std::collections::HashMap<_, rustc_hash::FxHashSet<OpId>> =
             std::collections::HashMap::new();
-        for (id, obj) in self.op_writer.targets.iter().flatten() {
+        for (_, id, obj) in &self.op_writer.targets {
             by_obj.entry(*obj).or_default().insert(*id);
         }
         by_obj
@@ -250,9 +270,6 @@ impl<'a> ChangeSetBuilder<'a> {
         data_u.extend_from_slice(&ops_data_buf);
         let ops_data_end_u = data_u.len();
 
-        // No chunk header of its own: these columns are the tail of the
-        // change set chunk, not a nested chunk. Offsets are relative to the
-        // start of the column data.
         let bytes_u = data_u;
         let changes_data_u_range = changes_data_start_u..changes_data_end_u;
         let ops_data_u_range = ops_data_start_u..ops_data_end_u;
@@ -285,11 +302,7 @@ impl<'a> ChangeSetBuilder<'a> {
             actors,
             changes_meta,
             changes_data: changes_data_u_range,
-            // the builder's caller reads the members back to validate
-            // them; that first read fills this
             changes: Default::default(),
-            // a change set being sent is never applied, so its op columns are
-            // not loaded here
             change_set_ops: Default::default(),
             _phantom: PhantomData,
         };
@@ -313,69 +326,86 @@ impl<'a> ChangeSetBuilder<'a> {
     }
 }
 
+/// Feeds a [`hexane::DeltaEncoder`] a run of equal deltas at a time.
+/// Call [`Self::flush`] once the stream ends.
+#[derive(Default)]
+pub(crate) struct DeltaRunGrouper {
+    last: Option<i64>,
+    run: Option<hexane::DeltaRun>,
+}
+
+impl DeltaRunGrouper {
+    pub(crate) fn push(&mut self, enc: &mut hexane::DeltaEncoder<'_, i64>, value: i64) {
+        if let Some(last) = self.last {
+            let delta = Some(value - last);
+            match &mut self.run {
+                Some(run) if run.delta == delta => run.count += 1,
+                run => {
+                    if let Some(done) = run.take() {
+                        enc.append_run(done);
+                    }
+                    *run = Some(hexane::DeltaRun {
+                        prefix: last,
+                        delta,
+                        count: 1,
+                    });
+                }
+            }
+        } else {
+            enc.append(value);
+        }
+        self.last = Some(value);
+    }
+
+    pub(crate) fn extend(
+        &mut self,
+        enc: &mut hexane::DeltaEncoder<'_, i64>,
+        values: impl IntoIterator<Item = i64>,
+    ) {
+        for v in values {
+            self.push(enc, v);
+        }
+    }
+
+    pub(crate) fn flush(&mut self, enc: &mut hexane::DeltaEncoder<'_, i64>) {
+        if let Some(run) = self.run.take() {
+            enc.append_run(run);
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ChangeSetChangeWriter<'a> {
-    len: usize,
-    cap: usize,
-    seen: HashMap<ChangeHash, usize>,
-    external: Vec<ChangeHash>,
-    actor: hexane::Encoder<'a, ActorIdx>,
-    seq: hexane::DeltaEncoder<'a, i64>,
-    /// the member's op count, not its `start_op`: this is the form the
-    /// receiving change graph stores, so it copies in as a column
-    num_ops: hexane::Encoder<'a, u64>,
-    max_op: hexane::DeltaEncoder<'a, i64>,
-    timestamp: hexane::DeltaEncoder<'a, i64>,
-    message: hexane::Encoder<'a, Option<String>>,
-    dep_count: hexane::Encoder<'a, u32>,
-    deps: hexane::DeltaEncoder<'a, i64>,
-    /// the extra bytes' widths as value metadata, matching the document
-    /// format's extra column (and the graph's `extra_bytes_meta`)
-    extra_meta: hexane::Encoder<'a, ValueMeta>,
-    extra: Vec<u8>,
+    pub(crate) len: usize,
+    pub(crate) cap: usize,
+    pub(crate) seen: HashMap<ChangeHash, usize>,
+    pub(crate) external: Vec<ChangeHash>,
+    pub(crate) actor: hexane::Encoder<'a, ActorIdx>,
+    pub(crate) seq: hexane::DeltaEncoder<'a, i64>,
+    pub(crate) num_ops: hexane::Encoder<'a, u64>,
+    pub(crate) max_op: hexane::DeltaEncoder<'a, i64>,
+    pub(crate) timestamp: hexane::DeltaEncoder<'a, i64>,
+    pub(crate) message: hexane::Encoder<'a, Option<String>>,
+    pub(crate) dep_count: hexane::Encoder<'a, u32>,
+    pub(crate) deps: hexane::DeltaEncoder<'a, i64>,
+    pub(crate) extra_meta: hexane::Encoder<'a, ValueMeta>,
+    pub(crate) extra: Vec<u8>,
 }
 
 impl<'a> ChangeSetChangeWriter<'a> {
-    fn new(cap: usize) -> Self {
+    pub(crate) fn new(cap: usize) -> Self {
         ChangeSetChangeWriter {
             cap,
             ..Default::default()
         }
     }
 
-    fn add(&mut self, change: &ChangeSetMetadata<'a>, mapper: &mut ActorMapper<'_>) {
-        assert!(self.len < self.cap);
-        mapper.process_actor(change.actor);
-        self.len += 1;
-        self.actor.append(ActorIdx::from(change.actor));
-        self.seq.append(change.seq as i64);
-        self.num_ops.append(1 + change.max_op - change.start_op);
-        self.max_op.append(change.max_op as i64);
-        self.message
-            .append_owned(change.message.as_deref().map(str::to_owned));
-        self.timestamp.append(change.timestamp);
-        self.extra_meta
-            .append(ValueMeta::from(change.extra.as_ref()));
-        self.extra.extend_from_slice(&change.extra);
-        self.dep_count.append(change.deps.len() as u32);
-        for d in &change.deps {
-            let dep_idx = match d {
-                // members are added in topological (member-list) order, so
-                // a member's dep index is its position in that list
-                super::DepRef::Internal(pos) => *pos as i64,
-                super::DepRef::External(h) => {
-                    if let Some(i) = self.seen.get(h) {
-                        *i as i64
-                    } else {
-                        let index = self.cap + self.external.len();
-                        self.seen.insert(*h, index);
-                        self.external.push(*h);
-                        index as i64
-                    }
-                }
-            };
-            self.deps.append(dep_idx);
-        }
+    pub(crate) fn external_dep_index(&mut self, h: ChangeHash) -> i64 {
+        let index = *self.seen.entry(h).or_insert_with(|| {
+            self.external.push(h);
+            self.cap + self.external.len() - 1
+        });
+        index as i64
     }
 
     fn finish(self, mapper: &ActorMapper<'_>, data: &mut Vec<u8>) -> ChangeSetChangeColumns {
@@ -408,32 +438,27 @@ impl<'a> ChangeSetChangeWriter<'a> {
 
 #[derive(Default)]
 pub(crate) struct ChangeSetOpWriter<'a> {
-    /// per-op covered seq target (key elem) for the hint column,
-    /// paired with the object it lives in — an insert's anchor is always
-    /// a row of the sequence being inserted into, so the hint's rank is
-    /// counted within that object rather than from the document start
-    targets: Vec<Option<(OpId, crate::types::ObjId)>>,
-    obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::Encoder<'a, Option<u64>>,
-    key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
-    key_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
-    key_str: hexane::Encoder<'a, Option<String>>,
-    id_actor: hexane::Encoder<'a, ActorIdx>,
-    insert: hexane::Encoder<'a, bool>,
-    action: hexane::Encoder<'a, Action>,
-    value_meta: hexane::Encoder<'a, ValueMeta>,
-    value: Vec<u8>,
-    pred_count: hexane::Encoder<'a, u32>,
-    pred_actor: hexane::Encoder<'a, ActorIdx>,
-    pred_ctr: hexane::DeltaEncoder<'a, i64>,
-    succ_count: hexane::Encoder<'a, u32>,
-    succ_actor: hexane::Encoder<'a, ActorIdx>,
-    succ_ctr: hexane::DeltaEncoder<'a, i64>,
-    expand: hexane::Encoder<'a, bool>,
-    mark_name: hexane::Encoder<'a, Option<String>>,
-    /// Each op's counter, in doc order — emitted as the `ID_CTR`
-    /// delta-int column, the same encoding a document chunk uses.
-    id_ctr_values: Vec<i64>,
+    /// `(row, hint target, the target's object)`
+    pub(crate) targets: Vec<(usize, OpId, crate::types::ObjId)>,
+    pub(crate) obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    pub(crate) obj_ctr: hexane::Encoder<'a, Option<u64>>,
+    pub(crate) key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
+    pub(crate) key_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
+    pub(crate) key_str: hexane::Encoder<'a, Option<String>>,
+    pub(crate) id_actor: hexane::Encoder<'a, ActorIdx>,
+    pub(crate) insert: hexane::Encoder<'a, bool>,
+    pub(crate) action: hexane::Encoder<'a, Action>,
+    pub(crate) value_meta: hexane::Encoder<'a, ValueMeta>,
+    pub(crate) value: Vec<u8>,
+    pub(crate) pred_count: hexane::Encoder<'a, u32>,
+    pub(crate) pred_actor: hexane::Encoder<'a, ActorIdx>,
+    pub(crate) pred_ctr: hexane::DeltaEncoder<'a, i64>,
+    pub(crate) succ_count: hexane::Encoder<'a, u32>,
+    pub(crate) succ_actor: hexane::Encoder<'a, ActorIdx>,
+    pub(crate) succ_ctr: hexane::DeltaEncoder<'a, i64>,
+    pub(crate) expand: hexane::Encoder<'a, bool>,
+    pub(crate) mark_name: hexane::Encoder<'a, Option<String>>,
+    pub(crate) id_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
 }
 
 impl<'a> ChangeSetOpWriter<'a> {
@@ -447,8 +472,6 @@ impl<'a> ChangeSetOpWriter<'a> {
         self.add_with_target(op, succ, _index, mapper, None)
     }
 
-    /// [`Self::add`], recording the op's covered seq target (its key
-    /// elem when that elem is a doc row) for the hint column.
     pub(crate) fn add_with_target(
         &mut self,
         op: &OpBuilder<'_>,
@@ -457,7 +480,9 @@ impl<'a> ChangeSetOpWriter<'a> {
         mapper: &mut ActorMapper<'a>,
         target: Option<OpId>,
     ) {
-        self.targets.push(target.map(|t| (t, op.obj)));
+        if let Some(t) = target {
+            self.targets.push((self.id_actor.len(), t, op.obj));
+        }
         mapper.process_op(op);
         self.succ_count.append(succ.len() as u32);
         for s in succ {
@@ -485,7 +510,7 @@ impl<'a> ChangeSetOpWriter<'a> {
         self.expand.append(op.expand);
         self.mark_name
             .append_owned(op.mark_name.as_deref().map(str::to_owned));
-        self.id_ctr_values.push(op.id.counter() as i64);
+        self.id_ctr.append(Some(op.id.counter() as i64));
     }
 
     pub(crate) fn finish(
@@ -496,12 +521,8 @@ impl<'a> ChangeSetOpWriter<'a> {
         self.finish_with_ranks(mapper, data, &Default::default())
     }
 
-    /// [`Self::finish`] with the covered-rank of every recorded target:
-    /// each op's hint value is `ranks[target]` — the number of
-    /// dep-covered ops preceding the target row **within its object**.
-    /// Object-relative so producing it costs a scan of one object rather
-    /// than of the whole document; the receiver rebases onto the object
-    /// it has already scoped to.
+    /// `ranks` maps each hint target to its value in the hint column (see
+    /// [`ops::HINT_COL_ID`]).
     pub(crate) fn finish_with_ranks(
         self,
         mapper: &ActorMapper<'a>,
@@ -509,8 +530,14 @@ impl<'a> ChangeSetOpWriter<'a> {
         ranks: &std::collections::HashMap<OpId, u64>,
     ) -> ChangeSetOpsColumns {
         let mut hint_enc = hexane::DeltaEncoder::<Option<i64>>::default();
-        for t in &self.targets {
-            hint_enc.append(t.and_then(|(id, _)| ranks.get(&id)).map(|&r| r as i64));
+        let mut row = 0;
+        for (at, id, _) in &self.targets {
+            hint_enc.append_n(None, at - row);
+            hint_enc.append(ranks.get(id).map(|&r| r as i64));
+            row = at + 1;
+        }
+        if !self.targets.is_empty() {
+            hint_enc.append_n(None, self.id_actor.len() - row);
         }
         let hint = hint_enc.save_to_unless(data, None);
         let obj_actor = save_opt_actor_unless_empty(self.obj_actor, &mapper.mapping, data);
@@ -525,8 +552,6 @@ impl<'a> ChangeSetOpWriter<'a> {
         let value_start = data.len();
         data.extend_from_slice(&self.value);
         let value = value_start..data.len();
-        // a change set whose members reference nothing outside — a whole
-        // document — has no preds at all; drop the all-zero column
         let pred_count = self.pred_count.save_to_unless(data, 0);
         let pred_actor = save_actor(self.pred_actor, &mapper.mapping, data);
         let pred_ctr = self.pred_ctr.save_to(data);
@@ -535,15 +560,7 @@ impl<'a> ChangeSetOpWriter<'a> {
         let succ_ctr = self.succ_ctr.save_to(data);
         let expand = self.expand.save_to_unless(data, false);
         let mark_name = self.mark_name.save_to_unless(data, None);
-
-        // Op counters in doc order. `add()` appends in doc order, so
-        // element k is the counter of the op at doc position k.
-        let id_ctr_values = self.id_ctr_values;
-        let mut id_ctr_enc = hexane::DeltaEncoder::<Option<i64>>::default();
-        for c in &id_ctr_values {
-            id_ctr_enc.append(Some(*c));
-        }
-        let id_ctr = id_ctr_enc.save_to(data);
+        let id_ctr = self.id_ctr.save_to(data);
 
         ChangeSetOpsColumns {
             id_actor,
@@ -638,8 +655,7 @@ impl ChangeSetOpsColumns {
             (ops::KEY_CTR, &self.key_ctr),
             (ops::KEY_STR, &self.key_str),
             (ops::ID_ACTOR, &self.id_actor),
-            // shares ID_COL_ID with ID_ACTOR, so it belongs here to keep
-            // the column list in ascending spec order
+            // shares ID_COL_ID: columns must stay in ascending spec order
             (ops::ID_CTR, &self.id_ctr),
             (ops::INSERT, &self.insert),
             (ops::ACTION, &self.action),
@@ -666,19 +682,12 @@ impl ChangeSetOpsColumns {
 struct ChangeBuilder {
     actor: usize,
     seq: u64,
-    change: usize,
     start_op: u64,
     max_op: u64,
 }
 
-/// A change set's change-metadata columns as raw byte slices.
-///
-/// The columnar counterpart to [`ChangeSetChangeIterUnverified`]: where the
-/// iterator materialises a [`ChangeSetChange`] per member (a `Vec` of deps,
-/// an owned message, an owned extra), this hands out the columns so a
-/// consumer can decode one column at a time — which is how the document
-/// load path builds the same graph state. An absent column is an empty
-/// slice, which every decoder reads as all-default.
+/// A change set's change-metadata columns, for decoding one column at a
+/// time. An absent column is an empty slice, which decodes as all-default.
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct ChangeSetChangeCols<'a> {
     pub(crate) actor: &'a [u8],
@@ -837,7 +846,6 @@ impl<'a> ChangeSetChangeIterInner<'a> {
             .next()
             .flatten()
             .ok_or(ReadOpError::MissingValue("max_op"))? as u64;
-        // the wire carries the op count; a change wants the range's foot
         let start_op = (max_op + 1)
             .checked_sub(num_ops)
             .filter(|s| *s > 0)
@@ -913,10 +921,7 @@ struct OpIterInner<'a> {
     value: &'a [u8],
 }
 
-/// One change set op row: the op itself (pred = references to ops before
-/// the change set) plus its in-change set successors from the succ column.
-/// `succ` is empty for change sets predating the succ column — those carry
-/// every relationship (and every delete) in pred/rows instead.
+/// `op.pred` holds only non-member preds; `succ` only member successors.
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeSetOp<'a> {
     pub(crate) op: OpBuilder<'a>,
@@ -1092,8 +1097,7 @@ impl<'a> OpIterInner<'a> {
     }
 }
 
-/// A minimally-decoded change set op for the streaming manifold: no
-/// marks, actor indexes already doc-mapped.
+/// A change set op with actors mapped to the document's, and no marks.
 #[derive(Debug)]
 pub(crate) struct ManifoldOp<'a> {
     pub(crate) id: OpId,
@@ -1101,20 +1105,16 @@ pub(crate) struct ManifoldOp<'a> {
     pub(crate) key: ChangeSetKey<'a>,
     pub(crate) insert: bool,
     pub(crate) action: Action,
-    /// external (doc-row) predecessors
+    /// non-member predecessors
     pub(crate) preds: Vec<OpId>,
-    /// no in-fragment successor deletes this op (normalized: only an
-    /// increment succ on a counter keeps it alive)
+    /// no member successor deletes this op (an increment does not)
     pub(crate) alive: bool,
-    /// increments only: the amount this row adds, read from its own
-    /// value
+    /// increments only: the amount added
     pub(crate) inc: Option<i64>,
-    /// in-fragment succ entries this row carries (sub-column width)
+    /// member succ entries this row carries
     pub(crate) sub_len: usize,
-    /// value bytes this row carries
     pub(crate) val_len: usize,
-    /// covered-rank position floor for this op's seq target (see
-    /// `ops::HINT_COL_ID`)
+    /// see [`ops::HINT_COL_ID`]
     pub(crate) hint: Option<u64>,
 }
 
@@ -1140,8 +1140,7 @@ impl ChangeSetKey<'_> {
     }
 }
 
-/// How many of the next `max` items satisfy `pred`, counted run by run
-/// so a repeat of ten thousand costs one test.
+/// How many of the next `max` items satisfy `pred`; tests once per run.
 fn run_len_while<D: hexane::RunDecoder>(
     mut d: D,
     max: usize,
@@ -1157,8 +1156,7 @@ fn run_len_while<D: hexane::RunDecoder>(
     n
 }
 
-// `MakeTable` is deliberately absent: it has no `ObjType`, so the
-// manifold's `ObjType::try_from` never records it in `obj_info` either
+// no `MakeTable`: it has no `ObjType`, so the manifold never records it
 fn makes_no_object(a: &Option<Action>) -> bool {
     !matches!(
         a,
@@ -1185,36 +1183,25 @@ fn last_true_offset(mut d: hexane::Decoder<'_, bool>, max: usize) -> Option<usiz
     last
 }
 
-/// A run of clean inserts, taken without decoding: its last row's id
-/// (the manifold registers it as a candidate) and the value bytes the
-/// run carries.
 pub(crate) struct CleanRun {
     pub(crate) last_id: OpId,
     pub(crate) val_bytes: usize,
 }
 
-/// What a bulk tail skip resolved: see [`ManifoldOps::skip_tail`].
 pub(crate) struct TailRun {
-    /// succ entries the skipped rows carry, in total
     pub(crate) sub: usize,
-    /// value bytes the skipped rows carry, in total
     pub(crate) val: usize,
-    /// offset (from the run's first row) and id of its last insert
+    /// offset from the run's first row, and id
     pub(crate) last_insert: Option<(usize, OpId)>,
 }
 
-/// Long-lived forward-only streaming reader over a fragment's op
-/// columns — the fragment-side counterpart of the manifold's document
-/// iterators. Only what the manifold consults is decoded: no marks, and
-/// of the value column only an increment's own amount (the rest of it
-/// is stepped over by width). Run-level peeks power the tail fast path.
+/// Forward-only reader over a change set's op columns for the manifold,
+/// decoding only what the manifold reads.
 #[derive(Clone)]
 pub(crate) struct ManifoldOps<'a> {
     pub(crate) pos: usize,
     pub(crate) len: usize,
-    /// succ entries and value bytes the whole fragment holds — parse
-    /// rejects columns that disagree with the per-row counts, so these
-    /// are the sums, already taken
+    /// column totals, validated against the per-row counts at parse time
     succ_entries: usize,
     value_bytes: usize,
     actor_map: &'a [usize],
@@ -1234,22 +1221,16 @@ pub(crate) struct ManifoldOps<'a> {
     succ_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     value_meta: hexane::Decoder<'a, Option<ValueMeta>>,
-    /// the raw value column, and how far into it the walk has read
     value: &'a [u8],
     val_pos: usize,
-    /// the fragment's `inc` index and the walk's position in it. Keyed
-    /// by succ position: an entry is `Some` exactly when that successor
-    /// is an increment. Only a counter with successors ever reads it, so
-    /// the position is carried as a count and the column is seeked when
-    /// one turns up — a fragment without counters never touches it.
+    /// indexed by succ position, `Some` exactly where the successor is an
+    /// increment; seeked only for counters with successors
     inc: &'a hexane::Column<Option<i64>>,
     sub_pos: usize,
     hint: hexane::DeltaDecoder<'a, Option<i64>>,
-    /// raw (unmapped) obj actor of the last-read op, for same-obj run
-    /// peeks against the raw column
+    /// unmapped, for comparing against the raw obj columns
     cur_obj_raw: (Option<ActorIdx>, Option<u64>),
-    /// elided columns decode as empty but mean "all default": the run
-    /// peeks must treat them as unbounded default runs
+    /// an elided column is one unbounded run of the default
     pred_absent: bool,
     succ_absent: bool,
     obj_absent: bool,
@@ -1350,7 +1331,6 @@ impl<'a> ManifoldOps<'a> {
         s
     }
 
-    /// Decode the next op (minimal fields), doc-mapping every actor.
     pub(crate) fn next_op(&mut self) -> ManifoldOp<'a> {
         debug_assert!(self.pos < self.len, "read past the end of the fragment");
         self.pos += 1;
@@ -1395,14 +1375,10 @@ impl<'a> ManifoldOps<'a> {
             preds.push(OpId::new(pc as u64, self.actor_map[usize::from(pa)]));
         }
 
-        // the row's own value says what it is: a counter, and — for an
-        // increment — how much it adds
         let vm = self.value_meta.next().flatten();
         let val_len = vm.map_or(0, |m| m.length());
         let is_counter =
             vm.is_some_and(|m| m.type_code() == crate::op_set2::meta::ValueType::Counter);
-        // only an increment's value is ever read; the rest just move the
-        // cursor past their bytes
         let inc = (action == Action::Increment).then(|| {
             let raw = &self.value[self.val_pos..self.val_pos + val_len];
             match ScalarValue::from_raw(vm.expect("an increment has a value"), raw)
@@ -1420,9 +1396,6 @@ impl<'a> ManifoldOps<'a> {
         self.succ_ctr.advance_by(n_succ);
         let sub = self.sub_pos;
         self.sub_pos += n_succ;
-        // a row with successors dies unless it is a counter and every one
-        // of them is an increment, which the `inc` index says outright —
-        // and nothing else reads it, so a non-counter never seeks it
         let alive = n_succ == 0
             || (is_counter && self.inc.iter_range(sub..sub + n_succ).all(|v| v.is_some()));
 
@@ -1443,9 +1416,8 @@ impl<'a> ManifoldOps<'a> {
         }
     }
 
-    /// How many upcoming ops are a *clean run*: same object, insert
-    /// rows, no preds and no succ. The manifold takes such a run
-    /// wholesale — one position push, no per-op scope work.
+    /// How many upcoming ops are plain `Set` inserts into the same object
+    /// with no preds and no succ.
     pub(crate) fn clean_insert_run(&self) -> usize {
         let mut n = self.len - self.pos;
         if n == 0 {
@@ -1455,8 +1427,6 @@ impl<'a> ManifoldOps<'a> {
         if n == 0 {
             return 0;
         }
-        // only plain Set inserts: Make ops must register obj_info and
-        // Mark/Increment rows carry semantics the skip would drop
         n = n.min(run_len_while(self.action.clone(), n, |a| {
             *a == Some(Action::Set)
         }));
@@ -1478,7 +1448,7 @@ impl<'a> ManifoldOps<'a> {
         n.min(self.same_obj_run(n))
     }
 
-    /// How many upcoming ops carry no external preds (bounded).
+    /// How many upcoming ops carry no preds.
     pub(crate) fn pred_free_run(&self) -> usize {
         if self.pred_absent {
             return self.len - self.pos;
@@ -1493,7 +1463,6 @@ impl<'a> ManifoldOps<'a> {
             // every op is in the root object
             return max.min(self.len - self.pos);
         }
-        // same object ⇔ both obj columns keep repeating their value
         let mut n = 0;
         let mut ctr = self.obj_ctr.clone();
         while n < max {
@@ -1513,44 +1482,24 @@ impl<'a> ManifoldOps<'a> {
         m
     }
 
-    /// How many upcoming ops of a tail run need no per-op attention at
-    /// all: the manifold's blank mode reads nothing but the row count,
-    /// the succ/value widths and the object-creating rows, so a run
-    /// stops only at a `Make*`.
     pub(crate) fn make_free_run(&self, max: usize) -> usize {
         run_len_while(self.action.clone(), max, makes_no_object)
     }
 
-    /// Consume every remaining row, reading nothing.
-    ///
-    /// The caller is finishing the fragment — no column is read after
-    /// this — so the decoders are left where they stand rather than
-    /// wound forward through rows nobody will look at. Returns the
-    /// extents the copy range ends at, which are the columns' own
-    /// lengths.
+    /// Marks every remaining row consumed without advancing the decoders,
+    /// so no column may be read afterwards. Returns the total succ entries
+    /// and value bytes.
     pub(crate) fn consume_rest(&mut self) -> (usize, usize) {
         self.pos = self.len;
         (self.succ_entries, self.value_bytes)
     }
 
-    /// Skip `n` tail ops wholesale, advancing every column in step.
-    /// Unlike [`skip_clean`](Self::skip_clean) the rows may carry succ
-    /// (in-fragment deletes and overwrites), so the succ sub-columns
-    /// advance by the run's total. Preds must be absent — the caller
-    /// proves that with [`pred_free_run`](Self::pred_free_run) before
-    /// entering the tail.
-    ///
-    /// Returns the run's total succ entries and value bytes (the
-    /// manifold's copy-range widths), plus the offset and id of its
-    /// last insert row.
+    /// Skip `n` ops that may carry succ but no preds (see
+    /// [`Self::pred_free_run`]).
     pub(crate) fn skip_tail(&mut self, n: usize) -> TailRun {
         debug_assert!(n > 0 && self.pos + n <= self.len);
 
-        // Single pass over the id columns. Cloning a decoder and calling
-        // `nth` reads the run twice — once on the clone, once on the
-        // skip — so instead advance the real decoders to `off`, take the
-        // value there, and carry on to the end of the run. Measurably
-        // faster than two O(runs) traversals.
+        // `nth` on the real decoders, not a clone: one pass over the runs
         let last_insert = match last_true_offset(self.insert.clone(), n) {
             Some(off) => {
                 let a = self.id_actor.nth(off).flatten().expect("id actor");
@@ -1577,8 +1526,6 @@ impl<'a> ManifoldOps<'a> {
         self.pred_count.advance_by(n);
         self.hint.advance_by(n);
 
-        // succ and value widths ride into the copy range, so both are
-        // summed run by run rather than row by row
         let mut sub = 0usize;
         let mut m = 0usize;
         while m < n {
@@ -1593,20 +1540,9 @@ impl<'a> ManifoldOps<'a> {
         self.succ_actor.advance_by(sub);
         self.succ_ctr.advance_by(sub);
 
-        let mut val = 0usize;
-        let mut m = 0usize;
-        while m < n {
-            match self.value_meta.next_run_max(n - m) {
-                Some(run) => {
-                    val += run.value.map_or(0, |v| v.length()) * run.count;
-                    m += run.count;
-                }
-                None => break, // elided column: no bytes
-            }
-        }
+        let val = self.skip_value_meta(n);
 
         self.pos += n;
-        self.val_pos += val;
         self.sub_pos += sub;
         TailRun {
             sub,
@@ -1615,9 +1551,7 @@ impl<'a> ManifoldOps<'a> {
         }
     }
 
-    /// Skip `n` ops known to have zero preds and zero succ (a clean
-    /// run), advancing every column in step. Returns the id of the
-    /// last skipped op.
+    /// Skip `n` ops known to have no preds and no succ.
     pub(crate) fn skip_clean(&mut self, n: usize) -> CleanRun {
         debug_assert!(n > 0 && self.pos + n <= self.len);
         let last_actor = self.id_actor.nth(n - 1).flatten().expect("id actor");
@@ -1629,30 +1563,32 @@ impl<'a> ManifoldOps<'a> {
         self.key_str.advance_by(n);
         self.insert.advance_by(n);
         self.action.advance_by(n);
-        // pred/succ counts are all zero in a clean run: the group
-        // sub-columns do not advance
+        // all counts are zero, so the pred/succ sub-columns stay put
         self.pred_count.advance_by(n);
         self.succ_count.advance_by(n);
         self.hint.advance_by(n);
-        // value bytes ride along in the copy ranges: sum the skipped
-        // rows' meta lengths run by run
-        let mut vbytes = 0usize;
+        let val_bytes = self.skip_value_meta(n);
+        self.pos += n;
+        CleanRun {
+            last_id: OpId::new(last_ctr as u64, self.actor_map[usize::from(last_actor)]),
+            val_bytes,
+        }
+    }
+
+    fn skip_value_meta(&mut self, n: usize) -> usize {
+        let mut bytes = 0usize;
         let mut m = 0usize;
         while m < n {
             match self.value_meta.next_run_max(n - m) {
                 Some(run) => {
-                    vbytes += run.value.map_or(0, |v| v.length()) * run.count;
+                    bytes += run.value.map_or(0, |v| v.length()) * run.count;
                     m += run.count;
                 }
                 None => break, // elided column: no bytes
             }
         }
-        self.pos += n;
-        self.val_pos += vbytes;
-        CleanRun {
-            last_id: OpId::new(last_ctr as u64, self.actor_map[usize::from(last_actor)]),
-            val_bytes: vbytes,
-        }
+        self.val_pos += bytes;
+        bytes
     }
 }
 
@@ -1667,23 +1603,17 @@ pub(crate) mod ops {
     pub(super) const ACTION_COL_ID:         ColumnId = ColumnId::new(4);
     pub(super) const VAL_COL_ID:            ColumnId = ColumnId::new(5);
     pub(super) const PRED_COL_ID:           ColumnId = ColumnId::new(7);
-    /// In-change set successors of each op, mirroring the document format's
-    /// succ group. Only relationships between two change set members are
-    /// stored here; the pred column holds only references to ops from
-    /// before the change set.
+    /// Successors that are members; `PRED_COL_ID` holds only non-member preds.
     pub(super) const SUCC_COL_ID:           ColumnId = ColumnId::new(8);
     pub(super) const EXPAND_COL_ID:         ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID:      ColumnId = ColumnId::new(10);
-    /// Per-op position hint: the rank of the op's key-elem row among
-    /// the ops covered by the fragment's dependency clock — a sound
-    /// lower bound on that row's position in any document the fragment
-    /// can apply to, and identical no matter when (or from what doc
-    /// state) the fragment is generated. Null for ops without a
-    /// covered seq target.
+    /// The rank of the op's key-elem row among the non-member ops of its
+    /// object covered by the change set's dependency clock: a lower bound
+    /// on that row's position in any document the change set applies to.
+    /// Null for ops with no such row: map keys, the list head, members.
     pub(super) const HINT_COL_ID:           ColumnId = ColumnId::new(12);
 
     pub(super) const ID_ACTOR:   ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
-    /// Doc-order op counters, the same encoding a document chunk uses.
     pub(super) const ID_CTR:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
     pub(crate) const HINT:       ColumnSpec = ColumnSpec::new_delta(HINT_COL_ID);
     pub(super) const OBJ_ACTOR:  ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);

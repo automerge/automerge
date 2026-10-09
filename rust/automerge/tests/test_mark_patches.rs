@@ -8,7 +8,6 @@ use test_log::test;
 #[test]
 fn mark_patches_at_end_of_text() {
     let mut doc1 = automerge::AutoCommit::new();
-    doc1.enable_audit_mode().unwrap();
     let text = doc1.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc1.splice_text(&text, 0, 0, "sample").unwrap();
     let heads_before_mark = doc1.get_heads();
@@ -23,7 +22,7 @@ fn mark_patches_at_end_of_text() {
 
     // Pop the patches
     doc2.diff_incremental();
-    let changes_after_mark = doc1.save_after(&heads_before_mark).unwrap();
+    let changes_after_mark = doc1.save_after(&heads_before_mark);
     doc2.dump();
     doc2.load_incremental(&changes_after_mark).unwrap();
 

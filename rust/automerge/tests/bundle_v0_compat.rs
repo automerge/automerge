@@ -1,15 +1,8 @@
-//! The frozen 3.3.x bundle reader (`storage::bundle_v0`, chunk id 3).
-//!
-//! The fixture is a real bundle emitted by automerge 3.3.2 — built by
-//! checking that tag out and calling `doc.bundle(hashes)` — not by any
-//! code in this tree. Change sets in that format are in circulation, so this
-//! test is the contract that they keep loading.
-//!
-//! If this fails, `storage::bundle_v0` has been "improved". Don't fix the
-//! test.
-use automerge::{Automerge, ObjType, ReadDoc, ROOT};
+//! Bundles written by automerge 3.3.2 (chunk type 3) are in circulation and
+//! must keep loading. If this fails, fix the reader, not the test.
+use automerge::next::{Automerge, ReadDoc};
+use automerge::{ObjType, ROOT};
 
-/// automerge 3.3.2, 329 bytes, chunk type 3, 5 changes.
 const BUNDLE_3_3_2: &[u8] = include_bytes!("fixtures/bundle_v0_automerge_3_3_2.bin");
 
 fn load_fixture() -> Automerge {
@@ -21,10 +14,12 @@ fn load_fixture() -> Automerge {
 
 #[test]
 fn v0_bundle_is_chunk_type_three() {
-    // byte 8 is the chunk type, right after the 4 magic bytes and the
-    // 4-byte checksum — if this ever changes, the fixture was regenerated
-    // with the wrong writer
-    assert_eq!(BUNDLE_3_3_2[8], 3, "fixture must be a BundleV0 chunk");
+    const CHUNK_TYPE_OFFSET: usize = 8;
+    const BUNDLE_V0_CHUNK: u8 = 3;
+    assert_eq!(
+        BUNDLE_3_3_2[CHUNK_TYPE_OFFSET], BUNDLE_V0_CHUNK,
+        "fixture must be a BundleV0 chunk"
+    );
 }
 
 #[test]
@@ -43,17 +38,13 @@ fn v0_bundle_loads_with_expected_content() {
         "three"
     );
 
-    // a splice replacing the middle of the text: exercises the pred
-    // column, which is where V0 records deletes (the live format elides
-    // them into a succ column this reader has never seen)
+    // the text splice exercises the pred column, where V0 records deletes
     let (_, text) = doc.get(ROOT, "text").unwrap().unwrap();
     assert_eq!(doc.object_type(&text).unwrap(), ObjType::Text);
     assert_eq!(doc.text(&text).unwrap(), "hello there");
 
-    // deleted key stays deleted
     assert!(doc.get(ROOT, "n").unwrap().is_none());
 
-    // counter with an increment applied on top
     let (counter, _) = doc.get(ROOT, "counter").unwrap().unwrap();
     assert_eq!(counter.as_i64(), Some(12));
 }
@@ -74,7 +65,6 @@ fn v0_bundle_reproduces_its_heads() {
 #[test]
 fn v0_bundle_carries_all_five_changes() {
     let doc = load_fixture();
-    let mut doc = doc;
-    doc.enable_audit_mode().unwrap();
+    let doc = doc.enable_audit_mode().unwrap();
     assert_eq!(doc.get_changes(&[]).unwrap().len(), 5);
 }

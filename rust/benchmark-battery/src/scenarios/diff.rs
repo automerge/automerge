@@ -12,13 +12,12 @@ fn diff() -> Box<dyn FnMut()> {
     let doc = Automerge::load(&data).unwrap();
     let history = doc
         .get_changes(&[])
-        .unwrap()
         .iter()
-        .map(|c| vec![c.id()])
+        .map(|c| vec![c.hash()])
         .collect::<Vec<_>>();
     Box::new(move || {
         let a = rand() % history.len();
         let b = rand() % history.len();
-        black_box(doc.diff(&history[a], &history[b]).unwrap());
+        black_box(doc.diff(&history[a], &history[b]));
     })
 }

@@ -131,7 +131,6 @@ impl<F: Fn(&mut AutoCommit, &automerge::ObjId, Encoding) -> T, T: PartialEq + st
 
     fn run_with_encoding(&self, encoding: Encoding) {
         let mut doc = AutoCommit::new_with_encoding(encoding.into());
-        doc.enable_audit_mode().unwrap();
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, self.text).unwrap();
         let result = (self.action)(&mut doc, &text, encoding);
@@ -157,7 +156,6 @@ impl<
 
     fn run_fallible_with_encoding(&self, encoding: Encoding) {
         let mut doc = AutoCommit::new_with_encoding(encoding.into());
-        doc.enable_audit_mode().unwrap();
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, self.text).unwrap();
         let result = (self.action)(&mut doc, &text, encoding);

@@ -5,9 +5,6 @@ type CounterDoc = { counter: number }
 
 function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
   let doc = Automerge.from<CounterDoc>({ counter: 0 }, { actor: "0123456789abcdef" })
-  // the tests cross-check fragment metadata against per-change lookups
-  // (getChangeMetaByHash), which needs the hashes audit mode keeps
-  Automerge.enableAuditMode(doc)
   for (let i = 1; i <= numChanges; i++) {
     doc = Automerge.change(doc, d => {
       d.counter = i
@@ -34,11 +31,7 @@ describe("the fragments API", () => {
     for (const fragment of allFragments) {
       assert.equal(fragment.head.length, 64)
       assert.equal(fragment.level, leadingZeroBytes(fragment.head))
-      const headMeta = Automerge.getBackend(doc).getChangeMetaByHash(
-        fragment.head,
-      )
-      assert.ok(headMeta != null)
-      assert.ok(fragment.members.includes(`${headMeta.seq}@${headMeta.actor}`))
+      assert.ok(fragment.members.includes(fragment.head))
       assert.deepEqual(Automerge.getFragmentMeta(doc, fragment.head), fragment)
     }
 
@@ -77,6 +70,7 @@ describe("the fragments API", () => {
     assert.ok(fragments.length > 0)
     assert.ok(fragments.some(fragment => fragment.boundary.length > 0))
     for (const fragment of fragments) {
+      assert.ok(fragment.members.includes(fragment.head))
       assert.ok(!fragment.checkpoints.includes(fragment.head))
       for (const boundary of fragment.boundary) {
         assert.ok(!fragment.checkpoints.includes(boundary))
@@ -99,6 +93,21 @@ describe("the fragments API", () => {
 
     assert.deepEqual(Automerge.getHeads(loaded).sort(), Automerge.getHeads(doc).sort())
     assert.equal(loaded.counter, 1500)
+  })
+
+  it("rejects commits whose metadata does not match their bytes", () => {
+    const doc = makeDoc()
+    const [commit, other] = Automerge.getCommits(doc)
+    const loaded = Automerge.addFragments(Automerge.init<CounterDoc>(), Automerge.getFragments(doc))
+
+    assert.throws(
+      () => Automerge.addCommits(loaded, [{ ...commit, head: other.head }]),
+      /head mismatch/,
+    )
+    assert.throws(
+      () => Automerge.addCommits(loaded, [{ ...commit, parents: [] }]),
+      /parents do not match/,
+    )
   })
 
   it("reports addCommits and addFragments patch sources", () => {

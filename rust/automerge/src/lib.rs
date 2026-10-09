@@ -15,9 +15,10 @@
 //! This crate is organised around two representations of a document -
 //! [`Automerge`] and [`AutoCommit`]. The difference between the two is that
 //! [`AutoCommit`] manages transactions for you. Both of these representations
-//! implement [`ReadDoc`] for reading values from a document. The sync
-//! protocol in `automerge-sync` works on an [`Automerge`]; an [`AutoCommit`]
-//! hands one over with [`AutoCommit::document`] / [`AutoCommit::document_mut`]. [`AutoCommit`] directly implements
+//! implement [`ReadDoc`] for reading values from a document, and can take part
+//! in the sync protocol (`Automerge` implements the `automerge-sync` crate's
+//! `SyncDoc` directly, whilst [`AutoCommit`] gets `sync()` from its
+//! `AutoCommitSync` trait). [`AutoCommit`] directly implements
 //! [`transaction::Transactable`] for making changes to a document, whilst
 //! [`Automerge`] requires you to explicitly create a
 //! [`transaction::Transaction`].
@@ -93,8 +94,23 @@
 //!
 //! ## Patches, maintaining materialized state
 //!
-//! Use [`Automerge::diff_incremental()`] for changes since the incremental cursor, or
-//! [`Automerge::diff()`] for differences between historical heads.
+//! Often you will have some state which represents the "current" state of the document. E.g. some
+//! text in a UI which is a view of a text object in the document. Rather than re-rendering this
+//! text every single time a change comes in you can ask for the [`Patch`]es which take the
+//! materialized state from one point in the document's history to another:
+//! [`Automerge::diff()`] between any two sets of heads, or [`AutoCommit::diff_incremental()`]
+//! for everything since the last time you asked. Patches describe the net change between the
+//! two states.
+//!
+//! ## The `next` API
+//!
+//! The types above can name any point in a document's history by [`ChangeHash`].
+//! [`next::Automerge`] and [`next::AutoCommit`] do not keep every change hash, which makes
+//! them smaller and faster to load. They name history by [`ChangeId`] (an actor and sequence
+//! number) instead, return errors where an operation needs history the document has not kept,
+//! and save in the compact change set format by default. Convert between the two with
+//! [`Automerge::into_next()`] and [`next::Automerge::into_audit()`] (or the [`AutoCommit`]
+//! equivalents); `into_audit` costs a pass over the whole history.
 //!
 //! ## Serde serialization
 //!
@@ -264,6 +280,7 @@ mod convert;
 mod cursor;
 pub mod error;
 mod exid;
+pub(crate) mod hash_retention;
 pub mod hydrate;
 mod indexed_cache;
 pub mod iter;
@@ -278,21 +295,28 @@ mod sequence_tree;
 mod storage;
 mod text_diff;
 mod text_value;
-pub mod transaction;
+pub(crate) mod tx;
+/// Transactions: groups of operations committed as a single change.
+pub mod transaction {
+    pub use crate::audit::transaction::{
+        BlockOrText, Failure, OwnedTransaction, Result, Success, Transaction,
+    };
+    pub use crate::audit::Transactable;
+    pub use crate::tx::CommitOptions;
+}
+mod audit;
+pub mod next;
 mod types;
 mod value;
 
 pub use crate::anonymize::AnonymizeError;
-pub use crate::automerge::{
-    AuditMode, Automerge, GcMode, LoadOptions, OnPartialLoad, SaveFormat, SaveOptions,
-    StringMigration,
-};
+pub use crate::audit::{AutoCommit, Automerge, LoadOptions, ReadDoc, SaveOptions};
+pub use crate::automerge::{OnPartialLoad, StringMigration};
+#[doc(hidden)]
+pub use audit::Fragment;
 pub use author::Author;
-pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
-#[doc(hidden)]
-pub use change_graph::Fragment;
 pub use change_id::{ChangeId, ParseChangeIdError};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::AutomergeError;
@@ -302,11 +326,11 @@ pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};
 pub use patches::{Patch, PatchAction};
-pub use read::{ReadDoc, Stats};
+pub use read::Stats;
 pub use sequence_tree::SequenceTree;
 pub use storage::{ChangeSet, ChangeSetChange, InvalidChangeSet, VerificationMode};
 pub use text_value::ConcreteTextValue;
-pub use transaction::BlockOrText;
+pub use tx::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 

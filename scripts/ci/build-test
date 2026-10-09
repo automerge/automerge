@@ -10,4 +10,5 @@ RUST_LOG=error cargo test -p automerge-test
 RUST_LOG=error cargo test -p automerge-c
 RUST_LOG=error cargo test -p automerge-cli
 RUST_LOG=error cargo test -p automerge-wasm
+RUST_LOG=error cargo test -p automerge-sync
 popd

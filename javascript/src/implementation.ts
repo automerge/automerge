@@ -60,8 +60,6 @@ import type {
   FragmentLevelRange,
   DecodedChange,
   DiffOptions,
-  ChangeId,
-  Hash,
   Heads,
   MaterializeValue,
   JsSyncState,
@@ -217,14 +215,6 @@ export type InitOptions<T> = {
   unchecked?: boolean
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
-  /**
-   * Load in audit mode: every change is reconstructed, hashed and
-   * verified, and all change hashes are kept — required for the sync
-   * protocol. The default (`false`) trusts the hashes stored in the
-   * document and retains only the heads, loose commits and fragment
-   * hashes, which is much faster.
-   */
-  auditMode?: boolean
   /** @hidden */
   convertImmutableStringsToText?: boolean
 }
@@ -240,32 +230,6 @@ function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
   } else {
     return { actor: _actor }
   }
-}
-
-/**
- * Switch a document to audit mode: every change is reconstructed and
- * hashed, the hashes retained so far are verified against the recomputed
- * ones, and afterwards every hash-based API (including sync) works.
- * No-op if the document is already in audit mode.
- */
-export function enableAuditMode<T>(doc: Doc<T>): void {
-  _state(doc).handle.enableAuditMode()
-}
-
-/**
- * Switch a document out of audit mode, freeing every change hash outside
- * the retained set (heads, loose commits, fragment heads and checkpoints,
- * and their deps).
- */
-export function disableAuditMode<T>(doc: Doc<T>): void {
-  _state(doc).handle.disableAuditMode()
-}
-
-/**
- * Whether the document is in audit mode — see {@link enableAuditMode}.
- */
-export function auditMode<T>(doc: Doc<T>): boolean {
-  return _state(doc).handle.auditMode()
 }
 
 export function getChangesSince<T>(state: Doc<T>, heads: Heads): Change[] {
@@ -334,13 +298,12 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
  * This is because it shares the same underlying memory as `doc`, but it is
  * consequently a very cheap copy.
  *
- * Note that this function will throw an error if any of the change ids in
- * `heads` are not in the document.
+ * Note that this function will throw an error if any of the hashes in `heads`
+ * are not in the document.
  *
  * @typeParam T - The type of the value contained in the document
  * @param doc - The document to create a view of
- * @param heads - The change ids (`"seq@actor"`) of the heads to create a
- *                view at
+ * @param heads - The hashes of the heads to create a view at
  */
 export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
   const state = _state(doc)
@@ -802,13 +765,11 @@ export function load<T>(
   const allowMissingDeps = opts.allowMissingChanges || false
   const convertImmutableStringsToText =
     opts.convertImmutableStringsToText || false
-  const auditMode = opts.auditMode
   const handle = ApiHandler.load(data, {
     actor,
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
-    auditMode,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
@@ -1375,31 +1336,19 @@ export function decodeSyncMessage(message: SyncMessage): DecodedSyncMessage {
 }
 
 /**
- * Get the hashes of any changes in `doc` which are not dependencies of
- * `heads`
+ * Get any changes in `doc` which are not dependencies of `heads`
  */
-export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Hash[] {
+export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads {
   const state = _state(doc)
   return state.handle.getMissingDeps(heads)
 }
 
 /**
- * Get the change ids (`"seq@actor"`) of the heads of this document
+ * Get the hashes of the heads of this document
  */
 export function getHeads<T>(doc: Doc<T>): Heads {
   const state = _state(doc)
   return state.heads || state.handle.getHeads()
-}
-
-/**
- * Get the change hashes of the heads of this document
- *
- * Hashes are the currency of the sync protocol and storage; for everything
- * else prefer the change ids from {@link getHeads}.
- */
-export function getHeadHashes<T>(doc: Doc<T>): Hash[] {
-  const state = _state(doc)
-  return state.handle.getHeadHashes()
 }
 
 /** @hidden */
@@ -1440,36 +1389,12 @@ export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
  */
 export function hasHeads(doc: Doc<unknown>, heads: Heads): boolean {
   const state = _state(doc)
-  for (const id of heads) {
-    if (!state.handle.hasChangeId(id)) {
+  for (const hash of heads) {
+    if (!state.handle.getChangeByHash(hash)) {
       return false
     }
   }
   return true
-}
-
-/**
- * Convert a change hash to its `"seq@actor"` change id, or `null` if the
- * change is definitely not in this document. Throws if the answer would
- * need hashes only kept in audit mode.
- */
-export function hashToChangeId(
-  doc: Doc<unknown>,
-  hash: Hash,
-): ChangeId | null {
-  return _state(doc).handle.hashToChangeId(hash)
-}
-
-/**
- * Convert a `"seq@actor"` change id to the change's hash, or `null` if the
- * change is not in this document. Throws if the change's hash was freed
- * (kept only in audit mode).
- */
-export function changeIdToHash(
-  doc: Doc<unknown>,
-  id: ChangeId,
-): Hash | null {
-  return _state(doc).handle.changeIdToHash(id)
 }
 
 export type {
@@ -1482,7 +1407,6 @@ export type {
   ObjID,
   DecodedChange,
   DecodedSyncMessage,
-  Hash,
   Heads,
   MaterializeValue,
 }

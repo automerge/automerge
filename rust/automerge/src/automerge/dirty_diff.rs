@@ -26,17 +26,15 @@ struct DirtyObject {
     range: Range<usize>,
 }
 
-/// Caches the object lookup while scanning dirty runs: consecutive
-/// dirty rows almost always land in the same object.
 #[derive(Default, Debug, Clone)]
-struct DirtyObjectContext {
+struct CachedObjectLookup {
     object: Option<DirtyObject>,
 }
 
-impl DirtyObjectContext {
-    fn object_containing(
+impl CachedObjectLookup {
+    fn object_containing<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &Automerge,
+        doc: &Automerge<H>,
         pos: usize,
     ) -> Result<DirtyObject, DirtyDiffError> {
         if let Some(object) = &self.object {
@@ -59,68 +57,55 @@ impl DirtyObjectContext {
     }
 }
 
-/// The diff pipeline for one dirty pass: one iterator per object type,
-/// plus the two index cursors, all long-lived.
-///
-/// Dirty ranges arrive in document order — `normalize_dirty_object_ranges`
-/// sorts by object and then by range, and an object's ops are contiguous
-/// and ascending — so every cursor here only ever moves forward. A range
-/// is a `shift_next` onto its object type's iterator, and the index
-/// cursors carry their running totals across ranges instead of
-/// recounting from the object's first row.
+/// Dirty ranges arrive in document order, so every cursor here only moves
+/// forward and the index totals carry across ranges.
 struct DirtyIters<'a> {
     map: MapDiff<'a>,
     list: ListDiff<'a>,
     spans: SpansDiff<'a>,
-    /// running count of visible elements: the list index
-    top: PrefixIter<'a, bool>,
-    /// running text width: the character index
-    text: PrefixIter<'a, Option<u32>>,
+    list_index: PrefixIter<'a, bool>,
+    text_index: PrefixIter<'a, Option<u32>>,
     object: Option<ObjId>,
 }
 
 impl<'a> DirtyIters<'a> {
     fn new(op_set: &'a OpSet, clock: ClockRange, encoding: TextEncoding) -> Self {
-        // built over an empty window at row zero: constructing over a
-        // real range would draw a lookahead item (`Unshift::new`), and
-        // the visibility skipper behind it reads ahead far enough that
-        // the first `shift` could then be asked to move backwards
+        // a non-empty window draws a lookahead item, after which the first
+        // `shift` could have to move backwards
         let empty = 0..0;
         Self {
             map: MapDiff::new(op_set, empty.clone(), clock.clone()),
             list: ListDiff::new(op_set, empty.clone(), clock.clone()),
             spans: SpansDiff::new(op_set, empty, clock, encoding),
-            top: op_set.top_prefix_iter(),
-            text: op_set.text_prefix_iter(),
+            list_index: op_set.top_prefix_iter(),
+            text_index: op_set.text_prefix_iter(),
             object: None,
         }
     }
 
-    /// Indexes are relative to their object, so zero the running totals
-    /// at each new object's first row.
     fn enter(&mut self, object: &DirtyObject) {
         if self.object == Some(object.obj) {
             return;
         }
-        self.top.advance_to(object.range.start);
-        self.top.reset_prefix();
-        self.text.advance_to(object.range.start);
-        self.text.reset_prefix();
+        self.list_index.advance_to(object.range.start);
+        self.list_index.reset_prefix();
+        self.text_index.advance_to(object.range.start);
+        self.text_index.reset_prefix();
         self.object = Some(object.obj);
     }
 
     fn list_index(&mut self, pos: usize) -> usize {
-        self.top.advance_to(pos);
-        self.top.total()
+        self.list_index.advance_to(pos);
+        self.list_index.total()
     }
 
     fn text_index(&mut self, pos: usize) -> usize {
-        self.text.advance_to(pos);
-        self.text.total() as usize
+        self.text_index.advance_to(pos);
+        self.text_index.total() as usize
     }
 }
 
-impl Automerge {
+impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     pub(crate) fn dirty_diff_patches(
         &self,
         before_heads: &[ChangeId],
@@ -144,7 +129,7 @@ impl Automerge {
                 .map_err(DirtyDiffError::InvalidHeads)?
         };
         let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads_clock = clock.after_clock();
+        patch_accumulator.heads_clock = clock.after().cloned();
         self.log_dirty_diff(clock, &mut patch_accumulator)?;
         Ok(patch_accumulator.make_patches(self))
     }
@@ -178,12 +163,7 @@ impl Automerge {
             let obj = object.obj;
             match object.typ {
                 ObjType::Map | ObjType::Table => {
-                    // `MapDiff` reads conflict, expose and the winner by
-                    // counting within a key's register, so a partial one
-                    // yields a wrong patch rather than a failure. This
-                    // checks `dirty_ranges_by_object`'s widening, not the
-                    // op set — a key column that isn't sorted by key is
-                    // past saving here.
+                    // a partial key register yields a wrong patch, not a failure
                     debug_assert!(
                         self.ops()
                             .map_range_is_on_key_boundaries(&range, object.range.clone()),
@@ -218,35 +198,35 @@ impl Automerge {
         Ok(())
     }
 
+    fn widen_to_registers(&self, object: &DirtyObject, range: Range<usize>) -> Range<usize> {
+        match object.typ {
+            ObjType::Map | ObjType::Table => {
+                let start = self
+                    .ops()
+                    .map_key_register_at_pos(range.start, object.range.clone())
+                    .start;
+                let end = self
+                    .ops()
+                    .map_key_register_at_pos(range.end - 1, object.range.clone())
+                    .end
+                    .max(range.end);
+                start..end
+            }
+            ObjType::List | ObjType::Text => self
+                .ops()
+                .expand_to_seq_register_boundaries(range, object.range.clone()),
+        }
+    }
+
     fn dirty_ranges_by_object(&self) -> Result<Vec<(DirtyObject, Range<usize>)>, DirtyDiffError> {
-        let mut context = DirtyObjectContext::default();
+        let mut lookup = CachedObjectLookup::default();
         let mut ranges = Vec::new();
         for dirty in self.ops().dirty_runs() {
             let mut start = dirty.start;
             while start < dirty.end {
-                let object = context.object_containing(self, start)?;
+                let object = lookup.object_containing(self, start)?;
                 let end = dirty.end.min(object.range.end);
-                let mut range = start..end;
-                // dirty bits are marked row-at-a-time; the diff iterators
-                // work register-at-a-time, so widen to register boundaries
-                match object.typ {
-                    ObjType::Map | ObjType::Table => {
-                        range.start = self
-                            .ops()
-                            .map_key_register_at_pos(range.start, object.range.clone())
-                            .start;
-                        range.end = self
-                            .ops()
-                            .map_key_register_at_pos(range.end - 1, object.range.clone())
-                            .end
-                            .max(range.end);
-                    }
-                    ObjType::List | ObjType::Text => {
-                        range = self
-                            .ops()
-                            .expand_to_seq_register_boundaries(range, object.range.clone());
-                    }
-                }
+                let range = self.widen_to_registers(&object, start..end);
                 ranges.push((object, range));
                 start = end;
             }
@@ -255,19 +235,9 @@ impl Automerge {
         Ok(Self::normalize_dirty_object_ranges(ranges))
     }
 
-    /// Widen text ranges to cover the span of every dirty mark.
-    ///
-    /// A mark op that appeared changes the formatting of everything it
-    /// brackets, not just the row it sits on, and the patch for that is
-    /// produced by walking those spans — so the span between the two
-    /// ends has to be in range.
-    ///
-    /// Finding the other end needs no search: a mark's begin and end are
-    /// written by one transaction, so either both rows are dirty or
-    /// neither is, and the end always sorts after the begin. Pairing
-    /// them off the ranges already collected is enough. The extents go
-    /// in as further ranges and
-    /// [`Self::normalize_dirty_object_ranges`] merges them.
+    /// A dirty mark changes the formatting of its whole span, so the span
+    /// must be diffed too. A mark's begin and end are written by one
+    /// transaction, so both are dirty or neither is.
     fn widen_to_mark_extents(&self, ranges: &mut Vec<(DirtyObject, Range<usize>)>) {
         if !self.ops().has_marks() {
             return;
@@ -285,8 +255,6 @@ impl Automerge {
                     }
                     MarkIdx::End(id) => {
                         let Some(start) = open.remove(&id) else {
-                            // the begin is dirty whenever the end is, so
-                            // a miss means the pair invariant broke
                             debug_assert!(false, "dirty mark end {id:?} without its begin");
                             continue;
                         };

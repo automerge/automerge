@@ -1,5 +1,6 @@
+use crate::automerge::Automerge;
 use crate::legacy::{ElementId, Key, MarkData, ObjectId, OpId, OpType};
-use crate::{ActorId, Automerge, AutomergeError, Change, ChangeHash, ScalarValue};
+use crate::{ActorId, AutomergeError, Change, ChangeHash, ScalarValue};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::RngExt;
@@ -24,7 +25,13 @@ pub enum AnonymizeError {
 }
 
 /// Return a new document anonymized with a fresh random seed.
-pub fn anonymize(document: &Automerge) -> Result<Automerge, AnonymizeError> {
+pub fn anonymize(document: &crate::Automerge) -> Result<crate::Automerge, AnonymizeError> {
+    document.anonymize()
+}
+
+pub(crate) fn anonymize_doc<H: crate::hash_retention::HashRetention>(
+    document: &Automerge<H>,
+) -> Result<Automerge<H>, AnonymizeError> {
     Anonymization::new(rand::make_rng()).anonymize(document)
 }
 
@@ -57,18 +64,16 @@ impl Anonymization {
         Self::new(StdRng::from_seed(seed))
     }
 
-    fn anonymize(mut self, document: &Automerge) -> Result<Automerge, AnonymizeError> {
+    fn anonymize<H: crate::hash_retention::HashRetention>(
+        mut self,
+        document: &Automerge<H>,
+    ) -> Result<Automerge<H>, AnonymizeError> {
         let changes = document.get_changes(&[])?;
         let actor_map = self.actor_map(&changes);
         let mut change_hashes = HashMap::<ChangeHash, ChangeHash>::new();
-        let mut anonymized = Automerge::new_with_encoding(document.text_encoding());
-        // Anonymizing replays a chain of rewritten changes into this
-        // document, and `apply_changes` over a chain is only reliable in
-        // audit mode (HASHLESS.md). The caller cannot enable it — the
-        // document is created here — and on an empty one it is free.
-        anonymized
-            .enable_audit_mode()
-            .expect("an empty document has no changes to hash");
+        // replaying a change chain needs every hash; converted to `H` at the end
+        let mut anonymized =
+            Automerge::<crate::hash_retention::Full>::empty(document.text_encoding());
 
         for change in changes {
             let old_hash = change.hash();
@@ -104,7 +109,7 @@ impl Anonymization {
             change_hashes.insert(old_hash, anonymized_hash);
         }
 
-        Ok(anonymized)
+        Ok(H::from_full(anonymized))
     }
 
     fn actor_map(&mut self, changes: &[Change]) -> HashMap<ActorId, ActorId> {
@@ -394,8 +399,11 @@ mod shape;
 #[cfg(test)]
 mod tests {
     use super::{shape::ShapeSignature, Anonymization, Key, OpType};
-    use crate::transaction::{CommitOptions, Transactable};
-    use crate::{AutoCommit, Automerge, ObjType, ReadDoc, ScalarValue, ROOT};
+    use crate::autocommit::AutoCommit;
+    use crate::automerge::Automerge;
+    use crate::read::ReadDoc;
+    use crate::tx::{CommitOptions, Transactable};
+    use crate::{ObjType, ScalarValue, ROOT};
     use std::collections::{HashMap, HashSet};
 
     #[test]
@@ -467,13 +475,11 @@ mod tests {
         source.put(ROOT, "private-key", "another secret").unwrap();
         source.commit();
 
-        // anonymizing reads the source's changes, which needs its hash
-        // graph — a default load does not keep one
-        let source = Automerge::load_with_options(
-            &source.save(),
-            crate::LoadOptions::new().with_audit_mode(),
-        )
-        .unwrap();
+        // reading the source's changes needs its full hash graph
+        let source = Automerge::load(&source.save())
+            .unwrap()
+            .enable_audit_mode()
+            .unwrap();
         let anonymized = Anonymization::from_seed([7; 32])
             .anonymize(&source)
             .unwrap();

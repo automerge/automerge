@@ -8,23 +8,14 @@ struct Orphans {
 /// Create a document with an orphan change
 fn doc_with_orphans() -> Orphans {
     let mut doc1 = AutoCommit::new();
-    doc1.enable_audit_mode().unwrap();
     doc1.put(&ROOT, "key", "value").unwrap();
 
     // Create two changes remotely
     let mut doc2 = doc1.fork();
     doc2.put(&ROOT, "key", "value2").unwrap();
-    let change1 = doc2
-        .get_last_local_change_legacy()
-        .unwrap()
-        .unwrap()
-        .clone();
+    let change1 = doc2.get_last_local_change().unwrap().clone();
     doc2.put(&ROOT, "key", "value3").unwrap();
-    let change2 = doc2
-        .get_last_local_change_legacy()
-        .unwrap()
-        .unwrap()
-        .clone();
+    let change2 = doc2.get_last_local_change().unwrap().clone();
 
     // Apply the second change, which means it will be orphaned because doc1 doesn't have the first
     // change
@@ -80,7 +71,6 @@ fn discard_orphans() {
 #[test]
 fn load_incremental_change_without_deps_throws() {
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
     doc.put(&ROOT, "key", "value").unwrap();
     let _ = doc.save_incremental();
 

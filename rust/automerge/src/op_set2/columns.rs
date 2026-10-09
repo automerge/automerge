@@ -45,10 +45,8 @@ pub(super) struct Indexes {
     pub(super) visible: hexane::Column<bool>,
     pub(super) inc: hexane::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
-    // Transient change-tracking bitmap: true on rows touched since the
-    // last incremental diff (new rows, succ changes, top re-elections).
-    // Never persisted, excluded from index validation (a rebuild cannot
-    // reproduce change history) — only the length invariant holds.
+    // rows touched since the last incremental diff; never persisted and
+    // not reproducible by an index rebuild
     pub(super) dirty: hexane::Column<bool>,
 }
 
@@ -228,13 +226,6 @@ impl Columns {
 
     /// Load the op columns while building the op indexes in the same
     /// decode pass.
-    ///
-    /// Phase 1 loads the columns the rare-op path needs through the plain
-    /// loader. Phase 2 streams the index-relevant columns run by run: each
-    /// pulled run is tee'd into a slab encoder (so the column comes out
-    /// the other side without a re-decode) and into the
-    /// [`IndexBuilder`]'s column walk. Object id validation (fully null
-    /// or fully set, strictly increasing) happens inside the walk.
     pub(crate) fn load_indexed(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
@@ -243,7 +234,6 @@ impl Columns {
         use super::op_set::ReadOpError;
         let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 
-        // ── phase 1: the columns the rare-op path materializes from ──
         let id_actor = MappedColumn::<ActorIdx>::load(_d(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
         let opts = hexane::LoadOpts::new().with_length(len);
@@ -259,15 +249,10 @@ impl Columns {
         )?;
         let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
         let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
-        // succ id lengths are validated against the succ_count totals below
         let succ_actor = MappedColumn::<ActorIdx>::load(_d(SUCC_ACTOR_COL_SPEC))?;
         let succ_ctr = hexane::DeltaColumn::<u32>::load(_d(SUCC_COUNTER_COL_SPEC))?;
         let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
 
-        // ── phase 2: stream the index columns ──
-        // Absent optional columns read as `len` copies of a default via
-        // the fill load option; required columns without bytes fail the
-        // length check in `finalize`.
         let mut action_src = hexane::Column::<Action>::load_iter(_d(ACTION_COL_SPEC), opts);
         let mut meta_src =
             hexane::PrefixColumn::<ValueMeta>::load_iter(_d(VALUE_META_COL_SPEC), opts);
@@ -301,7 +286,6 @@ impl Columns {
                 &mut insert_src,
                 &mut key_str_src,
                 rare,
-                // a document's sequence registers are insert-bounded
                 None,
             )?;
         }
@@ -310,7 +294,6 @@ impl Columns {
             return Err(PackError::InvalidLength(index.ops_len(), len).into());
         }
 
-        // ── finalize the streamed columns ──
         let action = action_src.finalize()?;
         let value_meta = meta_src.finalize()?;
         let succ_count = succ_src.finalize()?;
@@ -353,9 +336,7 @@ impl Columns {
         Ok((columns, index))
     }
 
-    /// Load op columns. Documents and fragments share this verbatim: a
-    /// fragment's columns carry the same specs at the same types, plus
-    /// pred and hint, which are never looked up here.
+    /// Load op columns, from a document or a fragment.
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
@@ -411,21 +392,10 @@ impl Columns {
         })
     }
 
-    /// Splice another column set's rows — op columns *and* index columns
-    /// — into this one at the manifold's insert runs. Each run
-    /// `(pos, start..end)` copies the fragment rows `start..end` to
-    /// document position `pos` (pre-merge coordinates; runs ascend, so a
-    /// running shift converts). Rows in the gaps between runs are the
-    /// fragment's delete ops, which have no document row.
-    ///
-    /// The fragment's index bits were built standalone, so they are
-    /// exactly right for groups living entirely inside the fragment;
-    /// groups shared with the document get corrected afterwards by the
-    /// manifold's conflict/expose sets.
+    /// Splice the fragment rows of each of `runs` (op and index columns)
+    /// into this one at the run's pre-merge position. Fragment rows not
+    /// covered by a run are dropped.
     pub(super) fn merge(&mut self, frag: Columns, runs: &[CopyRange]) {
-        // the fragment-side sub/value spans arrive precomputed on each
-        // CopyRange (stamped by the manifold while streaming); only
-        // this column set's own positions are resolved here
         let change_set_len = frag.len();
         let subs: Vec<hexane::Splice> = runs
             .iter()
@@ -435,11 +405,8 @@ impl Columns {
                 range: cr.sub_range.clone(),
             })
             .collect();
-        // the raw value arena merges like every other column: the byte
-        // offsets come from the (pre-merge) value meta prefix sums, and
-        // the fragment's slabs move across whole. Slab boundaries there
-        // only ever fall on value boundaries, so the merged arena keeps
-        // that invariant and `RawColumn::get` stays a single slice
+        // slab boundaries stay on value boundaries, so `RawColumn::get`
+        // stays a single slice
         let vals = runs.iter().map(|cr| hexane::Splice {
             pos: self.value_meta.get_prefix(cr.pos) as usize,
             delete: 0,
@@ -447,9 +414,6 @@ impl Columns {
         });
         self.value.copy_ranges(frag.value, vals);
 
-        // one multi-point copy per column, each consuming the
-        // fragment's column — slab adoption engages whenever the
-        // fragment dwarfs the doc
         let rows = || {
             runs.iter().map(|cr| hexane::Splice {
                 pos: cr.pos,
@@ -483,7 +447,6 @@ impl Columns {
         self.index.top.copy_ranges(frag.index.top, rows());
         self.index.text.copy_ranges(frag.index.text, rows());
         self.index.mark.merge_from(frag.index.mark, rows());
-        // every merged fragment row is a new row
         self.index
             .dirty
             .copy_ranges(hexane::Column::fill(change_set_len, true), rows());
@@ -493,8 +456,7 @@ impl Columns {
         self.id_actor.actor_map().clone()
     }
 
-    /// Swap the shared actor map on all four actor columns — O(1), no
-    /// slab access.
+    /// O(1): no slab is touched.
     pub(super) fn set_actor_map(&mut self, map: std::sync::Arc<super::op_set::ActorMap>) {
         self.id_actor.set_map(map.clone());
         self.obj_actor.set_map(map.clone());
@@ -502,8 +464,8 @@ impl Columns {
         self.succ_actor.set_map(map);
     }
 
-    /// Rewrite stored codes to logical and reset to the identity map —
-    /// for the rare paths (actor removal) that need raw == logical.
+    /// Rewrite stored codes to logical and reset to the identity map.
+    /// O(actor columns).
     pub(super) fn flush_actor_map(&mut self) {
         self.id_actor.flush();
         self.obj_actor.flush();
@@ -511,10 +473,8 @@ impl Columns {
         self.succ_actor.flush();
     }
 
-    /// Rewrite the actor columns through `f` (logical -> logical) and
-    /// install `target` as their map, translating values into its
-    /// stored space — the fragment-load rebase that lets
-    /// [`Self::merge`] adopt slabs (equal map versions).
+    /// Map the actor columns' logical values through `f` and adopt
+    /// `target` as their map.
     pub(super) fn rebase_actors<F>(
         &mut self,
         f: &F,
@@ -711,10 +671,8 @@ impl Columns {
         self.succ_actor.len()
     }
 
-    /// Every row column holds one entry per row, and the sub columns
-    /// hold what the counts add up to — the invariant an edit that
-    /// misses a column breaks. Op columns only: the indexes are built,
-    /// not edited.
+    /// Whether every op column has one entry per row and the succ sub
+    /// columns match the succ counts' total.
     pub(super) fn columns_agree(&self) -> bool {
         let len = self.len();
         let sub = self.succ_count.get_prefix(len) as usize;

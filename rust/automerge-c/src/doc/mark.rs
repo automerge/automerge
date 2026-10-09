@@ -29,6 +29,8 @@ macro_rules! to_expand_mark {
     }};
 }
 
+pub(crate) use to_expand_mark;
+
 /// \ingroup enumerations
 /// \enum AMmarkExpand
 /// \installed_headerfile
@@ -174,7 +176,7 @@ pub unsafe extern "C" fn AMmarkEnd(mark: *const AMmark) -> usize {
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical object or `NULL` to select the
 ///                  current object.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_MARK` items.
@@ -197,7 +199,7 @@ pub unsafe extern "C" fn AMmarks(
     let obj_id = to_obj_id!(obj_id);
     match heads.as_ref() {
         None => to_result(doc.marks(obj_id)),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => to_result(doc.marks_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },

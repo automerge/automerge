@@ -1,8 +1,9 @@
-use automerge::transaction::CommitOptions;
-use automerge::transaction::Transactable;
+use automerge::next::transaction::CommitOptions;
+use automerge::next::transaction::Transactable;
+use automerge::next::{Automerge, ReadDoc};
 use automerge::AutomergeError;
 use automerge::ObjType;
-use automerge::{Automerge, ReadDoc, ROOT};
+use automerge::ROOT;
 
 // Based on https://automerge.org/docs/reference/documents/lists/
 fn main() {

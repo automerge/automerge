@@ -63,8 +63,7 @@ impl Shiftable for ScanVisIter<'_> {
         self.succ.set_max(pos);
     }
 
-    // this iterator yields skip counts, so the nth-walking default
-    // would consume items instead of repositioning — shift the columns
+    // items are skip counts, so the default item-walking shift is wrong
     fn shift(&mut self, range: Range<usize>) {
         self.id.shift(range.clone());
         self.action.shift(range.clone());
@@ -74,11 +73,7 @@ impl Shiftable for ScanVisIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         let id = self.id.shift_next(range.clone())?;
         let action = self.action.shift_next(range.clone())?;
-        let vis = if action == Action::Increment || !self.clock.covers(&id) {
-            // This is the same visibility predicate ScanVisIter has always
-            // applied, but checked before reading successors. If the op itself
-            // is not visible at the clock, successor visibility cannot make it
-            // visible.
+        let vis = if Self::hidden_whatever_succ(id, action, &self.clock) {
             self.succ.shift_skip_next(range)?;
             false
         } else {
@@ -196,6 +191,10 @@ impl<'a> ScanVisIter<'a> {
         }
     }
 
+    fn hidden_whatever_succ(id: OpId, action: Action, clock: &Clock) -> bool {
+        action == Action::Increment || !clock.covers(&id)
+    }
+
     fn is_visible_with_succ(succ: SuccCursors<'_>, clock: &Clock) -> bool {
         for (id, inc) in succ.with_inc() {
             if inc.is_none() && clock.covers(&id) {
@@ -208,9 +207,7 @@ impl<'a> ScanVisIter<'a> {
     fn next_visible(&mut self) -> Option<bool> {
         let id = self.id.next()?;
         let action = self.action.next()?;
-        if action == Action::Increment || !self.clock.covers(&id) {
-            // The op is invisible regardless of its successors, so just keep
-            // the successor iterator aligned.
+        if Self::hidden_whatever_succ(id, action, &self.clock) {
             self.succ.skip_next()?;
             return Some(false);
         }

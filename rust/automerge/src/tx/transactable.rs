@@ -3,7 +3,8 @@ use std::borrow::Cow;
 use crate::exid::ExId;
 use crate::iter::Span;
 use crate::marks::{ExpandMark, Mark, UpdateSpansConfig};
-use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
+use crate::read::ReadDoc;
+use crate::{AutomergeError, ChangeHash, ObjType, Prop, ScalarValue};
 
 /// A way of mutating a document within a single change.
 pub trait Transactable: ReadDoc {

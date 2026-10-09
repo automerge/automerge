@@ -1,22 +1,12 @@
+use crate::automerge::Automerge;
 use crate::clock::Clock;
 use crate::op_set2::op_set::manifold::ManifoldResult;
 use crate::storage::ChangeSet;
-use crate::{Automerge, AutomergeError};
+use crate::AutomergeError;
 
-/// Applies the ops of a change set directly, without converting the change set
-/// into [`crate::Change`]s first.
-///
-/// This is the change set twin of `BatchApply`: the same walk over the
-/// document's op set, but exploiting the change set's invariants — its ops
-/// are already in document order and never causally precede anything in
-/// the receiving document — so no sorting or untangling is needed.
-/// Where the streaming manifold reads the change set's op columns from.
 #[derive(Debug)]
 pub(crate) enum ChangeSetSrc<'a> {
-    /// a received change set's columns, borrowed
     ChangeSet(&'a ChangeSet),
-    /// columns encoded in-process (the batch path, and re-encoded
-    /// overlap change sets)
     Owned {
         raw: crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
         data: Vec<u8>,
@@ -42,22 +32,15 @@ impl ChangeSetSrc<'_> {
 
 #[derive(Debug)]
 pub(crate) struct ChangeSetApply<'a> {
-    /// the document clock *before* this change set — the manifold needs
-    /// it to split doc preds from in-change set preds
-    clock: Clock,
-    /// change set-actor -> doc-actor translation for the column stream
+    clock_before: Clock,
+    /// change set actor index -> doc actor index
     actor_map: Vec<usize>,
     src: ChangeSetSrc<'a>,
-    /// the change set's op columns loaded through the document load path
-    /// — actor indexes remapped, indexes built — ready to merge. The
-    /// pred columns stay outside (they describe rows *before* the
-    /// change set and feed the manifold, not the op set).
+    /// excludes the pred columns: they feed the manifold, not the op set
     frag: crate::op_set2::op_set::OpSet,
 }
 
 impl<'a> ChangeSetApply<'a> {
-    /// Wrap already doc-ordered, succ-stamped columns (the batch path,
-    /// identity actor map).
     pub(crate) fn from_parts(
         clock: Clock,
         actor_map: Vec<usize>,
@@ -66,26 +49,15 @@ impl<'a> ChangeSetApply<'a> {
     ) -> Result<Self, AutomergeError> {
         let frag = load_change_set(&src, &actor_map, doc_ops)?;
         Ok(Self {
-            clock,
+            clock_before: clock,
             actor_map,
             src,
             frag,
         })
     }
 
-    /// Prepare a received change set for application: load its op columns
-    /// as an op set (which also validates them — a malformed change set
-    /// fails here, before any history is touched), remapping change set
-    /// actor indexes to the document's via `actor_map` (every change set
-    /// actor must already be in the document).
-    ///
-    /// `overlap` marks a change set whose members are partially present:
-    /// the covered rows must not apply again, so the kept ops are
-    /// decoded, filtered against `clock` and re-encoded (rare).
-    /// `change_set_ops` is the change set's op columns as the parse left them —
-    /// decoded, validated, still in change set actor space. All that remains
-    /// is the document-dependent half ([`OpSet::index_change_set`](crate::op_set2::OpSet::index_change_set)): rebase the
-    /// actors and build the indexes against `doc_ops`.
+    /// Fails on malformed op columns. Every change set actor must be in
+    /// `actor_map`; `overlap` marks a change set the document partly has.
     pub(crate) fn new(
         change_set: &'a ChangeSet,
         actor_map: Vec<usize>,
@@ -95,10 +67,7 @@ impl<'a> ChangeSetApply<'a> {
         change_set_ops: crate::op_set2::op_set::OpSet,
     ) -> Result<Self, AutomergeError> {
         let (src, frag) = if overlap {
-            // the covered rows must not apply again, so they are cut out
-            // — which makes the parse's columns (every row, unfiltered)
-            // the wrong ones for the manifold's read, and the filtered
-            // op set is written back out for it
+            // covered rows are dropped, so the manifold must read re-encoded columns
             let mut ops = change_set_ops;
             let preds = ops.drop_covered(
                 &change_set.storage.ops_meta,
@@ -107,8 +76,7 @@ impl<'a> ChangeSetApply<'a> {
                 &actor_map,
             );
             let (raw, data) = ops.export_change_set(preds);
-            // a filtered change set names elements it no longer contains
-            // whatever its deps say, so it always takes the safe reading
+            // a filtered change set may name elements it no longer contains
             let frag = ops
                 .index_change_set(&actor_map, doc_ops, true)
                 .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))?;
@@ -120,7 +88,7 @@ impl<'a> ChangeSetApply<'a> {
             (ChangeSetSrc::ChangeSet(change_set), frag)
         };
         Ok(Self {
-            clock: clock.clone(),
+            clock_before: clock.clone(),
             actor_map,
             src,
             frag,
@@ -128,8 +96,6 @@ impl<'a> ChangeSetApply<'a> {
     }
 }
 
-/// Load a change set source's op columns as a fully indexed op set in
-/// document actor space (see [`OpSet::load_change_set`](crate::op_set2::OpSet::load_change_set)).
 fn load_change_set(
     src: &ChangeSetSrc<'_>,
     actor_map: &[usize],
@@ -141,18 +107,12 @@ fn load_change_set(
 }
 
 impl<'a> ChangeSetApply<'a> {
-    /// Resolve the change set with [`ApplyManifold`](crate::op_set2::op_set::manifold::ApplyManifold):
-    /// the change set's ops are already in document order — the manifold's
-    /// exact contract — so positions, succ and top/text adjustments come
-    /// from seeks over the touched scopes only.
-    ///
-    /// Reads only. Everything that can reject a fragment happens here,
-    /// so [`Self::commit`] cannot fail and a rejected fragment leaves
-    /// the document exactly as it was.
-    ///
-    /// `pub(super)` so the batch path can join this pipeline after
-    /// converting a v1 batch into the succ-format columns.
-    pub(crate) fn resolve(&self, doc: &Automerge) -> Result<ManifoldResult, AutomergeError> {
+    /// Everything that can reject the change set happens here, without
+    /// writing, so [`Self::commit`] cannot fail.
+    pub(crate) fn resolve<H: crate::hash_retention::HashRetention>(
+        &self,
+        doc: &Automerge<H>,
+    ) -> Result<ManifoldResult, AutomergeError> {
         let (raw, data) = self.src.parts();
         let len = self.frag.len();
         let mut fs = crate::storage::change_set::ManifoldOps::new(
@@ -164,28 +124,25 @@ impl<'a> ChangeSetApply<'a> {
             self.frag.value_bytes(),
             self.frag.inc_index(),
         );
-        let m = doc.ops().apply_manifold(self.clock.clone());
+        let m = doc.ops().apply_manifold(self.clock_before.clone());
         m.apply_change_set_ops(&mut fs)
     }
 
-    /// Write what [`Self::resolve`] decided. Infallible by construction.
-    pub(crate) fn commit(self, doc: &mut Automerge, mut r: ManifoldResult) {
-        // write the doc succ while positions are still pre-merge —
-        // add_succ also clears vis/top/text on rows it deletes, so the
-        // visible column is final before the elections below read it
+    /// Write what [`Self::resolve`] decided.
+    pub(crate) fn commit<H: crate::hash_retention::HashRetention>(
+        self,
+        doc: &mut Automerge<H>,
+        mut r: ManifoldResult,
+    ) {
+        // must precede the merge (pre-merge positions) and write_tops (reads visibility)
         doc.ops.add_succ(std::mem::take(&mut r.doc_succ));
 
-        // top/text are the only index bits that aren't a straight copy.
-        // Each side is written in its own coordinates, before the merge
-        // mixes them: the merge carries the bits into place along with
-        // the columns holding them
+        // each side's top/text bits are written in its own coordinates before merging
         let mut frag = self.frag;
         doc.ops.write_tops(&r.doc_tops, true);
         // every merged row is marked dirty by the merge itself
         frag.write_tops(&r.batch_tops, false);
 
-        // the merge: copy the fragment's columns and indexes in at the
-        // insert runs
         doc.ops.merge(frag, &r.insert_runs);
 
         #[cfg(debug_assertions)]
@@ -209,19 +166,21 @@ impl<'a> ChangeSetApply<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::autocommit::AutoCommit;
+    use crate::automerge::AuditMode;
+    use crate::automerge::Automerge;
     use crate::marks::{ExpandMark, Mark};
     use crate::read::ReadDoc;
-    use crate::transaction::Transactable;
+    use crate::tx::Transactable;
     use crate::types::ChangeHash;
     use crate::{
-        make_rng, AuditMode, AutoCommit, Automerge, AutomergeError, Change, ChangeId, ChangeSet,
-        Fragment, ObjType, ScalarValue, ROOT,
+        change_graph::Fragment, make_rng, AutomergeError, Change, ChangeId, ChangeSet, ObjType,
+        ScalarValue, ROOT,
     };
     use rand::prelude::*;
     use std::collections::HashSet;
 
-    /// Build the fragment metadata describing `changes` (a causally
-    /// closed set with a single head, in topological order).
+    /// `changes` must be causally closed, topologically ordered, with one head.
     fn fragment_for(changes: &[Change]) -> Fragment {
         let in_set: HashSet<ChangeHash> = changes.iter().map(|c| c.hash()).collect();
         let mut has_child: HashSet<ChangeHash> = HashSet::new();
@@ -255,11 +214,12 @@ mod tests {
         }
     }
 
-    /// Change set everything in `src` after `heads` and apply it to `dst`
-    /// with `apply_change_set_opsment`; apply the same changes to a fork of `dst`
-    /// with the batch path; the results must agree — including the
-    /// heads, both before and after rebuilding the hash graph.
-    fn apply_and_compare(src: &mut AutoCommit, dst: &mut AutoCommit, heads: &[crate::ChangeId]) {
+    /// Applying as a change set and as a batch must produce the same document.
+    fn apply_and_compare(
+        src: &mut AutoCommit<crate::hash_retention::Full>,
+        dst: &mut AutoCommit,
+        heads: &[crate::ChangeId],
+    ) {
         let changes = src.get_changes(heads).unwrap();
         let frag = fragment_for(&changes);
         let change_set = src.doc.change_set_for_fragment(&frag).unwrap();
@@ -277,9 +237,43 @@ mod tests {
         dst.doc.debug_cmp(&dst_ref.doc);
 
         // hashing every member verifies the head hash taken on trust
-        dst.doc.enable_audit_mode().unwrap();
-        assert_eq!(dst.doc.audit_mode(), AuditMode::Enabled);
-        assert_eq!(dst.doc.save(), dst_ref.doc.save());
+        let audited = dst.doc.clone().enable_audit_mode().unwrap();
+        assert_eq!(audited.audit_mode(), AuditMode::Enabled);
+        assert_eq!(audited.save(), dst_ref.doc.save());
+    }
+
+    #[test]
+    fn change_set_tail_insert_overwritten_then_deleted() {
+        for (n, update, delete) in [
+            (1, true, true),
+            (3, true, true),
+            (3, true, false),
+            (1, true, false),
+        ] {
+            let mut doc1 = AutoCommit::new().with_actor(crate::ActorId::from(vec![1]));
+            let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
+            doc1.insert(&list, 0, "base").unwrap();
+            doc1.commit();
+            let heads = doc1.get_heads();
+            let mut src = doc1
+                .fork()
+                .with_actor(crate::ActorId::from(vec![2]))
+                .enable_audit_mode()
+                .unwrap();
+            for i in 0..n {
+                src.insert(&list, 1 + i, format!("x{i}")).unwrap();
+            }
+            src.commit();
+            if update {
+                src.put(&list, n, "y").unwrap();
+                src.commit();
+            }
+            if delete {
+                src.delete(&list, n).unwrap();
+                src.commit();
+            }
+            apply_and_compare(&mut src, &mut doc1, &heads);
+        }
     }
 
     #[test]
@@ -291,13 +285,15 @@ mod tests {
         doc1.put(&map1, "key2", "val2").unwrap();
         let heads = doc1.get_heads();
 
-        let mut src = doc1.fork().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = doc1
+            .fork()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         for i in 0..5 {
-            let mut tmp = doc1.fork().with_actor(rng.random());
-            // merging FROM tmp enumerates its changes, which needs its
-            // hashes — kept only in audit mode
-            tmp.enable_audit_mode().unwrap();
+            let tmp = doc1.fork().with_actor(rng.random());
+            // merging from tmp needs its hashes
+            let mut tmp = tmp.enable_audit_mode().unwrap();
             tmp.put(&map1, "key1", format!("conflict{}", i)).unwrap();
             tmp.delete(&map1, "key2").unwrap();
             let m = tmp
@@ -327,8 +323,11 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut src = doc1.fork().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = doc1
+            .fork()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         for _ in 0..3 {
             for _ in 0..20 {
@@ -374,8 +373,11 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut src = doc1.fork().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = doc1
+            .fork()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         for _ in 0..5 {
             for _ in 0..10 {
@@ -432,8 +434,11 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut src = doc1.fork().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = doc1
+            .fork()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         for _ in 0..30 {
             let mut tmp = src.fork().with_actor(rng.random());
@@ -465,8 +470,10 @@ mod tests {
     #[test]
     fn change_set_sequential() {
         let mut rng = make_rng();
-        let mut src = AutoCommit::new().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let text = src.put_object(&ROOT, "text", ObjType::Text).unwrap();
         for i in 0..40 {
             let len = src.length(&text);
@@ -479,13 +486,10 @@ mod tests {
             src.commit();
         }
 
-        // feed the history to an empty document as a chain of change sets —
-        // each change set's boundary dep is the previous fragment's head,
-        // whose hash apply_change_set_opsment learned from the fragment metadata
+        // each boundary dep's hash is known only from the previous fragment's metadata
         let changes = src.get_changes(&[]).unwrap();
         let mut dst = Automerge::new();
         for chunk in changes.chunks(7) {
-            // round trip through the encoded chunk
             let frag = fragment_for(chunk);
             let bytes = src.doc.change_set_for_fragment(&frag).unwrap().bytes();
             let change_set = ChangeSet::try_from(&bytes[..]).unwrap();
@@ -495,7 +499,7 @@ mod tests {
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);
 
-        dst.enable_audit_mode().unwrap();
+        let dst = dst.enable_audit_mode().unwrap();
         assert_eq!(dst.audit_mode(), AuditMode::Enabled);
         assert_eq!(dst.save(), src.doc.save());
     }
@@ -503,8 +507,10 @@ mod tests {
     #[test]
     fn change_set_apply_errors() {
         let mut rng = make_rng();
-        let mut src = AutoCommit::new().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         for i in 0..9 {
             src.put(&ROOT, "key", i).unwrap();
             src.commit();
@@ -519,7 +525,7 @@ mod tests {
 
         let mut dst = Automerge::new();
 
-        // out of order: the middle chunk's boundary dep is missing
+        // out of order
         assert!(matches!(
             dst.apply_change_set(change_sets[1].clone()),
             Err(AutomergeError::MissingDeps)
@@ -527,7 +533,6 @@ mod tests {
 
         dst.apply_change_set(change_sets[0].clone()).unwrap();
 
-        // duplicate application is a no-op
         let heads = dst.get_heads();
         dst.apply_change_set(change_sets[0].clone()).unwrap();
         assert_eq!(dst.get_heads(), heads);
@@ -536,18 +541,17 @@ mod tests {
         dst.apply_change_set(change_sets[2].clone()).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
-        dst.enable_audit_mode().unwrap();
+        let dst = dst.enable_audit_mode().unwrap();
         assert_eq!(dst.save(), src.doc.save());
     }
 
     #[test]
     fn change_set_apply_overlap() {
-        // fragments can contain a mixture of changes the document does
-        // and does not have — the present ones (and their ops) are
-        // skipped
         let mut rng = make_rng();
-        let mut src = AutoCommit::new().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let text = src.put_object(&ROOT, "text", ObjType::Text).unwrap();
         for i in 0..9 {
             src.splice_text(&text, 0, 0, &format!("{}", i)).unwrap();
@@ -565,18 +569,17 @@ mod tests {
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);
-        dst.enable_audit_mode().unwrap();
+        let dst = dst.enable_audit_mode().unwrap();
         assert_eq!(dst.save(), src.doc.save());
     }
 
-    /// Every mixture of present and new members the history allows:
-    /// change set a prefix, then a suffix that reaches back into it. The
-    /// cut is taken at a unifying commit so both halves have one head.
     #[test]
     fn change_set_fuzz_overlap_apply() {
         let mut rng = make_rng();
-        let mut src = AutoCommit::new().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = src.put_object(&ROOT, "list", ObjType::List).unwrap();
         let text = src.put_object(&ROOT, "text", ObjType::Text).unwrap();
         let map = src.put_object(&ROOT, "map", ObjType::Map).unwrap();
@@ -590,13 +593,11 @@ mod tests {
             value += 1;
             value
         };
-        // a cut is a change count with a single head — the only place a
-        // fragment can start or end
+        // change counts at single-head points, where a fragment can start or end
         let mut cuts = vec![src.get_changes(&[]).unwrap().len()];
         for round in 0..8 {
             for _ in 0..3 {
                 let mut tmp = src.fork().with_actor(rng.random());
-                tmp.enable_audit_mode().unwrap();
                 for _ in 0..(rng.random::<u32>() % 6 + 1) {
                     let key = format!("key{}", rng.random::<u32>() % 5);
                     match rng.random::<u32>() % 8 {
@@ -662,8 +663,6 @@ mod tests {
         let heads = src.get_heads();
         let saved = src.doc.save();
         let make = |cs: &[Change]| src.doc.change_set_for_fragment(&fragment_for(cs)).unwrap();
-        // every (present, new) split: the second change set re-delivers
-        // everything from `start` on, of which `first` rows are present
         for (i, &first) in cuts.iter().enumerate() {
             for &start in &cuts[..i] {
                 let mut dst = Automerge::new();
@@ -672,27 +671,26 @@ mod tests {
 
                 assert_eq!(dst.get_heads(), heads, "cut {}..{}", start, first);
                 dst.debug_cmp(&src.doc);
-                dst.enable_audit_mode().unwrap();
+                let dst = dst.enable_audit_mode().unwrap();
                 assert_eq!(dst.save(), saved, "cut {}..{}", start, first);
             }
         }
     }
 
-    /// One new op succeeding *both* values of a conflicted register
-    /// whose members are all present: whether it has a row of its own
-    /// (a put) or not (a delete), it ends up carrying two preds.
+    /// A new op over a fully present conflict carries two preds, whether or
+    /// not it has a row of its own.
     #[test]
     fn change_set_apply_overlap_succeeds_conflict() {
         for delete in [true, false] {
             let mut rng = make_rng();
-            let mut src = AutoCommit::new().with_actor(rng.random());
-            src.enable_audit_mode().unwrap();
+            let mut src = AutoCommit::new()
+                .with_actor(rng.random())
+                .enable_audit_mode()
+                .unwrap();
             src.put(&ROOT, "seed", 0).unwrap();
             src.commit();
 
-            // concurrent writers: each forks before the other's put
             let mut tmp = src.fork().with_actor(rng.random());
-            tmp.enable_audit_mode().unwrap();
             tmp.put(&ROOT, "x", 2).unwrap();
             tmp.commit();
             src.put(&ROOT, "x", 1).unwrap();
@@ -722,19 +720,19 @@ mod tests {
             assert_eq!(dst.get(&ROOT, "x").unwrap().is_none(), delete);
             assert_eq!(dst.get_heads(), src.get_heads());
             dst.debug_cmp(&src.doc);
-            dst.enable_audit_mode().unwrap();
+            let dst = dst.enable_audit_mode().unwrap();
             assert_eq!(dst.save(), src.doc.save());
         }
     }
 
     #[test]
     fn change_set_apply_overlap_delete_of_skipped_op() {
-        // a kept member deletes an op belonging to a skipped member:
-        // the deletion rides the skipped row's succ column and has no
-        // row of its own, so dropping that row must not drop the delete
+        // the kept delete has no row of its own: it rides the skipped row's succ
         let mut rng = make_rng();
-        let mut src = AutoCommit::new().with_actor(rng.random());
-        src.enable_audit_mode().unwrap();
+        let mut src = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         src.put(&ROOT, "x", 1).unwrap();
         src.commit();
         src.put(&ROOT, "y", 2).unwrap();
@@ -753,7 +751,7 @@ mod tests {
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);
-        dst.enable_audit_mode().unwrap();
+        let dst = dst.enable_audit_mode().unwrap();
         assert_eq!(dst.save(), src.doc.save());
     }
 }

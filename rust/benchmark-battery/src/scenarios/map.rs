@@ -87,7 +87,7 @@ fn apply_changes(changes: Vec<Change>) -> Automerge {
 }
 
 fn owned_changes(doc: &Automerge) -> Vec<Change> {
-    doc.get_changes(&[]).unwrap()
+    doc.get_changes(&[])
 }
 
 fn repeated_increment_doc(n: u64) -> Automerge {

@@ -145,9 +145,7 @@ impl<'a> ListDiff<'a> {
         }
     }
 
-    /// Reposition onto `range`, forward only, resuming the list index at
-    /// `index`. The first item lands in the lookahead, so plain
-    /// iteration picks up from there.
+    /// Forward only; `index` is the list index at `range.start`.
     pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
         self.iter.shift(range.clone());
         if let Some(op_set) = self.op_set {
@@ -244,9 +242,7 @@ impl<'a> Iterator for ListDiff<'a> {
                     index: self.index,
                 };
                 if diff == Diff::Same && pending.state.num_old > 1 && pending.state.num_new == 1 {
-                    // The surviving value is unchanged, but removing the
-                    // other visible values clears its conflict flag. Emit a
-                    // Put and, for objects, expose children too.
+                    // the survivor is unchanged but loses its conflict flag
                     pending.state.expose = true;
                     pending.diff = Diff::Add;
                 }
@@ -438,9 +434,11 @@ fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::Transactable;
+    use crate::automerge::Automerge;
+    use crate::read::ReadDoc;
+    use crate::tx::Transactable;
     use crate::types;
-    use crate::{Automerge, ObjType, ReadDoc, ROOT};
+    use crate::{ObjType, ROOT};
 
     #[test]
     fn list_range_bounds() {
@@ -470,9 +468,7 @@ mod tests {
 
     #[test]
     fn list_range_conflict() {
-        // Pinned timestamp: see HASHLESS.md — without it a commit can
-        // hash to a fragment head (1/256) and free the hashes `merge`
-        // needs to build its changes.
+        // pinned time: a fragment-head commit would free hashes `merge` needs
         let actor1 = "aaaaaaaa".try_into().unwrap();
         let actor2 = "bbbbbbbb".try_into().unwrap();
         let mut doc1 = Automerge::new().with_actor(actor1);
@@ -483,17 +479,17 @@ mod tests {
             .map(types::ScalarValue::Int)
             .collect::<Vec<_>>();
         tx1.splice(&list, 0, 0, values.clone()).unwrap();
-        tx1.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+        tx1.commit_with(crate::tx::CommitOptions::default().with_time(0));
 
         let mut doc2 = doc1.fork().with_actor(actor2);
 
         let mut tx2 = doc2.transaction();
         tx2.put(&list, 3, 11).unwrap();
-        tx2.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+        tx2.commit_with(crate::tx::CommitOptions::default().with_time(0));
 
         let mut tx1 = doc1.transaction();
         tx1.put(&list, 3, 10).unwrap();
-        tx1.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+        tx1.commit_with(crate::tx::CommitOptions::default().with_time(0));
 
         doc2.merge(&mut doc1).unwrap();
 

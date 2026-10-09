@@ -9,17 +9,18 @@ use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
+use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, SuccInsert, TxOp};
+use crate::read::ReadDoc;
 use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
-use crate::Automerge;
-use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc};
+use crate::{hydrate, AutomergeError, ObjType, OpType};
 use crate::{Change, ChangeHash, Prop};
 
 #[derive(Debug, Clone)]
-pub(crate) struct TransactionInner {
+pub struct TransactionInner {
     actor: usize,
     seq: u64,
     start_op: NonZeroU64,
@@ -55,9 +56,11 @@ struct InsertedOp {
 }
 
 impl TransactionInner {
-    /// Resolve an object id, rejecting objects that do not exist in the
-    /// transaction's scope (created after the isolation heads).
-    fn exid_to_obj(&self, doc: &Automerge, id: &ExId) -> Result<ObjMeta, AutomergeError> {
+    fn exid_to_obj_in_scope<H: crate::hash_retention::HashRetention>(
+        &self,
+        doc: &Automerge<H>,
+        id: &ExId,
+    ) -> Result<ObjMeta, AutomergeError> {
         let obj = doc.exid_to_obj(id)?;
         let created_in_transaction = obj.id.0.actor() == self.actor
             && obj.id.0.counter() >= self.start_op.get()
@@ -98,8 +101,8 @@ impl TransactionInner {
     }
 
     /// Create an empty change
-    pub(crate) fn empty(
-        doc: &mut Automerge,
+    pub(crate) fn empty<H: crate::hash_retention::HashRetention>(
+        doc: &mut Automerge<H>,
         args: TransactionArgs,
         message: Option<String>,
         time: Option<i64>,
@@ -116,9 +119,9 @@ impl TransactionInner {
     ///
     /// Returns `None` if there were no operations to commit
     #[tracing::instrument(skip(self, doc))]
-    pub(crate) fn commit(
+    pub(crate) fn commit<H: crate::hash_retention::HashRetention>(
         self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         message: Option<String>,
         time: Option<i64>,
     ) -> Option<ChangeHash> {
@@ -133,9 +136,9 @@ impl TransactionInner {
         Some(self.commit_impl(doc, message, time))
     }
 
-    pub(crate) fn commit_impl(
+    pub(crate) fn commit_impl<H: crate::hash_retention::HashRetention>(
         mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         message: Option<String>,
         time: Option<i64>,
     ) -> ChangeHash {
@@ -184,7 +187,11 @@ impl TransactionInner {
         crate::change::encode_author_footer(&self.author)
     }
 
-    pub(crate) fn export(mut self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
+    pub(crate) fn export<H: crate::hash_retention::HashRetention>(
+        mut self,
+        op_set: &OpSet,
+        change_graph: &ChangeGraph<H>,
+    ) -> Change {
         self.deps.sort_unstable();
         let deps_index = self
             .deps
@@ -198,7 +205,10 @@ impl TransactionInner {
 
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
-    pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
+    pub(crate) fn rollback<H: crate::hash_retention::HashRetention>(
+        self,
+        doc: &mut Automerge<H>,
+    ) -> usize {
         let num = self.pending.len();
 
         for o in self.pending.iter().rev() {
@@ -226,14 +236,18 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub(crate) fn put<P: Into<Prop>, V: Into<ScalarValue>>(
+    pub(crate) fn put<
+        P: Into<Prop>,
+        V: Into<ScalarValue>,
+        H: crate::hash_retention::HashRetention,
+    >(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         let value = value.into();
         let prop = prop.into();
         match (&prop, obj.typ) {
@@ -259,14 +273,14 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub(crate) fn put_object<P: Into<Prop>>(
+    pub(crate) fn put_object<P: Into<Prop>, H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         let prop = prop.into();
         match (&prop, obj.typ) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
@@ -291,9 +305,9 @@ impl TransactionInner {
         )
     }
 
-    fn insert_local_op(
+    fn insert_local_op<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         mut op: TxOp,
         succ: &[SuccInsert],
         range: Range<usize>,
@@ -310,14 +324,14 @@ impl TransactionInner {
         self.pending.push(op);
     }
 
-    pub(crate) fn insert<V: Into<ScalarValue>>(
+    pub(crate) fn insert<V: Into<ScalarValue>, H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
         };
@@ -327,14 +341,14 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn insert_object(
+    pub(crate) fn insert_object<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
         };
@@ -342,9 +356,9 @@ impl TransactionInner {
         Ok(doc.ops().id_to_exid(id))
     }
 
-    fn do_insert(
+    fn do_insert<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ObjMeta,
         seq_type: SequenceType,
         index: usize,
@@ -353,9 +367,9 @@ impl TransactionInner {
         Ok(self.do_insert_op(doc, obj, seq_type, index, action)?.id)
     }
 
-    fn do_insert_op(
+    fn do_insert_op<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ObjMeta,
         seq_type: SequenceType,
         index: usize,
@@ -382,13 +396,29 @@ impl TransactionInner {
         Ok(inserted)
     }
 
-    /// Insert a mark-end op anchored directly after `begin` — the
-    /// zero-width / single-element case where both anchors resolve to
-    /// the same op-set position and a plain insert would land the end
-    /// before its begin.
-    fn insert_mark_end_after(
+    fn insert_mark_end<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        begin: &InsertedOp,
+        index: usize,
+        expand: bool,
+    ) -> Result<InsertedOp, AutomergeError> {
+        // inside one multi-width element both anchors resolve to the same position
+        let end_pos = doc
+            .ops()
+            .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?
+            .pos;
+        if end_pos > begin.pos {
+            self.do_insert_op(doc, obj, SequenceType::Text, index, OpType::MarkEnd(expand))
+        } else {
+            Ok(self.insert_mark_end_after(doc, obj, begin, expand))
+        }
+    }
+
+    fn insert_mark_end_after<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
         obj: &ObjMeta,
         begin: &InsertedOp,
         expand: bool,
@@ -412,9 +442,9 @@ impl TransactionInner {
         inserted
     }
 
-    pub(crate) fn local_op(
+    pub(crate) fn local_op<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ObjMeta,
         prop: Prop,
         action: OpType,
@@ -425,9 +455,9 @@ impl TransactionInner {
         }
     }
 
-    fn local_map_op(
+    fn local_map_op<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ObjMeta,
         prop: String,
         action: OpType,
@@ -456,8 +486,7 @@ impl TransactionInner {
         let succ: Vec<_> = query
             .ops
             .iter()
-            // increments act as ordinary overwrites on non-counter
-            // targets (e.g. a conflicted non-counter loser)
+            // on a non-counter target an increment acts as an overwrite
             .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter())))
             .collect();
 
@@ -466,9 +495,9 @@ impl TransactionInner {
         Ok(Some(id))
     }
 
-    fn local_list_op(
+    fn local_list_op<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ObjMeta,
         index: usize,
         action: OpType,
@@ -503,14 +532,13 @@ impl TransactionInner {
         let succ = query
             .ops
             .iter()
-            // increments act as ordinary overwrites on non-counter
-            // targets (e.g. a conflicted non-counter loser)
+            // on a non-counter target an increment acts as an overwrite
             .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter())))
             .collect::<Vec<_>>();
 
         self.insert_local_op(doc, op, &succ, query.range);
 
-        // inserts can delete a conflicted value reveal a counter
+        // overwriting a conflicted winner can reveal a counter beneath it
         if let Some((i, s)) = succ.iter().rev().enumerate().find(|(_, s)| s.inc.is_some()) {
             if i > 0 {
                 doc.ops.expose(s.pos)
@@ -520,9 +548,9 @@ impl TransactionInner {
         Ok(Some(id))
     }
 
-    pub(crate) fn increment<P: Into<Prop>>(
+    pub(crate) fn increment<P: Into<Prop>, H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ExId,
         prop: P,
         value: i64,
@@ -532,13 +560,13 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn delete<P: Into<Prop>>(
+    pub(crate) fn delete<P: Into<Prop>, H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         let prop = prop.into();
         if obj.typ == ObjType::Text {
             let index = prop.as_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
@@ -563,21 +591,20 @@ impl TransactionInner {
     /// Values can be scalars or nested objects (maps, lists, text). Scalar
     /// values are inserted directly, while nested objects are created using
     /// batch insertion for efficiency.
-    pub(crate) fn splice(
+    pub(crate) fn splice<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         index: usize,
         del: isize,
         vals: impl IntoIterator<Item = impl Into<hydrate::Value>>,
     ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
         let values: Vec<hydrate::Value> = vals.into_iter().map(Into::into).collect();
         if obj.typ == ObjType::Text {
-            // text splices must be strings — never list splice semantics
             let text = values_to_splice_text(values)?;
             self.inner_splice(
                 doc,
@@ -603,15 +630,15 @@ impl TransactionInner {
     }
 
     /// Splice string into a text object
-    pub(crate) fn splice_text(
+    pub(crate) fn splice_text<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         index: usize,
         del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -626,9 +653,9 @@ impl TransactionInner {
         )
     }
 
-    fn inner_splice(
+    fn inner_splice<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         SpliceArgs {
             obj,
             mut index,
@@ -749,14 +776,14 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn mark(
+    pub(crate) fn mark<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         if ObjType::Text != obj.typ {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -779,31 +806,8 @@ impl TransactionInner {
         let end = if mark.start == mark.end {
             self.insert_mark_end_after(doc, &obj, &begin, expand.after())
         } else {
-            // The mark end must be inserted *after* the begin in the op
-            // set. When the mark's [start, end) range lies within a
-            // single multi-width text element both anchors resolve to
-            // the same op-set position, and a plain end insert would
-            // land before the begin — corrupting the mark index and
-            // producing a document that fails to reload with "mark end
-            // before begin". In that case anchor the end immediately
-            // after the begin, exactly as the zero-width branch does.
-            let end_pos = doc
-                .ops()
-                .query_insert_at(&obj.id, mark.end, SequenceType::Text, self.scope.clone())?
-                .pos;
-            if end_pos > begin.pos {
-                self.do_insert_op(
-                    doc,
-                    &obj,
-                    SequenceType::Text,
-                    mark.end,
-                    OpType::MarkEnd(expand.after()),
-                )?
-            } else {
-                self.insert_mark_end_after(doc, &obj, &begin, expand.after())
-            }
+            self.insert_mark_end(doc, &obj, &begin, mark.end, expand.after())?
         };
-        // Invariant: the MarkEnd op must sort after its MarkBegin.
         debug_assert!(
             end.pos > begin.pos,
             "mark end (pos {}) must follow its begin (pos {})",
@@ -814,9 +818,9 @@ impl TransactionInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn unmark(
+    pub(crate) fn unmark<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         name: &str,
         start: usize,
@@ -827,13 +831,13 @@ impl TransactionInner {
         self.mark(doc, ex_obj, mark, expand)
     }
 
-    pub(crate) fn split_block(
+    pub(crate) fn split_block<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_obj: &ExId,
         index: usize,
     ) -> Result<ExId, AutomergeError> {
-        let obj = self.exid_to_obj(doc, ex_obj)?;
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -855,9 +859,9 @@ impl TransactionInner {
         Ok(doc.ops().id_to_exid(id))
     }
 
-    pub(crate) fn join_block(
+    pub(crate) fn join_block<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         text: &ExId,
         index: usize,
     ) -> Result<(), AutomergeError> {
@@ -909,9 +913,9 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn replace_block(
+    pub(crate) fn replace_block<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         text: &ExId,
         index: usize,
     ) -> Result<ExId, AutomergeError> {
@@ -919,9 +923,9 @@ impl TransactionInner {
         self.split_block(doc, text, index)
     }
 
-    pub(crate) fn update_object(
+    pub(crate) fn update_object<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         obj: &ExId,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError> {
@@ -938,9 +942,9 @@ impl TransactionInner {
         }
     }
 
-    pub(crate) fn update_map(
+    pub(crate) fn update_map<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         map: &crate::ObjId,
         new_value: &crate::hydrate::Map,
     ) -> Result<(), AutomergeError> {
@@ -975,9 +979,9 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn update_list(
+    pub(crate) fn update_list<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         list: &crate::ObjId,
         new_value: &crate::hydrate::List,
     ) -> Result<(), AutomergeError> {
@@ -1021,9 +1025,9 @@ impl TransactionInner {
         Ok(())
     }
 
-    fn update_value(
+    fn update_value<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         parent: &crate::ObjId,
         key: Prop,
         new_value: &crate::hydrate::Value,
@@ -1082,15 +1086,15 @@ impl TransactionInner {
     /// at the given index (shifting subsequent elements). When `insert` is
     /// false, the value replaces the existing element at that index. For
     /// `Prop::Map` the `insert` flag is ignored (maps always use put semantics).
-    pub(crate) fn batch_create_object(
+    pub(crate) fn batch_create_object<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         ex_parent: &ExId,
         prop: Prop,
         value: &hydrate::Value,
         insert: bool,
     ) -> Result<ExId, AutomergeError> {
-        let parent = self.exid_to_obj(doc, ex_parent)?;
+        let parent = self.exid_to_obj_in_scope(doc, ex_parent)?;
 
         match (&prop, insert, parent.typ) {
             (Prop::Map(_), _, ObjType::Map) => Ok(()),
@@ -1143,9 +1147,9 @@ impl TransactionInner {
     }
 
     /// Initialize the root object of an empty document from a `hydrate::Map`.
-    pub(crate) fn batch_init_root_map(
+    pub(crate) fn batch_init_root_map<H: crate::hash_retention::HashRetention>(
         &mut self,
-        doc: &mut Automerge,
+        doc: &mut Automerge<H>,
         value: &hydrate::Map,
     ) -> Result<(), AutomergeError> {
         let root_meta = ObjMeta {
@@ -1243,15 +1247,16 @@ struct SpliceArgs<'a> {
     splice_type: SpliceType<'a>,
 }
 
-struct BatchInsertion<'a> {
+struct BatchInsertion<'a, H: crate::hash_retention::HashRetention = crate::hash_retention::Retained>
+{
     inner: &'a mut TransactionInner,
-    doc: &'a mut Automerge,
+    doc: &'a mut Automerge<H>,
     pending_start: usize,
     insert_pos: usize,
 }
 
-impl<'a> BatchInsertion<'a> {
-    fn new(inner: &'a mut TransactionInner, doc: &'a mut Automerge, start_pos: usize) -> Self {
+impl<'a, H: crate::hash_retention::HashRetention> BatchInsertion<'a, H> {
+    fn new(inner: &'a mut TransactionInner, doc: &'a mut Automerge<H>, start_pos: usize) -> Self {
         let pending_start = inner.pending.len();
         Self {
             inner,
@@ -1335,8 +1340,8 @@ fn value_to_op_type(value: &hydrate::Value) -> (Option<ObjType>, OpType) {
 ///
 /// This is the shared logic used by `batch_create_object`, `batch_init_map`,
 /// and `inner_splice` to populate the children of container objects.
-fn batch_bfs(
-    batch: &mut BatchInsertion<'_>,
+fn batch_bfs<H: crate::hash_retention::HashRetention>(
+    batch: &mut BatchInsertion<'_, H>,
     queue: &mut VecDeque<(ObjMeta, &'_ hydrate::Value)>,
 ) -> Result<(), AutomergeError> {
     while let Some((container_meta, container_value)) = queue.pop_front() {
@@ -1403,7 +1408,8 @@ fn batch_bfs(
 
 #[cfg(test)]
 mod tests {
-    use crate::{transaction::Transactable, ReadDoc, ROOT};
+    use crate::read::ReadDoc;
+    use crate::{tx::Transactable, ROOT};
 
     use super::*;
 

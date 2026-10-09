@@ -1,6 +1,8 @@
 use serde::ser::{SerializeMap, SerializeSeq};
 
-use crate::{ObjId, ObjType, ReadDoc, Value};
+use crate::{ObjId, ObjType, Value};
+
+use crate::audit::ReadDoc;
 
 /// A wrapper type which implements [`serde::Serialize`] for a [`ReadDoc`].
 ///
@@ -19,7 +21,7 @@ use crate::{ObjId, ObjType, ReadDoc, Value};
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct AutoSerde<'a, R: crate::ReadDoc>(&'a R);
+pub struct AutoSerde<'a, R: crate::audit::ReadDoc>(&'a R);
 
 impl<'a, R: ReadDoc> From<&'a R> for AutoSerde<'a, R> {
     fn from(a: &'a R) -> Self {
@@ -27,7 +29,7 @@ impl<'a, R: ReadDoc> From<&'a R> for AutoSerde<'a, R> {
     }
 }
 
-impl<R: crate::ReadDoc> serde::Serialize for AutoSerde<'_, R> {
+impl<R: crate::audit::ReadDoc> serde::Serialize for AutoSerde<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -45,7 +47,7 @@ struct AutoSerdeMap<'a, R> {
     obj: ObjId,
 }
 
-impl<R: crate::ReadDoc> serde::Serialize for AutoSerdeMap<'_, R> {
+impl<R: crate::audit::ReadDoc> serde::Serialize for AutoSerdeMap<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -71,7 +73,7 @@ struct AutoSerdeSeq<'a, R> {
     obj: ObjId,
 }
 
-impl<R: crate::ReadDoc> serde::Serialize for AutoSerdeSeq<'_, R> {
+impl<R: crate::audit::ReadDoc> serde::Serialize for AutoSerdeSeq<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -98,7 +100,7 @@ struct AutoSerdeVal<'a, R> {
     obj: ObjId,
 }
 
-impl<R: crate::ReadDoc> serde::Serialize for AutoSerdeVal<'_, R> {
+impl<R: crate::audit::ReadDoc> serde::Serialize for AutoSerdeVal<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

@@ -79,7 +79,7 @@ fn anonymize_scrubs_a_document_from_stdin() {
         .unwrap();
     let anonymized = Automerge::load(&output.stdout).unwrap();
 
-    assert_eq!(anonymized.get_changes(&[]).unwrap().len(), 1);
+    assert_eq!(anonymized.get_changes(&[]).len(), 1);
     assert!(anonymized.get(ROOT, "private-key").unwrap().is_none());
     assert_ne!(output.stdout, source_bytes);
 }

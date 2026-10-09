@@ -20,9 +20,8 @@ use std::ops::RangeBounds;
 /// given change ids.
 ///
 /// Change ids which are not present in the document cause the `*_at` methods
-/// to fail with [`AutomergeError::InvalidChangeId`]. In particular this means
-/// that heads obtained from a different document which contains changes this
-/// document has not seen are an error rather than being silently skipped.
+/// to fail with [`AutomergeError::InvalidChangeId`], including heads taken from
+/// a document which has changes this one has not seen.
 pub trait ReadDoc {
     /// Get the parents of an object in the document tree.
     ///
@@ -318,11 +317,6 @@ pub trait ReadDoc {
 
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the
     /// given `heads`.
-    ///
-    /// The return type is [`ChangeHash`] rather than [`ChangeId`] because the
-    /// missing changes are, by definition, not in this document — there is no
-    /// (actor, seq) information for them, only the hashes their dependents
-    /// recorded.
     fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError>;
 
     /// Get a change by its hash.

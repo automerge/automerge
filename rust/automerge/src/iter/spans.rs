@@ -51,8 +51,7 @@ impl SpanDiff {
 // case we avoid the overhead of TopIter and stream action/value columns
 // directly.
 #[derive(Debug, Clone)]
-// Boxing the variants loses a few milliseconds on some iteration benchmarks
-// (allow, not expect: on wasm32 the variants aren't large enough to fire)
+// boxing measurably slows iteration; `allow` because wasm32 doesn't trigger it
 #[allow(clippy::large_enum_variant)]
 enum SpansActionValue<'a> {
     Current(Unshift<ActionValueIter<'a>>),
@@ -147,16 +146,12 @@ impl<'a> SpansDiff<'a> {
         }
     }
 
-    /// Reposition onto `range`, forward only, resuming the character
-    /// index at `index` — the width of the object's text before
-    /// `range.start`, for a caller walking one object in pieces.
+    /// Forward only; `index` is the character index at `range.start`.
     pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
         let Some(op_set) = self.op_set else { return };
         self.op_id.set_max(range.end);
         self.action_value.shift(op_set, &self.clock, range.clone());
 
-        // the marks open at the new position are whatever the index
-        // says; no need to rebuild state by walking to get here
         self.marks.advance_to(range.start);
         self.state = SpanState::empty_at(self.state.encoding, index);
         self.state.push_marks(self.marks.current());
@@ -185,8 +180,7 @@ impl<'a> SpansDiff<'a> {
     ) -> Self {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
-        // the marks covering `range.start` come straight off the index —
-        // starting mid-object costs a tree descent, not a walk
+        // a tree descent, not a walk from the object start
         let marks = MarkCursor::new(op_set, clock.clone(), pos);
 
         let action_value = SpansActionValue::new(op_set, &clock, range.clone());
@@ -216,11 +210,6 @@ impl<'a> SpansDiff<'a> {
         self.op_id.nth(self.pos - id_pos)
     }
 
-    /// A mark op row: carry the cursor past it and take the new set.
-    ///
-    /// Nothing is read off the op — its id, name, value and visibility
-    /// are all already in the mark index, and the cursor resolves them
-    /// against the clock.
     fn process_mark(&mut self) {
         self.marks.advance_to(self.pos);
         self.state.push_marks(self.marks.current());

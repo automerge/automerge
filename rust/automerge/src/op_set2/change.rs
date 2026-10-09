@@ -30,7 +30,7 @@ impl GetHash for Vec<crate::Change> {
     }
 }
 
-impl GetHash for ChangeGraph {
+impl<H: crate::hash_retention::HashRetention> GetHash for ChangeGraph<H> {
     fn get_hash(&self, index: usize) -> Option<ChangeHash> {
         self.index_to_hash(index)
     }

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+* Patches describe the net change between two states of the document. Their
+  order and grouping can differ from before (for example several splices
+  arrive in final-position order, and a conflict may arrive as a put marked
+  `conflict: true`), but applying them still takes the old state to the new.
+* `addCommits` also accepts the change sets `getCommits` now produces, and
+  still checks each commit's `head` and `parents` against its bytes.
+
+### Removed
+
+* The experimental `saveBundle` function. `readBundle` remains and reads the
+  change sets `bundleFragmentMetadata` produces.
+
 ## 3.5.0
 
 Changes since 3.4.1.

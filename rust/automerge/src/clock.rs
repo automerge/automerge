@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 /// For example, given an [`OpId`], one can use [`OpId::actor`] to find the
 /// currently stored counter of the actor in the [`Clock`].
 #[derive(Default, Debug, Clone, PartialEq)]
-pub(crate) struct Clock(pub(crate) Vec<u32>);
+pub struct Clock(pub(crate) Vec<u32>);
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct SeqClock(pub(crate) Vec<Option<NonZeroU32>>);
@@ -92,15 +92,6 @@ impl ClockRange {
         Self::Diff(before, None)
     }
 
-    /// The owned after-side clock, when the range targets a historical
-    /// view (`None` = the current document).
-    pub(crate) fn after_clock(&self) -> Option<Clock> {
-        match self {
-            Self::Current(c) => c.clone(),
-            Self::Diff(_, a) => a.clone(),
-        }
-    }
-
     pub(crate) fn after(&self) -> Option<&Clock> {
         match self {
             Self::Diff(_, after) => after.as_ref(),
@@ -168,9 +159,6 @@ impl Clock {
         self.0[actor] = counter;
     }
 
-    /// The counter this clock reaches for `actor` — [`covers`](Self::covers)
-    /// for a caller holding ids in another actor space, which would
-    /// otherwise translate every one of them.
     pub(crate) fn max_op(&self, actor: usize) -> u64 {
         self.0[actor] as u64
     }

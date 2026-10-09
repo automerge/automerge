@@ -14,12 +14,11 @@ use super::{CommitOptions, TransactionInner};
 ///
 /// Created via [`Automerge::into_transaction`](crate::Automerge::into_transaction).
 #[derive(Debug)]
-pub struct OwnedTransaction {
-    // This is always `Some` — it's `Option` only because the shared `impl_transactable_for_tx!`
-    // macro (also used by `Transaction<'a>`, which needs `Option` for its `Drop` impl) accesses
-    // `self.inner` directly and expects it to be an Option<TransactionInner>
-    inner: Option<TransactionInner>,
-    doc: Automerge,
+pub struct OwnedTransaction<
+    H: crate::hash_retention::HashRetention = crate::hash_retention::Retained,
+> {
+    inner: TransactionInner,
+    doc: Automerge<H>,
 }
 
 // Compile-time assertion that OwnedTransaction is Send.
@@ -30,20 +29,19 @@ const _: () = {
     }
 };
 
-impl OwnedTransaction {
+impl<H: crate::hash_retention::HashRetention> OwnedTransaction<H> {
     /// Create a new transaction, consuming the document.
     pub(crate) fn new(
-        mut doc: Automerge,
+        mut doc: Automerge<H>,
         heads: Option<&[crate::ChangeId]>,
     ) -> Result<Self, AutomergeError> {
         if let Some(h) = heads {
-            // fail fast: an isolated transaction commits with these heads
-            // as its deps, which the wire format records as hashes
+            // fail fast: committing records these heads' hashes as deps
             doc.resolve_heads(h)?;
         }
         let args = doc.transaction_args(heads);
         Ok(Self {
-            inner: Some(TransactionInner::new(args)),
+            inner: TransactionInner::new(args),
             doc,
         })
     }
@@ -65,69 +63,61 @@ impl OwnedTransaction {
 
     /// Commit the transaction, returning the document and the id of the
     /// change it created (if any).
-    pub fn commit(mut self) -> (Automerge, Option<crate::ChangeId>) {
-        let hash = self.inner.take().unwrap().commit(&mut self.doc, None, None);
-        let id = hash.map(|h| {
-            self.doc
-                .hash_to_change_id(&h)
-                .expect("hash of a newly committed change is always known")
-                .expect("newly committed change must be in the document")
-        });
-        (self.doc, id)
+    pub fn commit(self) -> (Automerge<H>, Option<crate::ChangeId>) {
+        self.commit_with(CommitOptions::default())
     }
 
     /// Commit with options.
-    pub fn commit_with(mut self, options: CommitOptions) -> (Automerge, Option<crate::ChangeId>) {
-        let hash = self
-            .inner
-            .take()
-            .unwrap()
-            .commit(&mut self.doc, options.message, options.time);
+    pub fn commit_with(self, options: CommitOptions) -> (Automerge<H>, Option<crate::ChangeId>) {
+        let (doc, hash) = self.commit_hash(options);
         let id = hash.map(|h| {
-            self.doc
-                .hash_to_change_id(&h)
+            doc.hash_to_change_id(&h)
                 .expect("hash of a newly committed change is always known")
                 .expect("newly committed change must be in the document")
         });
-        (self.doc, id)
+        (doc, id)
+    }
+
+    pub(crate) fn commit_hash(self, options: CommitOptions) -> (Automerge<H>, Option<ChangeHash>) {
+        let Self { inner, mut doc } = self;
+        let hash = inner.commit(&mut doc, options.message, options.time);
+        (doc, hash)
+    }
+
+    pub(crate) fn doc_ref(&self) -> &Automerge<H> {
+        &self.doc
     }
 
     /// Rollback the transaction, returning the document and number of cancelled ops.
-    pub fn rollback(mut self) -> (Automerge, usize) {
-        let cancelled = self.inner.take().unwrap().rollback(&mut self.doc);
-        (self.doc, cancelled)
-    }
-
-    fn do_tx<F, O>(&mut self, f: F) -> O
-    where
-        F: FnOnce(&mut TransactionInner, &mut Automerge) -> O,
-    {
-        let tx = self.inner.as_mut().unwrap();
-        f(tx, &mut self.doc)
-    }
-
-    fn get_scope(
-        &self,
-        heads: Option<&[crate::ChangeId]>,
-    ) -> Result<Option<crate::types::Clock>, AutomergeError> {
-        if let Some(h) = heads {
-            // a transaction is in flight, so the current-heads shortcut is
-            // never sound here: always resolve a concrete clock
-            let nodes = self.doc.nodes_for_change_ids(h)?;
-            Ok(Some(self.doc.change_graph.clock_for_nodes(nodes)))
-        } else {
-            Ok(self.inner.as_ref().and_then(|i| i.get_scope().clone()))
-        }
+    pub fn rollback(self) -> (Automerge<H>, usize) {
+        let Self { inner, mut doc } = self;
+        let cancelled = inner.rollback(&mut doc);
+        (doc, cancelled)
     }
 }
 
-super::impl_read_doc_for_tx!(OwnedTransaction);
-super::impl_transactable_for_tx!(OwnedTransaction);
+impl<H: crate::hash_retention::HashRetention> super::TxDoc for OwnedTransaction<H> {
+    type Retention = H;
+
+    fn doc(&self) -> &Automerge<H> {
+        &self.doc
+    }
+
+    fn inner(&self) -> Option<&TransactionInner> {
+        Some(&self.inner)
+    }
+
+    fn parts_mut(&mut self) -> (&mut TransactionInner, &mut Automerge<H>) {
+        (&mut self.inner, &mut self.doc)
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use crate::transaction::{CommitOptions, Transactable};
-    use crate::{Automerge, ObjType, ReadDoc, ROOT};
+    use crate::automerge::Automerge;
+    use crate::read::ReadDoc;
+    use crate::tx::{CommitOptions, Transactable};
+    use crate::{ObjType, ROOT};
 
     #[test]
     fn put_and_get_roundtrip() {
@@ -244,14 +234,10 @@ mod tests {
     #[test]
     fn owned_transaction_at() {
         let mut doc = Automerge::new();
-        // Pinned actor *and* timestamp, so the hashes are a pure
-        // function of the ops. Isolating at `heads_v1` needs that
-        // change's hash retained; if the second commit's hash started
-        // with a zero byte it would be a fragment head, covering the
-        // first and freeing its hash, and `into_transaction` would error
-        // `AuditModeRequired`. Documented design — see HASHLESS.md.
+        // Deterministic hashes: a fragment-head second commit would free
+        // `heads_v1`'s hash and make isolating at it fail.
         doc.set_actor(crate::ActorId::from(&b"otx"[..]));
-        let t0 = || crate::transaction::CommitOptions::default().with_time(0);
+        let t0 = || crate::tx::CommitOptions::default().with_time(0);
 
         // Make a first change
         let mut tx = doc.transaction();

@@ -16,9 +16,6 @@ pub(crate) enum Chunk<'a> {
     Change(Change<'a, Unverified>),
     /// A change set in the frozen 3.3.x format — see [`super::bundle_v0`].
     BundleV0(Box<BundleV0Storage<'a, Unverified>>),
-    /// The live change set format, parsed. Boxed: a change set carries its
-    /// change metadata and op columns, which makes it far larger than
-    /// the other variants.
     ChangeSetColumns(Box<crate::storage::ChangeSet>),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
@@ -106,7 +103,6 @@ impl<'a> Chunk<'a> {
                     Compressed::new(header.checksum, Cow::Borrowed(chunk_input.bytes())),
                 )
             }
-            // frozen: 3.3.x wrote these and they are still in circulation
             ChunkType::BundleV0 => {
                 let (remaining, change_set) =
                     BundleV0Storage::parse_following_header(chunk_input, header)
@@ -133,8 +129,7 @@ impl<'a> Chunk<'a> {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
             Self::BundleV0(b) => b.checksum_valid(),
-            // the columns are part of the change set chunk, whose checksum
-            // the loader has already validated against the whole chunk
+            // already checked against the whole chunk by the loader
             Self::ChangeSetColumns(_) => true,
         }
     }
@@ -147,8 +142,7 @@ pub(crate) enum ChunkType {
     Compressed,
     /// The frozen 3.3.x change set format — see [`super::bundle_v0`].
     BundleV0,
-    /// A change set: fragment metadata prefix followed by the change and op
-    /// columns. Unrelated to [`Self::BundleV0`] beyond the name.
+    /// A [`crate::storage::ChangeSet`].
     ChangeSet,
 }
 

@@ -15,6 +15,8 @@ macro_rules! to_sync_state {
     }};
 }
 
+pub(crate) use to_sync_state;
+
 /// \struct AMsyncState
 /// \installed_headerfile
 /// \brief The state of synchronization with a peer.

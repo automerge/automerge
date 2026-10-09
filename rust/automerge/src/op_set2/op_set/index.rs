@@ -14,23 +14,14 @@ use hexane::encoder::{BoolEncoder, RleEncoder};
 use hexane::{EncoderApi, RunSrc};
 use std::collections::HashMap;
 
-/// Streaming index builder.
-///
-/// Ops are buffered per register (the `group` state machine) and flushed to
-/// run-length encoders at each register boundary; the encoders hand their
-/// slabs directly to the final columns. All the group-retroactive
-/// complexity — electing the `top` op, counter increments rewriting the
-/// visibility and inc entries of their counter — is confined to a single
-/// register, so the buffer never reaches back past the last flush.
+/// Streaming index builder: ops are buffered one register at a time and
+/// flushed to run-length encoders at each register boundary.
 pub(crate) struct IndexBuilder {
-    /// pending counter successor ids of the current group:
-    /// succ id -> [(absolute inc index, absolute op index)]
+    /// counter succ id -> [(absolute inc index, absolute op index)]
     counters: HashMap<OpId, Vec<(usize, usize)>>,
-    /// ops of the current (unflushed) register
+    /// the current, unflushed register
     group: Vec<GroupOp>,
-    /// inc-column entries of the current register (one per succ id)
     group_incs: Vec<Option<i64>>,
-    /// mark entries of the current register
     group_marks: Vec<Option<MarkIdx>>,
     text: RleEncoder<'static, Option<u32>>,
     top: BoolEncoder,
@@ -41,23 +32,16 @@ pub(crate) struct IndexBuilder {
     obj_info: ObjIndex,
     text_encoding: TextEncoding,
     mark_order: MarkOrderValidator,
-    /// See [`ElemBounds`]: set for a fragment that has boundary deps, the
-    /// only input whose sequence registers are not bounded by inserts
-    /// alone. Off for documents and for dep-free fragments.
     split_by_elem: bool,
-    /// objects the input creates itself. Their rows are all it has, so
-    /// their registers are insert-bounded whatever `split_by_elem` says —
-    /// and a `Make` always precedes its object in the walk, since an
-    /// object's id orders after the id of the op that made it
+    /// objects the input creates itself, whose registers are always
+    /// insert-bounded; a `Make` row always precedes its object's rows
     own_objs: rustc_hash::FxHashSet<ObjId>,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct GroupOp {
-    /// succ count (`u32::MAX` for increment ops), decremented when a
-    /// counter's increment is applied
+    /// see [`vis_succ`]; decremented as a counter's increments apply
     succ: u32,
-    /// text width — only read if this op is elected top
     width: u32,
 }
 
@@ -203,11 +187,8 @@ pub(crate) struct Indexes {
     pub(crate) obj_info: ObjIndex,
 }
 
-/// Object ranges derived by zipping the obj_actor / obj_ctr run streams,
-/// validating as it goes: ids must be fully null or fully set, and
-/// strictly increasing (which also guarantees each object's ops are
-/// contiguous). This replaces `column_validation`'s obj walk on the load
-/// path.
+/// Object ranges from the obj_actor / obj_ctr run streams. Errors if an id
+/// is half null or the ids are not strictly increasing.
 pub(crate) struct ObjRunWalk<A, C> {
     actor: A,
     ctr: C,
@@ -257,9 +238,7 @@ impl<A, C> ObjRunWalk<A, C> {
     }
 }
 
-/// Forward-only access to the columns the rare-op path needs — everything
-/// that is not carried by the index run stream itself. Built either from a
-/// loaded op set or from the phase-1 columns during a fused load.
+/// Forward-only access to the columns needed to materialize rare ops.
 pub(crate) struct RareOps<'a> {
     ids: OpIdIter<'a>,
     marks: super::MarkInfoIter<'a>,
@@ -328,45 +307,36 @@ impl IndexBuilder {
     }
 
     /// Bound sequence registers by element identity rather than by the
-    /// insert column alone — see [`ElemBounds`]. Only a fragment with
-    /// boundary deps needs it.
+    /// insert column alone. Needed for a fragment with deps.
     pub(crate) fn split_by_elem(&mut self) {
         self.split_by_elem = true;
     }
 
-    /// Seed the object-type index with entries from outside the columns
-    /// being processed. A fragment's ops can live in objects the
-    /// *document* created — without their types, sequence objects would
-    /// register-split like maps.
+    /// Seed the object-type index with objects from outside the columns
+    /// being processed.
     pub(crate) fn seed_obj_info(&mut self, info: &ObjIndex) {
         self.obj_info = info.clone();
     }
 
-    /// Number of ops already flushed to the encoders — the absolute index
-    /// of the current group's first op.
     fn ops_flushed(&self) -> usize {
         self.visible.len()
     }
 
-    /// Total ops processed so far (flushed and buffered).
+    /// Ops processed so far, flushed or buffered.
     pub(crate) fn ops_len(&self) -> usize {
         self.ops_flushed() + self.group.len()
     }
 
-    /// Number of inc entries already flushed — the absolute inc index of
-    /// the current group's first succ entry.
     fn incs_flushed(&self) -> usize {
         self.inc.len()
     }
 
-    /// Close the current register: elect its top op and stream the
-    /// buffered entries out to the encoders.
+    /// Close the current register.
     pub(crate) fn flush(&mut self) {
         if self.group.is_empty() {
             debug_assert!(self.group_incs.is_empty());
             return;
         }
-        // the top op is the last op of the register that is still visible
         match self.group.iter().rposition(|g| g.succ == 0) {
             Some(t) => {
                 self.top.append_n(false, t);
@@ -393,14 +363,10 @@ impl IndexBuilder {
         self.group.clear();
         self.group_incs.clear();
         self.group_marks.clear();
-        // successors live in the same register as their target: anything
-        // left is a delete (which has no op row) and can never match
+        // successors share their target's register, so leftovers can never match
         self.counters.clear();
     }
 
-    /// The shared per-op path: both the op-at-a-time reference builder
-    /// (the test-only `process_op`) and the rare path of the column walk
-    /// feed through here.
     #[allow(clippy::too_many_arguments)]
     fn process_op_parts(
         &mut self,
@@ -416,26 +382,8 @@ impl IndexBuilder {
             id,
             &mark_index,
         );
-        self.group_marks.push(match mark_index {
-            Some(MarkIndexBuilder::Start(mark_id, mark)) => {
-                self.mark_cache.insert(mark_id, mark);
-                Some(MarkIdx::Start(mark_id))
-            }
-            Some(MarkIndexBuilder::End(mark_id)) => Some(MarkIdx::End(mark_id)),
-            None => None,
-        });
-
-        let count = self.counters.remove(&id);
-
-        if let Some(i) = inc_value {
-            let incs_flushed = self.incs_flushed();
-            let ops_flushed = self.ops_flushed();
-            for (inc_idx, op_idx) in count.into_iter().flatten() {
-                // group-local: a counter and its increments share a register
-                self.group_incs[inc_idx - incs_flushed] = Some(i);
-                self.group[op_idx - ops_flushed].succ -= 1;
-            }
-        }
+        self.push_mark(mark_index);
+        self.apply_increment(id, inc_value);
 
         if let Some(obj_info) = obj_info {
             self.obj_info.insert(id, obj_info);
@@ -454,26 +402,8 @@ impl IndexBuilder {
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
-        self.group_marks.push(match mark_index {
-            Some(MarkIndexBuilder::Start(id, mark)) => {
-                self.mark_cache.insert(id, mark);
-                Some(MarkIdx::Start(id))
-            }
-            Some(MarkIndexBuilder::End(id)) => Some(MarkIdx::End(id)),
-            None => None,
-        });
-
-        let count = self.counters.remove(&op.id);
-
-        if let Some(i) = op.get_increment_value() {
-            let incs_flushed = self.incs_flushed();
-            let ops_flushed = self.ops_flushed();
-            for (inc_idx, op_idx) in count.into_iter().flatten() {
-                // group-local: a counter and its increments share a register
-                self.group_incs[inc_idx - incs_flushed] = Some(i);
-                self.group[op_idx - ops_flushed].succ -= 1;
-            }
-        }
+        self.push_mark(mark_index);
+        self.apply_increment(op.id, op.get_increment_value());
 
         if let Some(obj_info) = op.obj_info() {
             self.obj_info.insert(op.id, obj_info);
@@ -483,6 +413,30 @@ impl IndexBuilder {
             succ: vis_num(op),
             width: op.width(SequenceType::Text, self.text_encoding) as u32,
         });
+    }
+
+    fn push_mark(&mut self, mark_index: Option<MarkIndexBuilder>) {
+        self.group_marks.push(match mark_index {
+            Some(MarkIndexBuilder::Start(id, mark)) => {
+                self.mark_cache.insert(id, mark);
+                Some(MarkIdx::Start(id))
+            }
+            Some(MarkIndexBuilder::End(id)) => Some(MarkIdx::End(id)),
+            None => None,
+        });
+    }
+
+    fn apply_increment(&mut self, id: OpId, inc_value: Option<i64>) {
+        let count = self.counters.remove(&id);
+        if let Some(i) = inc_value {
+            let incs_flushed = self.incs_flushed();
+            let ops_flushed = self.ops_flushed();
+            for (inc_idx, op_idx) in count.into_iter().flatten() {
+                // a counter and its increments share a register
+                self.group_incs[inc_idx - incs_flushed] = Some(i);
+                self.group[op_idx - ops_flushed].succ -= 1;
+            }
+        }
     }
 
     pub(crate) fn process_succ(&mut self, op_is_counter: bool, id: OpId) {
@@ -505,10 +459,7 @@ impl IndexBuilder {
             || !self.counters.is_empty()
     }
 
-    /// Build the index from a loaded op set's columns — the equality
-    /// test's way of running [`Self::process_columns`] over in-memory
-    /// iterators to compare against the op-at-a-time reference builder.
-    /// Production always builds indexes during column load.
+    /// Build the index from a loaded op set's columns.
     pub(crate) fn process_op_set(&mut self, op_set: &OpSet) -> Result<(), ReadOpError> {
         let rare = RareOps::new(
             OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
@@ -516,7 +467,6 @@ impl IndexBuilder {
             OpIdIter::new(op_set.cols.succ_actor.iter(), op_set.cols.succ_ctr.iter()),
             op_set.cols.value.iter(),
         );
-        // the element split reads these; a document never opens them
         let elem = self.split_by_elem.then(|| ElemBounds {
             elems: super::op_iter::ElemIdIter::new(
                 op_set.cols.key_actor.iter(),
@@ -539,18 +489,8 @@ impl IndexBuilder {
         )
     }
 
-    /// Build the index by walking column run streams directly instead of
-    /// materializing every op.
-    ///
-    /// Per op this touches only the action, succ-count and value-meta
-    /// streams, advanced run-at-a-time. Register boundaries come from run
-    /// lengths: the key_str stream for maps (each run is one key's
-    /// register) and the insert stream for sequences (a register is one
-    /// `true` followed by zero or more `false`s). Uniform runs of
-    /// single-op registers stream straight to the encoders; everything
-    /// else goes through the same per-register buffer as the op-at-a-time
-    /// path. Rare ops (marks, object creation, increments, counters) are
-    /// materialized individually from the [`RareOps`] columns.
+    /// Build the index by walking column run streams. Only rare ops
+    /// (marks, object creation, increments, counters) are materialized.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_columns<'a, OA, OC, A, M, S, I, K>(
         &mut self,
@@ -582,15 +522,11 @@ impl IndexBuilder {
                 self.obj_info.object_type(&obj),
                 Some(ObjType::List) | Some(ObjType::Text)
             );
-            // an object this input created holds every op that ever
-            // touched it, so its registers are insert-bounded outright
             let split = self.split_by_elem && !self.own_objs.contains(&obj);
             bounds.start_obj(seq, obj_len, split)?;
 
             while let Some((group_len, repeat)) = bounds.next_batch()? {
                 if group_len == 1 && repeat > 1 {
-                    // a stretch of single-op registers: every op is its own
-                    // group, so uniform runs bypass the buffer entirely
                     let mut remaining = repeat;
                     while remaining > 0 {
                         let run = iter
@@ -627,10 +563,7 @@ impl IndexBuilder {
         Ok(())
     }
 
-    /// The text width of one op in a long-string run, from the raw value
-    /// bytes (mirrors `Op::as_str`: only `Set` string values render as
-    /// their text, everything else is an object replacement char; marks
-    /// are rare and never reach here).
+    /// The text width of the `i`th op of a non-mark run; mirrors `Op::width`.
     fn str_width(
         &mut self,
         run: &IndexRun,
@@ -649,8 +582,6 @@ impl IndexBuilder {
         })
     }
 
-    /// Stream a uniform run of single-op registers straight to the
-    /// encoders — no per-op work at all in the common case.
     fn stream_singletons(
         &mut self,
         run: &IndexRun,
@@ -679,7 +610,6 @@ impl IndexBuilder {
         Ok(())
     }
 
-    /// Append a uniform run to the current register's buffer.
     fn buffer_run(
         &mut self,
         run: &IndexRun,
@@ -715,10 +645,7 @@ impl IndexBuilder {
         Ok(())
     }
 
-    /// Materialize each op of a rare run from the [`RareOps`] columns and
-    /// feed it through the same per-op path the op-at-a-time builder uses.
-    /// With `singletons` each op is its own register and is flushed
-    /// immediately.
+    /// With `singletons`, each op is its own register.
     fn rare_run(
         &mut self,
         run: &IndexRun,
@@ -821,8 +748,6 @@ impl IndexBuilder {
 }
 
 impl Indexes {
-    /// Test-only drift guard: the column-walking builder must produce
-    /// exactly the same indexes as the op-at-a-time reference builder.
     #[cfg(test)]
     pub(crate) fn assert_same(&self, other: &Self) {
         assert_eq!(
@@ -838,36 +763,23 @@ impl Indexes {
     }
 }
 
-/// Element identity and op id at a row, for [`BoundaryIter`]'s
-/// fragment-only register split.
-///
-/// A register is a maximal run of rows sharing an element identity — an
-/// insert row's own id, any other row's key. In a *document* that is
-/// exactly what the insert column says, because every element's updates
-/// follow its own insert row. A fragment with boundary deps can break
-/// that: it can hold an update aimed at an element it does not contain,
-/// which arrives with no insert of its own and would otherwise be read as
-/// part of the register before it.
-///
-/// Both readers are forward-only and read only where the split is in
-/// doubt: one id per insert-to-update transition, and the element ids of
-/// the update rows themselves.
+/// Element identity and op id at a row, for splitting sequence registers
+/// in a fragment with deps: such a fragment can update an element it does
+/// not contain, which the insert column alone would attach to the
+/// register before it.
 pub(crate) struct ElemBounds<'a> {
     elems: super::op_iter::ElemIdIter<'a>,
     ids: OpIdIter<'a>,
-    /// row after the last one `ids` read — it is consulted at scattered
-    /// rows, so it seeks rather than streams
+    /// row after the last one `ids` read
     ids_pos: usize,
-    /// the span [`elem_run`](Self::elem_run) last measured. An insert
-    /// that turns out to be alone leaves its span for the next call,
-    /// which asks for it again
+    /// the span [`elem_run`](Self::elem_run) last measured, which the
+    /// next call may ask for again
     span: Option<(usize, Option<ElemId>, usize)>,
-    /// the row that ended the last span, read to find that it differed
+    /// the row that ended the last span
     peeked: Option<(usize, Option<ElemId>)>,
 }
 
 impl ElemBounds<'_> {
-    /// The op id at `pos`. Callers only ever move forward.
     fn id_at(&mut self, pos: usize) -> Result<OpId, ReadOpError> {
         let skip = pos
             .checked_sub(self.ids_pos)
@@ -909,18 +821,8 @@ impl ElemBounds<'_> {
 }
 
 /// Yields the register lengths of the current object: key_str runs for
-/// maps (each run is one key's register — the run streams are canonical,
-/// so adjacent runs never carry equal values), insert-run structure for
-/// sequences (a register is one `true` followed by zero or more
-/// `false`s).
-///
-/// The sources are consumed strictly sequentially, so runs that span an
-/// object boundary are clipped against the current object, and whichever
-/// stream an object does not consult (inserts for maps, keys for
-/// sequences) is drained lazily to stay position-aligned.
-///
-/// [`ElemBounds`], when present, refines the sequence case for the one
-/// input the insert column does not describe.
+/// maps (runs are canonical, so each is one key), insert-run structure for
+/// sequences, refined by [`ElemBounds`] when present.
 struct BoundaryIter<'a, I, K> {
     inserts: I,
     keys: K,
@@ -935,14 +837,12 @@ struct BoundaryIter<'a, I, K> {
     /// pending trues from the current insert run; all but the last are
     /// singleton registers, the last stays open for its trailing falses
     ones: usize,
-    /// rows pulled from the insert stream so far, absolute. The pending
-    /// `ones` sit at `abs - ones .. abs`
+    /// rows pulled from the insert stream so far
     abs: usize,
     elem: Option<ElemBounds<'a>>,
-    /// this object needs the element split (see [`ElemBounds`])
     split: bool,
-    /// non-insert rows of the current run still to be assigned to a
-    /// register, and where they start — split objects only
+    /// non-insert rows of the current run not yet assigned to a register
+    /// (split objects only)
     falses: usize,
     false_start: usize,
 }
@@ -982,8 +882,7 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
         Ok(())
     }
 
-    /// Pull the next insert run, clipped to the current object, after
-    /// draining anything owed by objects that didn't consult this stream.
+    /// The next insert run, clipped to the current object.
     fn next_insert_run<'a>(&mut self) -> Result<Option<(bool, usize)>, ReadOpError>
     where
         I: RunSrc<'a, bool>,
@@ -1022,8 +921,7 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
         Ok(Some((value, take)))
     }
 
-    /// Pull the next key run length, clipped to the current object, after
-    /// draining anything owed.
+    /// The next key run length, clipped to the current object.
     fn next_key_run<'a>(&mut self) -> Result<Option<usize>, ReadOpError>
     where
         K: RunSrc<'a, Option<String>>,
@@ -1061,9 +959,7 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
     }
 
     /// The next batch of registers as `(len, repeat)`: `repeat` consecutive
-    /// registers of `len` ops each. `repeat > 1` only for single-op
-    /// registers (a run of inserts), which is the batch the streaming fast
-    /// path feeds on.
+    /// registers of `len` ops each. `repeat > 1` only when `len == 1`.
     fn next_batch<'a>(&mut self) -> Result<Option<(usize, usize)>, ReadOpError>
     where
         I: RunSrc<'a, bool>,
@@ -1081,8 +977,6 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
         I: RunSrc<'a, bool>,
     {
         loop {
-            // more than one pending true: all but the last are singleton
-            // registers, the last stays open for its trailing falses
             if self.ones > 1 {
                 let repeat = self.ones - 1;
                 self.ones = 1;
@@ -1095,14 +989,11 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
                 Some((true, count)) => self.ones += count,
                 Some((false, count)) => {
                     if self.split {
-                        // the falses need not all belong to the insert
-                        // before them — hand them to `next_elem_span`
                         self.false_start = self.abs - count;
                         self.falses = count;
                         continue;
                     }
-                    // falses close the one pending true (if any); `ones`
-                    // is 0 only for a defensive headless run
+                    // `ones` is 0 only for a headless run
                     let result = self.ones + count;
                     self.ones = 0;
                     return Ok(Some((result, 1)));
@@ -1116,23 +1007,18 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
         }
     }
 
-    /// The next register out of the pending non-insert rows, for an
-    /// object needing the element split.
-    ///
-    /// Only the run's *first* span can continue the insert before it, and
-    /// only if it names that insert. Every later span names a different
-    /// element by construction, so it is a register of its own.
+    /// The next register out of the pending non-insert rows. Only the
+    /// run's first span can continue the insert before it, and only if it
+    /// names that insert.
     fn next_elem_span(&mut self) -> Result<(usize, usize), ReadOpError> {
         let start = self.false_start;
         let bounds = self.elem.as_mut().expect("split object without elem ids");
         let (elem, n) = bounds.elem_run(start, self.falses)?;
         if self.ones == 1 {
-            // `ones` marks the first span: the insert is still unassigned
             let ins = bounds.id_at(start - 1)?;
             self.ones = 0;
             if elem != Some(ElemId(ins)) {
-                // it names something else — the insert is alone, and this
-                // span opens its own register on the next call
+                // the insert is alone; this span is asked for again next call
                 return Ok((1, 1));
             }
             self.falses -= n;
@@ -1145,10 +1031,7 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
     }
 }
 
-/// The per-op streams consumed by [`IndexBuilder::process_columns`] —
-/// action, value *meta* and succ count — advanced run-at-a-time. The raw
-/// value bytes are never touched here: rare ops and long-string widths
-/// read them through [`RareOps`] at offsets derived from the meta stream.
+/// The action, value meta and succ count streams, advanced run-at-a-time.
 struct IndexIter<A, M, S> {
     action: A,
     meta: M,
@@ -1162,16 +1045,9 @@ struct IndexIter<A, M, S> {
     raw_prefix: u64,
 }
 
-/// The successor count a row's visibility is judged by — `u32::MAX`
-/// standing for "never visible, whatever its successors say".
-///
-/// An increment is not the register's value, it adjusts one. And a
-/// delete row exists only to carry a pred naming a *document* op: it
-/// holds no value, and the merge drops it rather than copying it in, so
-/// letting it take `top` would hand the bit to a row that is about to
-/// disappear. (This is also why a delete row cannot appear in an object
-/// the fragment created, or in a fragment with no deps — there is no
-/// document op for it to name.)
+/// The successor count a row's visibility is judged by; `u32::MAX` means
+/// never visible. A fragment's delete rows are dropped by the merge, so
+/// they must never take `top`.
 fn vis_succ(run: &IndexRun) -> u32 {
     match run.action {
         Action::Increment | Action::Delete => u32::MAX,
@@ -1276,12 +1152,12 @@ fn vis_num(op: &Op<'_>) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use crate::automerge::Automerge;
     use crate::op_set2::change::IndexedChangeCollector;
-    use crate::transaction::Transactable;
-    use crate::{Automerge, ObjType, ROOT};
+    use crate::tx::Transactable;
+    use crate::{ObjType, ROOT};
 
-    fn assert_builders_match(doc: &Automerge) {
-        // rebuild from a fresh load so neither builder sees existing indexes
+    fn assert_builders_match<H: crate::hash_retention::HashRetention>(doc: &Automerge<H>) {
         let bytes = doc.save();
         let reloaded = Automerge::load(&bytes).unwrap();
         let op_set = reloaded.ops();
@@ -1302,7 +1178,6 @@ mod tests {
     fn column_index_builder_matches_op_index_builder() {
         use crate::marks::{ExpandMark, Mark};
 
-        // text with marks, splices and deletes
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
@@ -1318,7 +1193,6 @@ mod tests {
         tx.commit();
         assert_builders_match(&doc);
 
-        // counters with increments, incl. deleted counters
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         tx.put(ROOT, "c", crate::ScalarValue::Counter(10.into()))
@@ -1331,7 +1205,6 @@ mod tests {
         tx.commit();
         assert_builders_match(&doc);
 
-        // map conflicts across actors + nested objects + list ops
         let mut doc1 = Automerge::new().with_actor("aaaaaa".try_into().unwrap());
         let mut tx = doc1.transaction();
         let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
@@ -1353,7 +1226,6 @@ mod tests {
         doc1.merge(&mut doc2).unwrap();
         assert_builders_match(&doc1);
 
-        // counter in a list with concurrent increments
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         let l = tx.put_object(ROOT, "l", ObjType::List).unwrap();

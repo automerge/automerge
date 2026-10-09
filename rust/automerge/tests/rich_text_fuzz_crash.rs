@@ -5,8 +5,7 @@ use automerge::{
     hydrate, hydrate_map, hydrate_text, ActorId, AutoCommit, Automerge, ObjType, ReadDoc,
     ScalarValue, ROOT,
 };
-use automerge_sync as sync;
-use automerge_sync::Sync;
+use automerge_sync::{self as sync, AutoCommitSync, SyncDoc};
 
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
     doc.set_actor(ActorId::from(actor.to_vec()));
@@ -27,7 +26,6 @@ fn splice_scalar_into_marked_text() {
     // Splice on a text object should either forward to splice_text for string
     // input or reject non-string input; it must not use list splice semantics.
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.update_text(&text, "abcd").unwrap();
@@ -48,7 +46,6 @@ fn splice_scalar_into_marked_text() {
 #[test]
 fn splice_string_into_marked_text() {
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
     doc.update_text(&text, "abcd").unwrap();
@@ -69,7 +66,6 @@ fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
     // change into a document containing a zero-width unmark on empty text used to panic
     // in BatchApply::apply when validating op order.
     let mut left = AutoCommit::new();
-    left.enable_audit_mode().unwrap();
     let text = left.put_object(ROOT, "text", ObjType::Text).unwrap();
     left.unmark(&text, "color", 0, 0, ExpandMark::After)
         .unwrap();
@@ -81,14 +77,18 @@ fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
 
     let mut left_state = sync::State::new();
     let mut right_state = sync::State::new();
-    let message = Sync::generate_sync_message(left.document(), &mut left_state)
-        .unwrap()
+    let message = left.sync().generate_sync_message(&mut left_state).unwrap();
+    right
+        .sync()
+        .receive_sync_message(&mut right_state, message)
         .unwrap();
-    Sync::receive_sync_message(right.document_mut(), &mut right_state, message).unwrap();
-    let message = Sync::generate_sync_message(right.document(), &mut right_state)
-        .unwrap()
+    let message = right
+        .sync()
+        .generate_sync_message(&mut right_state)
         .unwrap();
-    Sync::receive_sync_message(left.document_mut(), &mut left_state, message).unwrap();
+    left.sync()
+        .receive_sync_message(&mut left_state, message)
+        .unwrap();
 }
 
 #[test]
@@ -96,7 +96,6 @@ fn zero_width_mark_on_empty_text_from_fuzz_trace() {
     // Minimized from a fuzzing crash . This needs two committed changes: a zero-width unmark on an
     // empty text object, then a zero-width mark on the same text.
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
 
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
 
@@ -121,7 +120,6 @@ fn zero_width_mark_does_not_leak_to_later_text_object_from_fuzz_trace() {
     // zero-width expanding mark on one empty text object, then inserts into the middle of a
     // different text object.
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
 
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     commit_as(&mut doc, &[0]);
@@ -165,7 +163,6 @@ fn zero_width_mark_does_not_leak_to_later_text_object_from_fuzz_trace() {
 #[test]
 fn splice_text_at_length_over_conflicted_element_from_fuzz_trace() {
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "a").unwrap();
     commit_as(&mut doc, &[0]);
@@ -204,7 +201,6 @@ fn mark_within_single_multi_width_element_from_fuzz_trace() {
     // "mark end before begin". `TransactionInner::mark` now anchors the end after the
     // begin in that case, as the zero-width branch already did.
     let mut doc = AutoCommit::new();
-    doc.enable_audit_mode().unwrap();
     let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
     doc.insert(&text, 0, "hello world").unwrap();
     commit_as(&mut doc, &[0]);

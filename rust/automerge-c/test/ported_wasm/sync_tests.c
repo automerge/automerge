@@ -192,13 +192,13 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message_after_the_fi
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
                                 cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* for (let i = 0; i < 10; i++) {                                                                                 */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                                                                      */
         AMstackItem(NULL, AMlistPutUint(test_state->n1, list, i, true, i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /* n2.applyChanges(n1.getChanges([]))                                                                             */
@@ -215,11 +215,11 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message_after_the_fi
     assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
                                                 cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
                                     &m1));
-    /* assert.deepStrictEqual(s1.lastSentHeads, n1.getHeadHashes())                                                   */
+    /* assert.deepStrictEqual(s1.lastSentHeads, n1.getHeads())                                                        */
     AMitems const last_sent_heads =
         AMstackItems(stack_ptr, AMsyncStateLastSentHeads(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     AMitems const heads =
-        AMstackItems(stack_ptr, AMgetHeadHashes(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&last_sent_heads, &heads));
     /*
        // process the first response (which is always generated so we know the other ends heads)
@@ -255,13 +255,13 @@ static void test_n1_should_offer_all_changes_to_n2_when_starting_from_nothing(vo
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
                                 cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* for (let i = 0; i < 10; i++) {                                                                                 */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                                                                      */
         AMstackItem(NULL, AMlistPutUint(test_state->n1, list, i, true, i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -287,13 +287,13 @@ static void test_should_sync_peers_where_one_has_commits_the_other_does_not(void
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
                                 cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* for (let i = 0; i < 10; i++) {                                                                                 */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                                                                      */
         AMstackItem(NULL, AMlistPutUint(test_state->n1, list, i, true, i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -320,7 +320,7 @@ static void test_should_work_with_prior_sync_state(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -334,7 +334,7 @@ static void test_should_work_with_prior_sync_state(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -372,7 +372,7 @@ static void test_should_not_generate_messages_once_synced(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /* for (let i = 0; i < 5; i++) {                                                                                  */
@@ -380,7 +380,7 @@ static void test_should_not_generate_messages_once_synced(void** state) {
         /* n2.put("_root", "y", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n2, AM_ROOT, AMstr("y"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n2.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -465,7 +465,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /* for (let i = 0; i < 5; i++) {                                                                                  */
@@ -473,17 +473,15 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
         /* n2.put("_root", "y", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n2, AM_ROOT, AMstr("y"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n2.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
        const head1 = n1.getHeads()[0], head2 = n2.getHeads()[0]                                                       */
-    AMitems heads1 =
-        AMstackItems(stack_ptr, AMgetHeadHashes(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     AMbyteSpan head1;
     assert_true(AMitemToChangeHash(AMitemsNext(&heads1, 1), &head1));
-    AMitems heads2 =
-        AMstackItems(stack_ptr, AMgetHeadHashes(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     AMbyteSpan head2;
     assert_true(AMitemToChangeHash(AMitemsNext(&heads2, 1), &head2));
     /*
@@ -670,7 +668,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("items"), AM_OBJ_TYPE_LIST),
                                 cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        sync(n1, n2, s1, s2)                                                                                           */
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);
@@ -679,7 +677,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     AMstackItem(NULL, AMlistPutStr(test_state->n1, items, SIZE_MAX, true, AMstr("x")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* message = n1.generateSyncMessage(s1)
       if (message === null) { throw new RangeError("message should not be null") }                                    */
     AMsyncMessage const* message;
@@ -692,7 +690,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     AMstackItem(NULL, AMlistPutStr(test_state->n1, items, SIZE_MAX, true, AMstr("y")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be null") }                                   */
     assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
@@ -704,7 +702,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     AMstackItem(NULL, AMlistPutStr(test_state->n1, items, SIZE_MAX, true, AMstr("z")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     /* n1.commit("", 0)                                                                                               */
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be null") }                                   */
@@ -729,7 +727,7 @@ static void test_should_work_regardless_of_who_initiates_the_exchange(void** sta
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -742,7 +740,7 @@ static void test_should_work_regardless_of_who_initiates_the_exchange(void** sta
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -774,7 +772,7 @@ static void test_should_work_without_prior_sync_state(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -786,7 +784,7 @@ static void test_should_work_without_prior_sync_state(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -795,7 +793,7 @@ static void test_should_work_without_prior_sync_state(void** state) {
         /* n2.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n2, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n2.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -804,8 +802,8 @@ static void test_should_work_without_prior_sync_state(void** state) {
     /* sync(n1, n2)                                                                                                   */
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);
     /* assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));
@@ -831,7 +829,7 @@ static void test_should_work_with_prior_sync_state_2(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -843,7 +841,7 @@ static void test_should_work_with_prior_sync_state_2(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /* for (let i = 15; i < 18; i++) {                                                                                */
@@ -851,7 +849,7 @@ static void test_should_work_with_prior_sync_state_2(void** state) {
         /* n2.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n2, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n2.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -876,8 +874,8 @@ static void test_should_work_with_prior_sync_state_2(void** state) {
     /* sync(n1, n2, s1, s2)                                                                                           */
     sync(test_state->n1, test_state->n2, s1, s2);
     /* assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));
@@ -897,16 +895,15 @@ static void test_should_ensure_non_empty_state_after_sync(void** state) {
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
        sync(n1, n2, s1, s2)                                                                                           */
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);
     /*
-       assert.deepStrictEqual(s1.sharedHeads, n1.getHeadHashes())                                                     */
-    AMitems heads1 =
-        AMstackItems(stack_ptr, AMgetHeadHashes(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+       assert.deepStrictEqual(s1.sharedHeads, n1.getHeads())                                                          */
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     AMitems shared_heads1 =
         AMstackItems(stack_ptr, AMsyncStateSharedHeads(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&shared_heads1, &heads1));
@@ -936,7 +933,7 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -964,7 +961,7 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -973,8 +970,8 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
     /*
        // everyone should be on the same page here
        assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));
@@ -985,7 +982,7 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -1007,8 +1004,8 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
                                   &sync_state_r));
     /*
        assert.notDeepStrictEqual(n1.getHeads(), r.getHeads())                                                         */
-    heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads_r = AMstackItems(stack_ptr, AMgetHeads(r), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads_r = AMstackItems(stack_ptr, AMgetHeads(r), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_false(AMitemsEqual(&heads1, &heads_r));
     /* assert.notDeepStrictEqual(n1.materialize(), r.materialize())                                                   */
     assert_false(AMequal(test_state->n1, r));
@@ -1025,8 +1022,8 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
     /* sync(n1, r, s1, rSyncState)                                                                                    */
     sync(test_state->n1, r, test_state->s1, sync_state_r);
     /* assert.deepStrictEqual(n1.getHeads(), r.getHeads())                                                            */
-    heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    heads_r = AMstackItems(stack_ptr, AMgetHeads(r), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    heads_r = AMstackItems(stack_ptr, AMgetHeads(r), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads_r));
     /* assert.deepStrictEqual(n1.materialize(), r.materialize())                                                      */
     assert_true(AMequal(test_state->n1, r));
@@ -1049,7 +1046,7 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
         /* n1.put("_root", "x", i)                                                                                    */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         /* n1.commit("", 0)                                                                                           */
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* }                                                                                                          */
     }
     /*
@@ -1057,8 +1054,8 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);
     /*
        assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));
@@ -1080,8 +1077,8 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
         AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)), &s2_after_data_loss));
     sync(test_state->n1, n2_after_data_loss, test_state->s1, s2_after_data_loss);
     /* assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));
@@ -1114,7 +1111,7 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void**
        //n1 = Automerge.change(n1, {time: 0}, doc => doc.x = 1)
        n1.put("_root", "x", 1); n1.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 1), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        sync(n1, n2, s12, s21)                                                                                         */
     sync(test_state->n1, test_state->n2, s12, s21);
@@ -1124,7 +1121,7 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void**
        // Change 2 is known to n1 and n2
        n1.put("_root", "x", 2); n1.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 2), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        sync(n1, n2, s12, s21)                                                                                         */
     sync(test_state->n1, test_state->n2, s12, s21);
@@ -1132,13 +1129,13 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void**
        // Each of the three nodes makes one change (changes 3, 4, 5)
        n1.put("_root", "x", 3); n1.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 3), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* n2.put("_root", "x", 4); n2.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(test_state->n2, AM_ROOT, AMstr("x"), 4), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* n3.put("_root", "x", 5); n3.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(n3, AM_ROOT, AMstr("x"), 5), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(n3, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(n3, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        // Apply n3's latest change to n2. If running in Node, turn the Uint8Array into a Buffer, to
        // simulate transmission over a network (see https://github.com/automerge/automerge/pull/362)
@@ -1155,8 +1152,8 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void**
        sync(n1, n2, s12, s21)                                                                                         */
     sync(test_state->n1, test_state->n2, s12, s21);
     /* assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));
@@ -1177,7 +1174,7 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &n3));
     /* n1.put("_root", "x", 0); n1.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* const change1 = n1.getLastLocalChange()
        if (change1 === null) throw new RangeError("no local change")                                                  */
     AMitems change1 =
@@ -1192,7 +1189,7 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     AMstackItem(NULL, AMapplyChanges(n3, &change2), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* n3.put("_root", "x", 1); n3.commit("", 0)                                                                      */
     AMstackItem(NULL, AMmapPutUint(n3, AM_ROOT, AMstr("x"), 1), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(n3, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(n3, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        //        - n1c1 <------ n1c2 <------ n1c3 <-- etc. <-- n1c20 <------ n1c21
        //       /          \/           \/                              \/
@@ -1204,10 +1201,10 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     for (size_t i = 1; i != 20; ++i) {
         /* n1.put("_root", "n1", i); n1.commit("", 0)                                                                 */
         AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("n1"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* n2.put("_root", "n2", i); n2.commit("", 0)                                                                 */
         AMstackItem(NULL, AMmapPutUint(test_state->n2, AM_ROOT, AMstr("n2"), i), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+        AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         /* const change1 = n1.getLastLocalChange()
            if (change1 === null) throw new RangeError("no local change")                                              */
         AMitems change1 =
@@ -1236,17 +1233,17 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     /* n1.put("_root", "n1", "final"); n1.commit("", 0)                                                               */
     AMstackItem(NULL, AMmapPutStr(test_state->n1, AM_ROOT, AMstr("n1"), AMstr("final")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* n2.put("_root", "n2", "final"); n2.commit("", 0)                                                               */
     AMstackItem(NULL, AMmapPutStr(test_state->n2, AM_ROOT, AMstr("n2"), AMstr("final")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMstackItem(NULL, AMcommit(test_state->n2, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*
        sync(n1, n2, s1, s2)                                                                                           */
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);
     /* assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                                                           */
-    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
-    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_ID));
+    AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+    AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_true(AMitemsEqual(&heads1, &heads2));
     /* assert.deepStrictEqual(n1.materialize(), n2.materialize())                                                     */
     assert_true(AMequal(test_state->n1, test_state->n2));

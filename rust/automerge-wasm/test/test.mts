@@ -1,5 +1,7 @@
 import { describe, it } from "mocha";
 import assert from "assert";
+// @ts-ignore
+import { BloomFilter } from "./helpers/sync.mjs";
 import {
   create,
   load,
@@ -423,15 +425,15 @@ describe("Automerge", () => {
       const doc2 = create({ actor: "bbbb" });
       doc1.put("/", "a", "b");
       doc2.put("/", "b", "c");
-      const hash1 = doc1.changeIdToHash(doc1.getHeads()[0])!;
-      const hash2 = doc2.changeIdToHash(doc2.getHeads()[0])!;
-      const change1 = doc1.getChangeByHash(hash1);
-      const change2 = doc1.getChangeByHash(hash2);
+      const head1 = doc1.getHeads();
+      const head2 = doc2.getHeads();
+      const change1 = doc1.getChangeByHash(head1[0]);
+      const change2 = doc1.getChangeByHash(head2[0]);
       assert.deepEqual(change2, null);
       if (change1 === null) {
         throw new RangeError("change1 should not be null");
       }
-      assert.deepEqual(decodeChange(change1).hash, hash1);
+      assert.deepEqual(decodeChange(change1).hash, head1[0]);
     });
 
     it("recursive sets are possible", () => {
@@ -1191,20 +1193,8 @@ describe("Automerge", () => {
   });
 
   describe("sync", () => {
-    // sync requires audit mode: every doc in these tests opts in
-    const createAudit = ((...args: Parameters<typeof create>) => {
-      const doc = create(...args);
-      doc.enableAuditMode();
-      return doc;
-    }) as typeof create;
-    const loadAudit = ((...args: Parameters<typeof load>) => {
-      const doc = load(...args);
-      doc.enableAuditMode();
-      return doc;
-    }) as typeof load;
-
     it("should send a sync message implying no local data", () => {
-      const doc = createAudit();
+      const doc = create();
       const s1 = initSyncState();
       const m1 = doc.generateSyncMessage(s1);
       if (m1 === null) {
@@ -1220,8 +1210,8 @@ describe("Automerge", () => {
     });
 
     it("should not reply if we have no data as well after the first round", () => {
-      const n1 = createAudit(),
-        n2 = createAudit();
+      const n1 = create(),
+        n2 = create();
       const s1 = initSyncState(),
         s2 = initSyncState();
       let m1 = n1.generateSyncMessage(s1);
@@ -1244,8 +1234,8 @@ describe("Automerge", () => {
     });
 
     it("repos with equal heads do not need a reply message after the first round", () => {
-      const n1 = createAudit(),
-        n2 = createAudit();
+      const n1 = create(),
+        n2 = create();
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1264,7 +1254,7 @@ describe("Automerge", () => {
       if (m1 === null) {
         throw new RangeError("message should not be null");
       }
-      assert.deepStrictEqual(s1.lastSentHeads, n1.getHeadHashes());
+      assert.deepStrictEqual(s1.lastSentHeads, n1.getHeads());
 
       // process the first response (which is always generated so we know the other ends heads)
       n2.receiveSyncMessage(s2, m1);
@@ -1277,8 +1267,8 @@ describe("Automerge", () => {
     });
 
     it("n1 should offer all changes to n2 when starting from nothing", () => {
-      const n1 = createAudit(),
-        n2 = createAudit();
+      const n1 = create(),
+        n2 = create();
 
       // make changes for n1 that n2 should request
       const list = n1.putObject("_root", "n", []);
@@ -1294,8 +1284,8 @@ describe("Automerge", () => {
     });
 
     it("should sync peers where one has commits the other does not", () => {
-      const n1 = createAudit(),
-        n2 = createAudit();
+      const n1 = create(),
+        n2 = create();
 
       // make changes for n1 that n2 should request
       const list = n1.putObject("_root", "n", []);
@@ -1312,8 +1302,8 @@ describe("Automerge", () => {
 
     it("should work with prior sync state", () => {
       // create & synchronize two nodes
-      const n1 = createAudit(),
-        n2 = createAudit();
+      const n1 = create(),
+        n2 = create();
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1337,8 +1327,8 @@ describe("Automerge", () => {
 
     it("should not generate messages once synced", () => {
       // create & synchronize two nodes
-      const n1 = createAudit({ actor: "abc123" }),
-        n2 = createAudit({ actor: "def456" });
+      const n1 = create({ actor: "abc123" }),
+        n2 = create({ actor: "def456" });
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1395,8 +1385,8 @@ describe("Automerge", () => {
 
     it("should allow simultaneous messages during synchronization", () => {
       // create & synchronize two nodes
-      const n1 = createAudit({ actor: "abc123" }),
-        n2 = createAudit({ actor: "def456" });
+      const n1 = create({ actor: "abc123" }),
+        n2 = create({ actor: "def456" });
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1409,8 +1399,8 @@ describe("Automerge", () => {
         n2.commit("", 0);
       }
 
-      const head1 = n1.getHeadHashes()[0],
-        head2 = n2.getHeadHashes()[0];
+      const head1 = n1.getHeads()[0],
+        head2 = n2.getHeads()[0];
 
       // both sides report what they have but have no shared peer state
       let msg1to2, msg2to1;
@@ -1500,8 +1490,8 @@ describe("Automerge", () => {
     });
 
     it("should assume sent changes were received until we hear otherwise", () => {
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
       const s1 = initSyncState(),
         s2 = initSyncState();
       let message = null;
@@ -1539,8 +1529,8 @@ describe("Automerge", () => {
 
     it("should work regardless of who initiates the exchange", () => {
       // create & synchronize two nodes
-      const n1 = createAudit(),
-        n2 = createAudit();
+      const n1 = create(),
+        n2 = create();
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1569,8 +1559,8 @@ describe("Automerge", () => {
       // lastSync is undefined.
 
       // create two peers both with divergent commits
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
       //const s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 10; i++) {
@@ -1592,7 +1582,7 @@ describe("Automerge", () => {
 
       assert.notDeepStrictEqual(n1.materialize(), n2.materialize());
       sync(n1, n2);
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
     });
 
@@ -1603,8 +1593,8 @@ describe("Automerge", () => {
       // lastSync is c9.
 
       // create two peers both with divergent commits
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
       let s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1629,13 +1619,13 @@ describe("Automerge", () => {
 
       assert.notDeepStrictEqual(n1.materialize(), n2.materialize());
       sync(n1, n2, s1, s2);
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
     });
 
     it("should ensure non-empty state after sync", () => {
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1646,8 +1636,8 @@ describe("Automerge", () => {
 
       sync(n1, n2, s1, s2);
 
-      assert.deepStrictEqual(s1.sharedHeads, n1.getHeadHashes());
-      assert.deepStrictEqual(s2.sharedHeads, n1.getHeadHashes());
+      assert.deepStrictEqual(s1.sharedHeads, n1.getHeads());
+      assert.deepStrictEqual(s2.sharedHeads, n1.getHeads());
     });
 
     it("should re-sync after one node crashed with data loss", () => {
@@ -1655,8 +1645,8 @@ describe("Automerge", () => {
       // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8
       // n2 has changes {c0, c1, c2}, n1's lastSync is c5, and n2's lastSync is c2.
       // we want to successfully sync (n1) with (r), even though (n1) believes it's talking to (n2)
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
       let s1 = initSyncState();
       const s2 = initSyncState();
 
@@ -1682,7 +1672,7 @@ describe("Automerge", () => {
       sync(n1, n2, s1, s2);
 
       // everyone should be on the same page here
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
 
       // now make a few more changes and then attempt to sync the fully-up-to-date n1 with the confused r
@@ -1694,19 +1684,19 @@ describe("Automerge", () => {
       s1 = decodeSyncState(encodeSyncState(s1));
       rSyncState = decodeSyncState(encodeSyncState(rSyncState));
 
-      assert.notDeepStrictEqual(n1.getHeadHashes(), r.getHeadHashes());
+      assert.notDeepStrictEqual(n1.getHeads(), r.getHeads());
       assert.notDeepStrictEqual(n1.materialize(), r.materialize());
       assert.deepStrictEqual(n1.materialize(), { x: 8 });
       assert.deepStrictEqual(r.materialize(), { x: 2 });
       sync(n1, r, s1, rSyncState);
-      assert.deepStrictEqual(n1.getHeadHashes(), r.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), r.getHeads());
       assert.deepStrictEqual(n1.materialize(), r.materialize());
       r = null;
     });
 
     it("should re-sync after one node experiences data loss without disconnecting", () => {
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
       const s1 = initSyncState(),
         s2 = initSyncState();
 
@@ -1718,22 +1708,22 @@ describe("Automerge", () => {
 
       sync(n1, n2, s1, s2);
 
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
 
-      const n2AfterDataLoss = createAudit({ actor: "89abcdef" });
+      const n2AfterDataLoss = create({ actor: "89abcdef" });
 
       // "n2" now has no data, but n1 still thinks it does. Note we don't do
       // decodeSyncState(encodeSyncState(s1)) in order to simulate data loss without disconnecting
       sync(n1, n2AfterDataLoss, s1, initSyncState());
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
     });
 
     it("should handle changes concurrent to the last sync heads", () => {
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" }),
-        n3 = createAudit({ actor: "fedcba98" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" }),
+        n3 = create({ actor: "fedcba98" });
       const s12 = initSyncState(),
         s21 = initSyncState(),
         s23 = initSyncState(),
@@ -1774,14 +1764,14 @@ describe("Automerge", () => {
 
       // Now sync n1 and n2. n3's change is concurrent to n1 and n2's last sync heads
       sync(n1, n2, s12, s21);
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
     });
 
     it("should handle histories with lots of branching and merging", () => {
-      const n1 = createAudit({ actor: "01234567" }),
-        n2 = createAudit({ actor: "89abcdef" }),
-        n3 = createAudit({ actor: "fedcba98" });
+      const n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" }),
+        n3 = create({ actor: "fedcba98" });
       n1.put("_root", "x", 0);
       n1.commit("", 0);
       const change1 = n1.getLastLocalChange();
@@ -1826,14 +1816,463 @@ describe("Automerge", () => {
       n2.commit("", 0);
 
       sync(n1, n2, s1, s2);
-      assert.deepStrictEqual(n1.getHeadHashes(), n2.getHeadHashes());
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
       assert.deepStrictEqual(n1.materialize(), n2.materialize());
     });
 
+    it("should handle a false-positive head", () => {
+      // Scenario:                                                            ,-- n1
+      // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8 <-- c9 <-+
+      //                                                                      `-- n2
+      // where n2 is a false positive in the Bloom filter containing {n1}.
+      // lastSync is c9.
+      let n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
+      let s1 = initSyncState(),
+        s2 = initSyncState();
+
+      for (let i = 0; i < 10; i++) {
+        n1.put("_root", "x", i);
+        n1.commit("", 0);
+      }
+
+      sync(n1, n2, s1, s2);
+      for (let i = 1; ; i++) {
+        // search for false positive; see comment above
+        const n1up = n1.clone("01234567");
+        n1up.put("_root", "x", `${i} @ n1`);
+        n1up.commit("", 0);
+
+        const n2up = n2.clone("89abcdef");
+        n2up.put("_root", "x", `${i} @ n2`);
+        n2up.commit("", 0);
+        const falsePositive = new BloomFilter(n1up.getHeads()).containsHash(
+          n2up.getHeads()[0],
+        );
+        if (falsePositive) {
+          n1 = n1up;
+          n2 = n2up;
+          break;
+        }
+      }
+      const allHeads = [...n1.getHeads(), ...n2.getHeads()].sort();
+      s1 = decodeSyncState(encodeSyncState(s1));
+      s2 = decodeSyncState(encodeSyncState(s2));
+      sync(n1, n2, s1, s2);
+      assert.deepStrictEqual(n1.getHeads(), allHeads);
+      assert.deepStrictEqual(n2.getHeads(), allHeads);
+    });
+
+    describe("with a false-positive dependency", () => {
+      let n1: Automerge,
+        n2: Automerge,
+        s1: SyncState,
+        s2: SyncState,
+        n1hash2: Hash,
+        n2hash2: Hash;
+
+      beforeEach(() => {
+        // Scenario:                                                            ,-- n1c1 <-- n1c2
+        // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8 <-- c9 <-+
+        //                                                                      `-- n2c1 <-- n2c2
+        // where n2c1 is a false positive in the Bloom filter containing {n1c1, n1c2}.
+        // lastSync is c9.
+        n1 = create({ actor: "01234567" });
+        n2 = create({ actor: "89abcdef" });
+        s1 = initSyncState();
+        s2 = initSyncState();
+        for (let i = 0; i < 10; i++) {
+          n1.put("_root", "x", i);
+          n1.commit("", 0);
+        }
+        sync(n1, n2, s1, s2);
+
+        let n1hash1, n2hash1;
+        for (let i = 29; ; i++) {
+          // search for false positive; see comment above
+          const n1us1 = n1.clone("01234567");
+          n1us1.put("_root", "x", `${i} @ n1`);
+          n1us1.commit("", 0);
+
+          const n2us1 = n2.clone("89abcdef");
+          n2us1.put("_root", "x", `${i} @ n1`);
+          n2us1.commit("", 0);
+
+          n1hash1 = n1us1.getHeads()[0];
+          n2hash1 = n2us1.getHeads()[0];
+
+          const n1us2 = n1us1.clone();
+          n1us2.put("_root", "x", `final @ n1`);
+          n1us2.commit("", 0);
+
+          const n2us2 = n2us1.clone();
+          n2us2.put("_root", "x", `final @ n2`);
+          n2us2.commit("", 0);
+
+          n1hash2 = n1us2.getHeads()[0];
+          n2hash2 = n2us2.getHeads()[0];
+          if (new BloomFilter([n1hash1, n1hash2]).containsHash(n2hash1)) {
+            n1 = n1us2;
+            n2 = n2us2;
+            break;
+          }
+        }
+      });
+
+      it("should sync two nodes without connection reset", () => {
+        sync(n1, n2, s1, s2);
+        assert.deepStrictEqual(n1.getHeads(), [n1hash2, n2hash2].sort());
+        assert.deepStrictEqual(n2.getHeads(), [n1hash2, n2hash2].sort());
+      });
+
+      it("should sync two nodes with connection reset", () => {
+        s1 = decodeSyncState(encodeSyncState(s1));
+        s2 = decodeSyncState(encodeSyncState(s2));
+        sync(n1, n2, s1, s2);
+        assert.deepStrictEqual(n1.getHeads(), [n1hash2, n2hash2].sort());
+        assert.deepStrictEqual(n2.getHeads(), [n1hash2, n2hash2].sort());
+      });
+
+      it("should sync three nodes", () => {
+        s1 = decodeSyncState(encodeSyncState(s1));
+        s2 = decodeSyncState(encodeSyncState(s2));
+
+        // First n1 and n2 exchange Bloom filters
+        let m1, m2;
+        m1 = n1.generateSyncMessage(s1);
+        m2 = n2.generateSyncMessage(s2);
+        if (m1 === null) {
+          throw new RangeError("message should not be null");
+        }
+        if (m2 === null) {
+          throw new RangeError("message should not be null");
+        }
+        n1.receiveSyncMessage(s1, m2);
+        n2.receiveSyncMessage(s2, m1);
+
+        // Then n1 and n2 send each other their changes, except for the false positive
+        m1 = n1.generateSyncMessage(s1);
+        m2 = n2.generateSyncMessage(s2);
+        if (m1 === null) {
+          throw new RangeError("message should not be null");
+        }
+        if (m2 === null) {
+          throw new RangeError("message should not be null");
+        }
+        n1.receiveSyncMessage(s1, m2);
+        n2.receiveSyncMessage(s2, m1);
+        assert(decodeSyncMessage(m1).changes.length > 0); // n1c1 and n1c2
+        assert(decodeSyncMessage(m2).changes.length > 0); // only n2c2; change n2c1 is not sent
+
+        // n3 is a node that doesn't have the missing change. Nevertheless n1 is going to ask n3 for it
+        const n3 = create({ actor: "fedcba98" }),
+          s13 = initSyncState(),
+          s31 = initSyncState();
+        sync(n1, n3, s13, s31);
+        assert.deepStrictEqual(n1.getHeads(), [n1hash2]);
+        assert.deepStrictEqual(n3.getHeads(), [n1hash2]);
+      });
+    });
+
+    it("should not require an additional request when a false-positive depends on a true-negative", () => {
+      // Scenario:                         ,-- n1c1 <-- n1c2 <-- n1c3
+      // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-+
+      //                                   `-- n2c1 <-- n2c2 <-- n2c3
+      // where n2c2 is a false positive in the Bloom filter containing {n1c1, n1c2, n1c3}.
+      // lastSync is c4.
+      let n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
+      let s1 = initSyncState(),
+        s2 = initSyncState();
+      let n1hash3, n2hash3;
+
+      for (let i = 0; i < 5; i++) {
+        n1.put("_root", "x", i);
+        n1.commit("", 0);
+      }
+      sync(n1, n2, s1, s2);
+      for (let i = 86; ; i++) {
+        // search for false positive; see comment above
+        const n1us1 = n1.clone("01234567");
+        n1us1.put("_root", "x", `${i} @ n1`);
+        n1us1.commit("", 0);
+
+        const n2us1 = n2.clone("89abcdef");
+        n2us1.put("_root", "x", `${i} @ n2`);
+        n2us1.commit("", 0);
+
+        //const n1us1 = Automerge.change(Automerge.clone(n1, {actorId: '01234567'}), {time: 0}, doc => doc.x = `${i} @ n1`)
+        //const n2us1 = Automerge.change(Automerge.clone(n2, {actorId: '89abcdef'}), {time: 0}, doc => doc.x = `${i} @ n2`)
+        const n1hash1 = n1us1.getHeads()[0];
+
+        const n1us2 = n1us1.clone();
+        n1us2.put("_root", "x", `${i + 1} @ n1`);
+        n1us2.commit("", 0);
+
+        const n2us2 = n2us1.clone();
+        n2us2.put("_root", "x", `${i + 1} @ n2`);
+        n2us2.commit("", 0);
+
+        const n1hash2 = n1us2.getHeads()[0],
+          n2hash2 = n2us2.getHeads()[0];
+
+        const n1us3 = n1us2.clone();
+        n1us3.put("_root", "x", `final @ n1`);
+        n1us3.commit("", 0);
+
+        const n2us3 = n2us2.clone();
+        n2us3.put("_root", "x", `final @ n2`);
+        n2us3.commit("", 0);
+
+        n1hash3 = n1us3.getHeads()[0];
+        n2hash3 = n2us3.getHeads()[0];
+
+        if (
+          new BloomFilter([n1hash1, n1hash2, n1hash3]).containsHash(n2hash2)
+        ) {
+          n1 = n1us3;
+          n2 = n2us3;
+          break;
+        }
+      }
+      const bothHeads = [n1hash3, n2hash3].sort();
+      s1 = decodeSyncState(encodeSyncState(s1));
+      s2 = decodeSyncState(encodeSyncState(s2));
+      sync(n1, n2, s1, s2);
+      assert.deepStrictEqual(n1.getHeads(), bothHeads);
+      assert.deepStrictEqual(n2.getHeads(), bothHeads);
+    });
+
+    it("should handle chains of false-positives", () => {
+      // Scenario:                         ,-- c5
+      // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-+
+      //                                   `-- n2c1 <-- n2c2 <-- n2c3
+      // where n2c1 and n2c2 are both false positives in the Bloom filter containing {c5}.
+      // lastSync is c4.
+      const n1 = create({ actor: "01234567" });
+      let n2 = create({ actor: "89abcdef" });
+      let s1 = initSyncState(),
+        s2 = initSyncState();
+
+      for (let i = 0; i < 5; i++) {
+        n1.put("_root", "x", i);
+        n1.commit("", 0);
+      }
+
+      sync(n1, n2, s1, s2);
+
+      n1.put("_root", "x", 5);
+      n1.commit("", 0);
+
+      for (let i = 2; ; i++) {
+        // search for false positive; see comment above
+        const n2us1 = n2.clone("89abcdef");
+        n2us1.put("_root", "x", `${i} @ n2`);
+        n2us1.commit("", 0);
+        if (new BloomFilter(n1.getHeads()).containsHash(n2us1.getHeads()[0])) {
+          n2 = n2us1;
+          break;
+        }
+      }
+      for (let i = 141; ; i++) {
+        // search for false positive; see comment above
+        const n2us2 = n2.clone("89abcdef");
+        n2us2.put("_root", "x", `${i} again`);
+        n2us2.commit("", 0);
+        if (new BloomFilter(n1.getHeads()).containsHash(n2us2.getHeads()[0])) {
+          n2 = n2us2;
+          break;
+        }
+      }
+      n2.put("_root", "x", `final @ n2`);
+      n2.commit("", 0);
+
+      const allHeads = [...n1.getHeads(), ...n2.getHeads()].sort();
+      s1 = decodeSyncState(encodeSyncState(s1));
+      s2 = decodeSyncState(encodeSyncState(s2));
+      sync(n1, n2, s1, s2);
+      assert.deepStrictEqual(n1.getHeads(), allHeads);
+      assert.deepStrictEqual(n2.getHeads(), allHeads);
+    });
+
+    it("should allow the false-positive hash to be explicitly requested", () => {
+      // Scenario:                                                            ,-- n1
+      // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8 <-- c9 <-+
+      //                                                                      `-- n2
+      // where n2 causes a false positive in the Bloom filter containing {n1}.
+      let n1 = create({ actor: "01234567" }),
+        n2 = create({ actor: "89abcdef" });
+      let s1 = initSyncState(),
+        s2 = initSyncState();
+      let message;
+
+      for (let i = 0; i < 10; i++) {
+        n1.put("_root", "x", i);
+        n1.commit("", 0);
+      }
+
+      sync(n1, n2, s1, s2);
+
+      s1 = decodeSyncState(encodeSyncState(s1));
+      s2 = decodeSyncState(encodeSyncState(s2));
+
+      for (let i = 1; ; i++) {
+        // brute-force search for false positive; see comment above
+        const n1up = n1.clone("01234567");
+        n1up.put("_root", "x", `${i} @ n1`);
+        n1up.commit("", 0);
+        const n2up = n1.clone("89abcdef");
+        n2up.put("_root", "x", `${i} @ n2`);
+        n2up.commit("", 0);
+
+        // check if the bloom filter on n2 will believe n1 already has a particular hash
+        // this will mean n2 won't offer that data to n2 by receiving a sync message from n1
+        if (new BloomFilter(n1up.getHeads()).containsHash(n2up.getHeads()[0])) {
+          n1 = n1up;
+          n2 = n2up;
+          break;
+        }
+      }
+
+      // n1 creates a sync message for n2 with an ill-fated bloom
+      message = n1.generateSyncMessage(s1);
+      if (message === null) {
+        throw new RangeError("message should not be null");
+      }
+      assert.strictEqual(decodeSyncMessage(message).changes.length, 0);
+
+      // n2 receives it and DOESN'T send a change back
+      n2.receiveSyncMessage(s2, message);
+      message = n2.generateSyncMessage(s2);
+      if (message === null) {
+        throw new RangeError("message should not be null");
+      }
+      assert.strictEqual(decodeSyncMessage(message).changes.length, 0);
+
+      // n1 should now realize it's missing that change and request it explicitly
+      n1.receiveSyncMessage(s1, message);
+      message = n1.generateSyncMessage(s1);
+      if (message === null) {
+        throw new RangeError("message should not be null");
+      }
+      assert.deepStrictEqual(decodeSyncMessage(message).need, n2.getHeads());
+
+      // n2 should fulfill that request
+      n2.receiveSyncMessage(s2, message);
+      message = n2.generateSyncMessage(s2);
+      if (message === null) {
+        throw new RangeError("message should not be null");
+      }
+      assert.strictEqual(decodeSyncMessage(message).changes.length, 1);
+
+      // n1 should apply the change and the two should now be in sync
+      n1.receiveSyncMessage(s1, message);
+      assert.deepStrictEqual(n1.getHeads(), n2.getHeads());
+    });
+
     describe("protocol features", () => {
+      it("should allow multiple Bloom filters", () => {
+        // Scenario:           ,-- n1c1 <-- n1c2 <-- n1c3
+        // c0 <-- c1 <-- c2 <-+--- n2c1 <-- n2c2 <-- n2c3
+        //                     `-- n3c1 <-- n3c2 <-- n3c3
+        // n1 has {c0, c1, c2, n1c1, n1c2, n1c3, n2c1, n2c2};
+        // n2 has {c0, c1, c2, n1c1, n1c2, n2c1, n2c2, n2c3};
+        // n3 has {c0, c1, c2, n3c1, n3c2, n3c3}.
+        const n1 = create({ actor: "01234567" }),
+          n2 = create({ actor: "89abcdef" }),
+          n3 = create({ actor: "76543210" });
+        let s13 = initSyncState();
+        const s12 = initSyncState();
+        const s21 = initSyncState();
+        let s32 = initSyncState(),
+          s31 = initSyncState(),
+          s23 = initSyncState();
+        let message1, message3;
+
+        for (let i = 0; i < 3; i++) {
+          n1.put("_root", "x", i);
+          n1.commit("", 0);
+        }
+
+        // sync all 3 nodes
+        sync(n1, n2, s12, s21); // eslint-disable-line no-unused-vars -- kept for consistency
+        sync(n1, n3, s13, s31);
+        sync(n3, n2, s32, s23);
+        for (let i = 0; i < 2; i++) {
+          n1.put("_root", "x", `${i} @ n1`);
+          n1.commit("", 0);
+        }
+        for (let i = 0; i < 2; i++) {
+          n2.put("_root", "x", `${i} @ n2`);
+          n2.commit("", 0);
+        }
+        n1.applyChanges(n2.getChanges([]));
+        n2.applyChanges(n1.getChanges([]));
+        n1.put("_root", "x", `3 @ n1`);
+        n1.commit("", 0);
+        n2.put("_root", "x", `3 @ n2`);
+        n2.commit("", 0);
+
+        for (let i = 0; i < 3; i++) {
+          n3.put("_root", "x", `${i} @ n3`);
+          n3.commit("", 0);
+        }
+        const n1c3 = n1.getHeads()[0],
+          n2c3 = n2.getHeads()[0],
+          n3c3 = n3.getHeads()[0];
+        s13 = decodeSyncState(encodeSyncState(s13));
+        s31 = decodeSyncState(encodeSyncState(s31));
+        s23 = decodeSyncState(encodeSyncState(s23));
+        s32 = decodeSyncState(encodeSyncState(s32));
+
+        // Now n3 concurrently syncs with n1 and n2. Doing this naively would result in n3 receiving
+        // changes {n1c1, n1c2, n2c1, n2c2} twice (those are the changes that both n1 and n2 have, but
+        // that n3 does not have). We want to prevent this duplication.
+        message1 = n1.generateSyncMessage(s13); // message from n1 to n3
+        if (message1 === null) {
+          throw new RangeError("message should not be null");
+        }
+        assert.strictEqual(decodeSyncMessage(message1).changes.length, 0);
+        n3.receiveSyncMessage(s31, message1);
+        message3 = n3.generateSyncMessage(s31); // message from n3 to n1
+        if (message3 === null) {
+          throw new RangeError("message should not be null");
+        }
+        assert(decodeSyncMessage(message3).changes.length > 0); // {n3c1, n3c2, n3c3}
+        n1.receiveSyncMessage(s13, message3);
+
+        // Copy the Bloom filter received from n1 into the message sent from n3 to n2. This Bloom
+        // filter indicates what changes n3 is going to receive from n1.
+        message3 = n3.generateSyncMessage(s32); // message from n3 to n2
+        if (message3 === null) {
+          throw new RangeError("message should not be null");
+        }
+        const modifiedMessage = decodeSyncMessage(message3);
+        modifiedMessage.have.push(decodeSyncMessage(message1).have[0]);
+        assert.strictEqual(modifiedMessage.changes.length, 0);
+        n2.receiveSyncMessage(s23, encodeSyncMessage(modifiedMessage));
+
+        // n2 replies to n3, sending only n2c3 (the one change that n2 has but n1 doesn't)
+        const message2 = n2.generateSyncMessage(s23);
+        if (message2 === null) {
+          throw new RangeError("message should not be null");
+        }
+        assert(decodeSyncMessage(message2).changes.length > 0); // {n2c3}
+        n3.receiveSyncMessage(s32, message2);
+
+        // n1 replies to n3
+        message1 = n1.generateSyncMessage(s13);
+        if (message1 === null) {
+          throw new RangeError("message should not be null");
+        }
+        assert(decodeSyncMessage(message1).changes.length > 0); // {n1c1, n1c2, n1c3, n2c1, n2c2}
+        n3.receiveSyncMessage(s31, message1);
+        assert.deepStrictEqual(n3.getHeads(), [n1c3, n2c3, n3c3].sort());
+      });
+
       it("should allow any change to be requested", () => {
-        const n1 = createAudit({ actor: "01234567" }),
-          n2 = createAudit({ actor: "89abcdef" });
+        const n1 = create({ actor: "01234567" }),
+          n2 = create({ actor: "89abcdef" });
         const s1 = initSyncState(),
           s2 = initSyncState();
         let message = null;
@@ -1843,7 +2282,7 @@ describe("Automerge", () => {
           n1.commit("", 0);
         }
 
-        const lastSync = n1.getHeadHashes();
+        const lastSync = n1.getHeads();
 
         for (let i = 3; i < 6; i++) {
           n1.put("_root", "x", i);
@@ -1871,8 +2310,8 @@ describe("Automerge", () => {
       });
 
       it("should ignore requests for a nonexistent change", () => {
-        const n1 = createAudit({ actor: "01234567" }),
-          n2 = createAudit({ actor: "89abcdef" });
+        const n1 = create({ actor: "01234567" }),
+          n2 = create({ actor: "89abcdef" });
         const s1 = initSyncState(),
           s2 = initSyncState();
         let message = null;
@@ -1906,9 +2345,9 @@ describe("Automerge", () => {
         //       ,-- c1 <-- c2
         // c0 <-+
         //       `-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8
-        const n1 = createAudit({ actor: "01234567" }),
-          n2 = createAudit({ actor: "89abcdef" }),
-          n3 = createAudit({ actor: "76543210" });
+        const n1 = create({ actor: "01234567" }),
+          n2 = create({ actor: "89abcdef" }),
+          n3 = create({ actor: "76543210" });
         let s1 = initSyncState(),
           s2 = initSyncState();
         let msg;
@@ -1924,8 +2363,8 @@ describe("Automerge", () => {
           n3.put("_root", "x", i);
           n3.commit("", 0);
         }
-        const c2 = n1.getHeadHashes()[0],
-          c4 = n3.getHeadHashes()[0];
+        const c2 = n1.getHeads()[0],
+          c4 = n3.getHeads()[0];
         n2.applyChanges(n2.getChangesAdded(n3)); // merge()
 
         // Sync n1 and n2, so their shared heads are {c2, c4}
@@ -1943,13 +2382,13 @@ describe("Automerge", () => {
         n3.put("_root", "x", 6);
         n3.commit("", 0);
         const change6 = n3.getLastLocalChange(),
-          c6 = n3.getHeadHashes()[0];
+          c6 = n3.getHeads()[0];
         if (change6 === null) throw new RangeError("no local change");
         for (let i = 7; i <= 8; i++) {
           n3.put("_root", "x", i);
           n3.commit("", 0);
         }
-        const c8 = n3.getHeadHashes()[0];
+        const c8 = n3.getHeads()[0];
         n2.applyChanges(n2.getChangesAdded(n3)); // merge()
 
         // Now n1 initiates a sync with n2, and n2 replies with {c5, c6}. n2 does not send {c7, c8}
@@ -2000,7 +2439,7 @@ describe("Automerge", () => {
     });
 
     it("can handle overlappying splices", () => {
-      const doc = createAudit();
+      const doc = create();
       let mat: any = doc.materialize("/");
       doc.putObject("/", "text", "abcdefghij");
       doc.splice("/text", 2, 2, "00");
@@ -2010,7 +2449,7 @@ describe("Automerge", () => {
     });
 
     it("can handle utf16 text", () => {
-      const doc = createAudit();
+      const doc = create();
       let mat: any = doc.materialize("/");
 
       doc.putObject("/", "width1", "AAAAAA");
@@ -2025,7 +2464,7 @@ describe("Automerge", () => {
 
       mat = doc.applyPatches(mat);
 
-      const remote = loadAudit(doc.save());
+      const remote = load(doc.save());
       let r_mat: any = remote.materialize("/");
 
       assert.deepEqual(mat, {
@@ -2129,7 +2568,7 @@ describe("Automerge", () => {
         message: null,
         deps: [],
       };
-      const doc = loadAudit(encodeChange(change));
+      const doc = load(encodeChange(change));
       const mat: any = doc.materialize("/");
 
       // multi - char strings appear as a span of strings
@@ -2164,10 +2603,10 @@ describe("Automerge", () => {
     });
 
     it("should report whether the other end has our changes", () => {
-      const left = createAudit();
+      const left = create();
       left.put("/", "foo", "bar");
 
-      const right = createAudit();
+      const right = create();
       right.put("/", "baz", "qux");
 
       const leftSync = initSyncState();

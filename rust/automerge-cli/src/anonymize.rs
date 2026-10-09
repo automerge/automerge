@@ -17,9 +17,7 @@ pub(crate) fn anonymize(mut input: impl Read) -> Result<AnonymizedDocument> {
         .context("failed to read Automerge document")?;
     let document =
         automerge::Automerge::load(&bytes).context("failed to load Automerge document")?;
-    let changes = document
-        .get_changes(&[])
-        .context("failed to read the document's changes")?;
+    let changes = document.get_changes(&[]);
     let change_count = changes.len();
     let operation_count = changes.iter().map(automerge::Change::len).sum();
     let actor_count = changes

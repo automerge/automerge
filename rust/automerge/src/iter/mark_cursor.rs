@@ -8,31 +8,17 @@ use crate::iter::tools::Diff;
 use crate::op_set2::op_set::{MarkIdx, MarkIndexColumn, MarkPrefix, OpSet};
 use crate::op_set2::types::MarkData;
 
-/// The open-mark set, carried along a forward walk of the op set.
+/// The open-mark set along a forward walk of the op set. Free between mark
+/// rows, and can start at any position without walking from the object start.
 ///
-/// The mark index is a prefix column whose accumulator *is* the set of
-/// marks spanning a position, so this holds a cursor into it rather than
-/// re-deriving the set from the mark ops. Two consequences:
-///
-/// * a walk pays nothing for marks until it crosses a mark row —
-///   mark-free stretches are a single run step, however long;
-/// * a walk can start (or jump) anywhere, because the set at that
-///   position is whatever the prefix says it is. No accumulating from
-///   the start of the object.
-///
-/// Visibility is decided by the clock alone: mark ops are excluded from
-/// delete targets (`OpSet::seek_ops_by_*`'s `action != Action::Mark`),
-/// so a mark has no succ and `covers` is the whole story. That is what
-/// lets this agree with a diff derived from the op stream.
+/// Mark ops are never delete targets, so the clock alone decides visibility.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MarkCursor<'a> {
     marks: Option<&'a MarkIndexColumn>,
     iter: PrefixIter<'a, Option<MarkIdx>>,
     clock: ClockRange,
-    /// the prefix as of the last materialize; retaining it is what makes
-    /// [`MarkPrefix::same_set`] an exact change probe
+    /// retained so [`MarkPrefix::same_set`] is an exact change probe
     seen: MarkPrefix,
-    /// resolved view of `seen`
     state: RichTextDiff<'a>,
 }
 
@@ -50,14 +36,8 @@ impl<'a> MarkCursor<'a> {
         cursor
     }
 
-    /// Carry the set forward so it covers rows `..=pos`.
-    ///
-    /// Forward-only — every consumer walks the op set in document order
-    /// — and idempotent, so asking twice at the same row is free.
+    /// Covers rows `..=pos`. Forward only; repeating a position is free.
     pub(crate) fn advance_to(&mut self, pos: usize) {
-        // going backwards would silently leave the set too far along
-        // rather than panic, so say so here: the sibling column
-        // iterators assert the same contract
         debug_assert!(
             pos + 1 >= self.iter.pos(),
             "MarkCursor is forward-only (at {} want {pos})",
@@ -67,13 +47,11 @@ impl<'a> MarkCursor<'a> {
         self.refresh();
     }
 
-    /// The mark diff at the current position.
     pub(crate) fn current(&self) -> MarkDiff {
         self.state.current()
     }
 
-    /// Rebuild the resolved view, but only if the open set actually
-    /// moved: the common case is a pointer comparison and nothing else.
+    /// A pointer comparison when the open set hasn't moved.
     fn refresh(&mut self) {
         let now = self.iter.total();
         if self.seen.same_set(&now) {
@@ -98,8 +76,6 @@ impl<'a> MarkCursor<'a> {
                 let Some(data) = marks.mark_data(&id) else {
                     continue;
                 };
-                // the cache owns the name and value; borrow them rather
-                // than copy the string out
                 let data = MarkData {
                     name: Cow::Borrowed(data.name.as_ref()),
                     value: data.value.clone(),
@@ -114,12 +90,12 @@ impl<'a> MarkCursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autocommit::AutoCommit;
     use crate::marks::{ExpandMark, Mark, MarkSet};
-    use crate::transaction::Transactable;
-    use crate::{AutoCommit, ObjType, ScalarValue, ROOT};
+    use crate::tx::Transactable;
+    use crate::{ObjType, ScalarValue, ROOT};
 
-    /// Text carrying overlapping, nested and removed marks, with a block
-    /// and a deletion so the mark rows are not contiguous.
+    /// Overlapping, nested and removed marks; a deletion keeps mark rows non-contiguous.
     fn marked_doc() -> (AutoCommit, Vec<crate::ChangeId>) {
         let mut doc = AutoCommit::new();
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
@@ -149,9 +125,7 @@ mod tests {
         (doc, before)
     }
 
-    /// The after-side mark set, normalized the way a reader sees it —
-    /// `MarkSet::from_query_state` drops unmark tombstones, so compare
-    /// against the same shape.
+    /// Without unmarks, as `MarkSet::from_query_state` reports it.
     fn after_set(diff: &MarkDiff) -> Option<MarkSet> {
         match diff {
             MarkDiff::After(m) | MarkDiff::Diff(_, m) => {
@@ -162,12 +136,6 @@ mod tests {
         }
     }
 
-    /// Walking the cursor forward must agree with landing on a position
-    /// cold. The walk carries and patches its set incrementally and
-    /// skips rebuilds when the prefix identity is unchanged; a fresh
-    /// cursor descends the tree and rebuilds from scratch. If the
-    /// staleness probe or the inclusive-position convention were wrong,
-    /// these would diverge.
     #[test]
     fn walking_matches_seeking() {
         let (mut doc, before) = marked_doc();
@@ -189,8 +157,6 @@ mod tests {
         }
     }
 
-    /// And the walk must agree with the point query the read path
-    /// already trusts (`query_nth` resolves its marks this way).
     #[test]
     fn walking_matches_rich_text_at() {
         let (mut doc, _) = marked_doc();

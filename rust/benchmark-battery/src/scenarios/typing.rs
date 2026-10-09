@@ -1,7 +1,8 @@
 use super::SeriesBenchmark;
 use benchmark_battery::automerge::transaction::Transactable;
 use benchmark_battery::automerge::{AutoCommit, ObjType, ReadDoc, ROOT};
-use benchmark_battery::sync::{self, Sync};
+use benchmark_battery::sync;
+use benchmark_battery::sync::{AutoCommitSync, SyncDoc};
 use rand::distr::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, RngExt, SeedableRng};
@@ -49,8 +50,6 @@ pub fn benchmarks() -> Vec<SeriesBenchmark> {
 fn single_char_sync() -> Box<dyn FnMut(usize)> {
     let mut rng = StdRng::seed_from_u64(2);
     let mut doc = gen_text_doc(INITIAL_CHARS, 1, &mut rng);
-    // the protocol is hash-based throughout, so it needs every hash
-    doc.enable_audit_mode().unwrap();
     let mut remote = doc.fork();
     let mut doc_state = sync::State::new();
     let mut remote_state = sync::State::new();
@@ -76,8 +75,8 @@ fn single_char_apply_change() -> Box<dyn FnMut(usize)> {
     Box::new(move |_| {
         let pos = (rng.next_u32() as u64 % INITIAL_CHARS) as usize;
         doc.splice_text(&text, pos, 0, ".").unwrap();
-        let change = doc.get_last_local_change_legacy().unwrap().unwrap();
-        remote.apply_changes(vec![change]).unwrap();
+        let change = doc.get_last_local_change().unwrap();
+        remote.apply_changes(vec![change.clone()]).unwrap();
         assert_eq!(doc.get_heads(), remote.get_heads());
     })
 }
@@ -130,11 +129,11 @@ fn single_char_merge() -> Box<dyn FnMut(usize)> {
 
 fn sync_docs(d1: &mut AutoCommit, s1: &mut sync::State, d2: &mut AutoCommit, s2: &mut sync::State) {
     while d1.get_heads() != d2.get_heads() {
-        if let Some(msg) = Sync::generate_sync_message(d1.document(), s1).unwrap() {
-            Sync::receive_sync_message(d2.document_mut(), s2, msg).unwrap();
+        if let Some(msg) = d1.sync().generate_sync_message(s1) {
+            d2.sync().receive_sync_message(s2, msg).unwrap();
         }
-        if let Some(msg) = Sync::generate_sync_message(d2.document(), s2).unwrap() {
-            Sync::receive_sync_message(d1.document_mut(), s1, msg).unwrap();
+        if let Some(msg) = d2.sync().generate_sync_message(s2) {
+            d1.sync().receive_sync_message(s1, msg).unwrap();
         }
     }
 }

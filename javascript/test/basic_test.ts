@@ -620,9 +620,8 @@ describe("Automerge", () => {
   })
   describe("load", () => {
     it("can load a doc without checking the heads", () => {
-      // heads are only verified in audit mode, which is what computes them
       assert.throws(() => {
-        Automerge.load(mismatched_heads, { auditMode: true })
+        Automerge.load(mismatched_heads)
       }, /mismatching heads/)
       let doc = Automerge.load(mismatched_heads, { unchecked: true })
       assert.deepEqual(doc, { count: 260 })

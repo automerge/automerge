@@ -12,7 +12,7 @@ mod text;
 #[cfg(test)]
 mod tests;
 
-use crate::Automerge;
+use crate::automerge::Automerge;
 
 pub use list::{List, ListValue};
 pub use map::{Map, MapValue};
@@ -221,7 +221,7 @@ impl From<ScalarValue> for Value {
     }
 }
 
-impl Automerge {
+impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
         self.ops().hydrate_map(obj, clock, self.text_encoding())
     }

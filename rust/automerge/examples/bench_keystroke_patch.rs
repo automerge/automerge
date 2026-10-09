@@ -1,12 +1,10 @@
-// Steady-state keystroke apply + diff_incremental on a large loaded
-// doc — the JS-facing typing path with patches on. Timings are split
-// so the change-apply cost and the dirty-diff cost are visible
-// separately (the fragment path in bench_keystroke covers the apply
-// side; this bench watches the patch side).
+// Steady-state keystroke apply + diff_incremental on a large loaded doc, with
+// apply and diff timed separately.
 //
 //   cargo run --release -p automerge --example bench_keystroke_patch [S1 S2 S3 ...]
-use automerge::transaction::Transactable;
-use automerge::{Automerge, ObjType, ReadDoc, Value, ROOT};
+use automerge::next::transaction::Transactable;
+use automerge::next::{Automerge, ReadDoc};
+use automerge::{ObjType, Value, ROOT};
 use std::time::Instant;
 
 fn find_text(doc: &Automerge) -> automerge::ObjId {
@@ -41,7 +39,6 @@ fn main() {
         let pos = base.length(&text) / 2;
 
         let mut recv = base.fork();
-        // prime the cursor: everything up to now is not our concern
         let _ = recv.diff_incremental();
 
         let mut src = recv.fork();

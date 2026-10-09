@@ -1,8 +1,8 @@
 // Time `change_sets_for_fragments` over a document's whole fragment set, and
 // over a single small fragment, on the corpus docs.
 //
-//   cargo run --release -p automerge --example bench_change set
-use automerge::{Automerge, LoadOptions, ReadDoc};
+//   cargo run --release -p automerge --example bench_change_set
+use automerge::next::{Automerge, ReadDoc};
 use std::time::Instant;
 
 fn best_of<T>(n: u32, mut f: impl FnMut() -> T) -> f64 {
@@ -28,8 +28,10 @@ fn main() {
         let Ok(bytes) = std::fs::read(&path) else {
             continue;
         };
-        let doc =
-            Automerge::load_with_options(&bytes, LoadOptions::new().with_audit_mode()).unwrap();
+        let doc = Automerge::load(&bytes)
+            .unwrap()
+            .enable_audit_mode()
+            .unwrap();
         let fragments = doc.fragments(..);
         let n = fragments.len();
 
@@ -37,8 +39,7 @@ fn main() {
             doc.change_sets_for_fragments(fragments.clone()).unwrap()
         });
 
-        // the loose-keystroke case: one single-member fragment, which
-        // should touch only the ops it carries
+        // one single-member fragment should touch only its own ops
         let smallest = fragments
             .iter()
             .min_by_key(|f| f.members.len())

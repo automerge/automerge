@@ -1,11 +1,11 @@
 use automerge as am;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::ReadDoc;
+use automerge_sync::{AutoCommitSync, SyncDoc};
 use std::ops::{Deref, DerefMut};
 
 use crate::actor_id::{to_actor_id, AMactorId};
 use crate::byte_span::{to_str, AMbyteSpan};
-use crate::change_id::AMchangeId;
 use crate::cursor::{to_cursor, AMcursor};
 use crate::items::AMitems;
 use crate::obj::{to_obj_id, AMobjId, AMobjType};
@@ -124,15 +124,10 @@ pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
 /// actor_id must be a valid pointer to an AMactorId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
-    let mut doc = match actor_id.as_ref() {
+    to_result(match actor_id.as_ref() {
         Some(actor_id) => am::AutoCommit::new().with_actor(actor_id.as_ref().clone()),
         None => am::AutoCommit::new(),
-    };
-    // C documents are always in audit mode so that the hash-based APIs
-    // (sync included) keep working.
-    doc.enable_audit_mode()
-        .expect("an empty document has no hashes to verify");
-    to_result(doc)
+    })
 }
 
 /// \memberof AMdoc
@@ -142,7 +137,7 @@ pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] message A UTF-8 string view as an `AMbyteSpan` struct.
 /// \param[in] timestamp A pointer to a 64-bit integer or `NULL`.
-/// \return A pointer to an `AMresult` struct with one `AM_VAL_TYPE_CHANGE_ID`
+/// \return A pointer to an `AMresult` struct with one `AM_VAL_TYPE_CHANGE_HASH`
 ///         item if there were operations to commit or an `AM_VAL_TYPE_VOID` item
 ///         if there were no operations to commit.
 /// \pre \p doc `!= NULL`
@@ -186,7 +181,7 @@ pub unsafe extern "C" fn AMcommit(
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] message A UTF-8 string view as an `AMbyteSpan` struct.
 /// \param[in] timestamp A pointer to a 64-bit integer or `NULL`.
-/// \return A pointer to an `AMresult` struct with one `AM_VAL_TYPE_CHANGE_ID`
+/// \return A pointer to an `AMresult` struct with one `AM_VAL_TYPE_CHANGE_HASH`
 ///         item.
 /// \pre \p doc `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
@@ -209,9 +204,7 @@ pub unsafe extern "C" fn AMemptyChange(
     if let Some(timestamp) = timestamp.as_ref() {
         options.set_time(*timestamp);
     }
-    to_result(Ok::<am::ChangeId, am::AutomergeError>(
-        doc.empty_change(options),
-    ))
+    to_result(doc.empty_change(options))
 }
 
 /// \memberof AMdoc
@@ -240,7 +233,7 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 /// \brief Forks this document at its current or a historical point for use by
 ///        a different actor.
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical point or `NULL` to select its
 ///                  current point.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
@@ -257,7 +250,7 @@ pub unsafe extern "C" fn AMfork(doc: *mut AMdoc, heads: *const AMitems) -> *mut 
     let doc = to_doc_mut!(doc);
     match heads.as_ref() {
         None => to_result(doc.fork()),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => to_result(doc.fork_at(&heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
@@ -288,10 +281,7 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let sync_state = to_sync_state_mut!(sync_state);
-    to_result(
-        automerge_sync::Sync::generate_sync_message(doc.document(), sync_state.as_mut())
-            .expect("C documents always have a checked hash graph"),
-    )
+    to_result(doc.sync().generate_sync_message(sync_state.as_mut()))
 }
 
 /// \memberof AMdoc
@@ -342,10 +332,7 @@ pub unsafe extern "C" fn AMgetChangeByHash(
     let doc = to_doc_mut!(doc);
     let slice = std::slice::from_raw_parts(src, count);
     match slice.try_into() {
-        Ok(change_hash) => to_result(
-            doc.get_change_by_hash(&change_hash)
-                .expect("C documents always have a checked hash graph"),
-        ),
+        Ok(change_hash) => to_result(doc.get_change_by_hash(&change_hash)),
         Err(e) => AMresult::error(&e.to_string()).into(),
     }
 }
@@ -355,7 +342,7 @@ pub unsafe extern "C" fn AMgetChangeByHash(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] have_deps A pointer to an `AMitems` struct with
-///                      `AM_VAL_TYPE_CHANGE_ID` items or `NULL`.
+///                      `AM_VAL_TYPE_CHANGE_HASH` items or `NULL`.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
 /// \pre \p doc `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
@@ -368,11 +355,11 @@ pub unsafe extern "C" fn AMgetChangeByHash(
 pub unsafe extern "C" fn AMgetChanges(doc: *mut AMdoc, have_deps: *const AMitems) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let have_deps = match have_deps.as_ref() {
-        Some(have_deps) => match Vec::<am::ChangeId>::try_from(have_deps) {
-            Ok(change_ids) => change_ids,
+        Some(have_deps) => match Vec::<am::ChangeHash>::try_from(have_deps) {
+            Ok(change_hashes) => change_hashes,
             Err(e) => return AMresult::error(&e.to_string()).into(),
         },
-        None => Vec::<am::ChangeId>::new(),
+        None => Vec::<am::ChangeHash>::new(),
     };
     to_result(doc.get_changes(&have_deps))
 }
@@ -397,7 +384,7 @@ pub unsafe extern "C" fn AMgetChanges(doc: *mut AMdoc, have_deps: *const AMitems
 pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -> *mut AMresult {
     let doc1 = to_doc_mut!(doc1);
     let doc2 = to_doc_mut!(doc2);
-    to_result(doc1.get_changes_added_legacy(doc2))
+    to_result(doc1.get_changes_added(doc2))
 }
 
 /// \memberof AMdoc
@@ -407,7 +394,7 @@ pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] position The absolute position of the cursor.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical object or `NULL` to select the
 ///                  current object.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_CURSOR` item.
@@ -432,7 +419,7 @@ pub unsafe extern "C" fn AMgetCursor(
     let obj_id = to_obj_id!(obj_id);
     match heads.as_ref() {
         None => to_result(doc.get_cursor(obj_id, position, None)),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => to_result(doc.get_cursor(obj_id, position, Some(heads.as_slice()))),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
@@ -446,7 +433,7 @@ pub unsafe extern "C" fn AMgetCursor(
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] cursor A pointer to an `AMcursor` struct.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical object or `NULL` to select the
 ///                  current object.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_UINT` item.
@@ -476,7 +463,7 @@ pub unsafe extern "C" fn AMgetCursorPosition(
     let cursor = to_cursor!(cursor);
     match heads.as_ref() {
         None => to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), None)),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => {
                 to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), Some(heads.as_slice())))
             }
@@ -486,28 +473,7 @@ pub unsafe extern "C" fn AMgetCursorPosition(
 }
 
 /// \memberof AMdoc
-/// \brief Gets the current heads of a document as change identifiers.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_ID` items.
-/// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct pointer must be passed to
-///          `AMresultFree()` in order to avoid a memory leak.
-/// \internal
-///
-/// # Safety
-/// doc must be a valid pointer to an AMdoc
-#[no_mangle]
-pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
-    let doc = to_doc_mut!(doc);
-    to_result(Ok::<Vec<am::ChangeId>, am::AutomergeError>(doc.get_heads()))
-}
-
-/// \memberof AMdoc
-/// \brief Gets the current heads of a document as change hashes.
-///
-/// Hashes are the currency of the sync protocol and storage; for everything
-/// else prefer the change identifiers from `AMgetHeads()`.
+/// \brief Gets the current heads of a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
@@ -519,74 +485,11 @@ pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMgetHeadHashes(doc: *mut AMdoc) -> *mut AMresult {
+pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    let mut heads = doc.get_head_hashes();
-    // C callers expect hashes sorted
-    heads.sort_unstable();
-    to_result(Ok::<Vec<am::ChangeHash>, am::AutomergeError>(heads))
-}
-
-/// \memberof AMdoc
-/// \brief Converts a change hash into the change's identifier.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] hash A change hash as an `AMbyteSpan` struct.
-/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_CHANGE_ID`
-///         item, or an `AM_VAL_TYPE_VOID` item if the change is not in the
-///         document.
-/// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct pointer must be passed to
-///          `AMresultFree()` in order to avoid a memory leak.
-/// \internal
-///
-/// # Safety
-/// doc must be a valid pointer to an AMdoc
-#[no_mangle]
-pub unsafe extern "C" fn AMchangeIdForHash(doc: *mut AMdoc, hash: AMbyteSpan) -> *mut AMresult {
-    let doc = to_doc!(doc);
-    let hash = match am::ChangeHash::try_from(&hash) {
-        Ok(hash) => hash,
-        Err(e) => return AMresult::error(&e.to_string()).into(),
-    };
-    match doc.hash_to_change_id(&hash) {
-        Ok(Some(id)) => to_result(Ok::<am::ChangeId, am::AutomergeError>(id)),
-        Ok(None) => AMresult::item(Default::default()).into(),
-        Err(e) => AMresult::error(&e.to_string()).into(),
-    }
-}
-
-/// \memberof AMdoc
-/// \brief Converts a change identifier into the change's hash.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] change_id A pointer to an `AMchangeId` struct.
-/// \return A pointer to an `AMresult` struct with an
-///         `AM_VAL_TYPE_CHANGE_HASH` item, or an `AM_VAL_TYPE_VOID` item if
-///         the change is not in the document.
-/// \pre \p doc `!= NULL`
-/// \pre \p change_id `!= NULL`
-/// \warning The returned `AMresult` struct pointer must be passed to
-///          `AMresultFree()` in order to avoid a memory leak.
-/// \internal
-///
-/// # Safety
-/// doc must be a valid pointer to an AMdoc
-/// change_id must be a valid pointer to an AMchangeId
-#[no_mangle]
-pub unsafe extern "C" fn AMhashForChangeId(
-    doc: *mut AMdoc,
-    change_id: *const AMchangeId,
-) -> *mut AMresult {
-    let doc = to_doc!(doc);
-    let Some(change_id) = change_id.as_ref() else {
-        return AMresult::error("Invalid AMchangeId pointer").into();
-    };
-    match doc.change_id_to_hash(change_id.as_ref()) {
-        Ok(Some(hash)) => to_result(Ok::<am::ChangeHash, am::AutomergeError>(hash)),
-        Ok(None) => AMresult::item(Default::default()).into(),
-        Err(e) => AMresult::error(&e.to_string()).into(),
-    }
+    to_result(Ok::<Vec<am::ChangeHash>, am::AutomergeError>(
+        doc.get_heads(),
+    ))
 }
 
 /// \memberof AMdoc
@@ -594,7 +497,7 @@ pub unsafe extern "C" fn AMhashForChangeId(
 ///        dependencies of the given hashes of changes.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items or `NULL`.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p doc `!= NULL`
@@ -609,15 +512,15 @@ pub unsafe extern "C" fn AMhashForChangeId(
 pub unsafe extern "C" fn AMgetMissingDeps(doc: *mut AMdoc, heads: *const AMitems) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let heads = match heads.as_ref() {
-        None => Vec::<am::ChangeId>::new(),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+        None => Vec::<am::ChangeHash>::new(),
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => heads,
             Err(e) => {
                 return AMresult::error(&e.to_string()).into();
             }
         },
     };
-    to_result(doc.get_missing_deps(&heads))
+    to_result(doc.get_missing_deps(heads.as_slice()))
 }
 
 /// \memberof AMdoc
@@ -636,10 +539,7 @@ pub unsafe extern "C" fn AMgetMissingDeps(doc: *mut AMdoc, heads: *const AMitems
 #[no_mangle]
 pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(
-        doc.get_last_local_change_legacy()
-            .expect("C documents always have a checked hash graph"),
-    )
+    to_result(doc.get_last_local_change())
 }
 
 /// \memberof AMdoc
@@ -647,7 +547,7 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select historical keys or `NULL` to select current
 ///                  keys.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_STR` items.
@@ -670,11 +570,8 @@ pub unsafe extern "C" fn AMkeys(
     let obj_id = to_obj_id!(obj_id);
     match heads.as_ref() {
         None => to_result(doc.keys(obj_id)),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
-            Ok(heads) => match doc.keys_at(obj_id, &heads) {
-                Ok(v) => to_result(v),
-                Err(e) => AMresult::error(&e.to_string()).into(),
-            },
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+            Ok(heads) => to_result(doc.keys_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -700,10 +597,7 @@ pub unsafe extern "C" fn AMkeys(
 #[no_mangle]
 pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
-    to_result(am::AutoCommit::load_with_options(
-        data,
-        am::LoadOptions::new().with_audit_mode(),
-    ))
+    to_result(am::AutoCommit::load(data))
 }
 
 /// \memberof AMdoc
@@ -742,7 +636,7 @@ pub unsafe extern "C" fn AMloadIncremental(
 ///
 /// \param[in] dest A pointer to an `AMdoc` struct.
 /// \param[in] src A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_ID` items.
+/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p dest `!= NULL`
 /// \pre \p src `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
@@ -755,18 +649,14 @@ pub unsafe extern "C" fn AMloadIncremental(
 #[no_mangle]
 pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMresult {
     let dest = to_doc_mut!(dest);
-    let result = dest.merge(to_doc_mut!(src));
-    to_result(result.map(|mut ids| {
-        ids.sort_unstable();
-        ids
-    }))
+    to_result(dest.merge(to_doc_mut!(src)))
 }
 
 /// \memberof AMdoc
 /// \brief Gets the current or historical size of an object.
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical size or `NULL` to select its
 ///                  current size.
 /// \return The count of items in the object identified by \p obj_id.
@@ -793,8 +683,8 @@ pub unsafe extern "C" fn AMobjSize(
                 return doc.length(obj_id);
             }
             Some(heads) => {
-                if let Ok(heads) = <Vec<am::ChangeId>>::try_from(heads) {
-                    return doc.length_at(obj_id, &heads).unwrap_or(0);
+                if let Ok(heads) = <Vec<am::ChangeHash>>::try_from(heads) {
+                    return doc.length_at(obj_id, &heads);
                 }
             }
         }
@@ -831,7 +721,7 @@ pub unsafe extern "C" fn AMobjObjType(doc: *const AMdoc, obj_id: *const AMobjId)
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_ID`
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select its historical items or `NULL` to select
 ///                  its current items.
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
@@ -854,11 +744,8 @@ pub unsafe extern "C" fn AMobjItems(
     let obj_id = to_obj_id!(obj_id);
     match heads.as_ref() {
         None => to_result(doc.values(obj_id)),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
-            Ok(heads) => match doc.values_at(obj_id, &heads) {
-                Ok(v) => to_result(v),
-                Err(e) => AMresult::error(&e.to_string()).into(),
-            },
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+            Ok(heads) => to_result(doc.values_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -909,11 +796,10 @@ pub unsafe extern "C" fn AMreceiveSyncMessage(
     let doc = to_doc_mut!(doc);
     let sync_state = to_sync_state_mut!(sync_state);
     let sync_message = to_sync_message!(sync_message);
-    to_result(automerge_sync::Sync::receive_sync_message(
-        doc.document_mut(),
-        sync_state.as_mut(),
-        sync_message.as_ref().clone(),
-    ))
+    to_result(
+        doc.sync()
+            .receive_sync_message(sync_state.as_mut(), sync_message.as_ref().clone()),
+    )
 }
 
 /// \memberof AMdoc
@@ -995,7 +881,7 @@ pub unsafe extern "C" fn AMsetActorId(
     let doc = to_doc_mut!(doc);
     let actor_id = to_actor_id!(actor_id);
     doc.set_actor(actor_id.as_ref().clone());
-    to_result(Ok::<(), am::AutomergeError>(()))
+    to_result(Ok(()))
 }
 
 /// \memberof AMdoc
@@ -1093,7 +979,7 @@ pub unsafe extern "C" fn AMspliceText(
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] heads A pointer to an `AMitems` struct containing
-///                  `AM_VAL_TYPE_CHANGE_ID` items to select a historical string
+///                  `AM_VAL_TYPE_CHANGE_HASH` items to select a historical string
 ///                  or `NULL` to select the current string.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_STR` item.
 /// \pre \p doc `!= NULL`
@@ -1115,7 +1001,7 @@ pub unsafe extern "C" fn AMtext(
     let obj_id = to_obj_id!(obj_id);
     match heads.as_ref() {
         None => to_result(doc.text(obj_id)),
-        Some(heads) => match <Vec<am::ChangeId>>::try_from(heads) {
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => to_result(doc.text_at(obj_id, &heads)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },

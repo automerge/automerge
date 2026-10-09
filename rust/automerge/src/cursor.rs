@@ -1,8 +1,8 @@
 use crate::op_set2::OpSet;
+#[cfg(doc)]
+use crate::read::ReadDoc;
 use crate::storage::parse;
 use crate::types::OpId;
-#[cfg(doc)]
-use crate::ReadDoc;
 use crate::{ActorId, AutomergeError};
 use std::fmt;
 

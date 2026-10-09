@@ -20,35 +20,33 @@ the server.
 
 ```rust
 use automerge::{transaction::Transactable, AutoCommit, ReadDoc, ROOT};
-use automerge_sync::{State, Sync};
+use automerge_sync::{AutoCommitSync, State, SyncDoc};
 
 # fn main() -> Result<(), automerge::AutomergeError> {
 let mut peer1 = AutoCommit::new();
-peer1.enable_audit_mode()?;
 peer1.put(ROOT, "key", "value")?;
 
 let mut peer2 = AutoCommit::new();
-peer2.enable_audit_mode()?;
 
 // one State per peer you are talking to
 let mut peer1_state = State::new();
 let mut peer2_state = State::new();
 
 loop {
-    let one_to_two = Sync::generate_sync_message(peer1.document(), &mut peer1_state)?;
+    let one_to_two = peer1.sync().generate_sync_message(&mut peer1_state);
     if let Some(message) = one_to_two.clone() {
-        Sync::receive_sync_message(peer2.document_mut(), &mut peer2_state, message)?;
+        peer2.sync().receive_sync_message(&mut peer2_state, message)?;
     }
-    let two_to_one = Sync::generate_sync_message(peer2.document(), &mut peer2_state)?;
+    let two_to_one = peer2.sync().generate_sync_message(&mut peer2_state);
     if let Some(message) = two_to_one.clone() {
-        Sync::receive_sync_message(peer1.document_mut(), &mut peer1_state, message)?;
+        peer1.sync().receive_sync_message(&mut peer1_state, message)?;
     }
     if one_to_two.is_none() && two_to_one.is_none() {
         break;
     }
 }
 
-assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.to_str(), Some("value"));
+assert_eq!(peer2.get(ROOT, "key")?.unwrap().0.as_str(), Some("value"));
 # Ok(())
 # }
 ```
@@ -59,12 +57,11 @@ in flight. That is the loop's termination condition, not an error.
 
 ## Two things to know before wiring this up
 
-**Documents must be in audit mode.** The protocol identifies changes by
-hash from end to end, so it needs a document which retains every change
-hash. Both entry points fail with `AutomergeError::AuditModeRequired`
-otherwise. The check is deliberately unconditional — a small document whose
-retained hashes would happen to suffice still refuses, so replication never
-works "sometimes".
+**Sync runs on the default document types.** The protocol identifies
+changes by hash from end to end, so it needs a document which retains every
+change hash — which `automerge::Automerge` and `automerge::AutoCommit`
+always do. A `automerge::next` document keeps only the hashes it needs;
+convert it with `into_audit()` before syncing it.
 
 **Sync state is per peer, and worth persisting.** A `State` is what lets
 the second sync with a peer be cheap instead of re-deriving everything.
@@ -74,9 +71,18 @@ safe — you just pay a full re-sync.
 ## Working with an `AutoCommit`
 
 `AutoCommit` keeps an implicit transaction open, and ops in it are not yet
-under the document's heads. `document()` and `document_mut()` settle it
-first, which is why the example above goes through them rather than passing
-the `AutoCommit` directly.
+under the document's heads. [`AutoCommitSync::sync`] commits it first and
+returns a [`SyncDoc`] for the document, which is why the example above goes
+through `sync()`. `Automerge` implements [`SyncDoc`] directly.
+
+## Moving from `automerge::sync`
+
+This crate is the sync protocol that used to live in `automerge::sync`, with
+the same types and the same `SyncDoc` trait. Change the imports from
+`automerge::sync::…` to `automerge_sync::…`, and import [`AutoCommitSync`]
+for `AutoCommit::sync()` and `has_our_changes()`. The one method gone from
+`SyncDoc` is `receive_sync_message_log_patches`: to observe what a message
+changed, diff the document's heads from before and after receiving it.
 
 ## Message and state encodings
 
@@ -103,13 +109,14 @@ resets the far side's idea of what it has already sent, so nothing is lost.
 
 ## What this needs from automerge
 
-Everything the protocol asks of a document is on `Automerge` itself, under
-the "Replication" heading: `change_hashes`, `num_changes`, `change_deps`,
-`has_change`, `changes_by_hash`, `remove_ancestors`, `missing_deps`,
-`missing_deps_with_queued`, plus `save` and `load_incremental`. Nothing
-here reaches into automerge's internals, and the message parser is this
-crate's own — the sync wire format and the document format are independent,
-and share only the 32-byte change hash.
+Everything the protocol asks of a document is public on
+`automerge::next::Automerge`, under the "Replication" heading:
+`change_hashes`, `num_changes`, `change_deps`, `has_change`,
+`changes_by_hash`, `remove_ancestors`, `missing_deps`,
+`missing_deps_with_queued`, plus `save` and `load_incremental`. Nothing here
+reaches into automerge's internals, and the message parser is this crate's
+own — the sync wire format and the document format are independent, and
+share only the 32-byte change hash.
 
 That is deliberate: the protocol is versioned separately from the document
 format, and a different replication strategy can be built on the same
@@ -121,3 +128,6 @@ surface without changing automerge.
 [`State::new_read_only`]: https://docs.rs/automerge-sync/latest/automerge_sync/struct.State.html#method.new_read_only
 [`Message::encode`]: https://docs.rs/automerge-sync/latest/automerge_sync/struct.Message.html#method.encode
 [`Message::decode`]: https://docs.rs/automerge-sync/latest/automerge_sync/struct.Message.html#method.decode
+[`SyncDoc`]: https://docs.rs/automerge-sync/latest/automerge_sync/trait.SyncDoc.html
+[`AutoCommitSync`]: https://docs.rs/automerge-sync/latest/automerge_sync/trait.AutoCommitSync.html
+[`AutoCommitSync::sync`]: https://docs.rs/automerge-sync/latest/automerge_sync/trait.AutoCommitSync.html#tymethod.sync

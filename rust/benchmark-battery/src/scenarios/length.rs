@@ -41,7 +41,7 @@ fn text_len_at() -> Box<dyn FnMut()> {
     tx.splice_text(&text, pos, 9, "01234567890").unwrap();
     tx.commit();
     Box::new(move || {
-        black_box(doc.length_at(&text, &heads).unwrap());
+        black_box(doc.length_at(&text, &heads));
     })
 }
 
@@ -70,6 +70,6 @@ fn map_len_at() -> Box<dyn FnMut()> {
     tx.put(&ROOT, "next", "value").unwrap();
     tx.commit();
     Box::new(move || {
-        black_box(doc.length_at(&ROOT, &heads).unwrap());
+        black_box(doc.length_at(&ROOT, &heads));
     })
 }

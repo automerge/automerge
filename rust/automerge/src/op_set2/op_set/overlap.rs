@@ -1,20 +1,9 @@
-//! Cutting a change set's already-present rows out of its fragment.
+//! Cutting the rows a document already has out of a change set's fragment.
 //!
-//! A change set whose members are only partly new — an *overlap* — carries
-//! rows for members the document already has. Applying them again would
-//! be an error, so they are cut out before the fragment meets the
-//! manifold: one walk marks every row's fate, then one cursor per column
-//! applies the marks.
-//!
-//! Cutting a row is not always just a delete. The change set format keeps a
-//! relationship between two members in the *succ* column of the older
-//! one and gives an op a row of its own only when its pred names
-//! something the change set does not contain (`ChangeSetBuilder::flush_deletes`).
-//! Dropping a row therefore leaves its surviving successors in exactly
-//! the position an out-of-change set target puts them: the relationship
-//! moves to the successor's pred column — and a successor that had no
-//! row of its own, a delete, gains one at the end of its register, which
-//! is where the builder would have written it.
+//! A dropped row's surviving successors take the relationship into their
+//! pred column, and a delete successor with no row of its own gains one at
+//! the end of its register, as `ChangeSetBuilder::flush_deletes` would
+//! have written it.
 
 use super::super::columns::Columns;
 use super::super::meta::ValueMeta;
@@ -28,19 +17,11 @@ use crate::storage::{RawColumn, RawColumns};
 use std::ops::Range;
 
 impl OpSet {
-    /// Cut the rows `clock` covers out of this fragment, which the
-    /// document already has.
+    /// Cut the rows `clock` covers out of this fragment.
     ///
-    /// `raw`/`data` are the change set's own op columns — the source of the
-    /// pred and hint columns, which are not part of an op set. Returns
-    /// them rebuilt for the rows that remain: every dropped row takes
-    /// its preds with it and some kept rows gain one, so they are
-    /// re-encoded rather than edited (they are the two smallest columns
-    /// a fragment has, and usually empty).
-    ///
-    /// `actor_map` maps this change set's actor indexes to the document's;
-    /// the columns stay in change set space, so it is only consulted to ask
-    /// the clock about a row.
+    /// `raw`/`data` are the change set's op columns, read for their pred
+    /// and hint columns; returns those rebuilt for the rows that remain.
+    /// `actor_map` maps the change set's actor indexes to the document's.
     pub(crate) fn drop_covered(
         &mut self,
         raw: &RawColumns<Uncompressed>,
@@ -48,19 +29,14 @@ impl OpSet {
         clock: &Clock,
         actor_map: &[usize],
     ) -> PredCols {
-        // the clock in the fragment's own actor space: an id is covered
-        // exactly when its counter has been reached
         let covered: Vec<u64> = actor_map.iter().map(|&a| clock.max_op(a)).collect();
         let plan = Plan::build(&self.cols, PredSrc::new(raw, data), &covered);
         plan.apply(&mut self.cols)
     }
 
-    /// This fragment's op columns as a change set's, for the streaming read
-    /// the manifold makes ([`crate::storage::change_set::ManifoldOps`]) — the op
-    /// columns plus the pred and hint columns it holds separately.
-    ///
-    /// Only that reader consumes the result, and it looks columns up by
-    /// spec, so the appended columns need no place in the spec order.
+    /// This fragment's op columns plus `preds`, in change set form for
+    /// [`crate::storage::change_set::ManifoldOps`], which tolerates the
+    /// appended columns being out of spec order.
     pub(crate) fn export_change_set(&self, preds: PredCols) -> (RawColumns<Uncompressed>, Vec<u8>) {
         let (raw, mut data) = self.cols.export();
         let extra = preds.save_to(&mut data);
@@ -68,11 +44,8 @@ impl OpSet {
     }
 }
 
-/// An op id as the fragment stores it: change set actor space, which is
-/// where every comparison and every write in this pass happens.
-///
-/// Ordered as an [`crate::types::OpId`] is — by counter, then actor —
-/// so a group's synthesized deletes come out in a stable order.
+/// An op id in the change set's actor space, ordered like
+/// [`crate::types::OpId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct RawId {
     ctr: u64,
@@ -85,19 +58,14 @@ impl RawId {
     }
 }
 
-/// The register a walked row belongs to: its object and its element or
-/// map key, an insert naming the element it creates.
 #[derive(Clone, Copy, PartialEq)]
 struct Register<'a> {
     obj: (Option<ActorIdx>, Option<u32>),
     key: (Option<ActorIdx>, Option<u32>, Option<&'a str>),
 }
 
-/// A run of rows the walk drops, with the sub-column spans it takes
-/// with it. A skipped member's ops are contiguous, so a change set that is
-/// nearly all present comes out as a handful of runs rather than one
-/// cut per row — the difference between a few cursor writes and
-/// thousands.
+/// Dropped rows with their sub-column spans. Runs rather than rows: a
+/// skipped member's ops are contiguous.
 struct DropRun {
     row: usize,
     len: usize,
@@ -105,30 +73,26 @@ struct DropRun {
     value: Range<usize>,
 }
 
-/// A delete op that lost the row it rode on: its target is being
-/// dropped, so the deletion needs a row of its own, carrying the target
-/// as a pred.
+/// A delete whose target is dropped: it gets its own row at the end of
+/// its register, naming the target as a pred.
 struct NewDelete {
-    /// where the row lands — the end of its register
     row: usize,
     id: RawId,
     obj: (Option<ActorIdx>, Option<u32>),
     key: (Option<ActorIdx>, Option<u32>, Option<String>),
 }
 
-/// What the walk decided, in the columns' original coordinates.
 struct Plan {
     drops: Vec<DropRun>,
     inserts: Vec<NewDelete>,
     preds: PredCols,
-    /// whether the last drop run may still take the next row — false
-    /// once a register has closed with rows to insert at that seam
+    /// false once inserts land at the last run's end: a run must not
+    /// span an insert
     open_run: bool,
 }
 
-/// One row edit, as the column cursors take them: ascending, and an
-/// insert before a drop at the same row — the insert closes the register
-/// the dropped row has already left.
+/// Ascending; an insert sorts before a drop at the same row, since it
+/// closes the register the dropped row has already left.
 enum RowOp<'a> {
     Insert(&'a NewDelete),
     Drop(&'a DropRun),
@@ -144,8 +108,6 @@ impl RowOp<'_> {
 }
 
 impl Plan {
-    /// The walk: every column the fate of a row depends on, read once,
-    /// in step.
     fn build(cols: &Columns, mut src: PredSrc<'_>, covered: &[u64]) -> Self {
         let mut id_actor = cols.id_actor.iter();
         let mut id_ctr = cols.id_ctr.iter();
@@ -166,13 +128,10 @@ impl Plan {
             preds: PredCols::default(),
             open_run: true,
         };
-        // running positions in the sub columns, in original coordinates
-        let mut sub = 0;
-        let mut val = 0;
-        // successors of dropped rows that have not found their own row
-        // yet, as (successor, target). Cleared at every register: a
-        // successor is an op of the same register, so it is either
-        // ahead of the cursor and inside it, or it has no row at all
+        let mut succ_pos = 0;
+        let mut value_pos = 0;
+        // (successor, dropped target). Per register: a successor shares
+        // its target's register, so any still here at its close have no row
         let mut orphans: Vec<(RawId, RawId)> = vec![];
         let mut register: Option<Register<'_>> = None;
 
@@ -189,8 +148,7 @@ impl Plan {
             let kc = key_ctr.next().expect("key ctr");
             let ks = key_str.next().expect("key str");
             let ins = insert.next().expect("insert");
-            // an insert's register is the element it creates, not the
-            // one it is anchored to
+            // an insert's register is the element it creates
             let key = if ins {
                 (Some(id.actor), Some(id.ctr as u32), None)
             } else {
@@ -215,13 +173,8 @@ impl Plan {
                     ctr: u64::from(succ_ctr.next().expect("succ ctr")),
                 };
                 if !dropped {
-                    // a successor of a kept row cannot be covered: the
-                    // document would then hold a change whose ancestor
-                    // it is still missing
                     debug_assert!(!s.covered(covered), "covered successor of a new op");
                 } else if !s.covered(covered) {
-                    // the row that carried this relationship is going,
-                    // so the successor has to carry it instead
                     orphans.push((s, id));
                 }
             }
@@ -230,10 +183,12 @@ impl Plan {
                 for _ in 0..n_pred {
                     src.next_pred();
                 }
-                plan.push_drop(row, sub..sub + n_succ, val..val + n_val);
+                plan.push_drop(
+                    row,
+                    succ_pos..succ_pos + n_succ,
+                    value_pos..value_pos + n_val,
+                );
             } else {
-                // the row keeps its own preds and adopts the dropped
-                // rows it succeeds
                 let adopted = take_orphans(&mut orphans, id);
                 plan.preds.count.append((n_pred + adopted.len()) as u32);
                 for _ in 0..n_pred {
@@ -245,16 +200,13 @@ impl Plan {
                 }
                 plan.preds.hint.append(hint);
             }
-            sub += n_succ;
-            val += n_val;
+            succ_pos += n_succ;
+            value_pos += n_val;
         }
         plan.close_register(register, cols.len(), &mut orphans);
         plan
     }
 
-    /// Extend the open run of dropped rows, or start one. A run never
-    /// spans a row an insert lands on: the cursor would then have to cut
-    /// it in two, which is what `open_run` is holding the door for.
     fn push_drop(&mut self, row: usize, succ: Range<usize>, value: Range<usize>) {
         if self.open_run {
             if let Some(last) = self.drops.last_mut() {
@@ -275,8 +227,6 @@ impl Plan {
         });
     }
 
-    /// Give every orphan left in the closing register a row: it is a
-    /// delete whose target the change set held, and no longer does.
     fn close_register(
         &mut self,
         register: Option<Register<'_>>,
@@ -287,9 +237,7 @@ impl Plan {
             return;
         }
         let register = register.expect("orphans with no register");
-        // by successor: one delete op takes one row however many of the
-        // register's values it deletes. Sorted so the rows land in a
-        // fragment's own order, as the builder's `flush_deletes` does
+        // one row per delete op, in the order `flush_deletes` writes them
         orphans.sort_unstable();
         for group in orphans.chunk_by(|a, b| a.0 == b.0) {
             self.preds.count.append(group.len() as u32);
@@ -312,16 +260,11 @@ impl Plan {
         orphans.clear();
     }
 
-    /// One cursor per column, walking the marks in order.
     fn apply(self, cols: &mut Columns) -> PredCols {
         let ops = self.row_ops();
 
-        // a delete op carries no value, and its row is the only kind
-        // this pass inserts
         let null = ValueMeta::from(&ScalarValue::Null);
 
-        // Each arm gets the value an inserted delete row writes; a
-        // dropped row is a plain delete everywhere.
         macro_rules! edit_rows {
             ($col:expr, $insert:expr) => {{
                 let value = $insert;
@@ -354,8 +297,6 @@ impl Plan {
         edit_rows!(cols.expand, |_: &NewDelete| false);
         edit_rows!(cols.succ_count, |_: &NewDelete| 0);
 
-        // the sub columns: a new delete row has no successors, so only
-        // the dropped rows' spans move
         macro_rules! delete_subs {
             ($col:expr) => {{
                 let mut e = $col.edit();
@@ -367,8 +308,7 @@ impl Plan {
         }
         delete_subs!(cols.succ_actor.identity_mut());
         delete_subs!(cols.succ_ctr);
-        // the value blob has no cursor: splicing back to front keeps
-        // the spans ahead of each cut in their original coordinates
+        // back to front, so the spans still to cut keep their coordinates
         for d in self.drops.iter().rev() {
             if !d.value.is_empty() {
                 cols.value.splice_slice(d.value.start, d.value.len(), &[]);
@@ -379,7 +319,6 @@ impl Plan {
         self.preds
     }
 
-    /// The two mark lists as one ascending stream.
     fn row_ops(&self) -> Vec<RowOp<'_>> {
         let mut ops = Vec::with_capacity(self.drops.len() + self.inserts.len());
         let mut inserts = self.inserts.iter().peekable();
@@ -395,13 +334,11 @@ impl Plan {
     }
 }
 
-/// A free function so elision ties the borrow to the row, which a
-/// closure's would not.
+/// Not a closure: elision ties the borrow to the row.
 fn key_str(n: &NewDelete) -> Option<&str> {
     n.key.2.as_deref()
 }
 
-/// The orphans naming `id`, taken out of the list.
 fn take_orphans(orphans: &mut Vec<(RawId, RawId)>, id: RawId) -> Vec<RawId> {
     let mut taken = vec![];
     orphans.retain(|(s, target)| {
@@ -415,7 +352,6 @@ fn take_orphans(orphans: &mut Vec<(RawId, RawId)>, id: RawId) -> Vec<RawId> {
     taken
 }
 
-/// A fragment's pred and hint columns, being read.
 struct PredSrc<'a> {
     count: hexane::Decoder<'a, Option<u64>>,
     actor: hexane::Decoder<'a, Option<ActorIdx>>,
@@ -444,8 +380,7 @@ impl<'a> PredSrc<'a> {
         s
     }
 
-    /// An elided column decodes as empty, which is what an absent one
-    /// means: no preds, no hint.
+    /// An absent column decodes as empty: no preds.
     fn next_count(&mut self) -> usize {
         self.count.next().flatten().unwrap_or(0) as usize
     }
@@ -462,7 +397,7 @@ impl<'a> PredSrc<'a> {
     }
 }
 
-/// A fragment's pred and hint columns, being written.
+/// A fragment's rebuilt pred and hint columns.
 #[derive(Default)]
 pub(crate) struct PredCols {
     count: hexane::Encoder<'static, u32>,
@@ -477,9 +412,7 @@ impl PredCols {
         self.ctr.append(id.ctr as i64);
     }
 
-    /// Write the columns into `data`, as the change set writer does — a
-    /// fragment with no preds (or no hints) drops the column rather
-    /// than carrying a run of defaults.
+    /// Like the change set writer, omits a column of only defaults.
     fn save_to(self, data: &mut Vec<u8>) -> Vec<RawColumn<Uncompressed>> {
         [
             (spec::PRED_COUNT, self.count.save_to_unless(data, 0)),

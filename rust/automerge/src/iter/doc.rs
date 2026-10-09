@@ -2,13 +2,13 @@ use super::{
     ListDiff, ListDiffItem, ListRange, ListRangeItem, MapDiff, MapDiffItem, MapRange, MapRangeItem,
     Span, SpanDiff, SpanInternal, SpansDiff, SpansInternal,
 };
+use crate::automerge::Automerge;
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
 use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, ObjMeta, ObjType, Prop};
-use crate::Automerge;
 use crate::TextEncoding;
 
 use std::collections::BTreeMap;
@@ -39,7 +39,11 @@ impl<'a> DocIter<'a> {
         self.inner.span_iter.clock()
     }
 
-    pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, clock: Option<Clock>) -> Self {
+    pub(crate) fn new<H: crate::hash_retention::HashRetention>(
+        doc: &'a Automerge<H>,
+        obj: ObjMeta,
+        clock: Option<Clock>,
+    ) -> Self {
         let obj_export = Arc::new(doc.ops().id_to_exid(obj.id.0));
         let op_set = Some(doc.ops());
         Self {
@@ -76,8 +80,8 @@ pub(crate) struct DiffIter<'a> {
 }
 
 impl<'a> DiffIter<'a> {
-    pub(crate) fn log(
-        doc: &'a Automerge,
+    pub(crate) fn log<H: crate::hash_retention::HashRetention>(
+        doc: &'a Automerge<H>,
         obj: ObjMeta,
         clock: ClockRange,
         log: &mut PatchAccumulator,
@@ -91,8 +95,8 @@ impl<'a> DiffIter<'a> {
         iter.path_map
     }
 
-    pub(crate) fn new(
-        doc: &'a Automerge,
+    pub(crate) fn new<H: crate::hash_retention::HashRetention>(
+        doc: &'a Automerge<H>,
         obj: ObjMeta,
         clock: ClockRange,
         recursive: bool,
@@ -175,7 +179,11 @@ impl<'a> DiffIter<'a> {
 }
 
 impl<'a> DocIterInternal<'a> {
-    fn new(doc: &'a Automerge, obj: ObjMeta, clock: Option<Clock>) -> Self {
+    fn new<H: crate::hash_retention::HashRetention>(
+        doc: &'a Automerge<H>,
+        obj: ObjMeta,
+        clock: Option<Clock>,
+    ) -> Self {
         let op_set = doc.ops();
         let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
@@ -525,8 +533,10 @@ impl<'a> DocItem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::Transactable;
-    use crate::{Automerge, ObjType, ReadDoc, ROOT};
+    use crate::automerge::Automerge;
+    use crate::read::ReadDoc;
+    use crate::tx::Transactable;
+    use crate::{ObjType, ROOT};
 
     #[test]
     fn doc_iter() {
