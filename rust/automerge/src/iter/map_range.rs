@@ -72,6 +72,16 @@ impl<'a> MapDiffItem<'a> {
                 self.conflict,
                 self.expose,
             ),
+            // a counter both incremented and newly conflicted is put whole:
+            // the conflict flag only travels on a put
+            Diff::Same if self.inc != 0 && self.conflict => log.put_map(
+                obj,
+                self.key,
+                self.value.hydrate(encoding),
+                self.id,
+                true,
+                false,
+            ),
             Diff::Same => {
                 if self.inc != 0 {
                     log.increment_map(obj, self.key, self.inc, self.id);

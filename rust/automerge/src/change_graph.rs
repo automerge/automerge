@@ -5,6 +5,7 @@ use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Add;
 use std::ops::{Range, RangeBounds};
 
+use crate::actor::{ActorIndexed, ActorRefs, ActorRemoval, ActorShift, ActorTable};
 use crate::author::Authors;
 use crate::change_id::ChangeId;
 use crate::hash_retention::{Full, HashRetention, Retained};
@@ -25,10 +26,10 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct ChangeGraph<H: HashRetention = Retained> {
     hashes: H,
-    actors: Vec<ActorIdx>,
+    actors: ActorRefs<Vec<ActorIdx>>,
     /// `dep_range[n]` is the `(offset, count)` of node `n`'s parents within
     /// `dep_target`. Plain `Vec`s, not hexane columns: `parents()` is hot in
     /// the clock-cache ancestry walks.
@@ -45,7 +46,7 @@ pub struct ChangeGraph<H: HashRetention = Retained> {
     heads: BTreeSet<ChangeHash>,
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
     clock_cache: HashMap<NodeIdx, SeqClock>,
-    seq_index: Vec<Vec<NodeIdx>>,
+    seq_index: ActorIndexed<Vec<NodeIdx>>,
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
     gc_mode: crate::automerge::GcMode,
@@ -185,13 +186,13 @@ const SWEEP_NS_PER_OP: u64 = 400;
 const CARRY_NS_PER_OP: u64 = 760;
 
 impl<H: HashRetention> ChangeGraph<H> {
-    pub(crate) fn new(num_actors: usize) -> Self {
+    pub(crate) fn new(actors: &ActorTable) -> Self {
         Self {
             gc_mode: crate::automerge::GcMode::default(),
             gc_owed: false,
             nodes_by_hash: HashMap::new(),
             hashes: H::default(),
-            actors: Vec::new(),
+            actors: ActorRefs::default(),
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: hexane::Column::new(),
@@ -204,9 +205,9 @@ impl<H: HashRetention> ChangeGraph<H> {
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
-            seq_index: vec![vec![]; num_actors],
+            seq_index: ActorIndexed::new(actors),
             fragments: vec![],
-            fragment_top: SeqClock::new(num_actors),
+            fragment_top: SeqClock::new(actors),
         }
     }
 
@@ -242,8 +243,8 @@ impl<H: HashRetention> ChangeGraph<H> {
         })
     }
 
-    pub(crate) fn num_actors(&self) -> usize {
-        self.seq_index.len()
+    pub(crate) fn empty_clock(&self) -> SeqClock {
+        self.fragment_top.empty_like()
     }
 
     /// Ascending, which is topological order.
@@ -251,41 +252,32 @@ impl<H: HashRetention> ChangeGraph<H> {
         (0..self.len() as u32).map(NodeIdx).collect()
     }
 
-    pub(crate) fn insert_actor(&mut self, idx: usize) {
-        if self.seq_index.len() != idx {
-            for actor_index in &mut self.actors {
-                if actor_index.0 >= idx as u32 {
-                    actor_index.0 += 1;
-                }
-            }
-        }
+    pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
+        self.actors.shift_actors(shift);
         for clock in self.clock_cache.values_mut() {
-            clock.rewrite_with_new_actor(idx)
+            clock.shift_actor(shift)
         }
         for f in &mut self.fragments {
-            f.clock.rewrite_with_new_actor(idx)
+            f.clock.shift_actor(shift)
         }
-        self.fragment_top.rewrite_with_new_actor(idx);
-        self.seq_index.insert(idx, vec![]);
+        self.fragment_top.shift_actor(shift);
+        self.seq_index.insert(shift, vec![]);
     }
 
-    pub(crate) fn remove_actor(&mut self, idx: usize) {
-        for actor_index in &mut self.actors {
-            if actor_index.0 > idx as u32 {
-                actor_index.0 -= 1;
-            }
-        }
-        if self.seq_index.get(idx).is_some() {
-            assert!(self.seq_index[idx].is_empty());
-            self.seq_index.remove(idx);
-        }
-        for clock in &mut self.clock_cache.values_mut() {
-            clock.remove_actor(idx)
+    /// The actor must have no changes in the graph.
+    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
+        self.actors
+            .remove_actor(removal)
+            .expect("removed actor still has changes in the graph");
+        let removed = self.seq_index.remove(removal);
+        assert!(removed.is_empty());
+        for clock in self.clock_cache.values_mut() {
+            clock.remove_actor(removal)
         }
         for fragment in &mut self.fragments {
-            fragment.clock.remove_actor(idx)
+            fragment.clock.remove_actor(removal)
         }
-        self.fragment_top.remove_actor(idx);
+        self.fragment_top.remove_actor(removal);
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -328,15 +320,12 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     pub(crate) fn current_clock(&self) -> Clock {
-        Clock(
-            (0..self.seq_index.len())
-                .map(|a| self.max_op_for_actor(a) as u32)
-                .collect(),
-        )
+        self.fragment_top
+            .clock_for_each_actor(|a| self.max_op_for_actor(a) as u32)
     }
 
     pub(crate) fn current_seq_clock(&self) -> SeqClock {
-        let mut clock = SeqClock::new(self.num_actors());
+        let mut clock = self.empty_clock();
         for (a, seqs) in self.seq_index.iter().enumerate() {
             clock.include(a, u32::try_from(seqs.len()).ok().filter(|n| *n > 0));
         }
@@ -636,7 +625,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         &self,
         hash: &ChangeHash,
         id: &ChangeId,
-        actors: &[crate::ActorId],
+        actors: &ActorTable,
     ) -> ApplyLookup {
         if self.nodes_by_hash.contains_key(hash) {
             return ApplyLookup::Present;
@@ -701,7 +690,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     fn member_authors<'b>(
         members: impl Iterator<Item = (usize, u64, &'b [u8])>,
         authors: &Authors,
-        actor_ids: &[crate::ActorId],
+        actor_ids: &ActorTable,
     ) -> Result<Vec<(usize, crate::Author<'b>)>, AutomergeError> {
         let mut claimed = HashSet::new();
         let mut assigned = Vec::new();
@@ -1066,7 +1055,7 @@ impl<H: HashRetention> ChangeGraph<H> {
 
             assert!(actor < self.seq_index.len());
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
-            self.seq_index[actor].push(node_idx);
+            self.seq_index.as_mut_slice()[actor].push(node_idx);
 
             let ResolvedHashes { nodes, missing } = self.resolve_hashes(change.deps().iter())?;
             if !missing.is_empty() {
@@ -1089,11 +1078,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         Ok(())
     }
 
-    pub(crate) fn get_fragment(
-        &self,
-        head: ChangeHash,
-        actors: &[crate::ActorId],
-    ) -> Option<Fragment> {
+    pub(crate) fn get_fragment(&self, head: ChangeHash, actors: &ActorTable) -> Option<Fragment> {
         let n = self.nodes_by_hash.get(&head).copied()?;
         if head.fragment_level() == 0 {
             self.loose_commit(n, actors)
@@ -1107,22 +1092,18 @@ impl<H: HashRetention> ChangeGraph<H> {
         }
     }
 
-    pub(crate) fn change_id(&self, n: NodeIdx, actors: &[crate::ActorId]) -> ChangeId {
+    pub(crate) fn change_id(&self, n: NodeIdx, actors: &ActorTable) -> ChangeId {
         let i = n.0 as usize;
         let actor_idx = usize::from(self.actors[i]);
         ChangeId::from_doc_seq(self.seq[i] as u64, actors[actor_idx].clone(), actor_idx)
     }
 
-    pub(crate) fn node_for_change_id(
-        &self,
-        id: &ChangeId,
-        actors: &[crate::ActorId],
-    ) -> Option<NodeIdx> {
+    pub(crate) fn node_for_change_id(&self, id: &ChangeId, actors: &ActorTable) -> Option<NodeIdx> {
         let hint = id.actor_idx_hint();
         let actor_idx = if actors.get(hint) == Some(id.actor()) {
             hint
         } else {
-            actors.binary_search(id.actor()).ok()?
+            actors.lookup(id.actor())?
         };
         self.seq_index
             .get(actor_idx)?
@@ -1134,7 +1115,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     pub(crate) fn hash_for_change_id(
         &self,
         id: &ChangeId,
-        actors: &[crate::ActorId],
+        actors: &ActorTable,
     ) -> Option<ChangeHash> {
         self.hashes.get(self.node_for_change_id(id, actors)?)
     }
@@ -1145,7 +1126,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     pub(crate) fn get_hash_for_change_id(
         &self,
         id: &ChangeId,
-        actors: &[crate::ActorId],
+        actors: &ActorTable,
     ) -> Result<ChangeHash, AutomergeError> {
         let node = self
             .node_for_change_id(id, actors)
@@ -1155,11 +1136,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             .map_err(|_| AutomergeError::AuditModeRequired)
     }
 
-    pub(crate) fn opid_to_change_id(
-        &self,
-        id: OpId,
-        actors: &[crate::ActorId],
-    ) -> Option<ChangeId> {
+    pub(crate) fn opid_to_change_id(&self, id: OpId, actors: &ActorTable) -> Option<ChangeId> {
         let node = self.opid_to_node(id)?;
         Some(self.change_id(node, actors))
     }
@@ -1167,7 +1144,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     pub(crate) fn change_id_for_hash(
         &self,
         hash: &ChangeHash,
-        actors: &[crate::ActorId],
+        actors: &ActorTable,
     ) -> Result<Option<ChangeId>, UncheckedHashes> {
         let node = match self.lookup_hash(hash) {
             HashLookup::Found(n) => n,
@@ -1182,7 +1159,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// Sorted, so documents with equal heads give identical lists.
-    pub(crate) fn head_change_ids(&self, actors: &[crate::ActorId]) -> Vec<ChangeId> {
+    pub(crate) fn head_change_ids(&self, actors: &ActorTable) -> Vec<ChangeId> {
         let mut ids: Vec<ChangeId> = self
             .heads
             .iter()
@@ -1206,7 +1183,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// A loose commit as its own single-member fragment.
-    fn loose_commit(&self, n: NodeIdx, actors: &[crate::ActorId]) -> Option<Fragment> {
+    fn loose_commit(&self, n: NodeIdx, actors: &ActorTable) -> Option<Fragment> {
         let head = self.hashes.get(n)?;
         assert_eq!(head.fragment_level(), 0);
         let boundary = self
@@ -1216,7 +1193,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         Some(self.export_fragment(head, 0, boundary, &[n], actors))
     }
 
-    fn cached_fragment(&self, f: &FragmentNode, actors: &[crate::ActorId]) -> Fragment {
+    fn cached_fragment(&self, f: &FragmentNode, actors: &ActorTable) -> Fragment {
         let expect = "fragment index requires the fragment-hashes state";
         let head = self.hashes.get(f.head).expect(expect);
         let boundary = f
@@ -1235,7 +1212,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         level: usize,
         boundary: Vec<ChangeHash>,
         nodes: &[NodeIdx],
-        actors: &[crate::ActorId],
+        actors: &ActorTable,
     ) -> Fragment {
         // interior hashes may be freed; checkpoint hashes never are
         let checkpoints = nodes
@@ -1259,7 +1236,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         &self,
         heads: &[ChangeHash],
         levels: R,
-        actors: &[crate::ActorId],
+        actors: &ActorTable,
     ) -> Vec<Fragment> {
         let mut out: Vec<Fragment> = self
             .fragments
@@ -1278,7 +1255,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// The loose commits above the fragment index, oldest first.
-    fn loose_commits(&self, heads: &[ChangeHash], actors: &[crate::ActorId]) -> Vec<Fragment> {
+    fn loose_commits(&self, heads: &[ChangeHash], actors: &ActorTable) -> Vec<Fragment> {
         let nodes = heads
             .iter()
             .filter(|h| h.fragment_level() == 0)
@@ -1343,7 +1320,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     pub(crate) fn cache_fragments(&mut self) {
         // no hash GC: a fresh load already holds exactly the retained set
         self.fragments.clear();
-        self.fragment_top = SeqClock::new(self.num_actors());
+        self.fragment_top = self.empty_clock();
         for n in 0..self.hashes.len() {
             self.cache_fragment_inner(NodeIdx(n as u32));
         }
@@ -1477,7 +1454,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
-        let mut clock = SeqClock::new(self.num_actors());
+        let mut clock = self.empty_clock();
         let mut to_visit = BTreeSet::from([node_idx]);
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, CACHE_STEP as usize * 2);
@@ -1550,16 +1527,13 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     pub(crate) fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
-        self.calculate_clock(nodes)
-            .iter()
-            .map(|(actor, seq)| {
-                self.seq_index
-                    .get(actor)
-                    .and_then(|v| v.get(seq?.get() as usize - 1))
-                    .and_then(|i| self.max_ops.get(i.0 as usize))
-                    .copied()
-            })
-            .collect()
+        self.calculate_clock(nodes).map_to_clock(|actor, seq| {
+            self.seq_index
+                .get(actor)
+                .and_then(|v| v.get(seq.get() as usize - 1))
+                .and_then(|i| self.max_ops.get(i.0 as usize))
+                .copied()
+        })
     }
 
     pub(crate) fn seq_clock_for_heads(
@@ -1575,7 +1549,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> SeqClock {
-        let mut clock = SeqClock::new(self.num_actors());
+        let mut clock = self.empty_clock();
         let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, usize::MAX);
@@ -1596,7 +1570,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         // The merge of every cached clock absorbed so far: a node it covers
         // is already accounted for, subtree and all. Without this pruning the
         // walk fans out exponentially on merge-heavy graphs.
-        let mut covered = SeqClock::new(self.num_actors());
+        let mut covered = self.empty_clock();
 
         while let Some(idx) = to_visit.pop_last() {
             assert!(!visited.contains(&idx));
@@ -1741,9 +1715,9 @@ impl<H: HashRetention> ChangeGraph<H> {
             return;
         }
 
-        fn alloc(pool: &mut Vec<SeqClock>, free: &mut Vec<u32>, width: usize) -> u32 {
+        fn alloc(pool: &mut Vec<SeqClock>, free: &mut Vec<u32>, like: &SeqClock) -> u32 {
             free.pop().unwrap_or_else(|| {
-                pool.push(SeqClock::new(width));
+                pool.push(like.empty_like());
                 (pool.len() - 1) as u32
             })
         }
@@ -1759,7 +1733,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             }
         }
 
-        let num_actors = self.num_actors();
+        let template = self.empty_clock();
 
         const DEAD: u32 = u32::MAX;
         const PINNED: u32 = u32::MAX;
@@ -1808,9 +1782,9 @@ impl<H: HashRetention> ChangeGraph<H> {
                         slot_of[first] = DEAD;
                         first_slot
                     } else {
-                        let s = alloc(&mut pool, &mut free, num_actors);
+                        let s = alloc(&mut pool, &mut free, &template);
                         let (dst, src) = two_rows(&mut pool, s as usize, first_slot as usize);
-                        dst.0.copy_from_slice(&src.0);
+                        dst.copy_from(src);
                         s
                     };
                     for &p in rest {
@@ -1824,8 +1798,8 @@ impl<H: HashRetention> ChangeGraph<H> {
                     slot
                 }
                 None => {
-                    let s = alloc(&mut pool, &mut free, num_actors);
-                    pool[s as usize].0.fill(None);
+                    let s = alloc(&mut pool, &mut free, &template);
+                    pool[s as usize].clear();
                     s
                 }
             };
@@ -1902,7 +1876,7 @@ impl ChangeGraph<Retained> {
         &mut self,
         members: Vec<ChangeSetMember<'_>>,
         authors: &mut Authors,
-        actor_ids: &[crate::ActorId],
+        actor_ids: &ActorTable,
     ) -> Result<(), AutomergeError> {
         let new_authors: Vec<_> = Self::member_authors(
             members.iter().map(|m| (m.actor, m.seq, m.extra.as_ref())),
@@ -1937,7 +1911,7 @@ impl ChangeGraph<Retained> {
 
             assert!(m.actor < self.seq_index.len());
             assert_eq!(self.seq_index[m.actor].len() + 1, m.seq as usize);
-            self.seq_index[m.actor].push(node_idx);
+            self.seq_index.as_mut_slice()[m.actor].push(node_idx);
 
             parent_buf.clear();
             parent_buf.extend(m.deps.iter().map(|d| match d {
@@ -1974,7 +1948,7 @@ impl ChangeGraph<Retained> {
         actor_map: &[usize],
         ext_nodes: &[NodeIdx],
         authors: &mut Authors,
-        actor_ids: &[crate::ActorId],
+        actor_ids: &ActorTable,
     ) -> Result<(), AutomergeError> {
         let bad = |s: &'static str| AutomergeError::MalformedChangeSet(s);
         let base = NodeIdx(self.len() as u32);
@@ -2088,7 +2062,7 @@ impl ChangeGraph<Retained> {
                 self.seq_index[actor].len() + 1,
                 member_seqs[i].get() as usize
             );
-            self.seq_index[actor].push(base + i);
+            self.seq_index.as_mut_slice()[actor].push(base + i);
         }
 
         self.cache_clocks_from(base.0 as usize);
@@ -2126,10 +2100,6 @@ impl ChangeGraph<Full> {
 impl ChangeGraphCols {
     pub(crate) fn iter(&self) -> ChangeIter<'_> {
         self.graph.iter()
-    }
-
-    pub(crate) fn num_actors(&self) -> usize {
-        self.graph.num_actors()
     }
 
     pub(crate) fn finalize(self, changes: &[Change], authors: &mut Authors) -> ChangeGraph<Full> {
@@ -2213,10 +2183,10 @@ impl ChangeGraphCols {
         Ok(graph)
     }
 
-    pub(crate) fn load(doc: &Document<'_>) -> Result<Self, LoadError> {
+    pub(crate) fn load(doc: &Document<'_>, actor_table: &ActorTable) -> Result<Self, LoadError> {
         use ids::*;
 
-        let num_actors = doc.actors().len();
+        let num_actors = actor_table.len();
         let meta = doc.change_meta();
         let bytes = doc.change_bytes();
 
@@ -2231,7 +2201,8 @@ impl ChangeGraphCols {
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
-        let actors: Vec<ActorIdx> = hexane::decoder::<ActorIdx>(actor_bytes).collect();
+        let actors: ActorRefs<Vec<ActorIdx>> =
+            ActorRefs(hexane::decoder::<ActorIdx>(actor_bytes).collect());
         let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::new(max_op_bytes).collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
         let seq: Vec<u32> = hexane::DeltaDecoder::<u32>::new(seq_bytes).collect();
@@ -2265,10 +2236,10 @@ impl ChangeGraphCols {
             return Err(LoadError::InvalidColumnLength(MESSAGE_COL_SPEC));
         }
 
-        let mut seq_index = vec![vec![]; num_actors];
+        let mut seq_index: ActorIndexed<Vec<NodeIdx>> = ActorIndexed::new(actor_table);
         for (i, actor) in actors.iter().enumerate() {
             let actor = actor.0 as usize;
-            seq_index[actor].push(NodeIdx(i as u32));
+            seq_index.as_mut_slice()[actor].push(NodeIdx(i as u32));
         }
 
         let mut dep_range: Vec<(u32, u32)> = Vec::with_capacity(len);
@@ -2318,7 +2289,7 @@ impl ChangeGraphCols {
         let hashes = Retained::default();
         let nodes_by_hash = HashMap::new();
         let fragments = vec![];
-        let fragment_top = SeqClock::new(num_actors);
+        let fragment_top = SeqClock::new(actor_table);
 
         Ok(ChangeGraphCols {
             graph: ChangeGraph {
@@ -2432,7 +2403,7 @@ mod tests {
         let graph = builder.build();
 
         // todo - why 4?
-        let mut expected_clock = SeqClock::new(3);
+        let mut expected_clock = SeqClock::new(&builder.actors);
         expected_clock.include(builder.index(&actor1), Some(2));
         expected_clock.include(builder.index(&actor2), Some(1));
         expected_clock.include(builder.index(&actor3), Some(1));
@@ -2465,7 +2436,7 @@ mod tests {
     }
 
     struct TestGraphBuilder {
-        actors: Vec<ActorId>,
+        actors: ActorTable,
         changes: Vec<Change>,
         graph: ChangeGraph<Full>,
         seqs_by_actor: BTreeMap<ActorId, u64>,
@@ -2475,9 +2446,10 @@ mod tests {
     impl TestGraphBuilder {
         fn new() -> Self {
             // random hashes can form fragments, which would free hashes the tests resolve
-            let graph = ChangeGraph::<Full>::new(0);
+            let actors = ActorTable::new();
+            let graph = ChangeGraph::<Full>::new(&actors);
             TestGraphBuilder {
-                actors: Vec::new(),
+                actors,
                 changes: Vec::new(),
                 graph,
                 seqs_by_actor: BTreeMap::new(),
@@ -2488,13 +2460,15 @@ mod tests {
         fn actor(&mut self) -> ActorId {
             use rand::RngExt;
             let actor = ActorId::from(self.rng.random::<[u8; 16]>().to_vec());
-            self.graph.insert_actor(self.actors.len());
-            self.actors.push(actor.clone());
+            match self.actors.insert(actor.clone()) {
+                crate::actor::ActorInsert::Inserted(shift) => self.graph.insert_actor(&shift),
+                crate::actor::ActorInsert::Existing(_) => panic!("random actor already present"),
+            }
             actor
         }
 
         fn index(&self, actor: &ActorId) -> usize {
-            self.actors.iter().position(|a| a == actor).unwrap()
+            self.actors.lookup(actor).unwrap()
         }
 
         /// Create a change with `num_new_ops` and `parents` for `actor`
@@ -2507,7 +2481,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let osd = OpSet::from_actors(self.actors.clone(), TextEncoding::platform_default());
+            let osd = OpSet::from_actors(self.actors.to_vec(), TextEncoding::platform_default());
 
             let start_op = parents
                 .iter()
@@ -2556,15 +2530,15 @@ mod tests {
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
             self.graph
-                .add_change(&change, actor_idx, &mut Authors::default())
+                .add_change(&change, actor_idx, &mut Authors::new(&self.actors))
                 .unwrap();
             self.changes.push(change);
             hash
         }
 
         fn build(&self) -> ChangeGraph<Full> {
-            let mut graph = ChangeGraph::<Full>::new(self.actors.len());
-            let mut authors = Authors::with_actors(self.actors.len());
+            let mut graph = ChangeGraph::<Full>::new(&self.actors);
+            let mut authors = Authors::new(&self.actors);
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
                 graph.add_change(change, actor_idx, &mut authors).unwrap();
@@ -2593,7 +2567,7 @@ mod tests {
 
     #[test]
     fn member_authors_rejects_a_second_author() {
-        let actors = vec![ActorId::from(&[1][..]), ActorId::from(&[2][..])];
+        let actors = ActorTable::from_actors([ActorId::from(&[1][..]), ActorId::from(&[2][..])]);
         let x = crate::Author::from(vec![1, 1]);
         let y = crate::Author::from(vec![2, 2]);
         let footer = |a: &crate::Author<'static>| {

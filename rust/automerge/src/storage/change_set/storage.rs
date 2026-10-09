@@ -268,7 +268,8 @@ impl ChangeSetStorage<'_, Verified> {
     /// row of their own.
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
         let change_meta = self.changes()?.to_vec();
-        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &self.actors);
+        let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
+        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &actors);
 
         let mut rows: HashSet<OpId> = HashSet::new();
         let mut inverted: HashMap<OpId, Vec<OpId>> = HashMap::new();
@@ -315,7 +316,7 @@ impl ChangeSetStorage<'_, Verified> {
         }
 
         let change_set = collector
-            .decode_change_set(&self.actors, &self.deps)
+            .decode_change_set(&actors, &self.deps)
             .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
         Ok(change_set)
     }

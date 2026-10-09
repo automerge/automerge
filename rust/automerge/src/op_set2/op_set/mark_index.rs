@@ -1,3 +1,4 @@
+use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
@@ -53,12 +54,21 @@ impl MarkIdx {
             Self::Start(OpId::new(ctr, actor))
         }
     }
+}
 
-    pub(super) fn with_new_actor(self, idx: usize) -> Self {
+impl HasActorIndices for MarkIdx {
+    fn shifted(self, shift: &ActorShift) -> Self {
         match self {
-            Self::Start(id) => Self::Start(id.with_new_actor(idx)),
-            Self::End(id) => Self::End(id.with_new_actor(idx)),
+            Self::Start(id) => Self::Start(id.shifted(shift)),
+            Self::End(id) => Self::End(id.shifted(shift)),
         }
+    }
+
+    fn removed(self, removal: &ActorRemoval) -> Option<Self> {
+        Some(match self {
+            Self::Start(id) => Self::Start(id.removed(removal)?),
+            Self::End(id) => Self::End(id.removed(removal)?),
+        })
     }
 }
 
@@ -301,14 +311,14 @@ impl PrefixValue for MarkIdx {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MarkIndexColumn {
     data: PrefixColumn<Option<MarkIdx>>,
-    cache: HashMap<OpId, MarkData<'static>>,
+    cache: ActorRefs<HashMap<OpId, MarkData<'static>>>,
 }
 
 impl MarkIndexColumn {
     pub(crate) fn new() -> Self {
         Self {
             data: PrefixColumn::new(),
-            cache: HashMap::new(),
+            cache: ActorRefs::default(),
         }
     }
 
@@ -346,13 +356,9 @@ impl MarkIndexColumn {
         self.cache.get(id)
     }
 
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        self.remap_values(|m| m.with_new_actor(idx));
-        self.cache = self
-            .cache
-            .iter()
-            .map(|(key, val)| (key.with_new_actor(idx), val.clone()))
-            .collect();
+    pub(crate) fn shift(&mut self, shift: &ActorShift) {
+        self.remap_values(|m| m.shifted(shift));
+        self.cache.shift_actors(shift);
     }
 
     /// Map every actor index through `map`.
@@ -363,11 +369,12 @@ impl MarkIndexColumn {
             MarkIdx::End(id) => MarkIdx::End(remap_id(&id)),
         };
         self.remap_values(remap_idx);
-        self.cache = self
-            .cache
-            .iter()
-            .map(|(key, val)| (remap_id(key), val.clone()))
-            .collect();
+        self.cache = ActorRefs(
+            self.cache
+                .iter()
+                .map(|(key, val)| (remap_id(key), val.clone()))
+                .collect(),
+        );
     }
 
     /// Rebuild the data column with `f` applied to every mark idx —
@@ -392,14 +399,17 @@ impl MarkIndexColumn {
         R: IntoIterator<Item = hexane::Splice>,
     {
         self.data.copy_ranges(other.data, splices);
-        self.cache.extend(other.cache);
+        self.cache.extend(other.cache.0);
     }
 
     pub(crate) fn from_parts(
         data: PrefixColumn<Option<MarkIdx>>,
         cache: HashMap<OpId, MarkData<'static>>,
     ) -> Self {
-        Self { data, cache }
+        Self {
+            data,
+            cache: ActorRefs(cache),
+        }
     }
 
     #[cfg(test)]

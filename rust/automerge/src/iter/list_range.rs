@@ -233,6 +233,7 @@ impl<'a> Iterator for ListDiff<'a> {
                 // Deleting the winning value exposes `last`, so its put
                 // patch must carry the remaining register's conflict state.
                 last.state.conflict = state.num_new > 1;
+                last.state.num_old = state.num_old;
                 self.materialize(last)
             } else {
                 let mut pending = PendingListDiffItem {
@@ -298,6 +299,11 @@ impl<'a> ListDiffItem<'a> {
                 } else {
                     log.insert_and_maybe_expose(obj, index, value, id, conflict, expose);
                 }
+            }
+            // a counter both incremented and newly conflicted is put whole:
+            // the conflict flag only travels on a put
+            Diff::Same if inc != 0 && conflict => {
+                log.put_seq(obj, index, value.hydrate(encoding), id, true, false)
             }
             Diff::Same => {
                 if inc != 0 {

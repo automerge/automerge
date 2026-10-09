@@ -15,6 +15,7 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
+use crate::actor::{ActorInsert, ActorRemoval, ActorShift, HasActorIndices};
 use crate::change_graph::{ChangeGraph, ChangeSetDep, ChangeSetMember};
 use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -49,21 +50,18 @@ pub(crate) enum Actor {
 }
 
 impl Actor {
-    fn remove_actor(&mut self, index: usize, actors: &[ActorId]) {
+    fn remove_actor(&mut self, removal: &ActorRemoval, removed: ActorId) {
         if let Actor::Cached(idx) = self {
-            match (*idx).cmp(&index) {
-                Ordering::Equal => *self = Actor::Unused(actors[index].clone()),
-                Ordering::Greater => *idx -= 1,
-                Ordering::Less => (),
+            match idx.removed(removal) {
+                Some(new_idx) => *idx = new_idx,
+                None => *self = Actor::Unused(removed),
             }
         }
     }
 
-    fn rewrite_with_new_actor(&mut self, index: usize) {
+    fn shift(&mut self, shift: &ActorShift) {
         if let Actor::Cached(idx) = self {
-            if *idx >= index {
-                *idx += 1;
-            }
+            *idx = idx.shifted(shift);
         }
     }
 }
@@ -291,11 +289,12 @@ pub struct Automerge<H: HashRetention = Retained> {
 
 impl<H: HashRetention> Automerge<H> {
     pub(crate) fn empty(encoding: TextEncoding) -> Self {
+        let ops = OpSet::new(encoding);
         Automerge {
             queue: ChangeQueue::new(),
-            change_graph: ChangeGraph::new(0),
-            authors: Authors::with_actors(0),
-            ops: OpSet::new(encoding),
+            change_graph: ChangeGraph::new(&ops.actors),
+            authors: Authors::new(&ops.actors),
+            ops,
             actor: Actor::Unused(ActorId::random()),
             diff_cursor: Vec::new(),
             author: None,
@@ -380,12 +379,12 @@ impl<H: HashRetention> Automerge<H> {
 
     /// Set the actor id for this document.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
-        match self.ops.actors.binary_search(&actor) {
-            Ok(idx) => {
+        match self.ops.lookup_actor(&actor) {
+            Some(idx) => {
                 self.ensure_actor_tip_hash(idx);
                 self.actor = Actor::Cached(idx)
             }
-            Err(_) => self.actor = Actor::Unused(actor),
+            None => self.actor = Actor::Unused(actor),
         }
         self
     }
@@ -450,7 +449,7 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
-        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        let actor_index = self.ops.lookup_actor(actor)?;
         self.authors.get_author_for_actor(actor_index)
     }
 
@@ -462,11 +461,12 @@ impl<H: HashRetention> Automerge<H> {
         }
     }
 
+    /// The actor must have no changes in the document.
     pub(crate) fn remove_actor(&mut self, actor: usize) {
-        self.actor.remove_actor(actor, &self.ops.actors);
-        self.ops.remove_actor(actor);
-        self.change_graph.remove_actor(actor);
-        self.authors.remove_actor(actor);
+        let (removed, removal) = self.ops.remove_actor(actor);
+        self.actor.remove_actor(&removal, removed);
+        self.change_graph.remove_actor(&removal);
+        self.authors.remove_actor(&removal);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -1275,7 +1275,7 @@ impl<H: HashRetention> Automerge<H> {
             .add_changes(
                 changes
                     .iter()
-                    .map(|c| (c, self.ops.actors.binary_search(c.actor_id()).unwrap())),
+                    .map(|c| (c, self.ops.lookup_actor(c.actor_id()).unwrap())),
                 &mut self.authors,
             )
             .unwrap();
@@ -1284,8 +1284,7 @@ impl<H: HashRetention> Automerge<H> {
     pub(crate) fn update_history(&mut self, change: &Change) {
         let actor_index = self
             .ops
-            .actors
-            .binary_search(change.actor_id())
+            .lookup_actor(change.actor_id())
             .expect("Change's actor not already in the document");
 
         self.change_graph
@@ -1293,60 +1292,27 @@ impl<H: HashRetention> Automerge<H> {
             .expect("Change's deps should already be in the document");
     }
 
-    fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
-        self.ops.insert_actor(index, actor);
-        self.change_graph.insert_actor(index);
-        self.actor.rewrite_with_new_actor(index);
-        self.authors.insert_actor(index);
-        index
+    fn apply_actor_shift(&mut self, shift: &ActorShift) {
+        self.change_graph.insert_actor(shift);
+        self.authors.insert_actor(shift);
+        self.actor.shift(shift);
     }
 
     /// Insert every actor in `actors` the document lacks, returning the ones
     /// inserted for [`Self::undo_actor_refs`].
     pub(crate) fn put_actor_refs(&mut self, actors: &[ActorId]) -> Vec<ActorId> {
-        let mut new: Vec<ActorId> = actors
-            .iter()
-            .filter(|a| self.ops.actors.binary_search(a).is_err())
-            .cloned()
-            .collect();
-        if new.is_empty() {
-            return new;
+        let inserted = self.ops.insert_actors(actors);
+        for (_, shift) in &inserted {
+            self.apply_actor_shift(shift);
         }
-        new.sort_unstable();
-        new.dedup();
-        let mut old_to_new_index: Vec<u32> = Vec::with_capacity(self.ops.actors.len());
-        let mut j = 0;
-        for a in &self.ops.actors {
-            while j < new.len() && new[j] < *a {
-                j += 1;
-            }
-            old_to_new_index.push((old_to_new_index.len() + j) as u32);
-        }
-        let identity = old_to_new_index
-            .iter()
-            .enumerate()
-            .all(|(i, &m)| m as usize == i);
-        if !identity {
-            self.ops.remap_actor_indexes(&old_to_new_index);
-        }
-        let mut amap = self.ops.actor_map();
-        for a in &new {
-            let idx = self.ops.actors.binary_search(a).unwrap_err();
-            amap = amap.insert(idx, self.ops.actors.len());
-            self.ops.actors.insert(idx, a.clone());
-            self.change_graph.insert_actor(idx);
-            self.authors.insert_actor(idx);
-            self.actor.rewrite_with_new_actor(idx);
-        }
-        self.ops.set_actor_map(amap);
-        new
+        inserted.into_iter().map(|(actor, _)| actor).collect()
     }
 
     /// Undo a [`Self::put_actor_refs`].
     pub(crate) fn undo_actor_refs(&mut self, added: &[ActorId]) {
         let mut idxs: Vec<usize> = added
             .iter()
-            .filter_map(|a| self.ops.actors.binary_search(a).ok())
+            .filter_map(|a| self.ops.lookup_actor(a))
             .collect();
         idxs.sort_unstable();
         for idx in idxs.into_iter().rev() {
@@ -1355,9 +1321,12 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     fn put_actor(&mut self, actor: ActorId) -> usize {
-        match self.ops.actors.binary_search(&actor) {
-            Ok(idx) => idx,
-            Err(idx) => self.insert_actor(idx, actor),
+        match self.ops.insert_actor(actor) {
+            ActorInsert::Existing(idx) => idx,
+            ActorInsert::Inserted(shift) => {
+                self.apply_actor_shift(&shift);
+                shift.index()
+            }
         }
     }
 
@@ -2380,7 +2349,7 @@ impl<H: HashRetention> Automerge<H> {
         // exactly when our seq clock does not cover it
         let ours = self.change_graph.current_seq_clock();
         let theirs = other.change_graph.current_seq_clock();
-        let mut exclude = crate::clock::SeqClock::new(other.change_graph.num_actors());
+        let mut exclude = other.change_graph.empty_clock();
         for (actor_idx, seq) in ours.iter() {
             let Some(seq) = seq else { continue };
             if let Some(other_idx) = other.ops.lookup_actor(&self.ops.actors[actor_idx]) {

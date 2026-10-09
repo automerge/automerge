@@ -313,12 +313,13 @@ impl<'a> BundleV0Storage<'a, Unverified> {
 impl BundleV0Storage<'_, Verified> {
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
         let change_meta = self.iter_change_meta().collect();
-        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &self.actors);
+        let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
+        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &actors);
         for op in self.iter_ops() {
             collector.add(op);
         }
         let change_set = collector
-            .decode_change_set(&self.actors, &self.deps)
+            .decode_change_set(&actors, &self.deps)
             .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
         Ok(change_set)
     }

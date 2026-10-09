@@ -4,6 +4,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
+use crate::actor::ActorList;
 use crate::author::Authors;
 use crate::automerge::AuditMode;
 use crate::automerge::Automerge;
@@ -13,7 +14,7 @@ use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Change, ChangeHash, TextEncoding};
+use crate::{Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -29,7 +30,7 @@ pub(crate) struct Document<'a> {
     #[allow(dead_code)]
     compressed_bytes: Option<Cow<'a, [u8]>>,
     header: Header,
-    actors: Vec<ActorId>,
+    actors: ActorList,
     heads: Vec<ChangeHash>,
     /// The node index of each head, aligned with `heads`. `None` for
     /// documents written without the head-index suffix.
@@ -118,7 +119,10 @@ impl<'a> Document<'a> {
                 let (i, heads) = parse::length_prefixed(parse::change_hash)(i)?;
                 let (i, change_meta) = RawColumns::parse::<ParseError>(i)?;
                 let (i, ops_meta) = RawColumns::parse::<ParseError>(i)?;
-                Ok((i, (actors, heads, change_meta, ops_meta)))
+                Ok((
+                    i,
+                    (ActorList::from_stored(actors), heads, change_meta, ops_meta),
+                ))
             },
             i,
         )?;
@@ -212,12 +216,11 @@ impl<'a> Document<'a> {
         let mut change_out = Vec::new();
         let change_metadata = change_graph.encode(&mut change_out);
 
-        // actors already sorted
-        let actors = op_set.actors.clone();
+        let actors = ActorList::from_stored(op_set.actors.to_vec());
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
-        for actor in &actors {
+        for actor in actors.iter() {
             leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
             data.extend(actor.to_bytes());
         }
@@ -307,7 +310,7 @@ impl<'a> Document<'a> {
         self.header.checksum_valid()
     }
 
-    pub(crate) fn actors(&self) -> &[ActorId] {
+    pub(crate) fn actors(&self) -> &ActorList {
         &self.actors
     }
 
@@ -344,7 +347,7 @@ impl<'a> Document<'a> {
         allow_invalid_marks: bool,
     ) -> Result<Automerge<H>, ReconstructError> {
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
+        let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let head_indexes = self
             .head_indexes()
@@ -367,7 +370,7 @@ impl<'a> Document<'a> {
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
-        let mut authors = Authors::with_actors(change_cols.num_actors());
+        let mut authors = Authors::new(&op_set.actors);
         let change_graph = H::finish_load(
             change_cols,
             changes.as_ref().map(|c| c.changes.as_slice()),
@@ -398,7 +401,7 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Vec<Change>, ReconstructError> {
         let op_set = OpSet::load(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
+        let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut mark_order = MarkOrderValidator::default();
         let mut change_collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
@@ -432,6 +435,8 @@ pub(crate) enum ReconstructError {
     InvalidOp(#[from] crate::error::InvalidOpType),
     #[error(transparent)]
     PackErr(#[from] PackError),
+    #[error(transparent)]
+    UnsortedActors(#[from] crate::actor::UnsortedActors),
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
     #[error(transparent)]

@@ -11,6 +11,7 @@ use super::super::ValueMeta;
 use super::{length_prefixed_bytes, shift_range};
 use super::{ActorMapper, ChangeOpsColumns};
 
+use crate::actor::ActorTable;
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
@@ -580,7 +581,7 @@ impl<'a> ChangeBuilder<'a> {
 impl<'a> ChangeCollector<'a> {
     pub(crate) fn try_new<I>(
         changes: I,
-        actors: &'a [ActorId],
+        actors: &'a ActorTable,
     ) -> Result<ChangeCollector<'a>, OutOfMemory>
     where
         I: ExactSizeIterator<Item = BuildChangeMetadata<'a>>,
@@ -614,7 +615,7 @@ impl<'a> ChangeCollector<'a> {
 
     pub(crate) fn from_change_set_changes(
         changes: Vec<ChangeSetChange<'a>>,
-        actors: &'a [ActorId],
+        actors: &'a ActorTable,
     ) -> ChangeCollector<'a> {
         let changes = changes.into_iter().map(|c| c.into()).collect();
         Self::from_change_meta(changes, actors)
@@ -622,7 +623,7 @@ impl<'a> ChangeCollector<'a> {
 
     pub(crate) fn try_from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
-        actors: &'a [ActorId],
+        actors: &'a ActorTable,
     ) -> Result<ChangeCollector<'a>, OutOfMemory> {
         let mut builders = Vec::new();
         builders
@@ -658,7 +659,7 @@ impl<'a> ChangeCollector<'a> {
 
     pub(crate) fn from_change_meta(
         changes: Vec<BuildChangeMetadata<'a>>,
-        actors: &'a [ActorId],
+        actors: &'a ActorTable,
     ) -> ChangeCollector<'a> {
         Self::try_from_change_meta(changes, actors).unwrap()
     }
@@ -919,7 +920,7 @@ impl<'a> ChangeCollector<'a> {
 
     pub(crate) fn decode_change_set(
         mut self,
-        actors: &[ActorId],
+        actors: &ActorTable,
         deps: &[ChangeHash],
     ) -> Result<Vec<Change>, Error> {
         let num_actors = actors.len();

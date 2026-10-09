@@ -1,4 +1,5 @@
 use super::parents::Parents;
+use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 #[cfg(debug_assertions)]
@@ -7,6 +8,7 @@ use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
 use crate::storage::columns::BadColumnLayout;
+use crate::storage::document::ReconstructError as LoadError;
 use crate::storage::{columns::compression::Uncompressed, Document, RawColumns};
 use crate::types;
 use crate::types::{
@@ -66,7 +68,7 @@ pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSet {
-    pub(crate) actors: Vec<ActorId>,
+    pub(crate) actors: ActorTable,
     pub(crate) obj_info: ObjIndex,
     cols: Columns,
     pub(crate) text_encoding: TextEncoding,
@@ -81,7 +83,7 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            actors,
+            actors: ActorTable::from_actors(actors),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
@@ -1585,12 +1587,12 @@ impl OpSet {
     }
 
     pub(crate) fn lookup_actor(&self, actor: &ActorId) -> Option<usize> {
-        self.actors.binary_search(actor).ok()
+        self.actors.lookup(actor)
     }
 
     pub(crate) fn new(text_encoding: TextEncoding) -> Self {
         OpSet {
-            actors: vec![],
+            actors: ActorTable::new(),
             cols: Columns::default(),
             obj_info: ObjIndex::default(),
             text_encoding,
@@ -1602,9 +1604,9 @@ impl OpSet {
     pub(crate) fn load_indexed(
         doc: &Document<'_>,
         text_encoding: TextEncoding,
-    ) -> Result<(Self, IndexBuilder), ReadOpError> {
+    ) -> Result<(Self, IndexBuilder), LoadError> {
+        let actors = doc.actors().clone().into_table()?;
         let data = doc.op_raw_bytes();
-        let actors = doc.actors().to_vec();
         let (cols, index) =
             Columns::load_indexed(doc.op_metadata.clone().as_map(), data, text_encoding)?;
         let op_set = OpSet {
@@ -1655,10 +1657,10 @@ impl OpSet {
         data: &[u8],
         num_actors: usize,
     ) -> Result<Self, ReadOpError> {
-        let cols = Columns::load(raw.as_map(), data, &[])?;
+        let cols = Columns::load(raw.as_map(), data, &ActorTable::new())?;
         let num_rows = cols.len();
         let op_set = OpSet {
-            actors: vec![],
+            actors: ActorTable::new(),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),
@@ -1707,14 +1709,19 @@ impl OpSet {
 
     /// Splice a loaded fragment op set into this one at `runs`.
     pub(crate) fn merge(&mut self, frag: OpSet, runs: &[manifold::CopyRange]) {
-        self.obj_info.0.extend(frag.obj_info.0);
+        self.obj_info.0.extend(frag.obj_info.0 .0);
         self.cols.merge(frag.cols, runs);
     }
 
-    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, PackError> {
+    pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, LoadError> {
+        let actors = doc.actors().clone().into_table()?;
         let data = doc.op_raw_bytes();
-        let actors = doc.actors().to_vec();
-        Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
+        Ok(Self::from_parts(
+            doc.op_metadata.clone(),
+            data,
+            actors,
+            text_encoding,
+        )?)
     }
 
     #[cfg(test)]
@@ -1727,7 +1734,7 @@ impl OpSet {
     ) -> Self {
         let cols = Columns::new(ops);
         OpSet {
-            actors,
+            actors: ActorTable::from_actors(actors),
             cols,
             obj_info: ObjIndex::default(),
             text_encoding: TextEncoding::platform_default(),
@@ -1737,7 +1744,7 @@ impl OpSet {
     fn from_parts(
         cols: RawColumns<Uncompressed>,
         data: &[u8],
-        actors: Vec<ActorId>,
+        actors: ActorTable,
         text_encoding: TextEncoding,
     ) -> Result<Self, PackError> {
         let cols = Columns::load(cols.as_map(), data, &actors)?;
@@ -1932,68 +1939,106 @@ impl OpSet {
         self.cols.actor_map()
     }
 
-    pub(crate) fn set_actor_map(&mut self, map: std::sync::Arc<ActorMap>) {
-        self.cols.set_actor_map(map);
-    }
-
-    pub(crate) fn insert_actor(&mut self, idx: usize, actor: ActorId) {
-        if self.actors.len() != idx {
-            self.rewrite_index_sidecars_with_new_actor(idx);
+    /// An [`ActorInsert::Inserted`] shift must be applied to every other
+    /// actor-indexed structure in the document.
+    pub(crate) fn insert_actor(&mut self, actor: ActorId) -> ActorInsert {
+        let insert = self.actors.insert(actor);
+        if let ActorInsert::Inserted(shift) = &insert {
+            if shift.index() + 1 != self.actors.len() {
+                self.shift_index_sidecars(shift);
+            }
+            let map = self
+                .cols
+                .actor_map()
+                .insert(shift.index(), self.actors.len() - 1);
+            self.cols.set_actor_map(map);
         }
-        let map = self.cols.actor_map().insert(idx, self.actors.len());
-        self.cols.set_actor_map(map);
-        self.actors.insert(idx, actor)
+        insert
     }
 
-    /// Map the mark index's and obj_info's actor indexes through `map`.
+    /// Remaps the mark and object indexes once rather than per actor. The
+    /// shifts must be applied in the order returned.
+    pub(crate) fn insert_actors(&mut self, actors: &[ActorId]) -> Vec<(ActorId, ActorShift)> {
+        let mut new: Vec<ActorId> = actors
+            .iter()
+            .filter(|a| self.actors.lookup(a).is_none())
+            .cloned()
+            .collect();
+        new.sort_unstable();
+        new.dedup();
+        if new.is_empty() {
+            return Vec::new();
+        }
+        let mut old_to_new_index: Vec<u32> = Vec::with_capacity(self.actors.len());
+        let mut j = 0;
+        for a in self.actors.iter() {
+            while j < new.len() && new[j] < *a {
+                j += 1;
+            }
+            old_to_new_index.push((old_to_new_index.len() + j) as u32);
+        }
+        if old_to_new_index
+            .iter()
+            .enumerate()
+            .any(|(i, &m)| m as usize != i)
+        {
+            self.remap_actor_indexes(&old_to_new_index);
+        }
+        let mut map = self.cols.actor_map();
+        let mut shifts = Vec::with_capacity(new.len());
+        for a in new {
+            let ActorInsert::Inserted(shift) = self.actors.insert(a.clone()) else {
+                unreachable!("filtered to actors not in the table")
+            };
+            map = map.insert(shift.index(), self.actors.len() - 1);
+            shifts.push((a, shift));
+        }
+        self.cols.set_actor_map(map);
+        shifts
+    }
+
     /// The op columns are left alone; they remap through [`ActorMap`].
-    pub(crate) fn remap_actor_indexes(&mut self, map: &[u32]) {
+    fn remap_actor_indexes(&mut self, map: &[u32]) {
         self.cols.index.mark.remap_actor_indexes(map);
         let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .map(|(id, info)| {
-                    let parent = if info.parent.is_root() {
-                        info.parent
-                    } else {
-                        ObjId(remap_id(&info.parent.0))
-                    };
-                    (
-                        remap_id(id),
-                        ObjInfo {
-                            parent,
-                            obj_type: info.obj_type,
-                        },
-                    )
-                })
-                .collect(),
-        );
+        let remapped = self
+            .obj_info
+            .0
+            .iter()
+            .map(|(id, info)| {
+                let parent = if info.parent.is_root() {
+                    info.parent
+                } else {
+                    ObjId(remap_id(&info.parent.0))
+                };
+                (
+                    remap_id(id),
+                    ObjInfo {
+                        parent,
+                        obj_type: info.obj_type,
+                    },
+                )
+            })
+            .collect();
+        self.obj_info = ObjIndex(crate::actor::ActorRefs(remapped));
     }
 
-    fn rewrite_index_sidecars_with_new_actor(&mut self, idx: usize) {
-        self.cols.index.mark.rewrite_with_new_actor(idx);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .map(|(id, make)| (id.with_new_actor(idx), make.with_new_actor(idx)))
-                .collect(),
-        );
+    fn shift_index_sidecars(&mut self, shift: &ActorShift) {
+        self.cols.index.mark.shift(shift);
+        self.obj_info.0.shift_actors(shift);
     }
 
-    pub(crate) fn remove_actor(&mut self, idx: usize) {
-        self.actors.remove(idx);
+    /// The actor must have no ops. The removal must be applied to every
+    /// other actor-indexed structure in the document.
+    pub(crate) fn remove_actor(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
+        let (actor, removal) = self.actors.remove(idx);
         self.cols.flush_actor_map();
         self.cols.rewrite_without_actor(idx);
-        self.obj_info = ObjIndex(
-            self.obj_info
-                .0
-                .iter()
-                .filter_map(|(id, make)| Some((id.without_actor(idx)?, make.without_actor(idx)?)))
-                .collect(),
-        );
+        self.obj_info
+            .0
+            .remove_actor(&removal)
+            .expect("removed actor still owns objects");
+        (actor, removal)
     }
 }
 
@@ -2472,7 +2517,8 @@ mod tests {
 
     #[test]
     fn column_data_iter_range() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        actors.sort();
 
         let ops = vec![
             TestOp {
@@ -2555,7 +2601,8 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
-        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+        actors.sort();
 
         let test_ops = vec![
             TestOp {
@@ -2680,7 +2727,7 @@ mod tests {
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
-            let clock = [None, Some(9), Some(9)].into_iter().collect::<Clock>();
+            let clock = Clock::from_counters([None, Some(9), Some(9)]);
             let ops = opset
                 .top_ops(&ObjId(OpId::new(1, 1)), Some(clock.clone()))
                 .collect::<Vec<_>>();
