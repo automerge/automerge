@@ -923,8 +923,23 @@ impl<'a> SuccCursors<'a> {
     pub(crate) fn pos(&self) -> usize {
         self.succ_actor.pos()
     }
+
     pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
         SuccIncCursors(self)
+    }
+
+    /// Return the last successor id in this slice.
+    ///
+    /// Seeks to it via hexane's `nth`, which jumps by slab index and skips
+    /// whole runs, rather than decoding every preceding successor.
+    fn last_id(&self) -> Option<OpId> {
+        if self.len == 0 {
+            return None;
+        }
+        let n = self.len - 1;
+        let counter = self.succ_counter.clone().nth(n)?;
+        let actor = self.succ_actor.clone().nth(n)?;
+        Some(OpId::new(counter.into(), actor.into()))
     }
 }
 
@@ -1032,10 +1047,27 @@ impl<'a> Op<'a> {
     ) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
+        let len = succ.len();
+        let start = succ.pos();
         if inc.is_some() && !self.is_counter() {
             inc = None;
         }
-        let len = succ.len() as u64;
+
+        // The new successor is newer than every existing one. Peek the last
+        // existing id and append without performing the walk.
+        if let Some(last) = succ.last_id() {
+            if last < id {
+                return SuccInsert {
+                    id,
+                    pos,
+                    inc,
+                    len: len as u64,
+                    sub_pos: start + len,
+                    masked,
+                };
+            }
+        }
+
         let mut sub_pos = succ.pos();
         while let Some(i) = succ.next() {
             if i > id {
@@ -1047,7 +1079,7 @@ impl<'a> Op<'a> {
             id,
             pos,
             inc,
-            len,
+            len: len as u64,
             sub_pos,
             masked,
         }
