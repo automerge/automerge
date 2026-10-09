@@ -884,6 +884,9 @@ impl BatchApply {
         }
 
         debug_assert!(doc.ops.validate_op_order());
+        #[cfg(feature = "slow_path_assertions")]
+        doc.ops
+            .assert_counter_index_matches(doc.mask().map(crate::automerge::view::Mask::clock));
         Ok(())
     }
 

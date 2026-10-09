@@ -1579,7 +1579,6 @@ pub(crate) trait OpLike: Debug {
     /// successor.
     ///
     /// Returns `None` if this `op` is not a counter.
-    #[allow(unused)]
     fn counter_total(op: &Self) -> Option<i64>;
     fn mark_name(op: &Self) -> Option<&str>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;

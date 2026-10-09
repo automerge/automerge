@@ -31,6 +31,7 @@ use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
+mod counter_index;
 mod found_op;
 mod index;
 mod insert;
@@ -45,6 +46,7 @@ pub(crate) use index::{IndexBuilder, MarkOrderValidator, ObjIndex, ObjInfo};
 
 pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
+pub(crate) use counter_index::CounterIndex;
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
@@ -225,10 +227,10 @@ impl OpSet {
     }
 
     pub(crate) fn set_indexes(&mut self, indexes: Indexes) {
-        // let indexes = builder.finish();
-
         assert_eq!(indexes.text.len(), self.len());
+        assert_eq!(indexes.top.len(), self.len());
         assert_eq!(indexes.mark.len(), self.len());
+        assert_eq!(indexes.counter.len(), self.len());
         assert_eq!(indexes.visible.len(), self.len());
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
@@ -237,6 +239,7 @@ impl OpSet {
         self.cols.index.visible = indexes.visible;
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
+        self.cols.index.counter = indexes.counter;
         self.obj_info = indexes.obj_info;
     }
 
@@ -252,6 +255,16 @@ impl OpSet {
         let added = self.cols.splice(pos, ops, self.text_encoding);
         self.splice_objects(ops);
         added
+    }
+
+    /// Check [`CounterIndex`] against a slow re-sum of every op's successors.
+    ///
+    /// `mask` is the current write-frontier clock, if any; masked increments
+    /// must not be counted. Wired into the `slow_path_assertions` checks at
+    /// the mutation boundaries (local op, rollback, batch apply).
+    #[cfg(any(test, feature = "slow_path_assertions"))]
+    pub(crate) fn assert_counter_index_matches(&self, mask: Option<&Clock>) {
+        self.cols.index.counter.assert_matches(self, mask);
     }
 
     pub(crate) fn undo_op(&mut self, op: &TxOp) {
@@ -285,6 +298,7 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
+            self.cols.index.counter.add_succ(i);
             if !i.masked && i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
@@ -314,6 +328,7 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
+            self.cols.index.counter.add_succ(i);
             if i.masked {
                 undo.push(SuccUndo::new(*i, None, None, None));
             } else if i.inc.is_none() {
@@ -351,6 +366,7 @@ impl OpSet {
                 .index
                 .inc
                 .splice(i.sub_pos, 1, std::iter::empty::<Option<i64>>());
+            self.cols.index.counter.undo_succ(&i);
             if let Some(vis) = undo.visible {
                 self.cols.index.visible.splice(i.pos, 1, [vis]);
             }
