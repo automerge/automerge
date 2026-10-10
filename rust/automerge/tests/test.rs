@@ -4637,3 +4637,52 @@ fn rejects_change_with_author_footer_at_non_initial_seq() {
         err
     );
 }
+
+#[test]
+fn list_length_tracks_visible_elements_through_conflicts_deletes_and_merges() {
+    fn check(doc: &mut AutoCommit, list: &ObjId, expected: usize) {
+        assert_eq!(doc.length(list), expected);
+        assert_eq!(doc.list_range(list, ..).count(), expected);
+        let loaded = AutoCommit::load(&doc.save()).unwrap();
+        assert_eq!(loaded.length(list), expected);
+    }
+
+    let mut doc1 = AutoCommit::new();
+    let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
+    for i in 0..5 {
+        doc1.insert(&list, i, i as i64).unwrap();
+    }
+    doc1.insert(&list, 5, ScalarValue::counter(0)).unwrap();
+    doc1.insert_object(&list, 6, ObjType::Map).unwrap();
+    doc1.delete(&list, 0).unwrap();
+    check(&mut doc1, &list, 6);
+    let before_merge = doc1.get_heads();
+
+    // Concurrent puts on one element, a concurrent delete and put on
+    // another, increments on the counter, and concurrent inserts at the
+    // same position.
+    let mut doc2 = doc1.fork();
+    doc1.increment(&list, 4, 1).unwrap();
+    doc2.increment(&list, 4, 2).unwrap();
+    doc1.put(&list, 0, "a").unwrap();
+    doc2.put(&list, 0, "b").unwrap();
+    doc1.delete(&list, 1).unwrap();
+    doc2.put(&list, 1, "kept").unwrap();
+    doc1.insert(&list, 2, "x").unwrap();
+    doc2.insert(&list, 2, "y").unwrap();
+    doc1.merge(&mut doc2).unwrap();
+    check(&mut doc1, &list, 8);
+    assert_eq!(doc1.get_all(&list, 0).unwrap().len(), 2);
+    assert_eq!(doc1.length_at(&list, &before_merge), 6);
+
+    // Deleting a conflicted element removes every candidate at once.
+    doc1.delete(&list, 0).unwrap();
+    check(&mut doc1, &list, 7);
+
+    // Deleting everything leaves an empty list.
+    while doc1.length(&list) > 0 {
+        doc1.delete(&list, 0).unwrap();
+    }
+    check(&mut doc1, &list, 0);
+    assert_eq!(doc1.length_at(&list, &before_merge), 6);
+}
