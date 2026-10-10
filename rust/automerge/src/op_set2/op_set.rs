@@ -461,16 +461,22 @@ impl OpSet {
                     .sum()
             }
         } else if typ == ObjType::List {
-            let insert = self
-                .cols
-                .insert
-                .iter_range(range.clone())
-                .map(|pv| pv.total());
-            SkipIter::new(insert, vis).dedup().count()
+            if read.historical().is_none() {
+                let len = self.cols.index.top.sum_range(range.clone());
+                debug_assert_eq!(len, self.list_length_slow(range, vis));
+                len
+            } else {
+                self.list_length_slow(range, vis)
+            }
         } else {
             let key = self.cols.key_str.iter_range(range.clone());
             SkipIter::new(key, vis).dedup().count()
         }
+    }
+
+    fn list_length_slow(&self, range: Range<usize>, vis: VisIter<'_>) -> usize {
+        let insert = self.cols.insert.iter_range(range).map(|pv| pv.total());
+        SkipIter::new(insert, vis).dedup().count()
     }
 
     pub(crate) fn query_insert_at_text(
