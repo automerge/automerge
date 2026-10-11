@@ -899,16 +899,17 @@ impl OpSet {
     ) -> Option<FoundOpId<'_>> {
         let obj_range = self.scope_to_obj(obj);
         let pos = self.get_op_id_pos(id)?;
+        if !obj_range.contains(&pos) {
+            return None;
+        }
         let op = self.get(pos)?;
         let visible;
         let index;
         if encoding == SequenceType::List {
-            assert!(obj_range.contains(&pos)); // safe to unwrap
             let prefix = self.cols.index.top.delta(obj_range.start, pos).unwrap();
             visible = prefix.pv.value;
             index = prefix.delta;
         } else {
-            assert!(obj_range.contains(&pos)); // safe to unwrap
             let prefix = self.cols.index.text.delta(obj_range.start, pos).unwrap();
             visible = prefix.pv.value.is_some();
             index = prefix.delta as usize;

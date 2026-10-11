@@ -4637,3 +4637,28 @@ fn rejects_change_with_author_footer_at_non_initial_seq() {
         err
     );
 }
+
+#[test]
+fn cursor_from_another_object_is_invalid() {
+    let mut doc = AutoCommit::new();
+    let a = doc.put_object(ROOT, "a", ObjType::Text).unwrap();
+    let b = doc.put_object(ROOT, "b", ObjType::Text).unwrap();
+    doc.splice_text(&a, 0, 0, "a").unwrap();
+    doc.splice_text(&b, 0, 0, "b").unwrap();
+    let cursor = doc.get_cursor(&a, 0, None).unwrap();
+    assert_eq!(doc.get_cursor_position(&a, &cursor, None), Ok(0));
+    assert_eq!(
+        doc.get_cursor_position(&b, &cursor, None),
+        Err(AutomergeError::InvalidCursor(cursor))
+    );
+
+    let la = doc.put_object(ROOT, "la", ObjType::List).unwrap();
+    let lb = doc.put_object(ROOT, "lb", ObjType::List).unwrap();
+    doc.insert(&la, 0, 1).unwrap();
+    doc.insert(&lb, 0, 2).unwrap();
+    let cursor = doc.get_cursor(&la, 0, None).unwrap();
+    assert_eq!(
+        doc.get_cursor_position(&lb, &cursor, None),
+        Err(AutomergeError::InvalidCursor(cursor))
+    );
+}
