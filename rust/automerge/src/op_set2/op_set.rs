@@ -594,7 +594,8 @@ impl OpSet {
                 self.query_insert_at_text(obj, index)
             };
             if let Some(q) = query {
-                debug_assert_eq!(
+                #[cfg(feature = "slow_path_assertions")]
+                assert_eq!(
                     Ok(&q),
                     InsertQuery::new(
                         self.iter_obj(obj),
@@ -883,7 +884,8 @@ impl OpSet {
             self.seek_list_opid_slow(obj, opid, seq_type, Some(clock))
         } else {
             let found = self.seek_list_opid_fast(obj, opid, seq_type);
-            debug_assert_eq!(
+            #[cfg(feature = "slow_path_assertions")]
+            assert_eq!(
                 found,
                 self.seek_list_opid_slow(obj, opid, seq_type, read.historical_slow())
             );
@@ -1148,7 +1150,8 @@ impl OpSet {
             self.find_op_by_id_and_vis_slow(id, Some(clock))
         } else {
             let result = self.find_op_by_id_and_vis_fast(id);
-            debug_assert_eq!(
+            #[cfg(feature = "slow_path_assertions")]
+            assert_eq!(
                 result,
                 self.find_op_by_id_and_vis_slow(id, read.historical_slow())
             );
