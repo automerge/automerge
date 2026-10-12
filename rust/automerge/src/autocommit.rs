@@ -778,6 +778,16 @@ impl AutoCommit {
         self.doc.get_fragment(head)
     }
 
+    /// See [`Automerge::signature_chunk_for`]. Only the tests assemble streams
+    /// by hand, so only they need this.
+    #[cfg(test)]
+    pub(crate) fn signature_chunk_for<I>(&self, hashes: I) -> Vec<u8>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        self.doc.signature_chunk_for(hashes)
+    }
+
     /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
     /// (level-0 fragments with one member) or as a bundle.
     ///

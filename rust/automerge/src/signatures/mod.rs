@@ -7,6 +7,8 @@
 
 mod export;
 mod store;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use store::SignatureStore;
 
