@@ -16,7 +16,7 @@ pub(crate) use crate::read::ReadDoc;
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
-use crate::change_queue::ChangeQueue;
+use crate::change_queue::{ChangeQueue, DocState};
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
@@ -576,6 +576,30 @@ impl Automerge {
         log: &mut PatchLog,
     ) -> Result<(), crate::PatchLogMismatch> {
         self.republish_mask(log, |policy| policy.reveal_author(author))
+    }
+
+    /// The queue and the view of the document it consults, borrowed apart.
+    ///
+    /// This is just here to work around the borrow checker. The [`ChangeQueue`]
+    /// needs to mutate some fields on [`Automerge`] so this method splits the
+    /// [`ChangeQueue`] borrow from the fields that [`ChangeQueue`] needs (which
+    /// are in [`DocState`]).
+    pub(crate) fn split_queue(&mut self) -> (&mut ChangeQueue, DocState<'_>) {
+        let Self {
+            queue,
+            change_graph,
+            authors,
+            ops,
+            ..
+        } = self;
+        (
+            queue,
+            DocState {
+                graph: change_graph,
+                authors,
+                ops,
+            },
+        )
     }
 
     /// Apply `update` to the write-frontier policy and publish the result.
@@ -1442,17 +1466,6 @@ impl Automerge {
         patch_log.path_hint(path_map);
     }
 
-    fn seq_for_actor(&self, actor: &ActorId) -> u64 {
-        self.ops
-            .lookup_actor(actor)
-            .map(|idx| self.change_graph.seq_for_actor(idx))
-            .unwrap_or(0)
-    }
-
-    pub(crate) fn has_actor_seq(&self, change: &Change) -> bool {
-        self.seq_for_actor(change.actor_id()) >= change.seq()
-    }
-
     /// Apply changes to this document.
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
@@ -1516,7 +1529,7 @@ impl Automerge {
         let mut bytes = doc.into_bytes();
 
         if options.retain_orphans {
-            for orphaned in self.queue.iter() {
+            for orphaned in self.queue.changes() {
                 bytes.extend(orphaned.raw_bytes());
             }
         }
@@ -2488,7 +2501,7 @@ impl Automerge {
     ) -> Vec<ChangeHash> {
         let queued_changes = self
             .queue
-            .iter()
+            .changes()
             .map(|change| (change.hash(), change))
             .collect::<HashMap<_, _>>();
 
@@ -2724,7 +2737,7 @@ impl ReadDoc for Automerge {
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let queued = self.queue.iter().map(|change| change.hash());
+        let queued = self.queue.changes().map(|change| change.hash());
         self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 

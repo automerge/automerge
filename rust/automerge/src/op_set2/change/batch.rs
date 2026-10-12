@@ -1,16 +1,13 @@
 use crate::automerge::view::Mask;
 use crate::automerge::HistoryUpdate;
-use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::op::SuccessorValue;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::patches::Events;
-use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
-};
-use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
+use crate::types::{ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap};
+use crate::{Automerge, Change, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
 
 use super::super::op::{ChangeOp, Op, OpBuilder};
@@ -18,7 +15,7 @@ use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 mod transition;
@@ -974,6 +971,17 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        self.enqueue(changes, log)?;
+        self.apply_ready(log)
+    }
+
+    /// Queue `changes`, checking each against the document and what is already
+    /// queued. Nothing is applied.
+    pub(crate) fn enqueue(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
         // Validate the observer before any change is taken from the queue: a
         // rejected log must leave previously queued changes available for a
         // retry with a compatible log. `validate` is read-only, and once it
@@ -981,62 +989,14 @@ impl Automerge {
         // applying a batch only *adds* actors, and migrating onto a superset
         // of the log's actors always succeeds.
         log.validate(&self.ops.actors)?;
+        let (queue, doc) = self.split_queue();
+        queue.push(changes, &doc)
+    }
 
-        let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
-        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
-        let mut actor_author: HashSet<ActorId> = HashSet::new();
-
-        for change in self.queue.iter() {
-            actor_seqs
-                .entry(change.actor_id().clone())
-                .or_default()
-                .insert(change.seq());
-            if change.author().is_some() {
-                actor_author.insert(change.actor_id().clone());
-            }
-        }
-
-        let mut incoming = ChangeBatch::new();
-        for change in changes {
-            let hash = change.hash();
-            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
-                continue;
-            }
-            if self.has_actor_seq(&change) {
-                self.queue
-                    .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
-                return Err(AutomergeError::duplicate_seq(&change));
-            }
-            if actor_seqs
-                .get(change.actor_id())
-                .is_some_and(|seqs| seqs.contains(&change.seq()))
-            {
-                return Err(AutomergeError::duplicate_seq(&change));
-            }
-            // TODO(finto): Refactor with BatchBuilder pattern
-            if change.author().is_some()
-                && (self.get_author_for_actor(change.actor_id()).is_some()
-                    || actor_author.contains(change.actor_id()))
-            {
-                return Err(AutomergeError::duplicate_author(&change));
-            }
-            if change.author().is_some() && change.seq() != 1 {
-                return Err(AutomergeError::author_on_non_initial_seq(&change));
-            }
-
-            seen.insert(hash);
-            actor_seqs
-                .entry(change.actor_id().clone())
-                .or_default()
-                .insert(change.seq());
-            if change.author().is_some() {
-                actor_author.insert(change.actor_id().clone());
-            }
-            incoming.push(change)?;
-        }
-
-        self.queue.extend(incoming);
-        let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
+    /// Apply every queued change which is causally ready.
+    pub(crate) fn apply_ready(&mut self, log: &mut PatchLog) -> Result<(), AutomergeError> {
+        let (queue, doc) = self.split_queue();
+        let changes = queue.pop_ready(&doc);
         Ok(BatchApply::new(changes).apply(self, log)?)
     }
 

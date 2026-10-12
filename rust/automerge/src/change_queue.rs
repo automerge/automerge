@@ -1,61 +1,34 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash};
+use crate::{ActorId, Author, AutomergeError, Change, ChangeHash};
 
-#[derive(Debug, Clone)]
-pub(crate) struct ChangeBatch {
-    changes: Vec<Change>,
-    hashes: HashSet<ChangeHash>,
-    incoming_actor_seqs: HashSet<(ActorId, u64)>,
-}
+mod actor_queue;
+use actor_queue::ActorQueue;
+mod doc_state;
+pub(crate) use doc_state::DocState;
+mod entry_id;
+use entry_id::EntryId;
 
-impl ChangeBatch {
-    pub(crate) fn new() -> Self {
-        Self {
-            changes: Vec::new(),
-            hashes: HashSet::new(),
-            incoming_actor_seqs: HashSet::new(),
-        }
-    }
-
-    pub(crate) fn push(&mut self, change: Change) -> Result<(), AutomergeError> {
-        let hash = change.hash();
-        if self.hashes.contains(&hash) {
-            return Ok(());
-        }
-
-        let actor_seq = (change.actor_id().clone(), change.seq());
-        if self.incoming_actor_seqs.contains(&actor_seq) {
-            return Err(AutomergeError::DuplicateSeqNumber(
-                change.seq(),
-                change.actor_id().clone(),
-            ));
-        }
-
-        self.hashes.insert(hash);
-        self.incoming_actor_seqs.insert(actor_seq);
-        self.changes.push(change);
-        Ok(())
-    }
-}
-
-/// An indexed queue of unapplied changes that are not yet causally ready.
-///
-/// Maintains a hash index so that lookups are O(1) instead of linear scans.
+/// The changes waiting to enter the document.
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeQueue {
-    changes: Vec<Change>,
-    /// Set of hashes of all changes in the queue — O(1) contains check.
-    hashes: HashSet<ChangeHash>,
-    incoming_actor_seqs: HashSet<(ActorId, u64)>,
+    /// Queued changes in arrival order.
+    changes: BTreeMap<EntryId, Change>,
+    next_id: EntryId,
+    /// change hash → entry in `changes`.
+    by_hash: HashMap<ChangeHash, EntryId>,
+    /// actor → seq → entry in `changes`. Also where an actor's author is
+    /// found while its first change is still queued.
+    by_actor: HashMap<ActorId, ActorQueue>,
 }
 
 impl ChangeQueue {
     pub(crate) fn new() -> Self {
         Self {
-            changes: Vec::new(),
-            hashes: HashSet::new(),
-            incoming_actor_seqs: HashSet::new(),
+            changes: BTreeMap::new(),
+            next_id: EntryId::zero(),
+            by_hash: HashMap::new(),
+            by_actor: HashMap::new(),
         }
     }
 
@@ -63,115 +36,183 @@ impl ChangeQueue {
         self.changes.is_empty()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &Change> {
-        self.changes.iter()
+    /// Every queued change, in arrival order.
+    pub(crate) fn changes(&self) -> impl Iterator<Item = &Change> {
+        self.changes.values()
+    }
+
+    /// Queue `changes`, checking each against the document and against what is
+    /// already queued.
+    ///
+    /// Either everything is queued or nothing is: an error leaves the queue as
+    /// it was, except that a change conflicting with the document's own actor
+    /// sequence evicts the queued branch it conflicts with, as it always has.
+    ///
+    /// A change already applied or already queued is skipped rather than
+    /// refused, so re-receiving history is harmless.
+    pub(crate) fn push(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+        doc: &DocState<'_>,
+    ) -> Result<(), AutomergeError> {
+        let mark = self.next_id;
+        let result = self.try_push(changes, doc);
+        if result.is_err() {
+            let unwound = self.changes.split_off(&mark);
+            for change in unwound.values() {
+                self.unindex(change);
+            }
+        }
+        result
+    }
+
+    fn try_push(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+        doc: &DocState<'_>,
+    ) -> Result<(), AutomergeError> {
+        for change in changes {
+            if doc.graph.has_change(&change.hash()) || self.by_hash.contains_key(&change.hash()) {
+                continue;
+            }
+            self.check_change(&change, doc)?;
+            self.insert(change);
+        }
+        Ok(())
+    }
+
+    /// The checks one change must pass to be queued.
+    fn check_change(&mut self, change: &Change, doc: &DocState<'_>) -> Result<(), AutomergeError> {
+        if doc.has_actor_seq(change) {
+            // The document already holds this actor sequence under another
+            // hash. Any queued change at a later sequence belongs to the same
+            // incompatible branch and can never apply.
+            self.remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
+            return Err(AutomergeError::duplicate_seq(change));
+        }
+        let queued = self.by_actor.get(change.actor_id());
+        if queued.is_some_and(|seqs| seqs.at(change.seq()).is_some()) {
+            return Err(AutomergeError::duplicate_seq(change));
+        }
+        if change.author().is_some() {
+            let known = doc.author_of(change.actor_id()).is_some()
+                || self.author_for_actor(change.actor_id()).is_some();
+            if known {
+                return Err(AutomergeError::duplicate_author(change));
+            }
+            if change.seq() != 1 {
+                return Err(AutomergeError::author_on_non_initial_seq(change));
+            }
+        }
+        Ok(())
+    }
+
+    fn insert(&mut self, change: Change) {
+        let id = self.next_id;
+        self.next_id = id.next();
+        self.by_hash.insert(change.hash(), id);
+        self.by_actor
+            .entry(change.actor_id().clone())
+            .or_default()
+            .insert(change.seq(), id);
+        self.changes.insert(id, change);
+    }
+
+    fn remove(&mut self, id: EntryId) -> Option<Change> {
+        let change = self.changes.remove(&id)?;
+        self.unindex(&change);
+        Some(change)
+    }
+
+    fn unindex(&mut self, change: &Change) {
+        self.by_hash.remove(&change.hash());
+        if let Some(seqs) = self.by_actor.get_mut(change.actor_id()) {
+            seqs.remove(change.seq());
+            if seqs.is_empty() {
+                self.by_actor.remove(change.actor_id());
+            }
+        }
+    }
+
+    /// The author `actor` assigns itself, if its first change is queued.
+    fn author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
+        let id = self.by_actor.get(actor)?.first()?;
+        self.changes[&id].author()
     }
 
     /// Remove queued changes at or after an incompatible actor sequence,
     /// together with changes which transitively depend on that branch.
     pub(crate) fn remove_actor_branch_from(&mut self, actor: &ActorId, seq: u64) {
-        let mut removed = self
-            .changes
-            .iter()
-            .filter(|change| change.actor_id() == actor && change.seq() >= seq)
-            .map(Change::hash)
-            .collect::<HashSet<_>>();
-
-        let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
-        for change in &self.changes {
+        let seeds: Vec<EntryId> = self
+            .by_actor
+            .get(actor)
+            .map(|seqs| seqs.from_seq(seq).collect())
+            .unwrap_or_default();
+        if seeds.is_empty() {
+            return;
+        }
+        let mut dependents: HashMap<ChangeHash, Vec<EntryId>> = HashMap::new();
+        for (id, change) in &self.changes {
             for dep in change.deps() {
-                dependents.entry(*dep).or_default().push(change.hash());
+                dependents.entry(*dep).or_default().push(*id);
             }
         }
-
-        let mut to_remove = removed.iter().copied().collect::<VecDeque<_>>();
-        while let Some(hash) = to_remove.pop_front() {
-            if let Some(children) = dependents.remove(&hash) {
+        let mut removed: BTreeSet<EntryId> = seeds.iter().copied().collect();
+        let mut to_visit: VecDeque<EntryId> = seeds.into_iter().collect();
+        while let Some(id) = to_visit.pop_front() {
+            if let Some(children) = dependents.remove(&self.changes[&id].hash()) {
                 for child in children {
                     if removed.insert(child) {
-                        to_remove.push_back(child);
+                        to_visit.push_back(child);
                     }
                 }
             }
         }
-
-        self.changes.retain(|change| {
-            if removed.contains(&change.hash()) {
-                self.hashes.remove(&change.hash());
-                self.incoming_actor_seqs
-                    .remove(&(change.actor_id().clone(), change.seq()));
-                false
-            } else {
-                true
-            }
-        });
-    }
-
-    pub(crate) fn extend(&mut self, batch: ChangeBatch) {
-        for c in batch.changes {
-            let incoming_actor_seq = (c.actor_id().clone(), c.seq());
-            debug_assert!(!self.incoming_actor_seqs.contains(&incoming_actor_seq));
-            debug_assert!(!self.hashes.contains(&c.hash()));
-            self.incoming_actor_seqs.insert(incoming_actor_seq);
-            self.hashes.insert(c.hash());
-            self.changes.push(c);
+        for id in removed {
+            self.remove(id);
         }
     }
 
-    /// Return the causally ready (according to ChangeGraph) changes in
-    /// topological order, removing them from the queue
-    pub(crate) fn pop_topo_sorted_ready(&mut self, change_graph: &ChangeGraph) -> Vec<Change> {
-        // Kahn's algorithm: topological sort of the pool.
-        let n = self.changes.len();
-        let mut unsatisfied = vec![0u32; n];
+    /// Release every change which is causally ready, in an order which
+    /// respects their dependencies.
+    ///
+    /// A change is causally ready when every dependency is applied or released
+    /// before it in the same pass.
+    pub(crate) fn pop_ready(&mut self, doc: &DocState<'_>) -> Vec<Change> {
+        // Kahn's algorithm over the queue.
+        let ids: Vec<EntryId> = self.changes.keys().copied().collect();
+        let mut unsatisfied = vec![0u32; ids.len()];
         let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
-
-        for (i, c) in self.changes.iter().enumerate() {
-            for dep in c.deps() {
-                if !change_graph.has_change(dep) {
-                    unsatisfied[i] += 1;
-                    waiting_on.entry(*dep).or_default().push(i);
+        for (index, id) in ids.iter().enumerate() {
+            for dep in self.changes[id].deps() {
+                if !doc.graph.has_change(dep) {
+                    unsatisfied[index] += 1;
+                    waiting_on.entry(*dep).or_default().push(index);
                 }
             }
         }
 
-        let mut ready: VecDeque<usize> = VecDeque::new();
-        for (i, &count) in unsatisfied.iter().enumerate() {
-            if count == 0 {
-                ready.push_back(i);
-            }
-        }
-
-        let mut topo_order: Vec<usize> = Vec::new();
-        while let Some(idx) = ready.pop_front() {
-            let hash = self.changes[idx].hash();
-            topo_order.push(idx);
-            if let Some(dependents) = waiting_on.remove(&hash) {
-                for dep_idx in dependents {
-                    unsatisfied[dep_idx] -= 1;
-                    if unsatisfied[dep_idx] == 0 {
-                        ready.push_back(dep_idx);
-                    }
+        let mut ready: VecDeque<usize> = (0..ids.len())
+            .filter(|index| unsatisfied[*index] == 0)
+            .collect();
+        let mut released = Vec::new();
+        while let Some(index) = ready.pop_front() {
+            let id = ids[index];
+            released.push(id);
+            let Some(dependents) = waiting_on.remove(&self.changes[&id].hash()) else {
+                continue;
+            };
+            for dependent in dependents {
+                unsatisfied[dependent] -= 1;
+                if unsatisfied[dependent] == 0 {
+                    ready.push_back(dependent);
                 }
             }
         }
 
-        let mut slots = std::mem::take(&mut self.changes)
+        released
             .into_iter()
-            .map(Some)
-            .collect::<Vec<_>>();
-        let mut topo = Vec::new();
-        for idx in topo_order {
-            let change = slots[idx]
-                .take()
-                .expect("topo_order contains invalid index");
-            self.hashes.remove(&change.hash());
-            self.incoming_actor_seqs
-                .remove(&(change.actor_id().clone(), change.seq()));
-            topo.push(change);
-        }
-        self.changes = slots.into_iter().flatten().collect::<Vec<_>>();
-
-        topo
+            .map(|id| self.remove(id).expect("released change is queued"))
+            .collect()
     }
 }
