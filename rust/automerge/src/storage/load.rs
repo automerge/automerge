@@ -49,10 +49,22 @@ pub enum Error {
     BadChecksum,
 }
 
+/// One chunk of a chunk stream: the changes it carries, and the bytes it
+/// arrived as.
+pub(crate) struct StreamChunk {
+    /// The chunk exactly as it arrived.
+    ///
+    /// A chunk is the unit of authentication, so a document which has to hold one
+    /// until it can be verified keeps these bytes and writes them back unchanged:
+    /// regrouping the changes would change which signatures they need.
+    pub(crate) raw: Vec<u8>,
+    pub(crate) changes: Vec<Change>,
+}
+
 /// A chunk stream, read as far as it could be read.
 pub(crate) struct ChunkStream {
-    /// Every change the stream carried, in stream order.
-    pub(crate) changes: Vec<Change>,
+    /// The chunks which carry history, in stream order.
+    pub(crate) chunks: Vec<StreamChunk>,
     /// Every detached signature the stream carried.
     pub(crate) signatures: Vec<Signature>,
     /// Why reading stopped, when it stopped before the end.
@@ -66,9 +78,14 @@ pub(crate) struct ChunkStream {
 
 /// Read `data` as a stream of chunks.
 ///
-/// History chunks contribute their changes and signature chunks their signatures.
+/// This is the one reader for both signature modes. Chunk boundaries are kept
+/// rather than flattened, because in authenticated mode the chunk is the unit of
+/// authentication — what a chunk needs signatures for is a property of the chunk,
+/// not of each change in it. A legacy load ignores the grouping and applies
+/// everything it got.
+///
 /// A document chunk whose heads are all present is skipped: re-deriving history
-/// the document already holds is pure cost.
+/// the document already holds is pure cost, in either mode.
 #[instrument(skip(data, current))]
 pub(crate) fn read_chunk_stream(
     data: &[u8],
@@ -77,17 +94,24 @@ pub(crate) fn read_chunk_stream(
     mark_order: MarkOrderValidation,
 ) -> ChunkStream {
     let mut stream = ChunkStream {
-        changes: Vec::new(),
+        chunks: Vec::new(),
         signatures: Vec::new(),
         error: None,
     };
     let mut input = parse::Input::new(data);
     while !input.is_empty() {
+        let unparsed = input.unconsumed_bytes();
         match read_chunk(input, text_encoding, current, mark_order) {
             Ok((remaining, read)) => {
                 match read {
-                    ReadChunk::History(changes) => stream.changes.extend(changes),
-                    ReadChunk::AlreadyHeld => {}
+                    ReadChunk::History(changes) if !changes.is_empty() => {
+                        let consumed = unparsed.len() - remaining.unconsumed_bytes().len();
+                        stream.chunks.push(StreamChunk {
+                            raw: unparsed[..consumed].to_vec(),
+                            changes,
+                        });
+                    }
+                    ReadChunk::History(_) | ReadChunk::AlreadyHeld => {}
                     ReadChunk::Signatures(signatures) => stream.signatures.extend(signatures),
                 }
                 input = remaining.reset();

@@ -141,6 +141,43 @@ impl SigningRequest {
     }
 }
 
+/// What one call to [`crate::Automerge::add_signatures`] admitted.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SignatureReport {
+    admitted_chunks: usize,
+    applied_changes: Vec<ChangeHash>,
+    pending_chunks: usize,
+}
+
+impl SignatureReport {
+    pub(crate) fn new(
+        admitted_chunks: usize,
+        applied_changes: Vec<ChangeHash>,
+        pending_chunks: usize,
+    ) -> Self {
+        Self {
+            admitted_chunks,
+            applied_changes,
+            pending_chunks,
+        }
+    }
+
+    /// How many whole chunks crossed the authentication boundary.
+    pub fn admitted_chunks(&self) -> usize {
+        self.admitted_chunks
+    }
+
+    /// The changes those chunks contributed, in the order they were applied.
+    pub fn applied_changes(&self) -> &[ChangeHash] {
+        &self.applied_changes
+    }
+
+    /// How many chunks are still waiting for signatures.
+    pub fn pending_chunks(&self) -> usize {
+        self.pending_chunks
+    }
+}
+
 /// The greatest sequence each actor has a verifying signature for.
 ///
 /// A signature at an actor's sequence `n` covers that actor's whole prefix, so this

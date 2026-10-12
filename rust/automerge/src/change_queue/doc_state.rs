@@ -1,4 +1,6 @@
-use crate::{author::Authors, change_graph::ChangeGraph, op_set2::OpSet, ActorId, Author, Change};
+use crate::{
+    author::Authors, change_graph::ChangeGraph, op_set2::OpSet, ActorId, Author, Change, ChangeHash,
+};
 
 /// The parts of a document the queue consults to decide what may enter it.
 ///
@@ -16,6 +18,11 @@ impl DocState<'_> {
     pub(super) fn author_of(&self, actor: &ActorId) -> Option<Author<'_>> {
         let index = self.ops.lookup_actor(actor)?;
         self.authors.get_author_for_actor(index)
+    }
+
+    pub(super) fn actor_of(&self, hash: &ChangeHash) -> Option<&ActorId> {
+        let (index, _) = self.graph.actor_seq_for_hash(hash)?;
+        self.ops.actors.get(index)
     }
 
     /// Whether the document already holds this actor sequence.

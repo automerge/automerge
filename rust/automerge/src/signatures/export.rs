@@ -62,7 +62,7 @@ impl Automerge {
     /// Whether some signature on `hash` verifies under the author of its actor.
     pub(crate) fn has_verifying_signature(&self, hash: &ChangeHash) -> bool {
         self.materialized_ed25519_key(hash)
-            .is_some_and(|key| self.signatures.is_valid(hash, &key))
+            .is_some_and(|key| self.queue.signatures().is_valid(hash, &key))
     }
 
     /// A signature chunk authenticating `fragment`, or `None` if this document
@@ -79,7 +79,8 @@ impl Automerge {
                 return None;
             }
             signatures.extend(
-                self.signatures
+                self.queue
+                    .signatures()
                     .signatures_for(&hash)
                     .map(move |bytes| SignatureRef {
                         change_hash: hash,

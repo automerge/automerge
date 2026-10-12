@@ -17,6 +17,23 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error(
+        "this import path is unauthenticated: an authenticated document accepts \
+         remote history only through add_authenticated_chunk"
+    )]
+    UnauthenticatedImport,
+    #[error(
+        "change {0} by actor {1} is not in the causal history of that actor's \
+         greatest sequence in the chunk, so no signature can authenticate it"
+    )]
+    UncoveredChunk(ChangeHash, ActorId),
+
+    #[error(
+        "no signature was supplied for change {0}, which this chunk needs in \
+         order to be authenticated"
+    )]
+    UnsignedChunk(ChangeHash),
+
     #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
     DuplicateAuthor(Author<'static>, ActorId, u64),
     #[error("change for actor {1} has an author footer but seq is {0}, expected 1")]

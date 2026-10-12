@@ -16,7 +16,7 @@ pub(crate) use crate::read::ReadDoc;
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
-use crate::change_queue::{ChangeQueue, DocState};
+use crate::change_queue::{ChangeQueue, DocState, QueuedChunk};
 use crate::clock::Clock;
 use crate::config::Config;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -25,7 +25,9 @@ use crate::hydrate;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
-use crate::signatures::{self, Signature, SignatureInput, SignatureMode, SignatureRef, SignatureStore};
+use crate::signatures::{
+    self, Signature, SignatureInput, SignatureMode, SignatureRef, SignatureReport, SignatureStore,
+};
 use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
@@ -119,7 +121,7 @@ pub struct LoadOptions<'a> {
     signature_mode: SignatureMode,
     /// Signatures this load starts with, which an empty document
     /// rebuilding itself through `load` passes in so that signatures it already held
-    /// are not lost.
+    /// still count towards what the incoming history needs.
     signatures: Vec<Signature>,
 }
 
@@ -330,7 +332,8 @@ impl std::default::Default for LoadOptions<'static> {
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
-    /// The list of unapplied changes that are not causally ready.
+    /// History received but not yet applied, the signature records held, and
+    /// the mode which says what those records must cover.
     pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
@@ -352,10 +355,6 @@ pub struct Automerge {
     actor: Actor,
     /// The current author.
     author: Option<Author<'static>>,
-    /// Detached, opaque signatures keyed by their target change hash.
-    pub(crate) signatures: SignatureStore,
-    /// Whether remote history is accepted as it arrives or must be signed.
-    pub(crate) signature_mode: SignatureMode,
 }
 
 impl Automerge {
@@ -395,7 +394,7 @@ impl Automerge {
     /// Create a new document configured by `config`.
     pub fn new_with_config(config: Config) -> Self {
         let mut doc = Self::new_with_encoding(config.encoding());
-        doc.signature_mode = config.signatures();
+        doc.queue = ChangeQueue::new(config.signatures());
         doc
     }
 
@@ -411,7 +410,7 @@ impl Automerge {
             &ops.actors,
         );
         Automerge {
-            queue: ChangeQueue::new(),
+            queue: ChangeQueue::new(SignatureMode::Legacy),
             change_graph,
             authors,
             write_frontier,
@@ -420,8 +419,6 @@ impl Automerge {
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             author: None,
-            signatures: SignatureStore::default(),
-            signature_mode: SignatureMode::Legacy,
         }
     }
 
@@ -442,7 +439,7 @@ impl Automerge {
             &ops.actors,
         );
         let mut doc = Automerge {
-            queue: ChangeQueue::new(),
+            queue: ChangeQueue::new(SignatureMode::Legacy),
             change_graph,
             authors,
             write_frontier,
@@ -451,8 +448,6 @@ impl Automerge {
             deps,
             actor: Actor::Unused(ActorId::random()),
             author: None,
-            signatures: SignatureStore::default(),
-            signature_mode: SignatureMode::Legacy,
         };
         doc.remove_unused_actors(false);
         if doc.mask_hides_existing_ops() {
@@ -627,29 +622,63 @@ impl Automerge {
     }
 
     pub fn signature_mode(&self) -> SignatureMode {
-        self.signature_mode
+        self.queue.mode()
     }
 
     pub(crate) fn is_authenticated(&self) -> bool {
-        self.signature_mode == SignatureMode::Authenticated
+        self.queue.mode() == SignatureMode::Authenticated
     }
 
-    /// Attach signatures
-    pub fn add_signatures(&mut self, signatures: impl IntoIterator<Item = SignatureInput>) {
-        let signatures: Vec<_> = signatures
-            .into_iter()
-            .map(SignatureInput::into_signature)
-            .collect();
-        let targets: Vec<_> = signatures.iter().map(|signature| signature.change_hash).collect();
-        self.signatures.extend(signatures);
-        // Verify now and remember it, rather than leaving every later enumeration
-        // of the fragment cover to re-check the same signature.
-        for hash in targets {
-            if let Some(key) = self.materialized_ed25519_key(&hash) {
-                self.signatures.verify(hash, &key);
-            }
+    /// Apply the history of `chunks`, after whatever this document's signature
+    /// mode requires of them.
+    ///
+    /// This is where the two modes part, and it is the only place they part on
+    /// the way in. A legacy document requires nothing of a chunk, so its changes
+    /// are queued one by one and each applies as soon as it is causally ready.
+    /// An authenticated one requires each chunk to be covered by signatures,
+    /// which is why the grouping was kept: the chunk is queued whole and applies
+    /// whole, once it is both causally ready and verified.
+    fn admit_chunks(
+        &mut self,
+        chunks: Vec<load::StreamChunk>,
+        patch_log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        if !self.is_authenticated() {
+            let changes = chunks.into_iter().flat_map(|chunk| chunk.changes);
+            return self.apply_changes_batch_log_patches_trusted(changes, patch_log);
         }
+        // Decode and structurally check each chunk before touching the document,
+        // so a stream which fails part way through has not already changed it.
+        let mut queued = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            queued.push(QueuedChunk::authenticated(chunk.raw, chunk.changes)?);
+        }
+        self.enqueue(queued, patch_log)?;
+        self.apply_ready(patch_log)?;
+        // Admitted history is authenticated, so whatever it unblocks may now form.
         self.form_newly_covered_fragments();
+        Ok(())
+    }
+
+    pub fn add_signatures(
+        &mut self,
+        signatures: impl IntoIterator<Item = SignatureInput>,
+        patch_log: &mut PatchLog,
+    ) -> Result<SignatureReport, AutomergeError> {
+        let signatures = signatures.into_iter().map(SignatureInput::into_signature);
+        let (queue, doc) = self.split_queue();
+        queue.add_signatures(signatures, &doc);
+        // Admission forms whatever these signatures unblocked, and does it after
+        // any history it admitted is in the graph, which is the only order that
+        // sees both the local commits waiting on a signature and the fragments
+        // the admitted history completes.
+        let applied = self.apply_ready(patch_log)?;
+        self.form_newly_covered_fragments();
+        Ok(SignatureReport::new(
+            applied.authenticated_chunks,
+            applied.hashes,
+            self.queue.authenticated_chunks(),
+        ))
     }
 
     /// The queue and the view of the document it consults, borrowed apart.
@@ -678,7 +707,7 @@ impl Automerge {
 
     /// The detached signatures this document retains.
     pub(crate) fn signatures(&self) -> &SignatureStore {
-        &self.signatures
+        self.queue.signatures()
     }
 
     /// Encode the retained signatures for `hashes` as a detached signature chunk.
@@ -690,7 +719,8 @@ impl Automerge {
         let signatures: Vec<_> = hashes
             .iter()
             .flat_map(|hash| {
-                self.signatures
+                self.queue
+                    .signatures()
                     .signatures_for(hash)
                     .map(move |bytes| SignatureRef {
                         change_hash: *hash,
@@ -1176,12 +1206,11 @@ impl Automerge {
         }
         let mut f = Self::new_with_encoding(self.text_encoding());
         f.set_actor(ActorId::random());
+        f.queue = self.queue.fork();
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
-        f.apply_changes(changes)?;
-        f.signature_mode = self.signature_mode;
-        f.signatures = self.signatures.clone();
-        // The replay above ran before the mode was set, so the index was built as
-        // though every change were authenticated.
+        f.apply_changes_batch_log_patches_trusted(changes, &mut PatchLog::inactive())?;
+        // The replay formed a fragment at every level it met, as though every
+        // change were authenticated; only the signatures decide.
         f.rebuild_fragment_index();
         f.set_write_frontier(self.get_write_frontier());
         Ok(f)
@@ -1364,7 +1393,7 @@ impl Automerge {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
             let mut doc = Self::new_with_encoding(options.text_encoding);
-            doc.signature_mode = options.signature_mode;
+            doc.queue = ChangeQueue::new(options.signature_mode);
             let mut doc = doc.with_author(options.author);
             if !options.write_frontier.is_empty() {
                 doc.set_write_frontier(options.write_frontier);
@@ -1379,8 +1408,11 @@ impl Automerge {
         }
 
         let mut changes = vec![];
-        let mut signatures = SignatureStore::default();
-        signatures.extend(std::mem::take(&mut options.signatures));
+
+        let mut queue = ChangeQueue::with_signatures(
+            options.signature_mode,
+            std::mem::take(&mut options.signatures),
+        );
         let mut first_chunk_was_doc = false;
         // If `first_chunk` is `storage::Chunk::Document`, then these
         // write-frontier is consumed. For every other variant, the
@@ -1417,7 +1449,7 @@ impl Automerge {
             }
             storage::Chunk::Signatures(chunk) => {
                 tracing::trace!("first chunk is a detached signature chunk");
-                signatures.extend(chunk.into_signatures());
+                queue.extend_signatures(chunk.into_signatures());
                 Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::Bundle(bundle) => {
@@ -1442,8 +1474,7 @@ impl Automerge {
                 Self::new_with_encoding(options.text_encoding)
             }
         };
-        am.signature_mode = options.signature_mode;
-        am.signatures = signatures;
+        am.queue = queue;
         let rest = remaining.reset().unconsumed_bytes();
         let stream =
             load::read_chunk_stream(rest, options.text_encoding, &am.change_graph, mark_order);
@@ -1451,10 +1482,22 @@ impl Automerge {
             if options.on_partial_load == OnPartialLoad::Error {
                 return Err(error.into());
             }
-            tracing::warn!(whole_changes = stream.changes.len(), err = ?error, "partial load");
+            tracing::warn!(whole_chunks = stream.chunks.len(), err = ?error, "partial load");
         }
-        am.signatures.extend(stream.signatures);
-        am.apply_changes(changes.into_iter().chain(stream.changes))?;
+        am.queue.extend_signatures(stream.signatures);
+
+        let mut chunks = Vec::with_capacity(stream.chunks.len() + 1);
+        if !changes.is_empty() {
+            // The first chunk was parsed above to decide what kind of load this
+            // is, so it is reunited with the rest here. Its own bytes are the
+            // payload minus what is left to read.
+            chunks.push(load::StreamChunk {
+                raw: data[..data.len() - rest.len()].to_vec(),
+                changes: std::mem::take(&mut changes),
+            });
+        }
+        chunks.extend(stream.chunks);
+        am.admit_chunks(chunks, &mut PatchLog::inactive())?;
         // A document chunk is reconstructed before the mode and the signatures are
         // known, so its index was built as though every change were
         // authenticated.
@@ -1526,7 +1569,8 @@ impl Automerge {
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
             let existing_signatures = self
-                .signatures
+                .queue
+                .signatures()
                 .iter()
                 .map(SignatureRef::to_owned)
                 .collect::<Vec<_>>();
@@ -1536,10 +1580,10 @@ impl Automerge {
                     .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check)
-                    .signature_mode(self.signature_mode)
-                    // Signatures held before this call are still held afterwards,
-                    // which is what lets a signature arrive ahead of the change it
-                    // annotates.
+                    .signature_mode(self.queue.mode())
+                    // Signatures held before this call still count towards what
+                    // the incoming history needs, which is what lets a signature
+                    // arrive ahead of the change it covers.
                     .signatures(existing_signatures),
             )?;
             // Ensure that the author, actor, and write-frontier state are carried
@@ -1565,11 +1609,11 @@ impl Automerge {
             load::MarkOrderValidation::Validate,
         );
         if let Some(error) = &stream.error {
-            tracing::warn!(whole_changes = stream.changes.len(), err = ?error, "partial load");
+            tracing::warn!(whole_chunks = stream.chunks.len(), err = ?error, "partial load");
         }
-        self.signatures.extend(stream.signatures);
+        self.queue.extend_signatures(stream.signatures);
         let start = self.ops.len();
-        self.apply_changes_log_patches(stream.changes, patch_log)?;
+        self.admit_chunks(stream.chunks, patch_log)?;
         Ok(self.ops.len() - start)
     }
 
@@ -1650,17 +1694,23 @@ impl Automerge {
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         self.assert_no_unused_actors(true);
-
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
         let mut bytes = doc.into_bytes();
 
         if options.retain_orphans {
-            for orphaned in self.queue.changes() {
-                bytes.extend(orphaned.raw_bytes());
+            // Queued history is history this document holds and cannot apply
+            // yet, whether it waits for a dependency or a signature. Each chunk
+            // goes back as it arrived, after the document chunk rather than
+            // inside it, so a load makes the same admission decision again
+            // rather than taking it on trust.
+            for queued in self.queue.chunks() {
+                bytes.extend(queued.raw_bytes());
             }
         }
-        if !self.signatures.is_empty() {
-            bytes.extend(storage::SignatureChunk::encode(self.signatures.iter()));
+        if !self.queue.signatures().is_empty() {
+            bytes.extend(storage::SignatureChunk::encode(
+                self.queue.signatures().iter(),
+            ));
         }
         bytes
     }
@@ -1907,7 +1957,7 @@ impl Automerge {
     }
 
     fn signed_frontier(&self) -> HashMap<usize, u64> {
-        signatures::signed_frontier(&self.signatures, &self.change_graph, &self.authors)
+        signatures::signed_frontier(self.queue.signatures(), &self.change_graph, &self.authors)
     }
 
     /// A test for whether a change is authenticated, which reads the signed
@@ -1991,8 +2041,11 @@ impl Automerge {
         if !self.is_authenticated() {
             return;
         }
-        let may_form =
-            signatures::covered_fragments(&self.change_graph, &self.authors, &self.signatures);
+        let may_form = signatures::covered_fragments(
+            &self.change_graph,
+            &self.authors,
+            self.queue.signatures(),
+        );
         self.change_graph.rebuild_fragment_index(&may_form);
     }
 
@@ -3113,7 +3166,8 @@ impl Default for Automerge {
 pub struct SaveOptions {
     /// Whether to apply DEFLATE compression to the RLE encoded columns in the document
     pub deflate: bool,
-    /// Whether to save changes which we do not have the dependencies for
+    /// Whether to save history which cannot be applied yet: changes whose
+    /// dependencies are missing, and chunks still waiting to be authenticated
     pub retain_orphans: bool,
 }
 

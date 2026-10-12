@@ -17,7 +17,7 @@ use crate::transaction::{CommitOptions, Transactable};
 use crate::types::ObjMeta;
 use crate::{
     hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, SignatureInput, SignatureMode,
-    SigningRequest, TextEncoding,
+    SignatureReport, SigningRequest, TextEncoding,
 };
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -455,11 +455,20 @@ impl AutoCommit {
         self.doc.signature_mode()
     }
 
-    /// Attach signatures, verify what they cover, and form whatever
-    /// that completes. See [`Automerge::add_signatures`].
-    pub fn add_signatures(&mut self, signatures: impl IntoIterator<Item = SignatureInput>) {
+    /// Attach signatures, verify what they cover, and admit it.
+    ///
+    /// See [`Automerge::add_signatures`]. Patches for anything this admits are
+    /// recorded against this document's own log.
+    pub fn add_signatures(
+        &mut self,
+        signatures: impl IntoIterator<Item = SignatureInput>,
+    ) -> Result<SignatureReport, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.add_signatures(signatures)
+        if self.isolation.is_some() {
+            self.doc.add_signatures(signatures, &mut PatchLog::null())
+        } else {
+            self.doc.add_signatures(signatures, &mut self.patch_log)
+        }
     }
 
     pub fn signing_requests(&self) -> Vec<SigningRequest> {
@@ -601,6 +610,7 @@ impl AutoCommit {
     }
 
     /// Save the entirety of this document in a compact form.
+    ///
     pub fn save(&mut self) -> Vec<u8> {
         self.save_with_options(SaveOptions::default())
     }
@@ -1493,11 +1503,12 @@ impl SyncDoc for SyncWrapper<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::AutoCommit;
 
     fn is_send<S: Send>() {}
 
     #[test]
     fn test_autocommit_is_send() {
-        is_send::<super::AutoCommit>();
+        is_send::<AutoCommit>();
     }
 }

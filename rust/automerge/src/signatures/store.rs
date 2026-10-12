@@ -99,6 +99,13 @@ impl SignatureStore {
         self.by_hash.keys().copied()
     }
 
+    /// Whether `hash` carries any signature at all, verified or not.
+    pub(crate) fn has_any(&self, hash: &ChangeHash) -> bool {
+        self.by_hash
+            .get(hash)
+            .is_some_and(|signatures| !signatures.is_empty())
+    }
+
     /// Signatures which arrived after the first `cursor` signatures.
     pub(crate) fn since(&self, cursor: usize) -> impl Iterator<Item = SignatureRef<'_>> {
         self.log[cursor.min(self.log.len())..]

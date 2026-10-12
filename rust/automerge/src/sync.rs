@@ -389,6 +389,14 @@ impl Automerge {
         message: Message,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        // Sync messages carry no fragment boundary and no signatures, so there
+        // is nothing to calculate a signature set against and nothing to verify.
+        // Refusing here rather than letting the import checks reject each message
+        // keeps the reason legible, and keeps a whole-document sync message from
+        // reaching the loader, which can only check that signatures are present.
+        if self.is_authenticated() {
+            return Err(AutomergeError::UnauthenticatedImport);
+        }
         sync_state.in_flight = false;
         let before_heads = self.get_heads();
 

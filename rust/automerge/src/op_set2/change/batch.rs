@@ -1,5 +1,6 @@
 use crate::automerge::view::Mask;
 use crate::automerge::HistoryUpdate;
+use crate::change_queue::{Applied, QueuedChunk};
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::op::SuccessorValue;
@@ -973,15 +974,33 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        self.enqueue(changes, log)?;
-        self.apply_ready(log)
+        // Loose changes carry no fragment boundary, so there is no signature
+        // set to require of them. An authenticated document imports remote
+        // history only as whole chunks, which closes this path to `merge`,
+        // `apply_changes` and the sync protocol alike.
+        if self.is_authenticated() {
+            return Err(AutomergeError::UnauthenticatedImport);
+        }
+        self.apply_changes_batch_log_patches_trusted(changes, log)
     }
 
-    /// Queue `changes`, checking each against the document and what is already
+    /// Apply changes which have already crossed the authentication boundary.
+    /// This is also the ordinary legacy-mode path.
+    pub(crate) fn apply_changes_batch_log_patches_trusted<I: IntoIterator<Item = Change>>(
+        &mut self,
+        changes: I,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        self.enqueue(changes.into_iter().map(QueuedChunk::trusted), log)?;
+        self.apply_ready(log)?;
+        Ok(())
+    }
+
+    /// Queue `chunks`, checking each against the document and what is already
     /// queued. Nothing is applied.
     pub(crate) fn enqueue(
         &mut self,
-        changes: impl IntoIterator<Item = Change>,
+        chunks: impl IntoIterator<Item = QueuedChunk>,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Validate the observer before any change is taken from the queue: a
@@ -992,14 +1011,19 @@ impl Automerge {
         // of the log's actors always succeeds.
         log.validate(&self.ops.actors)?;
         let (queue, doc) = self.split_queue();
-        queue.push(changes, &doc)
+        queue.push(chunks, &doc)
     }
 
-    /// Apply every queued change which is causally ready.
-    pub(crate) fn apply_ready(&mut self, log: &mut PatchLog) -> Result<(), AutomergeError> {
+    /// Apply every queued chunk which is causally ready and authenticated.
+    pub(crate) fn apply_ready(&mut self, log: &mut PatchLog) -> Result<Applied, AutomergeError> {
         let (queue, doc) = self.split_queue();
-        let changes = queue.pop_ready(&doc);
-        Ok(BatchApply::new(changes).apply(self, log)?)
+        let released = queue.pop_ready(&doc);
+        let hashes = released.changes.iter().map(Change::hash).collect();
+        BatchApply::new(released.changes).apply(self, log)?;
+        Ok(Applied {
+            hashes,
+            authenticated_chunks: released.authenticated_chunks,
+        })
     }
 
     fn import_ops_to(
