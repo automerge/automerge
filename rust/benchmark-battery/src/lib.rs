@@ -1,10 +1,13 @@
 use rand::distr::Alphanumeric;
 use rand::{rng, Rng, RngExt};
+use std::collections::HashMap;
 use std::fmt::{Display, Error, Formatter};
 
 pub use automerge;
 
-pub use automerge::{transaction::Transactable, Automerge, ObjType, ScalarValue, ROOT};
+pub use automerge::{
+    hydrate, transaction::Transactable, AutoCommit, Automerge, ObjType, ScalarValue, ROOT,
+};
 
 pub struct TestItem<T> {
     pub label: String,
@@ -138,6 +141,56 @@ pub fn deep_history_doc(n: u64) -> Automerge {
         tx.commit();
     }
 
+    doc
+}
+
+/// Build a [`hydrate::Map`] document that consists of a single `records` list of `n` maps.
+/// Each map has an `id`, a `name`, a list of `tags`, and a nested `payload` map.
+///
+/// When expanded by `Automerge::from` (and in turn,
+/// `Transactable::init_root_from_hydrate`), it will produce roughly 11 ops per
+/// record. So, `n` records produce on the order of `11 * n` ops.
+#[inline(never)]
+pub fn build_hydrate_map(n: u64) -> hydrate::Map {
+    let mut records: Vec<hydrate::Value> = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let tags = hydrate::List::from(vec![
+            hydrate::Value::from(format!("t{}", i % 7).as_str()),
+            hydrate::Value::from(format!("t{}", i % 13).as_str()),
+            hydrate::Value::from(format!("t{}", i % 17).as_str()),
+        ]);
+        let payload = hydrate::Map::from(HashMap::<String, hydrate::Value>::from([
+            ("value".to_string(), hydrate::Value::from(i as f64 * 0.5)),
+            (
+                "note".to_string(),
+                hydrate::Value::scalar(format!("some text for record number {i} ").repeat(3)),
+            ),
+            ("active".to_string(), hydrate::Value::scalar(i % 2 == 0)),
+        ]));
+        let record = hydrate::Map::from(HashMap::<String, hydrate::Value>::from([
+            ("id".to_string(), hydrate::Value::from(i as i64)),
+            (
+                "name".to_string(),
+                hydrate::Value::scalar(format!("record-{i}")),
+            ),
+            ("tags".to_string(), hydrate::Value::from(tags)),
+            ("payload".to_string(), hydrate::Value::from(payload)),
+        ]));
+        records.push(hydrate::Value::from(record));
+    }
+    hydrate::Map::from(HashMap::<String, hydrate::Value>::from([(
+        "records".to_string(),
+        hydrate::Value::from(hydrate::List::from(records)),
+    )]))
+}
+
+/// Build a document from a pre-built `hydrate::Map` via
+/// [`Transactable::init_root_from_hydrate`], the exact core entry point used by
+/// the JavaScript `Automerge.from()` API.
+#[inline(never)]
+pub fn from_hydrate(map: &hydrate::Map) -> AutoCommit {
+    let mut doc = AutoCommit::new();
+    doc.init_root_from_hydrate(map).unwrap();
     doc
 }
 
