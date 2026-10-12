@@ -7,19 +7,23 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use super::{change::Unverified, parse, BundleStorage, Change, Compressed, Document, MAGIC_BYTES};
+use super::{
+    change::Unverified, parse, BundleStorage, Change, Compressed, Document, SignatureChunk,
+    MAGIC_BYTES,
+};
 use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
     Bundle(BundleStorage<'a, Unverified>),
+    Signatures(SignatureChunk),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
 pub(crate) mod error {
     use super::parse;
-    use crate::storage::{bundle, change, document};
+    use crate::storage::{bundle, change, document, signature};
 
     #[derive(thiserror::Error, Debug)]
     pub(crate) enum Chunk {
@@ -29,6 +33,8 @@ pub(crate) mod error {
         Leb128(#[from] parse::leb128::Error),
         #[error("failed to parse bundle: {0}")]
         Bundle(#[from] bundle::ParseError),
+        #[error("failed to parse signatures: {0}")]
+        Signatures(#[from] signature::ParseError),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
         #[error("bad change chunk: {0}")]
@@ -107,6 +113,10 @@ impl<'a> Chunk<'a> {
                 }
                 Chunk::Bundle(bundle)
             }
+            ChunkType::Signatures => Chunk::Signatures(
+                SignatureChunk::parse(chunk_input.unconsumed_bytes(), header)
+                    .map_err(|e| parse::ParseError::Error(error::Chunk::Signatures(e)))?,
+            ),
         };
         Ok((remaining, chunk))
     }
@@ -119,6 +129,7 @@ impl<'a> Chunk<'a> {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
             Self::Bundle(b) => b.checksum_valid(),
+            Self::Signatures(s) => s.checksum_valid(),
         }
     }
 }
@@ -129,6 +140,7 @@ pub(crate) enum ChunkType {
     Change,
     Compressed,
     Bundle,
+    Signatures,
 }
 
 impl TryFrom<u8> for ChunkType {
@@ -140,6 +152,7 @@ impl TryFrom<u8> for ChunkType {
             1 => Ok(Self::Change),
             2 => Ok(Self::Compressed),
             3 => Ok(Self::Bundle),
+            4 => Ok(Self::Signatures),
             other => Err(other),
         }
     }
@@ -152,6 +165,7 @@ impl From<ChunkType> for u8 {
             ChunkType::Change => 1,
             ChunkType::Compressed => 2,
             ChunkType::Bundle => 3,
+            ChunkType::Signatures => 4,
         }
     }
 }

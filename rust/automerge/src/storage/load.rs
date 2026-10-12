@@ -3,6 +3,7 @@ use tracing::instrument;
 use crate::{
     change::Change,
     change_graph::ChangeGraph,
+    signatures::Signature,
     storage::{self, document::ReconstructError, parse, Bundle},
     types::TextEncoding,
 };
@@ -48,109 +49,119 @@ pub enum Error {
     BadChecksum,
 }
 
-pub(crate) enum LoadedChanges<'a> {
-    /// All the data was succesfully loaded into a list of changes
-    Complete(Vec<Change>),
-    /// We only managed to load _some_ changes.
-    Partial {
-        /// The succesfully loaded changes
-        loaded: Vec<Change>,
-        /// The data which we were unable to parse
-        #[allow(dead_code)]
-        remaining: parse::Input<'a>,
-        /// The error encountered whilst trying to parse `remaining`
-        error: Error,
-    },
+/// A chunk stream, read as far as it could be read.
+pub(crate) struct ChunkStream {
+    /// Every change the stream carried, in stream order.
+    pub(crate) changes: Vec<Change>,
+    /// Every detached signature the stream carried.
+    pub(crate) signatures: Vec<Signature>,
+    /// Why reading stopped, when it stopped before the end.
+    ///
+    /// A document is concatenated chunks, so corrupt or truncated data still
+    /// leaves a prefix of whole chunks which is perfectly good. Each caller
+    /// applies its own policy to this: an incremental load keeps the prefix and
+    /// warns, while `load` consults [`OnPartialLoad`](crate::OnPartialLoad).
+    pub(crate) error: Option<Error>,
 }
 
-/// Attempt to Load all the chunks in `data`.
+/// Read `data` as a stream of chunks.
 ///
-/// # Partial Loads
-///
-/// Automerge documents are encoded as one or more concatenated chunks. Each chunk containing one
-/// or more changes. This means it is possible to partially load corrupted data if the first `n`
-/// chunks are valid. This function returns a `LoadedChanges` which you can examine to determine if
-/// this is the case.
-#[instrument(skip(data))]
-pub(crate) fn load_changes<'a>(
-    mut data: parse::Input<'a>,
+/// History chunks contribute their changes and signature chunks their signatures.
+/// A document chunk whose heads are all present is skipped: re-deriving history
+/// the document already holds is pure cost.
+#[instrument(skip(data, current))]
+pub(crate) fn read_chunk_stream(
+    data: &[u8],
     text_encoding: TextEncoding,
     current: &ChangeGraph,
     mark_order: MarkOrderValidation,
-) -> LoadedChanges<'a> {
-    let mut changes = Vec::new();
-    while !data.is_empty() {
-        let remaining =
-            match load_next_change(data, &mut changes, text_encoding, current, mark_order) {
-                Ok(d) => d,
-                Err(e) => {
-                    return LoadedChanges::Partial {
-                        loaded: changes,
-                        remaining: data,
-                        error: e,
-                    };
+) -> ChunkStream {
+    let mut stream = ChunkStream {
+        changes: Vec::new(),
+        signatures: Vec::new(),
+        error: None,
+    };
+    let mut input = parse::Input::new(data);
+    while !input.is_empty() {
+        match read_chunk(input, text_encoding, current, mark_order) {
+            Ok((remaining, read)) => {
+                match read {
+                    ReadChunk::History(changes) => stream.changes.extend(changes),
+                    ReadChunk::AlreadyHeld => {}
+                    ReadChunk::Signatures(signatures) => stream.signatures.extend(signatures),
                 }
-            };
-        data = remaining.reset();
+                input = remaining.reset();
+            }
+            Err(e) => {
+                stream.error = Some(e);
+                break;
+            }
+        }
     }
-    LoadedChanges::Complete(changes)
+    stream
 }
 
-fn load_next_change<'a>(
+/// What one chunk of a stream turned out to carry.
+enum ReadChunk {
+    History(Vec<Change>),
+    Signatures(Vec<Signature>),
+    /// A document chunk whose history the reading document already holds.
+    AlreadyHeld,
+}
+
+fn read_chunk<'a>(
     data: parse::Input<'a>,
-    changes: &mut Vec<Change>,
     text_encoding: TextEncoding,
     current: &ChangeGraph,
     mark_order: MarkOrderValidation,
-) -> Result<parse::Input<'a>, Error> {
+) -> Result<(parse::Input<'a>, ReadChunk), Error> {
     let (remaining, chunk) = storage::Chunk::parse(data).map_err(|e| Error::Parse(Box::new(e)))?;
     if !chunk.checksum_valid() {
         return Err(Error::BadChecksum);
     }
-    match chunk {
+    let read = match chunk {
         storage::Chunk::Document(d) => {
-            tracing::trace!("loading document chunk");
-            if !d.heads().iter().all(|h| current.has_change(h)) {
-                let new_changes = match d.reconstruct_changes(text_encoding) {
-                    Ok(c) => c,
+            tracing::trace!("reading document chunk");
+            if d.heads().iter().all(|h| current.has_change(h)) {
+                ReadChunk::AlreadyHeld
+            } else {
+                match d.reconstruct_changes(text_encoding) {
+                    Ok(changes) => ReadChunk::History(changes),
                     Err(ReconstructError::InvalidMarkOrderChanges {
                         changes,
                         error_message: _,
-                    }) if mark_order.allows_invalid() => changes,
+                    }) if mark_order.allows_invalid() => ReadChunk::History(changes),
                     Err(e) => return Err(Error::InflateDocument(Box::new(e))),
-                };
-                changes.extend(new_changes);
+                }
             }
         }
         storage::Chunk::Change(change) => {
-            tracing::trace!("loading change chunk");
             let change = Change::new_from_unverified(change.into_owned(), None)
                 .map_err(|e| Error::InvalidChangeColumns(Box::new(e)))?;
-            #[cfg(feature = "slow_path_assertions")]
-            {
-                let loaded_ops = change.iter_ops().collect::<Vec<_>>();
-                tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), ops=?loaded_ops, "loaded change");
-            }
-            #[cfg(not(feature = "slow_path_assertions"))]
-            tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
-            changes.push(change);
-        }
-        storage::Chunk::Bundle(bundle) => {
-            tracing::trace!("loading bundle chunk");
-            let bundle = Bundle::new_from_unverified(bundle.into_owned())
-                .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
-            let bundle_changes = bundle
-                .to_changes()
-                .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
-            changes.extend(bundle_changes);
+            tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "read change");
+            ReadChunk::History(vec![change])
         }
         storage::Chunk::CompressedChange(change, compressed) => {
-            tracing::trace!("loading compressed change chunk");
             let change =
                 Change::new_from_unverified(change.into_owned(), Some(compressed.into_owned()))
                     .map_err(|e| Error::InvalidChangeColumns(Box::new(e)))?;
-            changes.push(change);
+            tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "read compressed change");
+            ReadChunk::History(vec![change])
+        }
+        storage::Chunk::Bundle(bundle) => {
+            tracing::trace!("reading bundle chunk");
+            let bundle = Bundle::new_from_unverified(bundle.into_owned())
+                .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
+            ReadChunk::History(
+                bundle
+                    .to_changes()
+                    .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?,
+            )
+        }
+        storage::Chunk::Signatures(chunk) => {
+            tracing::trace!("reading detached signature chunk");
+            ReadChunk::Signatures(chunk.into_signatures())
         }
     };
-    Ok(remaining)
+    Ok((remaining, read))
 }

@@ -7,6 +7,7 @@ pub(crate) mod columns;
 pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
+pub(crate) mod signature;
 
 pub use bundle::{Bundle, BundleChange, BundleChangeIter};
 pub use load::VerificationMode;
@@ -17,6 +18,7 @@ pub(crate) use {
     chunk::{CheckSum, Chunk, ChunkType, Header},
     columns::{ColumnSpec, Columns, RawColumn, RawColumns},
     document::{CompressConfig, Document},
+    signature::SignatureChunk,
 };
 
 fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {

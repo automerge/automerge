@@ -10,10 +10,13 @@ use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
+use crate::storage::SignatureChunk;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::ObjMeta;
-use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
+use crate::{
+    hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, SignatureInput, TextEncoding,
+};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -67,6 +70,11 @@ pub struct AutoCommit {
     patch_log: PatchLog,
     diff_cursor: Vec<ChangeHash>,
     save_cursor: Vec<ChangeHash>,
+    /// How many signatures had arrived at the last incremental save.
+    /// Tracked separately from change history so legacy mode can relay signatures
+    /// which arrive after their changes were saved. Authenticated saves do not
+    /// need this: they withhold unsigned history until it can travel with signatures.
+    signature_cursor: usize,
     isolation: Option<Vec<ChangeHash>>,
 }
 
@@ -81,6 +89,7 @@ impl Default for AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
+            signature_cursor: 0,
             isolation: None,
         }
     }
@@ -103,6 +112,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
+            signature_cursor: 0,
             isolation: None,
         }
     }
@@ -116,6 +126,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
+            signature_cursor: 0,
             isolation: None,
         })
     }
@@ -128,6 +139,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
+            signature_cursor: 0,
             isolation: None,
         })
     }
@@ -140,6 +152,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
+            signature_cursor: 0,
             isolation: None,
         })
     }
@@ -169,6 +182,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
+            signature_cursor: 0,
             isolation: None,
         })
     }
@@ -320,6 +334,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
             save_cursor: vec![],
+            signature_cursor: 0,
             isolation: None,
         }
     }
@@ -332,6 +347,7 @@ impl AutoCommit {
             patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
             save_cursor: vec![],
+            signature_cursor: 0,
             isolation: None,
         })
     }
@@ -421,6 +437,13 @@ impl AutoCommit {
     ) {
         self.with_patch_log(update)
             .expect("AutoCommit's patch log always belongs to its document");
+    }
+
+    /// Attach signatures to the changes they target. See
+    /// [`Automerge::add_signatures`].
+    pub fn add_signatures(&mut self, signatures: impl IntoIterator<Item = SignatureInput>) {
+        self.ensure_transaction_closed();
+        self.doc.add_signatures(signatures)
     }
 
     /// Run a document mutation, recording its effect on the observed view.
@@ -620,9 +643,17 @@ impl AutoCommit {
     /// text object).
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
-        let bytes = self.doc.save_after(&self.save_cursor);
+        let mut bytes = self.doc.save_after(&self.save_cursor);
+        // A change goes out as soon as it is made, so a signature which arrives
+        // later has to follow it in a later save.
+        let signatures = self.doc.signatures();
+        let new_signatures: Vec<_> = signatures.since(self.signature_cursor).collect();
+        if !new_signatures.is_empty() {
+            bytes.extend(SignatureChunk::encode(new_signatures));
+        }
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.get_heads();
+            self.signature_cursor = signatures.len();
         }
         bytes
     }

@@ -285,6 +285,7 @@ pub mod op_set2;
 pub mod patches;
 mod read;
 mod sequence_tree;
+mod signatures;
 mod storage;
 pub mod sync;
 mod text_diff;
@@ -312,6 +313,7 @@ pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
+pub use signatures::SignatureInput;
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;

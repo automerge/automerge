@@ -2169,6 +2169,42 @@ fn load_incremental_with_corrupted_tail() {
     );
 }
 
+/// A document is concatenated chunks, so a corrupt tail still leaves a prefix of
+/// whole chunks. Ignoring a partial load keeps every one of them, not just the
+/// chunk the load happened to parse first.
+#[test]
+fn load_with_a_corrupted_tail_keeps_every_whole_chunk() {
+    let mut doc = AutoCommit::new();
+    for key in ["a", "b", "c"] {
+        doc.put(ROOT, key, key).unwrap();
+        doc.commit();
+    }
+    // One change chunk each, then rubbish.
+    let mut bytes = doc.save_after(&[]);
+    bytes.extend_from_slice(&[1, 2, 3, 4]);
+
+    let loaded = Automerge::load_with_options(
+        &bytes,
+        LoadOptions::new().on_partial_load(automerge::OnPartialLoad::Ignore),
+    )
+    .unwrap();
+    assert_doc!(
+        &loaded,
+        map! {
+            "a" => { "a" },
+            "b" => { "b" },
+            "c" => { "c" },
+        }
+    );
+
+    // Refusing a partial load still refuses the whole call.
+    assert!(Automerge::load_with_options(
+        &bytes,
+        LoadOptions::new().on_partial_load(automerge::OnPartialLoad::Error),
+    )
+    .is_err());
+}
+
 #[test]
 fn load_doc_with_deleted_objects() {
     // Reproduces an issue where a document with deleted objects failed to load
