@@ -10,6 +10,7 @@ use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
+use crate::signatures::Admission;
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
 use crate::{ActorId, Author, Automerge, Change, ChangeHash, TextEncoding};
@@ -327,11 +328,18 @@ impl<'a> Document<'a> {
         }
     }
 
+    /// Rebuild the document this chunk encodes.
+    ///
+    /// `admission` is `Some` for an authenticated load, and says what the history
+    /// must carry to be accepted. It is checked here, as soon as the change graph
+    /// and the authors are known, so an inadmissible chunk never becomes a
+    /// document at all.
     pub(crate) fn reconstruct(
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
         write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+        admission: Option<Admission<'_>>,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
@@ -352,6 +360,17 @@ impl<'a> Document<'a> {
 
         let mut authors = Authors::new(&op_set.actors);
         let change_graph = change_cols.finalize(&changes.changes, &mut authors)?;
+
+        let mut change_graph = change_graph;
+        if let Some(admission) = admission {
+            if let Err((hash, actor)) = admission.check(&change_graph, &authors) {
+                return Err(ReconstructError::UnsignedDocument(
+                    hash,
+                    op_set.actors[actor].clone(),
+                ));
+            }
+            admission.index_fragments(&mut change_graph, &authors);
+        }
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
@@ -418,6 +437,12 @@ pub(crate) enum ReconstructError {
     InvalidMaxOp,
     #[error("author provided for change with non-initial sequence number: {0}")]
     AuthorOnNonInitialSeq(u64, ActorId),
+    #[error(
+        "this document chunk carries no signature for change {0}, the greatest \
+         sequence of actor {1}, and that actor's author is not this \
+         application's own"
+    )]
+    UnsignedDocument(ChangeHash, ActorId),
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderDoc {
         doc: Box<Automerge>,

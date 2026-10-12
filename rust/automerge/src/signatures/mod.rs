@@ -178,6 +178,71 @@ impl SignatureReport {
     }
 }
 
+/// What an authenticated load requires of a whole-document chunk.
+///
+/// Every actor's greatest sequence must carry a signature from that actor's
+/// author: one signature there covers that actor's whole chain, and a document
+/// carries its own authors, so this is decidable while the chunk is being
+/// reconstructed, before any document is built from it.
+///
+/// `own_author` is the exception, and is `Some` only when the application has
+/// asserted that these are its own bytes. History assigned that author is
+/// admitted unsigned, which is what lets an application reload commits it has
+/// not signed yet. Its fragments stay deferred until it signs them, so the only
+/// history a document holds without a signature remains history it can still
+/// produce one for.
+pub(crate) struct Admission<'a> {
+    signatures: &'a SignatureStore,
+    own_author: Option<&'a Author<'a>>,
+}
+
+impl<'a> Admission<'a> {
+    pub(crate) fn new(signatures: &'a SignatureStore, own_author: Option<&'a Author<'a>>) -> Self {
+        Self {
+            signatures,
+            own_author,
+        }
+    }
+
+    /// Build the fragment index the reconstructed history may have.
+    ///
+    /// Reconstruction forms a fragment for every level it meets, which is right
+    /// for a document whose history is all signed and wrong for one carrying
+    /// unsigned commits of its own: forming their fragments would supersede the
+    /// lower-level fragments they absorb, withdrawing history which *was*
+    /// exportable. Only the signatures decide, so the unsigned history `own_author`
+    /// admits is deferred here exactly as a fresh local commit would be.
+    pub(crate) fn index_fragments(&self, change_graph: &mut ChangeGraph, authors: &Authors) {
+        let may_form = covered_fragments(change_graph, authors, self.signatures);
+        change_graph.rebuild_fragment_index(&may_form);
+    }
+
+    /// Check every actor's greatest sequence, returning the first which is
+    /// neither signed by its own author nor this load's own history, as its
+    /// change hash and actor index.
+    pub(crate) fn check(
+        &self,
+        change_graph: &ChangeGraph,
+        authors: &Authors,
+    ) -> Result<(), (ChangeHash, usize)> {
+        for (actor, hash) in change_graph.actor_maxima() {
+            let author = authors.get_author_for_actor(actor);
+            let signed = author
+                .as_ref()
+                .and_then(ed25519_key)
+                .is_some_and(|key| self.signatures.is_valid(&hash, &key));
+            let is_own = match (&author, self.own_author) {
+                (Some(author), Some(own)) => author.as_bytes() == own.as_bytes(),
+                _ => false,
+            };
+            if !signed && !is_own {
+                return Err((hash, actor));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The greatest sequence each actor has a verifying signature for.
 ///
 /// A signature at an actor's sequence `n` covers that actor's whole prefix, so this

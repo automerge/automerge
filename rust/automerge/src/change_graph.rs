@@ -134,10 +134,25 @@ impl ChangeGraph {
             .filter_map(|(i, v)| if !v.is_empty() { Some(i) } else { None })
     }
 
+    /// Each actor with history here, paired with the hash of its greatest
+    /// sequence.
+    ///
+    /// There is no fallible lookup to skip or to fail: an actor appears only
+    /// once it has a change, and that change is its last entry.
+    pub(crate) fn actor_maxima(&self) -> impl Iterator<Item = (usize, ChangeHash)> + '_ {
+        self.seq_index
+            .iter()
+            .enumerate()
+            .filter_map(|(actor, seqs)| {
+                let node = seqs.last()?;
+                Some((actor, self.hashes[node.0 as usize]))
+            })
+    }
+
     /// The hashes of `actor`'s changes above sequence `seq`, oldest first.
     ///
-    /// Infallible: these are the entries the index holds, not sequence numbers
-    /// to look up and miss.
+    /// Infallible for the same reason as [`Self::actor_maxima`]: these are the
+    /// entries the index holds, not sequence numbers to look up and miss.
     pub(crate) fn hashes_for_actor_above(
         &self,
         actor: usize,

@@ -33,6 +33,12 @@ pub enum AutomergeError {
          order to be authenticated"
     )]
     UnsignedChunk(ChangeHash),
+    #[error(
+        "this document chunk carries no signature for change {0}, the greatest \
+         sequence of actor {1}, and that actor's author is not this \
+         application's own"
+    )]
+    UnsignedDocument(ChangeHash, ActorId),
 
     #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
     DuplicateAuthor(Author<'static>, ActorId, u64),

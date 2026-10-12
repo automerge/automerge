@@ -119,6 +119,7 @@ pub struct LoadOptions<'a> {
     author: Option<Author<'static>>,
     write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
     signature_mode: SignatureMode,
+    own_storage: bool,
     /// Signatures this load starts with, which an empty document
     /// rebuilding itself through `load` passes in so that signatures it already held
     /// still count towards what the incoming history needs.
@@ -227,6 +228,34 @@ impl<'a> LoadOptions<'a> {
         }
     }
 
+    /// Assert that these bytes are this application's own storage.
+    ///
+    /// An authenticated load requires a signature for every actor's greatest
+    /// sequence in a document chunk, which is right for bytes from a peer. A
+    /// document the application saved itself is the one case where that is too
+    /// strong: its own unsigned commits were visible when it saved them and have
+    /// nothing to verify yet, so without this they would make the document
+    /// unloadable. With this, unsigned history is admitted when it is assigned
+    /// the author given to [`LoadOptions::author`], and so can still be signed
+    /// after a restart.
+    ///
+    /// This is an assertion about where the bytes came from, which only the
+    /// application knows. It cannot be inferred from the bytes: an author is a
+    /// public key asserted by the chain that claims it, so any chain can claim
+    /// any author. Passing this for bytes from a peer would therefore let that
+    /// peer put unsigned history into the document under this application's own
+    /// author, and have it offered back for signing.
+    ///
+    /// Everything else is unchanged: history by any other author still needs its
+    /// signature, and change chunks following the document chunk are held on
+    /// their own merits.
+    pub fn own_storage(self, own_storage: bool) -> Self {
+        Self {
+            own_storage,
+            ..self
+        }
+    }
+
     /// Signatures the loading document already holds.
     pub(crate) fn signatures(self, signatures: Vec<Signature>) -> Self {
         Self { signatures, ..self }
@@ -244,6 +273,7 @@ impl std::default::Default for LoadOptions<'static> {
             author: None,
             write_frontier: HashMap::new(),
             signature_mode: SignatureMode::Legacy,
+            own_storage: false,
             signatures: Vec::new(),
         }
     }
@@ -332,8 +362,8 @@ impl std::default::Default for LoadOptions<'static> {
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
-    /// History received but not yet applied, the signature records held, and
-    /// the mode which says what those records must cover.
+    /// History received but not yet applied, the signatures held, and
+    /// the mode which says what those signatures must cover.
     pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
@@ -1409,10 +1439,23 @@ impl Automerge {
 
         let mut changes = vec![];
 
+        // Every signature the stream carries is collected before anything is
+        // admitted, because a leading document chunk is checked as it is
+        // reconstructed, against signatures which may follow it.
         let mut queue = ChangeQueue::with_signatures(
             options.signature_mode,
             std::mem::take(&mut options.signatures),
         );
+        if options.signature_mode == SignatureMode::Authenticated {
+            queue.extend_signatures(signatures_in(data));
+        }
+        // Only an application loading its own storage may admit unsigned history,
+        // and only its own: an author is a public key which any chain can claim,
+        // so this cannot be read off the bytes.
+        let own_author = options
+            .own_storage
+            .then(|| options.author.clone())
+            .flatten();
         let mut first_chunk_was_doc = false;
         // If `first_chunk` is `storage::Chunk::Document`, then these
         // write-frontier is consumed. For every other variant, the
@@ -1422,10 +1465,14 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
+                let frontier = write_frontier.take().unwrap_or_default();
+                let admission = (options.signature_mode == SignatureMode::Authenticated)
+                    .then(|| signatures::Admission::new(queue.signatures(), own_author.as_ref()));
                 match d.reconstruct(
                     options.verification_mode,
                     options.text_encoding,
-                    write_frontier.take().unwrap_or_default(),
+                    frontier,
+                    admission,
                 ) {
                     Ok(doc) => doc,
                     Err(ReconstructError::InvalidMarkOrderDoc {
@@ -1435,6 +1482,9 @@ impl Automerge {
                     // Same policy violation, same error as the apply path.
                     Err(ReconstructError::AuthorOnNonInitialSeq(seq, actor)) => {
                         return Err(AutomergeError::AuthorOnNonInitialSeq(seq, actor))
+                    }
+                    Err(ReconstructError::UnsignedDocument(hash, actor)) => {
+                        return Err(AutomergeError::UnsignedDocument(hash, actor))
                     }
                     Err(e) => return Err(load::Error::InflateDocument(Box::new(e)).into()),
                 }
@@ -1498,10 +1548,6 @@ impl Automerge {
         }
         chunks.extend(stream.chunks);
         am.admit_chunks(chunks, &mut PatchLog::inactive())?;
-        // A document chunk is reconstructed before the mode and the signatures are
-        // known, so its index was built as though every change were
-        // authenticated.
-        am.rebuild_fragment_index();
 
         // Only allow missing deps if the first chunk was a document chunk
         // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
@@ -3162,6 +3208,28 @@ impl Default for Automerge {
 }
 
 /// Options to pass to [`Automerge::save_with_options()`] and [`crate::AutoCommit::save_with_options()`]
+/// Every detached signature in an encoded chunk stream.
+///
+/// Signatures sit after the history they cover, so a loader which needs to know
+/// whether that history is covered has to read ahead for them.
+fn signatures_in(data: &[u8]) -> Vec<Signature> {
+    let mut signatures = Vec::new();
+    let mut input = storage::parse::Input::new(data);
+    while !input.is_empty() {
+        let Ok((remaining, chunk)) = storage::Chunk::parse(input) else {
+            break;
+        };
+        if !chunk.checksum_valid() {
+            break;
+        }
+        if let storage::Chunk::Signatures(chunk) = chunk {
+            signatures.extend(chunk.into_signatures());
+        }
+        input = remaining.reset();
+    }
+    signatures
+}
+
 #[derive(Debug)]
 pub struct SaveOptions {
     /// Whether to apply DEFLATE compression to the RLE encoded columns in the document

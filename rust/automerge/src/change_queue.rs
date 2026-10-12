@@ -383,11 +383,7 @@ impl ChangeQueue {
 
     /// The checks one change must pass to be queued, which do not depend on
     /// the chunk it arrived in.
-    fn check_change(
-        &mut self,
-        change: &Change,
-        doc: &DocState<'_>,
-    ) -> Result<(), AutomergeError> {
+    fn check_change(&mut self, change: &Change, doc: &DocState<'_>) -> Result<(), AutomergeError> {
         if doc.has_actor_seq(change) {
             // The document already holds this actor sequence under another
             // hash. Any queued change at a later sequence belongs to the same
