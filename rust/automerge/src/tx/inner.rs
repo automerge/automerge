@@ -171,6 +171,7 @@ impl TransactionInner {
         doc.pin_incoming_boundaries(std::slice::from_ref(&change));
         doc.update_history(&change);
         doc.remove_unused_actors(true);
+        doc.debug_assert_mask_indexes();
         // a local change can be the pending boundary of a write-frontier
         doc.republish_if_pending();
         hash

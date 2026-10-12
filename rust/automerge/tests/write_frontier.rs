@@ -1360,3 +1360,31 @@ fn view_new_counts_boundaries_outside_its_heads_as_pending() {
     // before: alice's boundary is outside `early`, so a1 was hidden too
     assert_eq!(keys, vec!["a1", "a2", "other"]);
 }
+
+/// A masked author's new actor arriving in an apply is hidden from its first
+/// op, without a rebuild: its author is known before the ops are indexed.
+#[test]
+fn masked_authors_new_actor_is_hidden_on_arrival() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "early", 1).unwrap();
+    doc.commit();
+    let boundary = doc.get_heads();
+
+    let mut other = AutoCommit::new();
+    other.put(ROOT, "other", 1).unwrap();
+    doc.merge(&mut other).unwrap();
+    doc.mask_author(alice.clone(), &boundary);
+
+    let mut device = doc.fork().with_author(Some(alice));
+    device.put(ROOT, "late", 2).unwrap();
+    device.put(ROOT, "early", 3).unwrap();
+    device.commit();
+    doc.merge(&mut device).unwrap();
+
+    assert_eq!(doc.get(ROOT, "late").unwrap(), None);
+    assert_eq!(
+        doc.get(ROOT, "early").unwrap().map(|(v, _)| v.as_i64()),
+        Some(Some(1))
+    );
+}

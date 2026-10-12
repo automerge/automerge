@@ -1226,6 +1226,7 @@ pub(crate) struct ManifoldOps<'a> {
     /// indexed by succ position, `Some` exactly where the successor is an
     /// increment; seeked only for counters with successors
     inc: &'a hexane::Column<Option<i64>>,
+    mask: Option<&'a crate::clock::Clock>,
     sub_pos: usize,
     hint: hexane::DeltaDecoder<'a, Option<i64>>,
     /// unmapped, for comparing against the raw obj columns
@@ -1271,6 +1272,7 @@ impl<'a> ManifoldOps<'a> {
             value: &[],
             val_pos: 0,
             inc,
+            mask: None,
             sub_pos: 0,
             hint: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
             cur_obj_raw: (None, None),
@@ -1329,6 +1331,12 @@ impl<'a> ManifoldOps<'a> {
             }
         }
         s
+    }
+
+    /// Ops `mask` does not cover are hidden by the write-frontier.
+    pub(crate) fn with_mask(mut self, mask: Option<&'a crate::clock::Clock>) -> Self {
+        self.mask = mask;
+        self
     }
 
     pub(crate) fn next_op(&mut self) -> ManifoldOp<'a> {
@@ -1392,12 +1400,29 @@ impl<'a> ManifoldOps<'a> {
         self.val_pos += val_len;
 
         let n_succ = self.succ_count.next().flatten().unwrap_or(0) as usize;
-        self.succ_actor.advance_by(n_succ);
-        self.succ_ctr.advance_by(n_succ);
         let sub = self.sub_pos;
         self.sub_pos += n_succ;
-        let alive = n_succ == 0
-            || (is_counter && self.inc.iter_range(sub..sub + n_succ).all(|v| v.is_some()));
+        let alive = match self.mask {
+            None => {
+                self.succ_actor.advance_by(n_succ);
+                self.succ_ctr.advance_by(n_succ);
+                n_succ == 0
+                    || (is_counter && self.inc.iter_range(sub..sub + n_succ).all(|v| v.is_some()))
+            }
+            // only successors the mask lets through can delete
+            Some(mask) => {
+                let mut alive = mask.covers(&id);
+                for inc in self.inc.iter_range(sub..sub + n_succ) {
+                    let sa = self.succ_actor.next().flatten().expect("succ actor");
+                    let sc = self.succ_ctr.next().flatten().expect("succ ctr");
+                    let succ = OpId::new(sc as u64, self.actor_map[usize::from(sa)]);
+                    if mask.covers(&succ) && !(is_counter && inc.is_some()) {
+                        alive = false;
+                    }
+                }
+                alive
+            }
+        };
 
         let hint = self.hint.next().flatten().map(|h| h as u64);
 

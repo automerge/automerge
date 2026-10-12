@@ -595,36 +595,24 @@ impl<H: HashRetention> Automerge<H> {
         self.visibility_epoch
     }
 
-    /// Per-actor max ops before an apply adds to the change graph, once its
-    /// actors are in the table; `None` when no write-frontier is set.
-    pub(crate) fn max_ops_before_apply(&self) -> Option<Vec<u64>> {
-        (!self.write_frontier.is_empty()).then(|| {
-            (0..self.ops.actors.len())
-                .map(|actor| self.change_graph.max_op_for_actor(actor))
-                .collect()
-        })
-    }
-
-    /// An apply indexes its ops without the mask: re-derive it, which covers
-    /// new actors of masked authors and resolved boundaries, and rebuild if
-    /// the mask hides any of the ops just applied.
-    pub(crate) fn finish_apply(&mut self, before: Option<Vec<u64>>) {
-        let Some(before) = before else {
-            return;
-        };
-        if self.republish_mask(|_| {}) {
+    /// Before an apply indexes its ops: new actors' authors join the mask, so
+    /// the ops of a masked author's new actor are hidden from the start.
+    pub(crate) fn register_incoming_authors(
+        &mut self,
+        authors: impl IntoIterator<Item = (usize, Author<'static>)>,
+    ) {
+        if self.write_frontier.is_empty() {
             return;
         }
-        let Some(mask) = self.visibility.mask() else {
-            return;
-        };
-        let hides_applied = mask.clock().counters().enumerate().any(|(actor, bound)| {
-            let prior = before.get(actor).copied().unwrap_or(0);
-            self.change_graph.max_op_for_actor(actor) > prior.max(u64::from(bound))
-        });
-        if hides_applied {
-            let clock = self.visible_current();
-            self.ops.recompute_indexes(clock.clock(), |_| false);
+        let mut registered = false;
+        for (actor, author) in authors {
+            if self.authors.get_author_for_actor(actor).is_none() {
+                self.authors.assign_author(author, actor);
+                registered = true;
+            }
+        }
+        if registered {
+            self.rederive_visibility();
         }
     }
 
@@ -654,10 +642,31 @@ impl<H: HashRetention> Automerge<H> {
         }
     }
 
+    pub(crate) fn debug_assert_mask_indexes(&self) {
+        #[cfg(debug_assertions)]
+        if self.mask().is_some() {
+            self.ops
+                .assert_indexes_under(self.visible_current().clock());
+        }
+    }
+
     pub(crate) fn republish_if_pending(&mut self) {
         if self.visibility.has_pending() {
             self.republish_mask(|_| {});
         }
+    }
+
+    /// The mask, if it hides an op of the incoming changes, given as
+    /// `(actor index, max op)`.
+    pub(crate) fn mask_hiding(
+        &self,
+        changes: impl IntoIterator<Item = (usize, u64)>,
+    ) -> Option<Clock> {
+        let mask = self.mask()?;
+        changes
+            .into_iter()
+            .any(|(actor, max_op)| mask.hides(&OpId::new(max_op, actor)))
+            .then(|| mask.clock().clone())
     }
 
     /// The active visibility mask, if any author is masked.
@@ -2353,6 +2362,32 @@ impl Automerge<Retained> {
             .map(|a| self.ops.lookup_actor(a).expect("actor was just inserted"))
             .collect();
         let clock = self.change_graph.current_clock();
+        if !self.write_frontier.is_empty() && member_seqs.iter().any(|s| s.get() == 1) {
+            let first_authors: Vec<_> = change_set
+                .changes()?
+                .iter()
+                .filter(|c| c.seq == 1)
+                .filter_map(|c| {
+                    let author = crate::change::decode_author_footer(&c.extra)?;
+                    Some((actor_map[c.actor], author.into_owned()))
+                })
+                .collect();
+            self.register_incoming_authors(first_authors);
+        }
+        let restricted = |actor: usize| self.mask().is_some_and(|m| m.restricts(actor));
+        let mask = if member_actors
+            .iter()
+            .any(|a| restricted(actor_map[usize::from(*a)]))
+        {
+            let members: Vec<_> = change_set
+                .changes()?
+                .iter()
+                .map(|c| (actor_map[c.actor], c.max_op))
+                .collect();
+            self.mask_hiding(members)
+        } else {
+            None
+        };
 
         // ops the clock covers belong to skipped members and are dropped
         let ops = match ChangeSetApply::new(
@@ -2362,6 +2397,7 @@ impl Automerge<Retained> {
             overlap,
             &self.ops,
             change_set_ops,
+            mask,
         ) {
             Ok(ops) => ops,
             Err(e) => {
@@ -2377,7 +2413,6 @@ impl Automerge<Retained> {
             }
         };
 
-        let max_ops = self.max_ops_before_apply();
         if overlap {
             // change set actor indexes to document actor indexes
             for m in &mut graph_members {
@@ -2421,7 +2456,8 @@ impl Automerge<Retained> {
             owes_gc |= self.change_graph.record_node_hash(node, hash);
         }
         ops.commit(self, resolved);
-        self.finish_apply(max_ops);
+        self.debug_assert_mask_indexes();
+        self.republish_if_pending();
         // reads the delivered ops, so it waits for the commit
         self.rebuild_missing_hashes(base..self.change_graph.len() as u32);
         if owes_gc {

@@ -1682,9 +1682,10 @@ impl OpSet {
         data: &[u8],
         actor_map: &[usize],
         doc: &OpSet,
+        mask: Option<&Clock>,
     ) -> Result<Self, ReadOpError> {
         Self::load_change_set_cols(raw, data, actor_map.len())?
-            .index_change_set(actor_map, doc, true)
+            .index_change_set(actor_map, doc, true, mask)
     }
 
     /// Succ entries the op set holds, over every row.
@@ -1729,11 +1730,14 @@ impl OpSet {
     /// fragment's actor indexes into `doc`'s actor space and build its
     /// indexes there. Pass `has_deps` when the fragment depends on changes
     /// outside itself; passing `true` is always safe.
+    /// Ops `mask` does not cover are indexed as hidden; pass it only when it
+    /// hides some, since the masked build goes op by op.
     pub(crate) fn index_change_set(
         mut self,
         actor_map: &[usize],
         doc: &OpSet,
         has_deps: bool,
+        mask: Option<&Clock>,
     ) -> Result<Self, ReadOpError> {
         let doc_actor_map = doc.actor_map();
         let identity_f = actor_map.iter().enumerate().all(|(i, &m)| i == m);
@@ -1750,6 +1754,11 @@ impl OpSet {
             obj_info: ObjIndex::default(),
             text_encoding,
         };
+        if let Some(mask) = mask {
+            let (indexes, _) = op_set.indexes_under(mask, |_| false);
+            op_set.set_indexes(indexes);
+            return Ok(op_set);
+        }
         let mut builder = IndexBuilder::new(text_encoding);
         // without their types, sequences created by `doc` would register-split like maps
         builder.seed_obj_info(&doc.obj_info);
@@ -1894,6 +1903,16 @@ impl OpSet {
     /// dirty every op whose id or a successor's id satisfies `dirty`: a delete
     /// has no row of its own, only a successor link on its target.
     pub(crate) fn recompute_indexes(&mut self, clock: &Clock, dirty: impl Fn(&OpId) -> bool) {
+        let (indexes, dirty_rows) = self.indexes_under(clock, dirty);
+        self.set_indexes(indexes);
+        let mut marks = self.cols.index.dirty.edit();
+        for pos in dirty_rows {
+            marks.seek(pos).replace(|_| true);
+        }
+        marks.finish();
+    }
+
+    fn indexes_under(&self, clock: &Clock, dirty: impl Fn(&OpId) -> bool) -> (Indexes, Vec<usize>) {
         let mut builder = self.index_builder();
         let mut last = None;
         let mut dirty_rows = vec![];
@@ -1911,12 +1930,30 @@ impl OpSet {
             builder.process_op(&op, Some(clock));
         }
         let (indexes, _) = builder.finish();
-        self.set_indexes(indexes);
-        let mut marks = self.cols.index.dirty.edit();
-        for pos in dirty_rows {
-            marks.seek(pos).replace(|_| true);
-        }
-        marks.finish();
+        (indexes, dirty_rows)
+    }
+
+    /// Debug check: panics unless the indexes equal a rebuild under `clock`.
+    #[cfg(debug_assertions)]
+    pub(crate) fn assert_indexes_under(&self, clock: &Clock) {
+        let (fresh, _) = self.indexes_under(clock, |_| false);
+        let index = &self.cols.index;
+        assert!(
+            index.visible.iter().eq(fresh.visible.iter()),
+            "masked visible index diverges"
+        );
+        assert!(
+            index.top.values().iter().eq(fresh.top.values().iter()),
+            "masked top index diverges"
+        );
+        assert!(
+            index.text.values().iter().eq(fresh.text.values().iter()),
+            "masked text index diverges"
+        );
+        assert!(
+            index.inc.iter().eq(fresh.inc.iter()),
+            "masked inc index diverges"
+        );
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {

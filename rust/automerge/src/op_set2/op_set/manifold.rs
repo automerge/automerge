@@ -42,9 +42,13 @@ pub(crate) struct CopyRange {
 
 impl OpSet {
     /// `clock` is the document clock before the batch: preds it covers
-    /// are document rows.
-    pub(crate) fn apply_manifold(&self, clock: Clock) -> ApplyManifold<'_> {
-        ApplyManifold::new(self, clock)
+    /// are document rows. Batch ops `mask` does not cover are hidden.
+    pub(crate) fn apply_manifold<'a>(
+        &'a self,
+        clock: Clock,
+        mask: Option<&'a Clock>,
+    ) -> ApplyManifold<'a> {
+        ApplyManifold::new(self, clock, mask)
     }
 }
 
@@ -56,6 +60,7 @@ impl OpSet {
 pub(crate) struct ApplyManifold<'a> {
     op_set: &'a OpSet,
     clock: Clock,
+    mask: Option<&'a Clock>,
     obj_info: ObjIndex,
 
     obj_id_iter: ObjIdIter<'a>,
@@ -99,7 +104,7 @@ pub(crate) struct ApplyManifold<'a> {
 }
 
 impl<'a> ApplyManifold<'a> {
-    pub(crate) fn new(op_set: &'a OpSet, clock: Clock) -> Self {
+    pub(crate) fn new(op_set: &'a OpSet, clock: Clock, mask: Option<&'a Clock>) -> Self {
         let obj_info = op_set.obj_info.clone();
 
         let mut obj_id_iter = op_set.obj_id_iter();
@@ -123,6 +128,7 @@ impl<'a> ApplyManifold<'a> {
         ApplyManifold {
             op_set,
             clock,
+            mask,
             obj_info,
             obj_id_iter,
             id_iter,
@@ -570,9 +576,11 @@ impl<'a> ApplyManifold<'a> {
     }
 
     fn cache_preds(&mut self, op: &ManifoldOp<'_>) {
+        // a hidden successor keeps the link but neither deletes nor increments
+        let masked = self.mask.is_some_and(|m| !m.covers(&op.id));
         for pred_id in &op.preds {
             debug_assert!(self.clock.covers(pred_id), "fragment op had a batch pred");
-            self.succ_cache.push(*pred_id, op.id, op.inc);
+            self.succ_cache.push(*pred_id, op.id, op.inc, masked);
         }
     }
 
@@ -723,7 +731,7 @@ impl TopCalc {
 }
 
 struct SuccCache {
-    preds: Vec<(OpId, OpId, Option<i64>)>,
+    preds: Vec<(OpId, OpId, Option<i64>, bool)>,
     doc_succ: DocSucc,
 }
 
@@ -735,8 +743,8 @@ impl SuccCache {
         }
     }
 
-    fn push(&mut self, pred: OpId, succ: OpId, inc: Option<i64>) {
-        self.preds.push((pred, succ, inc));
+    fn push(&mut self, pred: OpId, succ: OpId, inc: Option<i64>, masked: bool) {
+        self.preds.push((pred, succ, inc, masked));
     }
 
     fn flush(
@@ -750,7 +758,7 @@ impl SuccCache {
         // value_iter cannot re-read a row, so a second increment of the
         // same pred needs the memo
         let mut counter_memo: Option<(OpId, bool)> = None;
-        for (pred, succ, mut inc) in self.preds.drain(..) {
+        for (pred, succ, mut inc, masked) in self.preds.drain(..) {
             let r = pred_iter.seek_to_value(&pred);
             assert!(r.len() == 1, "covered pred must be present");
             if inc.is_some() {
@@ -767,7 +775,7 @@ impl SuccCache {
                     inc = None;
                 }
             }
-            let s = succ_iter.add_succ_at(r.start, succ, inc).unwrap();
+            let s = succ_iter.add_succ_at(r.start, succ, inc, masked).unwrap();
             self.doc_succ.push(s);
         }
     }

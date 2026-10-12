@@ -38,6 +38,8 @@ pub(crate) struct ChangeSetApply<'a> {
     src: ChangeSetSrc<'a>,
     /// excludes the pred columns: they feed the manifold, not the op set
     frag: crate::op_set2::op_set::OpSet,
+    /// the write-frontier mask, when it hides some of the incoming ops
+    mask: Option<Clock>,
 }
 
 impl<'a> ChangeSetApply<'a> {
@@ -46,13 +48,15 @@ impl<'a> ChangeSetApply<'a> {
         actor_map: Vec<usize>,
         src: ChangeSetSrc<'a>,
         doc_ops: &crate::op_set2::op_set::OpSet,
+        mask: Option<Clock>,
     ) -> Result<Self, AutomergeError> {
-        let frag = load_change_set(&src, &actor_map, doc_ops)?;
+        let frag = load_change_set(&src, &actor_map, doc_ops, mask.as_ref())?;
         Ok(Self {
             clock_before: clock,
             actor_map,
             src,
             frag,
+            mask,
         })
     }
 
@@ -65,6 +69,7 @@ impl<'a> ChangeSetApply<'a> {
         overlap: bool,
         doc_ops: &crate::op_set2::op_set::OpSet,
         change_set_ops: crate::op_set2::op_set::OpSet,
+        mask: Option<Clock>,
     ) -> Result<Self, AutomergeError> {
         let (src, frag) = if overlap {
             // covered rows are dropped, so the manifold must read re-encoded columns
@@ -78,12 +83,17 @@ impl<'a> ChangeSetApply<'a> {
             let (raw, data) = ops.export_change_set(preds);
             // a filtered change set may name elements it no longer contains
             let frag = ops
-                .index_change_set(&actor_map, doc_ops, true)
+                .index_change_set(&actor_map, doc_ops, true, mask.as_ref())
                 .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))?;
             (ChangeSetSrc::Owned { raw, data }, frag)
         } else {
             let frag = change_set_ops
-                .index_change_set(&actor_map, doc_ops, !change_set.storage.deps.is_empty())
+                .index_change_set(
+                    &actor_map,
+                    doc_ops,
+                    !change_set.storage.deps.is_empty(),
+                    mask.as_ref(),
+                )
                 .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))?;
             (ChangeSetSrc::ChangeSet(change_set), frag)
         };
@@ -92,6 +102,7 @@ impl<'a> ChangeSetApply<'a> {
             actor_map,
             src,
             frag,
+            mask,
         })
     }
 }
@@ -100,9 +111,10 @@ fn load_change_set(
     src: &ChangeSetSrc<'_>,
     actor_map: &[usize],
     doc_ops: &crate::op_set2::op_set::OpSet,
+    mask: Option<&Clock>,
 ) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
     let (raw, data) = src.parts();
-    crate::op_set2::op_set::OpSet::load_change_set(raw, data, actor_map, doc_ops)
+    crate::op_set2::op_set::OpSet::load_change_set(raw, data, actor_map, doc_ops, mask)
         .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))
 }
 
@@ -115,6 +127,7 @@ impl<'a> ChangeSetApply<'a> {
     ) -> Result<ManifoldResult, AutomergeError> {
         let (raw, data) = self.src.parts();
         let len = self.frag.len();
+        let mask = self.mask.as_ref();
         let mut fs = crate::storage::change_set::ManifoldOps::new(
             raw,
             data,
@@ -123,8 +136,9 @@ impl<'a> ChangeSetApply<'a> {
             self.frag.succ_entries(),
             self.frag.value_bytes(),
             self.frag.inc_index(),
-        );
-        let m = doc.ops().apply_manifold(self.clock_before.clone());
+        )
+        .with_mask(mask);
+        let m = doc.ops().apply_manifold(self.clock_before.clone(), mask);
         m.apply_change_set_ops(&mut fs)
     }
 

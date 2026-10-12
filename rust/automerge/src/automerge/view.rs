@@ -211,6 +211,11 @@ impl Mask {
         !self.0.covers(id)
     }
 
+    /// Whether the mask hides any of `actor`'s ops.
+    pub(crate) fn restricts(&self, actor: usize) -> bool {
+        self.0.max_op(actor) < u64::from(u32::MAX)
+    }
+
     /// Add an unrestricted slot for an actor just inserted into the actor table.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
         self.0.insert_actor(shift, u32::MAX)

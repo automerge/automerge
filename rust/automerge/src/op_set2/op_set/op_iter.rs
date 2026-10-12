@@ -1385,11 +1385,12 @@ impl<'a> SuccIterIter<'a> {
         pos: usize,
         id: OpId,
         inc: Option<i64>,
+        masked: bool,
     ) -> Option<SuccInsert> {
         if pos > self.count.pos() {
             let _ = self.nth(pos - self.count.pos() - 1);
         }
-        Some(self.clone().next()?.add_succ(pos, id, inc, false))
+        Some(self.clone().next()?.add_succ(pos, id, inc, masked))
     }
 }
 

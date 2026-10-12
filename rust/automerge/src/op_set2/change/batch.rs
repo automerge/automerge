@@ -285,21 +285,37 @@ impl BatchApply {
         let (raw, data) =
             encode_change_set_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
 
+        let first_authors: Vec<_> = self
+            .changes
+            .iter()
+            .filter(|c| c.seq() == 1)
+            .filter_map(|c| {
+                let actor = doc.ops().lookup_actor(c.actor_id())?;
+                Some((actor, c.author()?.into_owned()))
+            })
+            .collect();
+        doc.register_incoming_authors(first_authors);
+        let mask = doc.mask_hiding(
+            self.changes
+                .iter()
+                .filter_map(|c| Some((doc.ops().lookup_actor(c.actor_id())?, c.max_op()))),
+        );
         let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
         let frag = super::change_set::ChangeSetApply::from_parts(
             clock_before_batch,
             actor_map,
             super::change_set::ChangeSetSrc::Owned { raw, data },
             doc.ops(),
+            mask,
         )?;
         // the last fallible step; nothing below can fail
         let r = frag.resolve(doc)?;
 
-        let max_ops = doc.max_ops_before_apply();
         doc.pin_incoming_boundaries(&self.changes);
         doc.update_history_batch(&self.changes);
         frag.commit(doc, r);
-        doc.finish_apply(max_ops);
+        doc.debug_assert_mask_indexes();
+        doc.republish_if_pending();
         Ok(())
     }
 

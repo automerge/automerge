@@ -904,7 +904,7 @@ impl DocSucc {
             Some((p, c)) if *p == s.pos => *c += 1,
             _ => self.counts.push((s.pos, s.len as u32 + 1)),
         }
-        if s.inc.is_none() && self.clears.last() != Some(&s.pos) {
+        if s.inc.is_none() && !s.masked && self.clears.last() != Some(&s.pos) {
             self.clears.push(s.pos);
         }
     }
