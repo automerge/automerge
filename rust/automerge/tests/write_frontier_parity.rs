@@ -730,9 +730,9 @@ impl Runner {
                 .expect("saved document reloads")
                 .with_write_frontier(old_policy.clone());
         let mut view = twin.hydrate(None);
-        let before = twin.view();
+        let before = twin.viewpoint();
         twin.set_write_frontier(new_policy.clone());
-        let patches = twin.diff_views(&before, &twin.view());
+        let patches = twin.diff(&before, twin.viewpoint());
         // `hydrate::Value` cannot replay text `Mark` patches; both sides of
         // the comparison leave marks out of the hydrated text value.
         let replayable = patches

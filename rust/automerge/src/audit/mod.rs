@@ -15,7 +15,7 @@ pub use transactable::Transactable;
 pub(crate) use wrapper::AuditWrapper;
 
 use crate::hash_retention::Full;
-use crate::{ChangeHash, ChangeId};
+use crate::{ChangeHash, ChangeId, Viewpoint};
 
 /// Every boundary as a hash, including hashes this document has not received
 /// yet.
@@ -39,6 +39,53 @@ pub(crate) fn frontier_hashes(
 }
 
 /// Drops unknown hashes: audited reads use the subset of `heads` the document knows.
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Heads named by hash, read under the document's current write-frontier, or
+/// a [`Viewpoint`], read under its own: either side of an audited `diff`.
+/// Hashes the document does not have are ignored.
+pub trait HeadsOrViewpoint: sealed::Sealed {
+    #[doc(hidden)]
+    fn into_viewpoint(self, doc: &crate::automerge::Automerge<Full>) -> Viewpoint;
+}
+
+impl sealed::Sealed for &[ChangeHash] {}
+impl HeadsOrViewpoint for &[ChangeHash] {
+    fn into_viewpoint(self, doc: &crate::automerge::Automerge<Full>) -> Viewpoint {
+        Viewpoint::at_heads(known_ids(doc, self))
+    }
+}
+
+impl sealed::Sealed for &Vec<ChangeHash> {}
+impl HeadsOrViewpoint for &Vec<ChangeHash> {
+    fn into_viewpoint(self, doc: &crate::automerge::Automerge<Full>) -> Viewpoint {
+        self.as_slice().into_viewpoint(doc)
+    }
+}
+
+impl<const N: usize> sealed::Sealed for &[ChangeHash; N] {}
+impl<const N: usize> HeadsOrViewpoint for &[ChangeHash; N] {
+    fn into_viewpoint(self, doc: &crate::automerge::Automerge<Full>) -> Viewpoint {
+        self.as_slice().into_viewpoint(doc)
+    }
+}
+
+impl sealed::Sealed for Viewpoint {}
+impl HeadsOrViewpoint for Viewpoint {
+    fn into_viewpoint(self, _doc: &crate::automerge::Automerge<Full>) -> Viewpoint {
+        self
+    }
+}
+
+impl sealed::Sealed for &Viewpoint {}
+impl HeadsOrViewpoint for &Viewpoint {
+    fn into_viewpoint(self, _doc: &crate::automerge::Automerge<Full>) -> Viewpoint {
+        self.clone()
+    }
+}
+
 pub(crate) fn known_ids(
     doc: &crate::automerge::Automerge<Full>,
     heads: &[ChangeHash],

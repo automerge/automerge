@@ -990,7 +990,7 @@ fn write_frontier_view_diff_tracks_actor_reordering() {
     tx.commit();
     doc.mask_author(author.clone(), &[]);
     let mut view = doc.hydrate(None);
-    let before = doc.view();
+    let before = doc.viewpoint();
     doc.reveal_author(&author);
 
     // The view taken before the reveal already references actor 0x80. A
@@ -1004,7 +1004,7 @@ fn write_frontier_view_diff_tracks_actor_reordering() {
 
     assert_eq!(doc.text(&text).unwrap(), "abc");
     assert_eq!(doc.get(ROOT, "other").unwrap().unwrap().0, 1.into());
-    let patches = doc.diff_views(&before, &doc.view());
+    let patches = doc.diff(&before, doc.viewpoint());
     view.apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
     assert_eq!(view, doc.hydrate(None));
@@ -1052,17 +1052,17 @@ fn set_write_frontier_view_diff_replays_to_hydrate() {
     doc.set_write_frontier(HashMap::from([(alice.clone(), epoch.clone())]));
 
     let mut view = doc.hydrate(None);
-    let before = doc.view();
+    let before = doc.viewpoint();
     doc.set_write_frontier(HashMap::from([(bob, Vec::new())]));
-    let patches = doc.diff_views(&before, &doc.view());
+    let patches = doc.diff(&before, doc.viewpoint());
     view.apply_patches(doc.text_encoding(), patches).unwrap();
     assert_eq!(view, doc.hydrate(None));
 
     // Replacing with the empty policy is also one view transition, and
     // restores full visibility.
-    let before = doc.view();
+    let before = doc.viewpoint();
     doc.set_write_frontier(HashMap::new());
-    let patches = doc.diff_views(&before, &doc.view());
+    let patches = doc.diff(&before, doc.viewpoint());
     view.apply_patches(doc.text_encoding(), patches).unwrap();
     assert_eq!(view, doc.hydrate(None));
     assert!(doc.get_write_frontier().is_empty());
@@ -1320,10 +1320,10 @@ fn view_from_a_fork_is_not_trusted() {
     b.set_actor(ActorId::from(vec![0x20]));
     b.put(ROOT, "q", 1).unwrap();
     b.commit();
-    let view = a.view();
-    let after = b.view();
+    let view = a.viewpoint();
+    let after = b.viewpoint();
     assert!(matches!(
-        b.diff_views(&view, &after),
+        b.diff(&view, &after),
         Err(automerge::AutomergeError::InvalidChangeId(_))
     ));
 }
@@ -1333,7 +1333,7 @@ fn view_from_a_fork_is_not_trusted() {
 #[test]
 fn view_new_counts_boundaries_outside_its_heads_as_pending() {
     use automerge::next::{transaction::Transactable as _, AutoCommit as Next};
-    use automerge::View;
+    use automerge::Viewpoint;
     let alice = Author::try_from("aaaa").unwrap();
     let mut doc = Next::new().with_author(Some(alice.clone()));
     doc.put(ROOT, "a1", 1).unwrap();
@@ -1347,9 +1347,9 @@ fn view_new_counts_boundaries_outside_its_heads_as_pending() {
     doc.commit();
 
     let frontier = std::collections::HashMap::from([(alice.clone(), late)]);
-    let before = View::new(early, frontier.clone());
-    let after = View::new(doc.get_heads(), frontier);
-    let patches = doc.diff_views(&before, &after).unwrap();
+    let before = Viewpoint::new(early, frontier.clone());
+    let after = Viewpoint::new(doc.get_heads(), frontier);
+    let patches = doc.diff(&before, &after).unwrap();
     let keys: Vec<_> = patches
         .iter()
         .filter_map(|p| match &p.action {

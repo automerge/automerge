@@ -38,7 +38,7 @@ use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, Text
 use crate::write_frontier::{Boundary, WriteFrontier};
 use crate::{AutomergeError, Change, ChangeId, Cursor, ObjType, Prop};
 use std::borrow::Cow;
-use view::{ClockRange, Mask, ReadAt, View, VisibleClock};
+use view::{ClockRange, Mask, ReadAt, Viewpoint, VisibleClock};
 
 pub(crate) mod current_state;
 mod dirty_diff;
@@ -330,7 +330,7 @@ pub struct Automerge<H: HashRetention = Retained> {
     /// The current actor.
     actor: Actor,
     /// Cursor for dirty-bit incremental diffs.
-    diff_cursor: View,
+    diff_cursor: Viewpoint,
     /// The current author.
     author: Option<Author<'static>>,
 }
@@ -348,7 +348,7 @@ impl<H: HashRetention> Automerge<H> {
             actor_generation: view::ActorGeneration::new(),
             ops,
             actor: Actor::Unused(ActorId::random()),
-            diff_cursor: View::default(),
+            diff_cursor: Viewpoint::default(),
             author: None,
         }
     }
@@ -397,7 +397,7 @@ impl<H: HashRetention> Automerge<H> {
             actor_generation: view::ActorGeneration::new(),
             ops,
             actor: Actor::Unused(ActorId::random()),
-            diff_cursor: View::default(),
+            diff_cursor: Viewpoint::default(),
             author: None,
         };
         doc.remove_unused_actors(false);
@@ -541,8 +541,8 @@ impl<H: HashRetention> Automerge<H> {
     /// Until every one of `heads` is in the document the author is hidden
     /// entirely. Hidden changes, including this document's own author's, are
     /// still recorded, saved and synced; sequence positions refer to the
-    /// visible document. Take a [`Self::view`] beforehand and call
-    /// [`Self::diff_views`] to get the resulting patches.
+    /// visible document. Take a [`Self::viewpoint`] beforehand and call
+    /// [`Self::diff`] to get the resulting patches.
     ///
     /// Rebuilds the document's indexes when the visible set changes.
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeId]) {
@@ -1522,17 +1522,6 @@ impl<H: HashRetention> Automerge<H> {
         self.change_set_nodes(vec![node], &deps, NameHashes::All)
     }
 
-    pub(crate) fn clock_range(
-        &self,
-        before: &[ChangeId],
-        after: &[ChangeId],
-    ) -> Result<ClockRange<'static>, AutomergeError> {
-        Ok(ClockRange::between(
-            self.visible(before)?,
-            self.visible(after)?,
-        ))
-    }
-
     /// The clock a read at `heads` observes: causal(heads) ∩ mask.
     pub(crate) fn visible(&self, heads: &[ChangeId]) -> Result<VisibleClock, AutomergeError> {
         let nodes = self.nodes_for_change_ids(heads)?;
@@ -1794,64 +1783,84 @@ impl<H: HashRetention> Automerge<H> {
         */
     }
 
-    /// Create patches representing the change in the current state of the document between the
-    /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
-    /// in the opposite order.
+    /// Patches from `before` to `after`, each given as heads or a
+    /// [`Viewpoint`]. Heads are read under the current write-frontier; a
+    /// viewpoint under its own, so masking and revealing authors is reported
+    /// even when the heads did not move. Reversing the arguments observes the
+    /// same changes in the opposite order.
+    ///
+    /// Returns [`AutomergeError::InvalidChangeId`] if either side names a
+    /// change this document does not have.
     pub fn diff(
         &self,
-        before_heads: &[ChangeId],
-        after_heads: &[ChangeId],
+        before: impl Into<Viewpoint>,
+        after: impl Into<Viewpoint>,
     ) -> Result<Vec<Patch>, AutomergeError> {
-        let clock = self.clock_range(before_heads, after_heads)?;
-        Ok(self.log_diff(clock))
+        self.diff_obj_inner(ObjMeta::root(), &before.into(), &after.into(), true)
     }
 
-    /// The document's current [`View`].
-    pub fn view(&self) -> View {
-        let mut view = self.view_at(self.get_heads());
+    pub(crate) fn diff_obj_inner(
+        &self,
+        obj: ObjMeta,
+        before: &Viewpoint,
+        after: &Viewpoint,
+        recursive: bool,
+    ) -> Result<Vec<Patch>, AutomergeError> {
+        let before = self.visible_for_viewpoint(before)?;
+        let clock = if self.is_current(after) {
+            ClockRange::between_current(before, self.read_current())
+        } else {
+            ClockRange::between(before, self.visible_for_viewpoint(after)?)
+        };
+        let mut patch_accumulator = PatchAccumulator::event_log();
+        patch_accumulator.heads_clock = clock.read_after().historical().cloned();
+        DiffIter::log(self, obj, clock, &mut patch_accumulator, recursive);
+        Ok(patch_accumulator.make_patches(self))
+    }
+
+    /// Whether `viewpoint` reads exactly what the current indexes hold.
+    pub(crate) fn is_current(&self, viewpoint: &Viewpoint) -> bool {
+        viewpoint.heads == self.get_heads()
+            && (viewpoint.write_frontier.is_none()
+                || viewpoint.epoch == Some(self.visibility_epoch))
+    }
+
+    /// The document's current [`Viewpoint`].
+    pub fn viewpoint(&self) -> Viewpoint {
+        let mut view = self.viewpoint_at(self.get_heads());
         view.cache = Some((self.actor_generation.get(), self.visible_current()));
         view.epoch = Some(self.visibility_epoch);
         view
     }
 
     /// `heads` under the current write-frontier.
-    pub(crate) fn view_at(&self, heads: Vec<ChangeId>) -> View {
-        View {
+    pub(crate) fn viewpoint_at(&self, heads: Vec<ChangeId>) -> Viewpoint {
+        Viewpoint {
             heads,
-            write_frontier: self.write_frontier.clone(),
+            write_frontier: Some(self.write_frontier.clone()),
             cache: None,
             epoch: None,
             pending: Some(self.visibility.pending.clone()),
         }
     }
 
-    /// Patches from `before` to `after`, each read under the write-frontier
-    /// it was taken with, so masking and revealing authors is reported even
-    /// when the heads did not move.
-    ///
-    /// Returns [`AutomergeError::InvalidChangeId`] if either view names a
-    /// change this document does not have.
-    pub fn diff_views(&self, before: &View, after: &View) -> Result<Vec<Patch>, AutomergeError> {
-        let before = self.visible_for_view(before)?;
-        let clock = if *after == self.view() {
-            ClockRange::between_current(before, self.read_current())
-        } else {
-            ClockRange::between(before, self.visible_for_view(after)?)
-        };
-        Ok(self.log_diff(clock))
-    }
-
-    pub(crate) fn visible_for_view(&self, view: &View) -> Result<VisibleClock, AutomergeError> {
+    pub(crate) fn visible_for_viewpoint(
+        &self,
+        view: &Viewpoint,
+    ) -> Result<VisibleClock, AutomergeError> {
         if let Some((generation, clock)) = &view.cache {
             if *generation == self.actor_generation.get() {
                 return Ok(clock.clone());
             }
         }
+        let Some(write_frontier) = &view.write_frontier else {
+            return self.visible(&view.heads);
+        };
         let nodes = self.nodes_for_change_ids(&view.heads)?;
         let graph = &self.change_graph;
         let visibility = match &view.pending {
             Some(pending) => visibility::FrontierVisibility::resolving(
-                &view.write_frontier,
+                write_frontier,
                 graph,
                 &self.authors,
                 &self.ops.actors,
@@ -1860,7 +1869,7 @@ impl<H: HashRetention> Automerge<H> {
             None => {
                 let history = graph.seq_clock_for_nodes(nodes.clone());
                 visibility::FrontierVisibility::resolving(
-                    &view.write_frontier,
+                    write_frontier,
                     graph,
                     &self.authors,
                     &self.ops.actors,
@@ -1879,13 +1888,6 @@ impl<H: HashRetention> Automerge<H> {
         ))
     }
 
-    fn log_diff(&self, clock: ClockRange<'_>) -> Vec<Patch> {
-        let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads_clock = clock.read_after().historical().cloned();
-        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_accumulator, true);
-        patch_accumulator.make_patches(self)
-    }
-
     /// The patches since the previous call (or since the empty document),
     /// including write-frontier changes.
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
@@ -1893,39 +1895,21 @@ impl<H: HashRetention> Automerge<H> {
         let patches = self
             .dirty_diff_patches_and_clear(&before)
             .expect("dirty diff should support Automerge incremental intervals");
-        self.diff_cursor = self.view();
+        self.diff_cursor = self.viewpoint();
         patches
     }
 
-    /// Create patches representing the change in the current state of an object
-    /// in the document between the `before_heads` and `after_heads` heads. If
-    /// the arguments are reverse it will observe the same changes in the
-    /// opposite order.
-    ///
-    /// # Arguments
-    ///
-    /// * `obj` - The object to start the diff at.
-    /// * `before_heads` - heads from [`Self::get_heads()`] at beginning point
-    ///   in the documents history
-    /// * `after_heads` - heads from [`Self::get_heads()`] at ending point in
-    ///   the documents history.
-    /// * `recursive` - if false, do not also diff child objects
-    ///
-    /// Note: `before_heads` and `after_heads` do not have to be chronological.
-    /// Document state can move backward.
+    /// [`Self::diff`] starting at `obj`; with `recursive` false, child objects
+    /// are not diffed.
     pub fn diff_obj(
         &self,
         obj: &ExId,
-        before_heads: &[ChangeId],
-        after_heads: &[ChangeId],
+        before: impl Into<Viewpoint>,
+        after: impl Into<Viewpoint>,
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_range(before_heads, after_heads)?;
-        let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads_clock = clock.read_after().historical().cloned();
-        DiffIter::log(self, obj, clock, &mut patch_accumulator, recursive);
-        Ok(patch_accumulator.make_patches(self))
+        self.diff_obj_inner(obj, &before.into(), &after.into(), recursive)
     }
 
     /// This document's [`AuditMode`].
@@ -3951,7 +3935,7 @@ mod dirty_diff_tests {
         let full = doc.diff(before, after).unwrap();
         assert_eq!(after, doc.get_heads().as_slice());
         let dirty = doc
-            .dirty_diff_patches(&doc.view_at(before.to_vec()))
+            .dirty_diff_patches(&doc.viewpoint_at(before.to_vec()))
             .unwrap();
         assert_patch_effects_match(doc, before, after, "dirty diff", &dirty, "full diff", &full);
     }
@@ -4046,7 +4030,7 @@ mod dirty_diff_tests {
         doc.ops_mut().clear_dirty();
         doc.ops_mut().mark_dirty(1);
         let patches = {
-            let view = doc.view_at(before.clone());
+            let view = doc.viewpoint_at(before.clone());
             doc.dirty_diff_patches_and_clear(&view)
         }
         .unwrap();
@@ -5736,7 +5720,7 @@ mod dirty_diff_tests {
 
         assert_dirty_diff_matches_full(&doc, &before, &after);
         {
-            let view = doc.view_at(before.clone());
+            let view = doc.viewpoint_at(before.clone());
             doc.dirty_diff_patches_and_clear(&view)
         }
         .unwrap();

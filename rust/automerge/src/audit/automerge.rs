@@ -334,8 +334,8 @@ impl Automerge {
     /// Until every one of `heads` is in the document the author is hidden
     /// entirely. Hidden changes, including this document's own author's, are
     /// still recorded, saved and synced; sequence positions refer to the
-    /// visible document. Take a [`Self::view`] beforehand and call
-    /// [`Self::diff_views`] to get the resulting patches.
+    /// visible document. Take a [`Self::viewpoint`] beforehand and call
+    /// [`Self::diff`] to get the resulting patches.
     ///
     /// Rebuilds the document's indexes when the visible set changes.
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
@@ -394,19 +394,9 @@ impl Automerge {
         self.0.read_forced_slow_hydrate()
     }
 
-    /// The document's current [`View`](crate::View).
-    pub fn view(&self) -> crate::View {
-        self.0.view()
-    }
-
-    /// Patches from `before` to `after`, each read under the write-frontier
-    /// it was taken with, so masking and revealing authors is reported even
-    /// when the heads did not move.
-    ///
-    /// Returns no patches if either view names a change this document does
-    /// not have.
-    pub fn diff_views(&self, before: &crate::View, after: &crate::View) -> Vec<Patch> {
-        self.0.diff_views(before, after).unwrap_or_default()
+    /// The document's current [`Viewpoint`](crate::Viewpoint).
+    pub fn viewpoint(&self) -> crate::Viewpoint {
+        self.0.viewpoint()
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
@@ -640,41 +630,32 @@ impl Automerge {
         self.0.dump()
     }
 
-    /// Create patches representing the change in the current state of the document between the
-    /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
-    /// in the opposite order.
-    pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
-        let before = super::known_ids(&self.0, before_heads);
-        let after = super::known_ids(&self.0, after_heads);
-        self.0.diff(&before, &after).unwrap_or_default()
+    /// Create patches representing the change in the current state of the document between
+    /// `before` and `after`, each heads or a [`Viewpoint`](crate::Viewpoint) (see
+    /// [`HeadsOrViewpoint`](crate::HeadsOrViewpoint)). If the arguments are reverse it will
+    /// observe the same changes in the opposite order.
+    pub fn diff(
+        &self,
+        before: impl crate::HeadsOrViewpoint,
+        after: impl crate::HeadsOrViewpoint,
+    ) -> Vec<Patch> {
+        let before = before.into_viewpoint(&self.0);
+        let after = after.into_viewpoint(&self.0);
+        self.0.diff(before, after).unwrap_or_default()
     }
 
-    /// Create patches representing the change in the current state of an object
-    /// in the document between the `before_heads` and `after_heads` heads. If
-    /// the arguments are reverse it will observe the same changes in the
-    /// opposite order.
-    ///
-    /// # Arguments
-    ///
-    /// * `obj` - The object to start the diff at.
-    /// * `before_heads` - heads from [`Self::get_heads()`] at beginning point
-    ///   in the documents history
-    /// * `after_heads` - heads from [`Self::get_heads()`] at ending point in
-    ///   the documents history.
-    /// * `recursive` - if false, do not also diff child objects
-    ///
-    /// Note: `before_heads` and `after_heads` do not have to be chronological.
-    /// Document state can move backward.
+    /// [`Self::diff`] starting at `obj`; with `recursive` false, child objects
+    /// are not diffed.
     pub fn diff_obj(
         &self,
         obj: &ExId,
-        before_heads: &[ChangeHash],
-        after_heads: &[ChangeHash],
+        before: impl crate::HeadsOrViewpoint,
+        after: impl crate::HeadsOrViewpoint,
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
-        let before = super::known_ids(&self.0, before_heads);
-        let after = super::known_ids(&self.0, after_heads);
-        self.0.diff_obj(obj, &before, &after, recursive)
+        let before = before.into_viewpoint(&self.0);
+        let after = after.into_viewpoint(&self.0);
+        self.0.diff_obj(obj, before, after, recursive)
     }
 
     /// EXPERIMENTAL: Return the fragments covering the document history at

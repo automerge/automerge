@@ -140,7 +140,8 @@ mod tests {
     fn walking_matches_seeking() {
         let (mut doc, before) = marked_doc();
         let after = doc.get_heads();
-        let diff = doc.document().clock_range(&before, &after).unwrap();
+        let am = doc.document();
+        let diff = ClockRange::between(am.visible(&before).unwrap(), am.visible(&after).unwrap());
         let ops = doc.document().ops();
         let clocks = [ClockRange::default(), diff];
 

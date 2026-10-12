@@ -13,44 +13,56 @@ use crate::{Author, ChangeId};
 
 use std::borrow::Cow;
 
-/// What a document showed at some point: its heads and its write-frontier.
+/// A point to diff from or to: some heads, read either under the document's
+/// current write-frontier or under one of their own.
 ///
-/// Take one with `view()` before a change and pass it to `diff_views` after
-/// to get patches that include write-frontier changes, which leave the heads
-/// alone. A boundary its document had not yet received hides its author
-/// entirely; for a view built with [`View::new`] that is any boundary outside
-/// the history of `heads`.
+/// Heads convert into a viewpoint under the current write-frontier. Take one
+/// with `viewpoint()` before a change and pass it to `diff` after to get
+/// patches that include write-frontier changes, which leave the heads alone.
+/// A boundary its document had not yet received hides its author entirely; for
+/// a viewpoint built with [`Viewpoint::new`] that is any boundary outside the
+/// history of `heads`.
 #[derive(Debug, Clone, Default)]
-pub struct View {
+pub struct Viewpoint {
     pub(crate) heads: Vec<ChangeId>,
-    pub(crate) write_frontier: WriteFrontier,
+    /// `None`: whatever write-frontier the document has when the viewpoint is
+    /// read.
+    pub(crate) write_frontier: Option<WriteFrontier>,
     /// The visible clock, valid while the document's actor generation matches.
     pub(crate) cache: Option<(u64, VisibleClock)>,
-    /// The visibility epoch, for a view of a document's current state.
+    /// The visibility epoch, for a viewpoint of a document's current state.
     pub(crate) epoch: Option<u64>,
-    /// The boundaries still pending when a document made this view; `None`
-    /// counts those outside the history of `heads`.
+    /// The boundaries still pending when a document made this viewpoint;
+    /// `None` counts those outside the history of `heads`.
     pub(crate) pending: Option<Vec<Boundary>>,
 }
 
-impl PartialEq for View {
+impl PartialEq for Viewpoint {
     fn eq(&self, other: &Self) -> bool {
         self.heads == other.heads && self.write_frontier == other.write_frontier
     }
 }
 
-impl Eq for View {}
+impl Eq for Viewpoint {}
 
-impl View {
-    /// The view at `heads` under `write_frontier`, as from `get_heads()` and
+impl Viewpoint {
+    /// `heads` under `write_frontier`, as from `get_heads()` and
     /// `get_write_frontier()`.
     pub fn new(
         heads: Vec<ChangeId>,
         write_frontier: HashMap<Author<'static>, Vec<ChangeId>>,
     ) -> Self {
-        View {
+        Viewpoint {
+            write_frontier: Some(WriteFrontier::from_ids(write_frontier)),
+            ..Viewpoint::at_heads(heads)
+        }
+    }
+
+    /// `heads` under whatever write-frontier the document has when read.
+    pub(crate) fn at_heads(heads: Vec<ChangeId>) -> Self {
+        Viewpoint {
             heads,
-            write_frontier: WriteFrontier::from_ids(write_frontier),
+            write_frontier: None,
             cache: None,
             epoch: None,
             pending: None,
@@ -61,9 +73,34 @@ impl View {
         &self.heads
     }
 
-    /// Boundaries named by a hash this view's document never held are left out.
-    pub fn write_frontier(&self) -> HashMap<Author<'static>, Vec<ChangeId>> {
-        self.write_frontier.ids()
+    /// `None` for heads read under the document's current write-frontier.
+    /// Boundaries named by a hash the document never held are left out.
+    pub fn write_frontier(&self) -> Option<HashMap<Author<'static>, Vec<ChangeId>>> {
+        self.write_frontier.as_ref().map(WriteFrontier::ids)
+    }
+}
+
+impl From<&[ChangeId]> for Viewpoint {
+    fn from(heads: &[ChangeId]) -> Self {
+        Viewpoint::at_heads(heads.to_vec())
+    }
+}
+
+impl From<&Vec<ChangeId>> for Viewpoint {
+    fn from(heads: &Vec<ChangeId>) -> Self {
+        Viewpoint::at_heads(heads.clone())
+    }
+}
+
+impl<const N: usize> From<&[ChangeId; N]> for Viewpoint {
+    fn from(heads: &[ChangeId; N]) -> Self {
+        Viewpoint::at_heads(heads.to_vec())
+    }
+}
+
+impl From<&Viewpoint> for Viewpoint {
+    fn from(viewpoint: &Viewpoint) -> Self {
+        viewpoint.clone()
     }
 }
 

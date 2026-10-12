@@ -171,9 +171,9 @@ fn restored_nested_lists_include_unchanged_other_author_descendants() {
 
     doc.mask_author(author.clone(), &[]);
     let mut view = doc.hydrate(None);
-    let before = doc.view();
+    let before = doc.viewpoint();
     doc.reveal_author(&author);
-    let patches = doc.diff_views(&before, &doc.view());
+    let patches = doc.diff(&before, doc.viewpoint());
     assert_eq!(patches, doc.diff(&[], &doc.get_heads()));
     view.apply_patches(ENCODING, patches).unwrap();
     assert_eq!(view, doc.hydrate(None));
@@ -203,9 +203,9 @@ fn restored_text_preserves_other_author_marks_and_block_children() {
     tx.commit();
 
     doc.mask_author(author.clone(), &[]);
-    let before = doc.view();
+    let before = doc.viewpoint();
     doc.reveal_author(&author);
-    let patches = doc.diff_views(&before, &doc.view());
+    let patches = doc.diff(&before, doc.viewpoint());
     // Hydrated text currently does not model marks/block children, so verify
     // the actual rich-text patches, including their complete paths and IDs.
     assert_eq!(patches, doc.diff(&[], &doc.get_heads()));
@@ -367,10 +367,10 @@ fn pending_events_survive_load_incremental_into_empty_document() {
     let more = third.save_after(&heads);
 
     let mut doc = Automerge::new_with_encoding(ENCODING);
-    let before = doc.view();
+    let before = doc.viewpoint();
     doc.load_incremental(&bytes).unwrap();
     doc.load_incremental(&more).unwrap();
-    let patches = doc.diff_views(&before, &doc.view());
+    let patches = doc.diff(&before, doc.viewpoint());
     assert_state_once(&patches);
     let mut view = AutoCommit::new_with_encoding(ENCODING)
         .hydrate(ROOT, None)

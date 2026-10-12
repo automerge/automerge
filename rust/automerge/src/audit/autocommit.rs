@@ -190,10 +190,14 @@ impl AutoCommit {
     /// ```
     ///
     /// See [`Self::diff_incremental()`] for encapsulating this pattern.
-    pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
-        let before = super::known_ids(&self.0.doc, before);
-        let after = super::known_ids(&self.0.doc, after);
-        self.0.diff(&before, &after).unwrap_or_default()
+    pub fn diff(
+        &mut self,
+        before: impl crate::HeadsOrViewpoint,
+        after: impl crate::HeadsOrViewpoint,
+    ) -> Vec<Patch> {
+        let before = before.into_viewpoint(&self.0.doc);
+        let after = after.into_viewpoint(&self.0.doc);
+        self.0.diff(before, after).unwrap_or_default()
     }
 
     /// Generates a diff from `before` to `after` for a given `object`
@@ -210,21 +214,21 @@ impl AutoCommit {
     /// # Arguments
     ///
     /// * `obj` - The object to start the diff at.
-    /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
-    /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
+    /// * `before` - heads or a [`Viewpoint`](crate::Viewpoint) at the beginning point
+    /// * `after` - heads or a [`Viewpoint`](crate::Viewpoint) at the ending point
     /// * `recursive` - if false, do not also diff child objects
     ///
     /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
     pub fn diff_obj(
         &mut self,
         obj: &ExId,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: impl crate::HeadsOrViewpoint,
+        after: impl crate::HeadsOrViewpoint,
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
-        let before = super::known_ids(&self.0.doc, before);
-        let after = super::known_ids(&self.0.doc, after);
-        self.0.diff_obj(obj, &before, &after, recursive)
+        let before = before.into_viewpoint(&self.0.doc);
+        let after = after.into_viewpoint(&self.0.doc);
+        self.0.diff_obj(obj, before, after, recursive)
     }
 
     /// This is a convience function that encapsulates the following common pattern
@@ -297,8 +301,8 @@ impl AutoCommit {
     /// Until every one of `heads` is in the document the author is hidden
     /// entirely. Hidden changes, including this document's own author's, are
     /// still recorded, saved and synced; sequence positions refer to the
-    /// visible document. Take a [`Self::view`] beforehand and call
-    /// [`Self::diff_views`] to get the resulting patches.
+    /// visible document. Take a [`Self::viewpoint`] beforehand and call
+    /// [`Self::diff`] to get the resulting patches.
     ///
     /// Rebuilds the document's indexes when the visible set changes.
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
@@ -341,18 +345,9 @@ impl AutoCommit {
         super::frontier_hashes(&self.0.doc)
     }
 
-    /// The document's current [`View`](crate::View).
-    pub fn view(&mut self) -> crate::View {
-        self.0.view()
-    }
-
-    /// Patches from `before` to `after`, each read under the write-frontier
-    /// it was taken with. See [`crate::Automerge::diff_views`].
-    ///
-    /// Returns no patches if either view names a change this document does
-    /// not have.
-    pub fn diff_views(&mut self, before: &crate::View, after: &crate::View) -> Vec<Patch> {
-        self.0.diff_views(before, after).unwrap_or_default()
+    /// The document's current [`Viewpoint`](crate::Viewpoint).
+    pub fn viewpoint(&mut self) -> crate::Viewpoint {
+        self.0.viewpoint()
     }
 
     pub fn get_authors(&self) -> &[Author<'static>] {

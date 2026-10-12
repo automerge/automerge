@@ -8,7 +8,7 @@ use crate::op_set2::op_set::{MarkIdx, OpSet};
 use crate::patches::{Patch, PatchAccumulator};
 use crate::types::{ObjId, ObjMeta, ObjType, OpId, TextEncoding};
 
-use super::view::{ClockRange, View};
+use super::view::{ClockRange, Viewpoint};
 use super::Automerge;
 
 #[derive(Debug, PartialEq)]
@@ -108,7 +108,10 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     /// Patches from `before` to the current state, walking only what changed
     /// since the dirty bits were last cleared: `before` must be the view they
     /// were cleared at.
-    pub(crate) fn dirty_diff_patches(&self, before: &View) -> Result<Vec<Patch>, DirtyDiffError> {
+    pub(crate) fn dirty_diff_patches(
+        &self,
+        before: &Viewpoint,
+    ) -> Result<Vec<Patch>, DirtyDiffError> {
         if before.heads.is_empty() {
             let mut patch_accumulator = PatchAccumulator::event_log();
             patch_accumulator.heads_clock = None;
@@ -116,7 +119,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             return Ok(patch_accumulator.make_patches(self));
         }
         let before = self
-            .visible_for_view(before)
+            .visible_for_viewpoint(before)
             .map_err(DirtyDiffError::InvalidHeads)?;
         let clock = ClockRange::between_current(before, self.read_current());
         let mut patch_accumulator = PatchAccumulator::event_log();
@@ -127,7 +130,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
 
     pub(crate) fn dirty_diff_patches_and_clear(
         &mut self,
-        before: &View,
+        before: &Viewpoint,
     ) -> Result<Vec<Patch>, DirtyDiffError> {
         let patches = self.dirty_diff_patches(before)?;
         self.clear_dirty();
