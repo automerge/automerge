@@ -1,8 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+
+use ed25519_dalek::VerifyingKey;
 
 use crate::ChangeHash;
 
-use super::{Signature, SignatureRef};
+use super::{verifies, Signature, SignatureRef};
 
 /// The signatures a document retains, keyed by the change they target.
 #[derive(Clone, Debug, Default)]
@@ -13,6 +15,10 @@ pub(crate) struct SignatureStore {
     /// entry above, so an incremental save can emit what arrived since a
     /// cursor without repeating anything.
     log: Vec<(ChangeHash, usize)>,
+    /// Targets known to carry a signature which verifies. A positive answer is
+    /// permanent because the key a target is checked against is fixed by the
+    /// change itself, so this is never serialized and never invalidated.
+    verified: HashSet<ChangeHash>,
 }
 
 impl SignatureStore {
@@ -57,6 +63,40 @@ impl SignatureStore {
                 bytes,
             })
         })
+    }
+
+    /// Whether `hash` carries a signature which verifies under `key`, remembering a
+    /// positive answer.
+    ///
+    /// The key a target is checked against is fixed by the change itself, so a
+    /// signature which verifies once verifies forever. Remembering that is what keeps
+    /// repeated questions — every enumeration of the fragment cover asks one per
+    /// actor maximum — from re-running the signature check each time.
+    pub(crate) fn verify(&mut self, hash: ChangeHash, key: &VerifyingKey) -> bool {
+        if self.verified.contains(&hash) {
+            return true;
+        }
+        let valid = self
+            .signatures_for(&hash)
+            .any(|signature| verifies(signature, &hash, key));
+        if valid {
+            self.verified.insert(hash);
+        }
+        valid
+    }
+
+    /// [`Self::verify`] for a `&self` caller, which cannot remember the answer and
+    /// so pays for the check whenever it was not already remembered.
+    pub(crate) fn is_valid(&self, hash: &ChangeHash, key: &VerifyingKey) -> bool {
+        self.verified.contains(hash)
+            || self
+                .signatures_for(hash)
+                .any(|signature| verifies(signature, hash, key))
+    }
+
+    /// The targets which carry at least one signature.
+    pub(crate) fn targets(&self) -> impl Iterator<Item = ChangeHash> + '_ {
+        self.by_hash.keys().copied()
     }
 
     /// Signatures which arrived after the first `cursor` signatures.

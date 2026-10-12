@@ -3,13 +3,18 @@
 //! A signature is an annotation on a change hash, stored beside the change
 //! rather than inside it, so attaching one never alters the change or its
 //! hash. Signatures are retained and relayed whether or not Automerge can
-//! interpret them.
+//! interpret them; only the Ed25519 scheme is ever verified.
 
+mod export;
 mod store;
 
 pub(crate) use store::SignatureStore;
 
-use crate::ChangeHash;
+use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey};
+
+use std::collections::{BTreeSet, HashMap};
+
+use crate::{author::Authors, change_graph::ChangeGraph, Author, ChangeHash};
 
 /// A detached signature, paired with the change hash it annotates.
 ///
@@ -43,6 +48,23 @@ impl SignatureRef<'_> {
 /// The first byte of every signature names its scheme.
 const ED25519_TAG: u8 = 0;
 const CUSTOM_TAG: u8 = 1;
+
+/// Whether a document trusts the changes it receives or holds them until a
+/// signature covers them.
+///
+/// The mode is fixed when a document is created or loaded, and forks inherit
+/// it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SignatureMode {
+    /// Apply received changes as Automerge always has. Signatures are
+    /// retained and relayed but never consulted.
+    #[default]
+    Legacy,
+    /// Hold received changes until a valid Ed25519 signature from their
+    /// actor's author covers them. Local commits stay visible immediately,
+    /// since signing them may need a key held outside Automerge.
+    Authenticated,
+}
 
 /// A signature to attach to a change.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,4 +103,121 @@ impl SignatureInput {
             bytes: self.bytes,
         }
     }
+}
+
+/// A change which needs an Ed25519 signature before the fragment it bounds
+/// can be exported. See [`crate::Automerge::signing_requests`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SigningRequest {
+    change_hash: ChangeHash,
+    author: Author<'static>,
+}
+
+impl SigningRequest {
+    pub(crate) fn new(change_hash: ChangeHash, author: Author<'static>) -> Self {
+        Self {
+            change_hash,
+            author,
+        }
+    }
+
+    pub fn change_hash(&self) -> ChangeHash {
+        self.change_hash
+    }
+
+    /// The Ed25519 verifying key the signature must match.
+    ///
+    /// This is what selects the private half to sign with. The actor whose chain
+    /// the change belongs to is deliberately absent: several actors may share an
+    /// author, so it would not narrow the choice of key, and the signature is
+    /// verified under the author alone.
+    pub fn author(&self) -> &Author<'static> {
+        &self.author
+    }
+
+    /// The exact bytes to sign: the raw change hash.
+    pub fn bytes_to_sign(&self) -> &[u8] {
+        self.change_hash.as_bytes()
+    }
+}
+
+/// The greatest sequence each actor has a verifying signature for.
+///
+/// A signature at an actor's sequence `n` covers that actor's whole prefix, so this
+/// is the frontier below which history is authenticated. It is built from the
+/// signatures held rather than from the changes, because there are far fewer of
+/// them.
+pub(crate) fn signed_frontier(
+    signatures: &SignatureStore,
+    change_graph: &ChangeGraph,
+    authors: &Authors,
+) -> HashMap<usize, u64> {
+    let mut frontier: HashMap<usize, u64> = HashMap::new();
+    for hash in signatures.targets() {
+        // A signature may target history this document does not hold, which is
+        // allowed and relayed. Skipping it is the conservative answer: it
+        // advances no actor's frontier, so it authenticates nothing.
+        let Some((actor, seq)) = change_graph.actor_seq_for_hash(&hash) else {
+            continue;
+        };
+        let verifies = authors
+            .get_author_for_actor(actor)
+            .as_ref()
+            .and_then(ed25519_key)
+            .is_some_and(|key| signatures.is_valid(&hash, &key));
+        if verifies {
+            let entry = frontier.entry(actor).or_default();
+            *entry = (*entry).max(seq);
+        }
+    }
+    frontier
+}
+
+/// The fragment-forming hashes which `signatures` cover, and so the fragments the
+/// index may hold.
+///
+/// History arrives, replays or reconstructs without regard to what has been
+/// signed, so the index formed along the way treats every change as
+/// authenticated. Selecting with this and handing the result to
+/// [`ChangeGraph::rebuild_fragment_index`] puts it back: a fragment forms only
+/// for history a signature covers, and the rest is deferred until one does, which
+/// is what keeps every fragment in the index one the document can export.
+///
+/// The selection lives here rather than on the graph because what counts as
+/// covered is a signature question — signatures, authors and keys — while the index
+/// it feeds is the graph's own.
+pub(crate) fn covered_fragments(
+    change_graph: &ChangeGraph,
+    authors: &Authors,
+    signatures: &SignatureStore,
+) -> BTreeSet<ChangeHash> {
+    let frontier = signed_frontier(signatures, change_graph, authors);
+    change_graph
+        .fragment_forming_hashes()
+        .filter(|hash| {
+            change_graph
+                .actor_seq_for_hash(hash)
+                .is_some_and(|(actor, seq)| frontier.get(&actor).is_some_and(|max| *max >= seq))
+        })
+        .collect()
+}
+
+/// The author as an Ed25519 verifying key, if it is one.
+pub(crate) fn ed25519_key(author: &Author<'_>) -> Option<VerifyingKey> {
+    let bytes = <&[u8; 32]>::try_from(author.as_bytes()).ok()?;
+    VerifyingKey::from_bytes(bytes)
+        .ok()
+        .filter(|key| !key.is_weak())
+}
+
+/// Whether `signature` is an Ed25519 signature over `hash` which verifies under `key`.
+fn verifies(signature: &[u8], hash: &ChangeHash, key: &VerifyingKey) -> bool {
+    let Some((&ED25519_TAG, payload)) = signature.split_first() else {
+        return false;
+    };
+    let Ok(signature) = <&[u8; 64]>::try_from(payload) else {
+        return false;
+    };
+    key.verify_strict(hash.as_bytes(), &Ed25519Signature::from_bytes(signature))
+        .is_ok()
 }

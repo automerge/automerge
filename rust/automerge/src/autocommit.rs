@@ -3,6 +3,7 @@ use std::ops::RangeBounds;
 use crate::author::Author;
 use crate::automerge::view::ReadAt;
 use crate::automerge::{HistoryUpdate, SaveOptions};
+use crate::config::Config;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
@@ -15,7 +16,8 @@ use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::ObjMeta;
 use crate::{
-    hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, SignatureInput, TextEncoding,
+    hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, SignatureInput, SignatureMode,
+    SigningRequest, TextEncoding,
 };
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -102,6 +104,16 @@ impl AutoCommit {
 
     pub fn diff_opset(&self, other: &AutoCommit) -> Result<(), AutomergeError> {
         self.doc.diff_opset(&other.doc)
+    }
+
+    /// Create a new document configured by `config`.
+    ///
+    /// See [`Automerge::new_with_config`]. Everything it carries is fixed for the
+    /// life of the document.
+    pub fn new_with_config(config: Config) -> AutoCommit {
+        let mut doc = AutoCommit::new_with_encoding(config.encoding());
+        doc.doc = Automerge::new_with_config(config);
+        doc
     }
 
     pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
@@ -439,11 +451,19 @@ impl AutoCommit {
             .expect("AutoCommit's patch log always belongs to its document");
     }
 
-    /// Attach signatures to the changes they target. See
-    /// [`Automerge::add_signatures`].
+    pub fn signature_mode(&self) -> SignatureMode {
+        self.doc.signature_mode()
+    }
+
+    /// Attach signatures, verify what they cover, and form whatever
+    /// that completes. See [`Automerge::add_signatures`].
     pub fn add_signatures(&mut self, signatures: impl IntoIterator<Item = SignatureInput>) {
         self.ensure_transaction_closed();
         self.doc.add_signatures(signatures)
+    }
+
+    pub fn signing_requests(&self) -> Vec<SigningRequest> {
+        self.doc.signing_requests()
     }
 
     /// Run a document mutation, recording its effect on the observed view.
@@ -643,15 +663,22 @@ impl AutoCommit {
     /// text object).
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
-        let mut bytes = self.doc.save_after(&self.save_cursor);
-        // A change goes out as soon as it is made, so a signature which arrives
-        // later has to follow it in a later save.
+        let saved = self.doc.save_after_reporting_tail(&self.save_cursor);
+        let mut bytes = saved.bytes;
         let signatures = self.doc.signatures();
-        let new_signatures: Vec<_> = signatures.since(self.signature_cursor).collect();
-        if !new_signatures.is_empty() {
-            bytes.extend(SignatureChunk::encode(new_signatures));
+        if self.doc.signature_mode() == SignatureMode::Legacy {
+            // A legacy save emits changes immediately, so a signature which arrives
+            // later has to follow its change. An authenticated save withholds the
+            // change until the signature exists, and then they travel together.
+            let new_signatures: Vec<_> = signatures.since(self.signature_cursor).collect();
+            if !new_signatures.is_empty() {
+                bytes.extend(SignatureChunk::encode(new_signatures));
+            }
         }
-        if !bytes.is_empty() {
+        // The cursor advances only past history which actually went out. Moving it
+        // past something the export withheld would strand that change once it was
+        // signed, because a later call would no longer see it as new.
+        if !bytes.is_empty() && saved.complete {
             self.save_cursor = self.doc.get_heads();
             self.signature_cursor = signatures.len();
         }

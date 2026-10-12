@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
@@ -51,6 +51,15 @@ pub(crate) struct ChangeGraph {
     seq_index: ActorIndexed<Vec<NodeIdx>>,
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
+    /// Changes which would form a fragment but are not allowed to yet.
+    ///
+    /// A fragment is exported whole, so one which contains history the document
+    /// may not export is no use to anyone — and worse, forming it supersedes the
+    /// lower-level fragments it absorbs, which would withdraw history that *was*
+    /// exportable. Holding these back keeps the index to fragments which can
+    /// actually be exported. Kept in arrival order, so they are formed in the
+    /// order they would have been.
+    deferred: Vec<NodeIdx>,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -109,6 +118,7 @@ impl ChangeGraph {
             clock_cache: HashMap::new(),
             seq_index: ActorIndexed::new(actors),
             fragments: vec![],
+            deferred: Vec::new(),
             fragment_top: SeqClock::new(actors),
         }
     }
@@ -122,6 +132,23 @@ impl ChangeGraph {
             .iter()
             .enumerate()
             .filter_map(|(i, v)| if !v.is_empty() { Some(i) } else { None })
+    }
+
+    /// The hashes of `actor`'s changes above sequence `seq`, oldest first.
+    ///
+    /// Infallible: these are the entries the index holds, not sequence numbers
+    /// to look up and miss.
+    pub(crate) fn hashes_for_actor_above(
+        &self,
+        actor: usize,
+        seq: u64,
+    ) -> impl Iterator<Item = ChangeHash> + '_ {
+        self.seq_index
+            .get(actor)
+            .map(|seqs| &seqs[(seq as usize).min(seqs.len())..])
+            .unwrap_or_default()
+            .iter()
+            .map(|node| self.hashes[node.0 as usize])
     }
 
     pub(crate) fn unused_actors(&self) -> impl Iterator<Item = usize> + '_ {
@@ -534,6 +561,55 @@ impl ChangeGraph {
             .copied()
     }
 
+    /// The actor index and sequence number of the change identified by `hash`.
+    pub(crate) fn actor_seq_for_hash(&self, hash: &ChangeHash) -> Option<(usize, u64)> {
+        let node = self.nodes_by_hash.get(hash)?.0 as usize;
+        Some((
+            usize::from(*self.actors.get(node)?),
+            *self.seq.get(node)? as u64,
+        ))
+    }
+
+    /// Return the greatest sequence represented for each actor in `hashes`.
+    ///
+    /// Actor equivocation is rejected today, but equal-sequence entries are
+    /// retained here so this remains conservative if that invariant changes.
+    pub(crate) fn actor_maxima_for_hashes<I>(&self, hashes: I) -> Vec<(ChangeHash, usize)>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        let mut maxima: BTreeMap<usize, (u32, Vec<ChangeHash>)> = BTreeMap::new();
+        for hash in hashes {
+            let Some(node) = self.nodes_by_hash.get(&hash).copied() else {
+                continue;
+            };
+            let node = node.0 as usize;
+            let actor = usize::from(self.actors[node]);
+            let seq = self.seq[node];
+            match maxima.entry(actor) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert((seq, vec![hash]));
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    let (max_seq, hashes) = entry.get_mut();
+                    match seq.cmp(max_seq) {
+                        Ordering::Greater => {
+                            *max_seq = seq;
+                            hashes.clear();
+                            hashes.push(hash);
+                        }
+                        Ordering::Equal if !hashes.contains(&hash) => hashes.push(hash),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        maxima
+            .into_iter()
+            .flat_map(|(actor, (_, hashes))| hashes.into_iter().map(move |hash| (hash, actor)))
+            .collect()
+    }
+
     fn update_heads(&mut self, change: &Change) {
         for d in change.deps() {
             self.heads.remove(d);
@@ -619,6 +695,10 @@ impl ChangeGraph {
             .filter(|h| h.fragment_level() == 0)
             .filter_map(|h| self.nodes_by_hash.get(h).copied());
         self.bfs_until_clock(nodes, &self.fragment_top)
+            // A change whose fragment is deferred is above `fragment_top` and so
+            // reachable here, but it is not a loose commit and has no fragment of
+            // its own yet.
+            .filter(|n| self.hashes[n.0 as usize].fragment_level() == 0)
             .filter_map(|n| self.loose_commit(n))
     }
 
@@ -686,14 +766,76 @@ impl ChangeGraph {
             self.fragments.remove(i);
         }
         SeqClock::merge(&mut self.fragment_top, &clock);
-        self.fragments.push(FragmentNode { head, deps, clock });
+        // Sorted by node index rather than appended: a deferred fragment is formed
+        // after nodes which arrived later than it, and `get_fragment` binary
+        // searches this.
+        let at = self.fragments.partition_point(|f| f.head.0 < head.0);
+        self.fragments
+            .insert(at, FragmentNode { head, deps, clock });
     }
 
+    /// Rebuild the fragment index from scratch, deferring what `may_form` rejects.
+    ///
+    /// A document which replays or reconstructs history before it knows which of
+    /// it is authenticated has an index built as though all of it were. Rebuilding
+    /// produces the index that history would have produced had the answer been
+    /// known, which is what [`Automerge::fork_at`](crate::Automerge::fork_at) and
+    /// loading a document chunk need.
+    pub(crate) fn rebuild_fragment_index(&mut self, may_form: &BTreeSet<ChangeHash>) {
+        self.fragments.clear();
+        self.deferred.clear();
+        self.fragment_top = self.fragment_top.empty_like();
+        for i in 0..self.hashes.len() {
+            let hash = self.hashes[i];
+            if hash.fragment_level() == 0 {
+                continue;
+            }
+            if may_form.contains(&hash) {
+                self.cache_fragment(NodeIdx(i as u32));
+            } else {
+                self.deferred.push(NodeIdx(i as u32));
+            }
+        }
+    }
+
+    /// Every change which would form a fragment, whether it has or not.
+    pub(crate) fn fragment_forming_hashes(&self) -> impl Iterator<Item = ChangeHash> + '_ {
+        self.hashes
+            .iter()
+            .copied()
+            .filter(|hash| hash.fragment_level() > 0)
+    }
+
+    /// The changes whose fragments are deferred, in arrival order.
+    pub(crate) fn deferred_fragments(&self) -> impl Iterator<Item = ChangeHash> + '_ {
+        self.deferred.iter().map(|n| self.hashes[n.0 as usize])
+    }
+
+    /// Form the fragments of `hashes`, which must be deferred changes.
+    pub(crate) fn form_deferred_fragments(&mut self, hashes: &BTreeSet<ChangeHash>) {
+        let ready: Vec<NodeIdx> = self
+            .deferred
+            .iter()
+            .copied()
+            .filter(|n| hashes.contains(&self.hashes[n.0 as usize]))
+            .collect();
+        self.deferred.retain(|n| !ready.contains(n));
+        // In arrival order, so the index ends up as it would have done had these
+        // never been deferred.
+        for node in ready {
+            self.cache_fragment(node);
+        }
+    }
+
+    /// Add `change`, forming its fragment unless `form_fragment` is false.
+    ///
+    /// A deferred fragment is formed later by [`Self::form_deferred_fragments`].
     pub(crate) fn add_change(
         &mut self,
         change: &Change,
         actor: usize,
         authors: &mut Authors,
+        form_fragment: bool,
     ) -> Result<ChangeHash, MissingDep> {
         let hash = change.hash();
 
@@ -734,7 +876,11 @@ impl ChangeGraph {
             self.cache_clock(node_idx);
         }
 
-        self.cache_fragment(node_idx);
+        if form_fragment {
+            self.cache_fragment(node_idx);
+        } else if hash.fragment_level() > 0 {
+            self.deferred.push(node_idx);
+        }
 
         Ok(hash)
     }
@@ -1074,6 +1220,7 @@ impl ChangeGraphCols {
             seq_index,
             fragments,
             fragment_top,
+            deferred: Vec::new(),
         }))
     }
 }
@@ -1312,7 +1459,7 @@ mod tests {
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
             self.graph
-                .add_change(&change, actor_idx, &mut authors)
+                .add_change(&change, actor_idx, &mut authors, true)
                 .unwrap();
             self.changes.push(change);
             hash
@@ -1323,7 +1470,9 @@ mod tests {
             let mut graph = ChangeGraph::new(&self.actors);
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
-                graph.add_change(change, actor_idx, &mut authors).unwrap();
+                graph
+                    .add_change(change, actor_idx, &mut authors, true)
+                    .unwrap();
             }
             graph
         }
@@ -1435,6 +1584,28 @@ mod tests {
         let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
 
         assert_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn legacy_fragments_cover_every_change() {
+        // Fragment enumeration starts from the exportable frontier in both
+        // signature modes. A legacy document requires nothing to be
+        // authenticated, so that frontier is simply its heads, and every change
+        // it holds is a member of some fragment.
+        let mut doc = AutoCommit::new().with_actor(ActorId::from(&[2][..]));
+        let mut hashes = BTreeSet::new();
+        for value in 0..1500 {
+            doc.put(ROOT, "counter", value).unwrap();
+            hashes.insert(doc.commit().unwrap());
+        }
+
+        let covered: BTreeSet<ChangeHash> = doc
+            .fragments(..)
+            .into_iter()
+            .flat_map(|fragment| fragment.members)
+            .collect();
+        let missing: Vec<_> = hashes.difference(&covered).collect();
+        assert!(missing.is_empty(), "changes in no fragment: {missing:?}");
     }
 
     #[test]
@@ -1871,7 +2042,7 @@ impl FragmentNode {
 ///
 /// This is an experimental API, it may change or be removed without warning.
 #[doc(hidden)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Fragment {
     pub head: ChangeHash,
     pub level: usize,

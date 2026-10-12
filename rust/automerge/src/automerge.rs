@@ -18,13 +18,14 @@ use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIn
 use crate::change_graph::ChangeGraph;
 use crate::change_queue::{ChangeQueue, DocState};
 use crate::clock::Clock;
+use crate::config::Config;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::hydrate;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
-use crate::signatures::{Signature, SignatureInput, SignatureRef, SignatureStore};
+use crate::signatures::{self, Signature, SignatureInput, SignatureMode, SignatureRef, SignatureStore};
 use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
@@ -115,6 +116,7 @@ pub struct LoadOptions<'a> {
     text_encoding: TextEncoding,
     author: Option<Author<'static>>,
     write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+    signature_mode: SignatureMode,
     /// Signatures this load starts with, which an empty document
     /// rebuilding itself through `load` passes in so that signatures it already held
     /// are not lost.
@@ -204,6 +206,25 @@ impl<'a> LoadOptions<'a> {
         }
     }
 
+    /// Apply a [`Config`] to the loaded document.
+    ///
+    /// The same settings as [`Automerge::new_with_config`], for the document a
+    /// load produces. Equivalent to setting [`Self::text_encoding`] and
+    /// [`Self::signature_mode`] individually.
+    pub fn config(self, config: Config) -> Self {
+        self.text_encoding(config.encoding())
+            .signature_mode(config.signatures())
+    }
+
+    /// Configure whether loaded changes are materialized immediately or held
+    /// until a signature covers them.
+    pub fn signature_mode(self, signature_mode: SignatureMode) -> Self {
+        Self {
+            signature_mode,
+            ..self
+        }
+    }
+
     /// Signatures the loading document already holds.
     pub(crate) fn signatures(self, signatures: Vec<Signature>) -> Self {
         Self { signatures, ..self }
@@ -220,6 +241,7 @@ impl std::default::Default for LoadOptions<'static> {
             text_encoding: TextEncoding::platform_default(),
             author: None,
             write_frontier: HashMap::new(),
+            signature_mode: SignatureMode::Legacy,
             signatures: Vec::new(),
         }
     }
@@ -312,7 +334,7 @@ pub struct Automerge {
     pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
-    authors: Authors,
+    pub(crate) authors: Authors,
     /// Authors whose changes are hidden past a heads boundary.
     ///
     /// The visibility based on these policies is derived in one place as
@@ -332,6 +354,8 @@ pub struct Automerge {
     author: Option<Author<'static>>,
     /// Detached, opaque signatures keyed by their target change hash.
     pub(crate) signatures: SignatureStore,
+    /// Whether remote history is accepted as it arrives or must be signed.
+    pub(crate) signature_mode: SignatureMode,
 }
 
 impl Automerge {
@@ -368,6 +392,13 @@ impl Automerge {
         Ok(())
     }
 
+    /// Create a new document configured by `config`.
+    pub fn new_with_config(config: Config) -> Self {
+        let mut doc = Self::new_with_encoding(config.encoding());
+        doc.signature_mode = config.signatures();
+        doc
+    }
+
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
         let ops = OpSet::new(encoding);
         let change_graph = ChangeGraph::new(&ops.actors);
@@ -390,6 +421,7 @@ impl Automerge {
             actor: Actor::Unused(ActorId::random()),
             author: None,
             signatures: SignatureStore::default(),
+            signature_mode: SignatureMode::Legacy,
         }
     }
 
@@ -420,6 +452,7 @@ impl Automerge {
             actor: Actor::Unused(ActorId::random()),
             author: None,
             signatures: SignatureStore::default(),
+            signature_mode: SignatureMode::Legacy,
         };
         doc.remove_unused_actors(false);
         if doc.mask_hides_existing_ops() {
@@ -593,10 +626,30 @@ impl Automerge {
         self.republish_mask(log, |policy| policy.reveal_author(author))
     }
 
-    /// Attach signatures to the changes they target.
+    pub fn signature_mode(&self) -> SignatureMode {
+        self.signature_mode
+    }
+
+    pub(crate) fn is_authenticated(&self) -> bool {
+        self.signature_mode == SignatureMode::Authenticated
+    }
+
+    /// Attach signatures
     pub fn add_signatures(&mut self, signatures: impl IntoIterator<Item = SignatureInput>) {
-        self.signatures
-            .extend(signatures.into_iter().map(SignatureInput::into_signature));
+        let signatures: Vec<_> = signatures
+            .into_iter()
+            .map(SignatureInput::into_signature)
+            .collect();
+        let targets: Vec<_> = signatures.iter().map(|signature| signature.change_hash).collect();
+        self.signatures.extend(signatures);
+        // Verify now and remember it, rather than leaving every later enumeration
+        // of the fragment cover to re-check the same signature.
+        for hash in targets {
+            if let Some(key) = self.materialized_ed25519_key(&hash) {
+                self.signatures.verify(hash, &key);
+            }
+        }
+        self.form_newly_covered_fragments();
     }
 
     /// The queue and the view of the document it consults, borrowed apart.
@@ -629,8 +682,6 @@ impl Automerge {
     }
 
     /// Encode the retained signatures for `hashes` as a detached signature chunk.
-    ///
-    /// Note that this silently skips hashes we don't have signatures for.
     pub(crate) fn signature_chunk_for<I>(&self, hashes: I) -> Vec<u8>
     where
         I: IntoIterator<Item = ChangeHash>,
@@ -1127,6 +1178,11 @@ impl Automerge {
         f.set_actor(ActorId::random());
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
+        f.signature_mode = self.signature_mode;
+        f.signatures = self.signatures.clone();
+        // The replay above ran before the mode was set, so the index was built as
+        // though every change were authenticated.
+        f.rebuild_fragment_index();
         f.set_write_frontier(self.get_write_frontier());
         Ok(f)
     }
@@ -1307,8 +1363,9 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            let mut doc =
-                Self::new_with_encoding(options.text_encoding).with_author(options.author);
+            let mut doc = Self::new_with_encoding(options.text_encoding);
+            doc.signature_mode = options.signature_mode;
+            let mut doc = doc.with_author(options.author);
             if !options.write_frontier.is_empty() {
                 doc.set_write_frontier(options.write_frontier);
             }
@@ -1385,6 +1442,7 @@ impl Automerge {
                 Self::new_with_encoding(options.text_encoding)
             }
         };
+        am.signature_mode = options.signature_mode;
         am.signatures = signatures;
         let rest = remaining.reset().unconsumed_bytes();
         let stream =
@@ -1397,6 +1455,10 @@ impl Automerge {
         }
         am.signatures.extend(stream.signatures);
         am.apply_changes(changes.into_iter().chain(stream.changes))?;
+        // A document chunk is reconstructed before the mode and the signatures are
+        // known, so its index was built as though every change were
+        // authenticated.
+        am.rebuild_fragment_index();
 
         // Only allow missing deps if the first chunk was a document chunk
         // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
@@ -1474,6 +1536,7 @@ impl Automerge {
                     .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check)
+                    .signature_mode(self.signature_mode)
                     // Signatures held before this call are still held afterwards,
                     // which is what lets a signature arrive ahead of the change it
                     // annotates.
@@ -1634,6 +1697,19 @@ impl Automerge {
     /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
     /// single character in a text object).
     pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
+        self.save_after_reporting_tail(heads).bytes
+    }
+
+    /// The history after `heads`, and whether that is all of it.
+    ///
+    /// An authenticated save withholds history it cannot authenticate, so a
+    /// caller tracking a cursor needs to know whether what it got was the whole
+    /// tail. That is a fact about the export, so it comes back from the export
+    /// rather than from a second question put to the document.
+    pub(crate) fn save_after_reporting_tail(&self, heads: &[ChangeHash]) -> SavedTail {
+        if self.is_authenticated() {
+            return self.export_fragments_after(heads);
+        }
         let changes = self.get_changes(heads);
         let mut bytes = vec![];
         let mut hashes = Vec::new();
@@ -1642,7 +1718,45 @@ impl Automerge {
             hashes.push(c.hash());
         }
         bytes.extend(self.signature_chunk_for(hashes));
-        bytes
+        // A legacy export withholds nothing: it emits unsigned changes too.
+        SavedTail {
+            bytes,
+            complete: true,
+        }
+    }
+
+    fn export_fragments_after(&self, heads: &[ChangeHash]) -> SavedTail {
+        let mut wanted: BTreeSet<ChangeHash> =
+            self.get_changes(heads).iter().map(Change::hash).collect();
+        if wanted.is_empty() {
+            return SavedTail {
+                bytes: Vec::new(),
+                complete: true,
+            };
+        }
+        let covering: Vec<Fragment> = self
+            .all_fragments(..)
+            .into_iter()
+            .filter(|fragment| fragment.members.iter().any(|hash| wanted.contains(hash)))
+            .collect();
+        // Which of the wanted changes no exportable fragment holds: an unsigned
+        // tail is in no fragment at all, because enumeration starts from the
+        // exportable frontier.
+        for fragment in &covering {
+            for member in &fragment.members {
+                wanted.remove(member);
+            }
+        }
+        let offered = covering.len();
+        let bundles = self.bundle_fragments(covering);
+        // A fragment can still be dropped here, having been offered: coverage
+        // puts it in the cover, but exporting it needs a signature on each of its
+        // own actor maxima, which is a stronger thing.
+        let complete = wanted.is_empty() && bundles.len() == offered;
+        SavedTail {
+            bytes: bundles.concat(),
+            complete,
+        }
     }
 
     /// Filter the changes down to those that are not transitive dependencies of the heads.
@@ -1792,12 +1906,126 @@ impl Automerge {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
-    /// Add the change to the graph. Returns
-    /// [`HistoryUpdate::BoundaryResolved`] if it was a pending write-frontier
-    /// boundary; witnessing one updates the stored seq-mask, but never the
-    /// visibility [`Mask`] — publishing that is the caller's single
+    fn signed_frontier(&self) -> HashMap<usize, u64> {
+        signatures::signed_frontier(&self.signatures, &self.change_graph, &self.authors)
+    }
+
+    /// A test for whether a change is authenticated, which reads the signed
+    /// frontier once.
+    ///
+    /// In legacy mode nothing is required to be authenticated, so everything is
+    /// covered. That is deliberately vacuous rather than meaningless: it is what
+    /// lets the export paths ask one question instead of branching on the mode,
+    /// since a legacy document's exportable history is simply all of it.
+    ///
+    /// Callers asking about more than one change should hold on to this rather
+    /// than calling [`Self::is_covered`] repeatedly, which rebuilds the frontier
+    /// each time.
+    fn covered_predicate(&self) -> impl Fn(&ChangeHash) -> bool + '_ {
+        let frontier = self.is_authenticated().then(|| self.signed_frontier());
+        move |hash: &ChangeHash| {
+            let Some(frontier) = &frontier else {
+                return true;
+            };
+            self.change_graph
+                .actor_seq_for_hash(hash)
+                .is_some_and(|(actor, seq)| frontier.get(&actor).is_some_and(|max| *max >= seq))
+        }
+    }
+
+    /// Whether `hash` is authenticated: at or below its actor's signed frontier,
+    /// or anything at all in legacy mode.
+    fn is_covered(&self, hash: &ChangeHash) -> bool {
+        self.covered_predicate()(hash)
+    }
+
+    /// The changes this document holds which are not authenticated.
+    ///
+    /// Per actor, everything above its signed frontier. Enumerated that way rather
+    /// than by scanning the document, because the answer is a short tail.
+    pub(crate) fn unsigned_changes(&self) -> impl Iterator<Item = ChangeHash> + '_ {
+        let frontier = self.signed_frontier();
+        self.change_graph
+            .actor_ids()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(move |actor| {
+                let signed = frontier.get(&actor).copied().unwrap_or(0);
+                self.change_graph.hashes_for_actor_above(actor, signed)
+            })
+    }
+
+    /// The heads of the authenticated part of this document.
+    ///
+    /// Walks back from the document's heads over whatever is not covered, so the
+    /// result is the frontier of history which may be exported. Bounded by the
+    /// uncovered tail rather than the document.
+    fn exportable_heads(&self) -> Vec<ChangeHash> {
+        let covered = self.covered_predicate();
+        let mut heads = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<ChangeHash> = self.get_heads();
+        while let Some(hash) = stack.pop() {
+            if !seen.insert(hash) {
+                continue;
+            }
+            if covered(&hash) {
+                heads.insert(hash);
+            } else {
+                stack.extend(self.change_graph.deps(&hash));
+            }
+        }
+        heads.into_iter().collect()
+    }
+
+    /// Rebuild the fragment index now that this document knows what is covered.
+    ///
+    /// History replayed or reconstructed into a document before its signature mode
+    /// was set has an index built as though all of it were authenticated. That
+    /// would offer an unsigned local commit's fragment as exportable, and in
+    /// absorbing the signed history beneath it, make that history unexportable
+    /// too. Rebuilding restores the index the history would have produced.
+    fn rebuild_fragment_index(&mut self) {
+        // A skip, not a different path: with every change covered, a legacy
+        // rebuild selects every fragment the index already holds.
+        if !self.is_authenticated() {
+            return;
+        }
+        let may_form =
+            signatures::covered_fragments(&self.change_graph, &self.authors, &self.signatures);
+        self.change_graph.rebuild_fragment_index(&may_form);
+    }
+
+    /// Form the fragments of deferred changes which have become authenticated.
+    fn form_newly_covered_fragments(&mut self) {
+        let frontier = self.signed_frontier();
+        let ready: BTreeSet<ChangeHash> = self
+            .change_graph
+            .deferred_fragments()
+            .filter(|hash| {
+                self.change_graph
+                    .actor_seq_for_hash(hash)
+                    .is_some_and(|(actor, seq)| frontier.get(&actor).is_some_and(|m| *m >= seq))
+            })
+            .collect();
+        if !ready.is_empty() {
+            self.change_graph.form_deferred_fragments(&ready);
+        }
+    }
+
+    /// Record `change` in the history.
+    ///
+    /// `form_fragment` says whether its fragment may form now. A fragment is only
+    /// formed for history the document may export: in authenticated mode a local
+    /// commit is not that until it is signed, and forming its fragment early would
+    /// supersede the lower-level fragments it absorbs, withdrawing history which
+    /// *was* exportable.
+    ///
+    /// Returns [`HistoryUpdate::BoundaryResolved`] if the change was a pending
+    /// write-frontier boundary; witnessing one updates the stored seq-mask, but
+    /// never the visibility [`Mask`] — publishing that is the caller's single
     /// [`Automerge::republish_mask`] step after the op set is consistent.
-    pub(crate) fn update_history(&mut self, change: &Change) -> HistoryUpdate {
+    pub(crate) fn update_history(&mut self, change: &Change, form_fragment: bool) -> HistoryUpdate {
         self.update_deps(change);
 
         let actor_index = self
@@ -1807,7 +2035,7 @@ impl Automerge {
 
         let hash = self
             .change_graph
-            .add_change(change, actor_index, &mut self.authors)
+            .add_change(change, actor_index, &mut self.authors, form_fragment)
             .expect("Change's deps should already be in the document");
 
         // This change was a pending boundary head. Report it so the caller
@@ -1995,11 +2223,22 @@ impl Automerge {
     /// warning.
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.all_fragments(levels)
+    }
+
+    /// Every fragment this document may export.
+    ///
+    /// Enumeration starts from the exportable frontier, which in legacy mode is
+    /// the document's heads and in authenticated mode stops short of history no
+    /// signature covers. The index holds only fragments whose history is
+    /// authenticated, because forming one is deferred until then, so every
+    /// fragment returned here is exportable by construction — there is no
+    /// per-fragment check, and no way for an unsigned commit to withdraw history
+    /// which was already exportable.
+    fn all_fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        let heads = self.exportable_heads();
         // these produce fragments newest to oldest
-        let mut fragments: Vec<_> = self
-            .change_graph
-            .fragments(&self.get_heads(), levels)
-            .collect();
+        let mut fragments: Vec<_> = self.change_graph.fragments(&heads, levels).collect();
         // but we want to return them oldest to newest
         fragments.reverse();
         fragments
@@ -2011,7 +2250,15 @@ impl Automerge {
     /// warning.
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        self.change_graph.get_fragment(head)
+        let fragment = self.change_graph.get_fragment(head)?;
+        // The index holds only fragments which may be exported, but a level-0
+        // head can be asked for by hash whether or not it is in the cover, so an
+        // unsigned local commit is turned away here.
+        if !self.is_covered(&fragment.head) {
+            None
+        } else {
+            Some(fragment)
+        }
     }
 
     /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
@@ -2021,15 +2268,32 @@ impl Automerge {
     /// warning.
     #[doc(hidden)]
     pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        let covered = self.covered_predicate();
         fragments
             .into_iter()
-            .filter_map(|f| {
-                if f.head.fragment_level() == 0 && f.members.len() == 1 {
-                    // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
-                    Some(self.get_change_by_hash(&f.head)?.bytes().to_vec())
-                } else {
-                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
+            .filter_map(|supplied| {
+                // Fragment metadata is caller-controlled at this API boundary.
+                // Always authorize and encode the canonical graph fragment so
+                // signed `members` cannot be paired with an unsigned `head`.
+                let fragment = self.change_graph.get_fragment(supplied.head)?;
+                if fragment != supplied {
+                    return None;
                 }
+                if !covered(&fragment.head) {
+                    return None;
+                }
+                // Encoded last so that a fragment this document cannot
+                // authenticate is withheld rather than sent unusable.
+                let signatures = self.fragment_signature_chunk(&fragment)?;
+                let mut bytes =
+                    if fragment.head.fragment_level() == 0 && fragment.members.len() == 1 {
+                        // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
+                        self.get_change_by_hash(&fragment.head)?.bytes().to_vec()
+                    } else {
+                        self.bundle(fragment.members.clone()).ok()?.bytes().to_vec()
+                    };
+                bytes.extend(signatures);
+                Some(bytes)
             })
             .collect()
     }
@@ -2870,6 +3134,18 @@ impl std::default::Default for SaveOptions {
             retain_orphans: true,
         }
     }
+}
+
+/// The result of saving the history after some heads.
+#[derive(Debug)]
+pub(crate) struct SavedTail {
+    pub(crate) bytes: Vec<u8>,
+    /// Whether every change after those heads is in `bytes`.
+    ///
+    /// False when an authenticated export withheld some of them, which is what
+    /// stops an incremental save from moving its cursor past history its peer
+    /// never received.
+    pub(crate) complete: bool,
 }
 
 #[derive(Debug)]

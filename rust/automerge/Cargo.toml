@@ -22,6 +22,7 @@ cfg-if = "1.0"
 # default miniz_oxide backend natively and ~2x faster on wasm
 flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
 getrandom = "0.4"
+ed25519-dalek = "2.2.0"
 hex = "^0.4.3"
 hexane = { version = "1.0.0-alpha.5", path = "../hexane" }
 itertools = "0.15.0"

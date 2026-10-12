@@ -270,6 +270,7 @@ mod change_graph;
 mod change_queue;
 mod clock;
 mod columnar;
+mod config;
 mod convert;
 mod cursor;
 pub mod error;
@@ -303,6 +304,7 @@ pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
 pub use change_graph::Fragment;
+pub use config::Config;
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
@@ -313,7 +315,7 @@ pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
-pub use signatures::SignatureInput;
+pub use signatures::{SignatureInput, SignatureMode, SigningRequest};
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;

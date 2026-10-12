@@ -758,7 +758,9 @@ impl BatchApply {
         // the op set is consistent again.
         let mut resolved = false;
         for c in &self.changes {
-            resolved |= matches!(doc.update_history(c), HistoryUpdate::BoundaryResolved);
+            // Anything reaching here has crossed the authentication boundary, so
+            // its fragment may form at once.
+            resolved |= matches!(doc.update_history(c, true), HistoryUpdate::BoundaryResolved);
         }
 
         self.import_ops(doc, mask0.as_ref());

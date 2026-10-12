@@ -191,7 +191,10 @@ impl TransactionInner {
         // A locally reconstructed byte-identical change can be the pending
         // write-frontier boundary; the caller publishes the resolved visibility
         // once its patch log's view has moved past this commit.
-        let history = doc.update_history(&change);
+        // A local commit is unsigned the moment it is made, and signing it needs a
+        // key Automerge does not hold, so its fragment waits.
+        let form_fragment = !doc.is_authenticated();
+        let history = doc.update_history(&change, form_fragment);
         doc.remove_unused_actors(true);
         (hash, history)
     }
