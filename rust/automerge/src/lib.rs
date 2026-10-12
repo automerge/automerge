@@ -309,9 +309,11 @@ mod audit;
 pub mod next;
 mod types;
 mod value;
+mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
 pub use crate::audit::{AutoCommit, Automerge, LoadOptions, ReadDoc, SaveOptions};
+pub use crate::automerge::view::View;
 pub use crate::automerge::{OnPartialLoad, StringMigration};
 #[doc(hidden)]
 pub use audit::Fragment;

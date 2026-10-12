@@ -295,8 +295,11 @@ impl BatchApply {
         // the last fallible step; nothing below can fail
         let r = frag.resolve(doc)?;
 
+        let max_ops = doc.max_ops_before_apply();
+        doc.pin_incoming_boundaries(&self.changes);
         doc.update_history_batch(&self.changes);
         frag.commit(doc, r);
+        doc.finish_apply(max_ops);
         Ok(())
     }
 
@@ -406,7 +409,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             if lookup == ApplyLookup::Present {
                 continue;
             }
-            if self.queue.has_hash(&hash) {
+            if self.queue.has_hash(&hash) || batch.has_hash(&hash) {
                 continue;
             }
             if lookup == ApplyLookup::Equivocation {
@@ -422,6 +425,9 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
                     || !actors_with_author.insert(c.actor_id().clone()))
             {
                 return Err(AutomergeError::duplicate_author(&c));
+            }
+            if c.author().is_some() && c.seq() != 1 {
+                return Err(AutomergeError::author_on_non_initial_seq(&c));
             }
             batch.push(c)?;
         }

@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
+use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::iter::SpanInternal;
 use crate::marks::{Mark, MarkSet};
 use crate::op_set2::{Op, OpQuery, OpQueryTerm, OpType};
 use crate::text_value::ConcreteTextValue;
-use crate::types::{Clock, ObjId as InternalObjId, SequenceType};
+use crate::types::{ObjId as InternalObjId, SequenceType};
 use crate::value::{ScalarValue, Value as PublicValue};
 #[cfg(test)]
 use crate::AutomergeError;
@@ -136,11 +137,10 @@ impl EffectValue {
         doc: &Automerge<H>,
         heads: Option<&[ChangeId]>,
     ) -> Self {
-        let clock = heads.and_then(|heads| {
-            doc.clock_for_ids(heads)
-                .expect("effect heads must be change ids in the document")
-        });
-        EffectMaterializer::new(doc).hydrate_map(&InternalObjId::root(), clock.as_ref())
+        let read = doc
+            .read_at(heads)
+            .expect("effect heads must be change ids in the document");
+        EffectMaterializer::new(doc).hydrate_map(&InternalObjId::root(), &read)
     }
 
     #[cfg(test)]
@@ -150,11 +150,10 @@ impl EffectValue {
         heads: Option<&[ChangeId]>,
     ) -> Result<Self, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let clock = heads.and_then(|heads| {
-            doc.clock_for_ids(heads)
-                .expect("effect heads must be change ids in the document")
-        });
-        Ok(EffectMaterializer::new(doc).hydrate_obj(&obj.id, clock.as_ref()))
+        let read = doc
+            .read_at(heads)
+            .expect("effect heads must be change ids in the document");
+        Ok(EffectMaterializer::new(doc).hydrate_obj(&obj.id, &read))
     }
 
     pub(crate) fn apply_patches<I>(
@@ -820,12 +819,12 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
         }
     }
 
-    fn hydrate_map(&self, obj: &InternalObjId, clock: Option<&Clock>) -> EffectValue {
+    fn hydrate_map(&self, obj: &InternalObjId, read: &ReadAt<'_>) -> EffectValue {
         let mut map = EffectMap::default();
-        for top in self.doc.ops().top_ops(obj, clock.cloned()) {
+        for top in self.doc.ops().top_ops(obj, read.borrow()) {
             let key = self.doc.ops().to_string(top.elemid_or_key());
             let conflict = top.conflict;
-            let value = self.hydrate_op(top, clock);
+            let value = self.hydrate_op(top, read);
             map.insert(key, value, conflict);
         }
         EffectValue::Map {
@@ -834,16 +833,16 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
         }
     }
 
-    fn hydrate_list(&self, obj: &InternalObjId, clock: Option<&Clock>) -> EffectValue {
+    fn hydrate_list(&self, obj: &InternalObjId, read: &ReadAt<'_>) -> EffectValue {
         let mut list = EffectList::default();
-        let mut top_ops = self.doc.ops().top_ops(obj, clock.cloned()).marks();
+        let mut top_ops = self.doc.ops().top_ops(obj, read.borrow()).marks();
         while let Some(top) = top_ops.next() {
             let marks = top_ops
                 .get_marks()
                 .map(|marks| EffectMarks::from(marks.as_ref()))
                 .unwrap_or_default();
             let conflict = top.conflict;
-            let value = self.hydrate_op(top, clock);
+            let value = self.hydrate_op(top, read);
             list.push(value, marks, conflict);
         }
         EffectValue::List {
@@ -852,9 +851,9 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
         }
     }
 
-    fn hydrate_text(&self, obj: &InternalObjId, clock: Option<&Clock>) -> EffectValue {
+    fn hydrate_text(&self, obj: &InternalObjId, read: &ReadAt<'_>) -> EffectValue {
         let mut text = EffectText::new(self.doc.text_encoding());
-        for span in self.doc.ops().spans(obj, clock.cloned()) {
+        for span in self.doc.ops().spans(obj, read.borrow()) {
             match span {
                 SpanInternal::Text(value, _, marks) => {
                     let marks = marks
@@ -865,12 +864,12 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
                     text.push_text(value.as_str(), marks, false);
                 }
                 SpanInternal::Obj(id, _, _) => {
-                    let value = self.hydrate_obj(&InternalObjId(id), clock);
+                    let value = self.hydrate_obj(&InternalObjId(id), read);
                     text.push_object(value, EffectMarks::default(), false);
                 }
             }
         }
-        for mark in self.sequence_marks(obj, ObjType::Text, clock) {
+        for mark in self.sequence_marks(obj, ObjType::Text, read) {
             text.apply_mark(mark)
                 .expect("document-derived text marks should fit the hydrated text");
         }
@@ -880,26 +879,26 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
         }
     }
 
-    fn hydrate_obj(&self, obj: &InternalObjId, clock: Option<&Clock>) -> EffectValue {
+    fn hydrate_obj(&self, obj: &InternalObjId, read: &ReadAt<'_>) -> EffectValue {
         match self
             .doc
             .ops()
             .object_type(obj)
             .expect("visible child object should have an object type")
         {
-            ObjType::Map | ObjType::Table => self.hydrate_map(obj, clock),
-            ObjType::List => self.hydrate_list(obj, clock),
-            ObjType::Text => self.hydrate_text(obj, clock),
+            ObjType::Map | ObjType::Table => self.hydrate_map(obj, read),
+            ObjType::List => self.hydrate_list(obj, read),
+            ObjType::Text => self.hydrate_text(obj, read),
         }
     }
 
-    fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> EffectValue {
+    fn hydrate_op(&self, op: Op<'_>, read: &ReadAt<'_>) -> EffectValue {
         match op.action() {
             OpType::Make(ObjType::Map | ObjType::Table) => {
-                self.hydrate_map(&InternalObjId(op.id), clock)
+                self.hydrate_map(&InternalObjId(op.id), read)
             }
-            OpType::Make(ObjType::List) => self.hydrate_list(&InternalObjId(op.id), clock),
-            OpType::Make(ObjType::Text) => self.hydrate_text(&InternalObjId(op.id), clock),
+            OpType::Make(ObjType::List) => self.hydrate_list(&InternalObjId(op.id), read),
+            OpType::Make(ObjType::Text) => self.hydrate_text(&InternalObjId(op.id), read),
             OpType::Put(value) => EffectValue::Scalar(value.into()),
             _ => panic!("invalid op to hydrate"),
         }
@@ -909,12 +908,12 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
         &self,
         obj: &InternalObjId,
         obj_type: ObjType,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> Vec<Mark> {
         let Some(seq_type) = obj_type.as_sequence_type() else {
             return Vec::new();
         };
-        let mut top_ops = self.doc.ops().top_ops(obj, clock.cloned()).marks();
+        let mut top_ops = self.doc.ops().top_ops(obj, read.borrow()).marks();
         let mut index = 0;
         let mut result = Vec::new();
         let mut last_marks = EffectMarks::default();

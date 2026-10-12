@@ -1,6 +1,7 @@
 use super::parents::Parents;
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
-use crate::clock::{Clock, ClockRange};
+use crate::automerge::view::{ClockRange, ReadAt};
+use crate::clock::Clock;
 use crate::exid::ExId;
 #[cfg(debug_assertions)]
 use crate::iter::tools::Shiftable;
@@ -97,15 +98,14 @@ impl OpSet {
         self.cols.dump();
     }
 
-    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
+    pub(crate) fn parents<'a>(&'a self, obj: ObjId, read: ReadAt<'a>) -> Parents<'a> {
         Parents {
             obj,
             ops: self,
-            clock,
+            read,
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn index_builder(&self) -> IndexBuilder {
         IndexBuilder::new(self.text_encoding)
     }
@@ -585,7 +585,9 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
+            if i.masked {
+                undo.push(SuccUndo::new(*i, None, None, None));
+            } else if i.inc.is_none() {
                 delete = true;
                 let visible = self.cols.index.visible.get(i.pos);
                 let text = self.cols.index.text.values().get(i.pos);
@@ -632,8 +634,8 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn parent_object(&self, child: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
-        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock)?;
+    pub(crate) fn parent_object(&self, child: &ObjId, read: &ReadAt<'_>) -> Option<Parent> {
+        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, read)?;
         let obj = op.obj;
         let typ = self.object_type(&obj)?;
         let prop = match op.key {
@@ -644,7 +646,7 @@ impl OpSet {
                     ObjType::Text => SequenceType::Text,
                     _ => panic!("unexpected object type {:?} for seq key {:?}", typ, op.key),
                 };
-                let index = self.seek_list_opid(&op.obj, op.id, seq_type, clock)?.index;
+                let index = self.seek_list_opid(&op.obj, op.id, seq_type, read)?.index;
                 Prop::Seq(index)
             }
         };
@@ -656,31 +658,31 @@ impl OpSet {
         })
     }
 
-    pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        Keys::new(self, self.top_ops(obj, clock))
+    pub(crate) fn keys<'a>(&'a self, obj: &ObjId, read: ReadAt<'_>) -> Keys<'a> {
+        Keys::new(self, self.top_ops(obj, read))
     }
 
-    pub(crate) fn spans(&self, obj: &ObjId, clock: Option<Clock>) -> SpansInternal<'_> {
+    pub(crate) fn spans<'a>(&'a self, obj: &ObjId, read: ReadAt<'a>) -> SpansInternal<'a> {
         let range = self.scope_to_obj(obj);
-        SpansInternal::new(self, range, clock, self.text_encoding)
+        SpansInternal::new(self, range, read, self.text_encoding)
     }
 
-    pub(crate) fn list_range<R: RangeBounds<usize>>(
-        &self,
+    pub(crate) fn list_range<'a, R: RangeBounds<usize>>(
+        &'a self,
         obj: &ObjId,
         range: R,
-        clock: Option<Clock>,
-    ) -> ListRange<'_> {
+        read: ReadAt<'a>,
+    ) -> ListRange<'a> {
         let obj_range = self.scope_to_obj(obj);
-        ListRange::new(self, obj_range, clock, range)
+        ListRange::new(self, obj_range, read, range)
     }
 
-    pub(crate) fn map_range<R: RangeBounds<String>>(
-        &self,
+    pub(crate) fn map_range<'a, R: RangeBounds<String>>(
+        &'a self,
         obj: &ObjId,
         range: R,
-        clock: Option<Clock>,
-    ) -> MapRange<'_> {
+        read: ReadAt<'a>,
+    ) -> MapRange<'a> {
         let obj_range = self.scope_to_obj(obj);
 
         let scope = |s: &str| self.cols.key_str.scope_to_value(Some(s), obj_range.clone());
@@ -697,7 +699,7 @@ impl OpSet {
             std::ops::Bound::Excluded(s) => scope(s.as_str()).start,
         };
 
-        MapRange::new(self, start..end, clock)
+        MapRange::new(self, start..end, read)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -708,16 +710,16 @@ impl OpSet {
         &self,
         obj: &ObjId,
         text_encoding: TextEncoding,
-        clock: Option<Clock>,
+        read: &ReadAt<'_>,
     ) -> usize {
         let range = self.scope_to_obj(obj);
-        let vis = VisIter::new(self, clock.as_ref(), range.clone());
+        let vis = VisIter::new(self, read.historical(), range.clone());
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
-            if clock.is_none() {
+            if read.historical().is_none() {
                 self.cols.index.text.sum_range(range.clone()) as usize
             } else {
-                self.action_value_iter(range.clone(), clock.as_ref())
+                self.action_value_iter(range.clone(), read.historical_slow())
                     .map(|(action, value, _)| match (action, &value) {
                         (Action::Set, ScalarValue::Str(s)) => text_encoding.width(s),
                         (Action::Mark, _) => 0,
@@ -738,10 +740,13 @@ impl OpSet {
         }
     }
 
+    /// `mask` hides marks the write-frontier hides; the mark index holds
+    /// every mark.
     pub(crate) fn query_insert_at_text(
         &self,
         obj: &ObjId,
         index: NonZeroUsize,
+        mask: Option<&Clock>,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
@@ -759,7 +764,7 @@ impl OpSet {
             elemid = self.elemid_at(pos, range.end)?.0;
         }
 
-        let marks = self.cols.index.mark.rich_text_at(pos, None);
+        let marks = self.cols.index.mark.rich_text_at(pos, mask);
 
         Some(QueryNth {
             marks: MarkSet::from_query_state(&marks),
@@ -825,6 +830,7 @@ impl OpSet {
         &self,
         obj: &ObjId,
         index: NonZeroUsize,
+        mask: Option<&Clock>,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
@@ -832,7 +838,7 @@ impl OpSet {
         let tx = top_iter.advance_prefix(index.get() - 1)?;
 
         let iter = self.iter_range(&(tx.pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
+        let marks = self.cols.index.mark.rich_text_at(tx.pos, mask);
         let mut query = InsertQuery::new(
             iter,
             index.get(),
@@ -849,14 +855,15 @@ impl OpSet {
         obj: &ObjId,
         index: usize,
         seq_type: SequenceType,
-        clock: Option<Clock>,
+        read: &ReadAt<'_>,
     ) -> Result<QueryNth, AutomergeError> {
-        if clock.is_none() && index > 0 {
+        if read.historical().is_none() && index > 0 {
             let index = NonZeroUsize::new(index).unwrap();
+            let mask = read.historical_slow();
             let query = if seq_type == SequenceType::List {
-                self.query_insert_at_list(obj, index)
+                self.query_insert_at_list(obj, index, mask)
             } else {
-                self.query_insert_at_text(obj, index)
+                self.query_insert_at_text(obj, index, mask)
             };
             if let Some(q) = query {
                 debug_assert_eq!(
@@ -866,7 +873,7 @@ impl OpSet {
                         index.get(),
                         seq_type,
                         self.text_encoding,
-                        clock,
+                        read.historical_slow().cloned(),
                         Default::default()
                     )
                     .resolve(0)
@@ -880,7 +887,7 @@ impl OpSet {
             index,
             seq_type,
             self.text_encoding,
-            clock,
+            read.historical_slow().cloned(),
             Default::default(),
         )
         .resolve(0)
@@ -890,12 +897,12 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         key: &str,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
         let range = self.prop_range(obj, key);
         let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
-        let ops = iter.visible(self, clock).collect::<Vec<_>>();
+        let ops = iter.visible(self, read).collect::<Vec<_>>();
         assert_eq!(end_pos, range.end);
         OpsFound {
             index: 0,
@@ -912,22 +919,23 @@ impl OpSet {
         obj: &ObjId,
         index: usize,
         seq_type: SequenceType,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
-        if clock.is_none() {
+        if let Some(clock) = read.historical() {
+            self.seek_ops_by_index_slow(obj, index, seq_type, Some(clock))
+        } else {
             let found = if seq_type == SequenceType::List {
-                self.seek_list_ops_by_index_fast(obj, index)
+                self.seek_list_ops_by_index_fast(obj, index, read)
             } else {
-                self.seek_text_ops_by_index_fast(obj, index)
+                self.seek_text_ops_by_index_fast(obj, index, read)
             };
             #[cfg(feature = "slow_path_assertions")]
             {
-                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
+                let slow =
+                    self.seek_ops_by_index_slow(obj, index, seq_type, read.historical_slow());
                 assert_eq!(found, slow, "fast != slow");
             }
             found
-        } else {
-            self.seek_ops_by_index_slow(obj, index, seq_type, clock)
         }
     }
 
@@ -985,6 +993,7 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         index: usize,
+        read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
         let range = self.scope_to_obj(obj);
 
@@ -992,7 +1001,7 @@ impl OpSet {
         if let Some(tx) = top_iter.advance_prefix(index) {
             let range = self.list_register_at_pos(tx.pos, range);
             let end_pos = range.end;
-            let ops = self.iter_range(&range).visible(self, None).collect();
+            let ops = self.iter_range(&range).visible(self, read).collect();
             OpsFound {
                 index,
                 ops,
@@ -1010,10 +1019,31 @@ impl OpSet {
         }
     }
 
+    /// Returns true if `op`, for text register selection, is visible.
+    ///
+    /// When `filter` is `None` this is equivalent to the `op` having no
+    /// successors.
+    ///
+    /// Otherwise, `op` must be covered by `filter`, and no successor that
+    /// overwrites or deletes it may be covered. Increment successors do not
+    /// hide `op`.
+    fn text_register_visible(op: &Op<'_>, filter: Option<&Clock>) -> bool {
+        match filter {
+            None => op.succ().len() == 0,
+            Some(clock) => {
+                clock.covers(&op.id)
+                    && !op
+                        .succ_inc()
+                        .any(|(id, inc)| inc.is_none() && clock.covers(&id))
+            }
+        }
+    }
+
     pub(crate) fn seek_text_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
         mut index: usize,
+        read: &ReadAt<'_>,
     ) -> OpsFound<'a> {
         let mut range = self.scope_to_obj(obj);
         let mut text_iter = self.cols.index.text.iter_range(range.clone());
@@ -1042,7 +1072,9 @@ impl OpSet {
                 }
                 end_pos = op.pos + 1;
                 range.end = op.pos + 1;
-                if op.succ().len() == 0 && op.action != Action::Mark {
+                if op.action != Action::Mark
+                    && Self::text_register_visible(&op, read.historical_slow())
+                {
                     ops.push(op);
                 }
             }
@@ -1117,14 +1149,17 @@ impl OpSet {
         obj: &ObjId,
         opid: OpId,
         seq_type: SequenceType,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> Option<FoundOpId<'_>> {
-        if clock.is_none() {
-            let found = self.seek_list_opid_fast(obj, opid, seq_type);
-            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, seq_type, clock));
-            found
+        if let Some(clock) = read.historical() {
+            self.seek_list_opid_slow(obj, opid, seq_type, Some(clock))
         } else {
-            self.seek_list_opid_slow(obj, opid, seq_type, clock)
+            let found = self.seek_list_opid_fast(obj, opid, seq_type);
+            debug_assert_eq!(
+                found,
+                self.seek_list_opid_slow(obj, opid, seq_type, read.historical_slow())
+            );
+            found
         }
     }
 
@@ -1245,7 +1280,12 @@ impl OpSet {
     }
 
     /// Present-time marks for a text object, without materializing ops.
-    pub(crate) fn calculate_marks_fast(&self, obj: &ObjId) -> Vec<crate::marks::Mark> {
+    /// `mask` hides marks the write-frontier hides.
+    pub(crate) fn calculate_marks_fast(
+        &self,
+        obj: &ObjId,
+        mask: Option<&Clock>,
+    ) -> Vec<crate::marks::Mark> {
         use super::op_set::mark_index::MarkIdx;
         use crate::marks::MarkAccumulator;
 
@@ -1268,7 +1308,10 @@ impl OpSet {
         let mut iter = self.cols.index.mark.iter_range(range.clone());
         let mut pos = range.start;
         while let Some(run) = iter.next_run() {
-            let Some(idx) = run.value else {
+            let Some(idx) = run
+                .value
+                .filter(|idx| mask.is_none_or(|m| m.covers(&idx.id())))
+            else {
                 pos += run.count;
                 continue;
             };
@@ -1310,7 +1353,12 @@ impl OpSet {
         acc.into_iter_no_unmark().collect()
     }
 
-    pub(crate) fn get_marks_fast(&self, obj: &ObjId, index: usize) -> MarkSet {
+    pub(crate) fn get_marks_fast(
+        &self,
+        obj: &ObjId,
+        index: usize,
+        mask: Option<&Clock>,
+    ) -> MarkSet {
         if !self.cols.index.mark.has_any_marks() {
             return MarkSet::default();
         }
@@ -1319,17 +1367,17 @@ impl OpSet {
         let Some(seek) = widths.advance_prefix(index as u64) else {
             return MarkSet::default();
         };
-        let state = self.cols.index.mark.rich_text_at(seek.pos, None);
+        let state = self.cols.index.mark.rich_text_at(seek.pos, mask);
         MarkSet::from_query_state(&state)
             .map(|set| set.as_ref().clone())
             .unwrap_or_default()
     }
 
-    pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
+    pub(crate) fn text(&self, obj: &ObjId, read: ReadAt<'_>) -> String {
         // only the action and value columns are needed: the `TopIter`
         // skipper jumps between top ops without materializing full ops
         let range = self.scope_to_obj(obj);
-        self.action_value_top_iter(range, clock)
+        self.action_value_top_iter(range, read.historical().cloned())
             .map(|(action, value, _)| match (action, value) {
                 (Action::Set, ScalarValue::Str(s)) => s,
                 (Action::Mark, _) => Cow::Borrowed(""),
@@ -1484,11 +1532,11 @@ impl OpSet {
         })
     }
 
-    pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
+    pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, read: ReadAt<'_>) -> TopOps<'a> {
         let range = self.scope_to_obj(obj);
-        let fast = TopOps::new(self, clock.clone(), range);
+        let fast = TopOps::new(self, &read, range);
         #[cfg(feature = "slow_path_assertions")]
-        top_op::assert_matches_slow(self, obj, clock, fast.clone());
+        top_op::assert_matches_slow(self, obj, read.historical_slow().cloned(), fast.clone());
         fast
     }
 
@@ -1502,14 +1550,17 @@ impl OpSet {
     pub(crate) fn find_op_by_id_and_vis(
         &self,
         id: &OpId,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> Option<(Op<'_>, bool)> {
-        if clock.is_none() {
-            let result = self.find_op_by_id_and_vis_fast(id);
-            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, clock));
-            result
+        if let Some(clock) = read.historical() {
+            self.find_op_by_id_and_vis_slow(id, Some(clock))
         } else {
-            self.find_op_by_id_and_vis_slow(id, clock)
+            let result = self.find_op_by_id_and_vis_fast(id);
+            debug_assert_eq!(
+                result,
+                self.find_op_by_id_and_vis_slow(id, read.historical_slow())
+            );
+            result
         }
     }
 
@@ -1541,7 +1592,11 @@ impl OpSet {
         Some((o1, vis))
     }
 
-    pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
+    pub(crate) fn get_increment_diff_at_pos(
+        &self,
+        pos: usize,
+        clock: &ClockRange<'_>,
+    ) -> (i64, i64) {
         if let Some(sc) = self.cols.succ_count.get(pos) {
             let start = sc.prefix() as usize;
             let len = sc.value as usize;
@@ -1832,6 +1887,36 @@ impl OpSet {
         let succ_counter = self.cols.succ_ctr.iter();
         let inc_values = self.cols.index.inc.iter();
         SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values)
+    }
+
+    /// Rebuild every op index with visibility computed under `clock`,
+    /// making the indexes authoritative for reads at that visibility. Marks
+    /// dirty every op whose id or a successor's id satisfies `dirty`: a delete
+    /// has no row of its own, only a successor link on its target.
+    pub(crate) fn recompute_indexes(&mut self, clock: &Clock, dirty: impl Fn(&OpId) -> bool) {
+        let mut builder = self.index_builder();
+        let mut last = None;
+        let mut dirty_rows = vec![];
+        for op in self.iter() {
+            let next = Some((op.obj, op.elemid_or_key()));
+
+            if last != next {
+                builder.flush();
+                last = next;
+            }
+
+            if dirty(&op.id) || op.succ().any(|id| dirty(&id)) {
+                dirty_rows.push(op.pos);
+            }
+            builder.process_op(&op, Some(clock));
+        }
+        let (indexes, _) = builder.finish();
+        self.set_indexes(indexes);
+        let mut marks = self.cols.index.dirty.edit();
+        for pos in dirty_rows {
+            marks.seek(pos).replace(|_| true);
+        }
+        marks.finish();
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -2319,7 +2404,7 @@ impl SuccUndo {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use crate::{
@@ -2430,17 +2515,19 @@ mod tests {
         doc
     }
 
+    /// Test-only op description, shared with `automerge::view`'s relocated
+    /// iteration test (see [`with_test_ops`]).
     #[derive(Debug, Clone)]
-    struct TestOp {
-        id: OpId,
-        obj: ObjId,
-        action: Action,
-        value: ScalarValue<'static>,
-        key: KeyRef<'static>,
-        insert: bool,
-        succs: Vec<OpId>,
-        expand: bool,
-        mark_name: Option<&'static str>,
+    pub(crate) struct TestOp {
+        pub(crate) id: OpId,
+        pub(crate) obj: ObjId,
+        pub(crate) action: Action,
+        pub(crate) value: ScalarValue<'static>,
+        pub(crate) key: KeyRef<'static>,
+        pub(crate) insert: bool,
+        pub(crate) succs: Vec<OpId>,
+        pub(crate) expand: bool,
+        pub(crate) mark_name: Option<&'static str>,
     }
 
     impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
@@ -2458,7 +2545,8 @@ mod tests {
         }
     }
 
-    fn with_test_ops<F>(actors: Vec<ActorId>, test_ops: &[TestOp], f: F)
+    /// Build an [`OpSet`] from `test_ops` and hand it to `f`.
+    pub(crate) fn with_test_ops<F>(actors: Vec<ActorId>, test_ops: &[TestOp], f: F)
     where
         F: FnOnce(super::OpSet),
     {
@@ -2599,182 +2687,6 @@ mod tests {
         });
     }
 
-    #[test]
-    fn column_data_op_iterators() {
-        let mut actors = vec![crate::ActorId::random(), crate::ActorId::random()];
-        actors.sort();
-
-        let test_ops = vec![
-            TestOp {
-                id: OpId::new(1, 1),
-                obj: ObjId::root(),
-                action: Action::MakeMap,
-                value: ScalarValue::Null,
-                key: KeyRef::Map("map".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(2, 1),
-                obj: ObjId::root(),
-                action: Action::MakeMap,
-                value: ScalarValue::Null,
-                key: KeyRef::Map("list".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(3, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value1"),
-                key: KeyRef::Map("key1".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(4, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value2a"),
-                key: KeyRef::Map("key2".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(4, 2),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value2b"),
-                key: KeyRef::Map("key2".into()),
-                insert: false,
-                succs: vec![OpId::new(5, 2)],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(5, 2),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value2c"),
-                key: KeyRef::Map("key2".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(6, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value3a"),
-                key: KeyRef::Map("key3".into()),
-                insert: false,
-                succs: vec![OpId::new(7, 2)],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(7, 2),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("value3b"),
-                key: KeyRef::Map("key3".into()),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(8, 1),
-                obj: ObjId(OpId::new(2, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("a"),
-                key: KeyRef::Seq(ElemId::head()),
-                insert: true,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(9, 1),
-                obj: ObjId(OpId::new(2, 1)),
-                action: Action::Set,
-                value: ScalarValue::str("b"),
-                key: KeyRef::Seq(ElemId(OpId::new(8, 1))),
-                insert: true,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-        ];
-
-        with_test_ops(actors, &test_ops, |opset| {
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.collect::<Vec<_>>();
-            assert_eq!(&test_ops[2..8], ops.as_slice());
-
-            let range = opset.prop_range(&ObjId(OpId::new(1, 1)), "key2");
-            let iter = opset.iter_range(&range);
-            let ops = iter.collect::<Vec<_>>();
-            assert_eq!(&test_ops[3..6], ops.as_slice());
-
-            let clock = Clock::from_counters([None, Some(9), Some(9)]);
-            let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), Some(clock.clone()))
-                .collect::<Vec<_>>();
-            assert_eq!(&test_ops[2], &ops[0]);
-            assert_eq!(&test_ops[5], &ops[1]);
-            assert_eq!(&test_ops[7], &ops[2]);
-            assert_eq!(3, ops.len());
-
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter
-                .key_ops()
-                .map(|n| n.collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-            let key1 = ops.first().unwrap().as_slice();
-            let key2 = ops.get(1).unwrap().as_slice();
-            let key3 = ops.get(2).unwrap().as_slice();
-            let key4 = ops.get(3);
-            assert_eq!(&test_ops[2..3], key1);
-            assert_eq!(&test_ops[3..6], key2);
-            assert_eq!(&test_ops[6..8], key3);
-            assert!(key4.is_none());
-
-            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter
-                .visible_slow(None)
-                .key_ops()
-                .map(|n| n.collect::<Vec<_>>())
-                .collect::<Vec<_>>();
-            let key1 = ops.first().unwrap().as_slice();
-            let key2 = ops.get(1).unwrap().as_slice();
-            let key3 = ops.get(2).unwrap().as_slice();
-            let key4 = ops.get(3);
-            let key2test = vec![test_ops[3].clone(), test_ops[5].clone()];
-            assert_eq!(&test_ops[2..3], key1);
-            assert_eq!(&key2test, key2);
-            assert_eq!(&test_ops[7..8], key3);
-            assert!(key4.is_none());
-
-            let ops = opset
-                .top_ops(&ObjId(OpId::new(1, 1)), Some(clock))
-                .collect::<Vec<_>>();
-            assert_eq!(&test_ops[2], &ops[0]);
-            assert_eq!(&test_ops[5], &ops[1]);
-            assert_eq!(&test_ops[7], &ops[2]);
-            assert_eq!(3, ops.len());
-        });
-    }
     #[test]
     fn column_validation_accepts_valid_docs() {
         use crate::tx::Transactable;

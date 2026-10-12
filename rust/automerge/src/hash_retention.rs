@@ -2,9 +2,8 @@ use std::collections::HashMap;
 
 use crate::author::Authors;
 use crate::automerge::{AuditMode, Automerge};
-use crate::change_graph::{
-    BadHeadIndexes, ChangeGraph, ChangeGraphCols, Members, NodeIdx, UncheckedHashes,
-};
+use crate::change_graph::GraphLoadError;
+use crate::change_graph::{ChangeGraph, ChangeGraphCols, Members, NodeIdx, UncheckedHashes};
 use crate::storage::change_set::ChangeSet;
 use crate::types::ChangeHash;
 use crate::{AutomergeError, Change};
@@ -64,7 +63,7 @@ pub trait HashRetention:
         heads: &[ChangeHash],
         head_indexes: Option<&[u64]>,
         authors: &mut Authors,
-    ) -> Result<ChangeGraph<Self>, BadHeadIndexes>;
+    ) -> Result<ChangeGraph<Self>, GraphLoadError>;
 
     #[doc(hidden)]
     fn from_full(doc: Automerge<Full>) -> Automerge<Self>;
@@ -132,9 +131,9 @@ impl HashRetention for Full {
         _heads: &[ChangeHash],
         _head_indexes: Option<&[u64]>,
         authors: &mut Authors,
-    ) -> Result<ChangeGraph<Self>, BadHeadIndexes> {
+    ) -> Result<ChangeGraph<Self>, GraphLoadError> {
         let changes = computed.expect("a load keeping every hash computes them all");
-        Ok(cols.finalize(changes, authors))
+        cols.finalize(changes, authors)
     }
 
     fn from_full(doc: Automerge<Full>) -> Automerge<Self> {
@@ -218,9 +217,9 @@ impl HashRetention for Retained {
         heads: &[ChangeHash],
         head_indexes: Option<&[u64]>,
         authors: &mut Authors,
-    ) -> Result<ChangeGraph<Self>, BadHeadIndexes> {
+    ) -> Result<ChangeGraph<Self>, GraphLoadError> {
         match (computed, head_indexes) {
-            (Some(changes), _) => Ok(cols.finalize(changes, authors).into_retained()),
+            (Some(changes), _) => Ok(cols.finalize(changes, authors)?.into_retained()),
             (None, Some(head_indexes)) => cols.finalize_unchecked(heads, head_indexes, authors),
             (None, None) => unreachable!("a document without head indexes is hashed on load"),
         }

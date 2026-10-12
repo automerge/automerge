@@ -1,4 +1,5 @@
 use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
+use crate::clock::Clock;
 use crate::iter::tools::Shiftable;
 use crate::op_set2::meta::ValueType;
 use crate::op_set2::op_set::OpIdIter;
@@ -8,7 +9,6 @@ use crate::op_set2::MarkData;
 use crate::op_set2::OpSet;
 use crate::op_set2::ValueMeta;
 use crate::op_set2::{ChangeOp, Op, OpBuilder, ReadOpError};
-#[cfg(test)]
 use crate::types::SequenceType;
 use crate::types::{ElemId, ObjId, ObjType, OpId, TextEncoding};
 use hexane::encoder::{BoolEncoder, RleEncoder};
@@ -157,7 +157,6 @@ impl HasActorIndices for ObjInfo {
 }
 
 impl Op<'_> {
-    #[cfg(test)]
     pub(crate) fn obj_info(&self) -> Option<ObjInfo> {
         let obj_type = ObjType::try_from(self.action).ok()?;
         let parent = self.obj;
@@ -384,7 +383,7 @@ impl IndexBuilder {
             &mark_index,
         );
         self.push_mark(mark_index);
-        self.apply_increment(id, inc_value);
+        self.apply_increment(id, inc_value, true);
 
         if let Some(obj_info) = obj_info {
             self.obj_info.insert(id, obj_info);
@@ -399,21 +398,27 @@ impl IndexBuilder {
         });
     }
 
-    #[cfg(test)]
-    pub(crate) fn process_op(&mut self, op: &Op<'_>) {
+    /// Add `op` and its successors. With a `clock`, ops it does not cover are
+    /// invisible and neither hide values nor add increments; the mark index
+    /// lists every mark regardless. Call [`Self::flush`] between registers.
+    pub(crate) fn process_op(&mut self, op: &Op<'_>, clock: Option<&Clock>) {
+        let visible = clock.is_none_or(|clock| clock.covers(&op.id));
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
         self.push_mark(mark_index);
-        self.apply_increment(op.id, op.get_increment_value());
+        self.apply_increment(op.id, op.get_increment_value(), visible);
 
         if let Some(obj_info) = op.obj_info() {
             self.obj_info.insert(op.id, obj_info);
         }
 
         self.group.push(GroupOp {
-            succ: vis_num(op),
+            succ: vis_num(op, clock),
             width: op.width(SequenceType::Text, self.text_encoding) as u32,
         });
+        for succ in op.succ() {
+            self.process_succ(op.is_counter(), succ);
+        }
     }
 
     fn push_mark(&mut self, mark_index: Option<MarkIndexBuilder>) {
@@ -427,7 +432,7 @@ impl IndexBuilder {
         });
     }
 
-    fn apply_increment(&mut self, id: OpId, inc_value: Option<i64>) {
+    fn apply_increment(&mut self, id: OpId, inc_value: Option<i64>, visible: bool) {
         let count = self.counters.remove(&id);
         if let Some(i) = inc_value {
             let incs_flushed = self.incs_flushed();
@@ -435,7 +440,9 @@ impl IndexBuilder {
             for (inc_idx, op_idx) in count.into_iter().flatten() {
                 // a counter and its increments share a register
                 self.group_incs[inc_idx - incs_flushed] = Some(i);
-                self.group[op_idx - ops_flushed].succ -= 1;
+                if visible {
+                    self.group[op_idx - ops_flushed].succ -= 1;
+                }
             }
         }
     }
@@ -1142,12 +1149,14 @@ pub(crate) fn runs<T: PartialEq>(
     })
 }
 
-#[cfg(test)]
-fn vis_num(op: &Op<'_>) -> u32 {
+fn vis_num(op: &Op<'_>, clock: Option<&Clock>) -> u32 {
     if op.is_inc() {
-        u32::MAX
-    } else {
-        op.succ().len() as u32
+        return u32::MAX;
+    }
+    match clock {
+        None => op.succ().len() as u32,
+        Some(clock) if !clock.covers(&op.id) => u32::MAX,
+        Some(clock) => op.succ().filter(|id| clock.covers(id)).count() as u32,
     }
 }
 

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+* `Automerge.maskAuthor(doc, author, heads)`, `Automerge.revealAuthor(doc,
+  author)` and `Automerge.isAuthorMasked(doc, author)` hide and restore an
+  author's changes beyond a set of heads; the patch callback receives the
+  resulting patches.
+
 ### Changed
 
 * Patches describe the net change between two states of the document. Their

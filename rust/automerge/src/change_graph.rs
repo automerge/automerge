@@ -36,6 +36,8 @@ pub struct ChangeGraph<H: HashRetention = Retained> {
     dep_range: Vec<(u32, u32)>,
     dep_target: Vec<NodeIdx>,
     seq: Vec<u32>,
+    /// A mapping from a [`NodeIdx`] to the maximum op-counter in a given
+    /// commit.
     max_ops: Vec<u32>,
     max_op: u32,
     num_ops: hexane::Column<u64>,
@@ -121,8 +123,12 @@ struct ResolvedHashes {
 pub struct UncheckedHashes;
 
 #[derive(Debug, thiserror::Error)]
-#[error("the document's head indexes are invalid")]
-pub struct BadHeadIndexes;
+pub enum GraphLoadError {
+    #[error("the document's head indexes are invalid")]
+    BadHeadIndexes,
+    #[error("actor {actor} has an author footer at seq {seq}")]
+    AuthorOnNonInitialSeq { seq: u64, actor: usize },
+}
 
 impl From<UncheckedHashes> for AutomergeError {
     fn from(_: UncheckedHashes) -> Self {
@@ -252,8 +258,10 @@ impl<H: HashRetention> ChangeGraph<H> {
         (0..self.len() as u32).map(NodeIdx).collect()
     }
 
+    /// Make room for an actor just inserted into the document's actor table.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
         self.actors.shift_actors(shift);
+
         for clock in self.clock_cache.values_mut() {
             clock.shift_actor(shift)
         }
@@ -607,6 +615,11 @@ impl<H: HashRetention> ChangeGraph<H> {
         parents.iter().map(move |p| self.hashes.try_get(*p))
     }
 
+    /// `None` for a hash the graph does not hold, including a freed one.
+    pub(crate) fn node_for_hash(&self, hash: &ChangeHash) -> Option<NodeIdx> {
+        self.nodes_by_hash.get(hash).copied()
+    }
+
     fn lookup_hash(&self, hash: &ChangeHash) -> HashLookup {
         if let Some(n) = self.nodes_by_hash.get(hash) {
             return HashLookup::Found(*n);
@@ -663,26 +676,30 @@ impl<H: HashRetention> ChangeGraph<H> {
         }
     }
 
-    fn authors_in(
+    /// An author footer is only valid on an actor's first change: skipping a
+    /// later one would leave its ops unattributed, so masking could not hide
+    /// them.
+    fn assign_authors(
         &self,
         nodes: Range<usize>,
-    ) -> impl Iterator<Item = (usize, crate::Author<'_>)> + '_ {
+        authors: &mut Authors,
+    ) -> Result<(), GraphLoadError> {
         // a prefix column's `get` walks from the start: iterate to stay linear
-        self.extra_bytes_meta
-            .iter_range(nodes.clone())
-            .zip(nodes)
-            .filter(|(_, i)| self.seq[*i] == 1)
-            .filter_map(|(meta, i)| {
-                let extra = &self.extra_bytes_raw[meta.prefix() as usize..meta.total() as usize];
-                let author = crate::change::decode_author_footer(extra)?;
-                Some((self.actors[i].into(), author))
-            })
-    }
-
-    fn assign_authors(&self, nodes: Range<usize>, authors: &mut Authors) {
-        for (actor, author) in self.authors_in(nodes) {
+        for (meta, i) in self.extra_bytes_meta.iter_range(nodes.clone()).zip(nodes) {
+            let extra = &self.extra_bytes_raw[meta.prefix() as usize..meta.total() as usize];
+            let Some(author) = crate::change::decode_author_footer(extra) else {
+                continue;
+            };
+            let actor = self.actors[i].into();
+            if self.seq[i] != 1 {
+                return Err(GraphLoadError::AuthorOnNonInitialSeq {
+                    seq: self.seq[i] as u64,
+                    actor,
+                });
+            }
             authors.assign_author(author.into_owned(), actor);
         }
+        Ok(())
     }
 
     /// The authors `members` (`(actor index, seq, extra bytes)`) assign.
@@ -701,16 +718,21 @@ impl<H: HashRetention> ChangeGraph<H> {
             let Some(author) = crate::change::decode_author_footer(extra) else {
                 continue;
             };
-            if authors.get_author_for_actor(actor).is_some() || !claimed.insert(actor) {
+            let existing = authors.get_author_for_actor(actor);
+            if existing.is_some_and(|a| a != author) || !claimed.insert(actor) {
                 return Err(AutomergeError::DuplicateAuthor(
                     author.into_owned(),
                     actor_ids[actor].clone(),
                     seq,
                 ));
             }
-            if seq == 1 {
-                assigned.push((actor, author));
+            if seq != 1 {
+                return Err(AutomergeError::AuthorOnNonInitialSeq(
+                    seq,
+                    actor_ids[actor].clone(),
+                ));
             }
+            assigned.push((actor, author));
         }
         Ok(assigned)
     }
@@ -1042,7 +1064,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         let mut new_fragment = false;
 
         self.add_nodes(iter.clone());
-        self.assign_authors(node.0 as usize..self.len(), authors);
+        self.assign_authors(node.0 as usize..self.len(), authors)?;
 
         for (i, (change, actor)) in iter.enumerate() {
             let node_idx = node + i;
@@ -1090,6 +1112,11 @@ impl<H: HashRetention> ChangeGraph<H> {
                 .ok()
                 .map(|i| self.cached_fragment(&self.fragments[i], actors))
         }
+    }
+
+    pub(crate) fn actor_seq(&self, n: NodeIdx) -> (usize, u32) {
+        let i = n.0 as usize;
+        (usize::from(self.actors[i]), self.seq[i])
     }
 
     pub(crate) fn change_id(&self, n: NodeIdx, actors: &ActorTable) -> ChangeId {
@@ -2102,12 +2129,16 @@ impl ChangeGraphCols {
         self.graph.iter()
     }
 
-    pub(crate) fn finalize(self, changes: &[Change], authors: &mut Authors) -> ChangeGraph<Full> {
+    pub(crate) fn finalize(
+        self,
+        changes: &[Change],
+        authors: &mut Authors,
+    ) -> Result<ChangeGraph<Full>, GraphLoadError> {
         debug_assert!(self.graph.hashes.len() == 0);
         let mut graph = self
             .graph
             .with_hashes(Full::new(Vec::with_capacity(changes.len())));
-        graph.assign_authors(0..graph.len(), authors);
+        graph.assign_authors(0..graph.len(), authors)?;
         debug_assert_eq!(changes.len(), graph.len());
 
         // The encoded change columns only contain each change's maximum op.
@@ -2134,7 +2165,7 @@ impl ChangeGraphCols {
 
         graph.cache_fragments();
 
-        graph
+        Ok(graph)
     }
 
     /// Finish loading without computing change hashes: only the heads are
@@ -2145,30 +2176,30 @@ impl ChangeGraphCols {
         heads: &[ChangeHash],
         head_indexes: &[u64],
         authors: &mut Authors,
-    ) -> Result<ChangeGraph<Retained>, BadHeadIndexes> {
+    ) -> Result<ChangeGraph<Retained>, GraphLoadError> {
         let mut graph = self.graph;
-        graph.assign_authors(0..graph.len(), authors);
+        graph.assign_authors(0..graph.len(), authors)?;
         debug_assert!(graph.hashes.len() == 0);
 
         if heads.len() != head_indexes.len() {
-            return Err(BadHeadIndexes);
+            return Err(GraphLoadError::BadHeadIndexes);
         }
 
         let has_child = graph.has_child_mask();
         let num_childless = has_child.iter().filter(|c| !**c).count();
         if num_childless != head_indexes.len() {
-            return Err(BadHeadIndexes);
+            return Err(GraphLoadError::BadHeadIndexes);
         }
 
         let mut pre = HashMap::with_capacity(heads.len());
         for (hash, index) in heads.iter().zip(head_indexes.iter()) {
             let i = *index as usize;
             if i >= graph.len() || has_child[i] {
-                return Err(BadHeadIndexes);
+                return Err(GraphLoadError::BadHeadIndexes);
             }
             let node = NodeIdx(*index as u32);
             if pre.insert(node, *hash).is_some() {
-                return Err(BadHeadIndexes);
+                return Err(GraphLoadError::BadHeadIndexes);
             }
             graph.nodes_by_hash.insert(*hash, node);
         }
@@ -2328,6 +2359,8 @@ pub(crate) enum AddChangeError {
     MissingDep(#[from] MissingDep),
     #[error(transparent)]
     Unchecked(#[from] UncheckedHashes),
+    #[error(transparent)]
+    Author(#[from] GraphLoadError),
 }
 
 #[cfg(test)]
@@ -2410,6 +2443,47 @@ mod tests {
 
         let clock = graph.seq_clock_for_heads(&[change4]).unwrap();
         assert_eq!(clock, expected_clock);
+    }
+
+    /// An author footer on a seq!=1 change must fail the load, as the same
+    /// change applied directly does: skipping it would leave the ops
+    /// unattributed, so masking could not hide them. The public API cannot
+    /// produce such bytes, so the footer is forged into the graph's columns.
+    #[test]
+    fn finalize_rejects_author_footer_at_non_initial_seq() {
+        use crate::{Author, ExpandedChange};
+
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "k1", "v1").unwrap();
+        doc.commit();
+        doc.put(ROOT, "k2", "v2").unwrap();
+        doc.commit();
+        let mut changes = doc.get_changes(&[]).unwrap();
+        changes.sort_by_key(Change::seq);
+        let author = Author::try_from("ffff").unwrap();
+        let mut expanded: ExpandedChange = (&changes[1]).into();
+        expanded.extra_bytes = vec![1, author.as_bytes().len() as u8];
+        expanded.extra_bytes.extend_from_slice(author.as_bytes());
+        let forged: Change = expanded.into();
+        assert!(forged.author().is_some());
+        let forged_changes = vec![changes[0].clone(), forged];
+
+        let actors = ActorTable::from_sorted(vec![changes[0].actor_id().clone()]).unwrap();
+        let mut graph: ChangeGraph = ChangeGraph::new(&actors);
+        graph.add_nodes(forged_changes.iter().map(|c| (c, 0usize)));
+        let cols = ChangeGraphCols { graph };
+
+        let mut authors = Authors::new(&actors);
+        let err = cols
+            .finalize(&forged_changes, &mut authors)
+            .expect_err("an author footer at seq 2 must fail the load");
+        assert!(
+            matches!(
+                err,
+                GraphLoadError::AuthorOnNonInitialSeq { seq: 2, actor: 0 }
+            ),
+            "got {err:?}"
+        );
     }
 
     #[test]

@@ -9,13 +9,14 @@ use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
+use crate::automerge::view::{ReadAt, VisibleClock};
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, SuccInsert, TxOp};
 use crate::read::ReadDoc;
-use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
+use crate::types::{ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
 use crate::{hydrate, AutomergeError, ObjType, OpType};
 use crate::{Change, ChangeHash, Prop};
 
@@ -27,9 +28,13 @@ pub struct TransactionInner {
     time: i64,
     message: Option<String>,
     deps: Vec<ChangeHash>,
-    scope: Option<Clock>,
+    scope: Option<VisibleClock>,
     pending: Vec<TxOp>,
     author: Option<Author<'static>>,
+    /// The transaction's actor belongs to a masked author: its ops are
+    /// committed but indexed as hidden. The mask cannot change while a
+    /// transaction is open.
+    masked: bool,
 }
 
 /// Arguments required to create a new transaction
@@ -44,9 +49,11 @@ pub(crate) struct TransactionArgs {
     /// The dependencies of the change this transaction will create
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
-    pub(crate) scope: Option<Clock>,
+    pub(crate) scope: Option<VisibleClock>,
     /// The author of the change
     pub(crate) author: Option<Author<'static>>,
+    /// Whether the visibility mask hides the ops this transaction creates
+    pub(crate) masked: bool,
 }
 
 struct InsertedOp {
@@ -85,6 +92,7 @@ impl TransactionInner {
             deps,
             scope,
             author,
+            masked,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -97,6 +105,7 @@ impl TransactionInner {
             pending: vec![],
             scope,
             author,
+            masked,
         }
     }
 
@@ -159,8 +168,11 @@ impl TransactionInner {
             let ops = change.iter_ops().collect::<Vec<_>>();
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
+        doc.pin_incoming_boundaries(std::slice::from_ref(&change));
         doc.update_history(&change);
         doc.remove_unused_actors(true);
+        // a local change can be the pending boundary of a write-frontier
+        doc.republish_if_pending();
         hash
     }
 
@@ -303,6 +315,7 @@ impl TransactionInner {
             elemid,
             ops.iter().map(|op| op.id),
         )
+        .masked(self.masked)
     }
 
     fn insert_local_op<H: crate::hash_retention::HashRetention>(
@@ -379,11 +392,11 @@ impl TransactionInner {
 
         let query = doc
             .ops()
-            .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
+            .query_insert_at(&obj.id, index, seq_type, &self.read_at(doc))?;
 
         let pos = query.pos;
 
-        let op = TxOp::insert(id, *obj, pos, index, action, query.elemid);
+        let op = TxOp::insert(id, *obj, pos, index, action, query.elemid).masked(self.masked);
         let inserted = InsertedOp {
             id,
             pos: op.pos,
@@ -407,7 +420,7 @@ impl TransactionInner {
         // inside one multi-width element both anchors resolve to the same position
         let end_pos = doc
             .ops()
-            .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?
+            .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at(doc))?
             .pos;
         if end_pos > begin.pos {
             self.do_insert_op(doc, obj, SequenceType::Text, index, OpType::MarkEnd(expand))
@@ -431,7 +444,8 @@ impl TransactionInner {
             begin.index,
             OpType::MarkEnd(expand),
             ElemId(begin.id),
-        );
+        )
+        .masked(self.masked);
         let inserted = InsertedOp {
             id,
             pos: op.pos,
@@ -466,7 +480,7 @@ impl TransactionInner {
 
         let mut query = doc
             .ops()
-            .seek_ops_by_map_key(&obj.id, &prop, self.scope.as_ref());
+            .seek_ops_by_map_key(&obj.id, &prop, &self.read_at(doc));
 
         let Some(resolved_action) = query.resolve_action(action) else {
             return Ok(None);
@@ -479,15 +493,19 @@ impl TransactionInner {
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred);
+        let op =
+            TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred).masked(self.masked);
 
         let inc_value = op.get_increment_value();
 
+        // A masked op's successor links must not delete or increment: the
+        // index records the link without flipping visibility.
+        let masked = self.masked;
         let succ: Vec<_> = query
             .ops
             .iter()
             // on a non-counter target an increment acts as an overwrite
-            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter())))
+            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter()), masked))
             .collect();
 
         self.insert_local_op(doc, op, &succ, query.range);
@@ -507,7 +525,7 @@ impl TransactionInner {
         };
         let mut query = doc
             .ops()
-            .seek_ops_by_index(&obj.id, index, seq_type, self.scope.as_ref());
+            .seek_ops_by_index(&obj.id, index, seq_type, &self.read_at(doc));
         let id = self.next_id();
         let eid = query
             .ops
@@ -527,20 +545,23 @@ impl TransactionInner {
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::list(id, *obj, query.end_pos, index, resolved_action, eid, pred);
+        let op = TxOp::list(id, *obj, query.end_pos, index, resolved_action, eid, pred)
+            .masked(self.masked);
         let inc_value = op.get_increment_value();
+        let masked = self.masked;
         let succ = query
             .ops
             .iter()
             // on a non-counter target an increment acts as an overwrite
-            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter())))
+            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter()), masked))
             .collect::<Vec<_>>();
 
         self.insert_local_op(doc, op, &succ, query.range);
 
-        // overwriting a conflicted winner can reveal a counter beneath it
+        // overwriting a conflicted winner can reveal a counter beneath it; a
+        // masked op overwrites nothing
         if let Some((i, s)) = succ.iter().rev().enumerate().find(|(_, s)| s.inc.is_some()) {
-            if i > 0 {
+            if i > 0 && !self.masked {
                 doc.ops.expose(s.pos)
             }
         }
@@ -677,7 +698,7 @@ impl TransactionInner {
         let inserted_width = if !splice_type.is_empty() {
             let query = doc
                 .ops()
-                .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
+                .query_insert_at(&obj.id, index, seq_type, &self.read_at(doc))?;
 
             index = query.index;
 
@@ -735,15 +756,24 @@ impl TransactionInner {
             0
         };
 
-        // delete `del` items - performing the query for each one
-        let mut delete_index = index + inserted_width;
+        // Deletion targets are selected from the visible sequence. In a
+        // maskless transaction the inserted items are visible (the targets
+        // sit after them) and each deletion collapses the sequence back
+        // onto the cursor. A masked transaction's inserts have no visible
+        // width and its deletes do not collapse positions, so the cursor
+        // starts at `index` and must step over each deleted element.
+        let mut delete_index = if self.masked {
+            index
+        } else {
+            index + inserted_width
+        };
         let mut deleted: usize = 0;
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
 
             let query =
                 doc.ops()
-                    .seek_ops_by_index(&obj.id, delete_index, seq_type, self.scope.as_ref());
+                    .seek_ops_by_index(&obj.id, delete_index, seq_type, &self.read_at(doc));
 
             let step = if let Some(op) = query.ops.last() {
                 op.width(seq_type, doc.text_encoding())
@@ -760,15 +790,21 @@ impl TransactionInner {
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
             let mut op = self.next_delete(obj, delete_index, query_elemid, &query.ops);
+            let masked = self.masked;
             let ops_pos = query
                 .ops
                 .iter()
-                .map(|o| o.add_succ(op.id(), None))
+                .map(|o| o.add_succ(op.id(), None, masked))
                 .collect::<Vec<_>>();
 
             op.undo = doc.ops_mut().add_succ_with_undo(&ops_pos);
 
             deleted += step;
+            if masked {
+                // The masked delete left its target visible: move past it so
+                // the next query does not select the same element again.
+                delete_index += step;
+            }
 
             self.pending.push(op);
         }
@@ -844,13 +880,14 @@ impl TransactionInner {
 
         let query =
             doc.ops()
-                .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?;
+                .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at(doc))?;
 
         let pos = query.pos;
 
         let id = self.next_id();
 
-        let op = TxOp::insert_obj(id, obj, pos, index, ObjType::Map, query.elemid);
+        let op =
+            TxOp::insert_obj(id, obj, pos, index, ObjType::Map, query.elemid).masked(self.masked);
 
         doc.ops_mut().splice(op.pos, &[&op]);
 
@@ -880,7 +917,7 @@ impl TransactionInner {
             &text_obj.id,
             index,
             SequenceType::Text,
-            self.scope.as_ref(),
+            &self.read_at(doc),
         );
         let target = target_query
             .ops
@@ -898,13 +935,14 @@ impl TransactionInner {
                 &text_obj.id,
                 block_id,
                 SequenceType::Text,
-                self.scope.as_ref(),
+                &self.read_at(doc),
             )
             .unwrap();
 
-        let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
+        let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id])
+            .masked(self.masked);
 
-        let succ_pos = vec![found.op.add_succ(op.id(), None)];
+        let succ_pos = vec![found.op.add_succ(op.id(), None, self.masked)];
 
         op.undo = doc.ops_mut().add_succ_with_undo(&succ_pos);
 
@@ -952,7 +990,7 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(map)?;
         let current_vals = doc
             .ops()
-            .map_range(&obj.id, .., self.scope.clone())
+            .map_range(&obj.id, .., self.read_at(doc))
             .map(|m| (m.key.to_string(), m.value.to_value(), m.id()))
             .collect::<Vec<_>>();
 
@@ -1194,8 +1232,20 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn get_scope(&self) -> &Option<Clock> {
+    pub(crate) fn get_scope(&self) -> &Option<VisibleClock> {
         &self.scope
+    }
+
+    /// The read position of this transaction: its isolation scope if any,
+    /// otherwise the current document (which carries the write-frontier mask).
+    pub(crate) fn read_at<'a, H: crate::hash_retention::HashRetention>(
+        &'a self,
+        doc: &'a Automerge<H>,
+    ) -> ReadAt<'a> {
+        match &self.scope {
+            Some(scope) => doc.read_scoped(std::borrow::Cow::Borrowed(scope)),
+            None => doc.read_current(),
+        }
     }
 
     pub(crate) fn get_deps(&self) -> Vec<ChangeHash> {
@@ -1272,7 +1322,7 @@ impl<'a, H: crate::hash_retention::HashRetention> BatchInsertion<'a, H> {
 
     fn append<F: FnOnce(usize, OpId) -> TxOp>(&mut self, factory: F) -> OpId {
         let id = self.inner.next_id();
-        let op = factory(self.next_pos(), id);
+        let op = factory(self.next_pos(), id).masked(self.inner.masked);
         self.inner.pending.push(op);
         id
     }
@@ -1305,7 +1355,8 @@ impl<'a, H: crate::hash_retention::HashRetention> BatchInsertion<'a, H> {
                 self.next_pos(),
                 char,
                 elemid,
-            );
+            )
+            .masked(self.inner.masked);
             inserted_width += op.bld.width(SequenceType::Text, self.doc.text_encoding());
             elemid = ElemId(op.id());
             self.inner.pending.push(op);

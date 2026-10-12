@@ -18,6 +18,10 @@ impl ChangeBatch {
         }
     }
 
+    pub(crate) fn has_hash(&self, hash: &ChangeHash) -> bool {
+        self.hashes.contains(hash)
+    }
+
     pub(crate) fn push(&mut self, change: Change) -> Result<(), AutomergeError> {
         let hash = change.hash();
         if self.hashes.contains(&hash) {

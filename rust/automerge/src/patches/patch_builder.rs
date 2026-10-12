@@ -2,12 +2,13 @@ use core::fmt::Debug;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
+use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::iter::SpanInternal;
 use crate::marks::MarkSet;
 use crate::text_value::ConcreteTextValue;
-use crate::types::{Clock, ObjId, ObjType};
+use crate::types::{ObjId, ObjType};
 use crate::{Prop, TextEncoding, Value};
 
 use super::{Event, Patch, PatchAction};
@@ -23,7 +24,7 @@ pub(crate) struct PatchBuilder<
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     seen: HashSet<ObjId>,
     text_encoding: TextEncoding,
-    clock: Option<Clock>,
+    read: ReadAt<'a>,
     doc: &'a Automerge<H>,
 }
 
@@ -31,7 +32,7 @@ impl<'a, H: crate::hash_retention::HashRetention> PatchBuilder<'a, H> {
     pub(crate) fn new(
         doc: &'a Automerge<H>,
         path_map: BTreeMap<ObjId, (Prop, ObjId)>,
-        clock: Option<Clock>,
+        read: ReadAt<'a>,
         text_encoding: TextEncoding,
     ) -> Self {
         // If we are expecting a lot of patches then precompute all the visible
@@ -43,7 +44,7 @@ impl<'a, H: crate::hash_retention::HashRetention> PatchBuilder<'a, H> {
             path_map,
             seen: HashSet::new(),
             doc,
-            clock,
+            read,
             text_encoding,
         }
     }
@@ -116,7 +117,7 @@ impl<H: crate::hash_retention::HashRetention> PatchBuilder<'_, H> {
     fn update_path_map(&mut self, parent_id: ObjId, parent_type: ObjType) {
         match parent_type {
             ObjType::List => {
-                for item in self.doc.ops.list_range(&parent_id, .., self.clock.clone()) {
+                for item in self.doc.ops.list_range(&parent_id, .., self.read.borrow()) {
                     if item.value.is_object() {
                         let prop = Prop::from(item.index);
                         self.path_map.insert(ObjId(item.op_id()), (prop, parent_id));
@@ -124,7 +125,7 @@ impl<H: crate::hash_retention::HashRetention> PatchBuilder<'_, H> {
                 }
             }
             ObjType::Text => {
-                for span in self.doc.ops.spans(&parent_id, self.clock.clone()) {
+                for span in self.doc.ops.spans(&parent_id, self.read.borrow()) {
                     if let SpanInternal::Obj(id, index, _) = span {
                         let prop = Prop::from(index);
                         self.path_map.insert(ObjId(id), (prop, parent_id));
@@ -132,7 +133,7 @@ impl<H: crate::hash_retention::HashRetention> PatchBuilder<'_, H> {
                 }
             }
             _ => {
-                for item in self.doc.ops.map_range(&parent_id, .., self.clock.clone()) {
+                for item in self.doc.ops.map_range(&parent_id, .., self.read.borrow()) {
                     if item.value.is_object() {
                         self.path_map.insert(
                             ObjId(item.op_id()),

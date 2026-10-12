@@ -20,6 +20,7 @@ pub struct LoadOptions {
     string_migration: StringMigration,
     text_encoding: TextEncoding,
     author: Option<Author<'static>>,
+    write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
 }
 
 impl LoadOptions {
@@ -84,6 +85,18 @@ impl LoadOptions {
             ..self
         }
     }
+
+    /// The write-frontier to apply to the loaded document. See
+    /// [`Automerge::set_write_frontier`].
+    pub fn write_frontier(
+        self,
+        write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) -> Self {
+        Self {
+            write_frontier,
+            ..self
+        }
+    }
 }
 
 impl LoadOptions {
@@ -92,7 +105,10 @@ impl LoadOptions {
             .on_partial_load(self.on_partial_load)
             .verification_mode(self.verification_mode)
             .migrate_strings(self.string_migration)
-            .text_encoding(self.text_encoding);
+            .text_encoding(self.text_encoding)
+            .write_frontier_boundaries(crate::write_frontier::WriteFrontier::from_hashes(
+                self.write_frontier,
+            ));
         match self.author {
             Some(author) => options.author(author),
             None => options,
@@ -108,6 +124,7 @@ impl std::default::Default for LoadOptions {
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
             author: None,
+            write_frontier: std::collections::HashMap::new(),
         }
     }
 }
@@ -310,6 +327,86 @@ impl Automerge {
     /// Get the current author of this document.
     pub fn get_author(&self) -> Option<&Author<'static>> {
         self.0.get_author()
+    }
+
+    /// Hide every change by `author` that is not in the history of `heads`.
+    ///
+    /// Until every one of `heads` is in the document the author is hidden
+    /// entirely. Hidden changes, including this document's own author's, are
+    /// still recorded, saved and synced; sequence positions refer to the
+    /// visible document. Take a [`Self::view`] beforehand and call
+    /// [`Self::diff_views`] to get the resulting patches.
+    ///
+    /// Rebuilds the document's indexes when the visible set changes.
+    pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
+        let heads = heads
+            .iter()
+            .map(|h| crate::write_frontier::Boundary::Hash(*h))
+            .collect();
+        self.0.mask_author_boundaries(author, heads);
+    }
+
+    /// Stop hiding `author`'s changes.
+    ///
+    /// Rebuilds the document's indexes when the visible set changes.
+    pub fn reveal_author(&mut self, author: &Author<'static>) {
+        self.0.reveal_author(author);
+    }
+
+    /// Replace the write-frontier: hide each author's changes past their heads.
+    pub fn set_write_frontier(
+        &mut self,
+        write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) {
+        self.0
+            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from_hashes(
+                write_frontier,
+            ));
+    }
+
+    /// Whether `author` is masked, e.g. so an application can disable editing
+    /// for a masked local author.
+    pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
+        self.0.is_author_masked(author)
+    }
+
+    /// Replace the write-frontier: hide each author's changes past their heads.
+    pub fn with_write_frontier(
+        mut self,
+        write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) -> Self {
+        self.set_write_frontier(write_frontier);
+        self
+    }
+
+    /// The write-frontier, per [`Author`], including boundaries this document
+    /// has not received yet.
+    pub fn get_write_frontier(
+        &self,
+    ) -> std::collections::HashMap<Author<'static>, Vec<ChangeHash>> {
+        super::frontier_hashes(&self.0)
+    }
+
+    /// Test oracle: the current view read through the filtered, non-indexed
+    /// path.
+    #[doc(hidden)]
+    pub fn read_forced_slow_hydrate(&self) -> crate::hydrate::Value {
+        self.0.read_forced_slow_hydrate()
+    }
+
+    /// The document's current [`View`](crate::View).
+    pub fn view(&self) -> crate::View {
+        self.0.view()
+    }
+
+    /// Patches from `before` to `after`, each read under the write-frontier
+    /// it was taken with, so masking and revealing authors is reported even
+    /// when the heads did not move.
+    ///
+    /// Returns no patches if either view names a change this document does
+    /// not have.
+    pub fn diff_views(&self, before: &crate::View, after: &crate::View) -> Vec<Patch> {
+        self.0.diff_views(before, after).unwrap_or_default()
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {

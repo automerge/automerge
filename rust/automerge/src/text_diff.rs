@@ -4,7 +4,7 @@ use crate::automerge::Automerge;
 use crate::iter::Span;
 use crate::read::ReadDoc;
 use crate::{
-    clock::Clock,
+    automerge::view::ReadAt,
     iter::{SpanInternal, SpansInternal},
     tx::TransactionInner,
     ObjId as ExId, TextEncoding,
@@ -19,7 +19,7 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>, H: crate::hash_retention::HashRetent
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
-    let old = doc.text_for(text_obj, tx.get_scope().clone())?;
+    let old = doc.text_for(text_obj, tx.read_at(doc))?;
     let new = new.as_ref();
     let old_graphemes = old.graphemes(true).collect::<Vec<&str>>();
     let new_graphemes = new.graphemes(true).collect::<Vec<&str>>();
@@ -131,7 +131,7 @@ pub(crate) fn myers_block_diff<
     config: &crate::marks::UpdateSpansConfig,
 ) -> Result<(), crate::AutomergeError> {
     let text_obj_meta = doc.exid_to_obj(text_obj)?;
-    let old = spans_as_grapheme(doc, &text_obj_meta.id, None)?;
+    let old = spans_as_grapheme(doc, &text_obj_meta.id, doc.read_current())?;
     let new_spans: Vec<Span> = new.into_iter().collect();
     let new = span_as_grapheme(new_spans.iter().cloned());
 
@@ -185,7 +185,7 @@ fn apply_marks_diff<H: crate::hash_retention::HashRetention>(
     }
 
     // Get current marks on the text
-    let current_marks = doc.marks_for(text_obj, None)?;
+    let current_marks = doc.marks_for(text_obj, doc.read_current())?;
 
     // Determine which marks to remove (those not in the new set)
     let mut marks_to_remove = Vec::new();
@@ -212,9 +212,12 @@ fn apply_marks_diff<H: crate::hash_retention::HashRetention>(
 
     // Add new marks that don't already exist
     for (mark_name, mark_value, start, end) in new_marks {
-        let already_exists = doc.marks_for(text_obj, None)?.iter().any(|m| {
-            m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
-        });
+        let already_exists = doc
+            .marks_for(text_obj, doc.read_current())?
+            .iter()
+            .any(|m| {
+                m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
+            });
 
         if !already_exists {
             let expand = config
@@ -413,16 +416,15 @@ impl<H: crate::hash_retention::HashRetention> myers::DiffHook for BlockDiffHook<
 fn spans_as_grapheme<H: crate::hash_retention::HashRetention>(
     doc: &Automerge<H>,
     text: &crate::types::ObjId,
-    clock: Option<Clock>,
+    read: ReadAt<'_>,
 ) -> Result<Vec<BlockOrGrapheme>, crate::AutomergeError> {
     let range = doc.ops.scope_to_obj(text);
-    let spans_internal = SpansInternal::new(doc.ops(), range, clock.clone(), doc.text_encoding());
+    let spans_internal = SpansInternal::new(doc.ops(), range, read.clone(), doc.text_encoding());
     let mut result = Vec::with_capacity(spans_internal.size_hint().0);
     for span in spans_internal {
         match span {
             SpanInternal::Obj(b, _, _) => {
-                let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), clock.as_ref())
-                else {
+                let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), &read) else {
                     tracing::warn!("unexpected non map object in text");
                     result.push(BlockOrGrapheme::Block(crate::hydrate::Map::new()));
                     continue;

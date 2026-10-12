@@ -37,6 +37,16 @@
   documents back with `into_audit()`, which recomputes every hash.
 * `ChangeId`, `ChangeSet` and the change set loader: every type loads change
   sets as well as everything earlier versions saved.
+* Write-frontiers: `mask_author(author, heads)` hides an author's changes
+  outside the history of `heads` from every read, diff and patch, without
+  removing them from the history; `reveal_author`, `set_write_frontier`,
+  `get_write_frontier`, `is_author_masked` and `LoadOptions::write_frontier`
+  manage the policy, which is local to the document instance. The `next` types
+  name the heads by `ChangeId`.
+* `View`: `view()` snapshots a document's heads together with its
+  write-frontier, and `diff_views(&before, &after)` returns the patches between
+  two views, including masking and revealing authors, which leave the heads
+  unchanged. `diff_incremental` reports these changes too.
 
 ### Fixed
 

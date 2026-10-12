@@ -8,13 +8,14 @@ use crate::actor::ActorList;
 use crate::author::Authors;
 use crate::automerge::AuditMode;
 use crate::automerge::Automerge;
-use crate::change_graph::{ChangeGraph, ChangeGraphCols};
+use crate::change_graph::{ChangeGraph, ChangeGraphCols, GraphLoadError};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{Change, ChangeHash, TextEncoding};
+use crate::write_frontier::WriteFrontier;
+use crate::{ActorId, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -345,6 +346,7 @@ impl<'a> Document<'a> {
         mode: VerificationMode,
         text_encoding: TextEncoding,
         allow_invalid_marks: bool,
+        write_frontier: WriteFrontier,
     ) -> Result<Automerge<H>, ReconstructError> {
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
@@ -378,7 +380,12 @@ impl<'a> Document<'a> {
             head_indexes,
             &mut authors,
         )
-        .map_err(|_| ReconstructError::BadHeadIndexes)?;
+        .map_err(|e| match e {
+            GraphLoadError::BadHeadIndexes => ReconstructError::BadHeadIndexes,
+            GraphLoadError::AuthorOnNonInitialSeq { seq, actor } => {
+                ReconstructError::AuthorOnNonInitialSeq(seq, op_set.actors[actor].clone())
+            }
+        })?;
 
         if let Some(changes) = &changes {
             debug_assert_eq!(changes.changes.len(), change_graph.len());
@@ -386,7 +393,7 @@ impl<'a> Document<'a> {
 
         debug_assert!(op_set.validate_top_index());
 
-        let doc = Automerge::from_parts(op_set, change_graph, authors);
+        let doc = Automerge::from_parts(op_set, change_graph, authors, write_frontier);
 
         match mark_order_validator.take_error() {
             Some(error_message) if !allow_invalid_marks => {
@@ -449,6 +456,8 @@ pub(crate) enum ReconstructError {
     InvalidMaxOp,
     #[error("change dep index out of range")]
     InvalidDepIndex,
+    #[error("author provided for change with non-initial sequence number: {0}")]
+    AuthorOnNonInitialSeq(u64, ActorId),
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderDoc { error_message: String },
     #[error("invalid mark operation order: {error_message}")]

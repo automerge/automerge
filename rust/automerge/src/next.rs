@@ -12,6 +12,7 @@
 //! `into_audit`.
 
 pub use crate::autocommit::AutoCommit;
+pub use crate::automerge::view::View;
 pub use crate::automerge::{
     Automerge, EnableAuditModeError, GcMode, LoadOptions, SaveFormat, SaveOptions,
 };

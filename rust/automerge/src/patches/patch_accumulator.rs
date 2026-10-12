@@ -1,3 +1,4 @@
+use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::hydrate::Value;
@@ -292,18 +293,19 @@ impl PatchAccumulator {
         clock: Option<Clock>,
         text_encoding: TextEncoding,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_encoding);
+        let read = doc.read_clock(clock);
+        let mut patch_builder = PatchBuilder::new(doc, path_map, read.clone(), text_encoding);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // pump before the skip check to keep expose observations in event order
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, &read);
             // exposed objects are reported from their final state instead
             if expose_queue.should_skip(&exid) {
                 continue;
             }
             patch_builder.log_event(doc, exid, event);
         }
-        expose_queue.flush_queue(&mut patch_builder, doc, clock.as_ref());
+        expose_queue.flush_queue(&mut patch_builder, doc, &read);
 
         patch_builder.take_patches()
     }
@@ -339,13 +341,13 @@ impl ExposeQueue {
         obj: &ExId,
         patch_builder: &mut PatchBuilder<'_, H>,
         doc: &Automerge<H>,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) {
         while let Some(exposed) = self.0.first() {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), patch_builder, doc, clock);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read);
         }
     }
 
@@ -353,10 +355,10 @@ impl ExposeQueue {
         &mut self,
         patch_builder: &mut PatchBuilder<'_, H>,
         doc: &Automerge<H>,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), patch_builder, doc, clock);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read);
         }
     }
 
@@ -373,13 +375,13 @@ impl ExposeQueue {
         exid: ExId,
         patch_builder: &mut PatchBuilder<'_, H>,
         doc: &Automerge<H>,
-        clock: Option<&Clock>,
+        read: &ReadAt<'_>,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text => {
-                for span in doc.ops().spans(&id, clock.cloned()) {
+                for span in doc.ops().spans(&id, read.borrow()) {
                     match span {
                         SpanInternal::Text(text, index, marks) => {
                             patch_builder.splice_text(exid.clone(), index, &text, marks.export());
@@ -398,7 +400,7 @@ impl ExposeQueue {
                 }
             }
             ObjType::List => {
-                for item in doc.list_range_for(&exid, .., clock.cloned()) {
+                for item in doc.list_range_for(&exid, .., read.borrow()) {
                     let value = item.value.to_value();
                     let id = item.id();
                     let conflict = item.conflict;
@@ -410,7 +412,7 @@ impl ExposeQueue {
                 }
             }
             ObjType::Map | ObjType::Table => {
-                for m in doc.map_range_for(&exid, .., clock.cloned()) {
+                for m in doc.map_range_for(&exid, .., read.borrow()) {
                     let value = m.value.to_value();
                     let id = m.id();
                     if value.is_object() {

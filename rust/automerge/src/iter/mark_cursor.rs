@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use hexane::PrefixIter;
 
-use crate::clock::ClockRange;
+use crate::automerge::view::ClockRange;
 use crate::iter::spans::{MarkDiff, RichTextDiff};
 use crate::iter::tools::Diff;
 use crate::op_set2::op_set::{MarkIdx, MarkIndexColumn, MarkPrefix, OpSet};
@@ -16,14 +16,14 @@ use crate::op_set2::types::MarkData;
 pub(crate) struct MarkCursor<'a> {
     marks: Option<&'a MarkIndexColumn>,
     iter: PrefixIter<'a, Option<MarkIdx>>,
-    clock: ClockRange,
+    clock: ClockRange<'a>,
     /// retained so [`MarkPrefix::same_set`] is an exact change probe
     seen: MarkPrefix,
     state: RichTextDiff<'a>,
 }
 
 impl<'a> MarkCursor<'a> {
-    pub(crate) fn new(op_set: &'a OpSet, clock: ClockRange, pos: usize) -> Self {
+    pub(crate) fn new(op_set: &'a OpSet, clock: ClockRange<'a>, pos: usize) -> Self {
         let marks = op_set.mark_index();
         let mut cursor = Self {
             iter: marks.prefix_at(pos),
@@ -142,7 +142,7 @@ mod tests {
         let after = doc.get_heads();
         let diff = doc.document().clock_range(&before, &after).unwrap();
         let ops = doc.document().ops();
-        let clocks = [ClockRange::current(None), diff];
+        let clocks = [ClockRange::default(), diff];
 
         for clock in clocks {
             let mut walk = MarkCursor::new(ops, clock.clone(), 0);
@@ -161,7 +161,7 @@ mod tests {
     fn walking_matches_rich_text_at() {
         let (mut doc, _) = marked_doc();
         let ops = doc.document().ops();
-        let mut cursor = MarkCursor::new(ops, ClockRange::current(None), 0);
+        let mut cursor = MarkCursor::new(ops, ClockRange::default(), 0);
         let mut saw_marks = false;
 
         for pos in 0..ops.len() {

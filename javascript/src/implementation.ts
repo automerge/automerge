@@ -860,6 +860,75 @@ export function save<T>(doc: Doc<T>): Uint8Array {
   return _state(doc).handle.save()
 }
 
+export type WriteFrontierOptions<T> = { patchCallback?: PatchCallback<T> }
+
+/** Mask all changes by `author` after `heads` from the document view. */
+export function maskAuthor<T>(
+  doc: Doc<T>,
+  author: string,
+  heads: Heads,
+  opts: WriteFrontierOptions<T> = {},
+): Doc<T> {
+  return applyVisibilityMutation(doc, "maskAuthor", opts, handle =>
+    handle.maskAuthor(author, heads),
+  )
+}
+
+/**
+ * Whether `author` is currently masked in this document's view, e.g. so an
+ * application can disable editing for a masked local author.
+ */
+export function isAuthorMasked<T>(doc: Doc<T>, author: string): boolean {
+  return _state(doc).handle.isAuthorMasked(author)
+}
+
+/** Remove a view-local write-frontier for `author`. */
+export function revealAuthor<T>(
+  doc: Doc<T>,
+  author: string,
+  opts: WriteFrontierOptions<T> = {},
+): Doc<T> {
+  return applyVisibilityMutation(doc, "revealAuthor", opts, handle =>
+    handle.revealAuthor(author),
+  )
+}
+
+function applyVisibilityMutation<T>(
+  doc: Doc<T>,
+  source: "maskAuthor" | "revealAuthor",
+  opts: WriteFrontierOptions<T>,
+  mutate: (handle: Automerge) => void,
+): Doc<T> {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError(
+      "Calls to Automerge.maskAuthor/revealAuthor cannot be nested inside a change callback",
+    )
+  }
+
+  const heads = state.handle.getHeads()
+  mutate(state.handle)
+  const next = progressDocument(
+    doc,
+    source,
+    heads,
+    opts.patchCallback || state.patchCallback,
+  )
+  // A write-frontier changes the visibility of historical states without moving
+  // the heads, so any cached historical diff is now invalid.
+  _state(next).mostRecentPatch = {
+    before: undefined,
+    after: undefined,
+    patches: [],
+  }
+  return next
+}
+
 /**
  * Merge `remote` into `local`
  * @typeParam T - The type of values contained in each document

@@ -1389,7 +1389,7 @@ impl<'a> SuccIterIter<'a> {
         if pos > self.count.pos() {
             let _ = self.nth(pos - self.count.pos() - 1);
         }
-        Some(self.clone().next()?.add_succ(pos, id, inc))
+        Some(self.clone().next()?.add_succ(pos, id, inc, false))
     }
 }
 

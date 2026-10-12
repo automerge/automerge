@@ -1,4 +1,4 @@
-use crate::clock::{Clock, ClockRange};
+use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::iter::tools::{DiffIter, ExIdPromise, Shiftable, Unshift};
 use crate::iter::Diff;
@@ -46,18 +46,18 @@ pub(crate) struct ListDiff<'a> {
     value: ValueIter<'a>,
     value_pos: usize,
     index: usize,
-    clock: ClockRange,
+    clock: ClockRange<'a>,
 }
 
 impl<'a> ListDiff<'a> {
-    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange) -> Self {
+    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange<'a>) -> Self {
         Self::new_with_index(op_set, range, clock, 0)
     }
 
     pub(crate) fn new_with_index(
         op_set: &'a OpSet,
         range: Range<usize>,
-        clock: ClockRange,
+        clock: ClockRange<'a>,
         index: usize,
     ) -> Self {
         let inserts = op_set.insert_acc_range(&range);
@@ -323,6 +323,12 @@ pub struct ListRange<'a> {
     range: Range<usize>,
 }
 
+impl ListRange<'_> {
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+}
+
 #[derive(Clone, Default, Debug)]
 struct ListIter<'a> {
     inserts: InsertAcc<'a>,
@@ -392,13 +398,13 @@ impl<'a> ListRange<'a> {
     pub(crate) fn new<R: RangeBounds<usize>>(
         op_set: &'a OpSet,
         obj_range: Range<usize>,
-        clock: Option<Clock>,
+        read: ReadAt<'a>,
         range: R,
     ) -> Self {
         let (start, end) = normalize_range(range);
         let range = start..end;
 
-        let clock = ClockRange::Current(clock);
+        let clock = read.into_range();
         let iter = ListDiff::new(op_set, obj_range, clock);
         Self { range, iter }
     }

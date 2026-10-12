@@ -99,6 +99,8 @@ impl ChangeOp {
 pub(crate) struct TxOp {
     pub(crate) index: usize,
     pub(crate) pos: usize,
+    /// Hidden by the write-frontier mask, so indexed as invisible.
+    pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
     pub(crate) undo: Vec<SuccUndo>,
     // Pre-insert register range for scoped transactions. When present,
@@ -176,6 +178,12 @@ impl TxOp {
         self.bld.id
     }
 
+    /// Modify the `masked` flag of this [`TxOp`].
+    pub(crate) fn masked(mut self, masked: bool) -> Self {
+        self.masked = masked;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn list(
         id: OpId,
@@ -194,6 +202,7 @@ impl TxOp {
         TxOp {
             pos,
             index,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -226,6 +235,7 @@ impl TxOp {
         TxOp {
             index: 0,
             pos,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -254,6 +264,7 @@ impl TxOp {
         TxOp {
             pos,
             index,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -282,6 +293,7 @@ impl TxOp {
         TxOp {
             pos,
             index: 0,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -311,6 +323,7 @@ impl TxOp {
         TxOp {
             pos,
             index,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -339,6 +352,7 @@ impl TxOp {
         TxOp {
             pos: 0,
             index,
+            masked: false,
             undo: vec![],
             reset_range: None,
             bld: OpBuilder {
@@ -367,7 +381,7 @@ impl OpLike for &TxOp {
         Self: 'b;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        op.bld.mark_index()
+        <TxOp as OpLike>::mark_index(op)
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -375,7 +389,7 @@ impl OpLike for &TxOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !op.bld.is_inc()
+        <TxOp as OpLike>::visible(op)
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -454,7 +468,7 @@ impl OpLike for TxOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !op.bld.is_inc()
+        !op.masked && !op.bld.is_inc()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -529,7 +543,7 @@ impl OpLike for ChangeOp {
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
-        if Self::visible(op) {
+        if op.visible() {
             op.bld.width(seq_type, text_encoding) as u64
         } else {
             0
@@ -537,11 +551,11 @@ impl OpLike for ChangeOp {
     }
 
     fn visible(op: &Self) -> bool {
-        !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+        op.visible()
     }
 
     fn top(op: &Self) -> bool {
-        !op.conflicted && Self::visible(op)
+        !op.conflicted && op.visible()
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -742,7 +756,13 @@ impl<'a> SuccCursors<'a> {
         SuccIncCursors(self)
     }
 
-    pub(crate) fn add_succ(mut self, pos: usize, id: OpId, inc: Option<i64>) -> SuccInsert {
+    pub(crate) fn add_succ(
+        mut self,
+        pos: usize,
+        id: OpId,
+        inc: Option<i64>,
+        masked: bool,
+    ) -> SuccInsert {
         let len = self.len() as u64;
         let mut sub_pos = self.pos();
         while let Some(i) = self.next() {
@@ -757,6 +777,7 @@ impl<'a> SuccCursors<'a> {
             inc,
             len,
             sub_pos,
+            masked,
         }
     }
 }
@@ -838,6 +859,9 @@ pub(crate) struct SuccInsert {
     pub(crate) inc: Option<i64>,
     pub(crate) len: u64,
     pub(crate) sub_pos: usize,
+    /// A masked successor keeps the link in the index but must not change
+    /// the predecessor's visibility or counter total.
+    pub(crate) masked: bool,
 }
 
 /// A batch of document succ additions, consumed whole by `OpSet::add_succ`.
@@ -901,9 +925,12 @@ impl<'a> Op<'a> {
     }
 
     /// `inc` is taken as given: pass `None` for an increment of a
-    /// non-counter target.
-    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
-        self.succ_cursors.clone().add_succ(self.pos, id, inc)
+    /// non-counter target. A `masked` successor keeps the link but neither
+    /// hides nor increments.
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>, masked: bool) -> SuccInsert {
+        self.succ_cursors
+            .clone()
+            .add_succ(self.pos, id, inc, masked)
     }
 
     pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
@@ -1015,7 +1042,6 @@ impl<'a> Op<'a> {
         (self.value().into_value(), self.exid(op_set))
     }
 
-    #[cfg(test)]
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
         match (self.action, &self.value) {
             (Action::Increment, ScalarValue::Int(i)) => Some(*i),

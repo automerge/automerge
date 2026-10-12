@@ -1,5 +1,5 @@
 use super::tools::{Diff, DiffIter, ExIdPromise, Shiftable, Unshift};
-use crate::clock::{Clock, ClockRange};
+use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
@@ -99,6 +99,12 @@ pub struct MapRange<'a> {
     iter: MapDiff<'a>,
 }
 
+impl MapRange<'_> {
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+}
+
 impl<'a> Iterator for MapRange<'a> {
     type Item = MapRangeItem<'a>;
 
@@ -182,8 +188,8 @@ impl<'a> Iterator for MapIter<'a> {
 }
 
 impl<'a> MapRange<'a> {
-    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: Option<Clock>) -> Self {
-        let iter = MapDiff::new(op_set, range, ClockRange::current(clock));
+    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, read: ReadAt<'a>) -> Self {
+        let iter = MapDiff::new(op_set, range, read.into_range());
         Self { iter }
     }
 
@@ -200,7 +206,7 @@ pub(crate) struct MapDiff<'a> {
     id_pos: usize,
     value: ValueIter<'a>,
     value_pos: usize,
-    clock: ClockRange,
+    clock: ClockRange<'a>,
 }
 
 impl<'a> Iterator for MapDiff<'a> {
@@ -341,7 +347,7 @@ impl<'a> MapDiff<'a> {
         }
     }
 
-    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange) -> Self {
+    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange<'a>) -> Self {
         let key_str = op_set.key_str_iter_range(&range);
         let action = op_set.action_iter_range(&range);
         let id = op_set.id_iter_range(&range);

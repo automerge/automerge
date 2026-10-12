@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::hash_retention::HashRetention;
@@ -24,14 +27,16 @@ pub trait TxDoc {
     fn get_scope(
         &self,
         heads: Option<&[crate::ChangeId]>,
-    ) -> std::result::Result<Option<crate::types::Clock>, crate::AutomergeError> {
+    ) -> std::result::Result<ReadAt<'_>, crate::AutomergeError> {
+        let doc = self.doc();
         if let Some(h) = heads {
             // with a transaction in flight the current-heads shortcut is unsound
-            let nodes = self.doc().nodes_for_change_ids(h)?;
-            Ok(Some(self.doc().change_graph.clock_for_nodes(nodes)))
-        } else {
-            Ok(self.inner().and_then(|i| i.get_scope().clone()))
+            return Ok(doc.read_scoped(Cow::Owned(doc.visible(h)?)));
         }
+        Ok(match self.inner().and_then(|i| i.get_scope().as_ref()) {
+            Some(scope) => doc.read_scoped(Cow::Borrowed(scope)),
+            None => doc.read_current(),
+        })
     }
 }
 
@@ -246,7 +251,8 @@ impl<T: TxDoc> crate::read::ReadDoc for T {
         obj: O,
         heads: Option<&[crate::ChangeId]>,
     ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
-        self.doc().hydrate_obj(obj.as_ref(), heads)
+        self.doc()
+            .hydrate_obj_for(obj.as_ref(), self.get_scope(heads)?)
     }
 
     fn get_marks<O: AsRef<crate::exid::ExId>>(

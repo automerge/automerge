@@ -292,6 +292,69 @@ impl AutoCommit {
         self.0.get_author()
     }
 
+    /// Hide every change by `author` that is not in the history of `heads`.
+    ///
+    /// Until every one of `heads` is in the document the author is hidden
+    /// entirely. Hidden changes, including this document's own author's, are
+    /// still recorded, saved and synced; sequence positions refer to the
+    /// visible document. Take a [`Self::view`] beforehand and call
+    /// [`Self::diff_views`] to get the resulting patches.
+    ///
+    /// Rebuilds the document's indexes when the visible set changes.
+    pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
+        let heads = heads
+            .iter()
+            .map(|h| crate::write_frontier::Boundary::Hash(*h))
+            .collect();
+        self.0.mask_author_boundaries(author, heads);
+    }
+
+    /// Stop hiding `author`'s changes.
+    ///
+    /// Rebuilds the document's indexes when the visible set changes.
+    pub fn reveal_author(&mut self, author: &Author<'static>) {
+        self.0.reveal_author(author);
+    }
+
+    /// Replace the write-frontier: hide each author's changes past their heads.
+    pub fn set_write_frontier(
+        &mut self,
+        write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
+    ) {
+        self.0
+            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from_hashes(
+                write_frontier,
+            ));
+    }
+
+    /// Whether `author` is masked, e.g. so an application can disable editing
+    /// for a masked local author.
+    pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
+        self.0.is_author_masked(author)
+    }
+
+    /// The write-frontier, per [`Author`], including boundaries this document
+    /// has not received yet.
+    pub fn get_write_frontier(
+        &self,
+    ) -> std::collections::HashMap<Author<'static>, Vec<ChangeHash>> {
+        super::frontier_hashes(&self.0.doc)
+    }
+
+    /// The document's current [`View`](crate::View).
+    pub fn view(&mut self) -> crate::View {
+        self.0.view()
+    }
+
+    /// Patches from `before` to `after`, each read under the write-frontier
+    /// it was taken with. See [`crate::Automerge::diff_views`].
+    ///
+    /// Returns no patches if either view names a change this document does
+    /// not have.
+    pub fn diff_views(&mut self, before: &crate::View, after: &crate::View) -> Vec<Patch> {
+        self.0.diff_views(before, after).unwrap_or_default()
+    }
+
     pub fn get_authors(&self) -> &[Author<'static>] {
         self.0.get_authors()
     }

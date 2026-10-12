@@ -3,14 +3,13 @@ use std::ops::Range;
 
 use hexane::PrefixIter;
 
-use crate::clock::ClockRange;
 use crate::iter::{ListDiff, MapDiff, SpansDiff};
 use crate::op_set2::op_set::{MarkIdx, OpSet};
 use crate::patches::{Patch, PatchAccumulator};
 use crate::types::{ObjId, ObjMeta, ObjType, OpId, TextEncoding};
 
+use super::view::{ClockRange, View};
 use super::Automerge;
-use crate::ChangeId;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum DirtyDiffError {
@@ -69,7 +68,7 @@ struct DirtyIters<'a> {
 }
 
 impl<'a> DirtyIters<'a> {
-    fn new(op_set: &'a OpSet, clock: ClockRange, encoding: TextEncoding) -> Self {
+    fn new(op_set: &'a OpSet, clock: ClockRange<'a>, encoding: TextEncoding) -> Self {
         // a non-empty window draws a lookahead item, after which the first
         // `shift` could have to move backwards
         let empty = 0..0;
@@ -106,53 +105,38 @@ impl<'a> DirtyIters<'a> {
 }
 
 impl<H: crate::hash_retention::HashRetention> Automerge<H> {
-    pub(crate) fn dirty_diff_patches(
-        &self,
-        before_heads: &[ChangeId],
-        after_heads: &[ChangeId],
-    ) -> Result<Vec<Patch>, DirtyDiffError> {
-        if before_heads.is_empty() && after_heads == self.get_heads() {
+    /// Patches from `before` to the current state, walking only what changed
+    /// since the dirty bits were last cleared: `before` must be the view they
+    /// were cleared at.
+    pub(crate) fn dirty_diff_patches(&self, before: &View) -> Result<Vec<Patch>, DirtyDiffError> {
+        if before.heads.is_empty() {
             let mut patch_accumulator = PatchAccumulator::event_log();
             patch_accumulator.heads_clock = None;
             self.log_current_state(ObjMeta::root(), &mut patch_accumulator, true);
             return Ok(patch_accumulator.make_patches(self));
         }
-
-        let current_heads = self.get_heads();
-        let clock = if after_heads == current_heads.as_slice() {
-            let before = self
-                .nodes_for_change_ids(before_heads)
-                .map_err(DirtyDiffError::InvalidHeads)?;
-            ClockRange::diff_to_current(self.change_graph.clock_for_nodes(before))
-        } else {
-            self.clock_range(before_heads, after_heads)
-                .map_err(DirtyDiffError::InvalidHeads)?
-        };
+        let before = self
+            .visible_for_view(before)
+            .map_err(DirtyDiffError::InvalidHeads)?;
+        let clock = ClockRange::between_current(before, self.read_current());
         let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads_clock = clock.after().cloned();
+        patch_accumulator.heads_clock = None;
         self.log_dirty_diff(clock, &mut patch_accumulator)?;
         Ok(patch_accumulator.make_patches(self))
     }
 
     pub(crate) fn dirty_diff_patches_and_clear(
         &mut self,
-        before_heads: &[ChangeId],
-        after_heads: &[ChangeId],
+        before: &View,
     ) -> Result<Vec<Patch>, DirtyDiffError> {
-        let current_heads = self.get_heads();
-        debug_assert_eq!(
-            after_heads,
-            current_heads.as_slice(),
-            "clearing dirty diff state is only valid after diffing to current heads"
-        );
-        let patches = self.dirty_diff_patches(before_heads, after_heads)?;
+        let patches = self.dirty_diff_patches(before)?;
         self.clear_dirty();
         Ok(patches)
     }
 
     fn log_dirty_diff(
         &self,
-        clock: ClockRange,
+        clock: ClockRange<'_>,
         patch_accumulator: &mut PatchAccumulator,
     ) -> Result<(), DirtyDiffError> {
         let encoding = self.text_encoding();

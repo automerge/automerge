@@ -19,6 +19,14 @@ pub(crate) enum MarkIdx {
     End(OpId),
 }
 
+impl MarkIdx {
+    pub(crate) fn id(&self) -> OpId {
+        match self {
+            MarkIdx::Start(id) | MarkIdx::End(id) => *id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum MarkIndexBuilder {
     Start(OpId, MarkData<'static>),
