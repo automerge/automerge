@@ -21,10 +21,10 @@ pub(crate) struct FrontierVisibility {
 }
 
 impl FrontierVisibility {
-    /// For each masked author: if every boundary is in `graph`, the author's
-    /// actors are bounded at their max op in the boundary's history (`0` when
-    /// they have none); otherwise the author is hidden entirely and the
-    /// missing boundaries are pending. Unmasked actors are unrestricted.
+    /// For each masked author, the author's actors are bounded at their max op
+    /// in the history of the boundaries `graph` holds (`0` when they have
+    /// none, including when it holds none of them), and the boundaries it
+    /// does not hold are pending. Unmasked actors are unrestricted.
     pub(super) fn new<H: HashRetention>(
         policy: &WriteFrontier,
         graph: &ChangeGraph<H>,
@@ -53,23 +53,13 @@ impl FrontierVisibility {
         let mut clocks: HashMap<Vec<NodeIdx>, Clock> = HashMap::new();
         for (author, heads) in policy.iter() {
             let mut nodes = Vec::with_capacity(heads.len());
-            let mut missing = false;
             for boundary in heads {
-                let node = node_for_boundary(boundary, graph, actors)
-                    .filter(|node| resolved(boundary, *node));
-                match node {
+                match node_for_boundary(boundary, graph, actors)
+                    .filter(|node| resolved(boundary, *node))
+                {
                     Some(node) => nodes.push(node),
-                    None => {
-                        missing = true;
-                        pending.push(boundary.clone());
-                    }
+                    None => pending.push(boundary.clone()),
                 }
-            }
-            if missing {
-                for actor in authors.get_actors_for_author(author) {
-                    bounds[actor] = 0;
-                }
-                continue;
             }
             nodes.sort_unstable();
             nodes.dedup();
@@ -260,16 +250,15 @@ mod tests {
         assert_eq!(pending_hashes(&derived), HashSet::from([unknown]));
     }
 
-    /// Partially known heads hide the author entirely: deriving from
-    /// the known subset would partially reveal them.
+    /// Partially known heads reveal only the author's known boundary history.
     #[test]
-    fn partially_unknown_heads_hide_author_entirely() {
+    fn partially_unknown_heads_bound_author_at_known_heads() {
         let mut built = build(&[3, 1]);
-        let (_, c2, _) = built.commits[1];
+        let (_, c2, c2_max_op) = built.commits[1];
         let unknown = unknown_hash(0xEE);
         let derived = built.frontier_visibility(&policy(vec![(0, vec![c2, unknown])]));
         let mut expected = vec![u32::MAX; built.num_actors()];
-        expected[built.actor_of(0)] = 0;
+        expected[built.actor_of(0)] = c2_max_op;
         assert_eq!(
             derived.mask,
             Some(Mask::new(Clock::from_counters(
@@ -337,10 +326,10 @@ mod tests {
 
     proptest! {
         /// Lockstep over real graphs: the expected bound for a masked
-        /// author is the max op of their last change at or before the
-        /// boundary (the history is linear, so a multi-head boundary
-        /// reduces to its latest commit), 0 when they have none or when
-        /// any head is unknown; unmasked authors are unrestricted.
+        /// author is the max op of their last change at or before a known
+        /// boundary head (the history is linear, so a multi-head boundary
+        /// reduces to its latest known commit), or 0 when they have none;
+        /// unmasked authors are unrestricted.
         #[test]
         fn lockstep_matches_generated_history((counts, boundaries) in gen_case()) {
             let mut built = build(&counts);
@@ -351,7 +340,6 @@ mod tests {
                 let Some(heads) = heads else { continue };
                 let mut resolved = Vec::new();
                 let mut boundary_idx = None;
-                let mut missing = false;
                 for head in heads {
                     match head {
                         Head::Known(i) => {
@@ -361,27 +349,22 @@ mod tests {
                                 Some(boundary_idx.map_or(i, |b: usize| b.max(i)));
                         }
                         Head::Unknown(n) => {
-                            resolved.push(unknown_hash(*n));
-                            missing = true;
+                            let hash = unknown_hash(*n);
+                            resolved.push(hash);
+                            expected_pending.insert(hash);
                         }
                     }
                 }
-                let bound = if missing {
-                    for h in &resolved {
-                        if !built.commits.iter().any(|(_, ch, _)| ch == h) {
-                            expected_pending.insert(*h);
-                        }
-                    }
-                    0
-                } else {
-                    // The last change by `a` at or before the boundary.
-                    built.commits[..=boundary_idx.unwrap()]
-                        .iter()
-                        .rev()
-                        .find(|(ca, _, _)| *ca == a)
-                        .map(|(_, _, max_op)| *max_op)
-                        .unwrap_or(0)
-                };
+                // The last change by `a` at or before any known head.
+                let bound = boundary_idx
+                    .and_then(|idx| {
+                        built.commits[..=idx]
+                            .iter()
+                            .rev()
+                            .find(|(ca, _, _)| *ca == a)
+                    })
+                    .map(|(_, _, max_op)| *max_op)
+                    .unwrap_or(0);
                 expected_bounds.insert(a, bound);
                 map.insert(author(a), resolved);
             }
