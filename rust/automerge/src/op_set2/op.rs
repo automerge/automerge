@@ -559,6 +559,7 @@ impl OpLike for &TxOp {
     fn id_actor(op: &Self) -> ActorIdx {
         op.as_builder().id.actoridx()
     }
+
     fn id_ctr(op: &Self) -> i64 {
         op.as_builder().id.icounter()
     }
@@ -572,12 +573,21 @@ impl OpLike for &TxOp {
         [].into_iter()
     }
 
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.bld.value {
+            ScalarValue::Counter(base) => Some(base),
+            _ => None,
+        }
+    }
+
     fn id(&self) -> OpId {
         self.as_builder().id
     }
+
     fn obj(&self) -> ObjId {
         self.as_builder().obj
     }
+
     fn action(o: &Self) -> Action {
         o.as_builder().action
     }
@@ -600,15 +610,19 @@ impl OpLike for &TxOp {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.as_builder().value.as_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
     }
+
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
+
     fn mark_name(o: &Self) -> Option<&str> {
         o.as_builder().mark_name.as_deref()
     }
+
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
     }
@@ -656,12 +670,21 @@ impl OpLike for TxOp {
         [].into_iter()
     }
 
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.bld.value {
+            ScalarValue::Counter(base) => Some(base),
+            _ => None,
+        }
+    }
+
     fn id(&self) -> OpId {
         self.as_builder().id
     }
+
     fn obj(&self) -> ObjId {
         self.as_builder().obj
     }
+
     fn action(o: &Self) -> Action {
         o.as_builder().action
     }
@@ -684,15 +707,19 @@ impl OpLike for TxOp {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.as_builder().value.as_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
     }
+
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
+
     fn mark_name(o: &Self) -> Option<&str> {
         o.as_builder().mark_name.as_deref()
     }
+
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
     }
@@ -734,6 +761,7 @@ impl OpLike for ChangeOp {
     fn id_actor(op: &Self) -> ActorIdx {
         op.as_builder().id.actoridx()
     }
+
     fn id_ctr(op: &Self) -> i64 {
         op.as_builder().id.icounter()
     }
@@ -750,12 +778,26 @@ impl OpLike for ChangeOp {
         Box::new(self.succ.iter().map(|SuccessorValue { id, .. }| *id))
     }
 
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.bld.value {
+            ScalarValue::Counter(base) => Some(
+                op.succ
+                    .iter()
+                    .filter_map(|s| s.increment())
+                    .fold(base, i64::wrapping_add),
+            ),
+            _ => None,
+        }
+    }
+
     fn id(&self) -> OpId {
         self.as_builder().id
     }
+
     fn obj(&self) -> ObjId {
         self.as_builder().obj
     }
+
     fn action(o: &Self) -> Action {
         o.as_builder().action
     }
@@ -778,15 +820,19 @@ impl OpLike for ChangeOp {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.as_builder().value.as_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
     }
+
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
+
     fn mark_name(o: &Self) -> Option<&str> {
         o.as_builder().mark_name.as_deref()
     }
+
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
     }
@@ -881,6 +927,21 @@ impl<'a> OpLike for Op<'a> {
 
     fn succ(&self) -> Self::SuccIter<'_> {
         self.succ()
+    }
+
+    /// Sums every increment successor, masked or not: a stored doc op carries
+    /// no per-successor mask flag. Only `IndexBuilder` sees ops under a mask,
+    /// and it gates increments on the clock itself, so the one caller that
+    /// reaches here — `Columns::splice` — is never masked.
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.value {
+            ScalarValue::Counter(base) => Some(
+                op.succ_inc()
+                    .filter_map(|(_, inc)| inc)
+                    .fold(base, i64::wrapping_add),
+            ),
+            _ => None,
+        }
     }
 
     fn insert(o: &Self) -> bool {
@@ -1514,6 +1575,12 @@ pub(crate) trait OpLike: Debug {
     fn expand(op: &Self) -> bool;
     fn succ(&self) -> Self::SuccIter<'_>;
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
+    /// The counter's current total, i.e. base plus every unmasked increment
+    /// successor.
+    ///
+    /// Returns `None` if this `op` is not a counter.
+    #[allow(unused)]
+    fn counter_total(op: &Self) -> Option<i64>;
     fn mark_name(op: &Self) -> Option<&str>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64;
