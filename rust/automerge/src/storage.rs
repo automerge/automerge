@@ -15,7 +15,7 @@ pub use load::VerificationMode;
 pub(crate) use {
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     change_set::{ChangeSetChangeCols, ChangeSetChangeWriter, ChangeSetStorage, DeltaRunGrouper},
-    chunk::{CheckSum, Chunk, ChunkType, Header},
+    chunk::{hash_parts, CheckSum, Chunk, ChunkType, Header},
     columns::{ColumnSpec, Columns, RawColumn, RawColumns},
     document::{CompressConfig, Document},
 };

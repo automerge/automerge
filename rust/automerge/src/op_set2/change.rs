@@ -19,7 +19,7 @@ pub(crate) mod collector;
 
 #[cfg(test)]
 pub(crate) use collector::IndexedChangeCollector;
-pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges, OutOfMemory};
+pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedHashes, OutOfMemory};
 
 pub(crate) trait GetHash {
     fn get_hash(&self, index: usize) -> Option<ChangeHash>;
@@ -28,6 +28,12 @@ pub(crate) trait GetHash {
 impl GetHash for Vec<crate::Change> {
     fn get_hash(&self, index: usize) -> Option<ChangeHash> {
         Some(self.get(index)?.hash())
+    }
+}
+
+impl GetHash for Vec<ChangeHash> {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash> {
+        self.get(index).copied()
     }
 }
 

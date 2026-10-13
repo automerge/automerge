@@ -321,12 +321,20 @@ impl Header {
 }
 
 fn hash(typ: ChunkType, data: &[u8]) -> ChangeHash {
+    hash_parts(typ, &[data])
+}
+
+/// The hash of a chunk whose data is `parts` concatenated.
+pub(crate) fn hash_parts(typ: ChunkType, parts: &[&[u8]]) -> ChangeHash {
+    let len: usize = parts.iter().map(|p| p.len()).sum();
     let mut header = Vec::with_capacity(5);
     header.push(u8::from(typ));
-    leb128::write::unsigned(&mut header, data.len() as u64).unwrap();
+    leb128::write::unsigned(&mut header, len as u64).unwrap();
     let mut hasher = Sha256::new();
     hasher.update(&header);
-    hasher.update(data);
+    for part in parts {
+        hasher.update(part);
+    }
     let hash_result = hasher.finalize();
     let array: [u8; 32] = hash_result.into();
     ChangeHash(array)

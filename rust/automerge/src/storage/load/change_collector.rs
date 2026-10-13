@@ -4,12 +4,14 @@ pub(crate) enum Error {
     MissingActor,
     #[error("changes out of order")]
     ChangesOutOfOrder,
-    #[error("incorrect max op")]
-    InvalidState,
     #[error("invalid internal state")]
+    InvalidState,
+    #[error("incorrect max op")]
     IncorrectMaxOp,
     #[error("missing ops")]
     MissingOps,
     #[error("missing ops")]
     MissingDep(#[from] crate::change_graph::MissingDep),
+    #[error("out of memory")]
+    OutOfMemory,
 }

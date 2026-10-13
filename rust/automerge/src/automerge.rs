@@ -2526,7 +2526,8 @@ impl<H: HashRetention> Automerge<H> {
             AutomergeError::Load(load::Error::InflateDocument(e))
         };
         let mut collector = ChangeCollector::try_new(self.change_graph.iter(), &self.ops.actors)
-            .map_err(|e| inflate(Box::new(e)))?;
+            .map_err(|e| inflate(Box::new(e)))?
+            .hashing();
         let mut iter = self.ops.iter();
         while let Some(op) = iter.try_next().map_err(|e| inflate(Box::new(e)))? {
             let op_id = op.id;
@@ -2537,9 +2538,9 @@ impl<H: HashRetention> Automerge<H> {
             }
         }
         let collected = collector
-            .collect(&self.ops)
+            .collect_hashes()
             .map_err(|e| inflate(Box::new(e)))?;
-        Ok(collected.changes.iter().map(|c| c.hash()).collect())
+        Ok(collected.hashes)
     }
 
     fn map_graph<H2: HashRetention>(

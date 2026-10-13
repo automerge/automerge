@@ -4,9 +4,10 @@ use crate::author::Authors;
 use crate::automerge::{AuditMode, Automerge};
 use crate::change_graph::GraphLoadError;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols, Members, NodeIdx, UncheckedHashes};
+use crate::op_set2::change::CollectedHashes;
 use crate::storage::change_set::ChangeSet;
 use crate::types::ChangeHash;
-use crate::{AutomergeError, Change};
+use crate::AutomergeError;
 
 mod sealed {
     pub trait Sealed {}
@@ -59,7 +60,7 @@ pub trait HashRetention:
     #[doc(hidden)]
     fn finish_load(
         cols: ChangeGraphCols,
-        computed: Option<&[Change]>,
+        computed: Option<CollectedHashes>,
         heads: &[ChangeHash],
         head_indexes: Option<&[u64]>,
         authors: &mut Authors,
@@ -127,13 +128,13 @@ impl HashRetention for Full {
 
     fn finish_load(
         cols: ChangeGraphCols,
-        computed: Option<&[Change]>,
+        computed: Option<CollectedHashes>,
         _heads: &[ChangeHash],
         _head_indexes: Option<&[u64]>,
         authors: &mut Authors,
     ) -> Result<ChangeGraph<Self>, GraphLoadError> {
-        let changes = computed.expect("a load keeping every hash computes them all");
-        cols.finalize(changes, authors)
+        let computed = computed.expect("a load keeping every hash computes them all");
+        cols.finalize(computed, authors)
     }
 
     fn from_full(doc: Automerge<Full>) -> Automerge<Self> {
@@ -213,13 +214,13 @@ impl HashRetention for Retained {
 
     fn finish_load(
         cols: ChangeGraphCols,
-        computed: Option<&[Change]>,
+        computed: Option<CollectedHashes>,
         heads: &[ChangeHash],
         head_indexes: Option<&[u64]>,
         authors: &mut Authors,
     ) -> Result<ChangeGraph<Self>, GraphLoadError> {
         match (computed, head_indexes) {
-            (Some(changes), _) => Ok(cols.finalize(changes, authors)?.into_retained()),
+            (Some(computed), _) => Ok(cols.finalize(computed, authors)?.into_retained()),
             (None, Some(head_indexes)) => cols.finalize_unchecked(heads, head_indexes, authors),
             (None, None) => unreachable!("a document without head indexes is hashed on load"),
         }

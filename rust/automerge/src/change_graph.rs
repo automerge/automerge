@@ -2131,24 +2131,26 @@ impl ChangeGraphCols {
 
     pub(crate) fn finalize(
         self,
-        changes: &[Change],
+        computed: crate::op_set2::change::CollectedHashes,
         authors: &mut Authors,
     ) -> Result<ChangeGraph<Full>, GraphLoadError> {
         debug_assert!(self.graph.hashes.len() == 0);
+        let crate::op_set2::change::CollectedHashes {
+            hashes, num_ops, ..
+        } = computed;
         let mut graph = self
             .graph
-            .with_hashes(Full::new(Vec::with_capacity(changes.len())));
+            .with_hashes(Full::new(Vec::with_capacity(hashes.len())));
         graph.assign_authors(0..graph.len(), authors)?;
-        debug_assert_eq!(changes.len(), graph.len());
+        debug_assert_eq!(hashes.len(), graph.len());
 
         // The encoded change columns only contain each change's maximum op.
         // `load()` estimates op counts from dependencies, but that is ambiguous
         // for an isolated actor whose first change can start above counter 1.
-        // Reconstruction has the verified changes, so use their exact lengths.
-        graph.num_ops = changes.iter().map(|change| change.len() as u64).collect();
+        // Reconstruction counted each change's ops, so use those.
+        graph.num_ops = num_ops.into_iter().collect();
 
-        for (i, c) in changes.iter().enumerate() {
-            let hash = c.hash();
+        for (i, hash) in hashes.into_iter().enumerate() {
             let node_idx = NodeIdx(i as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
@@ -2474,8 +2476,13 @@ mod tests {
         let cols = ChangeGraphCols { graph };
 
         let mut authors = Authors::new(&actors);
+        let computed = crate::op_set2::change::CollectedHashes {
+            hashes: forged_changes.iter().map(Change::hash).collect(),
+            num_ops: forged_changes.iter().map(|c| c.len() as u64).collect(),
+            heads: Default::default(),
+        };
         let err = cols
-            .finalize(&forged_changes, &mut authors)
+            .finalize(computed, &mut authors)
             .expect_err("an author footer at seq 2 must fail the load");
         assert!(
             matches!(

@@ -20,7 +20,7 @@ use crate::op_set2::op_set::{IndexBuilder, MarkOrderValidator};
 use crate::storage::change::{Change as StoredChange, Verified};
 use crate::storage::change_set::ChangeSetChange;
 use crate::storage::load::change_collector::Error;
-use crate::storage::{ChunkType, Header};
+use crate::storage::{hash_parts, ChunkType, Header};
 use crate::{
     change::Change,
     op_set2::{ChangeMetadata, KeyRef, Op, OpBuilder, OpSet, ReadOpError},
@@ -109,6 +109,10 @@ pub(crate) struct ChangeCollector<'a> {
     pub(crate) builders: Vec<ChangeBuilder<'a>>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
+    hashing: Option<Box<HashCursor>>,
+    /// the first failure while hashing as changes complete, reported when
+    /// collecting
+    error: Option<Error>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -140,15 +144,20 @@ pub(crate) struct ChangeBuilder<'a> {
     seq: u64,
     change: usize,
     start_op: u64,
+    num_ops: u64,
+    received: u64,
     encoder: OpEncoderStrategy<'a>,
 }
 
 #[derive(Debug, Default)]
 enum OpEncoderStrategy<'a> {
+    /// until the change's first op arrives
+    #[default]
+    Unstarted,
     Ops(VecEncoder<'a>),
     Enc(Box<ProgressiveEncoder<'a>>),
-    #[default]
-    Null, // this can be removed if we can consume the builder on finnish
+    /// the encoded change after its dependency hashes, and its op count
+    Tail(Box<[u8]>, u64),
 }
 
 impl<'a> OpEncoderStrategy<'a> {
@@ -156,7 +165,7 @@ impl<'a> OpEncoderStrategy<'a> {
         let ops_size = num_ops * size_of::<Option<OpBuilder<'_>>>();
         let enc_size = size_of::<ProgressiveEncoder<'_>>();
         if ops_size > enc_size {
-            Self::Enc(Box::new(ProgressiveEncoder::new(num_ops as u64)))
+            Self::Enc(Box::default())
         } else {
             Self::Ops(VecEncoder::new(num_ops as u64))
         }
@@ -173,68 +182,34 @@ impl<'a> OpEncoderStrategy<'a> {
         }
     }
 
-    fn num_ops(&self) -> u64 {
-        match self {
-            Self::Ops(v) => v.num_ops(),
-            Self::Enc(e) => e.num_ops,
-            Self::Null => 0,
-        }
-    }
-
     fn add(&mut self, index: usize, op: OpBuilder<'a>) {
         match self {
             Self::Ops(v) => v.add(index, op),
             Self::Enc(e) => e.add(index, op),
-            Self::Null => (),
+            // a duplicate op in a malformed document, which fails its hash check
+            Self::Tail(..) => (),
+            Self::Unstarted => unreachable!("started before its first op"),
         }
     }
 
-    fn into_change_cols(
+    fn tail(
         self,
         change: &BuildChangeMetadata<'_>,
         mapper: &mut ActorMapper<'_>,
-    ) -> Result<ChangeCols, Error> {
+        mut data: Vec<u8>,
+    ) -> Result<ChangeTail, Error> {
         mapper.reset();
-        match self {
-            Self::Ops(mut v) => v.finish(change, mapper),
-            Self::Enc(e) => Ok(e.finish(change, mapper)),
-            Self::Null => Err(Error::InvalidState),
-        }
-    }
-
-    fn finish<G>(
-        self,
-        change: &BuildChangeMetadata<'_>,
-        graph: &G,
-        mapper: &mut ActorMapper<'_>,
-    ) -> Result<StoredChange<'static, Verified>, Error>
-    where
-        G: GetHash,
-    {
-        let cols = self.into_change_cols(change, mapper)?;
+        let cols = match self {
+            Self::Ops(mut v) => v.finish(change, mapper)?,
+            Self::Enc(e) => e.finish(change, mapper),
+            Self::Unstarted | Self::Tail(..) => return Err(Error::InvalidState),
+        };
         let num_ops = cols.num_ops as usize;
         let start_op = cols.start_op.unwrap_or(change.max_op + 1);
-        let ops_meta = cols.meta;
-        let col_data = cols.data;
-        let actor = cols.actor;
-        let other_actors = cols.other_actors;
 
-        let mut data = Vec::with_capacity(col_data.len());
+        data.reserve(cols.data.len() + change.extra.len() + 64);
 
-        leb128::write::unsigned(&mut data, change.deps.len() as u64).unwrap();
-
-        // FIXME missing value here is changes out of order error
-        let deps: Vec<_> = change
-            .deps
-            .iter()
-            .map(|i| graph.get_hash(*i as usize).unwrap())
-            .collect();
-
-        for hash in &deps {
-            data.write_all(hash.as_bytes()).unwrap();
-        }
-
-        length_prefixed_bytes(&actor, &mut data);
+        length_prefixed_bytes(&cols.actor, &mut data);
 
         leb128::write::unsigned(&mut data, change.seq).unwrap();
         leb128::write::unsigned(&mut data, start_op).unwrap();
@@ -242,48 +217,98 @@ impl<'a> OpEncoderStrategy<'a> {
 
         length_prefixed_bytes(change.message_str(), &mut data);
 
-        leb128::write::unsigned(&mut data, other_actors.len() as u64).unwrap();
+        leb128::write::unsigned(&mut data, cols.other_actors.len() as u64).unwrap();
 
-        for actor in other_actors.iter() {
+        for actor in cols.other_actors.iter() {
             length_prefixed_bytes(actor, &mut data);
         }
 
-        ops_meta.raw_columns().write(&mut data);
+        cols.meta.raw_columns().write(&mut data);
 
         let ops_data_start = data.len();
-        let ops_data = ops_data_start..(ops_data_start + col_data.len());
+        let ops_data = ops_data_start..(ops_data_start + cols.data.len());
 
-        data.extend(col_data);
+        data.extend(cols.data);
         let extra_bytes = data.len()..(data.len() + change.extra.len());
         if !change.extra.is_empty() {
             data.extend(change.extra.as_ref());
         }
 
-        let header = Header::new(ChunkType::Change, &data);
-
-        let mut bytes = Vec::with_capacity(header.len() + data.len());
-        header.write(&mut bytes);
-        bytes.extend(data);
-
-        let ops_data = shift_range(ops_data, header.len());
-        let extra_bytes = shift_range(extra_bytes, header.len());
-
-        Ok(StoredChange {
-            bytes: Cow::Owned(bytes),
-            header,
-            dependencies: deps,
-            actor,
-            other_actors,
-            seq: change.seq,
-            start_op: NonZero::new(start_op).unwrap(),
-            timestamp: change.timestamp,
-            message: change.message.as_ref().map(|s| s.to_string()),
-            ops_meta,
+        Ok(ChangeTail {
+            data,
+            actor: cols.actor,
+            other_actors: cols.other_actors,
+            start_op,
+            ops_meta: cols.meta,
             ops_data,
             extra_bytes,
             num_ops,
-            _phantom: PhantomData,
         })
+    }
+}
+
+/// A change's encoding after its dependency hashes, which can be written
+/// before those hashes are known; `data` starts with whatever prefix it was
+/// written after.
+struct ChangeTail {
+    data: Vec<u8>,
+    actor: ActorId,
+    other_actors: Vec<ActorId>,
+    start_op: u64,
+    ops_meta: crate::storage::change::ChangeOpsColumns,
+    ops_data: std::ops::Range<usize>,
+    extra_bytes: std::ops::Range<usize>,
+    num_ops: usize,
+}
+
+fn deps_prefix<G: GetHash>(
+    change: &BuildChangeMetadata<'_>,
+    graph: &G,
+) -> (Vec<u8>, Vec<ChangeHash>) {
+    // FIXME missing value here is changes out of order error
+    let deps: Vec<_> = change
+        .deps
+        .iter()
+        .map(|i| graph.get_hash(*i as usize).unwrap())
+        .collect();
+    let mut data = Vec::with_capacity(1 + deps.len() * 32);
+    leb128::write::unsigned(&mut data, deps.len() as u64).unwrap();
+    for hash in &deps {
+        data.write_all(hash.as_bytes()).unwrap();
+    }
+    (data, deps)
+}
+
+fn assemble(
+    change: &BuildChangeMetadata<'_>,
+    deps: Vec<ChangeHash>,
+    tail: ChangeTail,
+) -> StoredChange<'static, Verified> {
+    let data = tail.data;
+    let header = Header::new(ChunkType::Change, &data);
+
+    let mut bytes = Vec::with_capacity(header.len() + data.len());
+    header.write(&mut bytes);
+    bytes.extend(data);
+
+    let ops_data = shift_range(tail.ops_data, header.len());
+    let extra_bytes = shift_range(tail.extra_bytes, header.len());
+
+    StoredChange {
+        bytes: Cow::Owned(bytes),
+        header,
+        dependencies: deps,
+        actor: tail.actor,
+        other_actors: tail.other_actors,
+        seq: change.seq,
+        start_op: NonZero::new(tail.start_op).unwrap(),
+        timestamp: change.timestamp,
+        message: change.message.as_ref().map(|s| s.to_string()),
+        ops_meta: tail.ops_meta,
+        ops_data,
+        extra_bytes,
+        num_ops: tail.num_ops,
+        _phantom: PhantomData,
     }
 }
 
@@ -305,10 +330,6 @@ impl<'a> VecEncoder<'a> {
         data.try_reserve(num_ops).map_err(|_| OutOfMemory)?;
         data.extend(std::iter::repeat_n(None, num_ops));
         Ok(Self { data })
-    }
-
-    fn num_ops(&self) -> u64 {
-        self.data.len() as u64
     }
 
     fn add(&mut self, index: usize, op: OpBuilder<'a>) {
@@ -354,7 +375,6 @@ impl<'a> VecEncoder<'a> {
 pub(crate) struct ProgressiveEncoder<'a> {
     pub(crate) len: usize,
     pub(crate) start_op: Option<u64>,
-    pub(crate) num_ops: u64,
     actors: Vec<bool>,
     queue: BTreeMap<usize, OpBuilder<'a>>,
     obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
@@ -374,13 +394,6 @@ pub(crate) struct ProgressiveEncoder<'a> {
 }
 
 impl<'a> ProgressiveEncoder<'a> {
-    fn new(num_ops: u64) -> Self {
-        ProgressiveEncoder {
-            num_ops,
-            ..Default::default()
-        }
-    }
-
     fn process_actor(&mut self, actor: usize) {
         if actor >= self.actors.len() {
             self.actors.resize(actor + 1, false);
@@ -551,28 +564,131 @@ impl<'a> ProgressiveEncoder<'a> {
 }
 
 impl<'a> ChangeBuilder<'a> {
-    pub(crate) fn finish<G>(
+    fn new(change: usize, meta: &BuildChangeMetadata<'_>) -> Self {
+        ChangeBuilder {
+            actor: meta.actor,
+            seq: meta.seq,
+            change,
+            start_op: meta.start_op,
+            num_ops: meta.num_ops() as u64,
+            received: 0,
+            encoder: OpEncoderStrategy::Unstarted,
+        }
+    }
+
+    fn max_op(&self) -> u64 {
+        self.start_op + self.num_ops - 1
+    }
+
+    fn is_complete(&self) -> bool {
+        self.received >= self.num_ops
+    }
+
+    fn start(&mut self) -> Result<(), OutOfMemory> {
+        if matches!(self.encoder, OpEncoderStrategy::Unstarted) {
+            self.encoder = OpEncoderStrategy::try_new(self.num_ops as usize)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `op` was the change's last.
+    fn add(&mut self, op: OpBuilder<'a>) -> Result<bool, OutOfMemory> {
+        self.start()?;
+        let index = (op.id.counter() - self.start_op) as usize;
+        self.encoder.add(index, op);
+        self.received += 1;
+        Ok(self.received == self.num_ops)
+    }
+
+    fn take_tail(
+        &mut self,
+        change: &BuildChangeMetadata<'_>,
+        mapper: &mut ActorMapper<'_>,
+        prefix: Vec<u8>,
+    ) -> Result<ChangeTail, Error> {
+        self.start().map_err(|_| Error::OutOfMemory)?;
+        std::mem::take(&mut self.encoder).tail(change, mapper, prefix)
+    }
+
+    fn encode_tail(
+        &mut self,
+        change: &BuildChangeMetadata<'_>,
+        mapper: &mut ActorMapper<'_>,
+    ) -> Result<(), Error> {
+        let tail = self.take_tail(change, mapper, Vec::new())?;
+        self.encoder = OpEncoderStrategy::Tail(tail.data.into_boxed_slice(), tail.num_ops as u64);
+        Ok(())
+    }
+
+    pub(crate) fn finish<G: GetHash>(
         &mut self,
         change: &BuildChangeMetadata<'_>,
         graph: &G,
         mapper: &mut ActorMapper<'_>,
-    ) -> Result<StoredChange<'static, Verified>, Error>
-    where
-        G: GetHash,
-    {
-        let encoder = std::mem::take(&mut self.encoder);
-        encoder.finish(change, graph, mapper)
+    ) -> Result<StoredChange<'static, Verified>, Error> {
+        let (prefix, deps) = deps_prefix(change, graph);
+        let tail = self.take_tail(change, mapper, prefix)?;
+        Ok(assemble(change, deps, tail))
     }
 
-    pub(crate) fn max_op(&self) -> u64 {
-        self.start_op + self.encoder.num_ops() - 1
+    fn hash<G: GetHash>(
+        &mut self,
+        change: &BuildChangeMetadata<'_>,
+        graph: &G,
+        mapper: &mut ActorMapper<'_>,
+    ) -> Result<(ChangeHash, u64), Error> {
+        let (prefix, _) = deps_prefix(change, graph);
+        match std::mem::take(&mut self.encoder) {
+            OpEncoderStrategy::Tail(tail, num_ops) => {
+                Ok((hash_parts(ChunkType::Change, &[&prefix, &tail]), num_ops))
+            }
+            encoder => {
+                self.encoder = encoder;
+                let tail = self.take_tail(change, mapper, prefix)?;
+                let hash = hash_parts(ChunkType::Change, &[&tail.data]);
+                Ok((hash, tail.num_ops as u64))
+            }
+        }
+    }
+}
+
+/// Hashes changes in change order, each as soon as it and every change
+/// before it are complete, so only changes still waiting hold their ops.
+struct HashCursor {
+    next: usize,
+    order: OrderCheck,
+    hashes: Vec<ChangeHash>,
+    num_ops: Vec<u64>,
+    heads: BTreeSet<ChangeHash>,
+}
+
+struct OrderCheck {
+    max_ops: Vec<u64>,
+    seq: Vec<u64>,
+}
+
+impl OrderCheck {
+    fn new(num_actors: usize) -> Self {
+        OrderCheck {
+            max_ops: vec![0; num_actors],
+            seq: vec![0; num_actors],
+        }
     }
 
-    pub(crate) fn add(&mut self, op: OpBuilder<'a>) {
-        let counter = op.id.counter();
-        let index = (counter - self.start_op) as usize;
-
-        self.encoder.add(index, op);
+    fn check(&mut self, change: &BuildChangeMetadata<'_>) -> Result<(), Error> {
+        let actor = change.actor;
+        if actor >= self.seq.len() {
+            return Err(Error::MissingActor);
+        }
+        if self.seq[actor] + 1 != change.seq {
+            return Err(Error::ChangesOutOfOrder);
+        }
+        self.seq[actor] = change.seq;
+        if change.start_op == 0 || change.max_op < self.max_ops[actor] {
+            return Err(Error::IncorrectMaxOp);
+        }
+        self.max_ops[actor] = change.max_op;
+        Ok(())
     }
 }
 
@@ -628,13 +744,7 @@ impl<'a> ChangeCollector<'a> {
             .try_reserve(changes.len())
             .map_err(|_| OutOfMemory)?;
         for (index, e) in changes.iter().enumerate() {
-            builders.push(ChangeBuilder {
-                actor: e.actor,
-                seq: e.seq,
-                change: index,
-                start_op: e.start_op,
-                encoder: OpEncoderStrategy::try_new(e.num_ops())?,
-            })
+            builders.push(ChangeBuilder::new(index, e));
         }
 
         builders.sort_unstable_by(|a, b| a.actor.cmp(&b.actor).then(a.seq.cmp(&b.seq)));
@@ -652,7 +762,23 @@ impl<'a> ChangeCollector<'a> {
             builders,
             last: None,
             preds: HashMap::default(),
+            hashing: None,
+            error: None,
         })
+    }
+
+    /// Hash each change as soon as it and every change before it are
+    /// complete, for [`Self::collect_hashes`].
+    pub(crate) fn hashing(mut self) -> Self {
+        self.hashing = Some(Box::new(HashCursor {
+            next: 0,
+            order: OrderCheck::new(self.mapper.actors.len()),
+            hashes: Vec::with_capacity(self.changes.len()),
+            num_ops: Vec::with_capacity(self.changes.len()),
+            heads: BTreeSet::new(),
+        }));
+        self.advance(false);
+        self
     }
 
     pub(crate) fn from_change_meta(
@@ -773,7 +899,7 @@ impl<'a> ChangeCollector<'a> {
                 }
             }
         }
-        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
+        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes);
         #[cfg(debug_assertions)]
         {
             // the change set encoder reorders changes: compare as sets
@@ -848,8 +974,65 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn add(&mut self, op: OpBuilder<'a>) {
-        if let Some(index) = self.builders_index(op.id) {
-            self.builders[index].add(op);
+        let Some(index) = self.builders_index(op.id) else {
+            return;
+        };
+        match self.builders[index].add(op) {
+            Ok(true) => self.complete(index),
+            Ok(false) => (),
+            Err(OutOfMemory) => self.fail(Error::OutOfMemory),
+        }
+    }
+
+    fn fail(&mut self, error: Error) {
+        self.error.get_or_insert(error);
+    }
+
+    fn complete(&mut self, index: usize) {
+        let builder = &mut self.builders[index];
+        let Some(cursor) = &self.hashing else {
+            return;
+        };
+        // a change at the cursor is hashed straight from its ops, and a small
+        // change's ops take less memory than its encoding
+        if builder.change != cursor.next && matches!(builder.encoder, OpEncoderStrategy::Enc(_)) {
+            let change = &self.changes[builder.change];
+            if let Err(e) = builder.encode_tail(change, &mut self.mapper) {
+                self.fail(e);
+                return;
+            }
+        }
+        self.advance(false);
+    }
+
+    /// Hash changes in order up to the first incomplete one, or, with
+    /// `force`, all of them.
+    fn advance(&mut self, force: bool) {
+        let Some(cursor) = &mut self.hashing else {
+            return;
+        };
+        while self.error.is_none() && cursor.next < self.changes.len() {
+            let change = &self.changes[cursor.next];
+            let builder = &mut self.builders[change.builder];
+            if !force && !builder.is_complete() {
+                break;
+            }
+            let hashed = cursor
+                .order
+                .check(change)
+                .and_then(|()| builder.hash(change, &cursor.hashes, &mut self.mapper));
+            match hashed {
+                Ok((hash, num_ops)) => {
+                    for dep in &change.deps {
+                        cursor.heads.remove(&cursor.hashes[*dep as usize]);
+                    }
+                    cursor.heads.insert(hash);
+                    cursor.hashes.push(hash);
+                    cursor.num_ops.push(num_ops);
+                    cursor.next += 1;
+                }
+                Err(e) => self.error = Some(e),
+            }
         }
     }
 
@@ -869,16 +1052,23 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn flush_deletes(&mut self) {
-        if let Some((obj, key)) = self.last.take() {
-            for (id, pred) in &self.preds {
-                let op = Op::del(*id, obj, key.clone());
-                let op = op.build(pred.to_vec());
-                if let Some(index) = self.builders_index(op.id) {
-                    self.builders[index].add(op);
-                }
-            }
-            self.preds.clear();
+        let last = self.last.take();
+        if self.preds.is_empty() {
+            return;
         }
+        if let Some((obj, key)) = last {
+            let mut preds = std::mem::take(&mut self.preds);
+            for (id, mut pred) in preds.drain() {
+                // grown by pushes; a queued out-of-order delete would hold the slack
+                pred.shrink_to_fit();
+                self.add(Op::del(id, obj, key.clone()).build(pred));
+            }
+            self.preds = preds;
+        }
+    }
+
+    fn take_error(&mut self) -> Result<(), Error> {
+        self.error.take().map_or(Ok(()), Err)
     }
 
     pub(crate) fn finish<H: crate::hash_retention::HashRetention>(
@@ -894,6 +1084,7 @@ impl<'a> ChangeCollector<'a> {
         index: Option<&mut IndexBuilder>,
     ) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
+        self.take_error()?;
 
         if let Some(i) = index {
             i.flush()
@@ -921,6 +1112,7 @@ impl<'a> ChangeCollector<'a> {
         actors: &ActorTable,
         deps: &[ChangeHash],
     ) -> Result<Vec<Change>, Error> {
+        self.take_error()?;
         let num_actors = actors.len();
         let num_changes = self.changes.len();
         let mut changes = Vec::with_capacity(num_changes);
@@ -958,56 +1150,46 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
-    pub(crate) fn collect(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
+    pub(crate) fn collect(mut self, op_set: &OpSet) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
+        self.take_error()?;
 
-        let num_actors = op_set.actors.len();
-        let mut max_ops = vec![0; num_actors];
-        let mut seq = vec![0; num_actors];
-        let mut changes = Vec::with_capacity(self.changes.len());
-        let mut heads = BTreeSet::new();
+        let mut order = OrderCheck::new(op_set.actors.len());
+        let mut changes: Vec<Change> = Vec::with_capacity(self.changes.len());
 
-        for change in self.changes.into_iter() {
-            let actor = change.actor;
-
-            if actor >= num_actors {
-                return Err(Error::MissingActor);
-            }
-
-            if seq[actor] + 1 != change.seq {
-                return Err(Error::ChangesOutOfOrder);
-            }
-
-            seq[actor] = change.seq;
-
-            let builder = change.builder;
-            let max_op = change.max_op;
-
-            if change.start_op == 0 || max_op < max_ops[actor] {
-                return Err(Error::IncorrectMaxOp);
-            }
-
-            max_ops[actor] = max_op;
-
-            let change = self.builders[builder].finish(&change, &changes, &mut self.mapper)?;
-
-            let hash = change.hash();
-
-            for dep in change.dependencies() {
-                heads.remove(dep);
-            }
-
-            heads.insert(hash);
-
-            changes.push(Change::from(change));
+        for change in std::mem::take(&mut self.changes) {
+            order.check(&change)?;
+            let built =
+                self.builders[change.builder].finish(&change, &changes, &mut self.mapper)?;
+            changes.push(Change::from(built));
         }
 
-        Ok(CollectedChanges { changes, heads })
+        Ok(changes)
+    }
+
+    /// Like [`Self::collect`], but holds only each change's hash and op
+    /// count. Call [`Self::hashing`] before adding ops to hash changes as
+    /// they complete rather than all at the end.
+    pub(crate) fn collect_hashes(mut self) -> Result<CollectedHashes, Error> {
+        if self.hashing.is_none() {
+            self = self.hashing();
+        }
+        self.flush_deletes();
+        self.advance(true);
+        self.take_error()?;
+        let cursor = self.hashing.expect("hashing was set above");
+        Ok(CollectedHashes {
+            hashes: cursor.hashes,
+            num_ops: cursor.num_ops,
+            heads: cursor.heads,
+        })
     }
 }
 
-pub(crate) struct CollectedChanges {
-    pub(crate) changes: Vec<Change>,
+#[derive(Debug)]
+pub struct CollectedHashes {
+    pub(crate) hashes: Vec<ChangeHash>,
+    pub(crate) num_ops: Vec<u64>,
     pub(crate) heads: BTreeSet<ChangeHash>,
 }
 

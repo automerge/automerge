@@ -9,7 +9,7 @@ use crate::author::Authors;
 use crate::automerge::AuditMode;
 use crate::automerge::Automerge;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols, GraphLoadError};
-use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
+use crate::op_set2::change::{ChangeCollector, CollectedHashes, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
@@ -325,14 +325,14 @@ impl<'a> Document<'a> {
 
     fn verify_changes(
         &self,
-        cc: &CollectedChanges,
+        cc: &CollectedHashes,
         mode: VerificationMode,
     ) -> Result<(), ReconstructError> {
         if mode == VerificationMode::Check && !self.heads().iter().eq(cc.heads.iter()) {
             let expected_heads: BTreeSet<_> = self.heads().iter().cloned().collect();
             tracing::error!(?expected_heads, ?cc.heads, "mismatching heads");
             Err(ReconstructError::MismatchingHeads(MismatchedHeads {
-                changes: cc.changes.clone(),
+                num_changes: cc.hashes.len(),
                 expected_heads,
                 derived_heads: cc.heads.clone(),
             }))
@@ -360,9 +360,10 @@ impl<'a> Document<'a> {
         op_set.column_validation()?;
 
         let changes = if compute_hashes {
-            let mut collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
+            let mut collector =
+                ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?.hashing();
             collector.process_all_ops(&op_set)?;
-            let changes = collector.collect(&op_set)?;
+            let changes = collector.collect_hashes()?;
             self.verify_changes(&changes, mode)?;
             Some(changes)
         } else {
@@ -375,7 +376,7 @@ impl<'a> Document<'a> {
         let mut authors = Authors::new(&op_set.actors);
         let change_graph = H::finish_load(
             change_cols,
-            changes.as_ref().map(|c| c.changes.as_slice()),
+            changes,
             self.heads(),
             head_indexes,
             &mut authors,
@@ -386,10 +387,6 @@ impl<'a> Document<'a> {
                 ReconstructError::AuthorOnNonInitialSeq(seq, op_set.actors[actor].clone())
             }
         })?;
-
-        if let Some(changes) = &changes {
-            debug_assert_eq!(changes.changes.len(), change_graph.len());
-        }
 
         debug_assert!(op_set.validate_top_index());
 
@@ -413,7 +410,7 @@ impl<'a> Document<'a> {
         let mut mark_order = MarkOrderValidator::default();
         let mut change_collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
         change_collector.process_ops(&op_set, &mut mark_order)?;
-        let changes = change_collector.collect(&op_set)?.changes;
+        let changes = change_collector.collect(&op_set)?;
         if let Some(err) = mark_order.take_error() {
             return Err(ReconstructError::InvalidMarkOrderChanges {
                 changes,
@@ -470,7 +467,7 @@ pub(crate) enum ReconstructError {
 }
 
 pub(crate) struct MismatchedHeads {
-    changes: Vec<Change>,
+    num_changes: usize,
     expected_heads: BTreeSet<ChangeHash>,
     derived_heads: BTreeSet<ChangeHash>,
 }
@@ -478,7 +475,7 @@ pub(crate) struct MismatchedHeads {
 impl std::fmt::Debug for MismatchedHeads {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MismatchedHeads")
-            .field("changes", &self.changes.len())
+            .field("num_changes", &self.num_changes)
             .field("expected_heads", &self.expected_heads)
             .field("derived_heads", &self.derived_heads)
             .finish()
