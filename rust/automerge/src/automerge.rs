@@ -36,7 +36,7 @@ use crate::change_graph::Fragment;
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::{Boundary, WriteFrontier};
-use crate::{AutomergeError, Change, ChangeId, Cursor, ObjType, Prop};
+use crate::{AutomergeError, Change, ChangeId, Cursor, MalformedChangeSet, ObjType, Prop};
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, Viewpoint, VisibleClock};
 
@@ -1142,7 +1142,7 @@ impl<H: HashRetention> Automerge<H> {
                 );
                 Self::empty(options.text_encoding)
             }
-            storage::Chunk::ChangeSetColumns(change_set) => {
+            storage::Chunk::ChangeSetColumns(change_set, _) => {
                 tracing::trace!("first chunk is a change_set-columns chunk");
                 // a leading change set is a document save, trailing orphans and all
                 first_chunk_was_doc = true;
@@ -2167,28 +2167,14 @@ impl<H: HashRetention> Automerge<H> {
         &mut self,
         change_set: ChangeSet,
     ) -> Result<(), AutomergeError> {
-        {
-            let changes = change_set.to_changes()?;
-            // checked before applying, so a rejected change set leaves no trace
-            let carried: std::collections::HashSet<ChangeHash> =
-                changes.iter().map(|c| c.hash()).collect();
-            for c in &changes {
-                for dep in c.deps() {
-                    if !carried.contains(dep) && !self.change_graph.has_change(dep)? {
-                        return Err(AutomergeError::MissingDeps);
-                    }
-                }
+        let changes = change_set.audit()?;
+        // checked before applying, so a rejected change set leaves no trace
+        for dep in change_set.deps() {
+            if !self.change_graph.has_change(dep)? {
+                return Err(AutomergeError::MissingDeps);
             }
-            for (hash, index) in &change_set.heads {
-                if changes.get(*index).map(|c| c.hash()) != Some(*hash) {
-                    return Err(AutomergeError::MalformedChangeSet(
-                        "change set head does not hash to the member it names",
-                    ));
-                }
-            }
-            self.apply_changes(changes)?;
-            Ok(())
         }
+        self.apply_changes(changes)
     }
 }
 
@@ -2299,7 +2285,7 @@ impl Automerge<Retained> {
                         let dep_id = change_set
                             .dep_ids
                             .get(d - num_members)
-                            .ok_or(AutomergeError::MalformedChangeSet("bad dep index"))?;
+                            .ok_or(MalformedChangeSet::Invalid("bad dep index"))?;
                         let node = self
                             .change_graph
                             .node_for_change_id(dep_id, &self.ops.actors)
@@ -2336,7 +2322,7 @@ impl Automerge<Retained> {
         let mut head_nodes = Vec::with_capacity(change_set.heads.len());
         for (hash, index) in &change_set.heads {
             head_nodes.push((
-                member_node(*index).ok_or(AutomergeError::MalformedChangeSet(
+                member_node(*index).ok_or(MalformedChangeSet::Invalid(
                     "change set head is not a member of the change set",
                 ))?,
                 *hash,

@@ -2,7 +2,7 @@ use crate::automerge::Automerge;
 use crate::clock::Clock;
 use crate::op_set2::op_set::manifold::ManifoldResult;
 use crate::storage::ChangeSet;
-use crate::AutomergeError;
+use crate::{AutomergeError, MalformedChangeSet};
 
 #[derive(Debug)]
 pub(crate) enum ChangeSetSrc<'a> {
@@ -84,7 +84,7 @@ impl<'a> ChangeSetApply<'a> {
             // a filtered change set may name elements it no longer contains
             let frag = ops
                 .index_change_set(&actor_map, doc_ops, true, mask.as_ref())
-                .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))?;
+                .map_err(|_| MalformedChangeSet::Invalid("invalid change set op columns"))?;
             (ChangeSetSrc::Owned { raw, data }, frag)
         } else {
             let frag = change_set_ops
@@ -94,7 +94,7 @@ impl<'a> ChangeSetApply<'a> {
                     !change_set.storage.deps.is_empty(),
                     mask.as_ref(),
                 )
-                .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))?;
+                .map_err(|_| MalformedChangeSet::Invalid("invalid change set op columns"))?;
             (ChangeSetSrc::ChangeSet(change_set), frag)
         };
         Ok(Self {
@@ -115,7 +115,7 @@ fn load_change_set(
 ) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
     let (raw, data) = src.parts();
     crate::op_set2::op_set::OpSet::load_change_set(raw, data, actor_map, doc_ops, mask)
-        .map_err(|_| AutomergeError::MalformedChangeSet("invalid change set op columns"))
+        .map_err(|_| MalformedChangeSet::Invalid("invalid change set op columns").into())
 }
 
 impl<'a> ChangeSetApply<'a> {

@@ -6,7 +6,7 @@ use crate::op_set2::op::DocSucc;
 use crate::op_set2::types::Action;
 use crate::storage::change_set::{ManifoldOp, ManifoldOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
-use crate::AutomergeError;
+use crate::{AutomergeError, MalformedChangeSet};
 
 use super::index::{ObjIndex, ObjInfo};
 use super::op_iter::{ObjIdIter, OpIdIter, SuccIterIter};
@@ -212,9 +212,10 @@ impl<'a> ApplyManifold<'a> {
             let op = src.next_op();
             self.apply_op(&op);
             if self.hint_overshot {
-                return Err(AutomergeError::MalformedChangeSet(
+                return Err(MalformedChangeSet::Invalid(
                     "op position hint overshot its target row",
-                ));
+                )
+                .into());
             }
         }
         Ok(self.finish())

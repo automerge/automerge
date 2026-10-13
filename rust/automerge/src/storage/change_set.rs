@@ -85,6 +85,109 @@ impl ChangeSet {
             .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
     }
 
+    /// The carried changes, in topological order, after checking that
+    /// everything the change set says about them is true. Two things cannot
+    /// be checked without the sender's document: that it retains every hash
+    /// a receiver will need, and its op hints.
+    ///
+    /// Rebuilds and hashes every carried change, as [`Self::to_changes`] does.
+    pub fn audit(&self) -> Result<Vec<Change>, MalformedChangeSet> {
+        use std::collections::{HashMap, HashSet};
+
+        let changes = self
+            .storage
+            .to_changes()
+            .map_err(|e| MalformedChangeSet::Decode(Box::new(e)))?;
+
+        let mut member_ids = HashSet::with_capacity(changes.len());
+        for c in &changes {
+            let id = ChangeId::from_doc_seq(c.seq(), c.actor_id().clone(), 0);
+            if !member_ids.insert(id.clone()) {
+                return Err(MalformedChangeSet::DuplicateMember(id));
+            }
+        }
+        let index_of: HashMap<ChangeHash, usize> = changes
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.hash(), i))
+            .collect();
+
+        let mut depended_on = vec![false; changes.len()];
+        let mut external = HashSet::new();
+        for (i, c) in changes.iter().enumerate() {
+            for dep in c.deps() {
+                match index_of.get(dep) {
+                    Some(&j) if j < i => depended_on[j] = true,
+                    Some(_) => return Err(MalformedChangeSet::NotTopological(i)),
+                    None => {
+                        external.insert(*dep);
+                    }
+                }
+            }
+        }
+
+        let names = |index: usize, hash: ChangeHash| changes[index].hash() == hash;
+        for &(hash, index) in &self.heads {
+            if !names(index, hash) {
+                return Err(MalformedChangeSet::WrongHeadHash { hash, index });
+            }
+        }
+        for &(index, hash) in &self.checkpoints {
+            if !names(index, hash) {
+                return Err(MalformedChangeSet::WrongCheckpointHash { hash, index });
+            }
+        }
+        for &(index, hash) in &self.retained {
+            if !names(index, hash) {
+                return Err(MalformedChangeSet::WrongRetainedHash { hash, index });
+            }
+        }
+
+        let mut declared_heads: Vec<usize> = self.heads.iter().map(|(_, i)| *i).collect();
+        declared_heads.sort_unstable();
+        let actual_heads: Vec<usize> = (0..changes.len()).filter(|i| !depended_on[*i]).collect();
+        if declared_heads != actual_heads {
+            return Err(MalformedChangeSet::WrongHeads);
+        }
+
+        let declared_deps: HashSet<ChangeHash> = self.deps().iter().copied().collect();
+        if declared_deps.len() != self.deps().len() || declared_deps != external {
+            return Err(MalformedChangeSet::WrongDeps);
+        }
+
+        let mut declared_checkpoints: Vec<usize> =
+            self.checkpoints.iter().map(|(i, _)| *i).collect();
+        declared_checkpoints.sort_unstable();
+        let actual_checkpoints: Vec<usize> = changes
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| c.hash().fragment_level() > 0 && depended_on[*i])
+            .map(|(i, _)| i)
+            .collect();
+        if declared_checkpoints != actual_checkpoints {
+            return Err(MalformedChangeSet::WrongCheckpoints);
+        }
+
+        if let Some(id) = self.dep_ids.iter().find(|id| member_ids.contains(*id)) {
+            return Err(MalformedChangeSet::ExternalIdIsMember(id.clone()));
+        }
+        for (hash, id) in &self.boundary {
+            if index_of.contains_key(hash) {
+                return Err(MalformedChangeSet::BoundaryIsMember(*hash));
+            }
+            if member_ids.contains(id) {
+                return Err(MalformedChangeSet::ExternalIdIsMember(id.clone()));
+            }
+            if let Some(k) = self.deps().iter().position(|d| d == hash) {
+                if self.dep_ids[k] != *id {
+                    return Err(MalformedChangeSet::BoundaryDisagreesWithDep(*hash));
+                }
+            }
+        }
+
+        Ok(changes)
+    }
+
     /// Metadata for each carried change, in topological order, without
     /// decoding its ops. The metadata is decoded on the first call, which
     /// fails if it is malformed.
@@ -459,6 +562,39 @@ pub(crate) struct ParsedPrefix {
 #[error("invalid change_set: {0}")]
 pub struct InvalidChangeSet(pub(crate) String);
 
+/// Why a change set was rejected as malformed.
+#[derive(Debug, thiserror::Error)]
+pub enum MalformedChangeSet {
+    #[error("malformed change set: {0}")]
+    Invalid(&'static str),
+    #[error("malformed change set: unable to rebuild the carried changes: {0}")]
+    Decode(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("malformed change set: change {0} is carried twice")]
+    DuplicateMember(ChangeId),
+    #[error("malformed change set: member {0} depends on a member after it")]
+    NotTopological(usize),
+    #[error("malformed change set: head {hash} does not name member {index}")]
+    WrongHeadHash { hash: ChangeHash, index: usize },
+    #[error("malformed change set: checkpoint {hash} does not name member {index}")]
+    WrongCheckpointHash { hash: ChangeHash, index: usize },
+    #[error("malformed change set: retained hash {hash} does not name member {index}")]
+    WrongRetainedHash { hash: ChangeHash, index: usize },
+    #[error("malformed change set: the heads are not the members nothing else depends on")]
+    WrongHeads,
+    #[error("malformed change set: the deps are not what the members depend on but do not carry")]
+    WrongDeps,
+    #[error("malformed change set: the checkpoints are not the non-head fragment-level members")]
+    WrongCheckpoints,
+    #[error("malformed change set: boundary {0} is a carried change")]
+    BoundaryIsMember(ChangeHash),
+    #[error("malformed change set: dep or boundary id {0} is a carried change")]
+    ExternalIdIsMember(ChangeId),
+    #[error(
+        "malformed change set: boundary {0} and the dep with its hash have different change ids"
+    )]
+    BoundaryDisagreesWithDep(ChangeHash),
+}
+
 fn parse_change_set_columns(bytes: &[u8]) -> Result<ChangeSetStorage<'static, Verified>, String> {
     let input = parse::Input::new(bytes);
     let (_i, stored) = ChangeSetStorage::parse_columns(input)
@@ -524,6 +660,9 @@ impl TryFrom<&[u8]> for ChangeSet {
             .map_err(|e| InvalidChangeSet(format!("invalid header: {}", e)))?;
         if header.chunk_type() != ChunkType::ChangeSet {
             return Err(InvalidChangeSet("not a change_set chunk".to_string()));
+        }
+        if !header.checksum_valid() {
+            return Err(InvalidChangeSet("bad checksum".to_string()));
         }
         Self::parse_after_header(i)
     }
@@ -860,7 +999,221 @@ mod tests {
         assert_ne!(seq, 0);
 
         bytes[seq_at] = 0;
-        let err = ChangeSet::try_from(&bytes[..]).expect_err("zero seq must be rejected");
+        let err = ChangeSet::try_from(&with_recomputed_checksum(&bytes)[..])
+            .expect_err("zero seq must be rejected");
         assert!(err.0.contains("sequence number"), "got {err}");
+    }
+
+    fn audit_fixture() -> crate::automerge::Automerge<crate::hash_retention::Full> {
+        use crate::automerge::Automerge;
+        use crate::tx::{CommitOptions, Transactable};
+        use crate::ROOT;
+
+        // pinned actors and timestamps fix which commits are fragment heads
+        let mut doc = Automerge::new()
+            .with_actor(crate::ActorId::from(&b"zsn"[..]))
+            .enable_audit_mode()
+            .unwrap();
+        let commit = |doc: &mut Automerge<_>, k: &str, i: i64| {
+            let mut tx = doc.transaction();
+            tx.put(ROOT, k, i).unwrap();
+            tx.commit_with(CommitOptions::default().with_time(0));
+        };
+        for i in 0..300 {
+            commit(&mut doc, "k", i);
+        }
+        let mut fork = doc.fork().with_actor(crate::ActorId::from(&b"other"[..]));
+        for i in 0..4 {
+            commit(&mut doc, "k", 10 + i);
+            commit(&mut fork, "j", 20 + i);
+        }
+        doc.merge(&mut fork).unwrap();
+        commit(&mut doc, "k", 30);
+        doc
+    }
+
+    fn first_change() -> crate::ChangeId {
+        crate::ChangeId::from_parts(
+            crate::ActorId::from(&b"zsn"[..]),
+            NonZeroU64::new(1).unwrap(),
+        )
+    }
+
+    fn assert_audits(cs: &ChangeSet) {
+        let audited = cs.audit().unwrap_or_else(|e| panic!("audit failed: {e}"));
+        let decoded = cs.to_changes().unwrap();
+        assert_eq!(
+            audited.iter().map(|c| c.hash()).collect::<Vec<_>>(),
+            decoded.iter().map(|c| c.hash()).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn change_sets_from_every_builder_pass_audit() {
+        let doc = audit_fixture();
+        let frags = doc.fragments(..);
+        assert!(frags.len() > 1, "fixture needs several fragments");
+
+        assert_audits(&doc.change_set_document().unwrap());
+        for f in &frags {
+            assert_audits(&doc.change_set_for_fragment(f).unwrap());
+            assert_audits(&doc.make_change_set_from_fragment(f).unwrap());
+        }
+        for cs in doc.change_sets_for_fragments(frags.clone()).unwrap() {
+            assert_audits(&ChangeSet::try_from(&cs[..]).unwrap());
+        }
+        assert_audits(&doc.change_set_after(&[first_change()]).unwrap().unwrap());
+
+        let retained = crate::automerge::Automerge::load(&doc.save()).unwrap();
+        assert_audits(&retained.change_set_document().unwrap());
+        for f in &retained.fragments(..) {
+            assert_audits(&retained.make_change_set_from_fragment(f).unwrap());
+        }
+    }
+
+    #[test]
+    fn audit_rejects_a_change_set_that_misdescribes_its_changes() {
+        let doc = audit_fixture();
+        let good = doc.change_set_after(&[first_change()]).unwrap().unwrap();
+        assert_audits(&good);
+        assert!(!good.boundary.is_empty(), "fixture needs a boundary");
+        assert!(!good.checkpoints.is_empty(), "fixture needs a checkpoint");
+        let changes = good.to_changes().unwrap();
+        macro_rules! rejects {
+            ($cs:expr, $why:literal, $err:pat) => {
+                let err = $cs
+                    .audit()
+                    .expect_err(concat!("audit should reject ", $why));
+                assert!(matches!(err, $err), "{}: got {err}", $why);
+            };
+        }
+
+        let mut cs = good.clone();
+        cs.heads[0].0 = changes[0].hash();
+        rejects!(
+            cs,
+            "a head hash that names another member",
+            MalformedChangeSet::WrongHeadHash { .. }
+        );
+
+        let mut cs = good.clone();
+        cs.heads[0].1 = 0;
+        cs.heads[0].0 = changes[0].hash();
+        rejects!(
+            cs,
+            "a head that other members depend on",
+            MalformedChangeSet::WrongHeads
+        );
+
+        let mut cs = good.clone();
+        cs.heads.push((changes[0].hash(), 0));
+        rejects!(cs, "an extra head", MalformedChangeSet::WrongHeads);
+
+        let mut cs = good.clone();
+        cs.retained.push((0, changes[1].hash()));
+        rejects!(
+            cs,
+            "a retained hash that names another member",
+            MalformedChangeSet::WrongRetainedHash { .. }
+        );
+
+        let mut cs = good.clone();
+        cs.checkpoints.push((0, changes[0].hash()));
+        rejects!(
+            cs,
+            "a checkpoint that is not fragment-level",
+            MalformedChangeSet::WrongCheckpoints
+        );
+
+        let mut cs = good.clone();
+        cs.checkpoints.pop();
+        rejects!(
+            cs,
+            "a missing checkpoint",
+            MalformedChangeSet::WrongCheckpoints
+        );
+
+        let mut cs = good.clone();
+        cs.boundary
+            .push((changes[0].hash(), cs.boundary[0].1.clone()));
+        rejects!(
+            cs,
+            "a boundary entry that names a member",
+            MalformedChangeSet::BoundaryIsMember(_)
+        );
+
+        let mut cs = good.clone();
+        let member = changes[0].clone();
+        cs.boundary[0].1 = crate::ChangeId::from_parts(
+            member.actor_id().clone(),
+            NonZeroU64::new(member.seq()).unwrap(),
+        );
+        rejects!(
+            cs,
+            "a boundary id that names a member",
+            MalformedChangeSet::ExternalIdIsMember(_)
+        );
+
+        let mut cs = good.clone();
+        let other = cs.dep_ids[0].clone();
+        cs.dep_ids[0] = crate::ChangeId::from_parts(
+            other.actor().clone(),
+            NonZeroU64::new(other.seq() + 1000).unwrap(),
+        );
+        rejects!(
+            cs,
+            "a dep id that disagrees with the boundary",
+            MalformedChangeSet::BoundaryDisagreesWithDep(_)
+        );
+    }
+
+    fn with_recomputed_checksum(bytes: &[u8]) -> Vec<u8> {
+        let (_, header) =
+            Header::parse::<crate::storage::chunk::error::Header>(parse::Input::new(bytes))
+                .unwrap();
+        let data = &bytes[header.data_bytes()];
+        let header = Header::new(ChunkType::ChangeSet, data);
+        let mut out = Vec::new();
+        header.write(&mut out);
+        out.extend(data);
+        out
+    }
+
+    #[test]
+    fn a_bad_checksum_is_rejected() {
+        let mut bytes = audit_fixture().save();
+        assert_eq!(bytes[8], u8::from(ChunkType::ChangeSet));
+        bytes[4] ^= 0xff;
+
+        let err = ChangeSet::try_from(&bytes[..]).expect_err("try_from should reject it");
+        assert!(err.0.contains("checksum"), "got {err}");
+        assert!(matches!(
+            crate::automerge::Automerge::load(&bytes),
+            Err(AutomergeError::Load(
+                crate::storage::load::Error::BadChecksum
+            ))
+        ));
+        assert!(matches!(
+            crate::audit::Automerge::load(&bytes),
+            Err(AutomergeError::Load(
+                crate::storage::load::Error::BadChecksum
+            ))
+        ));
+    }
+
+    #[test]
+    fn an_audit_load_rejects_a_change_set_that_fails_audit() {
+        let doc = audit_fixture();
+        let mut cs = ChangeSet::try_from(&doc.save()[..]).unwrap();
+        cs.heads[0].0 = cs.to_changes().unwrap()[0].hash();
+
+        let err = crate::audit::Automerge::load(&cs.bytes()).expect_err("audit load should fail");
+        assert!(
+            matches!(
+                err,
+                AutomergeError::MalformedChangeSet(MalformedChangeSet::WrongHeadHash { .. })
+            ),
+            "got {err}"
+        );
     }
 }

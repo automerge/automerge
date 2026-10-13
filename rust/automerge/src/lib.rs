@@ -333,7 +333,9 @@ pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef
 pub use patches::{Patch, PatchAction};
 pub use read::Stats;
 pub use sequence_tree::SequenceTree;
-pub use storage::{ChangeSet, ChangeSetChange, InvalidChangeSet, VerificationMode};
+pub use storage::{
+    ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet, VerificationMode,
+};
 pub use text_value::ConcreteTextValue;
 pub use tx::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};

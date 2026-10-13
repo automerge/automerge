@@ -18,7 +18,7 @@ use crate::{
     storage::document::ReconstructError as LoadError,
     storage::{Columns, Document, RawColumn, RawColumns},
     types::OpId,
-    Change, ChangeHash,
+    Change, ChangeHash, MalformedChangeSet,
 };
 
 /// The graph of changes
@@ -1977,7 +1977,7 @@ impl ChangeGraph<Retained> {
         authors: &mut Authors,
         actor_ids: &ActorTable,
     ) -> Result<(), AutomergeError> {
-        let bad = |s: &'static str| AutomergeError::MalformedChangeSet(s);
+        let bad = |s: &'static str| AutomergeError::from(MalformedChangeSet::Invalid(s));
         let base = NodeIdx(self.len() as u32);
         let n = member_actors.len();
         debug_assert_eq!(n, member_seqs.len());

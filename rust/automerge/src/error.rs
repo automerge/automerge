@@ -81,8 +81,8 @@ pub enum AutomergeError {
     #[error("invalid fragment: {0}")]
     InvalidFragment(&'static str),
     /// A change set is malformed or its metadata contradicts its contents.
-    #[error("malformed change set: {0}")]
-    MalformedChangeSet(&'static str),
+    #[error(transparent)]
+    MalformedChangeSet(#[from] crate::MalformedChangeSet),
 }
 
 impl AutomergeError {

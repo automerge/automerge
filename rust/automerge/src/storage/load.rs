@@ -168,7 +168,7 @@ fn load_next_change<'a, H: crate::hash_retention::HashRetention>(
                     .map(|c| LoadedChunk::Change(Box::new(c))),
             );
         }
-        storage::Chunk::ChangeSetColumns(change_set) => {
+        storage::Chunk::ChangeSetColumns(change_set, _) => {
             tracing::trace!("loading change_set columns chunk");
             changes.push(LoadedChunk::ChangeSet(change_set));
         }

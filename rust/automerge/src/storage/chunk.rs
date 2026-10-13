@@ -16,7 +16,7 @@ pub(crate) enum Chunk<'a> {
     Change(Change<'a, Unverified>),
     /// A change set in the frozen 3.3.x format — see [`super::bundle_v0`].
     BundleV0(Box<BundleV0Storage<'a, Unverified>>),
-    ChangeSetColumns(Box<crate::storage::ChangeSet>),
+    ChangeSetColumns(Box<crate::storage::ChangeSet>, Header),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
@@ -115,7 +115,7 @@ impl<'a> Chunk<'a> {
             ChunkType::ChangeSet => {
                 let change_set = crate::storage::ChangeSet::parse_after_header(chunk_input)
                     .map_err(|e| parse::ParseError::Error(error::Chunk::ChangeSet(e)))?;
-                Chunk::ChangeSetColumns(Box::new(change_set))
+                Chunk::ChangeSetColumns(Box::new(change_set), header)
             }
         };
         Ok((remaining, chunk))
@@ -129,8 +129,7 @@ impl<'a> Chunk<'a> {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
             Self::BundleV0(b) => b.checksum_valid(),
-            // already checked against the whole chunk by the loader
-            Self::ChangeSetColumns(_) => true,
+            Self::ChangeSetColumns(_, header) => header.checksum_valid(),
         }
     }
 }
