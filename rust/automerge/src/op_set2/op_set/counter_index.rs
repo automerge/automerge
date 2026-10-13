@@ -16,6 +16,7 @@
 //! must still sum against their clock.
 //!
 //! [`Indexes`]: super::super::columns::Indexes
+//! [`OpSet::recompute_indexes`]: crate::op_set2::OpSet::recompute_indexes
 
 #[cfg(test)]
 mod tests;

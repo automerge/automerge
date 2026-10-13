@@ -1211,6 +1211,20 @@ impl<'a> Op<'a> {
         )
     }
 
+    /// Replace this op's stored counter base with its current total, read
+    /// from [`OpSet`]'s counter index.
+    ///
+    /// The index is mask-aware, so this is correct for any **current** read,
+    /// masked or not. A historical read must use [`Op::fix_counter`] with
+    /// its clock instead. A non-counter op is left alone.
+    pub(crate) fn set_counter_from_index(&mut self, op_set: &OpSet) {
+        if let ScalarValue::Counter(ref mut n) = self.value {
+            if let Some(total) = op_set.counter_total_at(self.pos) {
+                *n = total;
+            }
+        }
+    }
+
     pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
         if let ScalarValue::Counter(n) = self.value {
             let mut inc = 0;

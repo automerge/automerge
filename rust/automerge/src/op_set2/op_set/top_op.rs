@@ -27,18 +27,17 @@ impl<'a> TopOps<'a> {
     /// Iterate over the top op of each key or element in `range`, marking an
     /// op as a conflict when other visible ops share its key.
     ///
-    /// The `read` decides how visibility is determined. A current read, with
-    /// or without a write-frontier mask, uses the op set's indexes: the mask
-    /// is already applied to them by [`OpSet::recompute_indexes`]. A
-    /// historical read scans the ops against its clock instead. Counter values
-    /// are summed from successors at read time, so the clock from
-    /// [`ReadAt::historical_slow`] is applied to them on either path.
+    /// A current read uses the op set's indexes, while a historical read will
+    /// use the supplied clock to scan the ops.
     pub(crate) fn new(op_set: &'a OpSet, read: &ReadAt<'_>, range: Range<usize>) -> Self {
         let scan = read.historical().cloned();
         let visible_pos = range.start;
         let visible = VisIter::new(op_set, scan.as_ref(), range.clone());
-        let iter = SkipIter::new(op_set.iter_range(&range), TopIter::new(op_set, scan, range));
-        let inner = FixCounters::new(iter, read.historical_slow().cloned());
+        let iter = SkipIter::new(
+            op_set.iter_range(&range),
+            TopIter::new(op_set, scan.clone(), range),
+        );
+        let inner = FixCounters::new(iter, scan, op_set);
         Self {
             inner,
             visible,

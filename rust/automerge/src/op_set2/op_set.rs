@@ -105,6 +105,17 @@ impl OpSet {
         }
     }
 
+    /// The current total of the counter op at `pos`, or `None` if the op at
+    /// `pos` is not a counter.
+    ///
+    /// Authoritative for current reads only: the index is built under the
+    /// write-frontier mask, so a masked increment is already excluded, but a
+    /// historical read must sum against its own clock
+    /// ([`Op::fix_counter`]).
+    pub(crate) fn counter_total_at(&self, pos: usize) -> Option<i64> {
+        self.cols.index.counter.get(pos)
+    }
+
     /// Whether the op at `pos` is visible under the current indexes.
     ///
     /// The indexes are built under the write-frontier mask, so this already

@@ -633,7 +633,7 @@ impl<'a> ValueState<'a> {
                     // OpIter yields stored counter bases, not their current
                     // totals. Under a mask only un-hidden increments count.
                     let mut doc_op = doc_op.clone();
-                    doc_op.fix_counter(self.mask.map(Mask::clock));
+                    doc_op.set_counter_from_index(self.op_set);
                     let mut value = doc_op.hydrate_value(self.text_encoding);
                     // Before always includes this candidate, even if the batch
                     // deletes it. Only after gets new counter contributions.
