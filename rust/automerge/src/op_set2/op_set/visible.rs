@@ -211,8 +211,7 @@ impl<'a> ScanVisIter<'a> {
             self.succ.skip_next()?;
             return Some(false);
         }
-        let succ = self.succ.next()?;
-        Some(Self::is_visible_with_succ(succ, &self.clock))
+        Some(!self.succ.next_deleted_in(&self.clock)?)
     }
 }
 

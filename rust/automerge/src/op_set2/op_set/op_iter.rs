@@ -12,6 +12,7 @@ use crate::{
     types::{ElemId, ObjId, OpId, TextEncoding},
 };
 
+use crate::clock::Clock;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::iter::Peekable;
@@ -1332,6 +1333,21 @@ impl<'a> SuccIterIter<'a> {
         self.incs.advance_by(num_succ);
 
         Some(result)
+    }
+
+    // Reads the successors in place: building `SuccCursors` for every op
+    // copies them through memory, which dominates a historical scan.
+    pub(crate) fn next_deleted_in(&mut self, clock: &Clock) -> Option<bool> {
+        let num_succ = self.count.next()?.value as usize;
+        let mut deleted = false;
+        for _ in 0..num_succ {
+            let counter = self.ctr.next()?;
+            let actor = self.actor.next()?;
+            let inc = self.incs.next()?;
+            let id = OpId::new(counter as u64, u64::from(actor) as usize);
+            deleted |= inc.is_none() && clock.covers(&id);
+        }
+        Some(deleted)
     }
 
     /// [`Iterator::next`] without building the successor cursors.
