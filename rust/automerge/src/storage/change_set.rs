@@ -66,7 +66,45 @@ pub struct ChangeSet {
     pub(crate) storage: ChangeSetStorage<'static, Verified>,
 }
 
+/// A change with at most this many ops is smaller than its hash.
+pub(crate) const TINY_CHANGE_OPS: u64 = 8;
+/// A load rehashes a change set within both limits in about a millisecond.
+pub(crate) const REHASHABLE_CHANGES: usize = 500;
+pub(crate) const REHASHABLE_OPS: u64 = 5_000;
+
+pub(crate) fn rehashable(num_changes: usize, num_ops: u64) -> bool {
+    num_changes <= REHASHABLE_CHANGES && num_ops <= REHASHABLE_OPS
+}
+
 impl ChangeSet {
+    /// Whether a load may rehash the members whose hashes this change set
+    /// leaves out: it depends on nothing outside itself and is small.
+    pub(crate) fn is_rehashable(&self) -> bool {
+        self.deps().is_empty()
+            && self.boundary.is_empty()
+            && self.changes().is_ok_and(|changes| {
+                changes.len() <= REHASHABLE_CHANGES
+                    && rehashable(
+                        changes.len(),
+                        changes
+                            .iter()
+                            .map(|c| (c.max_op + 1).saturating_sub(c.start_op))
+                            .sum(),
+                    )
+            })
+    }
+
+    /// Every member's hash, in member order: `known[i]` where given,
+    /// otherwise rebuilt from this change set's ops. Reads every op row.
+    pub(crate) fn member_hashes(
+        &self,
+        known: &[Option<ChangeHash>],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.storage
+            .member_hashes(known)
+            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
+    }
+
     pub(crate) fn change_cols(&self) -> ChangeSetChangeCols<'_> {
         self.storage
             .change_cols()

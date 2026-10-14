@@ -146,6 +146,8 @@ pub(crate) struct ChangeBuilder<'a> {
     start_op: u64,
     num_ops: u64,
     received: u64,
+    /// the change's hash is already known, so its ops are dropped
+    skip: bool,
     encoder: OpEncoderStrategy<'a>,
 }
 
@@ -624,6 +626,7 @@ impl<'a> ChangeBuilder<'a> {
             start_op: meta.start_op,
             num_ops: meta.num_ops() as u64,
             received: 0,
+            skip: false,
             encoder: OpEncoderStrategy::Unstarted,
         }
     }
@@ -645,6 +648,9 @@ impl<'a> ChangeBuilder<'a> {
 
     /// Whether `op` was the change's last.
     fn add(&mut self, op: OpBuilder<'a>) -> Result<bool, OutOfMemory> {
+        if self.skip {
+            return Ok(false);
+        }
         self.start()?;
         let index = (op.id.counter() - self.start_op) as usize;
         self.encoder.add(index, op);
@@ -1184,6 +1190,44 @@ impl<'a> ChangeCollector<'a> {
         Ok(changes)
     }
 
+    /// Drop the ops of every change `known` has a hash for, ahead of
+    /// [`Self::member_hashes`].
+    pub(crate) fn skipping(mut self, known: &[Option<ChangeHash>]) -> Self {
+        for (change, hash) in self.changes.iter().zip(known) {
+            self.builders[change.builder].skip = hash.is_some();
+        }
+        self
+    }
+
+    /// Each change's hash: `known[i]` where given, otherwise rebuilt.
+    pub(crate) fn member_hashes(
+        mut self,
+        deps: &[ChangeHash],
+        known: &[Option<ChangeHash>],
+    ) -> Result<Vec<ChangeHash>, Error> {
+        self.flush_deletes();
+        self.take_error()?;
+        let num_changes = self.changes.len();
+        let mut hashes = Vec::with_capacity(num_changes);
+        for (change, known) in self.changes.iter().zip(known) {
+            let hash = match known {
+                Some(hash) => *hash,
+                None => {
+                    let all_deps = MemberHashes {
+                        num_changes,
+                        hashes: &hashes,
+                        deps,
+                    };
+                    self.builders[change.builder]
+                        .hash(change, &all_deps, &mut self.mapper)?
+                        .0
+                }
+            };
+            hashes.push(hash);
+        }
+        Ok(hashes)
+    }
+
     pub(crate) fn process_all_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
         let mut iter = op_set.iter();
         while let Some(op) = iter.try_next()? {
@@ -1239,7 +1283,7 @@ impl<'a> ChangeCollector<'a> {
 }
 
 #[derive(Debug)]
-pub struct CollectedHashes {
+pub(crate) struct CollectedHashes {
     pub(crate) hashes: Vec<ChangeHash>,
     pub(crate) num_ops: Vec<u64>,
     pub(crate) heads: BTreeSet<ChangeHash>,
@@ -1257,6 +1301,22 @@ impl<'a> ChangeSetDeps<'a> {
             num_changes,
             changes,
             deps,
+        }
+    }
+}
+
+struct MemberHashes<'a> {
+    num_changes: usize,
+    hashes: &'a [ChangeHash],
+    deps: &'a [ChangeHash],
+}
+
+impl GetHash for MemberHashes<'_> {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash> {
+        if index >= self.num_changes {
+            self.deps.get(index - self.num_changes).copied()
+        } else {
+            self.hashes.get(index).copied()
         }
     }
 }

@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
-use crate::author::Authors;
 use crate::automerge::{AuditMode, Automerge};
-use crate::change_graph::GraphLoadError;
-use crate::change_graph::{ChangeGraph, ChangeGraphCols, Members, NodeIdx, UncheckedHashes};
-use crate::op_set2::change::CollectedHashes;
+use crate::change_graph::{ChangeGraph, Members, NodeIdx, UncheckedHashes};
 use crate::storage::change_set::ChangeSet;
 use crate::types::ChangeHash;
 use crate::AutomergeError;
@@ -55,16 +52,6 @@ pub trait HashRetention:
 
     #[doc(hidden)]
     fn collect_garbage(graph: &mut ChangeGraph<Self>);
-
-    /// `computed` is `None` only for a [`Retained`] load with `head_indexes`.
-    #[doc(hidden)]
-    fn finish_load(
-        cols: ChangeGraphCols,
-        computed: Option<CollectedHashes>,
-        heads: &[ChangeHash],
-        head_indexes: Option<&[u64]>,
-        authors: &mut Authors,
-    ) -> Result<ChangeGraph<Self>, GraphLoadError>;
 
     #[doc(hidden)]
     fn from_full(doc: Automerge<Full>) -> Automerge<Self>;
@@ -125,17 +112,6 @@ impl HashRetention for Full {
     }
 
     fn collect_garbage(_graph: &mut ChangeGraph<Self>) {}
-
-    fn finish_load(
-        cols: ChangeGraphCols,
-        computed: Option<CollectedHashes>,
-        _heads: &[ChangeHash],
-        _head_indexes: Option<&[u64]>,
-        authors: &mut Authors,
-    ) -> Result<ChangeGraph<Self>, GraphLoadError> {
-        let computed = computed.expect("a load keeping every hash computes them all");
-        cols.finalize(computed, authors)
-    }
 
     fn from_full(doc: Automerge<Full>) -> Automerge<Self> {
         doc
@@ -210,20 +186,6 @@ impl HashRetention for Retained {
 
     fn collect_garbage(graph: &mut ChangeGraph<Self>) {
         graph.retain_hashes_only();
-    }
-
-    fn finish_load(
-        cols: ChangeGraphCols,
-        computed: Option<CollectedHashes>,
-        heads: &[ChangeHash],
-        head_indexes: Option<&[u64]>,
-        authors: &mut Authors,
-    ) -> Result<ChangeGraph<Self>, GraphLoadError> {
-        match (computed, head_indexes) {
-            (Some(computed), _) => Ok(cols.finalize(computed, authors)?.into_retained()),
-            (None, Some(head_indexes)) => cols.finalize_unchecked(heads, head_indexes, authors),
-            (None, None) => unreachable!("a document without head indexes is hashed on load"),
-        }
     }
 
     fn from_full(doc: Automerge<Full>) -> Automerge<Self> {

@@ -85,6 +85,8 @@ pub enum OnPartialLoad {
 /// arbitrary historical hashes, such as the hash-based sync protocol, return
 /// [`AutomergeError::AuditModeRequired`]. With [`AuditMode::Enabled`] every
 /// change hash is verified and kept, and loading costs a full rehash.
+/// Without it, only loading a change set (what [`Automerge::save`] writes)
+/// skips the rehash.
 ///
 /// Convert with [`Automerge::enable_audit_mode`] and
 /// [`Automerge::disable_audit_mode`].
@@ -1104,6 +1106,15 @@ impl<H: HashRetention> Automerge<H> {
         if !first_chunk.checksum_valid() {
             return Err(load::Error::BadChecksum.into());
         }
+        // only a change set names the hashes a document outside audit mode keeps
+        if H::AUDIT != AuditMode::Enabled
+            && !matches!(first_chunk, storage::Chunk::ChangeSetColumns(..))
+        {
+            return Automerge::<Full>::load_with_options_and_mark_validation(
+                data, options, mark_order,
+            )
+            .map(H::from_full);
+        }
 
         let mut changes: Vec<load::LoadedChunk> = vec![];
         let mut first_chunk_was_doc = false;
@@ -1126,7 +1137,8 @@ impl<H: HashRetention> Automerge<H> {
                         actor,
                     ) => AutomergeError::AuthorOnNonInitialSeq(seq, actor),
                     e => load::Error::InflateDocument(Box::new(e)).into(),
-                })?
+                })
+                .map(H::from_full)?
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -1327,7 +1339,7 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// A whole-document change set by default; see [`SaveFormat`].
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        self.save_with(options, NameHashes::Anchors)
+        self.save_with(options, NameHashes::UntagTiny)
     }
 
     pub(crate) fn save_with(&self, options: SaveOptions, names: NameHashes) -> Vec<u8> {
@@ -1384,7 +1396,7 @@ impl<H: HashRetention> Automerge<H> {
 
     /// The whole document as a single change set.
     pub fn change_set_document(&self) -> Result<ChangeSet, AutomergeError> {
-        self.change_set_document_with(NameHashes::Anchors)
+        self.change_set_document_with(NameHashes::All)
     }
 
     pub(crate) fn change_set_document_with(
@@ -1412,7 +1424,7 @@ impl<H: HashRetention> Automerge<H> {
         let clock = self.change_graph.seq_clock_for_nodes(nodes);
         let fresh = self.change_graph.get_build_indexes(clock);
         let boundary = self.change_ids_to_hashes_lossy(heads);
-        self.change_set_nodes(fresh, &boundary, NameHashes::Anchors)
+        self.change_set_nodes(fresh, &boundary, NameHashes::All)
     }
 
     fn change_set_nodes(
@@ -2454,8 +2466,17 @@ impl Automerge<Retained> {
         ops.commit(self, resolved);
         self.debug_assert_mask_indexes();
         self.republish_if_pending();
-        // reads the delivered ops, so it waits for the commit
-        self.rebuild_missing_hashes(base..self.change_graph.len() as u32);
+        // both read the delivered ops, so they wait for the commit
+        if change_set.is_rehashable() {
+            let kept: Vec<usize> = (0..num_members).filter(|i| keep[*i]).collect();
+            owes_gc |= self.rehash_untagged(change_set, &kept, base)?;
+        }
+        let missing = self
+            .change_graph
+            .unhashed_retained_nodes(base..self.change_graph.len() as u32);
+        if !missing.is_empty() {
+            owes_gc |= self.rehash_document_for(&missing)?;
+        }
         if owes_gc {
             self.change_graph.gc_after_batch();
         }
@@ -2463,41 +2484,62 @@ impl Automerge<Retained> {
     }
 }
 
-impl<H: HashRetention> Automerge<H> {
-    /// Rehash the nodes in `delivered` that must be retained but whose
-    /// hashes the change set did not name.
-    fn rebuild_missing_hashes(&mut self, delivered: std::ops::Range<u32>) {
-        let missing = self.change_graph.unhashed_retained_nodes(delivered);
-        if missing.is_empty() {
-            return;
-        }
-        let nodes = self
-            .change_graph
-            .nodes_back_to_retained(missing.iter().copied());
-        // without the delivered anchors this walk would rehash most of the document
-        debug_assert_eq!(
-            nodes
-                .iter()
-                .filter(|n| self.change_graph.is_below_fragment_top(**n))
-                .count(),
-            0,
-            "rebuild walked below fragment_top ({} nodes)",
-            nodes.len(),
-        );
-        let Some(hashes) = self.rehash(nodes.clone()) else {
-            return;
-        };
-        let mut owes_gc = false;
-        for (node, hash) in nodes.iter().zip(hashes) {
-            if missing.binary_search(node).is_ok() {
-                owes_gc |= self.change_graph.record_node_hash(*node, hash);
+impl Automerge<Retained> {
+    /// Records the hash of every member `change_set` delivered without
+    /// one; its member `kept[i]` became node `base + i`. Whether an owed GC
+    /// is due.
+    fn rehash_untagged(
+        &mut self,
+        change_set: &ChangeSet,
+        kept: &[usize],
+        base: u32,
+    ) -> Result<bool, AutomergeError> {
+        let node = |i: usize| crate::change_graph::NodeIdx(base + i as u32);
+        let mut known = vec![None; change_set.member_seqs.len()];
+        let mut untagged = Vec::new();
+        for (i, member) in kept.iter().enumerate() {
+            known[*member] = self.change_graph.hash_for_node(node(i));
+            if known[*member].is_none() {
+                untagged.push(i);
             }
         }
-        if owes_gc {
-            self.change_graph.gc_after_batch();
+        if untagged.is_empty() {
+            return Ok(false);
         }
+        let hashes = change_set.member_hashes(&known)?;
+        let mut owes_gc = false;
+        for i in untagged {
+            owes_gc |= self.change_graph.record_node_hash(node(i), hashes[kept[i]]);
+        }
+        Ok(owes_gc)
     }
 
+    /// Slow: rehashes the whole document. Whether an owed GC is due.
+    fn rehash_document_for(
+        &mut self,
+        missing: &[crate::change_graph::NodeIdx],
+    ) -> Result<bool, AutomergeError> {
+        debug_assert!(
+            false,
+            "a change set left out {} hashes this document must retain",
+            missing.len()
+        );
+        tracing::warn!(
+            missing = missing.len(),
+            "a change set left out hashes this document must retain; rehashing the document"
+        );
+        let all = self.compute_hashes()?;
+        let mut owes_gc = false;
+        for node in missing {
+            owes_gc |= self
+                .change_graph
+                .record_node_hash(*node, all[node.0 as usize]);
+        }
+        Ok(owes_gc)
+    }
+}
+
+impl<H: HashRetention> Automerge<H> {
     /// Test support: panics if the op columns are out of order, their
     /// indexes are stale, or they do not reproduce the document's history.
     #[doc(hidden)]
@@ -3864,11 +3906,11 @@ pub enum SaveFormat {
     Legacy,
 }
 
-/// Which loose-commit hashes a change set names.
+/// Which level-0 hashes a change set names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NameHashes {
-    /// Only those a load cannot cheaply recompute.
-    Anchors,
+    /// All but tiny changes', when the load can rehash those cheaply.
+    UntagTiny,
     /// Every one, so the load rehashes nothing.
     All,
 }
@@ -5996,8 +6038,7 @@ mod retained_hash_tests {
     use crate::ROOT;
     use std::collections::BTreeSet;
 
-    /// Otherwise the receiver must fall back to
-    /// [`Automerge::rebuild_missing_hashes`].
+    /// Otherwise the receiver must rehash the whole document.
     #[test]
     fn change_sets_name_every_retained_hash() {
         let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"aaaa"[..]));

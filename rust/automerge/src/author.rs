@@ -19,7 +19,7 @@ use crate::error;
 /// [`Authors`] will also keep track of the current [`Author`] that is acting on
 /// the document, if set.
 #[derive(Clone, Debug)]
-pub struct Authors {
+pub(crate) struct Authors {
     /// Previously recorded [`Author`]s.
     ///
     /// The `Vec` must contain unique [`Authors`], and should be indexed by the

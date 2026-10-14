@@ -1,140 +1,143 @@
-//! [`NameHashes::All`] and [`NameHashes::Anchors`] must load to the same
-//! document; `Anchors` should be smaller.
+//! A small save leaves out the hashes of its tiny changes and the load
+//! rehashes them; nothing else is ever left out.
 
-use super::{Automerge, NameHashes, SaveOptions};
+use super::{Automerge, LoadOptions, NameHashes, SaveOptions};
 use crate::autocommit::AutoCommit;
+use crate::hash_retention::Retained;
+use crate::storage::change_set::{REHASHABLE_CHANGES, REHASHABLE_OPS};
 use crate::tx::{CommitOptions, Transactable};
 use crate::{ActorId, ROOT};
 
-fn build(n: usize) -> AutoCommit {
-    let mut doc = AutoCommit::new();
-    for i in 0..n {
-        doc.put(&ROOT, format!("k{i}"), i as i64).unwrap();
-        doc.commit();
+/// One change per entry of `sizes`, with that many ops.
+fn build(sizes: &[usize]) -> AutoCommit {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"save"[..]));
+    for (c, n) in sizes.iter().enumerate() {
+        for o in 0..*n {
+            doc.put(&ROOT, format!("k{}", o % 64), (c * 100_000 + o) as i64)
+                .unwrap();
+        }
+        doc.commit_with(CommitOptions::default().with_time(0));
     }
     doc
 }
 
-#[test]
-fn small_round_trips_through_the_rebuild() {
-    let mut live = build(2000);
-    let (lvl0, lvl1) = (live.fragments(0..=0).len(), live.fragments(1..).len());
-    assert!(lvl0 > 0 && lvl1 > 0, "test needs both bands populated");
-
-    let fast = live
-        .document()
-        .save_with(SaveOptions::default(), NameHashes::All);
-    let small = live.save();
-    assert!(
-        small.len() < fast.len(),
-        "NameHashes::Anchors should drop bytes ({} vs {})",
-        small.len(),
-        fast.len()
-    );
-
-    let rebuilt = Automerge::load(&small).unwrap();
-    // level >= 1 fragments don't survive a round trip
-    assert_eq!(
-        rebuilt.fragments(0..=0).len(),
-        lvl0,
-        "loose commits rebuilt"
-    );
-    assert_eq!(
-        rebuilt.save(),
-        Automerge::load(&fast).unwrap().save(),
-        "both paths land on the same document"
-    );
+fn reload(bytes: &[u8]) -> Automerge<Retained> {
+    Automerge::load_with_options(bytes, LoadOptions::new().with_manual_gc()).unwrap()
 }
 
-/// Unlike a linear history, loose commits here depend on changes inside
-/// fragments.
-fn mesh(actors: usize, rounds: usize, burst: usize) -> AutoCommit {
-    let mut peers: Vec<AutoCommit> = (0..actors)
-        .map(|i| AutoCommit::new().with_actor(ActorId::from(&[i as u8, 1, 2, 3][..])))
-        .collect();
-    for r in 0..rounds {
-        for (i, p) in peers.iter_mut().enumerate() {
-            for b in 0..burst {
-                p.put(&ROOT, format!("k{i}"), (r * burst + b) as i64)
-                    .unwrap();
-                p.commit_with(CommitOptions::default().with_time(0));
-            }
-        }
-        let snaps: Vec<Vec<u8>> = peers.iter_mut().map(|p| p.save()).collect();
-        for (i, p) in peers.iter_mut().enumerate() {
-            for (j, s) in snaps.iter().enumerate() {
-                if i != j {
-                    let mut o = AutoCommit::load(s).unwrap();
-                    p.merge(&mut o).unwrap();
-                }
-            }
-        }
-    }
-    peers.swap_remove(0)
-}
-
-/// Missing anchors trip the `debug_assert` in
-/// `Automerge::rebuild_missing_hashes` on load.
 #[test]
-fn anchors_floor_the_rebuild_on_a_concurrent_document() {
-    let mut doc = mesh(16, 8, 3);
-    assert!(
-        !doc.fragments(1..).is_empty(),
-        "fixture needs a fragment for the loose commits to reach into"
-    );
-
-    let fast = doc
-        .document()
-        .save_with(SaveOptions::default(), NameHashes::All);
+fn a_small_save_leaves_out_tiny_hashes_and_the_load_puts_them_back() {
+    let mut doc = build(&[1; 200]);
+    let doc = doc.document();
     let small = doc.save();
-
+    let full = doc.save_with(SaveOptions::default(), NameHashes::All);
     assert!(
-        small.len() < fast.len(),
-        "expected Small < Fast, got {} / {}",
+        small.len() + 190 * 32 < full.len(),
+        "{} vs {}",
         small.len(),
-        fast.len()
+        full.len()
     );
-    let from_fast = Automerge::load(&fast).unwrap();
-    let from_small = Automerge::load(&small).unwrap();
-    assert_eq!(from_small.save(), from_fast.save());
+    let held = doc.change_graph.held_hashes();
+    assert_eq!(reload(&small).change_graph.held_hashes(), held);
+
+    let mut other = Automerge::<Retained>::new().with_manual_gc();
+    other.load_incremental(&small).unwrap();
+    assert_eq!(other.change_graph.held_hashes(), held);
 }
 
 #[test]
-fn small_keeps_hashes_for_op_heavy_changes() {
-    // The actor is pinned because which commits end up loose depends on
-    // hashes. 400 changes stays inside `REHASH_BUDGET_US`, so only the op
-    // count decides whether a hash is omitted.
-    let build = |ops: usize| {
-        let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"frag"[..]));
-        for c in 0..400 {
-            for o in 0..ops {
-                doc.put(&ROOT, format!("k{o}"), (c * ops + o) as i64)
-                    .unwrap();
-            }
-            doc.commit();
-        }
-        let fast = doc
-            .document()
-            .save_with(SaveOptions::default(), NameHashes::All);
-        let small = doc.save();
-        assert!(
-            doc.fragments(0..=0).len() > 5,
-            "fixture needs loose commits"
-        );
-        assert_eq!(
-            Automerge::load(&small).unwrap().save(),
-            Automerge::load(&fast).unwrap().save(),
-            "both formats land on the same document at {ops} ops"
-        );
-        (fast.len(), small.len())
-    };
-
-    let (fast, small) = build(2);
-    assert!(
-        small < fast,
-        "small changes drop their hashes ({small} vs {fast})"
+fn a_big_change_keeps_its_hash() {
+    let mut sizes = vec![1; 100];
+    sizes.push(1000);
+    sizes.extend([1; 100]);
+    let mut doc = build(&sizes);
+    let doc = doc.document();
+    let big = doc.change_graph.all_nodes()[100];
+    let big_hash = doc.change_graph.hash_for_node(big).unwrap();
+    let change_set = doc.change_set_document_with(NameHashes::UntagTiny).unwrap();
+    assert!(change_set.retained.iter().any(|(_, h)| *h == big_hash));
+    assert!(change_set.retained.len() < 10, "tiny hashes left out");
+    assert_eq!(
+        reload(&doc.save()).change_graph.held_hashes(),
+        doc.change_graph.held_hashes()
     );
+}
 
-    let (fast, small) = build(64);
-    assert_eq!(small, fast, "op-heavy changes keep theirs");
+#[test]
+fn a_save_over_either_limit_names_every_hash() {
+    let mut too_many_ops = vec![1; 10];
+    too_many_ops.push(REHASHABLE_OPS as usize - 9);
+    for sizes in [vec![1; REHASHABLE_CHANGES + 1], too_many_ops] {
+        let mut doc = build(&sizes);
+        let doc = doc.document();
+        assert_eq!(
+            doc.save(),
+            doc.save_with(SaveOptions::default(), NameHashes::All)
+        );
+    }
+}
+
+#[test]
+fn a_save_at_the_limits_leaves_out_tiny_hashes() {
+    let mut sizes = vec![1; REHASHABLE_CHANGES - 1];
+    sizes.push(REHASHABLE_OPS as usize - (REHASHABLE_CHANGES - 1));
+    let mut doc = build(&sizes);
+    let doc = doc.document();
+    let small = doc.save();
+    assert!(small.len() < doc.save_with(SaveOptions::default(), NameHashes::All).len());
+    assert_eq!(
+        reload(&small).change_graph.held_hashes(),
+        doc.change_graph.held_hashes()
+    );
+}
+
+#[test]
+fn a_small_change_set_missing_any_hash_is_rehashed() {
+    let mut sizes = vec![1; 50];
+    sizes.push(1000);
+    let mut doc = build(&sizes);
+    let doc = doc.document();
+    let mut change_set = doc.change_set_document_with(NameHashes::All).unwrap();
+    change_set.retained.clear();
+    let mut other = Automerge::<Retained>::new().with_manual_gc();
+    other.apply_change_set(change_set).unwrap();
+    assert_eq!(
+        other.change_graph.held_hashes(),
+        doc.change_graph.held_hashes()
+    );
+}
+
+fn big_change_set_missing_hashes() -> (Automerge<Retained>, crate::storage::ChangeSet) {
+    let mut doc = build(&[1; REHASHABLE_CHANGES + 100]);
+    let doc = doc.document().clone();
+    let mut change_set = doc.change_set_document_with(NameHashes::All).unwrap();
+    assert!(!change_set.retained.is_empty());
+    change_set.retained.clear();
+    (doc, change_set)
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "left out")]
+fn a_big_change_set_missing_hashes_fails_fast_in_debug() {
+    let (_, change_set) = big_change_set_missing_hashes();
+    Automerge::<Retained>::new()
+        .apply_change_set(change_set)
+        .unwrap();
+}
+
+#[test]
+#[cfg(not(debug_assertions))]
+fn a_big_change_set_missing_hashes_rehashes_the_document() {
+    let (doc, change_set) = big_change_set_missing_hashes();
+    let mut other = Automerge::<Retained>::new().with_manual_gc();
+    other.apply_change_set(change_set).unwrap();
+    assert!(other
+        .change_graph
+        .unhashed_retained_nodes(0..other.change_graph.len() as u32)
+        .is_empty());
+    assert!(other
+        .change_graph
+        .held_hashes()
+        .is_subset(&doc.change_graph.held_hashes()));
 }

@@ -270,7 +270,27 @@ impl ChangeSetStorage<'_, Verified> {
         let change_meta = self.changes()?.to_vec();
         let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
         let mut collector = ChangeCollector::from_change_set_changes(change_meta, &actors);
+        self.feed(&mut collector)?;
+        collector
+            .decode_change_set(&actors, &self.deps)
+            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))
+    }
 
+    pub(crate) fn member_hashes(
+        &self,
+        known: &[Option<ChangeHash>],
+    ) -> Result<Vec<ChangeHash>, ParseError> {
+        let change_meta = self.changes()?.to_vec();
+        let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
+        let mut collector =
+            ChangeCollector::from_change_set_changes(change_meta, &actors).skipping(known);
+        self.feed(&mut collector)?;
+        collector
+            .member_hashes(&self.deps, known)
+            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))
+    }
+
+    fn feed<'c>(&'c self, collector: &mut ChangeCollector<'c>) -> Result<(), ParseError> {
         let mut rows: HashSet<OpId> = HashSet::new();
         let mut inverted: HashMap<OpId, Vec<OpId>> = HashMap::new();
         for bop in self.iter_ops_checked() {
@@ -295,7 +315,7 @@ impl ChangeSetStorage<'_, Verified> {
             let next = Some((bop.op.obj, key));
             if last != next {
                 if let Some((obj, key)) = last.take() {
-                    add_elided_deletes(&mut collector, &mut inverted, &mut group_dels, obj, key);
+                    add_elided_deletes(collector, &mut inverted, &mut group_dels, obj, key);
                 }
                 last = next;
             }
@@ -312,13 +332,10 @@ impl ChangeSetStorage<'_, Verified> {
             collector.add(op);
         }
         if let Some((obj, key)) = last.take() {
-            add_elided_deletes(&mut collector, &mut inverted, &mut group_dels, obj, key);
+            add_elided_deletes(collector, &mut inverted, &mut group_dels, obj, key);
         }
 
-        let change_set = collector
-            .decode_change_set(&actors, &self.deps)
-            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
-        Ok(change_set)
+        Ok(())
     }
 
     /// Yields an error for each malformed row (see [`Self::verify`]

@@ -56,7 +56,7 @@ pub struct ChangeGraph<H: HashRetention = Retained> {
 }
 
 #[derive(Debug)]
-pub struct ChangeGraphCols {
+pub(crate) struct ChangeGraphCols {
     graph: ChangeGraph,
 }
 
@@ -123,9 +123,7 @@ struct ResolvedHashes {
 pub struct UncheckedHashes;
 
 #[derive(Debug, thiserror::Error)]
-pub enum GraphLoadError {
-    #[error("the document's head indexes are invalid")]
-    BadHeadIndexes,
+pub(crate) enum GraphLoadError {
     #[error("actor {actor} has an author footer at seq {seq}")]
     AuthorOnNonInitialSeq { seq: u64, actor: usize },
 }
@@ -173,23 +171,6 @@ pub(crate) enum ChangeSetDep {
     Member(usize),
     Node(NodeIdx),
 }
-
-/// Ops above which a loose commit keeps its hash even under
-/// [`NameHashes::Anchors`](crate::automerge::NameHashes::Anchors): omitting a
-/// hash saves ~34 bytes but costs ~0.6us of rehash per op on load.
-const REHASHABLE_OPS: u64 = 8;
-
-/// Microseconds of extra load an omission may cost before
-/// [`NameHashes::Anchors`](crate::automerge::NameHashes::Anchors) names the hashes instead.
-/// The rehash sweeps the omitted changes' whole id span, so one straggler
-/// can cost far more than the 34 bytes it saves.
-const REHASH_BUDGET_US: u64 = 1_000;
-
-/// Estimated rehash nanoseconds per op of id span swept.
-const SWEEP_NS_PER_OP: u64 = 400;
-
-/// Estimated rehash nanoseconds per op the omitted changes carry.
-const CARRY_NS_PER_OP: u64 = 760;
 
 impl<H: HashRetention> ChangeGraph<H> {
     pub(crate) fn new(actors: &ActorTable) -> Self {
@@ -359,8 +340,9 @@ impl<H: HashRetention> ChangeGraph<H> {
         frontier.get_for_actor(&actor) >= NonZeroU32::new(self.seq[i])
     }
 
-    pub(crate) fn is_below_fragment_top(&self, node: NodeIdx) -> bool {
-        self.is_covered_by(node, &self.fragment_top)
+    #[cfg(test)]
+    pub(crate) fn held_hashes(&self) -> BTreeSet<ChangeHash> {
+        self.hashes.iter().map(|(_, h)| h).collect()
     }
 
     /// The nodes that keep their hashes outside audit mode, heads excepted.
@@ -432,30 +414,38 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// The hashes among `nodes` a receiver of them must retain, each paired
-    /// with its position in `nodes`. Unless `names` is
-    /// [`NameHashes::All`](crate::automerge::NameHashes::All), hashes the
-    /// receiver can cheaply rehash are omitted.
+    /// with its position in `nodes`: every one held, or for an audited
+    /// document the ones a document without audit mode would hold. With
+    /// [`NameHashes::UntagTiny`](crate::automerge::NameHashes::UntagTiny)
+    /// and few enough `nodes` to rehash on load, tiny level-0 changes are
+    /// left out.
     pub(crate) fn hashes_to_retain(
         &self,
         nodes: &[NodeIdx],
         names: crate::automerge::NameHashes,
     ) -> Vec<(usize, ChangeHash)> {
+        use crate::storage::change_set::{rehashable, TINY_CHANGE_OPS};
+        let num_ops = |n: &NodeIdx| self.num_ops.get(n.0 as usize).unwrap_or_default();
+        let untag_tiny = names == crate::automerge::NameHashes::UntagTiny
+            && rehashable(nodes.len(), nodes.iter().map(num_ops).sum());
         let members = Members::new(nodes);
-        let carried: Vec<NodeIdx> = self.leveled_members(&members).map(|(n, _)| n).collect();
-        let frontier = self.calculate_clock(carried.clone());
-        let loose = self.loose_members(&members, &frontier);
-        let candidates = carried.into_iter().chain(loose);
-        let retained = self.retained_from(candidates, &frontier);
-        let omittable = |n: &NodeIdx| {
-            !self.is_covered_by(*n, &frontier)
-                && self.num_ops.get(n.0 as usize).unwrap_or_default() <= REHASHABLE_OPS
+        let named: Vec<NodeIdx> = if H::AUDIT == crate::automerge::AuditMode::Enabled {
+            let carried: Vec<NodeIdx> = self.leveled_members(&members).map(|(n, _)| n).collect();
+            let frontier = self.calculate_clock(carried.clone());
+            let loose = self.loose_members(&members, &frontier);
+            self.retained_from(carried.into_iter().chain(loose), &frontier)
+                .into_iter()
+                .collect()
+        } else {
+            nodes.to_vec()
         };
-        let name_all = names == crate::automerge::NameHashes::All
-            || self.rehash_cost_us(retained.iter().filter(|n| omittable(n))) > REHASH_BUDGET_US;
-        retained
+        named
             .into_iter()
-            .filter(|n| name_all || !omittable(n))
-            .filter_map(|n| Some((members.position(n)?, self.hashes.get(n)?)))
+            .filter_map(|n| Some((members.position(n)?, n, self.hashes.get(n)?)))
+            .filter(|(_, n, h)| {
+                !untag_tiny || h.fragment_level() > 0 || num_ops(n) > TINY_CHANGE_OPS
+            })
+            .map(|(i, _, h)| (i, h))
             .collect()
     }
 
@@ -486,22 +476,6 @@ impl<H: HashRetention> ChangeGraph<H> {
         members: &'a Members<'a>,
     ) -> impl Iterator<Item = (NodeIdx, ChangeHash)> + 'a {
         self.hashes.leveled_members(members).into_iter()
-    }
-
-    /// Estimated microseconds a receiver spends rehashing `omitted`.
-    fn rehash_cost_us<'n>(&self, omitted: impl Iterator<Item = &'n NodeIdx>) -> u64 {
-        let (mut lo, mut hi, mut carried) = (u64::MAX, 0u64, 0u64);
-        for n in omitted {
-            let max_op = self.max_ops[n.0 as usize] as u64;
-            let ops = self.num_ops.get(n.0 as usize).unwrap_or_default();
-            lo = lo.min((max_op + 1).saturating_sub(ops));
-            hi = hi.max(max_op);
-            carried += ops;
-        }
-        if carried == 0 {
-            return 0;
-        }
-        ((hi + 1 - lo) * SWEEP_NS_PER_OP + carried * CARRY_NS_PER_OP) / 1_000
     }
 
     fn retained_store(&self) -> Retained {
@@ -2162,52 +2136,6 @@ impl ChangeGraphCols {
             .filter(|n| !has_child[*n as usize])
             .filter_map(|n| graph.hashes.get(NodeIdx(n)))
             .collect();
-
-        graph.cache_clocks();
-
-        graph.cache_fragments();
-
-        Ok(graph)
-    }
-
-    /// Finish loading without computing change hashes: only the heads are
-    /// known (`heads[i]` names node `head_indexes[i]`), and they are
-    /// unverified.
-    pub(crate) fn finalize_unchecked(
-        self,
-        heads: &[ChangeHash],
-        head_indexes: &[u64],
-        authors: &mut Authors,
-    ) -> Result<ChangeGraph<Retained>, GraphLoadError> {
-        let mut graph = self.graph;
-        graph.assign_authors(0..graph.len(), authors)?;
-        debug_assert!(graph.hashes.len() == 0);
-
-        if heads.len() != head_indexes.len() {
-            return Err(GraphLoadError::BadHeadIndexes);
-        }
-
-        let has_child = graph.has_child_mask();
-        let num_childless = has_child.iter().filter(|c| !**c).count();
-        if num_childless != head_indexes.len() {
-            return Err(GraphLoadError::BadHeadIndexes);
-        }
-
-        let mut pre = HashMap::with_capacity(heads.len());
-        for (hash, index) in heads.iter().zip(head_indexes.iter()) {
-            let i = *index as usize;
-            if i >= graph.len() || has_child[i] {
-                return Err(GraphLoadError::BadHeadIndexes);
-            }
-            let node = NodeIdx(*index as u32);
-            if pre.insert(node, *hash).is_some() {
-                return Err(GraphLoadError::BadHeadIndexes);
-            }
-            graph.nodes_by_hash.insert(*hash, node);
-        }
-
-        let len = graph.len();
-        graph.hashes = Retained::new(pre, len);
 
         graph.cache_clocks();
 

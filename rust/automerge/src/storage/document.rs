@@ -6,9 +6,9 @@ use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
 use crate::actor::ActorList;
 use crate::author::Authors;
-use crate::automerge::AuditMode;
 use crate::automerge::Automerge;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols, GraphLoadError};
+use crate::hash_retention::Full;
 use crate::op_set2::change::{ChangeCollector, CollectedHashes, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
@@ -33,9 +33,6 @@ pub(crate) struct Document<'a> {
     header: Header,
     actors: ActorList,
     heads: Vec<ChangeHash>,
-    /// The node index of each head, aligned with `heads`. `None` for
-    /// documents written without the head-index suffix.
-    head_indexes: Option<Vec<u64>>,
     pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
     change_metadata: RawColumns<Uncompressed>,
@@ -140,14 +137,14 @@ impl<'a> Document<'a> {
 
         // parse the suffix, which may be empty if this document was produced by an older version
         // of the JS automerge implementation
-        let (i, suffix, head_indexes) = if i.is_empty() {
-            (i, 0, None)
+        let (i, suffix) = if i.is_empty() {
+            (i, 0)
         } else {
             let (i, parsed) = parse::range_of(
                 |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
                 i,
             )?;
-            (i, parsed.range.start, Some(parsed.value))
+            (i, parsed.range.start)
         };
 
         let compression::Decompressed {
@@ -190,7 +187,6 @@ impl<'a> Document<'a> {
                 header,
                 actors,
                 heads,
-                head_indexes,
                 op_metadata,
                 op_bytes,
                 change_metadata,
@@ -287,7 +283,6 @@ impl<'a> Document<'a> {
             compressed_bytes,
             header,
             heads,
-            head_indexes: Some(head_indices),
             op_metadata,
             op_bytes,
             change_metadata,
@@ -315,10 +310,6 @@ impl<'a> Document<'a> {
         &self.actors
     }
 
-    pub(crate) fn head_indexes(&self) -> Option<&[u64]> {
-        self.head_indexes.as_deref()
-    }
-
     pub(crate) fn heads(&self) -> &[ChangeHash] {
         &self.heads
     }
@@ -341,52 +332,35 @@ impl<'a> Document<'a> {
         }
     }
 
-    pub(crate) fn reconstruct<H: crate::hash_retention::HashRetention>(
+    pub(crate) fn reconstruct(
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
         allow_invalid_marks: bool,
         write_frontier: WriteFrontier,
-    ) -> Result<Automerge<H>, ReconstructError> {
+    ) -> Result<Automerge<Full>, ReconstructError> {
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
-
-        let head_indexes = self
-            .head_indexes()
-            .filter(|_| H::AUDIT != AuditMode::Enabled);
-        let compute_hashes = head_indexes.is_none();
 
         // the op scan checks neither actor index ranges nor succ/value totals
         op_set.column_validation()?;
 
-        let changes = if compute_hashes {
-            let mut collector =
-                ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?.hashing();
-            collector.process_all_ops(&op_set)?;
-            let changes = collector.collect_hashes()?;
-            self.verify_changes(&changes, mode)?;
-            Some(changes)
-        } else {
-            None
-        };
+        let mut collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?.hashing();
+        collector.process_all_ops(&op_set)?;
+        let changes = collector.collect_hashes()?;
+        self.verify_changes(&changes, mode)?;
 
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::new(&op_set.actors);
-        let change_graph = H::finish_load(
-            change_cols,
-            changes,
-            self.heads(),
-            head_indexes,
-            &mut authors,
-        )
-        .map_err(|e| match e {
-            GraphLoadError::BadHeadIndexes => ReconstructError::BadHeadIndexes,
-            GraphLoadError::AuthorOnNonInitialSeq { seq, actor } => {
-                ReconstructError::AuthorOnNonInitialSeq(seq, op_set.actors[actor].clone())
-            }
-        })?;
+        let change_graph = change_cols
+            .finalize(changes, &mut authors)
+            .map_err(|e| match e {
+                GraphLoadError::AuthorOnNonInitialSeq { seq, actor } => {
+                    ReconstructError::AuthorOnNonInitialSeq(seq, op_set.actors[actor].clone())
+                }
+            })?;
 
         debug_assert!(op_set.validate_top_index());
 
@@ -430,8 +404,6 @@ pub(crate) enum ReconstructError {
     InvalidChanges(#[from] crate::storage::load::change_collector::Error),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
-    #[error("the document's head indexes are invalid")]
-    BadHeadIndexes,
     // FIXME - i need to do this check
     //#[error("succ out of order")]
     //SuccOutOfOrder,
