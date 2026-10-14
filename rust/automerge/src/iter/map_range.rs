@@ -203,9 +203,7 @@ pub(crate) struct MapDiff<'a> {
     op_set: Option<&'a OpSet>,
     iter: Unshift<DiffIter<'a, MapIter<'a>>>,
     id: OpIdIter<'a>,
-    id_pos: usize,
     value: ValueIter<'a>,
-    value_pos: usize,
     clock: ClockRange<'a>,
 }
 
@@ -297,7 +295,7 @@ impl<'a> MapDiff<'a> {
             diff = Diff::Add;
         }
         let MapEntry { pos, key, action } = map;
-        let id = self.id_at(pos);
+        let id = self.id.seek_to(pos).unwrap();
         if diff == Diff::Add && self.clock.predates(&id) {
             expose = true;
         }
@@ -314,20 +312,11 @@ impl<'a> MapDiff<'a> {
         }
     }
 
-    fn id_at(&mut self, pos: usize) -> OpId {
-        let skip = pos.saturating_sub(self.id_pos);
-        let id = self.id.nth(skip).unwrap_or(crate::types::ROOT);
-        self.id_pos = pos + 1;
-        id
-    }
-
     fn value_at(&mut self, pos: usize, action: Action) -> (ValueRef<'a>, i64) {
         let Some(op_set) = self.op_set else {
             return (ValueRef::Scalar(ScalarValue::Null), 0);
         };
-        let skip = pos.saturating_sub(self.value_pos);
-        let value = self.value.nth(skip).unwrap_or(ScalarValue::Null);
-        self.value_pos = pos + 1;
+        let value = self.value.seek_to(pos).unwrap_or(ScalarValue::Null);
         match action {
             Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable => {
                 (ValueRef::from_action_value(action, ScalarValue::Null), 0)
@@ -350,10 +339,8 @@ impl<'a> MapDiff<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange<'a>) -> Self {
         let key_str = op_set.key_str_iter_range(&range);
         let action = op_set.action_iter_range(&range);
-        let id = op_set.id_iter_range(&range);
-        let id_pos = range.start;
-        let value = op_set.value_iter_range(&range);
-        let value_pos = range.start;
+        let id = op_set.id_iter();
+        let value = op_set.value_iter();
 
         let map_iter = MapIter { key_str, action };
 
@@ -364,22 +351,14 @@ impl<'a> MapDiff<'a> {
             op_set: Some(op_set),
             iter,
             id,
-            id_pos,
             value,
-            value_pos,
             clock,
         }
     }
 
     /// Forward only.
     pub(crate) fn shift(&mut self, range: Range<usize>) {
-        self.iter.shift(range.clone());
-        if let Some(op_set) = self.op_set {
-            self.id = op_set.id_iter_range(&range);
-            self.id_pos = range.start;
-            self.value = op_set.value_iter_range(&range);
-            self.value_pos = range.start;
-        }
+        self.iter.shift(range);
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {

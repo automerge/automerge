@@ -1310,11 +1310,15 @@ impl<'a> SuccIterIter<'a> {
 
     #[inline(never)]
     pub(crate) fn try_next(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let num_succ = self
-            .count
-            .next()
-            .ok_or(ReadOpError::MissingValue("succ_count"))?
-            .value as usize;
+        self.next_cursors()
+            .ok_or(ReadOpError::MissingValue("succ_count"))
+    }
+
+    // `Iterator::next` takes this directly: converting the `Result` from
+    // `try_next` copies the cursors through memory on every op.
+    #[inline]
+    fn next_cursors(&mut self) -> Option<SuccCursors<'a>> {
+        let num_succ = self.count.next()?.value as usize;
 
         let result = SuccCursors {
             len: num_succ,
@@ -1327,7 +1331,7 @@ impl<'a> SuccIterIter<'a> {
         self.ctr.advance_by(num_succ);
         self.incs.advance_by(num_succ);
 
-        Ok(result)
+        Some(result)
     }
 
     /// [`Iterator::next`] without building the successor cursors.
@@ -1398,7 +1402,7 @@ impl<'a> Iterator for SuccIterIter<'a> {
     type Item = SuccCursors<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().ok()
+        self.next_cursors()
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {

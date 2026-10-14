@@ -20,6 +20,12 @@ pub(crate) struct ActorMap {
     version: u64,
 }
 
+static IDENTITY: ActorMap = ActorMap {
+    to_logical: Vec::new(),
+    to_stored: Vec::new(),
+    version: 0,
+};
+
 impl ActorMap {
     pub(crate) fn identity() -> Arc<Self> {
         Arc::new(ActorMap::default())
@@ -208,7 +214,7 @@ where
     pub(crate) fn iter(&self) -> MappedIter<'_, T> {
         MappedIter {
             iter: self.col.iter(),
-            map: self.map.clone(),
+            map: &self.map,
         }
     }
 
@@ -221,7 +227,7 @@ where
     pub(crate) fn iter_range(&self, range: std::ops::Range<usize>) -> MappedIter<'_, T> {
         MappedIter {
             iter: self.col.iter_range(range),
-            map: self.map.clone(),
+            map: &self.map,
         }
     }
 
@@ -326,7 +332,7 @@ where
         }
         Ok(MappedIter {
             iter: state.state.try_resume(&self.col)?,
-            map: self.map.clone(),
+            map: &self.map,
         })
     }
 
@@ -386,7 +392,7 @@ where
     T: MapActor + hexane::ColumnValueRef,
 {
     iter: hexane::Iter<'a, T>,
-    map: Arc<ActorMap>,
+    map: &'a ActorMap,
 }
 
 impl<'a, T> MappedIter<'a, T>
@@ -512,7 +518,7 @@ where
     pub(crate) fn raw(iter: hexane::Iter<'a, T>) -> Self {
         MappedIter {
             iter,
-            map: ActorMap::identity(),
+            map: &IDENTITY,
         }
     }
 
@@ -531,7 +537,7 @@ where
     fn default() -> Self {
         MappedIter {
             iter: Default::default(),
-            map: ActorMap::identity(),
+            map: &IDENTITY,
         }
     }
 }

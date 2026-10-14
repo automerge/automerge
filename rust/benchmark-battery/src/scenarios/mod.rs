@@ -1,5 +1,4 @@
 pub mod apply;
-pub mod audit_mode;
 pub mod bestiary;
 pub mod build;
 pub mod diff;
@@ -258,7 +257,6 @@ impl From<MemoryBenchmark> for Benchmark {
 pub fn benchmarks() -> Vec<Benchmark> {
     let mut benchmarks = Vec::new();
     benchmarks.extend(apply::benchmarks().into_iter().map(Into::into));
-    benchmarks.extend(audit_mode::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(bestiary::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(build::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(diff::benchmarks().into_iter().map(Into::into));
