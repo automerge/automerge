@@ -238,7 +238,7 @@ impl<'a> Untangler<'a> {
                 log.insert(op.bld.obj, self.index, value, op.id(), conflict);
                 self.index += 1;
             } else {
-                let marks = self.value.marks.after.current().cloned();
+                let marks = self.value.marks.after.current_without_unmarks();
                 match op.bld.action {
                     Action::MakeMap => {
                         // Block markers
@@ -1107,7 +1107,7 @@ mod tests {
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
     use crate::types;
-    use crate::{make_rng, ActorId, AutoCommit, ROOT};
+    use crate::{make_rng, ActorId, AutoCommit, Patch, PatchAction, ROOT};
     use rand::prelude::*;
 
     /// InsertQuery::resolve had a bug where an increment op before a trailing
@@ -1811,6 +1811,39 @@ mod tests {
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
         }
         merge_and_diff(&mut doc1, &mut doc1_copy, &changes);
+    }
+
+    #[test]
+    fn batch_insert_into_unmarked_text_has_no_marks() {
+        let mut doc = AutoCommit::new();
+        let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "0123456789").unwrap();
+        let mark = Mark::new("bold".into(), true, 0, 10);
+        doc.mark(&text, mark, ExpandMark::Both).unwrap();
+        doc.unmark(&text, "bold", 3, 7, ExpandMark::Both).unwrap();
+        doc.commit();
+
+        let mut other = doc.fork();
+        other.splice_text(&text, 5, 0, "x").unwrap();
+        other.commit();
+        let change = other.get_last_local_change().unwrap();
+
+        let heads = doc.get_heads();
+        doc.update_diff_cursor();
+        doc.apply_changes([change]).unwrap();
+        let patches = doc.diff_incremental();
+        let after = doc.get_heads();
+        assert_eq!(patches, doc.diff(&heads, &after));
+        assert!(
+            matches!(
+                &patches[..],
+                [Patch {
+                    action: PatchAction::SpliceText { marks: None, .. },
+                    ..
+                }]
+            ),
+            "{patches:?}"
+        );
     }
 
     fn merge_and_diff(a: &mut AutoCommit, a_copy: &mut AutoCommit, changes: &[Change]) {

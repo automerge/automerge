@@ -6,6 +6,9 @@
   text went from 9ms to 1.6us).
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
+* Patches for text inserted by `apply_changes`, `load_incremental` and `merge`
+  into a range where a mark was removed no longer carry that mark with a null
+  value. They now match `diff` and local edits.
 
 ## 0.12.0
 
