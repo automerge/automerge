@@ -403,7 +403,7 @@ impl<H: HashRetention> Automerge<H> {
             author: None,
         };
         doc.remove_unused_actors(false);
-        doc.pin_resolved_boundaries();
+        doc.pin_boundaries_if_hashes_may_be_freed();
         doc.rederive_visibility();
         if doc.mask_hides_existing_ops() {
             doc.ops
@@ -572,7 +572,7 @@ impl<H: HashRetention> Automerge<H> {
     /// dirty, so an incremental diff reports it. Returns whether it rebuilt.
     pub(crate) fn republish_mask(&mut self, update: impl FnOnce(&mut WriteFrontier)) -> bool {
         update(&mut self.write_frontier);
-        self.pin_resolved_boundaries();
+        self.pin_boundaries_if_hashes_may_be_freed();
         let visibility = visibility::FrontierVisibility::new(
             &self.write_frontier,
             &self.change_graph,
@@ -620,6 +620,14 @@ impl<H: HashRetention> Automerge<H> {
 
     /// A hash boundary the graph now holds becomes an id, so freeing the hash
     /// later cannot make it pending again.
+    // An audited document never frees a hash, and pinning clones an actor id
+    // per boundary: large policies spend most of a load doing it.
+    fn pin_boundaries_if_hashes_may_be_freed(&mut self) {
+        if matches!(H::AUDIT, AuditMode::Disabled) {
+            self.pin_resolved_boundaries();
+        }
+    }
+
     fn pin_resolved_boundaries(&mut self) {
         for boundary in self.write_frontier.boundaries_mut() {
             if let Boundary::Hash(hash) = boundary {
