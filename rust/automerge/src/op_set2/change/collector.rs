@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::io::Write;
 use std::marker::PhantomData;
 use std::mem::size_of;
@@ -376,7 +376,13 @@ pub(crate) struct ProgressiveEncoder<'a> {
     pub(crate) len: usize,
     pub(crate) start_op: Option<u64>,
     actors: Vec<bool>,
-    queue: BTreeMap<usize, OpBuilder<'a>>,
+    /// slot `i` holds op `len + i`; grown only while at least half full
+    window: VecDeque<Option<OpBuilder<'a>>>,
+    window_filled: usize,
+    /// ops past the window, boxed so rebalancing moves pointers
+    sparse: BTreeMap<usize, Box<OpBuilder<'a>>>,
+    /// ops before `len`, from a malformed document; kept so its hash fails
+    stray: Vec<OpBuilder<'a>>,
     obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
     obj_ctr: hexane::Encoder<'a, Option<u64>>,
     key_actor: hexane::Encoder<'a, Option<ActorIdx>>,
@@ -414,15 +420,53 @@ impl<'a> ProgressiveEncoder<'a> {
 
     fn add(&mut self, index: usize, op: OpBuilder<'a>) {
         self.process_op(&op);
-        if index == self.len {
+        let Some(slot) = index.checked_sub(self.len) else {
+            self.stray.push(op);
+            return;
+        };
+        if slot == 0 {
+            self.window.pop_front();
             self.append(op);
             self.len += 1;
-            while let Some(op) = self.queue.remove(&self.len) {
+            while let Some(op) = self.next_queued() {
                 self.append(op);
                 self.len += 1;
             }
+        } else if slot < self.window.len() {
+            self.window[slot] = Some(op);
+            self.window_filled += 1;
+        } else if slot < 2 * (self.window_filled + 1) + 64 {
+            self.window.resize_with(slot + 1, || None);
+            self.window[slot] = Some(op);
+            self.window_filled += 1;
+            self.absorb_sparse();
         } else {
-            self.queue.insert(index, op);
+            self.sparse.insert(index, Box::new(op));
+            let span = index + 1 - self.len;
+            if 2 * (self.window_filled + self.sparse.len()) >= span {
+                self.window.resize_with(span, || None);
+                self.absorb_sparse();
+            }
+        }
+    }
+
+    fn absorb_sparse(&mut self) {
+        let end = self.len + self.window.len();
+        let beyond = self.sparse.split_off(&end);
+        for (i, op) in std::mem::replace(&mut self.sparse, beyond) {
+            self.window[i - self.len] = Some(*op);
+            self.window_filled += 1;
+        }
+    }
+
+    fn next_queued(&mut self) -> Option<OpBuilder<'a>> {
+        match self.window.front() {
+            Some(Some(_)) => {
+                self.window_filled -= 1;
+                self.window.pop_front().flatten()
+            }
+            Some(None) => None,
+            None => self.sparse.remove(&self.len).map(|op| *op),
         }
     }
 
@@ -453,8 +497,16 @@ impl<'a> ProgressiveEncoder<'a> {
     }
 
     fn flush(&mut self) {
-        let queue = std::mem::take(&mut self.queue);
-        for (_index, op) in queue {
+        let window = std::mem::take(&mut self.window);
+        let sparse = std::mem::take(&mut self.sparse);
+        let stray = std::mem::take(&mut self.stray);
+        self.window_filled = 0;
+        for op in window
+            .into_iter()
+            .flatten()
+            .chain(sparse.into_values().map(|op| *op))
+            .chain(stray)
+        {
             self.append(op);
             self.len += 1;
         }
