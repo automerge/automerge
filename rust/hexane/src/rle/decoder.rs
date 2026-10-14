@@ -235,7 +235,7 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
         } else {
             match C::try_read_signed(&self.data[self.byte_pos..])? {
                 (count_bytes, n) if n > 0 => {
-                    let count = n as usize;
+                    let count = usize::try_from(n).map_err(|_| PackError::BadFormat)?;
                     let value_start = self.byte_pos + count_bytes;
                     let (vlen, value) = T::try_unpack::<C>(&self.data[value_start..])?;
                     let bytes = count_bytes + vlen;
@@ -249,7 +249,10 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
                     }))
                 }
                 (bytes, n) if n < 0 => {
-                    let count = (-n) as usize;
+                    // The trusted decoder negates the header as i64 too, so
+                    // reject MIN even when its unsigned magnitude fits usize.
+                    let count = n.checked_neg().ok_or(PackError::BadFormat)?;
+                    let count = usize::try_from(count).map_err(|_| PackError::BadFormat)?;
                     self.byte_pos += bytes;
                     self.remaining = count;
                     self.state = RunState::Literal;
@@ -258,7 +261,7 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
                 (count_bytes, _) => {
                     let (ncb, count) =
                         C::try_read_unsigned(&self.data[self.byte_pos + count_bytes..])?;
-                    let count = count as usize;
+                    let count = usize::try_from(count).map_err(|_| PackError::BadFormat)?;
                     let bytes = count_bytes + ncb;
                     self.byte_pos += bytes;
                     self.state = RunState::Idle;
@@ -533,6 +536,66 @@ impl<'a, T: RleValue, C: Codec> RunDecoder for RleDecoder<'a, T, C> {
             if self.remaining == 0 {
                 return None;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod arithmetic_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_min_literal_count() {
+        let data = Leb128::encode_signed(i64::MIN);
+        let mut decoder = RleDecoder::<u64>::new(data.as_bytes());
+        assert!(decoder.try_next_segment().is_err());
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    mod counts_32bit {
+        use super::*;
+
+        // Truncation would turn this into 2, which passes canonical run validation.
+        const OVERSIZED_COUNT: u64 = u32::MAX as u64 + 3;
+
+        #[test]
+        fn rejects_oversized_repeat_count() {
+            let mut data = Leb128::encode_signed(OVERSIZED_COUNT as i64)
+                .as_bytes()
+                .to_vec();
+            data.extend(Leb128::encode_unsigned(7));
+            let mut decoder = RleDecoder::<u64>::new(&data);
+            assert!(decoder.try_next_segment().is_err());
+        }
+
+        #[test]
+        fn rejects_oversized_literal_count() {
+            let data = Leb128::encode_signed(-(OVERSIZED_COUNT as i64));
+            let mut decoder = RleDecoder::<u64>::new(data.as_bytes());
+            assert!(decoder.try_next_segment().is_err());
+        }
+
+        #[test]
+        fn rejects_oversized_string_length() {
+            let mut data = Leb128::encode_unsigned(OVERSIZED_COUNT).as_bytes().to_vec();
+            data.extend_from_slice(b"hi");
+            assert!(String::try_unpack::<Leb128>(&data).is_err());
+        }
+
+        #[test]
+        fn rejects_oversized_byte_length() {
+            let mut data = Leb128::encode_unsigned(OVERSIZED_COUNT).as_bytes().to_vec();
+            data.extend_from_slice(b"hi");
+            assert!(Vec::<u8>::try_unpack::<Leb128>(&data).is_err());
+            assert!(Vec::<u8>::value_len::<Leb128>(&data).is_none());
+        }
+
+        #[test]
+        fn rejects_oversized_null_count() {
+            let mut data = vec![0];
+            data.extend(Leb128::encode_unsigned(OVERSIZED_COUNT));
+            let mut decoder = RleDecoder::<Option<u64>>::new(&data);
+            assert!(decoder.try_next_segment().is_err());
         }
     }
 }
