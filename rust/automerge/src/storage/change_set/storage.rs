@@ -4,23 +4,19 @@ use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::OnceLock;
 
+use crate::actor::ActorTable;
 use crate::op_set2::change::ChangeCollector;
-use crate::op_set2::op::Op;
 use crate::op_set2::types::ActorIdx;
-use crate::op_set2::types::KeyRef;
 use crate::op_set2::OpSet;
 use crate::storage::change::{OpReadState, Unverified, Verified};
 use crate::storage::columns::compression;
 
 use crate::storage::{parse, RawColumns};
-use crate::types::{ActorId, ChangeHash, ElemId, ObjId, OpId};
+use crate::types::{ActorId, ChangeHash};
 use crate::Change;
-use std::collections::{HashMap, HashSet};
 
-use super::{
-    ChangeSetChange, ChangeSetChangeCols, ChangeSetChangeIterUnverified, OpIterUnverified,
-    ParseError,
-};
+use super::builder::ExternalPreds;
+use super::{ChangeSetChange, ChangeSetChangeCols, ChangeSetChangeIterUnverified, ParseError};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ChangeSetStorage<'a, OpReadState> {
@@ -89,6 +85,22 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
             return Err(bad("short member seq column"));
         }
         Ok((actors, seqs))
+    }
+
+    /// Each member's metadata, decoded afresh rather than cached.
+    pub(crate) fn iter_change_meta(&self) -> Result<ChangeSetChangeIterUnverified<'_>, ParseError> {
+        ChangeSetChangeIterUnverified::try_new(
+            &self.changes_meta,
+            &self.bytes[self.changes_data.clone()],
+        )
+    }
+
+    fn collector<'c>(&'c self, actors: &'c ActorTable) -> Result<ChangeCollector<'c>, ParseError> {
+        let meta = self
+            .iter_change_meta()?
+            .map(|c| c.map(Into::into))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ChangeCollector::from_change_meta(meta, actors))
     }
 
     pub(crate) fn changes(&self) -> Result<&[ChangeSetChange<'static>], ParseError> {
@@ -267,10 +279,10 @@ impl ChangeSetStorage<'_, Verified> {
     /// Rebuilds the member [`Change`]s, including the deletes that have no
     /// row of their own.
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
-        let change_meta = self.changes()?.to_vec();
-        let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
-        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &actors);
-        self.feed(&mut collector)?;
+        let actors = ActorTable::from_sorted(self.actors.clone())?;
+        let ops = self.ops()?;
+        let mut collector = self.collector(&actors)?;
+        self.feed(&ops, &mut collector)?;
         collector
             .decode_change_set(&actors, &self.deps)
             .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))
@@ -280,86 +292,45 @@ impl ChangeSetStorage<'_, Verified> {
         &self,
         known: &[Option<ChangeHash>],
     ) -> Result<Vec<ChangeHash>, ParseError> {
-        let change_meta = self.changes()?.to_vec();
-        let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
-        let mut collector =
-            ChangeCollector::from_change_set_changes(change_meta, &actors).skipping(known);
-        self.feed(&mut collector)?;
+        let actors = ActorTable::from_sorted(self.actors.clone())?;
+        let ops = self.ops()?;
+        let mut collector = self.collector(&actors)?.skipping(known);
+        self.feed(&ops, &mut collector)?;
         collector
             .member_hashes(&self.deps, known)
             .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))
     }
 
-    fn feed<'c>(&'c self, collector: &mut ChangeCollector<'c>) -> Result<(), ParseError> {
-        let mut rows: HashSet<OpId> = HashSet::new();
-        let mut inverted: HashMap<OpId, Vec<OpId>> = HashMap::new();
-        for bop in self.iter_ops_checked() {
-            let bop = bop?;
-            rows.insert(bop.op.id);
-            for s in &bop.succ {
-                inverted.entry(*s).or_default().push(bop.op.id);
-            }
-        }
-
-        // an elided delete's position within its change is fixed by its
-        // counter, so it can be emitted whenever its key group ends
-        let mut last: Option<(ObjId, KeyRef<'_>)> = None;
-        let mut group_dels: Vec<OpId> = Vec::new();
-        for bop in self.iter_ops_checked() {
-            let bop = bop?;
-            let key = if bop.op.insert {
-                KeyRef::Seq(ElemId(bop.op.id))
-            } else {
-                bop.op.key.clone()
-            };
-            let next = Some((bop.op.obj, key));
-            if last != next {
-                if let Some((obj, key)) = last.take() {
-                    add_elided_deletes(collector, &mut inverted, &mut group_dels, obj, key);
-                }
-                last = next;
-            }
-            for s in &bop.succ {
-                if !rows.contains(s) && !group_dels.contains(s) {
-                    group_dels.push(*s);
-                }
-            }
-            let mut op = bop.op;
-            if let Some(member_preds) = inverted.remove(&op.id) {
-                op.pred.extend(member_preds);
-                op.pred.sort_unstable();
-            }
-            collector.add(op);
-        }
-        if let Some((obj, key)) = last.take() {
-            add_elided_deletes(collector, &mut inverted, &mut group_dels, obj, key);
-        }
-
-        Ok(())
+    /// Every member's hash, hashing each as soon as its ops are in, as a
+    /// document load does.
+    pub(crate) fn hash_members(&self) -> Result<Vec<ChangeHash>, ParseError> {
+        let actors = ActorTable::from_sorted(self.actors.clone())?;
+        let ops = self.ops()?;
+        let mut collector = self.collector(&actors)?.hashing_change_set(&self.deps);
+        self.feed(&ops, &mut collector)?;
+        let collected = collector
+            .collect_hashes()
+            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
+        Ok(collected.hashes)
     }
 
-    /// Yields an error for each malformed row (see [`Self::verify`]
-    /// for which rows the column validation misses).
-    pub(crate) fn iter_ops_checked(&self) -> OpIterUnverified<'_> {
-        let bytes = &self.bytes[self.ops_data.clone()];
-        OpIterUnverified::new(&self.ops_meta, bytes)
+    fn ops(&self) -> Result<Cow<'_, OpSet>, ParseError> {
+        match self.change_set_ops.get() {
+            Some(ops) => Ok(Cow::Borrowed(ops)),
+            None => self.load_change_set_ops().map(Cow::Owned),
+        }
+    }
+
+    fn feed<'c>(
+        &self,
+        ops: &'c OpSet,
+        collector: &mut ChangeCollector<'c>,
+    ) -> Result<(), ParseError> {
+        let mut preds = ExternalPreds::new(&self.ops_meta, &self.bytes[self.ops_data.clone()]);
+        collector.process_all_ops_with(ops, |out| preds.next_row(out))
     }
 
     pub(crate) fn deps(&self) -> &[ChangeHash] {
         &self.deps
-    }
-}
-
-fn add_elided_deletes<'a>(
-    collector: &mut ChangeCollector<'a>,
-    member_preds: &mut HashMap<OpId, Vec<OpId>>,
-    dels: &mut Vec<OpId>,
-    obj: ObjId,
-    key: KeyRef<'a>,
-) {
-    for d in dels.drain(..) {
-        let mut pred = member_preds.remove(&d).unwrap_or_default();
-        pred.sort_unstable();
-        collector.add(Op::del(d, obj, key.clone()).build(pred));
     }
 }

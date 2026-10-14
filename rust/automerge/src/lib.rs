@@ -334,7 +334,8 @@ pub use patches::{Patch, PatchAction};
 pub use read::Stats;
 pub use sequence_tree::SequenceTree;
 pub use storage::{
-    ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet, VerificationMode,
+    AuditedMember, ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet,
+    VerificationMode,
 };
 pub use text_value::ConcreteTextValue;
 pub use tx::BlockOrText;

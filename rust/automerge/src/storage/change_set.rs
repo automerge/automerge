@@ -17,7 +17,7 @@ mod storage;
 pub(crate) use builder::ops;
 pub(crate) use builder::{
     ChangeSetBuilder, ChangeSetChangeCols, ChangeSetChangeIterUnverified, ChangeSetChangeWriter,
-    ChangeSetOpWriter, DeltaRunGrouper, ManifoldOp, ManifoldOps, OpIterUnverified,
+    ChangeSetOpWriter, DeltaRunGrouper, ManifoldOp, ManifoldOps,
 };
 pub(crate) use error::ParseError;
 pub(crate) use storage::ChangeSetStorage;
@@ -80,17 +80,18 @@ impl ChangeSet {
     /// Whether a load may rehash the members whose hashes this change set
     /// leaves out: it depends on nothing outside itself and is small.
     pub(crate) fn is_rehashable(&self) -> bool {
+        // decoding the members' metadata is O(members), so count them first
         self.deps().is_empty()
             && self.boundary.is_empty()
+            && self.member_seqs.len() <= REHASHABLE_CHANGES
             && self.changes().is_ok_and(|changes| {
-                changes.len() <= REHASHABLE_CHANGES
-                    && rehashable(
-                        changes.len(),
-                        changes
-                            .iter()
-                            .map(|c| (c.max_op + 1).saturating_sub(c.start_op))
-                            .sum(),
-                    )
+                rehashable(
+                    changes.len(),
+                    changes
+                        .iter()
+                        .map(|c| (c.max_op + 1).saturating_sub(c.start_op))
+                        .sum(),
+                )
             })
     }
 
@@ -123,48 +124,61 @@ impl ChangeSet {
             .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
     }
 
-    /// The carried changes, in topological order, after checking that
+    /// What [`Self::to_changes`] would return, or with `M = ChangeHash` just
+    /// the changes' hashes, in topological order, after checking that
     /// everything the change set says about them is true. Two things cannot
     /// be checked without the sender's document: that it retains every hash
     /// a receiver will need, and its op hints.
     ///
-    /// Rebuilds and hashes every carried change, as [`Self::to_changes`] does.
-    pub fn audit(&self) -> Result<Vec<Change>, MalformedChangeSet> {
-        use std::collections::{HashMap, HashSet};
+    /// Hashes every carried change; `M = Change` also rebuilds each one.
+    pub fn audit<M: AuditedMember>(&self) -> Result<Vec<M>, MalformedChangeSet> {
+        use std::collections::HashSet;
 
-        let changes = self
-            .storage
-            .to_changes()
-            .map_err(|e| MalformedChangeSet::Decode(Box::new(e)))?;
+        let members = M::decode(self)?;
+        let hash = |i: usize| members[i].hash();
+        let num_members = members.len();
+        let decode = |e| MalformedChangeSet::Decode(Box::new(e));
 
-        let mut member_ids = HashSet::with_capacity(changes.len());
-        for c in &changes {
-            let id = ChangeId::from_doc_seq(c.seq(), c.actor_id().clone(), 0);
-            if !member_ids.insert(id.clone()) {
-                return Err(MalformedChangeSet::DuplicateMember(id));
+        // decoding checked that the actors are unique, so an index names one
+        let mut member_ids = HashSet::with_capacity(num_members);
+        let mut depended_on = vec![false; num_members];
+        let mut used_deps = vec![false; self.deps().len()];
+        let mut num_meta = 0;
+        for (i, m) in self.storage.iter_change_meta().map_err(decode)?.enumerate() {
+            let m = m.map_err(decode)?;
+            num_meta += 1;
+            if m.actor >= self.actors().len() {
+                return Err(MalformedChangeSet::Invalid("member actor out of range"));
             }
-        }
-        let index_of: HashMap<ChangeHash, usize> = changes
-            .iter()
-            .enumerate()
-            .map(|(i, c)| (c.hash(), i))
-            .collect();
-
-        let mut depended_on = vec![false; changes.len()];
-        let mut external = HashSet::new();
-        for (i, c) in changes.iter().enumerate() {
-            for dep in c.deps() {
-                match index_of.get(dep) {
-                    Some(&j) if j < i => depended_on[j] = true,
-                    Some(_) => return Err(MalformedChangeSet::NotTopological(i)),
-                    None => {
-                        external.insert(*dep);
+            if !member_ids.insert((m.actor, m.seq)) {
+                let actor = self.actors()[m.actor].clone();
+                return Err(MalformedChangeSet::DuplicateMember(ChangeId::from_doc_seq(
+                    m.seq, actor, 0,
+                )));
+            }
+            for d in &m.deps {
+                let d = *d as usize;
+                match d.checked_sub(num_members) {
+                    None if d < i => depended_on[d] = true,
+                    None => return Err(MalformedChangeSet::NotTopological(i)),
+                    Some(e) => {
+                        *used_deps
+                            .get_mut(e)
+                            .ok_or(MalformedChangeSet::Invalid("member dep out of range"))? = true
                     }
                 }
             }
         }
+        if num_meta != num_members {
+            return Err(MalformedChangeSet::Invalid("member count mismatch"));
+        }
+        let is_member = |id: &ChangeId| {
+            self.actors()
+                .binary_search(id.actor())
+                .is_ok_and(|actor| member_ids.contains(&(actor, id.seq())))
+        };
 
-        let names = |index: usize, hash: ChangeHash| changes[index].hash() == hash;
+        let names = |index: usize, h: ChangeHash| index < num_members && hash(index) == h;
         for &(hash, index) in &self.heads {
             if !names(index, hash) {
                 return Err(MalformedChangeSet::WrongHeadHash { hash, index });
@@ -183,37 +197,44 @@ impl ChangeSet {
 
         let mut declared_heads: Vec<usize> = self.heads.iter().map(|(_, i)| *i).collect();
         declared_heads.sort_unstable();
-        let actual_heads: Vec<usize> = (0..changes.len()).filter(|i| !depended_on[*i]).collect();
+        let actual_heads: Vec<usize> = (0..num_members).filter(|i| !depended_on[*i]).collect();
         if declared_heads != actual_heads {
             return Err(MalformedChangeSet::WrongHeads);
         }
 
+        let carried = |hashes: &HashSet<ChangeHash>| {
+            if hashes.is_empty() {
+                return None;
+            }
+            (0..num_members).map(hash).find(|h| hashes.contains(h))
+        };
         let declared_deps: HashSet<ChangeHash> = self.deps().iter().copied().collect();
-        if declared_deps.len() != self.deps().len() || declared_deps != external {
+        if declared_deps.len() != self.deps().len()
+            || used_deps.contains(&false)
+            || carried(&declared_deps).is_some()
+        {
             return Err(MalformedChangeSet::WrongDeps);
         }
 
         let mut declared_checkpoints: Vec<usize> =
             self.checkpoints.iter().map(|(i, _)| *i).collect();
         declared_checkpoints.sort_unstable();
-        let actual_checkpoints: Vec<usize> = changes
-            .iter()
-            .enumerate()
-            .filter(|(i, c)| c.hash().fragment_level() > 0 && depended_on[*i])
-            .map(|(i, _)| i)
+        let actual_checkpoints: Vec<usize> = (0..num_members)
+            .filter(|i| hash(*i).fragment_level() > 0 && depended_on[*i])
             .collect();
         if declared_checkpoints != actual_checkpoints {
             return Err(MalformedChangeSet::WrongCheckpoints);
         }
 
-        if let Some(id) = self.dep_ids.iter().find(|id| member_ids.contains(*id)) {
+        if let Some(id) = self.dep_ids.iter().find(|id| is_member(id)) {
             return Err(MalformedChangeSet::ExternalIdIsMember(id.clone()));
         }
+        let boundary: HashSet<ChangeHash> = self.boundary.iter().map(|(h, _)| *h).collect();
+        if let Some(hash) = carried(&boundary) {
+            return Err(MalformedChangeSet::BoundaryIsMember(hash));
+        }
         for (hash, id) in &self.boundary {
-            if index_of.contains_key(hash) {
-                return Err(MalformedChangeSet::BoundaryIsMember(*hash));
-            }
-            if member_ids.contains(id) {
+            if is_member(id) {
                 return Err(MalformedChangeSet::ExternalIdIsMember(id.clone()));
             }
             if let Some(k) = self.deps().iter().position(|d| d == hash) {
@@ -223,7 +244,7 @@ impl ChangeSet {
             }
         }
 
-        Ok(changes)
+        Ok(members)
     }
 
     /// Metadata for each carried change, in topological order, without
@@ -631,6 +652,47 @@ pub enum MalformedChangeSet {
         "malformed change set: boundary {0} and the dep with its hash have different change ids"
     )]
     BoundaryDisagreesWithDep(ChangeHash),
+}
+
+/// What [`ChangeSet::audit`] returns for each carried change: the whole
+/// [`Change`], or only its [`ChangeHash`].
+pub trait AuditedMember: Sized + sealed::Sealed {
+    #[doc(hidden)]
+    fn decode(change_set: &ChangeSet) -> Result<Vec<Self>, MalformedChangeSet>;
+    #[doc(hidden)]
+    fn hash(&self) -> ChangeHash;
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for crate::Change {}
+    impl Sealed for crate::ChangeHash {}
+}
+
+impl AuditedMember for Change {
+    fn decode(change_set: &ChangeSet) -> Result<Vec<Self>, MalformedChangeSet> {
+        change_set
+            .storage
+            .to_changes()
+            .map_err(|e| MalformedChangeSet::Decode(Box::new(e)))
+    }
+
+    fn hash(&self) -> ChangeHash {
+        Change::hash(self)
+    }
+}
+
+impl AuditedMember for ChangeHash {
+    fn decode(change_set: &ChangeSet) -> Result<Vec<Self>, MalformedChangeSet> {
+        change_set
+            .storage
+            .hash_members()
+            .map_err(|e| MalformedChangeSet::Decode(Box::new(e)))
+    }
+
+    fn hash(&self) -> ChangeHash {
+        *self
+    }
 }
 
 fn parse_change_set_columns(bytes: &[u8]) -> Result<ChangeSetStorage<'static, Verified>, String> {
@@ -1042,6 +1104,104 @@ mod tests {
         assert!(err.0.contains("sequence number"), "got {err}");
     }
 
+    fn audited(actor: &[u8]) -> crate::automerge::Automerge<crate::hash_retention::Full> {
+        crate::automerge::Automerge::new()
+            .with_actor(crate::ActorId::from(actor))
+            .enable_audit_mode()
+            .unwrap()
+    }
+
+    fn put(doc: &mut crate::automerge::Automerge<crate::hash_retention::Full>, i: i64) {
+        use crate::tx::{CommitOptions, Transactable};
+        let mut tx = doc.transaction();
+        tx.put(crate::ROOT, "k", i).unwrap();
+        tx.commit_with(CommitOptions::default().with_time(0));
+    }
+
+    #[test]
+    fn an_audited_apply_skips_members_it_has() {
+        let src = audit_fixture();
+        let mut doc = audited(b"rcv");
+        let first = src.change_set_for_fragment(&src.fragments(..)[0]).unwrap();
+        doc.apply_change_set(first).unwrap();
+        doc.apply_change_set(src.change_set_document().unwrap())
+            .unwrap();
+        assert_eq!(doc.get_heads(), src.get_heads());
+        assert_eq!(doc.save(), src.save());
+    }
+
+    #[test]
+    fn an_audited_apply_rejects_a_forked_actor() {
+        let mut ours = audited(b"zsn");
+        put(&mut ours, 1);
+        let mut theirs = audited(b"zsn");
+        put(&mut theirs, 2);
+        put(&mut theirs, 3);
+        let err = ours
+            .apply_change_set(theirs.change_set_document().unwrap())
+            .unwrap_err();
+        assert!(
+            matches!(err, AutomergeError::DuplicateSeqNumber(1, _)),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_audited_apply_rejects_a_dep_id_naming_another_change() {
+        let mut base = audited(b"aaa");
+        put(&mut base, 1);
+        put(&mut base, 2);
+        let mut src = base.fork().with_actor(crate::ActorId::from(&b"bbb"[..]));
+        put(&mut src, 3);
+        let at = |seq| {
+            crate::ChangeId::from_parts(
+                crate::ActorId::from(&b"aaa"[..]),
+                NonZeroU64::new(seq).unwrap(),
+            )
+        };
+        let mut cs = src.change_set_after(&[at(2)]).unwrap().unwrap();
+        assert_eq!(cs.dep_ids, vec![at(2)]);
+        cs.dep_ids[0] = at(1);
+        for (_, id) in &mut cs.boundary {
+            *id = at(1);
+        }
+        cs.audit::<ChangeHash>().unwrap();
+        let err = base.apply_change_set(cs).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                AutomergeError::MalformedChangeSet(MalformedChangeSet::Invalid(_))
+            ),
+            "{err}"
+        );
+        assert_eq!(base.get_changes(&[]).unwrap().len(), 2);
+    }
+
+    fn delivers_queued_changes<H: crate::hash_retention::HashRetention>(
+        mut doc: crate::automerge::Automerge<H>,
+    ) {
+        let mut src = audited(b"src");
+        for i in 0..3 {
+            put(&mut src, i);
+        }
+        let changes = src.get_changes(&[]).unwrap();
+        doc.apply_changes(changes[1..].to_vec()).unwrap();
+        assert!(!doc.queue.is_empty());
+        doc.apply_change_set(src.change_set_document().unwrap())
+            .unwrap();
+        assert!(doc.queue.is_empty());
+        doc.apply_changes(changes).unwrap();
+        assert_eq!(doc.get_heads(), src.get_heads());
+    }
+
+    #[test]
+    fn a_change_set_delivers_queued_changes() {
+        delivers_queued_changes(audited(b"rcv"));
+        delivers_queued_changes(
+            crate::automerge::Automerge::<crate::hash_retention::Retained>::new(),
+        );
+    }
+
     fn audit_fixture() -> crate::automerge::Automerge<crate::hash_retention::Full> {
         use crate::automerge::Automerge;
         use crate::tx::{CommitOptions, Transactable};
@@ -1078,12 +1238,13 @@ mod tests {
     }
 
     fn assert_audits(cs: &ChangeSet) {
-        let audited = cs.audit().unwrap_or_else(|e| panic!("audit failed: {e}"));
+        let audited = cs
+            .audit::<Change>()
+            .unwrap_or_else(|e| panic!("audit failed: {e}"));
         let decoded = cs.to_changes().unwrap();
-        assert_eq!(
-            audited.iter().map(|c| c.hash()).collect::<Vec<_>>(),
-            decoded.iter().map(|c| c.hash()).collect::<Vec<_>>(),
-        );
+        let hashes = decoded.iter().map(|c| c.hash()).collect::<Vec<_>>();
+        assert_eq!(audited.iter().map(|c| c.hash()).collect::<Vec<_>>(), hashes);
+        assert_eq!(cs.audit::<ChangeHash>().unwrap(), hashes);
     }
 
     #[test]
@@ -1120,7 +1281,11 @@ mod tests {
         macro_rules! rejects {
             ($cs:expr, $why:literal, $err:pat) => {
                 let err = $cs
-                    .audit()
+                    .audit::<Change>()
+                    .expect_err(concat!("audit should reject ", $why));
+                assert!(matches!(err, $err), "{}: got {err}", $why);
+                let err = $cs
+                    .audit::<ChangeHash>()
                     .expect_err(concat!("audit should reject ", $why));
                 assert!(matches!(err, $err), "{}: got {err}", $why);
             };

@@ -36,6 +36,10 @@ pub trait HashRetention:
     #[doc(hidden)]
     fn push(&mut self, hash: ChangeHash);
 
+    /// Appends `n` nodes, with their hashes when given.
+    #[doc(hidden)]
+    fn extend(&mut self, n: usize, hashes: Option<&[ChangeHash]>);
+
     #[doc(hidden)]
     fn has_every_hash(&self) -> bool;
 
@@ -99,6 +103,12 @@ impl HashRetention for Full {
         self.0.push(hash);
     }
 
+    fn extend(&mut self, n: usize, hashes: Option<&[ChangeHash]>) {
+        let hashes = hashes.expect("audit mode is given every hash");
+        assert_eq!(hashes.len(), n);
+        self.0.extend_from_slice(hashes);
+    }
+
     fn has_every_hash(&self) -> bool {
         true
     }
@@ -145,10 +155,6 @@ impl Retained {
     pub(crate) fn new(map: HashMap<NodeIdx, ChangeHash>, len: usize) -> Self {
         Retained { map, len }
     }
-
-    pub(crate) fn extend_without_hashes(&mut self, n: usize) {
-        self.len += n;
-    }
 }
 
 impl HashRetention for Retained {
@@ -169,6 +175,13 @@ impl HashRetention for Retained {
     fn push(&mut self, hash: ChangeHash) {
         self.map.insert(NodeIdx(self.len as u32), hash);
         self.len += 1;
+    }
+
+    fn extend(&mut self, n: usize, hashes: Option<&[ChangeHash]>) {
+        for (i, hash) in hashes.into_iter().flatten().enumerate() {
+            self.map.insert(NodeIdx((self.len + i) as u32), *hash);
+        }
+        self.len += n;
     }
 
     fn has_every_hash(&self) -> bool {
@@ -196,7 +209,7 @@ impl HashRetention for Retained {
         doc: &mut Automerge<Self>,
         change_set: ChangeSet,
     ) -> Result<(), AutomergeError> {
-        doc.apply_change_set_trusted(change_set)
+        doc.apply_change_set_columns(change_set, None)
     }
 
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)> {

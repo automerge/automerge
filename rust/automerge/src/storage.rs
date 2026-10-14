@@ -9,7 +9,9 @@ pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
 
-pub use change_set::{ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet};
+pub use change_set::{
+    AuditedMember, ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet,
+};
 pub use load::VerificationMode;
 
 pub(crate) use {

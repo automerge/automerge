@@ -108,8 +108,12 @@ impl ChangeQueue {
             }
         }
 
+        self.remove_present(|change| removed.contains(&change.hash()));
+    }
+
+    pub(crate) fn remove_present(&mut self, mut present: impl FnMut(&Change) -> bool) {
         self.changes.retain(|change| {
-            if removed.contains(&change.hash()) {
+            if present(change) {
                 self.hashes.remove(&change.hash());
                 self.incoming_actor_seqs
                     .remove(&(change.actor_id().clone(), change.seq()));

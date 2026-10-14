@@ -716,6 +716,8 @@ struct HashCursor {
     next: usize,
     order: OrderCheck,
     hashes: Vec<ChangeHash>,
+    /// a change set's external deps, indexed after its members
+    deps: Vec<ChangeHash>,
     num_ops: Vec<u64>,
     heads: BTreeSet<ChangeHash>,
 }
@@ -723,13 +725,16 @@ struct HashCursor {
 struct OrderCheck {
     max_ops: Vec<u64>,
     seq: Vec<u64>,
+    /// a change set's actors may start anywhere in their seq chains
+    continuing: bool,
 }
 
 impl OrderCheck {
-    fn new(num_actors: usize) -> Self {
+    fn new(num_actors: usize, continuing: bool) -> Self {
         OrderCheck {
             max_ops: vec![0; num_actors],
             seq: vec![0; num_actors],
+            continuing,
         }
     }
 
@@ -738,7 +743,8 @@ impl OrderCheck {
         if actor >= self.seq.len() {
             return Err(Error::MissingActor);
         }
-        if self.seq[actor] + 1 != change.seq {
+        let first = self.continuing && self.seq[actor] == 0 && change.seq > 0;
+        if !first && self.seq[actor] + 1 != change.seq {
             return Err(Error::ChangesOutOfOrder);
         }
         self.seq[actor] = change.seq;
@@ -827,11 +833,22 @@ impl<'a> ChangeCollector<'a> {
 
     /// Hash each change as soon as it and every change before it are
     /// complete, for [`Self::collect_hashes`].
-    pub(crate) fn hashing(mut self) -> Self {
+    pub(crate) fn hashing(self) -> Self {
+        self.hashing_with(Vec::new(), false)
+    }
+
+    /// [`Self::hashing`] for a change set's members, which may depend on
+    /// `deps` outside it.
+    pub(crate) fn hashing_change_set(self, deps: &[ChangeHash]) -> Self {
+        self.hashing_with(deps.to_vec(), true)
+    }
+
+    fn hashing_with(mut self, deps: Vec<ChangeHash>, continuing: bool) -> Self {
         self.hashing = Some(Box::new(HashCursor {
             next: 0,
-            order: OrderCheck::new(self.mapper.actors.len()),
+            order: OrderCheck::new(self.mapper.actors.len(), continuing),
             hashes: Vec::with_capacity(self.changes.len()),
+            deps,
             num_ops: Vec::with_capacity(self.changes.len()),
             heads: BTreeSet::new(),
         }));
@@ -1075,14 +1092,21 @@ impl<'a> ChangeCollector<'a> {
             if !force && !builder.is_complete() {
                 break;
             }
+            let all_deps = MemberHashes {
+                num_changes: self.changes.len(),
+                hashes: &cursor.hashes,
+                deps: &cursor.deps,
+            };
             let hashed = cursor
                 .order
                 .check(change)
-                .and_then(|()| builder.hash(change, &cursor.hashes, &mut self.mapper));
+                .and_then(|()| builder.hash(change, &all_deps, &mut self.mapper));
             match hashed {
                 Ok((hash, num_ops)) => {
                     for dep in &change.deps {
-                        cursor.heads.remove(&cursor.hashes[*dep as usize]);
+                        if let Some(dep) = cursor.hashes.get(*dep as usize) {
+                            cursor.heads.remove(dep);
+                        }
                     }
                     cursor.heads.insert(hash);
                     cursor.hashes.push(hash);
@@ -1170,6 +1194,7 @@ impl<'a> ChangeCollector<'a> {
         actors: &ActorTable,
         deps: &[ChangeHash],
     ) -> Result<Vec<Change>, Error> {
+        self.flush_deletes();
         self.take_error()?;
         let num_actors = actors.len();
         let num_changes = self.changes.len();
@@ -1229,13 +1254,34 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn process_all_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
+        self.process_all_ops_with(op_set, |_| Ok(()))
+    }
+
+    /// [`Self::process_all_ops`], with `external_preds` adding to each row
+    /// in turn the preds its succ lists cannot show.
+    pub(crate) fn process_all_ops_with<E: From<ReadOpError>>(
+        &mut self,
+        op_set: &'a OpSet,
+        mut external_preds: impl FnMut(&mut Vec<OpId>) -> Result<(), E>,
+    ) -> Result<(), E> {
         let mut iter = op_set.iter();
+        let mut external = Vec::new();
         while let Some(op) = iter.try_next()? {
             let op_id = op.id;
             let op_succ = op.succ();
             let next = Some((op.obj, op.elemid_or_key()));
             let flush = self.last != next;
-            self.process_op_internal(op, flush);
+            if flush {
+                self.flush_deletes();
+            }
+            // after the flush, which would take them for an elided delete
+            external_preds(&mut external)?;
+            if !external.is_empty() {
+                let pred = self.preds.entry(op_id).or_default();
+                pred.append(&mut external);
+                pred.sort_unstable();
+            }
+            self.process_op_internal(op, false);
             if flush {
                 self.last = next;
             }
@@ -1250,7 +1296,7 @@ impl<'a> ChangeCollector<'a> {
         self.flush_deletes();
         self.take_error()?;
 
-        let mut order = OrderCheck::new(op_set.actors.len());
+        let mut order = OrderCheck::new(op_set.actors.len(), false);
         let mut changes: Vec<Change> = Vec::with_capacity(self.changes.len());
 
         for change in std::mem::take(&mut self.changes) {

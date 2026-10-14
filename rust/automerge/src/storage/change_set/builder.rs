@@ -886,214 +886,46 @@ impl<'a> ChangeSetChangeIterInner<'a> {
     }
 }
 
-pub(crate) struct OpIterUnverified<'a> {
-    inner: Option<OpIterInner<'a>>,
+/// Each row's preds from outside the change set, in row order.
+pub(crate) struct ExternalPreds<'a> {
+    count: hexane::Decoder<'a, Option<u64>>,
+    actor: hexane::Decoder<'a, Option<ActorIdx>>,
+    ctr: hexane::DeltaDecoder<'a, Option<i64>>,
 }
 
-impl<'a> OpIterUnverified<'a> {
+impl<'a> ExternalPreds<'a> {
     pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
-        Self {
-            inner: OpIterInner::try_new(columns, data).ok(),
-        }
-    }
-}
-
-struct OpIterInner<'a> {
-    obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::Decoder<'a, Option<u64>>,
-    key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
-    key_str: hexane::Decoder<'a, Option<String>>,
-    id_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    /// Doc-order counter values reconstructed at parse time.
-    id_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
-    insert: hexane::Decoder<'a, bool>,
-    action: hexane::Decoder<'a, Option<Action>>,
-    meta: hexane::Decoder<'a, Option<ValueMeta>>,
-    pred_count: hexane::Decoder<'a, Option<u64>>,
-    pred_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    pred_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
-    succ_count: hexane::Decoder<'a, Option<u64>>,
-    succ_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    succ_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
-    expand: hexane::Decoder<'a, bool>,
-    mark_name: hexane::Decoder<'a, Option<String>>,
-    value: &'a [u8],
-}
-
-/// `op.pred` holds only non-member preds; `succ` only member successors.
-#[derive(Debug, Clone)]
-pub(crate) struct ChangeSetOp<'a> {
-    pub(crate) op: OpBuilder<'a>,
-    pub(crate) succ: Vec<OpId>,
-}
-
-impl<'a> Iterator for OpIterUnverified<'a> {
-    type Item = Result<ChangeSetOp<'a>, ParseError>;
-
-    fn next(&mut self) -> Option<Result<ChangeSetOp<'a>, ParseError>> {
-        self.inner
-            .as_mut()?
-            .try_next()
-            .inspect_err(|_| self.inner = None)
-            .transpose()
-    }
-}
-
-impl<'a> OpIterInner<'a> {
-    fn try_next(&mut self) -> Result<Option<ChangeSetOp<'a>>, ParseError> {
-        let id_actor = self.id_actor.next().flatten();
-        let id_ctr = self.id_ctr.next().flatten();
-        let id = match OpId::try_load(id_actor, id_ctr) {
-            Ok(id) => id,
-            Err(_) => return Ok(None),
+        let mut preds = ExternalPreds {
+            count: hexane::decoder::<Option<u64>>(&[]),
+            actor: hexane::decoder::<Option<ActorIdx>>(&[]),
+            ctr: hexane::DeltaDecoder::<Option<i64>>::new(&[]),
         };
-
-        let obj_actor = self.obj_actor.next().flatten();
-        let obj_ctr = self.obj_ctr.next().flatten().map(|v| v as i64);
-        let obj = ObjId::try_load(obj_actor, obj_ctr)?;
-
-        let key_str = self.key_str.next().flatten();
-        let key_actor = self.key_actor.next().flatten();
-        let key_ctr = self.key_ctr.next().flatten();
-        let key = KeyRef::try_load(key_str, key_actor, key_ctr)?;
-
-        let action = self
-            .action
-            .next()
-            .flatten()
-            .ok_or(ReadOpError::MissingValue("action"))?;
-        let insert = self.insert.next().unwrap_or_default();
-        let expand = self.expand.next().unwrap_or_default();
-        let mark_name = self.mark_name.next().flatten().map(Cow::Borrowed);
-
-        let value_meta = self
-            .meta
-            .next()
-            .flatten()
-            .ok_or(ReadOpError::MissingValue("value_meta"))?;
-        let (value_raw, tail) = self.value.split_at(value_meta.length());
-        self.value = tail;
-        let value = ScalarValue::from_raw(value_meta, value_raw)
-            .map_err(|_| ReadOpError::MissingValue("value"))?;
-
-        let pred_count = self.pred_count.next().flatten().unwrap_or(0) as usize;
-        let mut pred = Vec::with_capacity(pred_count);
-        for _ in 0..pred_count {
-            let pred_actor = self.pred_actor.next().flatten();
-            let pred_ctr = self.pred_ctr.next().flatten();
-            pred.push(OpId::try_load(pred_actor, pred_ctr)?);
-        }
-
-        let succ_count = self.succ_count.next().flatten().unwrap_or(0) as usize;
-        let mut succ = Vec::with_capacity(succ_count);
-        for _ in 0..succ_count {
-            let succ_actor = self.succ_actor.next().flatten();
-            let succ_ctr = self.succ_ctr.next().flatten();
-            succ.push(OpId::try_load(succ_actor, succ_ctr)?);
-        }
-
-        Ok(Some(ChangeSetOp {
-            op: OpBuilder {
-                id,
-                obj,
-                action,
-                key,
-                value,
-                insert,
-                expand,
-                mark_name,
-                pred,
-            },
-            succ,
-        }))
-    }
-
-    fn try_new(
-        columns: &RawColumns<compression::Uncompressed>,
-        data: &'a [u8],
-    ) -> Result<Self, ParseError> {
-        let mut obj_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
-        let mut obj_ctr = hexane::decoder::<Option<u64>>(&[]);
-        let mut key_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
-        let mut key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut key_str = hexane::decoder::<Option<String>>(&[]);
-        let mut id_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
-        let mut id_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut insert = hexane::decoder::<bool>(&[]);
-        let mut action = hexane::decoder::<Option<Action>>(&[]);
-        let mut meta = hexane::decoder::<Option<ValueMeta>>(&[]);
-        let mut pred_count = hexane::decoder::<Option<u64>>(&[]);
-        let mut pred_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
-        let mut pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut succ_count = hexane::decoder::<Option<u64>>(&[]);
-        let mut succ_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
-        let mut succ_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
-        let mut expand = hexane::decoder::<bool>(&[]);
-        let mut mark_name = hexane::decoder::<Option<String>>(&[]);
-        let mut value: &[u8] = &[];
-
         for col in columns.iter() {
             let d = &data[col.data()];
-            type C = ColumnType;
             match (col.spec().id(), col.spec().col_type()) {
-                (ops::OBJ_COL_ID, C::Actor) => obj_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::OBJ_COL_ID, C::Integer) => obj_ctr = hexane::decoder::<Option<u64>>(d),
-                (ops::KEY_COL_ID, C::Actor) => key_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::KEY_COL_ID, C::DeltaInteger) => {
-                    key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                (ops::PRED_COL_ID, ColumnType::Group) => {
+                    preds.count = hexane::decoder::<Option<u64>>(d)
                 }
-                (ops::KEY_COL_ID, C::String) => key_str = hexane::decoder::<Option<String>>(d),
-                (ops::ID_COL_ID, C::Actor) => id_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                // Both counter encodings are handled at the storage layer.
-                (ops::ID_COL_ID, C::DeltaInteger) => {
-                    id_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
+                (ops::PRED_COL_ID, ColumnType::Actor) => {
+                    preds.actor = hexane::decoder::<Option<ActorIdx>>(d)
                 }
-                (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::decoder::<bool>(d),
-                (ops::ACTION_COL_ID, C::Integer) => action = hexane::decoder::<Option<Action>>(d),
-                (ops::VAL_COL_ID, C::ValueMetadata) => {
-                    meta = hexane::decoder::<Option<ValueMeta>>(d)
+                (ops::PRED_COL_ID, ColumnType::DeltaInteger) => {
+                    preds.ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
                 }
-                (ops::VAL_COL_ID, C::Value) => value = d,
-                (ops::PRED_COL_ID, C::Group) => pred_count = hexane::decoder::<Option<u64>>(d),
-                (ops::PRED_COL_ID, C::Actor) => pred_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::PRED_COL_ID, C::DeltaInteger) => {
-                    pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
-                (ops::HINT_COL_ID, C::DeltaInteger) => {}
-                (ops::SUCC_COL_ID, C::Group) => succ_count = hexane::decoder::<Option<u64>>(d),
-                (ops::SUCC_COL_ID, C::Actor) => succ_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::SUCC_COL_ID, C::DeltaInteger) => {
-                    succ_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
-                (ops::EXPAND_COL_ID, C::Boolean) => expand = hexane::decoder::<bool>(d),
-                (ops::MARK_NAME_COL_ID, C::String) => {
-                    mark_name = hexane::decoder::<Option<String>>(d)
-                }
-                _ => return Err(ParseError::InvalidOpColumn(u32::from(col.spec()))),
+                _ => {}
             }
         }
-        Ok(Self {
-            obj_actor,
-            obj_ctr,
-            key_actor,
-            key_ctr,
-            key_str,
-            id_actor,
-            id_ctr,
-            insert,
-            action,
-            meta,
-            value,
-            pred_count,
-            pred_actor,
-            pred_ctr,
-            succ_count,
-            succ_actor,
-            succ_ctr,
-            expand,
-            mark_name,
-        })
+        preds
+    }
+
+    pub(crate) fn next_row(&mut self, out: &mut Vec<OpId>) -> Result<(), ParseError> {
+        let count = self.count.next().flatten().unwrap_or(0);
+        for _ in 0..count {
+            let actor = self.actor.next().flatten();
+            let ctr = self.ctr.next().flatten();
+            out.push(OpId::try_load(actor, ctr)?);
+        }
+        Ok(())
     }
 }
 

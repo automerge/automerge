@@ -424,9 +424,10 @@ impl<H: HashRetention> ChangeGraph<H> {
         nodes: &[NodeIdx],
         names: crate::automerge::NameHashes,
     ) -> Vec<(usize, ChangeHash)> {
-        use crate::storage::change_set::{rehashable, TINY_CHANGE_OPS};
+        use crate::storage::change_set::{rehashable, REHASHABLE_CHANGES, TINY_CHANGE_OPS};
         let num_ops = |n: &NodeIdx| self.num_ops.get(n.0 as usize).unwrap_or_default();
         let untag_tiny = names == crate::automerge::NameHashes::UntagTiny
+            && nodes.len() <= REHASHABLE_CHANGES
             && rehashable(nodes.len(), nodes.iter().map(num_ops).sum());
         let members = Members::new(nodes);
         let named: Vec<NodeIdx> = if H::AUDIT == crate::automerge::AuditMode::Enabled {
@@ -1870,15 +1871,17 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 }
 
-impl ChangeGraph<Retained> {
-    /// Append a change set's members without their hashes. Members must be
-    /// in topological order, each extending its actor's seq chain.
+impl<H: HashRetention> ChangeGraph<H> {
+    /// Append a change set's members, with their `hashes` if given. Members
+    /// must be in topological order, each extending its actor's seq chain.
+    /// Whether a new fragment owes a [`Self::gc_after_batch`].
     pub(crate) fn add_change_set_members(
         &mut self,
         members: Vec<ChangeSetMember<'_>>,
+        hashes: Option<&[ChangeHash]>,
         authors: &mut Authors,
         actor_ids: &ActorTable,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<bool, AutomergeError> {
         let new_authors: Vec<_> = Self::member_authors(
             members.iter().map(|m| (m.actor, m.seq, m.extra.as_ref())),
             authors,
@@ -1889,7 +1892,7 @@ impl ChangeGraph<Retained> {
         .collect();
         let base = NodeIdx(self.len() as u32);
 
-        self.hashes.extend_without_hashes(members.len());
+        self.hashes.extend(members.len(), hashes);
 
         self.actors
             .extend(members.iter().map(|m| ActorIdx::from(m.actor)));
@@ -1933,7 +1936,16 @@ impl ChangeGraph<Retained> {
         for (actor, author) in new_authors {
             authors.assign_author(author.into_owned(), actor);
         }
-        Ok(())
+        Ok(self.index_member_hashes(base, hashes))
+    }
+
+    fn index_member_hashes(&mut self, base: NodeIdx, hashes: Option<&[ChangeHash]>) -> bool {
+        let mut new_fragment = false;
+        for (i, hash) in hashes.into_iter().flatten().enumerate() {
+            self.nodes_by_hash.insert(*hash, base + i);
+            new_fragment |= self.cache_fragment_inner(base + i);
+        }
+        new_fragment
     }
 
     /// [`Self::add_change_set_members`] straight from the change set's
@@ -1948,9 +1960,10 @@ impl ChangeGraph<Retained> {
         member_seqs: &[NonZeroU64],
         actor_map: &[usize],
         ext_nodes: &[NodeIdx],
+        hashes: Option<&[ChangeHash]>,
         authors: &mut Authors,
         actor_ids: &ActorTable,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<bool, AutomergeError> {
         let bad = |s: &'static str| AutomergeError::from(MalformedChangeSet::Invalid(s));
         let base = NodeIdx(self.len() as u32);
         let n = member_actors.len();
@@ -2023,7 +2036,7 @@ impl ChangeGraph<Retained> {
             dep_range.push((off, dep_target.len() as u32 + dep_base - off));
         }
 
-        self.hashes.extend_without_hashes(n);
+        self.hashes.extend(n, hashes);
         self.actors.extend(
             member_actors
                 .iter()
@@ -2046,7 +2059,7 @@ impl ChangeGraph<Retained> {
 
         debug_assert_eq!(self.dep_range.len(), base.0 as usize);
         for parent in &dep_target {
-            // appended members have no hash yet, so can't be heads
+            // appended members are not heads yet
             if *parent < base {
                 if let Some(h) = self.hashes.get(*parent) {
                     self.heads.remove(&h);
@@ -2070,9 +2083,11 @@ impl ChangeGraph<Retained> {
         for (actor, author) in new_authors {
             authors.assign_author(author.into_owned(), actor);
         }
-        Ok(())
+        Ok(self.index_member_hashes(base, hashes))
     }
+}
 
+impl ChangeGraph<Retained> {
     pub(crate) fn retain_hashes_only(&mut self) {
         let store = self.retained_store();
         self.nodes_by_hash.retain(|_, n| store.get(*n).is_some());

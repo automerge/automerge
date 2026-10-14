@@ -2180,7 +2180,18 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     fn apply_change_set_inner(&mut self, change_set: ChangeSet) -> Result<(), AutomergeError> {
-        H::apply_change_set(self, change_set)
+        H::apply_change_set(self, change_set)?;
+        if self.queue.is_empty() {
+            return Ok(());
+        }
+        // a queued change the change set delivered would otherwise apply twice
+        let graph = &self.change_graph;
+        let actors = &self.ops.actors;
+        self.queue.remove_present(|c| {
+            graph.lookup_change_for_apply(&c.hash(), &c.id(), actors)
+                == crate::change_graph::ApplyLookup::Present
+        });
+        self.apply_changes_batch(std::iter::empty())
     }
 
     /// Rebuilds and hashes every member instead of trusting the change
@@ -2189,21 +2200,22 @@ impl<H: HashRetention> Automerge<H> {
         &mut self,
         change_set: ChangeSet,
     ) -> Result<(), AutomergeError> {
-        let changes = change_set.audit()?;
+        let hashes = change_set.audit::<ChangeHash>()?;
         // checked before applying, so a rejected change set leaves no trace
         for dep in change_set.deps() {
             if !self.change_graph.has_change(dep)? {
                 return Err(AutomergeError::MissingDeps);
             }
         }
-        self.apply_changes(changes)
+        self.apply_change_set_columns(change_set, Some(hashes))
     }
-}
 
-impl Automerge<Retained> {
-    pub(crate) fn apply_change_set_trusted(
+    /// `member_hashes`, when given, are every member's verified hash, and
+    /// what the change set says about the document is checked, not trusted.
+    pub(crate) fn apply_change_set_columns(
         &mut self,
         mut change_set: ChangeSet,
+        member_hashes: Option<Vec<ChangeHash>>,
     ) -> Result<(), AutomergeError> {
         let change_set_ops = change_set.take_change_set_ops()?;
         let change_set = &change_set;
@@ -2243,7 +2255,16 @@ impl Automerge<Retained> {
                 .unwrap_or(0);
             let next = next_seq[actor].unwrap_or(have + 1);
             match seq.cmp(&next) {
-                Ordering::Less => continue, // already have this change
+                Ordering::Less => {
+                    // already have this change, unless the actor forked
+                    if let Some(hashes) = &member_hashes {
+                        if !self.change_graph.has_change(&hashes[i])? {
+                            let actor = change_set.actors()[actor].clone();
+                            return Err(AutomergeError::DuplicateSeqNumber(seq, actor));
+                        }
+                    }
+                    continue;
+                }
                 Ordering::Greater => return Err(AutomergeError::MissingDeps),
                 Ordering::Equal => {}
             }
@@ -2257,6 +2278,21 @@ impl Automerge<Retained> {
             return Ok(());
         }
         let overlap = num_kept < num_members;
+        let kept_hashes: Option<Vec<ChangeHash>> = member_hashes.map(|hashes| {
+            (0..num_members)
+                .filter(|i| keep[*i])
+                .map(|i| hashes[i])
+                .collect()
+        });
+        let check_external = |graph: &ChangeGraph<H>, node, hash| {
+            if kept_hashes.is_some() && graph.hash_for_node(node) != Some(hash) {
+                Err(AutomergeError::from(MalformedChangeSet::Invalid(
+                    "an external change id names another change",
+                )))
+            } else {
+                Ok(())
+            }
+        };
 
         // only the commit below appends to the graph, so the kept members'
         // nodes are known before they exist
@@ -2278,6 +2314,7 @@ impl Automerge<Retained> {
                 .change_graph
                 .node_for_change_id(id, &self.ops.actors)
                 .ok_or(AutomergeError::MissingDeps)?;
+            check_external(&self.change_graph, node, *hash)?;
             hash_pairs.push((node, *hash));
         }
 
@@ -2312,7 +2349,9 @@ impl Automerge<Retained> {
                             .change_graph
                             .node_for_change_id(dep_id, &self.ops.actors)
                             .ok_or(AutomergeError::MissingDeps)?;
-                        hash_pairs.push((node, change_set.deps()[d - num_members]));
+                        let hash = change_set.deps()[d - num_members];
+                        check_external(&self.change_graph, node, hash)?;
+                        hash_pairs.push((node, hash));
                         deps.push(ChangeSetDep::Node(node));
                     }
                 }
@@ -2336,6 +2375,7 @@ impl Automerge<Retained> {
                     .change_graph
                     .node_for_change_id(dep_id, &self.ops.actors)
                     .ok_or(AutomergeError::MissingDeps)?;
+                check_external(&self.change_graph, node, change_set.deps()[i])?;
                 hash_pairs.push((node, change_set.deps()[i]));
                 ext_nodes.push(node);
             }
@@ -2430,6 +2470,7 @@ impl Automerge<Retained> {
         let added_members = if overlap {
             self.change_graph.add_change_set_members(
                 graph_members,
+                kept_hashes.as_deref(),
                 &mut self.authors,
                 &self.ops.actors,
             )
@@ -2440,17 +2481,19 @@ impl Automerge<Retained> {
                 member_seqs,
                 &actor_map,
                 &ext_nodes,
+                kept_hashes.as_deref(),
                 &mut self.authors,
                 &self.ops.actors,
             )
         };
-        if let Err(e) = added_members {
-            self.undo_actor_refs(&added);
-            return Err(e);
-        }
-
         // the GC is O(graph), so it runs once per apply, not per hash
-        let mut owes_gc = false;
+        let mut owes_gc = match added_members {
+            Ok(owes_gc) => owes_gc,
+            Err(e) => {
+                self.undo_actor_refs(&added);
+                return Err(e);
+            }
+        };
         for (node, hash) in hash_pairs {
             owes_gc |= self.change_graph.record_node_hash(node, hash);
         }
@@ -2467,15 +2510,17 @@ impl Automerge<Retained> {
         self.debug_assert_mask_indexes();
         self.republish_if_pending();
         // both read the delivered ops, so they wait for the commit
-        if change_set.is_rehashable() {
-            let kept: Vec<usize> = (0..num_members).filter(|i| keep[*i]).collect();
-            owes_gc |= self.rehash_untagged(change_set, &kept, base)?;
-        }
-        let missing = self
-            .change_graph
-            .unhashed_retained_nodes(base..self.change_graph.len() as u32);
-        if !missing.is_empty() {
-            owes_gc |= self.rehash_document_for(&missing)?;
+        if kept_hashes.is_none() {
+            if change_set.is_rehashable() {
+                let kept: Vec<usize> = (0..num_members).filter(|i| keep[*i]).collect();
+                owes_gc |= self.rehash_untagged(change_set, &kept, base)?;
+            }
+            let missing = self
+                .change_graph
+                .unhashed_retained_nodes(base..self.change_graph.len() as u32);
+            if !missing.is_empty() {
+                owes_gc |= self.rehash_document_for(&missing)?;
+            }
         }
         if owes_gc {
             self.change_graph.gc_after_batch();
@@ -2484,7 +2529,7 @@ impl Automerge<Retained> {
     }
 }
 
-impl Automerge<Retained> {
+impl<H: HashRetention> Automerge<H> {
     /// Records the hash of every member `change_set` delivered without
     /// one; its member `kept[i]` became node `base + i`. Whether an owed GC
     /// is due.
