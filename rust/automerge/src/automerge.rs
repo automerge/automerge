@@ -2731,6 +2731,24 @@ impl<H: HashRetention> Automerge<H> {
         self.node_for_change_id(id).is_some()
     }
 
+    /// The change identified by `id`, or `None` if this document does not
+    /// contain it.
+    ///
+    /// Outside audit mode this rebuilds every ancestor whose hash is not
+    /// retained back to the nearest retained hashes, which can be slow.
+    pub fn get_change_by_id(&self, id: &ChangeId) -> Result<Option<Change>, AutomergeError> {
+        let Some(node) = self.node_for_change_id(id) else {
+            return Ok(None);
+        };
+        let nodes = self.change_graph.nodes_back_to_retained([node]);
+        let changes = ChangeSet::storage_for_nodes(&self.ops, &self.change_graph, nodes)?
+            .to_changes()
+            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))?;
+        Ok(changes
+            .into_iter()
+            .find(|c| c.actor_id() == id.actor() && c.seq() == id.seq()))
+    }
+
     pub(crate) fn resolve_heads(
         &self,
         heads: &[ChangeId],

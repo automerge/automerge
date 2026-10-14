@@ -478,6 +478,22 @@ impl AutoCommit {
         self.0.get_change_by_hash(hash).ok().flatten()
     }
 
+    /// The change identified by `id`, or `None` if this document does not
+    /// contain it.
+    pub fn get_change_by_id(&mut self, id: &ChangeId) -> Option<Change> {
+        self.0
+            .get_change_by_id(id)
+            .expect("an audited document keeps every hash a change embeds")
+    }
+
+    /// Whether this document contains the change with `hash`.
+    pub fn has_change(&mut self, hash: &ChangeHash) -> bool {
+        self.0
+            .document()
+            .has_change(hash)
+            .expect("an audited document keeps every hash")
+    }
+
     pub fn get_change_meta_by_hash(&mut self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
         self.0.get_change_meta_by_hash(hash).ok().flatten()
     }

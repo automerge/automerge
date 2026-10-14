@@ -216,6 +216,29 @@ fn disabled_save_after_narrow_failure() {
     ));
 }
 
+#[test]
+fn get_change_by_id_rebuilds_changes_whose_hash_is_not_retained() {
+    let (bytes, unknown) = saved_big_doc_with_unknown_hash();
+    let mut audited = load_audited(&bytes).unwrap();
+    let mut doc = AutoCommit::load(&bytes).unwrap();
+    assert!(matches!(
+        doc.get_change_by_hash(&unknown),
+        Err(AutomergeError::AuditModeRequired)
+    ));
+
+    let actor = ActorId::from(&b"aaaa"[..]);
+    let unknown_id = audited.hash_to_change_id(&unknown).unwrap().unwrap();
+    for seq in [1, unknown_id.seq(), 2000, 4000] {
+        let id = ChangeId::from_parts(actor.clone(), seq.try_into().unwrap());
+        let rebuilt = doc.get_change_by_id(&id).unwrap().unwrap();
+        let expected = audited.get_change_by_id(&id).unwrap().unwrap();
+        assert_eq!(rebuilt.raw_bytes(), expected.raw_bytes(), "seq {seq}");
+    }
+
+    let absent = ChangeId::from_parts(actor, 4001.try_into().unwrap());
+    assert!(doc.get_change_by_id(&absent).unwrap().is_none());
+}
+
 /// Diffing from unknown heads errors rather than panicking or diffing partially.
 #[test]
 fn diff_rejects_foreign_change_ids() {

@@ -650,6 +650,12 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.get_change_by_hash(hash)
     }
 
+    /// See [`Automerge::get_change_by_id`].
+    pub fn get_change_by_id(&mut self, id: &ChangeId) -> Result<Option<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.get_change_by_id(id)
+    }
+
     pub fn get_change_meta_by_hash(
         &mut self,
         hash: &ChangeHash,

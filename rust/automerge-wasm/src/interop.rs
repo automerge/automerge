@@ -5,7 +5,6 @@ use crate::{Automerge, UpdateSpansArgs};
 use automerge as am;
 use automerge::iter::{Span, Spans};
 use automerge::marks::{MarkSet, UpdateSpansConfig};
-use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
 use automerge_sync::{ChunkList, MessageFlags, MessageVersion};
@@ -994,23 +993,6 @@ pub(crate) fn import_obj(
     }
 }
 
-pub(crate) fn get_heads(heads: JsValue) -> Result<Option<Vec<ChangeHash>>, error::BadChangeHashes> {
-    if heads.is_undefined() || heads.is_null() {
-        return Ok(None);
-    }
-    let Ok(heads) = heads.dyn_into::<js_sys::Array>() else {
-        return Err(error::BadChangeHashes::NotArray);
-    };
-    heads
-        .iter()
-        .enumerate()
-        .map(|(i, v)| {
-            ChangeHash::try_from(JS(v)).map_err(|e| error::BadChangeHashes::BadElem(i, e))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct ExternalTypeConstructor {
     construct: Function,
@@ -1555,12 +1537,12 @@ impl Automerge {
             }
             let is_map = matches!(obj_type, am::ObjType::Map | am::ObjType::Table);
             let val = if is_map {
-                self.doc.get(obj, prop)?
+                self.doc.get(&obj, prop.into(), None)?
             } else {
                 let idx = prop
                     .parse()
                     .map_err(|_| error::ImportPath::IndexNotInteger(i, prop.to_string()))?;
-                self.doc.get(obj, am::Prop::Seq(idx))?
+                self.doc.get(&obj, am::Prop::Seq(idx), None)?
             };
             match val {
                 Some((am::Value::Object(am::ObjType::Map), id)) => {
@@ -2011,6 +1993,8 @@ pub(crate) mod error {
         NotArray,
         #[error("could not decode hash {0}: {1}")]
         BadElem(usize, BadChangeHash),
+        #[error("could not decode change id {0}: {1}")]
+        NotChangeId(usize, String),
     }
 
     impl From<BadChangeHashes> for JsValue {
