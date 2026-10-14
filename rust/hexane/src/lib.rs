@@ -100,6 +100,8 @@ pub mod bijou {
 
 pub mod bool;
 pub(crate) mod btree;
+#[cfg(feature = "debug")]
+pub use btree::debug;
 pub mod codec;
 pub mod column;
 pub mod delta;

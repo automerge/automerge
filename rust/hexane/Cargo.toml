@@ -18,6 +18,8 @@ slow_path_assertions = []
 # Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
 deep_fuzz = []
 bijou64 = ["dep:bijoux"]
+# Read-only views of column internals (hexane::debug) for inspectors.
+debug = []
 
 
 [dependencies]

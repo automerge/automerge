@@ -27,6 +27,10 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
 
+#[cfg(feature = "debug")]
+#[path = "debug.rs"]
+pub mod debug;
+
 /// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
 /// larger = fewer nodes + more per-node cost.  64 is empirically a good
 /// compromise across the `marks_at` (query-heavy) and `insert_null`
