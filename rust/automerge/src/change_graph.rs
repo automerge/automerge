@@ -88,6 +88,28 @@ struct Edge {
     next: Option<EdgeIdx>,
 }
 
+/// The index of an actor if they are freshly inserted into the [`ChangeGraph`],
+/// i.e. their sequence number is `0`.
+///
+/// A [`FreshActor`] acts as a witness to ensure type-safety for modifying the
+/// actor's related data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FreshActor(usize);
+
+impl FreshActor {
+    /// Return the index of the actor.
+    pub(crate) fn actor_index(&self) -> usize {
+        self.0
+    }
+
+    /// Fabricate a witness for tests which model an actor-indexed structure
+    /// in isolation from an actual change graph.
+    #[cfg(test)]
+    pub(crate) fn for_test(index: usize) -> Self {
+        Self(index)
+    }
+}
+
 impl ChangeGraph {
     /// An empty graph tracking the actors in `actors`.
     pub(crate) fn new(actors: &ActorTable) -> Self {
@@ -207,6 +229,12 @@ impl ChangeGraph {
             fragment.clock.remove_actor(removal)
         }
         self.fragment_top.remove_actor(removal);
+    }
+
+    /// Returns [`FreshActor`] if the given `actor` has no changes in the
+    /// [`ChangeGraph`].
+    pub(crate) fn fresh_actor(&self, actor: usize) -> Option<FreshActor> {
+        (self.seq_for_actor(actor) == 0).then_some(FreshActor(actor))
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -1096,6 +1124,20 @@ mod tests {
     use rand::RngExt;
 
     use super::*;
+
+    /// A witness is available only for an actor with no changes.
+    #[test]
+    fn fresh_actor_witnesses_only_actors_without_changes() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+        builder.change(&actor1, 3, &[]);
+        let graph = builder.build();
+
+        let (idx1, idx2) = (builder.index(&actor1), builder.index(&actor2));
+        assert_eq!(graph.fresh_actor(idx1), None);
+        assert_eq!(graph.fresh_actor(idx2).map(|f| f.actor_index()), Some(idx2));
+    }
 
     #[test]
     fn clock_by_heads() {

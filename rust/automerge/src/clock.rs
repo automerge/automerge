@@ -126,6 +126,11 @@ impl Clock {
         self.set_counter_of(actor_index, u32::MAX);
     }
 
+    /// Set the `actor`'s count to `0`.
+    pub(crate) fn zero_out_actor(&mut self, actor: usize) {
+        self.set_counter_of(actor, 0);
+    }
+
     /// Get the minimum bound intersection of two [`Clock`]s.
     ///
     /// # Panics
