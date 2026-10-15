@@ -6,6 +6,7 @@
   text went from 9ms to 1.6us).
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
+* `ReadDoc::list_range` on a text no longer yields marks as elements.
 
 ## 0.12.0
 

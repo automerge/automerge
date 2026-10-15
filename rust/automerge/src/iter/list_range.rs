@@ -152,6 +152,9 @@ impl<'a> Iterator for ListDiff<'a> {
         let mut state = ListState::default();
 
         while let Some((diff, list)) = iter.next() {
+            if list.action == Action::Mark {
+                continue;
+            }
             match diff {
                 Diff::Del => {
                     state.num_old += 1;
@@ -413,6 +416,7 @@ fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::marks::{ExpandMark, Mark};
     use crate::transaction::Transactable;
     use crate::types;
     use crate::{Automerge, ObjType, ReadDoc, ROOT};
@@ -476,5 +480,42 @@ mod tests {
         assert_eq!(vals.len(), values.len());
         assert_eq!(vals[3], 11.into());
         assert_eq!(conflict, vec![false, false, false, true, false]);
+    }
+
+    #[test]
+    fn list_range_skips_marks() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "hello world").unwrap();
+        let mark = Mark::new("highlight".into(), "pink", 2, 7);
+        tx.mark(&text, mark, ExpandMark::None).unwrap();
+        tx.commit();
+
+        let chars = |s: &str| {
+            s.chars()
+                .map(|c| crate::Value::str(&c.to_string()))
+                .collect::<Vec<_>>()
+        };
+        let values = |r: std::ops::RangeFrom<usize>| {
+            doc.list_range(&text, r)
+                .map(|i| (i.index, i.value.to_value()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            values(0..),
+            chars("hello world")
+                .into_iter()
+                .enumerate()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            values(6..),
+            chars("world")
+                .into_iter()
+                .zip(6..)
+                .map(|(v, i)| (i, v))
+                .collect::<Vec<_>>()
+        );
     }
 }
