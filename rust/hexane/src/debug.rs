@@ -83,6 +83,9 @@ where
 
     /// The slab index's nodes from the root down.
     pub fn debug_index(&self) -> NodeDebug {
+        if self.index.nodes.is_empty() {
+            return NodeDebug::Leaf { weights: vec![] };
+        }
         self.index.debug_node(self.index.root)
     }
 }

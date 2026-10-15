@@ -989,8 +989,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         if splices.is_empty() {
             return;
         }
-        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-        let strategy = self.col.copy_strategy(&src.col, &ranges, splices.len());
+        let strategy = self.col.copy_strategy_for(&src.col, &splices);
         self.copy_splices_with(src, &splices, strategy);
     }
 
@@ -1020,6 +1019,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
                 }
                 e.finish();
             }
+            CopyStrategy::Take => self.col.swap_contents(&mut src.col),
             CopyStrategy::Invert => {
                 let old_len = self.len();
                 self.col.swap_contents(&mut src.col);
@@ -1056,7 +1056,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
                 use crate::Shiftable;
                 self.splice_runs(index, del, src.iter().runs().ranges(ranges));
             }
-            CopyStrategy::Invert => {
+            CopyStrategy::Invert | CopyStrategy::Take => {
                 let old_len = self.len();
                 self.col.swap_contents(&mut src.col);
                 self.retain_ranges(&ranges);

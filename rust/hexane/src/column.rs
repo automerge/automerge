@@ -659,11 +659,16 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 
 // ── copy_ranges support ─────────────────────────────────────────────────────
 
+/// Below this many source slabs, inverting never pays.
+const INVERT_MIN_SLABS: usize = 8;
+
 /// Execution strategy for `copy_ranges`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CopyStrategy {
     Direct,
     Invert,
+    /// All of a small source into an empty destination: move it in.
+    Take,
 }
 
 /// Safety factor favouring Direct in [`Column::copy_strategy`].  The
@@ -1588,8 +1593,7 @@ where
         if splices.is_empty() {
             return;
         }
-        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-        let strategy = self.copy_strategy(&src, &ranges, splices.len());
+        let strategy = self.copy_strategy_for(&src, &splices);
         self.copy_splices_with(src, &splices, strategy);
     }
 
@@ -1619,6 +1623,7 @@ where
                 }
                 e.finish();
             }
+            CopyStrategy::Take => self.swap_contents(&mut src),
             CopyStrategy::Invert => {
                 // keep src's slabs: swap, drop the gaps (interior slabs
                 // undecoded), then splice the old column's kept
@@ -1639,6 +1644,22 @@ where
         }
     }
 
+    /// Strategy for copying normalized `splices` out of `src`.
+    pub(crate) fn copy_strategy_for(&self, src: &Self, splices: &[Splice]) -> CopyStrategy {
+        if src.slabs.len() >= INVERT_MIN_SLABS {
+            let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
+            return self.copy_strategy(src, &ranges, splices.len());
+        }
+        // Moving a large source in keeps its slab layout, which made later
+        // edits slower than re-encoding it; only small sources are moved.
+        let takes_all = self.is_empty() && matches!(splices, [sp] if sp.range == (0..src.len()));
+        if takes_all && self.max_segments == src.max_segments {
+            CopyStrategy::Take
+        } else {
+            CopyStrategy::Direct
+        }
+    }
+
     /// Decide direct vs inverted for [`copy_ranges`](Self::copy_ranges)
     /// from stored per-slab item/segment counts — O(slabs), no data
     /// decoded.
@@ -1650,7 +1671,7 @@ where
     ) -> CopyStrategy {
         // Inverting keeps src's slabs, built under src's segment
         // budget — only sound when the budgets match.
-        if self.max_segments != src.max_segments || src.slabs.len() < 8 {
+        if self.max_segments != src.max_segments || src.slabs.len() < INVERT_MIN_SLABS {
             return CopyStrategy::Direct;
         }
 
@@ -1715,7 +1736,7 @@ where
                 use crate::shift::Shiftable;
                 self.splice_runs(index, del, src.iter().runs().ranges(ranges));
             }
-            CopyStrategy::Invert => {
+            CopyStrategy::Invert | CopyStrategy::Take => {
                 let old_len = self.len();
                 self.swap_contents(&mut src);
                 self.retain_ranges(&ranges);
