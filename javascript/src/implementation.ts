@@ -221,7 +221,7 @@ export type InitOptions<T> = {
   /**
    * Defaults to `true`. With `false` the document does not keep change
    * hashes: its heads are change IDs (`"seq@actor"`) rather than hashes,
-   * {@link save} and {@link saveIncremental} write the change set format,
+   * {@link save} and {@link saveIncremental} write the bundle format,
    * and the sync functions throw. With {@link clone} it sets the mode of the
    * copy, which otherwise keeps the mode of the original.
    */

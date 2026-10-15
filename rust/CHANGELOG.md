@@ -19,11 +19,12 @@
   change `automerge::sync::…` imports to `automerge_sync::…`, and import
   `automerge_sync::AutoCommitSync` for `AutoCommit::sync()` and
   `has_our_changes()`.
-* The experimental bundle API (`bundle`, `bundle_fragments`, `Bundle`,
-  `BundleChange`, `BundleChangeIter` and `AutomergeError::Unbundle`) is gone.
-  Bundles saved by 0.12 still load.
+* The experimental bundle API (`bundle`, `bundle_fragments`,
+  `BundleChangeIter` and `AutomergeError::Unbundle`) is gone, and `Bundle` and
+  `BundleChange` now name the new bundle format (see Added). Bundles that API
+  saved in 0.8 to 0.12 (chunk type 3, now called BundleV0) still load.
 * `AutomergeError` has new variants (`AuditModeRequired`, `InvalidChangeId`,
-  `DecodeChangeSet`, `InvalidFragment`, `MalformedChangeSet`).
+  `DecodeBundle`, `InvalidFragment`, `MalformedBundle`).
 
 ### Added
 
@@ -31,12 +32,12 @@
   change hashes a document needs rather than the hash of every change in its
   history, which makes them smaller and faster to load. They name history by
   `ChangeId` (an actor and sequence number), return errors where an operation
-  needs history the document has not kept, and save in a compact change set
+  needs history the document has not kept, and save in a compact bundle
   format by default (`SaveFormat::Legacy` writes the document format older
   versions read). The default types convert with `into_next()`, and next
   documents back with `into_audit()`, which recomputes every hash.
-* `ChangeId`, `ChangeSet` and the change set loader: every type loads change
-  sets as well as everything earlier versions saved.
+* `ChangeId`, `Bundle` and the bundle loader: every type loads bundles as
+  well as everything earlier versions saved.
 * Write-frontiers: `mask_author(author, heads)` hides an author's changes
   outside the history of `heads` from every read, diff and patch, without
   removing them from the history; `reveal_author`, `set_write_frontier`,

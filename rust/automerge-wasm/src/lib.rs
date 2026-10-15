@@ -1491,15 +1491,15 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "FragmentMeta[]")] fragments: JsValue,
     ) -> Result<Array, error::BadJSFragments> {
-        let change_sets = match &mut self.doc {
+        let bundles = match &mut self.doc {
             Doc::Audit(d) => {
-                d.change_sets_for_fragments(Vec::<am::Fragment>::try_from(JS(fragments))?)?
+                d.bundles_for_fragments(Vec::<am::Fragment>::try_from(JS(fragments))?)?
             }
             Doc::Next(d) => d
                 .document()
-                .change_sets_for_fragments(Vec::<am::next::Fragment>::try_from(JS(fragments))?)?,
+                .bundles_for_fragments(Vec::<am::next::Fragment>::try_from(JS(fragments))?)?,
         };
-        Ok(change_sets
+        Ok(bundles
             .iter()
             .map(|bytes| Uint8Array::from(bytes.as_slice()))
             .collect())
@@ -1512,16 +1512,16 @@ impl Automerge {
     ) -> Result<(), error::AddCommits> {
         let commits = Vec::<Commit>::try_from(JS(commits))?;
         let mut changes = Vec::new();
-        let mut change_sets = Vec::new();
+        let mut bundles = Vec::new();
         for commit in commits {
             match commit.into_bytes()? {
                 CommitBytes::Change(change) => changes.push(*change),
-                CommitBytes::ChangeSet(bytes) => change_sets.extend(bytes),
+                CommitBytes::Bundle(bytes) => bundles.extend(bytes),
             }
         }
         self.doc.apply_changes(changes)?;
-        if !change_sets.is_empty() {
-            self.doc.load_incremental(&change_sets)?;
+        if !bundles.is_empty() {
+            self.doc.load_incremental(&bundles)?;
         }
         Ok(())
     }
@@ -1549,7 +1549,7 @@ impl Automerge {
     }
 
     /// Outside audit mode heads are change ids rather than hashes, and saves
-    /// use the change set format. Re-enabling it rehashes every change and
+    /// use the bundle format. Re-enabling it rehashes every change and
     /// fails, leaving the document unchanged, if a hash it held is wrong.
     #[wasm_bindgen(js_name = enableAuditMode)]
     pub fn enable_audit_mode(&mut self, enable: bool) -> Result<(), JsValue> {
@@ -2216,18 +2216,18 @@ struct Commit {
     bytes: Vec<u8>,
 }
 
-/// A commit's bytes: an encoded change, or the change set `getCommits` produces
+/// A commit's bytes: an encoded change, or the bundle `getCommits` produces
 /// for it. Either way they have been checked against the commit's metadata.
 enum CommitBytes {
     Change(Box<Change>),
-    ChangeSet(Vec<u8>),
+    Bundle(Vec<u8>),
 }
 
 impl Commit {
     fn into_bytes(self) -> Result<CommitBytes, error::BadCommitBytes> {
-        if let Ok(change_set) = am::ChangeSet::try_from(self.bytes.as_slice()) {
-            // validate the change set against the JS metadata as for a change
-            let heads: Vec<_> = change_set.heads().collect();
+        if let Ok(bundle) = am::Bundle::try_from(self.bytes.as_slice()) {
+            // validate the bundle against the JS metadata as for a change
+            let heads: Vec<_> = bundle.heads().collect();
             if heads != [self.head] {
                 return Err(error::BadCommitBytes::HeadMismatch {
                     expected: self.head.to_string(),
@@ -2238,14 +2238,14 @@ impl Commit {
                         .join(","),
                 });
             }
-            let mut deps = change_set.deps().to_vec();
+            let mut deps = bundle.deps().to_vec();
             let mut parents = self.parents.clone();
             deps.sort();
             parents.sort();
             if deps != parents {
                 return Err(error::BadCommitBytes::ParentsMismatch);
             }
-            return Ok(CommitBytes::ChangeSet(self.bytes));
+            return Ok(CommitBytes::Bundle(self.bytes));
         }
         self.into_change().map(|c| CommitBytes::Change(Box::new(c)))
     }
@@ -2447,7 +2447,7 @@ impl TryFrom<JS> for Vec<am::Fragment> {
 #[wasm_bindgen(js_name = "readBundle")]
 pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     let bundle_bytes = bundle.to_vec();
-    let bundle = automerge::ChangeSet::try_from(bundle_bytes.as_slice())
+    let bundle = automerge::Bundle::try_from(bundle_bytes.as_slice())
         .map_err(|e| error::ReadBundle(e.to_string()))?;
     let changes = bundle
         .to_changes()
@@ -3212,7 +3212,7 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    #[error("error parsing bundle: {}", 0)]
+    #[error("error parsing bundle: {0}")]
     pub struct ReadBundle(pub(super) String);
 
     impl From<ReadBundle> for JsValue {

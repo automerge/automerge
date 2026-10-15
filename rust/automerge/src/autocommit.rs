@@ -21,7 +21,7 @@ use crate::tx::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
 use crate::write_frontier::{Boundary, WriteFrontier};
 use crate::VerificationMode;
-use crate::{hydrate, AnonymizeError, ChangeSet, OnPartialLoad, TextEncoding};
+use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
 use crate::{
     tx::TransactionInner, ActorId, AutomergeError, Change, ChangeHash, ChangeId, Cursor, Prop,
     Value,
@@ -623,8 +623,8 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.get_last_local_change_legacy()
     }
 
-    /// The last change made by this document's actor, as a change set
-    pub fn get_last_local_change(&mut self) -> Result<Option<ChangeSet>, AutomergeError> {
+    /// The last change made by this document's actor, as a bundle
+    pub fn get_last_local_change(&mut self) -> Result<Option<Bundle>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
     }
@@ -678,7 +678,7 @@ impl<H: HashRetention> AutoCommit<H> {
     pub fn get_changes_added<H2: HashRetention>(
         &mut self,
         other: &mut AutoCommit<H2>,
-    ) -> Result<Option<ChangeSet>, AutomergeError> {
+    ) -> Result<Option<Bundle>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
@@ -714,11 +714,11 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.get_fragment(head)
     }
 
-    pub fn change_sets_for_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        self.doc.change_sets_for_fragments(fragments)
+        self.doc.bundles_for_fragments(fragments)
     }
 
     /// Get the current heads of the document.

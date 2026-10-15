@@ -16,7 +16,7 @@ use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
-use super::{ChangeSetChange, ChangeSetStorage, ParseError};
+use super::{BundleChange, BundleStorage, ParseError};
 
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
@@ -41,10 +41,10 @@ fn save_actor(
     enc.save_to_and_remap(data, |a: ActorIdx| mapping[usize::from(a)].unwrap())
 }
 
-pub(crate) struct ChangeSetBuilder<'a> {
+pub(crate) struct BundleBuilder<'a> {
     mapper: ActorMapper<'a>,
-    change_writer: ChangeSetChangeWriter<'a>,
-    op_writer: ChangeSetOpWriter<'a>,
+    change_writer: BundleChangeWriter<'a>,
+    op_writer: BundleOpWriter<'a>,
     builders: Vec<ChangeBuilder>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
@@ -53,15 +53,15 @@ pub(crate) struct ChangeSetBuilder<'a> {
     verbatim_rows: Option<Range<usize>>,
 }
 
-impl<'a> ChangeSetBuilder<'a> {
+impl<'a> BundleBuilder<'a> {
     pub(crate) fn from_graph<H: crate::hash_retention::HashRetention>(
         op_set: &'a crate::op_set2::OpSet,
         change_graph: &'a crate::change_graph::ChangeGraph<H>,
         nodes: &[crate::change_graph::NodeIdx],
         mut mapper: ActorMapper<'a>,
-    ) -> Result<ChangeSetBuilder<'a>, crate::change_graph::MissingDep> {
-        let mut change_writer = ChangeSetChangeWriter::new(nodes.len());
-        change_graph.write_change_set_changes(nodes, &mut change_writer, &mut mapper)?;
+    ) -> Result<BundleBuilder<'a>, crate::change_graph::MissingDep> {
+        let mut change_writer = BundleChangeWriter::new(nodes.len());
+        change_graph.write_bundle_changes(nodes, &mut change_writer, &mut mapper)?;
         let mut builders: Vec<_> = change_graph
             .op_spans(nodes)
             .map(|(actor, seq, start_op, max_op)| ChangeBuilder {
@@ -72,10 +72,10 @@ impl<'a> ChangeSetBuilder<'a> {
             })
             .collect();
         builders.sort_unstable_by(|a, b| a.actor.cmp(&b.actor).then(a.seq.cmp(&b.seq)));
-        Ok(ChangeSetBuilder {
+        Ok(BundleBuilder {
             mapper,
             change_writer,
-            op_writer: ChangeSetOpWriter::default(),
+            op_writer: BundleOpWriter::default(),
             builders,
             last: None,
             preds: HashMap::default(),
@@ -93,10 +93,10 @@ impl<'a> ChangeSetBuilder<'a> {
 
     pub(crate) fn from_writers(
         mapper: ActorMapper<'a>,
-        change_writer: ChangeSetChangeWriter<'a>,
-        op_writer: ChangeSetOpWriter<'a>,
-    ) -> ChangeSetBuilder<'a> {
-        ChangeSetBuilder {
+        change_writer: BundleChangeWriter<'a>,
+        op_writer: BundleOpWriter<'a>,
+    ) -> BundleBuilder<'a> {
+        BundleBuilder {
             mapper,
             change_writer,
             op_writer,
@@ -227,7 +227,7 @@ impl<'a> ChangeSetBuilder<'a> {
     pub(crate) fn finish_with_ranks(
         mut self,
         ranks: &std::collections::HashMap<OpId, u64>,
-    ) -> ChangeSetStorage<'static, crate::storage::change::Verified> {
+    ) -> BundleStorage<'static, crate::storage::change::Verified> {
         self.flush_deletes();
 
         let mut mapper = self.mapper;
@@ -293,7 +293,7 @@ impl<'a> ChangeSetBuilder<'a> {
 
         let bytes_c = data_c;
 
-        let storage = ChangeSetStorage {
+        let storage = BundleStorage {
             bytes: Cow::Owned(bytes_u),
             compressed_bytes: Some(Cow::Owned(bytes_c)),
             ops_meta,
@@ -303,7 +303,7 @@ impl<'a> ChangeSetBuilder<'a> {
             changes_meta,
             changes_data: changes_data_u_range,
             changes: Default::default(),
-            change_set_ops: Default::default(),
+            bundle_ops: Default::default(),
             _phantom: PhantomData,
         };
 
@@ -375,7 +375,7 @@ impl DeltaRunGrouper {
 }
 
 #[derive(Default)]
-pub(crate) struct ChangeSetChangeWriter<'a> {
+pub(crate) struct BundleChangeWriter<'a> {
     pub(crate) len: usize,
     pub(crate) cap: usize,
     pub(crate) seen: HashMap<ChangeHash, usize>,
@@ -392,9 +392,9 @@ pub(crate) struct ChangeSetChangeWriter<'a> {
     pub(crate) extra: Vec<u8>,
 }
 
-impl<'a> ChangeSetChangeWriter<'a> {
+impl<'a> BundleChangeWriter<'a> {
     pub(crate) fn new(cap: usize) -> Self {
-        ChangeSetChangeWriter {
+        BundleChangeWriter {
             cap,
             ..Default::default()
         }
@@ -408,7 +408,7 @@ impl<'a> ChangeSetChangeWriter<'a> {
         index as i64
     }
 
-    fn finish(self, mapper: &ActorMapper<'_>, data: &mut Vec<u8>) -> ChangeSetChangeColumns {
+    fn finish(self, mapper: &ActorMapper<'_>, data: &mut Vec<u8>) -> BundleChangeColumns {
         let actor = save_actor(self.actor, &mapper.mapping, data);
         let seq = self.seq.save_to(data);
         let num_ops = self.num_ops.save_to(data);
@@ -421,7 +421,7 @@ impl<'a> ChangeSetChangeWriter<'a> {
         let start = data.len();
         data.extend_from_slice(&self.extra);
         let extra = start..data.len();
-        ChangeSetChangeColumns {
+        BundleChangeColumns {
             actor,
             seq,
             num_ops,
@@ -437,7 +437,7 @@ impl<'a> ChangeSetChangeWriter<'a> {
 }
 
 #[derive(Default)]
-pub(crate) struct ChangeSetOpWriter<'a> {
+pub(crate) struct BundleOpWriter<'a> {
     /// `(row, hint target, the target's object)`
     pub(crate) targets: Vec<(usize, OpId, crate::types::ObjId)>,
     pub(crate) obj_actor: hexane::Encoder<'a, Option<ActorIdx>>,
@@ -461,7 +461,7 @@ pub(crate) struct ChangeSetOpWriter<'a> {
     pub(crate) id_ctr: hexane::DeltaEncoder<'a, Option<i64>>,
 }
 
-impl<'a> ChangeSetOpWriter<'a> {
+impl<'a> BundleOpWriter<'a> {
     pub(crate) fn add(
         &mut self,
         op: &OpBuilder<'_>,
@@ -513,11 +513,7 @@ impl<'a> ChangeSetOpWriter<'a> {
         self.id_ctr.append(Some(op.id.counter() as i64));
     }
 
-    pub(crate) fn finish(
-        self,
-        mapper: &ActorMapper<'a>,
-        data: &mut Vec<u8>,
-    ) -> ChangeSetOpsColumns {
+    pub(crate) fn finish(self, mapper: &ActorMapper<'a>, data: &mut Vec<u8>) -> BundleOpsColumns {
         self.finish_with_ranks(mapper, data, &Default::default())
     }
 
@@ -528,7 +524,7 @@ impl<'a> ChangeSetOpWriter<'a> {
         mapper: &ActorMapper<'a>,
         data: &mut Vec<u8>,
         ranks: &std::collections::HashMap<OpId, u64>,
-    ) -> ChangeSetOpsColumns {
+    ) -> BundleOpsColumns {
         let mut hint_enc = hexane::DeltaEncoder::<Option<i64>>::default();
         let mut row = 0;
         for (at, id, _) in &self.targets {
@@ -562,7 +558,7 @@ impl<'a> ChangeSetOpWriter<'a> {
         let mark_name = self.mark_name.save_to_unless(data, None);
         let id_ctr = self.id_ctr.save_to(data);
 
-        ChangeSetOpsColumns {
+        BundleOpsColumns {
             id_actor,
             id_ctr,
             obj_actor,
@@ -588,7 +584,7 @@ impl<'a> ChangeSetOpWriter<'a> {
 }
 
 #[derive(Default)]
-pub(crate) struct ChangeSetOpsColumns {
+pub(crate) struct BundleOpsColumns {
     pub(crate) id_actor: Range<usize>,
     pub(crate) id_ctr: Range<usize>,
     pub(crate) obj_actor: Range<usize>,
@@ -612,7 +608,7 @@ pub(crate) struct ChangeSetOpsColumns {
 }
 
 #[derive(Default)]
-pub(crate) struct ChangeSetChangeColumns {
+pub(crate) struct BundleChangeColumns {
     actor: Range<usize>,
     seq: Range<usize>,
     max_op: Range<usize>,
@@ -625,7 +621,7 @@ pub(crate) struct ChangeSetChangeColumns {
     extra: Range<usize>,
 }
 
-impl ChangeSetChangeColumns {
+impl BundleChangeColumns {
     fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (change::ACTOR, &self.actor),
@@ -646,7 +642,7 @@ impl ChangeSetChangeColumns {
     }
 }
 
-impl ChangeSetOpsColumns {
+impl BundleOpsColumns {
     pub(crate) fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         [
             (ops::OBJ_ACTOR, &self.obj_actor),
@@ -686,10 +682,10 @@ struct ChangeBuilder {
     max_op: u64,
 }
 
-/// A change set's change-metadata columns, for decoding one column at a
-/// time. An absent column is an empty slice, which decodes as all-default.
+/// A bundle's change-metadata columns, for decoding one column at a time.
+/// An absent column is an empty slice, which decodes as all-default.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct ChangeSetChangeCols<'a> {
+pub(crate) struct BundleChangeCols<'a> {
     pub(crate) actor: &'a [u8],
     pub(crate) seq: &'a [u8],
     pub(crate) num_ops: &'a [u8],
@@ -702,7 +698,7 @@ pub(crate) struct ChangeSetChangeCols<'a> {
     pub(crate) extra: &'a [u8],
 }
 
-impl<'a> ChangeSetChangeCols<'a> {
+impl<'a> BundleChangeCols<'a> {
     pub(crate) fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
@@ -765,12 +761,12 @@ impl<'a> ChangeSetChangeCols<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct ChangeSetChangeIterUnverified<'a> {
-    inner: Option<ChangeSetChangeIterInner<'a>>,
+pub(crate) struct BundleChangeIterUnverified<'a> {
+    inner: Option<BundleChangeIterInner<'a>>,
 }
 
 #[derive(Debug)]
-struct ChangeSetChangeIterInner<'a> {
+struct BundleChangeIterInner<'a> {
     actor: hexane::Decoder<'a, Option<ActorIdx>>,
     seq: hexane::DeltaDecoder<'a, Option<i64>>,
     max_op: hexane::DeltaDecoder<'a, Option<i64>>,
@@ -783,8 +779,8 @@ struct ChangeSetChangeIterInner<'a> {
     extra: &'a [u8],
 }
 
-impl<'a> Iterator for ChangeSetChangeIterUnverified<'a> {
-    type Item = Result<ChangeSetChange<'a>, ParseError>;
+impl<'a> Iterator for BundleChangeIterUnverified<'a> {
+    type Item = Result<BundleChange<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -795,23 +791,23 @@ impl<'a> Iterator for ChangeSetChangeIterUnverified<'a> {
     }
 }
 
-impl<'a> ChangeSetChangeIterUnverified<'a> {
+impl<'a> BundleChangeIterUnverified<'a> {
     pub(crate) fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
         Ok(Self {
-            inner: Some(ChangeSetChangeIterInner::try_new(columns, data)?),
+            inner: Some(BundleChangeIterInner::try_new(columns, data)?),
         })
     }
 }
 
-impl<'a> ChangeSetChangeIterInner<'a> {
+impl<'a> BundleChangeIterInner<'a> {
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
-        let cols = ChangeSetChangeCols::try_new(columns, data)?;
+        let cols = BundleChangeCols::try_new(columns, data)?;
         Ok(Self {
             actor: cols.actors(),
             seq: cols.seqs(),
@@ -826,7 +822,7 @@ impl<'a> ChangeSetChangeIterInner<'a> {
         })
     }
 
-    fn try_next(&mut self) -> Result<Option<ChangeSetChange<'a>>, ParseError> {
+    fn try_next(&mut self) -> Result<Option<BundleChange<'a>>, ParseError> {
         let actor = match self.actor.next().flatten() {
             Some(a) => a.into(),
             None => return Ok(None),
@@ -872,7 +868,7 @@ impl<'a> ChangeSetChangeIterInner<'a> {
         let extra = Cow::Borrowed(extra);
         self.extra = tail;
 
-        Ok(Some(ChangeSetChange {
+        Ok(Some(BundleChange {
             actor,
             author: None,
             seq,
@@ -886,7 +882,7 @@ impl<'a> ChangeSetChangeIterInner<'a> {
     }
 }
 
-/// Each row's preds from outside the change set, in row order.
+/// Each row's preds from outside the bundle, in row order.
 pub(crate) struct ExternalPreds<'a> {
     count: hexane::Decoder<'a, Option<u64>>,
     actor: hexane::Decoder<'a, Option<ActorIdx>>,
@@ -929,12 +925,12 @@ impl<'a> ExternalPreds<'a> {
     }
 }
 
-/// A change set op with actors mapped to the document's, and no marks.
+/// A bundle op with actors mapped to the document's, and no marks.
 #[derive(Debug)]
 pub(crate) struct ManifoldOp<'a> {
     pub(crate) id: OpId,
     pub(crate) obj: ObjId,
-    pub(crate) key: ChangeSetKey<'a>,
+    pub(crate) key: BundleKey<'a>,
     pub(crate) insert: bool,
     pub(crate) action: Action,
     /// non-member predecessors
@@ -951,23 +947,23 @@ pub(crate) struct ManifoldOp<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ChangeSetKey<'a> {
+pub(crate) enum BundleKey<'a> {
     Map(&'a str),
     Seq(ElemId),
 }
 
-impl ChangeSetKey<'_> {
+impl BundleKey<'_> {
     pub(crate) fn key_str(&self) -> Option<&str> {
         match self {
-            ChangeSetKey::Map(s) => Some(s),
-            ChangeSetKey::Seq(_) => None,
+            BundleKey::Map(s) => Some(s),
+            BundleKey::Seq(_) => None,
         }
     }
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
-            ChangeSetKey::Map(_) => None,
-            ChangeSetKey::Seq(e) => Some(*e),
+            BundleKey::Map(_) => None,
+            BundleKey::Seq(e) => Some(*e),
         }
     }
 }
@@ -1027,7 +1023,7 @@ pub(crate) struct TailRun {
     pub(crate) last_insert: Option<(usize, OpId)>,
 }
 
-/// Forward-only reader over a change set's op columns for the manifold,
+/// Forward-only reader over a bundle's op columns for the manifold,
 /// decoding only what the manifold reads.
 #[derive(Clone)]
 pub(crate) struct ManifoldOps<'a> {
@@ -1191,7 +1187,7 @@ impl<'a> ManifoldOps<'a> {
         let ka = self.key_actor.next().flatten();
         let kc = self.key_ctr.next().flatten();
         let key = match ks {
-            Some(sv) => ChangeSetKey::Map(sv),
+            Some(sv) => BundleKey::Map(sv),
             None => {
                 let e = match (ka, kc) {
                     (None, Some(0)) | (None, None) => ElemId(OpId::new(0, 0)),
@@ -1200,7 +1196,7 @@ impl<'a> ManifoldOps<'a> {
                     }
                     _ => panic!("invalid elem key"),
                 };
-                ChangeSetKey::Seq(e)
+                BundleKey::Seq(e)
             }
         };
 
@@ -1465,8 +1461,8 @@ pub(crate) mod ops {
     pub(super) const EXPAND_COL_ID:         ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID:      ColumnId = ColumnId::new(10);
     /// The rank of the op's key-elem row among the non-member ops of its
-    /// object covered by the change set's dependency clock: a lower bound
-    /// on that row's position in any document the change set applies to.
+    /// object covered by the bundle's dependency clock: a lower bound
+    /// on that row's position in any document the bundle applies to.
     /// Null for ops with no such row: map keys, the list head, members.
     pub(super) const HINT_COL_ID:           ColumnId = ColumnId::new(12);
 

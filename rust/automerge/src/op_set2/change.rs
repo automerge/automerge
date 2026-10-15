@@ -14,7 +14,7 @@ use std::num::NonZero;
 use std::ops::Range;
 
 pub(crate) mod batch;
-pub(crate) mod change_set;
+pub(crate) mod bundle;
 pub(crate) mod collector;
 
 #[cfg(test)]

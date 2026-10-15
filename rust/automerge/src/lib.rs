@@ -108,7 +108,7 @@
 //! [`next::Automerge`] and [`next::AutoCommit`] do not keep every change hash, which makes
 //! them smaller and faster to load. They name history by [`ChangeId`] (an actor and sequence
 //! number) instead, return errors where an operation needs history the document has not kept,
-//! and save in the compact change set format by default. Convert between the two with
+//! and save in the compact bundle format by default. Convert between the two with
 //! [`Automerge::into_next()`] and [`next::Automerge::into_audit()`] (or the [`AutoCommit`]
 //! equivalents); `into_audit` costs a pass over the whole history.
 //!
@@ -334,8 +334,7 @@ pub use patches::{Patch, PatchAction};
 pub use read::Stats;
 pub use sequence_tree::SequenceTree;
 pub use storage::{
-    AuditedMember, ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet,
-    VerificationMode,
+    AuditedMember, Bundle, BundleChange, InvalidBundle, MalformedBundle, VerificationMode,
 };
 pub use text_value::ConcreteTextValue;
 pub use tx::BlockOrText;

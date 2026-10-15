@@ -16,14 +16,14 @@ use crate::types::{ActorId, ChangeHash};
 use crate::Change;
 
 use super::builder::ExternalPreds;
-use super::{ChangeSetChange, ChangeSetChangeCols, ChangeSetChangeIterUnverified, ParseError};
+use super::{BundleChange, BundleChangeCols, BundleChangeIterUnverified, ParseError};
 
 #[derive(Clone, Debug)]
-pub(crate) struct ChangeSetStorage<'a, OpReadState> {
+pub(crate) struct BundleStorage<'a, OpReadState> {
     /// Uncompressed in-memory form. Iterators index into this.
     pub(crate) bytes: Cow<'a, [u8]>,
     /// On-disk form, if columns were DEFLATE-compressed. `None` for
-    /// change sets that were written or received in fully-uncompressed form
+    /// bundles that were written or received in fully-uncompressed form
     /// (in which case `bytes` is also the on-disk form).
     pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
     pub(crate) deps: Vec<ChangeHash>,
@@ -34,16 +34,16 @@ pub(crate) struct ChangeSetStorage<'a, OpReadState> {
     pub(crate) changes_data: Range<usize>,
     /// Decoded on demand; allocates per member, so the apply path reads
     /// [`Self::change_cols`] instead.
-    pub(crate) changes: OnceLock<Vec<ChangeSetChange<'static>>>,
-    /// The op columns in change set actor space, loaded at parse time.
+    pub(crate) changes: OnceLock<Vec<BundleChange<'static>>>,
+    /// The op columns in bundle actor space, loaded at parse time.
     /// Empty once taken, or if built locally; reloaded from `bytes` then.
-    pub(crate) change_set_ops: OnceLock<OpSet>,
+    pub(crate) bundle_ops: OnceLock<OpSet>,
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
-impl<O: OpReadState> ChangeSetStorage<'_, O> {
-    pub(crate) fn into_owned(self) -> ChangeSetStorage<'static, O> {
-        ChangeSetStorage {
+impl<O: OpReadState> BundleStorage<'_, O> {
+    pub(crate) fn into_owned(self) -> BundleStorage<'static, O> {
+        BundleStorage {
             bytes: Cow::Owned(self.bytes.into_owned()),
             compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
             deps: self.deps,
@@ -53,13 +53,13 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
             changes: self.changes,
-            change_set_ops: self.change_set_ops,
+            bundle_ops: self.bundle_ops,
             _phantom: self._phantom,
         }
     }
 
-    pub(crate) fn change_cols(&self) -> Result<ChangeSetChangeCols<'_>, ParseError> {
-        ChangeSetChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
+    pub(crate) fn change_cols(&self) -> Result<BundleChangeCols<'_>, ParseError> {
+        BundleChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
     }
 
     /// Each member's actor and sequence number, checking that actors are
@@ -88,8 +88,8 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
     }
 
     /// Each member's metadata, decoded afresh rather than cached.
-    pub(crate) fn iter_change_meta(&self) -> Result<ChangeSetChangeIterUnverified<'_>, ParseError> {
-        ChangeSetChangeIterUnverified::try_new(
+    pub(crate) fn iter_change_meta(&self) -> Result<BundleChangeIterUnverified<'_>, ParseError> {
+        BundleChangeIterUnverified::try_new(
             &self.changes_meta,
             &self.bytes[self.changes_data.clone()],
         )
@@ -103,7 +103,7 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
         Ok(ChangeCollector::from_change_meta(meta, actors))
     }
 
-    pub(crate) fn changes(&self) -> Result<&[ChangeSetChange<'static>], ParseError> {
+    pub(crate) fn changes(&self) -> Result<&[BundleChange<'static>], ParseError> {
         if self.changes.get().is_none() {
             let decoded =
                 decode_change_meta(&self.changes_meta, &self.bytes[self.changes_data.clone()])?;
@@ -117,15 +117,15 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
     }
 
     /// Reloads from `bytes` if the op columns were already taken.
-    pub(crate) fn take_change_set_ops(&mut self) -> Result<OpSet, ParseError> {
-        if let Some(ops) = self.change_set_ops.take() {
+    pub(crate) fn take_bundle_ops(&mut self) -> Result<OpSet, ParseError> {
+        if let Some(ops) = self.bundle_ops.take() {
             return Ok(ops);
         }
-        self.load_change_set_ops()
+        self.load_bundle_ops()
     }
 
-    fn load_change_set_ops(&self) -> Result<OpSet, ParseError> {
-        OpSet::load_change_set_cols(
+    fn load_bundle_ops(&self) -> Result<OpSet, ParseError> {
+        OpSet::load_bundle_cols(
             &self.ops_meta,
             &self.bytes[self.ops_data.clone()],
             self.actors.len(),
@@ -137,9 +137,9 @@ impl<O: OpReadState> ChangeSetStorage<'_, O> {
 fn decode_change_meta(
     changes_meta: &RawColumns<compression::Uncompressed>,
     data: &[u8],
-) -> Result<Vec<ChangeSetChange<'static>>, ParseError> {
-    ChangeSetChangeIterUnverified::try_new(changes_meta, data)?
-        .map(|c| c.map(ChangeSetChange::into_owned))
+) -> Result<Vec<BundleChange<'static>>, ParseError> {
+    BundleChangeIterUnverified::try_new(changes_meta, data)?
+        .map(|c| c.map(BundleChange::into_owned))
         .collect()
 }
 
@@ -149,10 +149,10 @@ fn primed<T>(value: T) -> OnceLock<T> {
     cell
 }
 
-impl<'a> ChangeSetStorage<'a, Unverified> {
+impl<'a> BundleStorage<'a, Unverified> {
     pub(crate) fn parse_columns(
         input: parse::Input<'a>,
-    ) -> parse::ParseResult<'a, ChangeSetStorage<'a, Unverified>, ParseError> {
+    ) -> parse::ParseResult<'a, BundleStorage<'a, Unverified>, ParseError> {
         let full_bytes = input.bytes();
 
         // Parse the leading deps + actors, capturing the byte range so we
@@ -183,11 +183,11 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
         if let (Some(changes_meta), Some(ops_meta)) =
             (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
         {
-            let change_set_ops = OpSet::load_change_set_cols(&ops_meta, ops.value, actors.len())
+            let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops.value, actors.len())
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
             return Ok((
                 parse::Input::empty(),
-                ChangeSetStorage {
+                BundleStorage {
                     bytes: full_bytes.into(),
                     compressed_bytes: None,
                     deps,
@@ -197,7 +197,7 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
                     changes_meta,
                     changes_data: changes_data_range,
                     changes: OnceLock::new(),
-                    change_set_ops: primed(change_set_ops),
+                    bundle_ops: primed(bundle_ops),
                     _phantom: PhantomData,
                 },
             ));
@@ -233,13 +233,13 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
         out.extend_from_slice(&ops_data_buf);
         let new_ops_end = out.len();
 
-        let change_set_ops =
-            OpSet::load_change_set_cols(&ops_meta, &out[new_ops_start..new_ops_end], actors.len())
+        let bundle_ops =
+            OpSet::load_bundle_cols(&ops_meta, &out[new_ops_start..new_ops_end], actors.len())
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
 
         Ok((
             parse::Input::empty(),
-            ChangeSetStorage {
+            BundleStorage {
                 bytes: Cow::Owned(out),
                 compressed_bytes: Some(full_bytes.into()),
                 deps,
@@ -249,7 +249,7 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
                 changes_meta,
                 changes_data: new_changes_start..new_changes_end,
                 changes: OnceLock::new(),
-                change_set_ops: primed(change_set_ops),
+                bundle_ops: primed(bundle_ops),
                 _phantom: PhantomData,
             },
         ))
@@ -258,8 +258,8 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
     /// `parse_columns` has already validated the columns. Rows malformed in
     /// ways a column decode cannot see (a map op with a null key, say) are
     /// only caught by [`Self::to_changes`].
-    pub(crate) fn verify(self) -> Result<ChangeSetStorage<'a, Verified>, ParseError> {
-        Ok(ChangeSetStorage {
+    pub(crate) fn verify(self) -> Result<BundleStorage<'a, Verified>, ParseError> {
+        Ok(BundleStorage {
             bytes: self.bytes,
             compressed_bytes: self.compressed_bytes,
             deps: self.deps,
@@ -269,13 +269,13 @@ impl<'a> ChangeSetStorage<'a, Unverified> {
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
             changes: self.changes,
-            change_set_ops: self.change_set_ops,
+            bundle_ops: self.bundle_ops,
             _phantom: PhantomData,
         })
     }
 }
 
-impl ChangeSetStorage<'_, Verified> {
+impl BundleStorage<'_, Verified> {
     /// Rebuilds the member [`Change`]s, including the deletes that have no
     /// row of their own.
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
@@ -284,8 +284,8 @@ impl ChangeSetStorage<'_, Verified> {
         let mut collector = self.collector(&actors)?;
         self.feed(&ops, &mut collector)?;
         collector
-            .decode_change_set(&actors, &self.deps)
-            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))
+            .decode_bundle(&actors, &self.deps)
+            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))
     }
 
     pub(crate) fn member_hashes(
@@ -298,7 +298,7 @@ impl ChangeSetStorage<'_, Verified> {
         self.feed(&ops, &mut collector)?;
         collector
             .member_hashes(&self.deps, known)
-            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))
+            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))
     }
 
     /// Every member's hash, hashing each as soon as its ops are in, as a
@@ -306,18 +306,18 @@ impl ChangeSetStorage<'_, Verified> {
     pub(crate) fn hash_members(&self) -> Result<Vec<ChangeHash>, ParseError> {
         let actors = ActorTable::from_sorted(self.actors.clone())?;
         let ops = self.ops()?;
-        let mut collector = self.collector(&actors)?.hashing_change_set(&self.deps);
+        let mut collector = self.collector(&actors)?.hashing_bundle(&self.deps);
         self.feed(&ops, &mut collector)?;
         let collected = collector
             .collect_hashes()
-            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
+            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))?;
         Ok(collected.hashes)
     }
 
     fn ops(&self) -> Result<Cow<'_, OpSet>, ParseError> {
-        match self.change_set_ops.get() {
+        match self.bundle_ops.get() {
             Some(ops) => Ok(Cow::Borrowed(ops)),
-            None => self.load_change_set_ops().map(Cow::Owned),
+            None => self.load_bundle_ops().map(Cow::Owned),
         }
     }
 

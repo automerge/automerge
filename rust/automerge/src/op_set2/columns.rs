@@ -397,7 +397,7 @@ impl Columns {
     /// into this one at the run's pre-merge position. Fragment rows not
     /// covered by a run are dropped.
     pub(super) fn merge(&mut self, frag: Columns, runs: &[CopyRange]) {
-        let change_set_len = frag.len();
+        let bundle_len = frag.len();
         let subs: Vec<hexane::Splice> = runs
             .iter()
             .map(|cr| hexane::Splice {
@@ -450,7 +450,7 @@ impl Columns {
         self.index.mark.merge_from(frag.index.mark, rows());
         self.index
             .dirty
-            .copy_ranges(hexane::Column::fill(change_set_len, true), rows());
+            .copy_ranges(hexane::Column::fill(bundle_len, true), rows());
     }
 
     pub(super) fn actor_map(&self) -> std::sync::Arc<super::op_set::ActorMap> {

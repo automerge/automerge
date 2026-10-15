@@ -7,7 +7,7 @@ const HASH = /^[0-9a-f]{64}$/;
 
 const DOCUMENT_CHUNK = 0;
 const CHANGE_CHUNK = 1;
-const CHANGE_SET_CHUNK = 4;
+const BUNDLE_CHUNK = 4;
 
 function chunkType(bytes: Uint8Array): number {
   // magic bytes, then a four byte checksum, then the chunk type
@@ -51,17 +51,17 @@ describe("Automerge", () => {
       assert.deepStrictEqual(doc.merge(other), ["1@bbbb"]);
     });
 
-    it("saves in the change set format outside audit mode", () => {
+    it("saves in the bundle format outside audit mode", () => {
       const doc = docWithHistory();
       assert.strictEqual(chunkType(doc.save()), DOCUMENT_CHUNK);
 
       doc.enableAuditMode(false);
       const saved = doc.save();
-      assert.strictEqual(chunkType(saved), CHANGE_SET_CHUNK);
+      assert.strictEqual(chunkType(saved), BUNDLE_CHUNK);
 
       doc.put("_root", "c", 3);
       const incremental = doc.saveIncremental();
-      assert.strictEqual(chunkType(incremental), CHANGE_SET_CHUNK);
+      assert.strictEqual(chunkType(incremental), BUNDLE_CHUNK);
 
       const loaded = load(saved);
       loaded.loadIncremental(incremental);

@@ -1,7 +1,7 @@
-// Time `change_sets_for_fragments` over a document's whole fragment set, and
+// Time `bundles_for_fragments` over a document's whole fragment set, and
 // over a single small fragment, on the corpus docs.
 //
-//   cargo run --release -p automerge --example bench_change_set
+//   cargo run --release -p automerge --example bench_bundle
 use automerge::next::{Automerge, ReadDoc};
 use std::time::Instant;
 
@@ -35,9 +35,7 @@ fn main() {
         let fragments = doc.fragments(..);
         let n = fragments.len();
 
-        let all = best_of(3, || {
-            doc.change_sets_for_fragments(fragments.clone()).unwrap()
-        });
+        let all = best_of(3, || doc.bundles_for_fragments(fragments.clone()).unwrap());
 
         // one single-member fragment should touch only its own ops
         let smallest = fragments
@@ -45,7 +43,7 @@ fn main() {
             .min_by_key(|f| f.members.len())
             .unwrap()
             .clone();
-        let one = best_of(50, || doc.change_set_for_fragment(&smallest).unwrap());
+        let one = best_of(50, || doc.bundle_for_fragment(&smallest).unwrap());
 
         println!(
             "{:>4} {:>8} {:>7} {:>11.4}s {:>13.4}ms {:>10.4}ms",

@@ -727,12 +727,12 @@ impl Automerge {
         self.0.text_encoding()
     }
 
-    /// EXPERIMENTAL: Encode each fragment as a change set.
+    /// EXPERIMENTAL: Encode each fragment as a bundle.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn change_sets_for_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
@@ -740,7 +740,7 @@ impl Automerge {
             .into_iter()
             .map(|f| f.into_next(&self.0))
             .collect();
-        self.0.change_sets_for_fragments(fragments)
+        self.0.bundles_for_fragments(fragments)
     }
 
     /// Apply a batch of changes to this document. See [`Self::apply_changes()`].

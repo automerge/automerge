@@ -4,7 +4,7 @@
 use super::{Automerge, LoadOptions, NameHashes, SaveOptions};
 use crate::autocommit::AutoCommit;
 use crate::hash_retention::Retained;
-use crate::storage::change_set::{REHASHABLE_CHANGES, REHASHABLE_OPS};
+use crate::storage::bundle::{REHASHABLE_CHANGES, REHASHABLE_OPS};
 use crate::tx::{CommitOptions, Transactable};
 use crate::{ActorId, ROOT};
 
@@ -54,9 +54,9 @@ fn a_big_change_keeps_its_hash() {
     let doc = doc.document();
     let big = doc.change_graph.all_nodes()[100];
     let big_hash = doc.change_graph.hash_for_node(big).unwrap();
-    let change_set = doc.change_set_document_with(NameHashes::UntagTiny).unwrap();
-    assert!(change_set.retained.iter().any(|(_, h)| *h == big_hash));
-    assert!(change_set.retained.len() < 10, "tiny hashes left out");
+    let bundle = doc.bundle_document_with(NameHashes::UntagTiny).unwrap();
+    assert!(bundle.retained.iter().any(|(_, h)| *h == big_hash));
+    assert!(bundle.retained.len() < 10, "tiny hashes left out");
     assert_eq!(
         reload(&doc.save()).change_graph.held_hashes(),
         doc.change_graph.held_hashes()
@@ -92,46 +92,44 @@ fn a_save_at_the_limits_leaves_out_tiny_hashes() {
 }
 
 #[test]
-fn a_small_change_set_missing_any_hash_is_rehashed() {
+fn a_small_bundle_missing_any_hash_is_rehashed() {
     let mut sizes = vec![1; 50];
     sizes.push(1000);
     let mut doc = build(&sizes);
     let doc = doc.document();
-    let mut change_set = doc.change_set_document_with(NameHashes::All).unwrap();
-    change_set.retained.clear();
+    let mut bundle = doc.bundle_document_with(NameHashes::All).unwrap();
+    bundle.retained.clear();
     let mut other = Automerge::<Retained>::new().with_manual_gc();
-    other.apply_change_set(change_set).unwrap();
+    other.apply_bundle(bundle).unwrap();
     assert_eq!(
         other.change_graph.held_hashes(),
         doc.change_graph.held_hashes()
     );
 }
 
-fn big_change_set_missing_hashes() -> (Automerge<Retained>, crate::storage::ChangeSet) {
+fn big_bundle_missing_hashes() -> (Automerge<Retained>, crate::storage::Bundle) {
     let mut doc = build(&[1; REHASHABLE_CHANGES + 100]);
     let doc = doc.document().clone();
-    let mut change_set = doc.change_set_document_with(NameHashes::All).unwrap();
-    assert!(!change_set.retained.is_empty());
-    change_set.retained.clear();
-    (doc, change_set)
+    let mut bundle = doc.bundle_document_with(NameHashes::All).unwrap();
+    assert!(!bundle.retained.is_empty());
+    bundle.retained.clear();
+    (doc, bundle)
 }
 
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "left out")]
-fn a_big_change_set_missing_hashes_fails_fast_in_debug() {
-    let (_, change_set) = big_change_set_missing_hashes();
-    Automerge::<Retained>::new()
-        .apply_change_set(change_set)
-        .unwrap();
+fn a_big_bundle_missing_hashes_fails_fast_in_debug() {
+    let (_, bundle) = big_bundle_missing_hashes();
+    Automerge::<Retained>::new().apply_bundle(bundle).unwrap();
 }
 
 #[test]
 #[cfg(not(debug_assertions))]
-fn a_big_change_set_missing_hashes_rehashes_the_document() {
-    let (doc, change_set) = big_change_set_missing_hashes();
+fn a_big_bundle_missing_hashes_rehashes_the_document() {
+    let (doc, bundle) = big_bundle_missing_hashes();
     let mut other = Automerge::<Retained>::new().with_manual_gc();
-    other.apply_change_set(change_set).unwrap();
+    other.apply_bundle(bundle).unwrap();
     assert!(other
         .change_graph
         .unhashed_retained_nodes(0..other.change_graph.len() as u32)

@@ -18,7 +18,7 @@ use crate::{
     storage::document::ReconstructError as LoadError,
     storage::{Columns, Document, RawColumn, RawColumns},
     types::OpId,
-    Change, ChangeHash, MalformedChangeSet,
+    Change, ChangeHash, MalformedBundle,
 };
 
 /// The graph of changes
@@ -153,7 +153,7 @@ fn pad<T: Clone>(iter: impl Iterator<Item = T>, default: T, n: usize) -> impl It
 const NO_EXTRA: ValueMeta = ValueMeta::bytes(0);
 
 #[derive(Debug, Clone)]
-pub(crate) struct ChangeSetMember<'a> {
+pub(crate) struct BundleMember<'a> {
     /// The member's actor as a document actor index
     pub(crate) actor: usize,
     pub(crate) seq: u64,
@@ -162,12 +162,12 @@ pub(crate) struct ChangeSetMember<'a> {
     pub(crate) timestamp: i64,
     pub(crate) message: Option<String>,
     pub(crate) extra: Cow<'a, [u8]>,
-    pub(crate) deps: Vec<ChangeSetDep>,
+    pub(crate) deps: Vec<BundleDep>,
 }
 
-/// `Member` is a position in the change set's (topologically ordered) member list.
+/// `Member` is a position in the bundle's (topologically ordered) member list.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ChangeSetDep {
+pub(crate) enum BundleDep {
     Member(usize),
     Node(NodeIdx),
 }
@@ -424,7 +424,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         nodes: &[NodeIdx],
         names: crate::automerge::NameHashes,
     ) -> Vec<(usize, ChangeHash)> {
-        use crate::storage::change_set::{rehashable, REHASHABLE_CHANGES, TINY_CHANGE_OPS};
+        use crate::storage::bundle::{rehashable, REHASHABLE_CHANGES, TINY_CHANGE_OPS};
         let num_ops = |n: &NodeIdx| self.num_ops.get(n.0 as usize).unwrap_or_default();
         let untag_tiny = names == crate::automerge::NameHashes::UntagTiny
             && nodes.len() <= REHASHABLE_CHANGES
@@ -451,7 +451,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// Walks whichever is smaller, the members or the uncovered tails, so a
-    /// small change set never walks the whole document.
+    /// small bundle never walks the whole document.
     fn loose_members(&self, members: &Members<'_>, frontier: &SeqClock) -> Vec<NodeIdx> {
         let tails: Vec<&[NodeIdx]> = self.uncovered_tails(frontier).collect();
         if tails.iter().map(|t| t.len()).sum::<usize>() <= members.nodes().len() {
@@ -713,10 +713,10 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// A dep outside `nodes` is written by hash, so its hash must be retained.
-    pub(crate) fn write_change_set_changes<'a>(
+    pub(crate) fn write_bundle_changes<'a>(
         &'a self,
         nodes: &[NodeIdx],
-        writer: &mut crate::storage::ChangeSetChangeWriter<'a>,
+        writer: &mut crate::storage::BundleChangeWriter<'a>,
         mapper: &mut crate::op_set2::change::ActorMapper<'_>,
     ) -> Result<(), MissingDep> {
         debug_assert!(nodes.is_sorted());
@@ -1872,12 +1872,12 @@ impl<H: HashRetention> ChangeGraph<H> {
 }
 
 impl<H: HashRetention> ChangeGraph<H> {
-    /// Append a change set's members, with their `hashes` if given. Members
+    /// Append a bundle's members, with their `hashes` if given. Members
     /// must be in topological order, each extending its actor's seq chain.
     /// Whether a new fragment owes a [`Self::gc_after_batch`].
-    pub(crate) fn add_change_set_members(
+    pub(crate) fn add_bundle_members(
         &mut self,
-        members: Vec<ChangeSetMember<'_>>,
+        members: Vec<BundleMember<'_>>,
         hashes: Option<&[ChangeHash]>,
         authors: &mut Authors,
         actor_ids: &ActorTable,
@@ -1919,11 +1919,11 @@ impl<H: HashRetention> ChangeGraph<H> {
 
             parent_buf.clear();
             parent_buf.extend(m.deps.iter().map(|d| match d {
-                ChangeSetDep::Member(j) => {
+                BundleDep::Member(j) => {
                     debug_assert!(*j < i);
                     base + *j
                 }
-                ChangeSetDep::Node(n) => *n,
+                BundleDep::Node(n) => *n,
             }));
             for &parent in &parent_buf {
                 if let Some(h) = self.hashes.get(parent) {
@@ -1948,14 +1948,14 @@ impl<H: HashRetention> ChangeGraph<H> {
         new_fragment
     }
 
-    /// [`Self::add_change_set_members`] straight from the change set's
-    /// columns. Only valid when *every* member is kept. `ext_nodes` holds the
-    /// node of each external dep, in the change set's dep order. A malformed
-    /// change set leaves the graph untouched.
+    /// [`Self::add_bundle_members`] straight from the bundle's columns.
+    /// Only valid when *every* member is kept. `ext_nodes` holds the node
+    /// of each external dep, in the bundle's dep order. A malformed bundle
+    /// leaves the graph untouched.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn add_change_set_members_cols(
+    pub(crate) fn add_bundle_members_cols(
         &mut self,
-        cols: &crate::storage::ChangeSetChangeCols<'_>,
+        cols: &crate::storage::BundleChangeCols<'_>,
         member_actors: &[ActorIdx],
         member_seqs: &[NonZeroU64],
         actor_map: &[usize],
@@ -1964,7 +1964,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         authors: &mut Authors,
         actor_ids: &ActorTable,
     ) -> Result<bool, AutomergeError> {
-        let bad = |s: &'static str| AutomergeError::from(MalformedChangeSet::Invalid(s));
+        let bad = |s: &'static str| AutomergeError::from(MalformedBundle::Invalid(s));
         let base = NodeIdx(self.len() as u32);
         let n = member_actors.len();
         debug_assert_eq!(n, member_seqs.len());
@@ -2613,7 +2613,7 @@ mod tests {
             matches!(err, AutomergeError::DuplicateAuthor(a, actor, 2) if a == y && actor == actors[0])
         );
 
-        // two members of the change set claim the same actor
+        // two members of the bundle claim the same actor
         let authors = Authors::with_actors(2);
         let twice = [(1, 1, &fx[..]), (1, 2, &fy[..])];
         let err = <ChangeGraph>::member_authors(twice.into_iter(), &authors, &actors).unwrap_err();
@@ -3122,7 +3122,7 @@ mod tests {
     }
 
     #[test]
-    fn change_sets_for_fragments_roundtrips_through_load_incremental() {
+    fn bundles_for_fragments_roundtrips_through_load_incremental() {
         let mut rng = make_rng();
         let mut doc = Automerge::new();
 
@@ -3136,9 +3136,9 @@ mod tests {
 
         let fragments = doc.fragments(..);
 
-        let change_sets = doc.change_sets_for_fragments(fragments).unwrap();
+        let bundles = doc.bundles_for_fragments(fragments).unwrap();
 
-        let joined: Vec<u8> = change_sets.into_iter().flatten().collect();
+        let joined: Vec<u8> = bundles.into_iter().flatten().collect();
 
         let mut loaded = AutoCommit::new();
         loaded.load_incremental(&joined).unwrap();
@@ -3186,15 +3186,15 @@ mod tests {
         doc.commit();
 
         let fragments = doc.doc.fragments(..);
-        let change_sets: Vec<_> = fragments
+        let bundles: Vec<_> = fragments
             .iter()
-            .map(|f| doc.doc.change_set_for_fragment(f).unwrap())
+            .map(|f| doc.doc.bundle_for_fragment(f).unwrap())
             .collect();
 
         let apply_all = || {
             let mut d = Automerge::new();
-            for b in &change_sets {
-                d.apply_change_set(b.clone()).unwrap();
+            for b in &bundles {
+                d.apply_bundle(b.clone()).unwrap();
             }
             d
         };

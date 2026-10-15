@@ -617,16 +617,16 @@ impl AutoCommit {
         self.0.hash_for_opid(opid).ok().flatten()
     }
 
-    /// EXPERIMENTAL: Encode each fragment as a change set.
+    /// EXPERIMENTAL: Encode each fragment as a bundle.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn change_sets_for_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        Automerge::from_next_ref(&self.0.doc).change_sets_for_fragments(fragments)
+        Automerge::from_next_ref(&self.0.doc).bundles_for_fragments(fragments)
     }
 
     /// Convert to the [`next`](crate::next) API, which keeps only the hashes a

@@ -1,16 +1,16 @@
-//! Cutting the rows a document already has out of a change set's fragment.
+//! Cutting the rows a document already has out of a bundle's fragment.
 //!
 //! A dropped row's surviving successors take the relationship into their
 //! pred column, and a delete successor with no row of its own gains one at
-//! the end of its register, as `ChangeSetBuilder::flush_deletes` would
-//! have written it.
+//! the end of its register, as `BundleBuilder::flush_deletes` would have
+//! written it.
 
 use super::super::columns::Columns;
 use super::super::meta::ValueMeta;
 use super::super::types::{Action, ActorIdx, ScalarValue};
 use super::OpSet;
 use crate::clock::Clock;
-use crate::storage::change_set::ops as spec;
+use crate::storage::bundle::ops as spec;
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::{RawColumn, RawColumns};
 
@@ -19,9 +19,9 @@ use std::ops::Range;
 impl OpSet {
     /// Cut the rows `clock` covers out of this fragment.
     ///
-    /// `raw`/`data` are the change set's op columns, read for their pred
+    /// `raw`/`data` are the bundle's op columns, read for their pred
     /// and hint columns; returns those rebuilt for the rows that remain.
-    /// `actor_map` maps the change set's actor indexes to the document's.
+    /// `actor_map` maps the bundle's actor indexes to the document's.
     pub(crate) fn drop_covered(
         &mut self,
         raw: &RawColumns<Uncompressed>,
@@ -34,17 +34,17 @@ impl OpSet {
         plan.apply(&mut self.cols)
     }
 
-    /// This fragment's op columns plus `preds`, in change set form for
-    /// [`crate::storage::change_set::ManifoldOps`], which tolerates the
+    /// This fragment's op columns plus `preds`, in bundle form for
+    /// [`crate::storage::bundle::ManifoldOps`], which tolerates the
     /// appended columns being out of spec order.
-    pub(crate) fn export_change_set(&self, preds: PredCols) -> (RawColumns<Uncompressed>, Vec<u8>) {
+    pub(crate) fn export_bundle(&self, preds: PredCols) -> (RawColumns<Uncompressed>, Vec<u8>) {
         let (raw, mut data) = self.cols.export();
         let extra = preds.save_to(&mut data);
         (raw.iter().cloned().chain(extra).collect(), data)
     }
 }
 
-/// An op id in the change set's actor space, ordered like
+/// An op id in the bundle's actor space, ordered like
 /// [`crate::types::OpId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct RawId {
@@ -412,7 +412,7 @@ impl PredCols {
         self.ctr.append(id.ctr as i64);
     }
 
-    /// Like the change set writer, omits a column of only defaults.
+    /// Like the bundle writer, omits a column of only defaults.
     fn save_to(self, data: &mut Vec<u8>) -> Vec<RawColumn<Uncompressed>> {
         [
             (spec::PRED_COUNT, self.count.save_to_unless(data, 0)),

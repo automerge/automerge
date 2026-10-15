@@ -1,19 +1,19 @@
 use crate::automerge::Automerge;
 use crate::clock::Clock;
 use crate::op_set2::op_set::manifold::ManifoldResult;
-use crate::storage::ChangeSet;
-use crate::{AutomergeError, MalformedChangeSet};
+use crate::storage::Bundle;
+use crate::{AutomergeError, MalformedBundle};
 
 #[derive(Debug)]
-pub(crate) enum ChangeSetSrc<'a> {
-    ChangeSet(&'a ChangeSet),
+pub(crate) enum BundleSrc<'a> {
+    Bundle(&'a Bundle),
     Owned {
         raw: crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
         data: Vec<u8>,
     },
 }
 
-impl ChangeSetSrc<'_> {
+impl BundleSrc<'_> {
     fn parts(
         &self,
     ) -> (
@@ -21,36 +21,36 @@ impl ChangeSetSrc<'_> {
         &[u8],
     ) {
         match self {
-            ChangeSetSrc::ChangeSet(b) => (
+            BundleSrc::Bundle(b) => (
                 &b.storage.ops_meta,
                 &b.storage.bytes[b.storage.ops_data.clone()],
             ),
-            ChangeSetSrc::Owned { raw, data } => (raw, data),
+            BundleSrc::Owned { raw, data } => (raw, data),
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct ChangeSetApply<'a> {
+pub(crate) struct BundleApply<'a> {
     clock_before: Clock,
-    /// change set actor index -> doc actor index
+    /// bundle actor index -> doc actor index
     actor_map: Vec<usize>,
-    src: ChangeSetSrc<'a>,
+    src: BundleSrc<'a>,
     /// excludes the pred columns: they feed the manifold, not the op set
     frag: crate::op_set2::op_set::OpSet,
     /// the write-frontier mask, when it hides some of the incoming ops
     mask: Option<Clock>,
 }
 
-impl<'a> ChangeSetApply<'a> {
+impl<'a> BundleApply<'a> {
     pub(crate) fn from_parts(
         clock: Clock,
         actor_map: Vec<usize>,
-        src: ChangeSetSrc<'a>,
+        src: BundleSrc<'a>,
         doc_ops: &crate::op_set2::op_set::OpSet,
         mask: Option<Clock>,
     ) -> Result<Self, AutomergeError> {
-        let frag = load_change_set(&src, &actor_map, doc_ops, mask.as_ref())?;
+        let frag = load_bundle(&src, &actor_map, doc_ops, mask.as_ref())?;
         Ok(Self {
             clock_before: clock,
             actor_map,
@@ -60,42 +60,42 @@ impl<'a> ChangeSetApply<'a> {
         })
     }
 
-    /// Fails on malformed op columns. Every change set actor must be in
-    /// `actor_map`; `overlap` marks a change set the document partly has.
+    /// Fails on malformed op columns. Every bundle actor must be in
+    /// `actor_map`; `overlap` marks a bundle the document partly has.
     pub(crate) fn new(
-        change_set: &'a ChangeSet,
+        bundle: &'a Bundle,
         actor_map: Vec<usize>,
         clock: &Clock,
         overlap: bool,
         doc_ops: &crate::op_set2::op_set::OpSet,
-        change_set_ops: crate::op_set2::op_set::OpSet,
+        bundle_ops: crate::op_set2::op_set::OpSet,
         mask: Option<Clock>,
     ) -> Result<Self, AutomergeError> {
         let (src, frag) = if overlap {
             // covered rows are dropped, so the manifold must read re-encoded columns
-            let mut ops = change_set_ops;
+            let mut ops = bundle_ops;
             let preds = ops.drop_covered(
-                &change_set.storage.ops_meta,
-                &change_set.storage.bytes[change_set.storage.ops_data.clone()],
+                &bundle.storage.ops_meta,
+                &bundle.storage.bytes[bundle.storage.ops_data.clone()],
                 clock,
                 &actor_map,
             );
-            let (raw, data) = ops.export_change_set(preds);
-            // a filtered change set may name elements it no longer contains
+            let (raw, data) = ops.export_bundle(preds);
+            // a filtered bundle may name elements it no longer contains
             let frag = ops
-                .index_change_set(&actor_map, doc_ops, true, mask.as_ref())
-                .map_err(|_| MalformedChangeSet::Invalid("invalid change set op columns"))?;
-            (ChangeSetSrc::Owned { raw, data }, frag)
+                .index_bundle(&actor_map, doc_ops, true, mask.as_ref())
+                .map_err(|_| MalformedBundle::Invalid("invalid bundle op columns"))?;
+            (BundleSrc::Owned { raw, data }, frag)
         } else {
-            let frag = change_set_ops
-                .index_change_set(
+            let frag = bundle_ops
+                .index_bundle(
                     &actor_map,
                     doc_ops,
-                    !change_set.storage.deps.is_empty(),
+                    !bundle.storage.deps.is_empty(),
                     mask.as_ref(),
                 )
-                .map_err(|_| MalformedChangeSet::Invalid("invalid change set op columns"))?;
-            (ChangeSetSrc::ChangeSet(change_set), frag)
+                .map_err(|_| MalformedBundle::Invalid("invalid bundle op columns"))?;
+            (BundleSrc::Bundle(bundle), frag)
         };
         Ok(Self {
             clock_before: clock.clone(),
@@ -107,19 +107,19 @@ impl<'a> ChangeSetApply<'a> {
     }
 }
 
-fn load_change_set(
-    src: &ChangeSetSrc<'_>,
+fn load_bundle(
+    src: &BundleSrc<'_>,
     actor_map: &[usize],
     doc_ops: &crate::op_set2::op_set::OpSet,
     mask: Option<&Clock>,
 ) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
     let (raw, data) = src.parts();
-    crate::op_set2::op_set::OpSet::load_change_set(raw, data, actor_map, doc_ops, mask)
-        .map_err(|_| MalformedChangeSet::Invalid("invalid change set op columns").into())
+    crate::op_set2::op_set::OpSet::load_bundle(raw, data, actor_map, doc_ops, mask)
+        .map_err(|_| MalformedBundle::Invalid("invalid bundle op columns").into())
 }
 
-impl<'a> ChangeSetApply<'a> {
-    /// Everything that can reject the change set happens here, without
+impl<'a> BundleApply<'a> {
+    /// Everything that can reject the bundle happens here, without
     /// writing, so [`Self::commit`] cannot fail.
     pub(crate) fn resolve<H: crate::hash_retention::HashRetention>(
         &self,
@@ -128,7 +128,7 @@ impl<'a> ChangeSetApply<'a> {
         let (raw, data) = self.src.parts();
         let len = self.frag.len();
         let mask = self.mask.as_ref();
-        let mut fs = crate::storage::change_set::ManifoldOps::new(
+        let mut fs = crate::storage::bundle::ManifoldOps::new(
             raw,
             data,
             len,
@@ -139,7 +139,7 @@ impl<'a> ChangeSetApply<'a> {
         )
         .with_mask(mask);
         let m = doc.ops().apply_manifold(self.clock_before.clone(), mask);
-        m.apply_change_set_ops(&mut fs)
+        m.apply_bundle_ops(&mut fs)
     }
 
     /// Write what [`Self::resolve`] decided.
@@ -188,7 +188,7 @@ mod tests {
     use crate::tx::Transactable;
     use crate::types::ChangeHash;
     use crate::{
-        change_graph::Fragment, make_rng, AutomergeError, Change, ChangeId, ChangeSet, ObjType,
+        change_graph::Fragment, make_rng, AutomergeError, Bundle, Change, ChangeId, ObjType,
         ScalarValue, ROOT,
     };
     use rand::prelude::*;
@@ -228,7 +228,7 @@ mod tests {
         }
     }
 
-    /// Applying as a change set and as a batch must produce the same document.
+    /// Applying as a bundle and as a batch must produce the same document.
     fn apply_and_compare(
         src: &mut AutoCommit<crate::hash_retention::Full>,
         dst: &mut AutoCommit,
@@ -236,13 +236,13 @@ mod tests {
     ) {
         let changes = src.get_changes(heads).unwrap();
         let frag = fragment_for(&changes);
-        let change_set = src.doc.change_set_for_fragment(&frag).unwrap();
+        let bundle = src.doc.bundle_for_fragment(&frag).unwrap();
 
         let mut dst_ref = dst.fork();
         dst_ref.doc.apply_changes_batch(changes).unwrap();
         dst_ref.validate_top_index();
 
-        dst.doc.apply_change_set(change_set.clone()).unwrap();
+        dst.doc.apply_bundle(bundle.clone()).unwrap();
         dst.validate_top_index();
 
         assert_eq!(dst.doc.audit_mode(), AuditMode::Disabled);
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_tail_insert_overwritten_then_deleted() {
+    fn bundle_tail_insert_overwritten_then_deleted() {
         for (n, update, delete) in [
             (1, true, true),
             (3, true, true),
@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_map_apply() {
+    fn bundle_map_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random());
         let map1 = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_fuzz_list_apply() {
+    fn bundle_fuzz_list_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random());
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_fuzz_text_marks_apply() {
+    fn bundle_fuzz_text_marks_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random());
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_fuzz_map_counter_apply() {
+    fn bundle_fuzz_map_counter_apply() {
         let mut rng = make_rng();
         let mut doc1 = AutoCommit::new().with_actor(rng.random());
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
@@ -482,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_sequential() {
+    fn bundle_sequential() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new()
             .with_actor(rng.random())
@@ -505,9 +505,9 @@ mod tests {
         let mut dst = Automerge::new();
         for chunk in changes.chunks(7) {
             let frag = fragment_for(chunk);
-            let bytes = src.doc.change_set_for_fragment(&frag).unwrap().bytes();
-            let change_set = ChangeSet::try_from(&bytes[..]).unwrap();
-            dst.apply_change_set(change_set.clone()).unwrap();
+            let bytes = src.doc.bundle_for_fragment(&frag).unwrap().bytes();
+            let bundle = Bundle::try_from(&bytes[..]).unwrap();
+            dst.apply_bundle(bundle.clone()).unwrap();
         }
 
         assert_eq!(dst.get_heads(), src.get_heads());
@@ -519,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_apply_errors() {
+    fn bundle_apply_errors() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new()
             .with_actor(rng.random())
@@ -532,27 +532,27 @@ mod tests {
 
         let changes = src.get_changes(&[]).unwrap();
         let chunks: Vec<_> = changes.chunks(3).collect();
-        let change_sets: Vec<_> = chunks
+        let bundles: Vec<_> = chunks
             .iter()
-            .map(|c| src.doc.change_set_for_fragment(&fragment_for(c)).unwrap())
+            .map(|c| src.doc.bundle_for_fragment(&fragment_for(c)).unwrap())
             .collect();
 
         let mut dst = Automerge::new();
 
         // out of order
         assert!(matches!(
-            dst.apply_change_set(change_sets[1].clone()),
+            dst.apply_bundle(bundles[1].clone()),
             Err(AutomergeError::MissingDeps)
         ));
 
-        dst.apply_change_set(change_sets[0].clone()).unwrap();
+        dst.apply_bundle(bundles[0].clone()).unwrap();
 
         let heads = dst.get_heads();
-        dst.apply_change_set(change_sets[0].clone()).unwrap();
+        dst.apply_bundle(bundles[0].clone()).unwrap();
         assert_eq!(dst.get_heads(), heads);
 
-        dst.apply_change_set(change_sets[1].clone()).unwrap();
-        dst.apply_change_set(change_sets[2].clone()).unwrap();
+        dst.apply_bundle(bundles[1].clone()).unwrap();
+        dst.apply_bundle(bundles[2].clone()).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
         let dst = dst.enable_audit_mode().unwrap();
@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_apply_overlap() {
+    fn bundle_apply_overlap() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new()
             .with_actor(rng.random())
@@ -573,13 +573,13 @@ mod tests {
         }
 
         let changes = src.get_changes(&[]).unwrap();
-        let make = |cs: &[Change]| src.doc.change_set_for_fragment(&fragment_for(cs)).unwrap();
+        let make = |cs: &[Change]| src.doc.bundle_for_fragment(&fragment_for(cs)).unwrap();
         let first = make(&changes[..6]);
         let overlapping = make(&changes[3..]); // 3 present, 3 new
 
         let mut dst = Automerge::new();
-        dst.apply_change_set(first.clone()).unwrap();
-        dst.apply_change_set(overlapping.clone()).unwrap();
+        dst.apply_bundle(first.clone()).unwrap();
+        dst.apply_bundle(overlapping.clone()).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);
@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_fuzz_overlap_apply() {
+    fn bundle_fuzz_overlap_apply() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new()
             .with_actor(rng.random())
@@ -676,12 +676,12 @@ mod tests {
         let changes = src.get_changes(&[]).unwrap();
         let heads = src.get_heads();
         let saved = src.doc.save();
-        let make = |cs: &[Change]| src.doc.change_set_for_fragment(&fragment_for(cs)).unwrap();
+        let make = |cs: &[Change]| src.doc.bundle_for_fragment(&fragment_for(cs)).unwrap();
         for (i, &first) in cuts.iter().enumerate() {
             for &start in &cuts[..i] {
                 let mut dst = Automerge::new();
-                dst.apply_change_set(make(&changes[..first])).unwrap();
-                dst.apply_change_set(make(&changes[start..])).unwrap();
+                dst.apply_bundle(make(&changes[..first])).unwrap();
+                dst.apply_bundle(make(&changes[start..])).unwrap();
 
                 assert_eq!(dst.get_heads(), heads, "cut {}..{}", start, first);
                 dst.debug_cmp(&src.doc);
@@ -694,7 +694,7 @@ mod tests {
     /// A new op over a fully present conflict carries two preds, whether or
     /// not it has a row of its own.
     #[test]
-    fn change_set_apply_overlap_succeeds_conflict() {
+    fn bundle_apply_overlap_succeeds_conflict() {
         for delete in [true, false] {
             let mut rng = make_rng();
             let mut src = AutoCommit::new()
@@ -723,13 +723,13 @@ mod tests {
             src.commit();
 
             let changes = src.get_changes(&[]).unwrap();
-            let make = |cs: &[Change]| src.doc.change_set_for_fragment(&fragment_for(cs)).unwrap();
+            let make = |cs: &[Change]| src.doc.bundle_for_fragment(&fragment_for(cs)).unwrap();
             let first = make(&changes[..present]);
             let overlapping = make(&changes);
 
             let mut dst = Automerge::new();
-            dst.apply_change_set(first).unwrap();
-            dst.apply_change_set(overlapping).unwrap();
+            dst.apply_bundle(first).unwrap();
+            dst.apply_bundle(overlapping).unwrap();
 
             assert_eq!(dst.get(&ROOT, "x").unwrap().is_none(), delete);
             assert_eq!(dst.get_heads(), src.get_heads());
@@ -740,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn change_set_apply_overlap_delete_of_skipped_op() {
+    fn bundle_apply_overlap_delete_of_skipped_op() {
         // the kept delete has no row of its own: it rides the skipped row's succ
         let mut rng = make_rng();
         let mut src = AutoCommit::new()
@@ -755,13 +755,13 @@ mod tests {
         src.commit();
 
         let changes = src.get_changes(&[]).unwrap();
-        let make = |cs: &[Change]| src.doc.change_set_for_fragment(&fragment_for(cs)).unwrap();
+        let make = |cs: &[Change]| src.doc.bundle_for_fragment(&fragment_for(cs)).unwrap();
         let first = make(&changes[..2]);
         let overlapping = make(&changes); // 2 present, 1 new
 
         let mut dst = Automerge::new();
-        dst.apply_change_set(first).unwrap();
-        dst.apply_change_set(overlapping).unwrap();
+        dst.apply_bundle(first).unwrap();
+        dst.apply_bundle(overlapping).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
         dst.debug_cmp(&src.doc);

@@ -1,5 +1,5 @@
-//! Bundles written by automerge 3.3.2 (chunk type 3) are in circulation and
-//! must keep loading. If this fails, fix the reader, not the test.
+//! BundleV0 chunks (chunk type 3), like this one written by automerge 3.3.2,
+//! are in circulation and must keep loading. If this fails, fix the reader, not the test.
 use automerge::next::{Automerge, ReadDoc};
 use automerge::{ObjType, ROOT};
 

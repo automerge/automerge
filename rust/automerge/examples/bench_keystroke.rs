@@ -1,10 +1,10 @@
 // Keystroke latency: apply one text-insert change to a large document as a
-// change set, via load_incremental, and via apply_changes.
+// bundle, via load_incremental, and via apply_changes.
 //
 //   cargo run --release -p automerge --example bench_keystroke [S1 S2 S3 ...]
 use automerge::next::transaction::Transactable;
 use automerge::next::{Automerge, Fragment, ReadDoc};
-use automerge::{ChangeHash, ChangeId, ChangeSet, ObjType, Value, ROOT};
+use automerge::{Bundle, ChangeHash, ChangeId, ObjType, Value, ROOT};
 use std::time::Instant;
 
 fn find_text(doc: &Automerge) -> automerge::ObjId {
@@ -64,7 +64,7 @@ fn main() {
                         std::num::NonZeroU64::new(change.seq()).unwrap(),
                     )],
                 };
-                src.change_set_for_fragment(&frag).unwrap().bytes()
+                src.bundle_for_fragment(&frag).unwrap().bytes()
             })
             .collect();
 
@@ -85,8 +85,8 @@ fn main() {
         };
 
         let (frag_new, frag_steady) = bench(&|d: &mut Automerge, i: usize| {
-            let v2 = ChangeSet::try_from(&v2_bytes[i][..]).unwrap();
-            d.apply_change_set(v2).unwrap();
+            let v2 = Bundle::try_from(&v2_bytes[i][..]).unwrap();
+            d.apply_bundle(v2).unwrap();
         });
         let (inc_new, inc_steady) = bench(&|d: &mut Automerge, i: usize| {
             d.apply_changes([changes[i].clone()]).unwrap();

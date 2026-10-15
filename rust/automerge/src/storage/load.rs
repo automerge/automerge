@@ -38,23 +38,23 @@ pub enum Error {
     InvalidOpsColumns(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("a chunk contained leftover data")]
     LeftoverData,
-    #[error("a change_set contained an invalid column")]
-    InvalidChangeSetColumn(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("a change_set contained an invalid change")]
-    InvalidChangeSetChange(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("invalid change_set: {0}")]
-    InvalidChangeSet(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("a BundleV0 contained an invalid column")]
+    InvalidBundleV0Column(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("a BundleV0 contained an invalid change")]
+    InvalidBundleV0Change(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("invalid bundle: {0}")]
+    InvalidBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("error inflating document chunk ops: {0}")]
     InflateDocument(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("bad checksum")]
     BadChecksum,
 }
 
-/// Change sets are kept whole: expanding them into changes needs dep hashes
+/// Bundles are kept whole: expanding them into changes needs dep hashes
 /// a hashless document may not have.
 pub(crate) enum LoadedChunk {
     Change(Box<Change>),
-    ChangeSet(Box<crate::storage::ChangeSet>),
+    Bundle(Box<crate::storage::Bundle>),
 }
 
 pub(crate) enum LoadedChanges<'a> {
@@ -153,24 +153,24 @@ fn load_next_change<'a, H: crate::hash_retention::HashRetention>(
             tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
             changes.push(LoadedChunk::Change(Box::new(change)));
         }
-        storage::Chunk::BundleV0(change_set) => {
-            tracing::trace!("loading a 3.3.x change_set chunk");
-            let storage = change_set
+        storage::Chunk::BundleV0(bundle) => {
+            tracing::trace!("loading a BundleV0 chunk");
+            let storage = bundle
                 .into_owned()
                 .verify()
-                .map_err(|e| Error::InvalidChangeSetColumn(Box::new(e)))?;
-            let change_set_changes = storage
+                .map_err(|e| Error::InvalidBundleV0Column(Box::new(e)))?;
+            let bundle_changes = storage
                 .to_changes()
-                .map_err(|e| Error::InvalidChangeSetChange(Box::new(e)))?;
+                .map_err(|e| Error::InvalidBundleV0Change(Box::new(e)))?;
             changes.extend(
-                change_set_changes
+                bundle_changes
                     .into_iter()
                     .map(|c| LoadedChunk::Change(Box::new(c))),
             );
         }
-        storage::Chunk::ChangeSetColumns(change_set, _) => {
-            tracing::trace!("loading change_set columns chunk");
-            changes.push(LoadedChunk::ChangeSet(change_set));
+        storage::Chunk::BundleColumns(bundle, _) => {
+            tracing::trace!("loading bundle columns chunk");
+            changes.push(LoadedChunk::Bundle(bundle));
         }
         storage::Chunk::CompressedChange(change, compressed) => {
             tracing::trace!("loading compressed change chunk");

@@ -590,7 +590,7 @@ fn disabled_lifecycle_all_fallible_functions() {
     let mid_fragments = doc.fragments(..);
     assert!(!mid_fragments.is_empty());
     assert!(!doc
-        .change_sets_for_fragments(mid_fragments.clone())
+        .bundles_for_fragments(mid_fragments.clone())
         .unwrap()
         .is_empty());
 
@@ -638,7 +638,7 @@ fn fragments_work_without_hash_columns() {
     let head = doc.get_head_hashes()[0];
     assert!(doc.get_fragment(head).is_some());
     assert!(!doc
-        .change_sets_for_fragments(doc.fragments(..))
+        .bundles_for_fragments(doc.fragments(..))
         .unwrap()
         .is_empty());
 
@@ -717,24 +717,24 @@ fn default_load_computes_then_retains_without_columns() {
     assert!(doc.get_change_by_hash(&head).unwrap().is_some());
 }
 
-/// Applying a change set chain with and without audit mode gives identical documents.
+/// Applying a bundle chain with and without audit mode gives identical documents.
 #[test]
 fn audit_and_manifold_fragment_apply_agree() {
     let mut src = big_doc_in_audit_mode();
 
     let fragments = src.fragments(..);
-    let change_sets: Vec<_> = fragments
+    let bundles: Vec<_> = fragments
         .into_iter()
-        .map(|f| src.document().change_set_for_fragment(&f).unwrap())
+        .map(|f| src.document().bundle_for_fragment(&f).unwrap())
         .collect();
-    assert!(change_sets.len() > 1);
+    assert!(bundles.len() > 1);
 
     let mut plain = Automerge::new();
     let mut audit = Automerge::new().enable_audit_mode().unwrap();
 
-    for b in &change_sets {
-        plain.apply_change_set(b.clone()).unwrap();
-        audit.apply_change_set(b.clone()).unwrap();
+    for b in &bundles {
+        plain.apply_bundle(b.clone()).unwrap();
+        audit.apply_bundle(b.clone()).unwrap();
     }
 
     assert_eq!(plain.audit_mode(), AuditMode::Disabled);
@@ -748,21 +748,21 @@ fn audit_and_manifold_fragment_apply_agree() {
     assert_eq!(plain.save(), audit.save());
 }
 
-/// An out-of-order change set errors instead of queueing.
+/// An out-of-order bundle errors instead of queueing.
 #[test]
 fn audit_fragment_apply_missing_deps() {
     let mut src = big_doc_in_audit_mode();
 
     let fragments = src.fragments(..);
-    let change_sets: Vec<_> = fragments
+    let bundles: Vec<_> = fragments
         .into_iter()
-        .map(|f| src.document().change_set_for_fragment(&f).unwrap())
+        .map(|f| src.document().bundle_for_fragment(&f).unwrap())
         .collect();
-    assert!(change_sets.len() > 1);
+    assert!(bundles.len() > 1);
 
     let mut audit = Automerge::new().enable_audit_mode().unwrap();
     assert!(matches!(
-        audit.apply_change_set(change_sets[1].clone()),
+        audit.apply_bundle(bundles[1].clone()),
         Err(AutomergeError::MissingDeps)
     ));
     assert!(audit.get_heads().is_empty());

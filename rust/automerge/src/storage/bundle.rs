@@ -16,11 +16,11 @@ mod storage;
 
 pub(crate) use builder::ops;
 pub(crate) use builder::{
-    ChangeSetBuilder, ChangeSetChangeCols, ChangeSetChangeIterUnverified, ChangeSetChangeWriter,
-    ChangeSetOpWriter, DeltaRunGrouper, ManifoldOp, ManifoldOps,
+    BundleBuilder, BundleChangeCols, BundleChangeIterUnverified, BundleChangeWriter,
+    BundleOpWriter, DeltaRunGrouper, ManifoldOp, ManifoldOps,
 };
 pub(crate) use error::ParseError;
-pub(crate) use storage::ChangeSetStorage;
+pub(crate) use storage::BundleStorage;
 
 /// EXPERIMENTAL: A set of changes in compressed columnar form, plus the
 /// fragment metadata needed to apply them to a document that does not know
@@ -50,7 +50,7 @@ pub(crate) use storage::ChangeSetStorage;
 /// The format may still change — do not use it in systems where you expect
 /// data to stick around.
 #[derive(Debug, Clone)]
-pub struct ChangeSet {
+pub struct Bundle {
     /// `(hash, member index)`
     pub(crate) heads: Vec<(ChangeHash, usize)>,
     /// `(member index, hash)`
@@ -63,12 +63,12 @@ pub struct ChangeSet {
     /// Validated at parse time; aligned with the members.
     pub(crate) member_actors: Vec<ActorIdx>,
     pub(crate) member_seqs: Vec<NonZeroU64>,
-    pub(crate) storage: ChangeSetStorage<'static, Verified>,
+    pub(crate) storage: BundleStorage<'static, Verified>,
 }
 
 /// A change with at most this many ops is smaller than its hash.
 pub(crate) const TINY_CHANGE_OPS: u64 = 8;
-/// A load rehashes a change set within both limits in about a millisecond.
+/// A load rehashes a bundle within both limits in about a millisecond.
 pub(crate) const REHASHABLE_CHANGES: usize = 500;
 pub(crate) const REHASHABLE_OPS: u64 = 5_000;
 
@@ -76,8 +76,8 @@ pub(crate) fn rehashable(num_changes: usize, num_ops: u64) -> bool {
     num_changes <= REHASHABLE_CHANGES && num_ops <= REHASHABLE_OPS
 }
 
-impl ChangeSet {
-    /// Whether a load may rehash the members whose hashes this change set
+impl Bundle {
+    /// Whether a load may rehash the members whose hashes this bundle
     /// leaves out: it depends on nothing outside itself and is small.
     pub(crate) fn is_rehashable(&self) -> bool {
         // decoding the members' metadata is O(members), so count them first
@@ -96,48 +96,48 @@ impl ChangeSet {
     }
 
     /// Every member's hash, in member order: `known[i]` where given,
-    /// otherwise rebuilt from this change set's ops. Reads every op row.
+    /// otherwise rebuilt from this bundle's ops. Reads every op row.
     pub(crate) fn member_hashes(
         &self,
         known: &[Option<ChangeHash>],
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.storage
             .member_hashes(known)
-            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
+            .map_err(|e| AutomergeError::DecodeBundle(Box::new(e)))
     }
 
-    pub(crate) fn change_cols(&self) -> ChangeSetChangeCols<'_> {
+    pub(crate) fn change_cols(&self) -> BundleChangeCols<'_> {
         self.storage
             .change_cols()
-            .expect("a parsed change_set's change columns are well formed")
+            .expect("a parsed bundle's change columns are well formed")
     }
 
-    /// The members no other member of the change set depends on.
+    /// The members no other member of the bundle depends on.
     pub fn heads(&self) -> impl ExactSizeIterator<Item = ChangeHash> + '_ {
         self.heads.iter().map(|(h, _)| *h)
     }
 
-    /// The changes carried by the change set, in topological order.
+    /// The changes carried by the bundle, in topological order.
     pub fn to_changes(&self) -> Result<Vec<Change>, AutomergeError> {
         self.storage
             .to_changes()
-            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
+            .map_err(|e| AutomergeError::DecodeBundle(Box::new(e)))
     }
 
     /// What [`Self::to_changes`] would return, or with `M = ChangeHash` just
     /// the changes' hashes, in topological order, after checking that
-    /// everything the change set says about them is true. Two things cannot
+    /// everything the bundle says about them is true. Two things cannot
     /// be checked without the sender's document: that it retains every hash
     /// a receiver will need, and its op hints.
     ///
     /// Hashes every carried change; `M = Change` also rebuilds each one.
-    pub fn audit<M: AuditedMember>(&self) -> Result<Vec<M>, MalformedChangeSet> {
+    pub fn audit<M: AuditedMember>(&self) -> Result<Vec<M>, MalformedBundle> {
         use std::collections::HashSet;
 
         let members = M::decode(self)?;
         let hash = |i: usize| members[i].hash();
         let num_members = members.len();
-        let decode = |e| MalformedChangeSet::Decode(Box::new(e));
+        let decode = |e| MalformedBundle::Decode(Box::new(e));
 
         // decoding checked that the actors are unique, so an index names one
         let mut member_ids = HashSet::with_capacity(num_members);
@@ -148,11 +148,11 @@ impl ChangeSet {
             let m = m.map_err(decode)?;
             num_meta += 1;
             if m.actor >= self.actors().len() {
-                return Err(MalformedChangeSet::Invalid("member actor out of range"));
+                return Err(MalformedBundle::Invalid("member actor out of range"));
             }
             if !member_ids.insert((m.actor, m.seq)) {
                 let actor = self.actors()[m.actor].clone();
-                return Err(MalformedChangeSet::DuplicateMember(ChangeId::from_doc_seq(
+                return Err(MalformedBundle::DuplicateMember(ChangeId::from_doc_seq(
                     m.seq, actor, 0,
                 )));
             }
@@ -160,17 +160,17 @@ impl ChangeSet {
                 let d = *d as usize;
                 match d.checked_sub(num_members) {
                     None if d < i => depended_on[d] = true,
-                    None => return Err(MalformedChangeSet::NotTopological(i)),
+                    None => return Err(MalformedBundle::NotTopological(i)),
                     Some(e) => {
                         *used_deps
                             .get_mut(e)
-                            .ok_or(MalformedChangeSet::Invalid("member dep out of range"))? = true
+                            .ok_or(MalformedBundle::Invalid("member dep out of range"))? = true
                     }
                 }
             }
         }
         if num_meta != num_members {
-            return Err(MalformedChangeSet::Invalid("member count mismatch"));
+            return Err(MalformedBundle::Invalid("member count mismatch"));
         }
         let is_member = |id: &ChangeId| {
             self.actors()
@@ -181,17 +181,17 @@ impl ChangeSet {
         let names = |index: usize, h: ChangeHash| index < num_members && hash(index) == h;
         for &(hash, index) in &self.heads {
             if !names(index, hash) {
-                return Err(MalformedChangeSet::WrongHeadHash { hash, index });
+                return Err(MalformedBundle::WrongHeadHash { hash, index });
             }
         }
         for &(index, hash) in &self.checkpoints {
             if !names(index, hash) {
-                return Err(MalformedChangeSet::WrongCheckpointHash { hash, index });
+                return Err(MalformedBundle::WrongCheckpointHash { hash, index });
             }
         }
         for &(index, hash) in &self.retained {
             if !names(index, hash) {
-                return Err(MalformedChangeSet::WrongRetainedHash { hash, index });
+                return Err(MalformedBundle::WrongRetainedHash { hash, index });
             }
         }
 
@@ -199,7 +199,7 @@ impl ChangeSet {
         declared_heads.sort_unstable();
         let actual_heads: Vec<usize> = (0..num_members).filter(|i| !depended_on[*i]).collect();
         if declared_heads != actual_heads {
-            return Err(MalformedChangeSet::WrongHeads);
+            return Err(MalformedBundle::WrongHeads);
         }
 
         let carried = |hashes: &HashSet<ChangeHash>| {
@@ -213,7 +213,7 @@ impl ChangeSet {
             || used_deps.contains(&false)
             || carried(&declared_deps).is_some()
         {
-            return Err(MalformedChangeSet::WrongDeps);
+            return Err(MalformedBundle::WrongDeps);
         }
 
         let mut declared_checkpoints: Vec<usize> =
@@ -223,23 +223,23 @@ impl ChangeSet {
             .filter(|i| hash(*i).fragment_level() > 0 && depended_on[*i])
             .collect();
         if declared_checkpoints != actual_checkpoints {
-            return Err(MalformedChangeSet::WrongCheckpoints);
+            return Err(MalformedBundle::WrongCheckpoints);
         }
 
         if let Some(id) = self.dep_ids.iter().find(|id| is_member(id)) {
-            return Err(MalformedChangeSet::ExternalIdIsMember(id.clone()));
+            return Err(MalformedBundle::ExternalIdIsMember(id.clone()));
         }
         let boundary: HashSet<ChangeHash> = self.boundary.iter().map(|(h, _)| *h).collect();
         if let Some(hash) = carried(&boundary) {
-            return Err(MalformedChangeSet::BoundaryIsMember(hash));
+            return Err(MalformedBundle::BoundaryIsMember(hash));
         }
         for (hash, id) in &self.boundary {
             if is_member(id) {
-                return Err(MalformedChangeSet::ExternalIdIsMember(id.clone()));
+                return Err(MalformedBundle::ExternalIdIsMember(id.clone()));
             }
             if let Some(k) = self.deps().iter().position(|d| d == hash) {
                 if self.dep_ids[k] != *id {
-                    return Err(MalformedChangeSet::BoundaryDisagreesWithDep(*hash));
+                    return Err(MalformedBundle::BoundaryDisagreesWithDep(*hash));
                 }
             }
         }
@@ -252,23 +252,23 @@ impl ChangeSet {
     /// fails if it is malformed.
     pub fn iter_changes(
         &self,
-    ) -> Result<std::slice::Iter<'_, ChangeSetChange<'static>>, AutomergeError> {
+    ) -> Result<std::slice::Iter<'_, BundleChange<'static>>, AutomergeError> {
         Ok(self.changes()?.iter())
     }
 
-    pub(crate) fn take_change_set_ops(&mut self) -> Result<OpSet, AutomergeError> {
+    pub(crate) fn take_bundle_ops(&mut self) -> Result<OpSet, AutomergeError> {
         self.storage
-            .take_change_set_ops()
-            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
+            .take_bundle_ops()
+            .map_err(|e| AutomergeError::DecodeBundle(Box::new(e)))
     }
 
-    pub(crate) fn changes(&self) -> Result<&[ChangeSetChange<'static>], AutomergeError> {
+    pub(crate) fn changes(&self) -> Result<&[BundleChange<'static>], AutomergeError> {
         self.storage
             .changes()
-            .map_err(|e| AutomergeError::DecodeChangeSet(Box::new(e)))
+            .map_err(|e| AutomergeError::DecodeBundle(Box::new(e)))
     }
 
-    /// The hashes this change set depends on but does not carry.
+    /// The hashes this bundle depends on but does not carry.
     pub fn deps(&self) -> &[ChangeHash] {
         self.storage.deps()
     }
@@ -282,7 +282,7 @@ impl ChangeSet {
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
         hashes: I,
-    ) -> Result<ChangeSetStorage<'static, Verified>, AutomergeError>
+    ) -> Result<BundleStorage<'static, Verified>, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
@@ -300,7 +300,7 @@ impl ChangeSet {
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
         nodes: Vec<crate::change_graph::NodeIdx>,
-    ) -> Result<ChangeSetStorage<'static, Verified>, AutomergeError> {
+    ) -> Result<BundleStorage<'static, Verified>, AutomergeError> {
         Ok(
             Self::storage_for_node_sets(op_set, change_graph, vec![nodes])?
                 .pop()
@@ -314,31 +314,31 @@ impl ChangeSet {
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
         nodes: &[crate::change_graph::NodeIdx],
-    ) -> Result<ChangeSetStorage<'static, Verified>, AutomergeError> {
+    ) -> Result<BundleStorage<'static, Verified>, AutomergeError> {
         let mut mapper = ActorMapper::new(&op_set.actors);
-        let mut change_writer = ChangeSetChangeWriter::new(nodes.len());
-        change_graph.write_change_set_changes(nodes, &mut change_writer, &mut mapper)?;
-        let mut op_writer = ChangeSetOpWriter::default();
-        op_set.write_all_change_set_ops(&mut op_writer, &mut mapper);
+        let mut change_writer = BundleChangeWriter::new(nodes.len());
+        change_graph.write_bundle_changes(nodes, &mut change_writer, &mut mapper)?;
+        let mut op_writer = BundleOpWriter::default();
+        op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
         Ok(
-            ChangeSetBuilder::from_writers(mapper, change_writer, op_writer)
+            BundleBuilder::from_writers(mapper, change_writer, op_writer)
                 .finish_with_ranks(&std::collections::HashMap::new()),
         )
     }
 
-    /// [`Self::storage_for_nodes`] for several change sets at once. Hint
+    /// [`Self::storage_for_nodes`] for several bundles at once. Hint
     /// ranks need a walk of the document's id column; batching shares one
-    /// walk rather than paying O(change sets × document).
+    /// walk rather than paying O(bundles × document).
     pub(crate) fn storage_for_node_sets<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
         node_sets: Vec<Vec<crate::change_graph::NodeIdx>>,
-    ) -> Result<Vec<ChangeSetStorage<'static, Verified>>, AutomergeError> {
+    ) -> Result<Vec<BundleStorage<'static, Verified>>, AutomergeError> {
         let mut jobs = Vec::with_capacity(node_sets.len());
         for nodes in node_sets {
             let clock = change_graph.clock_for_nodes(nodes.clone());
             let mapper = ActorMapper::new(&op_set.actors);
-            let collector = ChangeSetBuilder::from_graph(op_set, change_graph, &nodes, mapper)?;
+            let collector = BundleBuilder::from_graph(op_set, change_graph, &nodes, mapper)?;
             let collector = Self::walk_ops(op_set, collector);
             jobs.push(HintJob {
                 targets_by_obj: collector.hint_targets_by_obj(),
@@ -391,7 +391,7 @@ impl ChangeSet {
                         k += 1;
                         continue;
                     }
-                    // a receiver applying the change set does not have its
+                    // a receiver applying the bundle does not have its
                     // members yet, so they do not count towards the rank
                     if job.collector.is_member(id) {
                         k += 1;
@@ -418,10 +418,7 @@ impl ChangeSet {
         }
     }
 
-    fn walk_ops<'a>(
-        op_set: &'a OpSet,
-        mut collector: ChangeSetBuilder<'a>,
-    ) -> ChangeSetBuilder<'a> {
+    fn walk_ops<'a>(op_set: &'a OpSet, mut collector: BundleBuilder<'a>) -> BundleBuilder<'a> {
         for op in op_set.iter_ctr_range(collector.op_counters()) {
             let op_id = op.id;
             let op_succ: Vec<_> = op.succ().collect();
@@ -515,7 +512,7 @@ impl ChangeSet {
             &self.storage.bytes
         });
 
-        let header = Header::new(ChunkType::ChangeSet, &data);
+        let header = Header::new(ChunkType::Bundle, &data);
         let mut out = Vec::with_capacity(header.len() + data.len());
         header.write(&mut out);
         out.extend(data);
@@ -576,7 +573,7 @@ impl ChangeSet {
 }
 
 struct HintJob<'a> {
-    collector: ChangeSetBuilder<'a>,
+    collector: BundleBuilder<'a>,
     clock: crate::clock::Clock,
     targets_by_obj:
         std::collections::HashMap<crate::types::ObjId, rustc_hash::FxHashSet<crate::types::OpId>>,
@@ -618,47 +615,45 @@ pub(crate) struct ParsedPrefix {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("invalid change_set: {0}")]
-pub struct InvalidChangeSet(pub(crate) String);
+#[error("invalid bundle: {0}")]
+pub struct InvalidBundle(pub(crate) String);
 
-/// Why a change set was rejected as malformed.
+/// Why a bundle was rejected as malformed.
 #[derive(Debug, thiserror::Error)]
-pub enum MalformedChangeSet {
-    #[error("malformed change set: {0}")]
+pub enum MalformedBundle {
+    #[error("malformed bundle: {0}")]
     Invalid(&'static str),
-    #[error("malformed change set: unable to rebuild the carried changes: {0}")]
+    #[error("malformed bundle: unable to rebuild the carried changes: {0}")]
     Decode(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("malformed change set: change {0} is carried twice")]
+    #[error("malformed bundle: change {0} is carried twice")]
     DuplicateMember(ChangeId),
-    #[error("malformed change set: member {0} depends on a member after it")]
+    #[error("malformed bundle: member {0} depends on a member after it")]
     NotTopological(usize),
-    #[error("malformed change set: head {hash} does not name member {index}")]
+    #[error("malformed bundle: head {hash} does not name member {index}")]
     WrongHeadHash { hash: ChangeHash, index: usize },
-    #[error("malformed change set: checkpoint {hash} does not name member {index}")]
+    #[error("malformed bundle: checkpoint {hash} does not name member {index}")]
     WrongCheckpointHash { hash: ChangeHash, index: usize },
-    #[error("malformed change set: retained hash {hash} does not name member {index}")]
+    #[error("malformed bundle: retained hash {hash} does not name member {index}")]
     WrongRetainedHash { hash: ChangeHash, index: usize },
-    #[error("malformed change set: the heads are not the members nothing else depends on")]
+    #[error("malformed bundle: the heads are not the members nothing else depends on")]
     WrongHeads,
-    #[error("malformed change set: the deps are not what the members depend on but do not carry")]
+    #[error("malformed bundle: the deps are not what the members depend on but do not carry")]
     WrongDeps,
-    #[error("malformed change set: the checkpoints are not the non-head fragment-level members")]
+    #[error("malformed bundle: the checkpoints are not the non-head fragment-level members")]
     WrongCheckpoints,
-    #[error("malformed change set: boundary {0} is a carried change")]
+    #[error("malformed bundle: boundary {0} is a carried change")]
     BoundaryIsMember(ChangeHash),
-    #[error("malformed change set: dep or boundary id {0} is a carried change")]
+    #[error("malformed bundle: dep or boundary id {0} is a carried change")]
     ExternalIdIsMember(ChangeId),
-    #[error(
-        "malformed change set: boundary {0} and the dep with its hash have different change ids"
-    )]
+    #[error("malformed bundle: boundary {0} and the dep with its hash have different change ids")]
     BoundaryDisagreesWithDep(ChangeHash),
 }
 
-/// What [`ChangeSet::audit`] returns for each carried change: the whole
+/// What [`Bundle::audit`] returns for each carried change: the whole
 /// [`Change`], or only its [`ChangeHash`].
 pub trait AuditedMember: Sized + sealed::Sealed {
     #[doc(hidden)]
-    fn decode(change_set: &ChangeSet) -> Result<Vec<Self>, MalformedChangeSet>;
+    fn decode(bundle: &Bundle) -> Result<Vec<Self>, MalformedBundle>;
     #[doc(hidden)]
     fn hash(&self) -> ChangeHash;
 }
@@ -670,11 +665,11 @@ mod sealed {
 }
 
 impl AuditedMember for Change {
-    fn decode(change_set: &ChangeSet) -> Result<Vec<Self>, MalformedChangeSet> {
-        change_set
+    fn decode(bundle: &Bundle) -> Result<Vec<Self>, MalformedBundle> {
+        bundle
             .storage
             .to_changes()
-            .map_err(|e| MalformedChangeSet::Decode(Box::new(e)))
+            .map_err(|e| MalformedBundle::Decode(Box::new(e)))
     }
 
     fn hash(&self) -> ChangeHash {
@@ -683,11 +678,11 @@ impl AuditedMember for Change {
 }
 
 impl AuditedMember for ChangeHash {
-    fn decode(change_set: &ChangeSet) -> Result<Vec<Self>, MalformedChangeSet> {
-        change_set
+    fn decode(bundle: &Bundle) -> Result<Vec<Self>, MalformedBundle> {
+        bundle
             .storage
             .hash_members()
-            .map_err(|e| MalformedChangeSet::Decode(Box::new(e)))
+            .map_err(|e| MalformedBundle::Decode(Box::new(e)))
     }
 
     fn hash(&self) -> ChangeHash {
@@ -695,9 +690,9 @@ impl AuditedMember for ChangeHash {
     }
 }
 
-fn parse_change_set_columns(bytes: &[u8]) -> Result<ChangeSetStorage<'static, Verified>, String> {
+fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>, String> {
     let input = parse::Input::new(bytes);
-    let (_i, stored) = ChangeSetStorage::parse_columns(input)
+    let (_i, stored) = BundleStorage::parse_columns(input)
         .map_err(|e| format!("invalid carried changes: {}", e))?;
     let verified = stored
         .verify()
@@ -705,9 +700,9 @@ fn parse_change_set_columns(bytes: &[u8]) -> Result<ChangeSetStorage<'static, Ve
     Ok(verified.into_owned())
 }
 
-/// Metadata for one change carried by a change set.
+/// Metadata for one change carried by a bundle.
 #[derive(Clone, Debug)]
-pub struct ChangeSetChange<'a> {
+pub struct BundleChange<'a> {
     pub actor: usize,
     pub author: Option<usize>,
     pub seq: u64,
@@ -719,9 +714,9 @@ pub struct ChangeSetChange<'a> {
     pub extra: Cow<'a, [u8]>,
 }
 
-impl ChangeSetChange<'_> {
-    pub(crate) fn into_owned(self) -> ChangeSetChange<'static> {
-        ChangeSetChange {
+impl BundleChange<'_> {
+    pub(crate) fn into_owned(self) -> BundleChange<'static> {
+        BundleChange {
             actor: self.actor,
             author: self.author,
             seq: self.seq,
@@ -735,46 +730,46 @@ impl ChangeSetChange<'_> {
     }
 }
 
-impl<'a> From<ChangeSetChange<'a>> for BuildChangeMetadata<'a> {
-    fn from(change_set: ChangeSetChange<'a>) -> Self {
+impl<'a> From<BundleChange<'a>> for BuildChangeMetadata<'a> {
+    fn from(bundle: BundleChange<'a>) -> Self {
         BuildChangeMetadata {
-            actor: change_set.actor,
-            seq: change_set.seq,
-            start_op: change_set.start_op,
-            max_op: change_set.max_op,
-            timestamp: change_set.timestamp,
-            message: change_set.message,
-            deps: change_set.deps,
-            extra: change_set.extra,
+            actor: bundle.actor,
+            seq: bundle.seq,
+            start_op: bundle.start_op,
+            max_op: bundle.max_op,
+            timestamp: bundle.timestamp,
+            message: bundle.message,
+            deps: bundle.deps,
+            extra: bundle.extra,
             builder: 0,
         }
     }
 }
 
-impl TryFrom<&[u8]> for ChangeSet {
-    type Error = InvalidChangeSet;
+impl TryFrom<&[u8]> for Bundle {
+    type Error = InvalidBundle;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let input = parse::Input::new(bytes);
         let (i, header) = Header::parse::<crate::storage::chunk::error::Header>(input)
-            .map_err(|e| InvalidChangeSet(format!("invalid header: {}", e)))?;
-        if header.chunk_type() != ChunkType::ChangeSet {
-            return Err(InvalidChangeSet("not a change_set chunk".to_string()));
+            .map_err(|e| InvalidBundle(format!("invalid header: {}", e)))?;
+        if header.chunk_type() != ChunkType::Bundle {
+            return Err(InvalidBundle("not a bundle chunk".to_string()));
         }
         if !header.checksum_valid() {
-            return Err(InvalidChangeSet("bad checksum".to_string()));
+            return Err(InvalidBundle("bad checksum".to_string()));
         }
         Self::parse_after_header(i)
     }
 }
 
-impl ChangeSet {
-    pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidChangeSet> {
-        let bad = |s: &str| InvalidChangeSet(s.to_string());
-        let (i, prefix) = Self::parse_prefix(i)
-            .map_err(|e| InvalidChangeSet(format!("invalid prefix: {}", e)))?;
+impl Bundle {
+    pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidBundle> {
+        let bad = |s: &str| InvalidBundle(s.to_string());
+        let (i, prefix) =
+            Self::parse_prefix(i).map_err(|e| InvalidBundle(format!("invalid prefix: {}", e)))?;
 
-        let resolve = |a: u64| -> Result<ActorId, InvalidChangeSet> {
+        let resolve = |a: u64| -> Result<ActorId, InvalidBundle> {
             prefix
                 .actors
                 .get(a as usize)
@@ -787,25 +782,25 @@ impl ChangeSet {
             .boundary
             .iter()
             .map(|(h, a, s)| Ok((*h, change_id(*a, *s)?)))
-            .collect::<Result<Vec<_>, InvalidChangeSet>>()?;
+            .collect::<Result<Vec<_>, InvalidBundle>>()?;
         let dep_ids = prefix
             .deps
             .iter()
             .map(|(a, s)| change_id(*a, *s))
-            .collect::<Result<Vec<_>, InvalidChangeSet>>()?;
+            .collect::<Result<Vec<_>, InvalidBundle>>()?;
 
-        let storage = parse_change_set_columns(i.unconsumed_bytes())
-            .map_err(|e| InvalidChangeSet(format!("invalid carried changes: {}", e)))?;
+        let storage = parse_bundle_columns(i.unconsumed_bytes())
+            .map_err(|e| InvalidBundle(format!("invalid carried changes: {}", e)))?;
 
         if dep_ids.len() != storage.deps().len() {
             return Err(bad("dep ids do not match the carried changes' deps"));
         }
         let (member_actors, member_seqs) = storage
             .member_ids()
-            .map_err(|e| InvalidChangeSet(format!("invalid change metadata: {}", e)))?;
+            .map_err(|e| InvalidBundle(format!("invalid change metadata: {}", e)))?;
         let num_members = member_seqs.len();
         if prefix.heads.is_empty() {
-            return Err(bad("a change_set must deliver at least one head"));
+            return Err(bad("a bundle must deliver at least one head"));
         }
         if prefix.heads.iter().any(|(_, i)| *i >= num_members) {
             return Err(bad("head index out of range"));
@@ -843,7 +838,7 @@ impl ChangeSet {
             return Err(bad("retained hash duplicates a delivered head"));
         }
 
-        Ok(ChangeSet {
+        Ok(Bundle {
             heads: prefix.heads,
             checkpoints: prefix.checkpoints,
             retained: prefix.retained,
@@ -863,7 +858,7 @@ mod tests {
     use crate::storage::MAGIC_BYTES;
 
     #[test]
-    fn change_sets_carry_their_fragment_level_members_as_checkpoints() {
+    fn bundles_carry_their_fragment_level_members_as_checkpoints() {
         use crate::autocommit::AutoCommit;
         use crate::tx::{CommitOptions, Transactable};
         use crate::{ActorId, ROOT};
@@ -880,7 +875,7 @@ mod tests {
         }
 
         let bytes = doc.save_incremental();
-        let cs = ChangeSet::try_from(bytes.as_slice()).unwrap();
+        let cs = Bundle::try_from(bytes.as_slice()).unwrap();
 
         let heads: Vec<ChangeHash> = cs.heads().collect();
         let mut expected: Vec<ChangeHash> = cs
@@ -895,7 +890,7 @@ mod tests {
         got.sort_unstable();
         assert_eq!(
             got, expected,
-            "a change set must carry exactly its non-head fragment-level members",
+            "a bundle must carry exactly its non-head fragment-level members",
         );
         assert!(cs
             .checkpoints
@@ -903,7 +898,7 @@ mod tests {
             .all(|(i, _)| *i < cs.member_seqs.len()));
     }
 
-    /// A change set's bytes must be a function of its content, and batched
+    /// A bundle's bytes must be a function of its content, and batched
     /// bundling must agree with bundling one fragment at a time.
     #[test]
     fn bundling_is_deterministic() {
@@ -939,23 +934,23 @@ mod tests {
         let fragments = doc.document().fragments(..);
         assert!(!fragments.is_empty());
         for f in &fragments {
-            let first = doc.document().change_set_for_fragment(f).unwrap().bytes();
+            let first = doc.document().bundle_for_fragment(f).unwrap().bytes();
             for _ in 0..4 {
                 assert_eq!(
-                    doc.document().change_set_for_fragment(f).unwrap().bytes(),
+                    doc.document().bundle_for_fragment(f).unwrap().bytes(),
                     first,
-                    "change_set bytes vary between identical calls"
+                    "bundle bytes vary between identical calls"
                 );
             }
         }
 
         let batched = doc
             .document()
-            .change_sets_for_fragments(fragments.clone())
+            .bundles_for_fragments(fragments.clone())
             .unwrap();
         let singly: Vec<Vec<u8>> = fragments
             .iter()
-            .map(|f| doc.document().change_set_for_fragment(f).unwrap().bytes())
+            .map(|f| doc.document().bundle_for_fragment(f).unwrap().bytes())
             .collect();
         assert_eq!(batched, singly, "batched bundling diverges");
     }
@@ -974,11 +969,11 @@ mod tests {
         }
     }
 
-    /// `ChangeSet::try_from` does not verify the checksum, so it is blank.
+    /// `Bundle::try_from` does not verify the checksum, so it is blank.
     fn chunk(data: Vec<u8>) -> Vec<u8> {
         let mut out = MAGIC_BYTES.to_vec();
         out.extend([0u8; 4]);
-        out.push(u8::from(ChunkType::ChangeSet));
+        out.push(u8::from(ChunkType::Bundle));
         leb(data.len() as u64, &mut out);
         out.extend(data);
         out
@@ -995,13 +990,13 @@ mod tests {
                     break;
                 }
             }
-            let err = ChangeSet::try_from(&chunk(data)[..]);
+            let err = Bundle::try_from(&chunk(data)[..]);
             assert!(err.is_err(), "section {section} should not parse");
         }
     }
 
     #[test]
-    fn a_change_set_with_no_heads_is_rejected() {
+    fn a_bundle_with_no_heads_is_rejected() {
         let mut doc = crate::automerge::Automerge::new()
             .enable_audit_mode()
             .unwrap();
@@ -1012,12 +1007,12 @@ mod tests {
             tx.commit();
         }
         let f = &doc.fragments(..)[0];
-        let good = doc.change_set_for_fragment(f).unwrap();
+        let good = doc.bundle_for_fragment(f).unwrap();
         assert_eq!(good.heads().len(), 1);
 
-        let mut b = ChangeSet::try_from(&good.bytes()[..]).unwrap();
+        let mut b = Bundle::try_from(&good.bytes()[..]).unwrap();
         b.heads.clear();
-        let err = ChangeSet::try_from(&b.bytes()[..]).expect_err("no heads must be rejected");
+        let err = Bundle::try_from(&b.bytes()[..]).expect_err("no heads must be rejected");
         assert!(err.0.contains("at least one head"), "got {err}");
     }
 
@@ -1049,8 +1044,8 @@ mod tests {
         }
         let frags = src.fragments(0..=0);
         // the second fragment has a boundary entry (its dep on the first)
-        let mut bytes = src.change_set_for_fragment(&frags[1]).unwrap().bytes();
-        assert!(ChangeSet::try_from(&bytes[..]).is_ok(), "baseline parses");
+        let mut bytes = src.bundle_for_fragment(&frags[1]).unwrap().bytes();
+        assert!(Bundle::try_from(&bytes[..]).is_ok(), "baseline parses");
 
         // walk the prefix to the first boundary entry's seq and zero it
         let mut at = MAGIC_BYTES.len() + 4 + 1;
@@ -1099,7 +1094,7 @@ mod tests {
         assert_ne!(seq, 0);
 
         bytes[seq_at] = 0;
-        let err = ChangeSet::try_from(&with_recomputed_checksum(&bytes)[..])
+        let err = Bundle::try_from(&with_recomputed_checksum(&bytes)[..])
             .expect_err("zero seq must be rejected");
         assert!(err.0.contains("sequence number"), "got {err}");
     }
@@ -1122,10 +1117,9 @@ mod tests {
     fn an_audited_apply_skips_members_it_has() {
         let src = audit_fixture();
         let mut doc = audited(b"rcv");
-        let first = src.change_set_for_fragment(&src.fragments(..)[0]).unwrap();
-        doc.apply_change_set(first).unwrap();
-        doc.apply_change_set(src.change_set_document().unwrap())
-            .unwrap();
+        let first = src.bundle_for_fragment(&src.fragments(..)[0]).unwrap();
+        doc.apply_bundle(first).unwrap();
+        doc.apply_bundle(src.bundle_document().unwrap()).unwrap();
         assert_eq!(doc.get_heads(), src.get_heads());
         assert_eq!(doc.save(), src.save());
     }
@@ -1138,7 +1132,7 @@ mod tests {
         put(&mut theirs, 2);
         put(&mut theirs, 3);
         let err = ours
-            .apply_change_set(theirs.change_set_document().unwrap())
+            .apply_bundle(theirs.bundle_document().unwrap())
             .unwrap_err();
         assert!(
             matches!(err, AutomergeError::DuplicateSeqNumber(1, _)),
@@ -1159,18 +1153,18 @@ mod tests {
                 NonZeroU64::new(seq).unwrap(),
             )
         };
-        let mut cs = src.change_set_after(&[at(2)]).unwrap().unwrap();
+        let mut cs = src.bundle_after(&[at(2)]).unwrap().unwrap();
         assert_eq!(cs.dep_ids, vec![at(2)]);
         cs.dep_ids[0] = at(1);
         for (_, id) in &mut cs.boundary {
             *id = at(1);
         }
         cs.audit::<ChangeHash>().unwrap();
-        let err = base.apply_change_set(cs).unwrap_err();
+        let err = base.apply_bundle(cs).unwrap_err();
         assert!(
             matches!(
                 err,
-                AutomergeError::MalformedChangeSet(MalformedChangeSet::Invalid(_))
+                AutomergeError::MalformedBundle(MalformedBundle::Invalid(_))
             ),
             "{err}"
         );
@@ -1187,15 +1181,14 @@ mod tests {
         let changes = src.get_changes(&[]).unwrap();
         doc.apply_changes(changes[1..].to_vec()).unwrap();
         assert!(!doc.queue.is_empty());
-        doc.apply_change_set(src.change_set_document().unwrap())
-            .unwrap();
+        doc.apply_bundle(src.bundle_document().unwrap()).unwrap();
         assert!(doc.queue.is_empty());
         doc.apply_changes(changes).unwrap();
         assert_eq!(doc.get_heads(), src.get_heads());
     }
 
     #[test]
-    fn a_change_set_delivers_queued_changes() {
+    fn a_bundle_delivers_queued_changes() {
         delivers_queued_changes(audited(b"rcv"));
         delivers_queued_changes(
             crate::automerge::Automerge::<crate::hash_retention::Retained>::new(),
@@ -1237,7 +1230,7 @@ mod tests {
         )
     }
 
-    fn assert_audits(cs: &ChangeSet) {
+    fn assert_audits(cs: &Bundle) {
         let audited = cs
             .audit::<Change>()
             .unwrap_or_else(|e| panic!("audit failed: {e}"));
@@ -1248,32 +1241,32 @@ mod tests {
     }
 
     #[test]
-    fn change_sets_from_every_builder_pass_audit() {
+    fn bundles_from_every_builder_pass_audit() {
         let doc = audit_fixture();
         let frags = doc.fragments(..);
         assert!(frags.len() > 1, "fixture needs several fragments");
 
-        assert_audits(&doc.change_set_document().unwrap());
+        assert_audits(&doc.bundle_document().unwrap());
         for f in &frags {
-            assert_audits(&doc.change_set_for_fragment(f).unwrap());
-            assert_audits(&doc.make_change_set_from_fragment(f).unwrap());
+            assert_audits(&doc.bundle_for_fragment(f).unwrap());
+            assert_audits(&doc.make_bundle_from_fragment(f).unwrap());
         }
-        for cs in doc.change_sets_for_fragments(frags.clone()).unwrap() {
-            assert_audits(&ChangeSet::try_from(&cs[..]).unwrap());
+        for cs in doc.bundles_for_fragments(frags.clone()).unwrap() {
+            assert_audits(&Bundle::try_from(&cs[..]).unwrap());
         }
-        assert_audits(&doc.change_set_after(&[first_change()]).unwrap().unwrap());
+        assert_audits(&doc.bundle_after(&[first_change()]).unwrap().unwrap());
 
         let retained = crate::automerge::Automerge::load(&doc.save()).unwrap();
-        assert_audits(&retained.change_set_document().unwrap());
+        assert_audits(&retained.bundle_document().unwrap());
         for f in &retained.fragments(..) {
-            assert_audits(&retained.make_change_set_from_fragment(f).unwrap());
+            assert_audits(&retained.make_bundle_from_fragment(f).unwrap());
         }
     }
 
     #[test]
-    fn audit_rejects_a_change_set_that_misdescribes_its_changes() {
+    fn audit_rejects_a_bundle_that_misdescribes_its_changes() {
         let doc = audit_fixture();
-        let good = doc.change_set_after(&[first_change()]).unwrap().unwrap();
+        let good = doc.bundle_after(&[first_change()]).unwrap().unwrap();
         assert_audits(&good);
         assert!(!good.boundary.is_empty(), "fixture needs a boundary");
         assert!(!good.checkpoints.is_empty(), "fixture needs a checkpoint");
@@ -1296,7 +1289,7 @@ mod tests {
         rejects!(
             cs,
             "a head hash that names another member",
-            MalformedChangeSet::WrongHeadHash { .. }
+            MalformedBundle::WrongHeadHash { .. }
         );
 
         let mut cs = good.clone();
@@ -1305,19 +1298,19 @@ mod tests {
         rejects!(
             cs,
             "a head that other members depend on",
-            MalformedChangeSet::WrongHeads
+            MalformedBundle::WrongHeads
         );
 
         let mut cs = good.clone();
         cs.heads.push((changes[0].hash(), 0));
-        rejects!(cs, "an extra head", MalformedChangeSet::WrongHeads);
+        rejects!(cs, "an extra head", MalformedBundle::WrongHeads);
 
         let mut cs = good.clone();
         cs.retained.push((0, changes[1].hash()));
         rejects!(
             cs,
             "a retained hash that names another member",
-            MalformedChangeSet::WrongRetainedHash { .. }
+            MalformedBundle::WrongRetainedHash { .. }
         );
 
         let mut cs = good.clone();
@@ -1325,7 +1318,7 @@ mod tests {
         rejects!(
             cs,
             "a checkpoint that is not fragment-level",
-            MalformedChangeSet::WrongCheckpoints
+            MalformedBundle::WrongCheckpoints
         );
 
         let mut cs = good.clone();
@@ -1333,7 +1326,7 @@ mod tests {
         rejects!(
             cs,
             "a missing checkpoint",
-            MalformedChangeSet::WrongCheckpoints
+            MalformedBundle::WrongCheckpoints
         );
 
         let mut cs = good.clone();
@@ -1342,7 +1335,7 @@ mod tests {
         rejects!(
             cs,
             "a boundary entry that names a member",
-            MalformedChangeSet::BoundaryIsMember(_)
+            MalformedBundle::BoundaryIsMember(_)
         );
 
         let mut cs = good.clone();
@@ -1354,7 +1347,7 @@ mod tests {
         rejects!(
             cs,
             "a boundary id that names a member",
-            MalformedChangeSet::ExternalIdIsMember(_)
+            MalformedBundle::ExternalIdIsMember(_)
         );
 
         let mut cs = good.clone();
@@ -1366,7 +1359,7 @@ mod tests {
         rejects!(
             cs,
             "a dep id that disagrees with the boundary",
-            MalformedChangeSet::BoundaryDisagreesWithDep(_)
+            MalformedBundle::BoundaryDisagreesWithDep(_)
         );
     }
 
@@ -1375,7 +1368,7 @@ mod tests {
             Header::parse::<crate::storage::chunk::error::Header>(parse::Input::new(bytes))
                 .unwrap();
         let data = &bytes[header.data_bytes()];
-        let header = Header::new(ChunkType::ChangeSet, data);
+        let header = Header::new(ChunkType::Bundle, data);
         let mut out = Vec::new();
         header.write(&mut out);
         out.extend(data);
@@ -1385,10 +1378,10 @@ mod tests {
     #[test]
     fn a_bad_checksum_is_rejected() {
         let mut bytes = audit_fixture().save();
-        assert_eq!(bytes[8], u8::from(ChunkType::ChangeSet));
+        assert_eq!(bytes[8], u8::from(ChunkType::Bundle));
         bytes[4] ^= 0xff;
 
-        let err = ChangeSet::try_from(&bytes[..]).expect_err("try_from should reject it");
+        let err = Bundle::try_from(&bytes[..]).expect_err("try_from should reject it");
         assert!(err.0.contains("checksum"), "got {err}");
         assert!(matches!(
             crate::automerge::Automerge::load(&bytes),
@@ -1405,16 +1398,16 @@ mod tests {
     }
 
     #[test]
-    fn an_audit_load_rejects_a_change_set_that_fails_audit() {
+    fn an_audit_load_rejects_a_bundle_that_fails_audit() {
         let doc = audit_fixture();
-        let mut cs = ChangeSet::try_from(&doc.save()[..]).unwrap();
+        let mut cs = Bundle::try_from(&doc.save()[..]).unwrap();
         cs.heads[0].0 = cs.to_changes().unwrap()[0].hash();
 
         let err = crate::audit::Automerge::load(&cs.bytes()).expect_err("audit load should fail");
         assert!(
             matches!(
                 err,
-                AutomergeError::MalformedChangeSet(MalformedChangeSet::WrongHeadHash { .. })
+                AutomergeError::MalformedBundle(MalformedBundle::WrongHeadHash { .. })
             ),
             "got {err}"
         );

@@ -1,22 +1,20 @@
 use std::ops::Range;
 
+pub(crate) mod bundle;
 mod bundle_v0;
 pub(crate) mod change;
-pub(crate) mod change_set;
 mod chunk;
 pub(crate) mod columns;
 pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
 
-pub use change_set::{
-    AuditedMember, ChangeSet, ChangeSetChange, InvalidChangeSet, MalformedChangeSet,
-};
+pub use bundle::{AuditedMember, Bundle, BundleChange, InvalidBundle, MalformedBundle};
 pub use load::VerificationMode;
 
 pub(crate) use {
+    bundle::{BundleChangeCols, BundleChangeWriter, BundleStorage, DeltaRunGrouper},
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
-    change_set::{ChangeSetChangeCols, ChangeSetChangeWriter, ChangeSetStorage, DeltaRunGrouper},
     chunk::{hash_parts, CheckSum, Chunk, ChunkType, Header},
     columns::{ColumnSpec, Columns, RawColumn, RawColumns},
     document::{CompressConfig, Document},

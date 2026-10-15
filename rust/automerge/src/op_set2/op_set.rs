@@ -33,8 +33,8 @@ use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
-mod change_set_copy;
-pub(crate) use change_set_copy::RowCopier;
+mod bundle_copy;
+pub(crate) use bundle_copy::RowCopier;
 mod found_op;
 pub(crate) mod index;
 mod insert;
@@ -1681,15 +1681,14 @@ impl OpSet {
     /// space. The indexes are final only for groups entirely inside the
     /// fragment; groups shared with the document need the manifold's
     /// conflict/expose corrections.
-    pub(crate) fn load_change_set(
+    pub(crate) fn load_bundle(
         raw: &RawColumns<Uncompressed>,
         data: &[u8],
         actor_map: &[usize],
         doc: &OpSet,
         mask: Option<&Clock>,
     ) -> Result<Self, ReadOpError> {
-        Self::load_change_set_cols(raw, data, actor_map.len())?
-            .index_change_set(actor_map, doc, true, mask)
+        Self::load_bundle_cols(raw, data, actor_map.len())?.index_bundle(actor_map, doc, true, mask)
     }
 
     /// Succ entries the op set holds, over every row.
@@ -1708,11 +1707,11 @@ impl OpSet {
         self.cols.value.len()
     }
 
-    /// The document-independent half of [`Self::load_change_set`]: decode
+    /// The document-independent half of [`Self::load_bundle`]: decode
     /// and validate a fragment's op columns. Actor indexes stay in the
     /// sender's space (`num_actors` actors) until
-    /// [`Self::index_change_set`] rebases them.
-    pub(crate) fn load_change_set_cols(
+    /// [`Self::index_bundle`] rebases them.
+    pub(crate) fn load_bundle_cols(
         raw: &RawColumns<Uncompressed>,
         data: &[u8],
         num_actors: usize,
@@ -1730,13 +1729,13 @@ impl OpSet {
         Ok(op_set)
     }
 
-    /// The document-dependent half of [`Self::load_change_set`]: rebase the
+    /// The document-dependent half of [`Self::load_bundle`]: rebase the
     /// fragment's actor indexes into `doc`'s actor space and build its
     /// indexes there. Pass `has_deps` when the fragment depends on changes
     /// outside itself; passing `true` is always safe.
     /// Ops `mask` does not cover are indexed as hidden; pass it only when it
     /// hides some, since the masked build goes op by op.
-    pub(crate) fn index_change_set(
+    pub(crate) fn index_bundle(
         mut self,
         actor_map: &[usize],
         doc: &OpSet,

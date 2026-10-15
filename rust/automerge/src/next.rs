@@ -5,7 +5,7 @@
 //! hash in the document's history. History is addressed by
 //! [`ChangeId`](crate::ChangeId) (an actor and sequence number) instead of by
 //! hash, operations that may touch history return `Result`s, and documents
-//! save in the compact change set format by default.
+//! save in the compact bundle format by default.
 //!
 //! The default types in the crate root keep every hash and the API they
 //! have always had. Convert between the two with `into_next` and

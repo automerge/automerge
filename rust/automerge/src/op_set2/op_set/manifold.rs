@@ -4,9 +4,9 @@
 
 use crate::op_set2::op::DocSucc;
 use crate::op_set2::types::Action;
-use crate::storage::change_set::{ManifoldOp, ManifoldOps};
+use crate::storage::bundle::{ManifoldOp, ManifoldOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
-use crate::{AutomergeError, MalformedChangeSet};
+use crate::{AutomergeError, MalformedBundle};
 
 use super::index::{ObjIndex, ObjInfo};
 use super::op_iter::{ObjIdIter, OpIdIter, SuccIterIter};
@@ -196,11 +196,10 @@ impl<'a> ApplyManifold<'a> {
 
     /// Resolve the fragment against the document without writing to it.
     ///
-    /// Fails with [`AutomergeError::MalformedChangeSet`] if an op's
-    /// position hint overshoots its target row: hints are floors in any
-    /// document holding the change set's deps, so the sender computed
-    /// it wrong.
-    pub(crate) fn apply_change_set_ops(
+    /// Fails with [`AutomergeError::MalformedBundle`] if an op's position
+    /// hint overshoots its target row: hints are floors in any document
+    /// holding the bundle's deps, so the sender computed it wrong.
+    pub(crate) fn apply_bundle_ops(
         mut self,
         src: &mut ManifoldOps<'_>,
     ) -> Result<ManifoldResult, AutomergeError> {
@@ -212,10 +211,9 @@ impl<'a> ApplyManifold<'a> {
             let op = src.next_op();
             self.apply_op(&op);
             if self.hint_overshot {
-                return Err(MalformedChangeSet::Invalid(
-                    "op position hint overshot its target row",
-                )
-                .into());
+                return Err(
+                    MalformedBundle::Invalid("op position hint overshot its target row").into(),
+                );
             }
         }
         Ok(self.finish())

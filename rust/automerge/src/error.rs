@@ -74,15 +74,15 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error("{0}")]
     EncodingError(String),
-    #[error("failed to decode change set: {0}")]
-    DecodeChangeSet(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("failed to decode bundle: {0}")]
+    DecodeBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
     /// A caller-supplied [`crate::Fragment`] names history this document
     /// cannot resolve.
     #[error("invalid fragment: {0}")]
     InvalidFragment(&'static str),
-    /// A change set is malformed or its metadata contradicts its contents.
+    /// A bundle is malformed or its metadata contradicts its contents.
     #[error(transparent)]
-    MalformedChangeSet(#[from] crate::MalformedChangeSet),
+    MalformedBundle(#[from] crate::MalformedBundle),
 }
 
 impl AutomergeError {

@@ -6,19 +6,19 @@ use crate::op_set2::columns::Columns;
 use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::types::Action;
 use crate::op_set2::types::ActorIdx;
-use crate::storage::change_set::ChangeSetOpWriter;
+use crate::storage::bundle::BundleOpWriter;
 
 impl OpSet {
-    pub(crate) fn write_all_change_set_ops<'a>(
+    pub(crate) fn write_all_bundle_ops<'a>(
         &'a self,
-        writer: &mut ChangeSetOpWriter<'a>,
+        writer: &mut BundleOpWriter<'a>,
         mapper: &mut ActorMapper<'_>,
     ) {
         RowCopier::new(self).copy(0..self.len(), writer, mapper);
     }
 }
 
-/// Copies ascending row ranges into a change set, run by run, with one
+/// Copies ascending row ranges into a bundle, run by run, with one
 /// forward cursor per column.
 pub(crate) struct RowCopier<'a> {
     cols: &'a Columns,
@@ -62,13 +62,13 @@ impl<'a> RowCopier<'a> {
         }
     }
 
-    /// The rows' successors and referenced ops must all be in the change
-    /// set, and none may take a pred from outside it. Successive calls
-    /// must name ascending rows.
+    /// The rows' successors and referenced ops must all be in the bundle,
+    /// and none may take a pred from outside it. Successive calls must name
+    /// ascending rows.
     pub(crate) fn copy(
         &mut self,
         rows: Range<usize>,
-        w: &mut ChangeSetOpWriter<'a>,
+        w: &mut BundleOpWriter<'a>,
         mapper: &mut ActorMapper<'_>,
     ) {
         debug_assert!(rows.start >= self.id_actor.pos(), "row ranges must ascend");

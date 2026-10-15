@@ -17,8 +17,8 @@ use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
 use crate::op_set2::op_set::{IndexBuilder, MarkOrderValidator};
+use crate::storage::bundle::BundleChange;
 use crate::storage::change::{Change as StoredChange, Verified};
-use crate::storage::change_set::ChangeSetChange;
 use crate::storage::load::change_collector::Error;
 use crate::storage::{hash_parts, ChunkType, Header};
 use crate::{
@@ -716,7 +716,7 @@ struct HashCursor {
     next: usize,
     order: OrderCheck,
     hashes: Vec<ChangeHash>,
-    /// a change set's external deps, indexed after its members
+    /// a bundle's external deps, indexed after its members
     deps: Vec<ChangeHash>,
     num_ops: Vec<u64>,
     heads: BTreeSet<ChangeHash>,
@@ -725,7 +725,7 @@ struct HashCursor {
 struct OrderCheck {
     max_ops: Vec<u64>,
     seq: Vec<u64>,
-    /// a change set's actors may start anywhere in their seq chains
+    /// a bundle's actors may start anywhere in their seq chains
     continuing: bool,
 }
 
@@ -791,8 +791,8 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
-    pub(crate) fn from_change_set_changes(
-        changes: Vec<ChangeSetChange<'a>>,
+    pub(crate) fn from_bundle_changes(
+        changes: Vec<BundleChange<'a>>,
         actors: &'a ActorTable,
     ) -> ChangeCollector<'a> {
         let changes = changes.into_iter().map(|c| c.into()).collect();
@@ -837,9 +837,9 @@ impl<'a> ChangeCollector<'a> {
         self.hashing_with(Vec::new(), false)
     }
 
-    /// [`Self::hashing`] for a change set's members, which may depend on
-    /// `deps` outside it.
-    pub(crate) fn hashing_change_set(self, deps: &[ChangeHash]) -> Self {
+    /// [`Self::hashing`] for a bundle's members, which may depend on `deps`
+    /// outside it.
+    pub(crate) fn hashing_bundle(self, deps: &[ChangeHash]) -> Self {
         self.hashing_with(deps.to_vec(), true)
     }
 
@@ -977,8 +977,8 @@ impl<'a> ChangeCollector<'a> {
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes);
         #[cfg(debug_assertions)]
         {
-            // the change set encoder reorders changes: compare as sets
-            let change_set_changes = crate::storage::ChangeSet::storage_for_hashes(
+            // the bundle encoder reorders changes: compare as sets
+            let bundle_changes = crate::storage::Bundle::storage_for_hashes(
                 op_set,
                 change_graph,
                 r1.iter().map(|c| c.hash()),
@@ -987,9 +987,9 @@ impl<'a> ChangeCollector<'a> {
             .to_changes()
             .unwrap();
             let r1_hashes: std::collections::HashSet<_> = r1.iter().map(|c| c.hash()).collect();
-            let change_set_hashes: std::collections::HashSet<_> =
-                change_set_changes.iter().map(|c| c.hash()).collect();
-            debug_assert_eq!(r1_hashes, change_set_hashes);
+            let bundle_hashes: std::collections::HashSet<_> =
+                bundle_changes.iter().map(|c| c.hash()).collect();
+            debug_assert_eq!(r1_hashes, bundle_hashes);
         }
         Ok(r1)
     }
@@ -1189,7 +1189,7 @@ impl<'a> ChangeCollector<'a> {
         Ok(changes)
     }
 
-    pub(crate) fn decode_change_set(
+    pub(crate) fn decode_bundle(
         mut self,
         actors: &ActorTable,
         deps: &[ChangeHash],
@@ -1205,7 +1205,7 @@ impl<'a> ChangeCollector<'a> {
                 return Err(Error::MissingActor);
             }
 
-            let all_deps = ChangeSetDeps::new(num_changes, &changes, deps);
+            let all_deps = BundleDeps::new(num_changes, &changes, deps);
             let change = self.builders[change.builder]
                 .finish(&change, &all_deps, &mut self.mapper)
                 .unwrap();
@@ -1335,13 +1335,13 @@ pub(crate) struct CollectedHashes {
     pub(crate) heads: BTreeSet<ChangeHash>,
 }
 
-struct ChangeSetDeps<'a> {
+struct BundleDeps<'a> {
     num_changes: usize,
     changes: &'a Vec<Change>,
     deps: &'a [ChangeHash],
 }
 
-impl<'a> ChangeSetDeps<'a> {
+impl<'a> BundleDeps<'a> {
     fn new(num_changes: usize, changes: &'a Vec<Change>, deps: &'a [ChangeHash]) -> Self {
         Self {
             num_changes,
@@ -1367,7 +1367,7 @@ impl GetHash for MemberHashes<'_> {
     }
 }
 
-impl GetHash for ChangeSetDeps<'_> {
+impl GetHash for BundleDeps<'_> {
     fn get_hash(&self, index: usize) -> Option<ChangeHash> {
         if index >= self.num_changes {
             self.deps.get(index - self.num_changes).copied()

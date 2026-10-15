@@ -1,5 +1,5 @@
 // Ingest each egwalker doc in one load_incremental() call: as raw changes and
-// as change sets, plus a plain full-doc load for context.
+// as bundles, plus a plain full-doc load for context.
 use automerge::next::Automerge;
 use automerge::ChangeId;
 use std::time::Instant;
@@ -39,8 +39,8 @@ fn main() {
             changes.extend_from_slice(c.raw_bytes());
         }
         let fragments = doc.fragments(..);
-        let change_sets: Vec<u8> = doc
-            .change_sets_for_fragments(fragments)
+        let bundles: Vec<u8> = doc
+            .bundles_for_fragments(fragments)
             .unwrap()
             .into_iter()
             .flatten()
@@ -53,7 +53,7 @@ fn main() {
         };
 
         let t_changes = best_of(|| ingest(&changes), &heads);
-        let t_change_sets = best_of(|| ingest(&change_sets), &heads);
+        let t_bundles = best_of(|| ingest(&bundles), &heads);
         let t_load_p = best_of(|| Automerge::load(&bytes).unwrap(), &heads);
         let t_changes_p = best_of(
             || {
@@ -65,9 +65,9 @@ fn main() {
             &heads,
         );
 
-        // parsing is timed: an applied change set is consumed, so it can't be reused
+        // parsing is timed: an applied bundle is consumed, so it can't be reused
         let v2_bytes: Vec<Vec<u8>> = doc
-            .change_sets_for_fragments(doc.fragments(..))
+            .bundles_for_fragments(doc.fragments(..))
             .unwrap()
             .into_iter()
             .collect();
@@ -75,7 +75,7 @@ fn main() {
             || {
                 let mut d = Automerge::new();
                 for b in &v2_bytes {
-                    d.apply_change_set(automerge::ChangeSet::try_from(&b[..]).unwrap())
+                    d.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
                         .unwrap();
                 }
                 d
@@ -84,13 +84,13 @@ fn main() {
         );
 
         println!(
-            "{name}: changes {:>7.3}s (patches {:>7.3}s) | fragments {:>7.3}s | full load {:>6.3}s (patches {:>6.3}s) | change_sets {:>7.3}s",
+            "{name}: changes {:>7.3}s (patches {:>7.3}s) | fragments {:>7.3}s | full load {:>6.3}s (patches {:>6.3}s) | bundles {:>7.3}s",
             t_changes,
             t_changes_p,
             t_frag,
             full,
             t_load_p,
-            t_change_sets,
+            t_bundles,
         );
     }
 }

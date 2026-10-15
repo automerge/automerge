@@ -1,9 +1,10 @@
-//! DEPRECATED: the change set format written by automerge 3.3.0–3.3.2
-//! (chunk id 3), kept so those documents still load.
+//! DEPRECATED: BundleV0, the bundle format (chunk id 3) written by the
+//! Rust crate 0.8–0.12 and the JS package 3.2–3.5, kept so those bundles
+//! still load.
 //!
-//! Frozen: do not change it or share code with `storage::change_set`, whose
-//! format has diverged (its reader silently drops a 3.3.2 change set's
-//! object ids). When chunk id 3 no longer needs supporting, delete this
+//! Frozen: do not change it or share code with `storage::bundle`, whose
+//! format has diverged (its reader silently drops a BundleV0's object
+//! ids). When chunk id 3 no longer needs supporting, delete this
 //! file, the `BundleV0` chunk arm and the `ChunkType::BundleV0` variant.
 #![allow(dead_code)]
 
@@ -16,8 +17,8 @@ use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::op::OpBuilder;
 use crate::op_set2::types::{Action, ActorIdx, KeyRef};
 use crate::op_set2::{ReadOpError, ScalarValue};
+use crate::storage::bundle::{BundleChange, ParseError};
 use crate::storage::change::{OpReadState, Unverified, Verified};
-use crate::storage::change_set::{ChangeSetChange, ParseError};
 use crate::storage::columns::{compression, ColumnId, ColumnType};
 use crate::storage::{parse, Header, RawColumns};
 use crate::types::{ActorId, ChangeHash, ObjId, OpId};
@@ -34,7 +35,7 @@ pub(crate) struct BundleV0Storage<'a, OpReadState> {
     /// Uncompressed in-memory form. Iterators index into this.
     pub(crate) bytes: Cow<'a, [u8]>,
     /// On-disk form, if columns were DEFLATE-compressed. `None` for
-    /// change sets that were written or received in fully-uncompressed form
+    /// chunks that were written or received in fully-uncompressed form
     /// (in which case `bytes` is also the on-disk form).
     pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
     pub(crate) header: Header,
@@ -74,14 +75,12 @@ impl<O: OpReadState> BundleV0Storage<'_, O> {
     }
 }
 
-/// Materialise the doc-order id_ctr values. Accepts change sets in either
-/// the current format (only `ID_CTR_INVERSE` on the wire — reconstructed
+/// Materialise the doc-order id_ctr values. BundleV0 has two counter
+/// encodings: the later one stores only `ID_CTR_INVERSE` (reconstructed
 /// here by walking change metadata in canonical `(actor, seq)` order and
-/// applying `inverse[k] = doc_pos`) or the legacy format (an explicit
-/// doc-order `ID_CTR` column — decoded directly). New format takes
-/// precedence if both are somehow present. Returns the counters as a
-/// plain `Vec<i64>` for `V0OpIter` to read directly — no columnar round
-/// trip.
+/// applying `inverse[k] = doc_pos`), the earlier one an explicit
+/// doc-order `ID_CTR` column (decoded directly). The inverse column takes
+/// precedence if both are somehow present.
 fn extract_id_ctr_values(
     changes_meta: &RawColumns<compression::Uncompressed>,
     changes_data: &[u8],
@@ -108,7 +107,7 @@ fn extract_id_ctr_values(
         }
     }
 
-    // New format: reconstruct doc-order counters from the inverse
+    // Later encoding: reconstruct doc-order counters from the inverse
     // permutation column.
     if let Some(inverse_bytes) = inverse_bytes {
         let inverse: Vec<i64> = decode_delta_int(inverse_bytes)?;
@@ -140,12 +139,12 @@ fn extract_id_ctr_values(
         return Ok(counters);
     }
 
-    // Legacy format: decode the explicit doc-order id_ctr column.
+    // Earlier encoding: decode the explicit doc-order id_ctr column.
     if let Some(id_ctr_bytes) = id_ctr_bytes {
         return decode_delta_int(id_ctr_bytes);
     }
 
-    // Empty change set (no ops) — both columns absent.
+    // No ops — both columns absent.
     Ok(Vec::new())
 }
 
@@ -314,14 +313,14 @@ impl BundleV0Storage<'_, Verified> {
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
         let change_meta = self.iter_change_meta().collect();
         let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
-        let mut collector = ChangeCollector::from_change_set_changes(change_meta, &actors);
+        let mut collector = ChangeCollector::from_bundle_changes(change_meta, &actors);
         for op in self.iter_ops() {
             collector.add(op);
         }
-        let change_set = collector
-            .decode_change_set(&actors, &self.deps)
-            .map_err(|e| ParseError::DecodeChangeSet(Box::new(e)))?;
-        Ok(change_set)
+        let bundle = collector
+            .decode_bundle(&actors, &self.deps)
+            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))?;
+        Ok(bundle)
     }
 
     pub(crate) fn iter_ops(&self) -> V0OpIter<'_> {
@@ -352,7 +351,7 @@ impl<'a> V0ChangeIter<'a> {
 }
 
 impl<'a> Iterator for V0ChangeIter<'a> {
-    type Item = ChangeSetChange<'a>;
+    type Item = BundleChange<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().transpose().unwrap()
@@ -379,7 +378,7 @@ struct V0ChangeIterInner<'a> {
 }
 
 impl<'a> Iterator for V0ChangeIterUnverified<'a> {
-    type Item = Result<ChangeSetChange<'a>, ParseError>;
+    type Item = Result<BundleChange<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.inner
@@ -453,7 +452,7 @@ impl<'a> V0ChangeIterInner<'a> {
         })
     }
 
-    fn try_next(&mut self) -> Result<Option<ChangeSetChange<'a>>, ParseError> {
+    fn try_next(&mut self) -> Result<Option<BundleChange<'a>>, ParseError> {
         let actor = match self.actor.next().flatten() {
             Some(a) => a.into(),
             None => return Ok(None),
@@ -492,7 +491,7 @@ impl<'a> V0ChangeIterInner<'a> {
         let extra = Cow::Borrowed(extra);
         self.extra = tail;
 
-        Ok(Some(ChangeSetChange {
+        Ok(Some(BundleChange {
             actor,
             author: None,
             seq,

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::automerge::{AuditMode, Automerge};
 use crate::change_graph::{ChangeGraph, Members, NodeIdx, UncheckedHashes};
-use crate::storage::change_set::ChangeSet;
+use crate::storage::bundle::Bundle;
 use crate::types::ChangeHash;
 use crate::AutomergeError;
 
@@ -61,10 +61,7 @@ pub trait HashRetention:
     fn from_full(doc: Automerge<Full>) -> Automerge<Self>;
 
     #[doc(hidden)]
-    fn apply_change_set(
-        doc: &mut Automerge<Self>,
-        change_set: ChangeSet,
-    ) -> Result<(), AutomergeError>;
+    fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError>;
 }
 
 /// Every change hash is kept: audit mode.
@@ -127,11 +124,8 @@ impl HashRetention for Full {
         doc
     }
 
-    fn apply_change_set(
-        doc: &mut Automerge<Self>,
-        change_set: ChangeSet,
-    ) -> Result<(), AutomergeError> {
-        doc.apply_change_set_verified(change_set)
+    fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError> {
+        doc.apply_bundle_verified(bundle)
     }
 
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)> {
@@ -205,11 +199,8 @@ impl HashRetention for Retained {
         doc.disable_audit_mode()
     }
 
-    fn apply_change_set(
-        doc: &mut Automerge<Self>,
-        change_set: ChangeSet,
-    ) -> Result<(), AutomergeError> {
-        doc.apply_change_set_columns(change_set, None)
+    fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError> {
+        doc.apply_bundle_columns(bundle, None)
     }
 
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)> {

@@ -1,4 +1,4 @@
-// Apply each doc's whole history as a change set chain, with and without an
+// Apply each doc's whole history as a bundle chain, with and without an
 // active patch log:
 //
 //   cargo run --release -p automerge --example profile_frag C1 A1 A2
@@ -10,9 +10,9 @@ fn main() {
         let bytes = std::fs::read(&path).unwrap();
         let doc = Automerge::load(&bytes).unwrap();
 
-        // bytes: applying consumes a change set, and the chain is applied twice
+        // bytes: applying consumes a bundle, and the chain is applied twice
         let v2: Vec<Vec<u8>> = doc
-            .change_sets_for_fragments(doc.fragments(..))
+            .bundles_for_fragments(doc.fragments(..))
             .unwrap()
             .into_iter()
             .collect();
@@ -20,7 +20,7 @@ fn main() {
         let t = std::time::Instant::now();
         let mut d = Automerge::new();
         for b in &v2 {
-            d.apply_change_set(automerge::ChangeSet::try_from(&b[..]).unwrap())
+            d.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
                 .unwrap();
         }
         eprintln!(
@@ -34,7 +34,7 @@ fn main() {
         let t = std::time::Instant::now();
         let mut d2 = Automerge::new();
         for b in &v2 {
-            d2.apply_change_set(automerge::ChangeSet::try_from(&b[..]).unwrap())
+            d2.apply_bundle(automerge::Bundle::try_from(&b[..]).unwrap())
                 .unwrap();
             let _patches = d2.diff_incremental();
         }

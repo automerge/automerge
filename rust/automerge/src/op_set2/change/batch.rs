@@ -239,7 +239,7 @@ impl BatchApply {
         doc: &mut Automerge<H>,
     ) -> Result<(), AutomergeError> {
         let added = self.insert_new_actors(doc);
-        let result = self.apply_as_change_set(doc);
+        let result = self.apply_as_bundle(doc);
         if result.is_err() {
             doc.undo_actor_refs(&added);
         }
@@ -271,7 +271,7 @@ impl BatchApply {
         debug_assert!(succ_map.is_empty(), "succ target missing from batch");
     }
 
-    fn apply_as_change_set<H: crate::hash_retention::HashRetention>(
+    fn apply_as_bundle<H: crate::hash_retention::HashRetention>(
         &mut self,
         doc: &mut Automerge<H>,
     ) -> Result<(), AutomergeError> {
@@ -282,8 +282,7 @@ impl BatchApply {
         self.move_in_batch_preds_to_succ(&clock_before_batch);
 
         let idxs = self.doc_ordered_indexes(doc);
-        let (raw, data) =
-            encode_change_set_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
+        let (raw, data) = encode_bundle_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
 
         let first_authors: Vec<_> = self
             .changes
@@ -301,10 +300,10 @@ impl BatchApply {
                 .filter_map(|c| Some((doc.ops().lookup_actor(c.actor_id())?, c.max_op()))),
         );
         let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
-        let frag = super::change_set::ChangeSetApply::from_parts(
+        let frag = super::bundle::BundleApply::from_parts(
             clock_before_batch,
             actor_map,
-            super::change_set::ChangeSetSrc::Owned { raw, data },
+            super::bundle::BundleSrc::Owned { raw, data },
             doc.ops(),
             mask,
         )?;
@@ -378,9 +377,9 @@ impl<'a> ObjWalker<'a> {
     }
 }
 
-/// Encode doc-ordered, succ-stamped ops as change set op columns, keeping
+/// Encode doc-ordered, succ-stamped ops as bundle op columns, keeping
 /// the document's actor indexes.
-pub(super) fn encode_change_set_ops<'x, I>(
+pub(super) fn encode_bundle_ops<'x, I>(
     ops: I,
     op_set: &OpSet,
 ) -> (
@@ -392,7 +391,7 @@ where
 {
     let actors_len = op_set.actors.len();
     let mut mapper = crate::op_set2::change::ActorMapper::new(&op_set.actors);
-    let mut writer = crate::storage::change_set::ChangeSetOpWriter::default();
+    let mut writer = crate::storage::bundle::BundleOpWriter::default();
     for op in ops {
         let succ_ids: Vec<OpId> = op.succ.iter().map(|s| s.0).collect();
         writer.add(&op.bld, &succ_ids, 0, &mut mapper);

@@ -2,7 +2,7 @@
 //!
 //! In audit mode history is named by change hash, as it always has been.
 //! Outside it history is named by change id (`"<seq>@<actor>"`) and saves
-//! use the change set format.
+//! use the bundle format.
 
 use automerge as am;
 use automerge::marks::{Mark, MarkSet};
