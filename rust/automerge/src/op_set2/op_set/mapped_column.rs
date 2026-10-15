@@ -35,6 +35,12 @@ impl ActorMap {
         self.to_logical.is_empty()
     }
 
+    pub(crate) fn same_mapping(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+            || (self.is_identity() && other.is_identity())
+            || self.to_logical == other.to_logical
+    }
+
     pub(crate) fn version(&self) -> u64 {
         self.version
     }
@@ -262,7 +268,7 @@ where
         I: IntoIterator<Item = hexane::Splice>,
         T::Encoding<hexane::Leb128>: hexane::edit::SlabEdit<Value = T>,
     {
-        if Arc::ptr_eq(&self.map, &src.map) || self.map == src.map {
+        if self.map.same_mapping(&src.map) {
             self.col.copy_ranges(src.col, splices);
         } else {
             let mut shift = 0isize;

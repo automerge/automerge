@@ -13,13 +13,17 @@ use crate::types::SequenceType;
 use crate::types::{ElemId, ObjId, ObjType, OpId, TextEncoding};
 use hexane::encoder::{BoolEncoder, RleEncoder};
 use hexane::{EncoderApi, RunSrc};
+use rustc_hash::FxHashMap;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 /// Streaming index builder: ops are buffered one register at a time and
 /// flushed to run-length encoders at each register boundary.
 pub(crate) struct IndexBuilder {
-    /// counter succ id -> [(absolute inc index, absolute op index)]
-    counters: HashMap<OpId, Vec<(usize, usize)>>,
+    /// counter succ id -> (absolute inc index, absolute op index)
+    counters: FxHashMap<OpId, (usize, usize)>,
+    /// further counters sharing a succ id, which only conflicting counters do
+    shared_counters: Vec<(OpId, (usize, usize))>,
     /// the current, unflushed register
     group: Vec<GroupOp>,
     group_incs: Vec<Option<i64>>,
@@ -288,7 +292,8 @@ impl<'a> RareOps<'a> {
 impl IndexBuilder {
     pub(crate) fn new(encoding: TextEncoding) -> Self {
         Self {
-            counters: HashMap::new(),
+            counters: FxHashMap::default(),
+            shared_counters: Vec::new(),
             group: Vec::new(),
             group_incs: Vec::new(),
             group_marks: Vec::new(),
@@ -365,6 +370,7 @@ impl IndexBuilder {
         self.group_marks.clear();
         // successors share their target's register, so leftovers can never match
         self.counters.clear();
+        self.shared_counters.clear();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -433,16 +439,26 @@ impl IndexBuilder {
     }
 
     fn apply_increment(&mut self, id: OpId, inc_value: Option<i64>, visible: bool) {
-        let count = self.counters.remove(&id);
-        if let Some(i) = inc_value {
-            let incs_flushed = self.incs_flushed();
-            let ops_flushed = self.ops_flushed();
-            for (inc_idx, op_idx) in count.into_iter().flatten() {
-                // a counter and its increments share a register
-                self.group_incs[inc_idx - incs_flushed] = Some(i);
-                if visible {
-                    self.group[op_idx - ops_flushed].succ -= 1;
-                }
+        let first = self.counters.remove(&id);
+        let Some(i) = inc_value else {
+            return;
+        };
+        let mut apply = |(inc_idx, op_idx): (usize, usize)| {
+            // a counter and its increments share a register
+            self.group_incs[inc_idx - self.inc.len()] = Some(i);
+            if visible {
+                self.group[op_idx - self.visible.len()].succ -= 1;
+            }
+        };
+        if let Some(entry) = first {
+            apply(entry);
+        }
+        let mut j = 0;
+        while j < self.shared_counters.len() {
+            if self.shared_counters[j].0 == id {
+                apply(self.shared_counters.swap_remove(j).1);
+            } else {
+                j += 1;
             }
         }
     }
@@ -453,7 +469,12 @@ impl IndexBuilder {
                 self.incs_flushed() + self.group_incs.len(),
                 self.ops_flushed() + self.group.len() - 1,
             );
-            self.counters.entry(id).or_default().push(entry);
+            match self.counters.entry(id) {
+                Entry::Vacant(v) => {
+                    v.insert(entry);
+                }
+                Entry::Occupied(_) => self.shared_counters.push((id, entry)),
+            }
         }
         self.group_incs.push(None);
     }
@@ -713,6 +734,7 @@ impl IndexBuilder {
                 if is_counter {
                     let start = run.succ_prefix as usize + i * run.succ as usize;
                     let end = start + run.succ as usize;
+                    self.counters.reserve(run.succ as usize);
                     let mut next_id = rare.succ_ids.shift_next(start..end);
                     while let Some(succ_id) = next_id {
                         self.process_succ(true, succ_id);
