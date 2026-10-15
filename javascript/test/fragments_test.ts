@@ -3,10 +3,12 @@ import * as Automerge from "../src/entrypoints/fullfat_node.js"
 
 type CounterDoc = { counter: number }
 
+// Fixed timestamps keep the change hashes, and so the fragment levels,
+// the same on every run: these tests need the head to be a level-0 commit.
 function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
-  let doc = Automerge.from<CounterDoc>({ counter: 0 }, { actor: "0123456789abcdef" })
-  for (let i = 1; i <= numChanges; i++) {
-    doc = Automerge.change(doc, d => {
+  let doc = Automerge.init<CounterDoc>({ actor: "0123456789abcdef" })
+  for (let i = 0; i <= numChanges; i++) {
+    doc = Automerge.change(doc, { time: 0 }, d => {
       d.counter = i
     })
   }
