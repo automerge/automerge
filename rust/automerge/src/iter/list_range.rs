@@ -399,7 +399,7 @@ fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
     let start = match range.start_bound() {
         Bound::Unbounded => usize::MIN,
         Bound::Included(n) => *n,
-        Bound::Excluded(n) => *n - 1,
+        Bound::Excluded(n) => *n + 1,
     };
 
     let end = match range.end_bound() {
@@ -441,6 +441,16 @@ mod tests {
         assert_eq!(&v, &values[..=3]);
         let v: Vec<_> = doc.list_range(&list, 1..=3).map(|v| v.value).collect();
         assert_eq!(&v, &values[1..=3]);
+        let v: Vec<_> = doc
+            .list_range(&list, (Bound::Excluded(1), Bound::Unbounded))
+            .map(|v| v.value)
+            .collect();
+        assert_eq!(&v, &values[2..]);
+        let v: Vec<_> = doc
+            .list_range(&list, (Bound::Excluded(0), Bound::Excluded(3)))
+            .map(|v| v.value)
+            .collect();
+        assert_eq!(&v, &values[1..3]);
     }
 
     #[test]
