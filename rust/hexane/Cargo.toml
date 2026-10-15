@@ -32,6 +32,42 @@ proptest = { version = "^1.7", default-features = false, features = ["std"] }
 rand = { version = "^0.10", optional = false }
 divan = "0.1.15"
 
+[[bench]]
+name = "btree_b_sweep"
+harness = false
+
+[[bench]]
+name = "column_ops"
+harness = false
+
+[[bench]]
+name = "column_u64_mutations"
+harness = false
+
+[[bench]]
+name = "load"
+harness = false
+
+[[bench]]
+name = "max_segments"
+harness = false
+
+[[bench]]
+name = "profile_bool_replace"
+harness = false
+
+[[bench]]
+name = "profile_str_splice"
+harness = false
+
+[[bench]]
+name = "remap"
+harness = false
+
+[[bench]]
+name = "seek_to_value"
+harness = false
+
 [profile.release]
 debug = true
 

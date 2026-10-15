@@ -783,6 +783,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
             return self.make_fresh_leaves(aggs);
         }
         let below = self.build_children_at_height(aggs, height - 1);
+        self.group_into_internals(below)
+    }
+
+    fn group_into_internals(&mut self, below: Vec<ChildSlot<A>>) -> Vec<ChildSlot<A>> {
         if below.is_empty() {
             return Vec::new();
         }
@@ -1146,6 +1150,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
             }
             _ => {
                 // Root overflowed — grow a new root one level up.
+                while replacement.len() > B {
+                    replacement = self.group_into_internals(replacement);
+                }
                 let new_root = Internal {
                     children: replacement,
                 };
@@ -2353,6 +2360,14 @@ mod tests {
 
     // ── Deep structural fuzz ────────────────────────────────────────────
     //
+    #[test]
+    fn bulk_insert_past_b_cubed_slabs_keeps_root_within_b() {
+        let mut t = SlabBTree::<SlabAgg>::from_iter((0..B as i64 + 1).map(|i| simple_agg(i, 1)));
+        let n = B * B * B + 1;
+        t.splice(1..1, (0..n).map(|i| simple_agg(i as i64, 1)));
+        t.check_invariants();
+    }
+
     // The older fuzzers run at ~10-70 slabs, which at B=64 almost never
     // leaves a single root leaf.  This one starts at 200-1500 slabs so
     // splits, LCA splices, underflow removal, sibling merges, and root
