@@ -31,11 +31,11 @@ use std::ops::{Add, AddAssign, Range, SubAssign};
 #[path = "debug.rs"]
 pub mod debug;
 
-/// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
-/// larger = fewer nodes + more per-node cost.  64 is empirically a good
-/// compromise across the `marks_at` (query-heavy) and `insert_null`
-/// (mutation-heavy) workloads.
-const B: usize = 64;
+/// Branching factor.  Smaller = more levels, each costing dependent loads
+/// and a mispredict; larger = longer linear scans per node.  32 measured
+/// equal or better than 16 and 64 on real document columns; 8 is
+/// clearly worse.
+const B: usize = 32;
 
 // ── SlabAggregate trait ─────────────────────────────────────────────────────
 
@@ -2285,14 +2285,15 @@ mod tests {
     #[test]
     fn exact_internal_span_delete() {
         // Pure delete exactly covering the middle level-1 internal's span.
-        let n = 64 * 64 * 3;
-        let aggs: Vec<_> = (0..n).map(|i| simple_agg(i as i64, 1)).collect();
+        let span = B * B;
+        let aggs: Vec<_> = (0..span * 3).map(|i| simple_agg(i as i64, 1)).collect();
         let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
         assert_eq!(t.subtree_height(t.root), 2);
-        t.splice(4096..8192, std::iter::empty());
-        assert_eq!(t.len(), 8192);
-        assert_eq!(t.find_by_prefix(5000), Some((5000, 5000)));
-        assert_eq!(t.root_agg().len, 8192);
+        t.splice(span..span * 2, std::iter::empty());
+        assert_eq!(t.len(), span * 2);
+        let p = span + B / 2;
+        assert_eq!(t.find_by_prefix(p), Some((p, p)));
+        assert_eq!(t.root_agg().len, span * 2);
         t.check_invariants();
     }
 
@@ -2333,7 +2334,7 @@ mod tests {
 
     #[test]
     fn root_collapses_after_mass_delete() {
-        let n = 64 * 64 + 5;
+        let n = B * B + 5;
         let aggs: Vec<_> = (0..n).map(|i| simple_agg(i as i64, 1)).collect();
         let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
         assert_eq!(t.subtree_height(t.root), 2);
