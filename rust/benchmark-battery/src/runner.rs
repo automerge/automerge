@@ -15,7 +15,11 @@ pub const SUITE_NAME: &str = "benchmark-battery";
 pub struct RunOptions {
     pub sample_count: usize,
     pub warmup_count: usize,
+    /// at least this many iterations in each sample
     pub iters_per_sample: u64,
+    /// more iterations per sample, if needed, so that each sample takes at
+    /// least this long; 0 keeps `iters_per_sample` as is
+    pub min_sample_ns: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -195,13 +199,15 @@ fn run_sampled(benchmark: &SampledBenchmark, options: RunOptions) -> SampledResu
     let mut operation = (benchmark.make_runner)();
     let setup_duration_ns = nanos_u64(setup_start.elapsed().as_nanos());
 
-    for _ in 0..options.warmup_count {
-        operation.run_sample(1);
+    let mut fastest = u64::MAX;
+    for _ in 0..options.warmup_count.max(1) {
+        fastest = fastest.min(operation.run_sample(1));
     }
+    let iters_per_sample = iters_for(options, fastest);
 
     let mut samples = Vec::with_capacity(options.sample_count);
     for _ in 0..options.sample_count {
-        samples.push(operation.run_sample(options.iters_per_sample));
+        samples.push(operation.run_sample(iters_per_sample));
     }
 
     let stats = Stats::from_samples(&mut samples.clone());
@@ -215,9 +221,20 @@ fn run_sampled(benchmark: &SampledBenchmark, options: RunOptions) -> SampledResu
         mean: stats.mean,
         max: stats.max,
         samples: options.sample_count,
-        iters_per_sample: options.iters_per_sample,
+        iters_per_sample,
         sample_values: samples,
     }
+}
+
+/// Batched benchmarks clone their state once per iteration up front, so
+/// this also bounds a sample's memory.
+const MAX_ITERS_PER_SAMPLE: u64 = 1_000_000;
+
+fn iters_for(options: RunOptions, iter_ns: u64) -> u64 {
+    let to_fill = options.min_sample_ns.div_ceil(iter_ns.max(1));
+    options
+        .iters_per_sample
+        .max(to_fill.min(MAX_ITERS_PER_SAMPLE))
 }
 
 fn run_memory(benchmark: &MemoryBenchmark) -> MemoryResult {
@@ -436,8 +453,9 @@ fn parse_host(rustc_verbose: String) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        append, run_memory, run_sampled, BenchResult, BenchRun, MemoryResult, NotRunResult,
-        RunOptions, SeriesSummary, Stats, SCHEMA_VERSION, SUITE_NAME,
+        append, iters_for, run_memory, run_sampled, BenchResult, BenchRun, MemoryResult,
+        NotRunResult, RunOptions, SeriesSummary, Stats, MAX_ITERS_PER_SAMPLE, SCHEMA_VERSION,
+        SUITE_NAME,
     };
     use crate::scenarios::{BenchmarkKind, MemoryBenchmark, MemoryMeasurement, SampledBenchmark};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -519,6 +537,7 @@ mod tests {
                 sample_count: 2,
                 warmup_count: 3,
                 iters_per_sample: 4,
+                min_sample_ns: 0,
             },
         );
         assert_eq!(result.sample_values.len(), 2);
@@ -526,6 +545,39 @@ mod tests {
         assert_eq!(BATCHED_CLONES.load(Ordering::Relaxed), 11);
         assert_eq!(BATCHED_RUNS.load(Ordering::Relaxed), 11);
         assert_eq!(BATCHED_DROPS.load(Ordering::Relaxed), 11);
+    }
+
+    #[test]
+    fn fast_benchmarks_get_enough_iterations_to_fill_a_sample() {
+        let options = RunOptions {
+            sample_count: 1,
+            warmup_count: 1,
+            iters_per_sample: 1,
+            min_sample_ns: 10_000_000,
+        };
+        assert_eq!(iters_for(options, 200_000), 50);
+        assert_eq!(iters_for(options, 30_000_000), 1);
+        assert_eq!(iters_for(options, 0), MAX_ITERS_PER_SAMPLE);
+        assert_eq!(
+            iters_for(
+                RunOptions {
+                    iters_per_sample: 80,
+                    ..options
+                },
+                200_000
+            ),
+            80
+        );
+        assert_eq!(
+            iters_for(
+                RunOptions {
+                    min_sample_ns: 0,
+                    ..options
+                },
+                200_000
+            ),
+            1
+        );
     }
 
     #[test]
