@@ -2073,7 +2073,13 @@ impl<H: HashRetention> Automerge<H> {
             );
             debug_assert_eq!(
                 sorted(bundle.boundary.iter().map(|(h, _)| *h).collect()),
-                sorted(f.boundary.clone()),
+                sorted(
+                    f.boundary
+                        .iter()
+                        .copied()
+                        .filter(|h| bundle.deps().contains(h))
+                        .collect()
+                ),
                 "derived boundary disagrees with the fragment's",
             );
             let mut derived: Vec<ChangeId> = bundle
@@ -2138,8 +2144,11 @@ impl<H: HashRetention> Automerge<H> {
             let n = self.change_graph.node_by_hash(h)?;
             Some(self.change_graph.change_id(n, &self.ops.actors))
         };
+        // an entry no member depends on is behind another entry, and a
+        // fragment's boundary lists every earlier fragment it covers
         let boundary = boundary
             .iter()
+            .filter(|h| storage.deps().contains(h))
             .map(|h| change_id(h).map(|id| (*h, id)))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
