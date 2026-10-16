@@ -705,11 +705,16 @@ impl BatchApply {
         }
     }
 
+    /// Insert the new actors into the document, followed by registering them to
+    /// their given author, if any.
+    ///
+    /// The actors are first inserted to stabilize the actor table, and a second
+    /// pass is made to pair each author, if any, with its now stable actor
+    /// index.
+    ///
+    /// Registering the actors also handles updating the visibility mask, where
+    /// necessary.
     fn insert_new_actors(&self, doc: &mut Automerge) {
-        // Insert every new actor first: a later insertion would shift the
-        // indices collected for the earlier ones. The second pass is pure
-        // lookup. Registration is bulk: one visibility derivation per batch,
-        // not one per new actor.
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
             doc.put_actor_ref(c.actor_id());
         }
