@@ -56,6 +56,9 @@ pub trait ColumnIndex<W>: Sealed + Default {
     /// insert `new_weights` in their place.  Used for structural
     /// changes (overflow, cross-slab drain, merges).
     fn splice<I: IntoIterator<Item = W>>(&mut self, range: Range<usize>, new_weights: I);
+
+    /// Every slab's weight, in slab order.  O(slabs).
+    fn weights(&self) -> Vec<W>;
 }
 
 // ── BitIndex: Fenwick-backed ───────────────────────────────────────────────
@@ -117,6 +120,10 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
         self.weights.splice(range, new_weights);
         self.bit = rebuild_bit(&self.weights, |w| w.clone());
     }
+
+    fn weights(&self) -> Vec<W> {
+        self.weights.clone()
+    }
 }
 
 // ── SlabBTree: B-tree-backed ───────────────────────────────────────────────
@@ -149,5 +156,9 @@ impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
 
     fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_weights: I) {
         SlabBTree::splice(self, range, new_weights);
+    }
+
+    fn weights(&self) -> Vec<A> {
+        SlabBTree::weights(self)
     }
 }

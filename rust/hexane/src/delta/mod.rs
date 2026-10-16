@@ -671,6 +671,76 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
 /// values lie within a 2^63-wide range (for unsigned types, `< 2^63`).
 /// Writes outside the domain panic; [`load`](DeltaColumn::load) rejects
 /// out-of-domain data with an error.
+/// Builds a [`DeltaColumn`] value by value, keeping each slab's index
+/// weight as it goes: see [`ColumnEncoder`](crate::ColumnEncoder).
+pub struct DeltaColumnEncoder<T: DeltaValue, C: Codec = Leb128> {
+    inner: crate::ColumnEncoder<'static, T::Inner, C, IndexedDeltaWeightFn>,
+    /// the last non-null value appended
+    abs: i64,
+}
+
+impl<T: DeltaValue, C: Codec> Default for DeltaColumnEncoder<T, C> {
+    fn default() -> Self {
+        Self {
+            inner: crate::ColumnEncoder::default(),
+            abs: 0,
+        }
+    }
+}
+
+impl<T: DeltaValue, C: Codec> DeltaColumnEncoder<T, C> {
+    /// An encoder whose column's slabs hold up to `max_segments` segments.
+    pub fn with_max_segments(max_segments: usize) -> Self {
+        Self {
+            inner: crate::ColumnEncoder::with_max_segments(max_segments),
+            abs: 0,
+        }
+    }
+
+    /// Items appended so far.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn append(&mut self, value: T) {
+        self.append_n(value, 1);
+    }
+
+    /// Append `n` copies of `value`.
+    pub fn append_n(&mut self, value: T, n: usize) {
+        if n == 0 {
+            return;
+        }
+        match value.to_i64() {
+            None => self.inner.append_n_owned(T::Inner::from_opt(None), n),
+            Some(v) => {
+                self.inner
+                    .append_n_owned(T::Inner::from_opt(Some(v - self.abs)), 1);
+                if n > 1 {
+                    self.inner
+                        .append_n_owned(T::Inner::from_opt(Some(0)), n - 1);
+                }
+                self.abs = v;
+            }
+        }
+    }
+
+    /// The column, its index built from the weights already kept.
+    pub fn into_column(self) -> DeltaColumn<T, C>
+    where
+        for<'b> <T::Inner as crate::ColumnValueRef>::Get<'b>: crate::AsColumnRef<T::Inner>,
+    {
+        DeltaColumn {
+            col: self.inner.into_column(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
 pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
     pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
@@ -991,6 +1061,139 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         }
         let strategy = self.col.copy_strategy_for(&src.col, &splices);
         self.copy_splices_with(src, &splices, strategy);
+    }
+
+    /// [`copy_ranges`](Self::copy_ranges) from several sources at once,
+    /// with the contract of [`Column::copy_many_ranges`].
+    ///
+    /// # Panics
+    ///
+    /// As [`Column::copy_many_ranges`].
+    pub fn copy_many_ranges<I>(&mut self, srcs: Vec<Self>, splices: I)
+    where
+        I: IntoIterator<Item = (usize, crate::Splice)>,
+        T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+        for<'b> <T::Inner as crate::ColumnValueRef>::Get<'b>: crate::AsColumnRef<T::Inner>,
+    {
+        let mut srcs = srcs;
+        if srcs.len() == 1 {
+            let src = srcs.pop().unwrap();
+            return self.copy_ranges(src, splices.into_iter().map(|(_, sp)| sp));
+        }
+        let counter = srcs
+            .iter()
+            .map(|s| s.col.counter)
+            .max()
+            .unwrap_or(0)
+            .max(self.col.counter)
+            + 1;
+        let max = self.col.max_segments;
+        let dest = std::mem::replace(&mut self.col, InnerColumn::<T, C>::with_max_segments(max));
+        // the destination is column 0, sources follow
+        let mut cols: Vec<InnerColumn<T, C>> = std::iter::once(dest)
+            .chain(srcs.into_iter().map(|s| s.col))
+            .collect();
+        let pieces = crate::column::pieces(&cols, splices);
+
+        // every piece's realized value before and after it in its column:
+        // one forward pass per column
+        let mut by_col: Vec<Vec<usize>> = vec![Vec::new(); cols.len()];
+        for (i, (c, _)) in pieces.iter().enumerate() {
+            by_col[*c].push(i);
+        }
+        let mut anchors = vec![(0i64, 0i64); pieces.len()];
+        for (col, idxs) in cols.iter().zip(&by_col) {
+            if idxs.is_empty() {
+                continue;
+            }
+            let mut it = DeltaIter::<T, C> {
+                inner: col.iter(),
+                running: 0,
+                col: Some(col),
+                _phantom: PhantomData,
+            };
+            let mut realized_at = |pos: usize| {
+                it.advance_to(pos);
+                it.running
+            };
+            for &i in idxs {
+                let r = &pieces[i].1;
+                anchors[i] = (realized_at(r.start), realized_at(r.end));
+            }
+        }
+
+        let parts = {
+            let mut asm = crate::column::SlabAssembly::new(max);
+            let mut runs: Vec<_> = cols.iter().map(|c| c.iter().runs()).collect();
+            // the realized value of the last non-null row assembled so far
+            let mut running = 0i64;
+            for ((c, range), (before, after)) in pieces.into_iter().zip(anchors) {
+                // slabs built under another budget would break this one's
+                let movable = cols[c].max_segments == max;
+                let ends_as_before = Self::push_anchored(
+                    &mut asm,
+                    c,
+                    &cols[c],
+                    &mut runs[c],
+                    range,
+                    movable,
+                    before,
+                    running,
+                );
+                if ends_as_before {
+                    running = after;
+                }
+            }
+            asm.into_parts()
+        };
+        self.col = crate::column::assemble(parts, &mut cols, max);
+        self.col.counter = counter;
+    }
+
+    /// Append rows `range` of column `id`, realized at `before` there,
+    /// after a row realized at `running`: the first non-null delta is
+    /// rewritten against it, everything else is position-independent and
+    /// copies as is. Whether the rows end where they did in their column.
+    #[allow(clippy::too_many_arguments)]
+    fn push_anchored<'a>(
+        asm: &mut crate::column::SlabAssembly<'a, T::Inner, C, IndexedDeltaWeightFn>,
+        id: usize,
+        col: &'a InnerColumn<T, C>,
+        runs: &mut crate::column::Runs<'a, T::Inner, C>,
+        range: Range<usize>,
+        movable: bool,
+        before: i64,
+        running: i64,
+    ) -> bool
+    where
+        T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
+        for<'b> <T::Inner as crate::ColumnValueRef>::Get<'b>: crate::AsColumnRef<T::Inner>,
+    {
+        if before == running {
+            asm.push(id, col, runs, range, movable);
+            // continuing from `running`, the rows end where they did
+            return true;
+        }
+        let mut first = range.start;
+        let mut delta = None;
+        let mut it = col.iter_range(range.clone());
+        while let Some(run) = it.next_run() {
+            match T::Inner::to_opt(run.value) {
+                None => first += run.count,
+                Some(d) => {
+                    delta = Some(d);
+                    break;
+                }
+            }
+        }
+        let Some(d) = delta else {
+            asm.push(id, col, runs, range, movable);
+            return false;
+        };
+        asm.push(id, col, runs, range.start..first, movable);
+        asm.push_owned(T::Inner::from_opt(Some(before + d - running)), 1);
+        asm.push(id, col, runs, first + 1..range.end, movable);
+        true
     }
 
     /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;

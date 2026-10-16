@@ -38,6 +38,7 @@ pub(crate) use bundle_copy::RowCopier;
 mod found_op;
 pub(crate) mod index;
 mod insert;
+pub(crate) mod intake;
 pub(crate) mod manifold;
 pub(crate) mod mapped_column;
 mod mark_index;
@@ -1736,9 +1737,22 @@ impl OpSet {
     /// Ops `mask` does not cover are indexed as hidden; pass it only when it
     /// hides some, since the masked build goes op by op.
     pub(crate) fn index_bundle(
+        self,
+        actor_map: &[usize],
+        doc: &OpSet,
+        has_deps: bool,
+        mask: Option<&Clock>,
+    ) -> Result<Self, ReadOpError> {
+        self.index_bundle_with(actor_map, doc, ObjSeed::Copy(&doc.obj_info), has_deps, mask)
+    }
+
+    /// [`Self::index_bundle`] for one of several fragments applied
+    /// together: `objs` holds the objects of `doc` and of every fragment.
+    pub(crate) fn index_bundle_with(
         mut self,
         actor_map: &[usize],
         doc: &OpSet,
+        objs: ObjSeed<'_>,
         has_deps: bool,
         mask: Option<&Clock>,
     ) -> Result<Self, ReadOpError> {
@@ -1764,7 +1778,10 @@ impl OpSet {
         }
         let mut builder = IndexBuilder::new(text_encoding);
         // without their types, sequences created by `doc` would register-split like maps
-        builder.seed_obj_info(&doc.obj_info);
+        match objs {
+            ObjSeed::Copy(objs) => builder.seed_obj_info(objs),
+            ObjSeed::Shared(objs) => builder.share_obj_info(objs),
+        }
         if has_deps {
             builder.split_by_elem();
         }
@@ -1778,6 +1795,67 @@ impl OpSet {
     pub(crate) fn merge(&mut self, frag: OpSet, runs: &[manifold::CopyRange]) {
         self.obj_info.0.extend(frag.obj_info.0 .0);
         self.cols.merge(frag.cols, runs);
+    }
+
+    /// [`Self::merge`] for several fragments: `runs` are in final order and
+    /// name their fragment by its index in `frags`; `fixes` then overwrite
+    /// their rows' index bits and successors.
+    pub(crate) fn merge_many(
+        &mut self,
+        frags: Vec<OpSet>,
+        runs: &[manifold::CopyRange],
+        fixes: intake::Fixes,
+    ) {
+        // each fix's row and first succ entry once merged: fixes are in
+        // release order, which is the runs' order, and a source's fixes
+        // ascend, so one cursor per source places them
+        let mut by_src: Vec<Vec<usize>> = vec![Vec::new(); frags.len()];
+        for (k, f) in fixes.rows.iter().enumerate() {
+            by_src[f.src as usize].push(k);
+        }
+        let mut next = vec![0usize; frags.len()];
+        let mut placed = vec![(0usize, 0usize); fixes.rows.len()];
+        let (mut rows_before, mut subs_before) = (0, 0);
+        for cr in runs {
+            let s = cr.src as usize;
+            let row0 = cr.pos + rows_before;
+            let sub0 = self.cols.succ_count.get_prefix(cr.pos) as usize + subs_before;
+            while let Some(&k) = by_src[s].get(next[s]) {
+                let f = &fixes.rows[k];
+                if f.row >= cr.range.end {
+                    break;
+                }
+                debug_assert!(f.row >= cr.range.start, "fixed row outside every run");
+                placed[k] = (
+                    row0 + f.row - cr.range.start,
+                    sub0 + f.sub - cr.sub_range.start,
+                );
+                next[s] += 1;
+            }
+            rows_before += cr.range.len();
+            subs_before += cr.sub_range.len();
+        }
+        debug_assert!(
+            placed.windows(2).all(|w| w[0].0 < w[1].0),
+            "fixes land in order"
+        );
+
+        let mut cols = Vec::with_capacity(frags.len());
+        for frag in frags {
+            self.obj_info.0.extend(frag.obj_info.0 .0);
+            cols.push(frag.cols);
+        }
+        self.cols.merge_many(cols, runs);
+        self.cols.apply_fixes(&placed, fixes);
+    }
+
+    pub(crate) fn width_iter(&self) -> WidthIter<'_> {
+        WidthIter::new(
+            &self.cols.action,
+            &self.cols.value,
+            &self.cols.value_meta,
+            self.text_encoding,
+        )
     }
 
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, LoadError> {
@@ -2441,6 +2519,14 @@ impl SuccUndo {
             top,
         }
     }
+}
+
+/// The objects a fragment's index build knows besides its own.
+pub(crate) enum ObjSeed<'a> {
+    /// copied into the fragment's object index
+    Copy(&'a ObjIndex),
+    /// looked up only: the fragment's object index holds just its own
+    Shared(std::sync::Arc<ObjIndex>),
 }
 
 #[cfg(test)]

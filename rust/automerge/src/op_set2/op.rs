@@ -797,6 +797,7 @@ struct IncCursors<'a>(SuccCursors<'a>);
 impl Iterator for SuccCursors<'_> {
     type Item = OpId;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             None
@@ -818,6 +819,7 @@ impl ExactSizeIterator for SuccCursors<'_> {
 impl Iterator for SuccIncCursors<'_> {
     type Item = (OpId, Option<i64>);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.0.len == 0 {
             None
@@ -835,6 +837,7 @@ impl Iterator for SuccIncCursors<'_> {
 impl Iterator for IncCursors<'_> {
     type Item = Option<i64>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.0.len == 0 {
             None

@@ -358,6 +358,7 @@ impl<'a> OpIdIter<'a> {
         self.actor.pos()
     }
 
+    #[inline]
     pub(crate) fn maybe_try_next(&mut self) -> Result<Option<OpId>, ReadOpError> {
         let actor = self.actor.next();
         let ctr = self.ctr.next();
@@ -478,6 +479,7 @@ impl Shiftable for OpIdIter<'_> {
 impl Iterator for OpIdIter<'_> {
     type Item = OpId;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.maybe_try_next().ok().flatten()
     }

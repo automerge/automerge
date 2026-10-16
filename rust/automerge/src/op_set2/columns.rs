@@ -1,6 +1,7 @@
 use super::meta::ValueMeta;
 use super::op::OpLike;
 use super::op_set::index::{IndexBuilder, ObjRunWalk, RareOps};
+use super::op_set::intake::Fixes;
 use super::op_set::manifold::CopyRange;
 use super::op_set::MappedColumn;
 use super::op_set::MarkIndexColumn;
@@ -451,6 +452,150 @@ impl Columns {
         self.index
             .dirty
             .copy_ranges(hexane::Column::fill(bundle_len, true), rows());
+    }
+
+    /// [`Self::merge`] for several fragments: `runs` are in final order,
+    /// name their fragment by its index in `frags`, and land at
+    /// pre-merge positions of this one.
+    pub(super) fn merge_many(&mut self, frags: Vec<Columns>, runs: &[CopyRange]) {
+        let lens: Vec<usize> = frags.iter().map(|f| f.len()).collect();
+        let splice = |cr: &CopyRange, pos: usize, range: std::ops::Range<usize>| {
+            (
+                cr.src as usize,
+                hexane::Splice {
+                    pos,
+                    delete: 0,
+                    range,
+                },
+            )
+        };
+        let rows: Vec<_> = runs
+            .iter()
+            .map(|cr| splice(cr, cr.pos, cr.range.clone()))
+            .collect();
+        let subs: Vec<_> = runs
+            .iter()
+            .map(|cr| {
+                let pos = self.succ_count.get_prefix(cr.pos) as usize;
+                splice(cr, pos, cr.sub_range.clone())
+            })
+            .collect();
+        let vals: Vec<_> = runs
+            .iter()
+            .map(|cr| {
+                let pos = self.value_meta.get_prefix(cr.pos) as usize;
+                splice(cr, pos, cr.val_range.clone())
+            })
+            .collect();
+
+        let mut frags = frags;
+        macro_rules! merge_col {
+            ($frags:ident, $($field:ident).+, $splices:expr) => {{
+                let srcs = $frags.iter_mut().map(|f| std::mem::take(&mut f.$($field).+)).collect();
+                self.$($field).+.copy_many_ranges(srcs, $splices.iter().cloned());
+            }};
+        }
+        merge_col!(frags, value, vals);
+        merge_col!(frags, id_actor, rows);
+        merge_col!(frags, id_ctr, rows);
+        merge_col!(frags, obj_actor, rows);
+        merge_col!(frags, obj_ctr, rows);
+        merge_col!(frags, key_actor, rows);
+        merge_col!(frags, key_ctr, rows);
+        merge_col!(frags, key_str, rows);
+        merge_col!(frags, insert, rows);
+        merge_col!(frags, action, rows);
+        merge_col!(frags, mark_name, rows);
+        merge_col!(frags, expand, rows);
+        merge_col!(frags, value_meta, rows);
+        merge_col!(frags, succ_count, rows);
+        merge_col!(frags, succ_actor, subs);
+        merge_col!(frags, succ_ctr, subs);
+        merge_col!(frags, index.inc, subs);
+        merge_col!(frags, index.visible, rows);
+        merge_col!(frags, index.top, rows);
+        merge_col!(frags, index.text, rows);
+        let marks = frags
+            .iter_mut()
+            .map(|f| std::mem::take(&mut f.index.mark))
+            .collect();
+        self.index.mark.merge_many_from(marks, rows.iter().cloned());
+        let dirty = lens
+            .iter()
+            .map(|n| hexane::Column::fill(*n, true))
+            .collect();
+        self.index
+            .dirty
+            .copy_many_ranges(dirty, rows.iter().cloned());
+    }
+
+    /// Overwrite the fixed rows' index bits, and where marked their
+    /// successors; `placed` gives each fix's row and first succ entry,
+    /// ascending.
+    pub(super) fn apply_fixes(&mut self, placed: &[(usize, usize)], fixes: Fixes) {
+        if placed.is_empty() {
+            return;
+        }
+        let each_row = || {
+            placed
+                .iter()
+                .enumerate()
+                .map(|(k, (row, _))| hexane::Splice {
+                    pos: *row,
+                    delete: 1,
+                    range: k..k + 1,
+                })
+        };
+        self.index.visible.copy_ranges(fixes.visible, each_row());
+        self.index.top.copy_ranges(fixes.top, each_row());
+        self.index.text.copy_ranges(fixes.text, each_row());
+
+        let mut counts = Vec::new();
+        let mut subs = Vec::new();
+        for ((row, sub), fix) in placed.iter().zip(&fixes.rows) {
+            if !fix.succ {
+                continue;
+            }
+            counts.push(*row);
+            subs.push((*sub, fix.sub_len));
+        }
+        if counts.is_empty() {
+            return;
+        }
+        // each replaced slice's new entries, in order
+        let lens: Vec<usize> = fixes.succ_count.iter().map(|n| n.value as usize).collect();
+        let mut at = 0;
+        let sub_splices: Vec<hexane::Splice> = subs
+            .iter()
+            .zip(&lens)
+            .map(|((pos, delete), len)| {
+                let sp = hexane::Splice {
+                    pos: *pos,
+                    delete: *delete,
+                    range: at..at + len,
+                };
+                at += len;
+                sp
+            })
+            .collect();
+        let mut actors = MappedColumn::identity(fixes.succ_actor);
+        let map = self.succ_actor.actor_map().clone();
+        if !map.is_identity() {
+            actors.remap_into(&|a| a, map);
+        }
+        self.succ_actor
+            .copy_ranges(actors, sub_splices.iter().cloned());
+        self.succ_ctr
+            .copy_ranges(fixes.succ_ctr, sub_splices.iter().cloned());
+        self.index
+            .inc
+            .copy_ranges(fixes.inc, sub_splices.iter().cloned());
+        let count_splices = counts.iter().enumerate().map(|(k, row)| hexane::Splice {
+            pos: *row,
+            delete: 1,
+            range: k..k + 1,
+        });
+        self.succ_count.copy_ranges(fixes.succ_count, count_splices);
     }
 
     pub(super) fn actor_map(&self) -> std::sync::Arc<super::op_set::ActorMap> {

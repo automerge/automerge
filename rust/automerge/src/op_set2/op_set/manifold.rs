@@ -4,7 +4,7 @@
 
 use crate::op_set2::op::DocSucc;
 use crate::op_set2::types::Action;
-use crate::storage::bundle::{ManifoldOp, ManifoldOps};
+use crate::storage::bundle::{CleanRun, ManifoldOp, TailRun};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
 use crate::{AutomergeError, MalformedBundle};
 
@@ -25,15 +25,61 @@ pub(crate) struct ManifoldResult {
     /// `top` bits to rewrite on document rows, by pre-merge position.
     /// Ascending, as [`OpSet::write_tops`] requires.
     pub(crate) doc_tops: Vec<(usize, bool)>,
-    /// The same for batch rows, indexed into the fragment's own columns.
-    pub(crate) batch_tops: Vec<(usize, bool)>,
+    /// The same for batch rows, in their own fragment's coordinates.
+    pub(crate) batch_tops: Vec<(BatchRow, bool)>,
+}
+
+/// A row of one of the fragments an [`Inlet`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct BatchRow {
+    pub(crate) src: u32,
+    pub(crate) row: usize,
+}
+
+/// Where a row sits in its fragment: the fragment, the row, and the
+/// offsets of its first succ entry and first value byte.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SrcPos {
+    pub(crate) src: u32,
+    pub(crate) row: usize,
+    pub(crate) sub: usize,
+    pub(crate) val: usize,
+}
+
+/// A stream of fragment rows in final document order, with actor indexes
+/// mapped to the document's: what the manifold applies.
+///
+/// The run methods are fast paths; an inlet that cannot offer one returns
+/// 0 from its `*_run` methods and is never asked to skip.
+pub(crate) trait Inlet<'a> {
+    fn is_empty(&self) -> bool;
+    /// Rows left to read.
+    fn remaining(&self) -> usize;
+    /// Where the next row sits.
+    fn position(&self) -> SrcPos;
+    fn next_op(&mut self) -> ManifoldOp<'a>;
+    /// How many upcoming rows share the last-read row's object, at most `max`.
+    fn same_obj_run(&self, max: usize) -> usize;
+    /// How many upcoming rows carry no preds.
+    fn pred_free_run(&self) -> usize;
+    /// How many upcoming rows are plain `Set` inserts into one object with
+    /// no preds and no succ.
+    fn clean_insert_run(&self) -> usize;
+    /// How many of the next `max` rows make no object.
+    fn make_free_run(&self, max: usize) -> usize;
+    fn skip_clean(&mut self, n: usize) -> CleanRun;
+    fn skip_tail(&mut self, n: usize) -> TailRun;
+    /// Consumes every remaining row; returns the succ entry and value byte
+    /// offsets of the end.
+    fn consume_rest(&mut self) -> (usize, usize);
 }
 
 /// Fragment rows `range` land in front of document row `pos`
 /// (pre-merge); `sub_range` and `val_range` are their succ entries and
-/// value bytes in the fragment.
+/// value bytes in fragment `src`.
 #[derive(Debug, Clone)]
 pub(crate) struct CopyRange {
+    pub(crate) src: u32,
     pub(crate) pos: usize,
     pub(crate) range: Range<usize>,
     pub(crate) sub_range: Range<usize>,
@@ -55,8 +101,7 @@ impl OpSet {
 /// Streaming state of a batch apply.
 ///
 /// Ops must arrive in final document order, with actor indexes mapped
-/// to this doc: every cursor here is forward-only. `order_ops_for_doc`
-/// alone does not produce this order for sequence inserts.
+/// to this doc: every cursor here is forward-only.
 pub(crate) struct ApplyManifold<'a> {
     op_set: &'a OpSet,
     clock: Clock,
@@ -80,9 +125,8 @@ pub(crate) struct ApplyManifold<'a> {
     key: Option<String>,
 
     insert_runs: Vec<CopyRange>,
-    op_index: usize,
-    sub_consumed: usize,
-    val_consumed: usize,
+    /// the row being placed and the succ and value offsets not yet landed
+    at: SrcPos,
     succ_cache: SuccCache,
     // (row, slot) of the last row a slot scan stopped on. Any later
     // insert that beats the row lands at the same slot, except one
@@ -143,9 +187,7 @@ impl<'a> ApplyManifold<'a> {
             obj_scope,
             key: None,
             insert_runs: vec![],
-            op_index: 0,
-            sub_consumed: 0,
-            val_consumed: 0,
+            at: SrcPos::default(),
             succ_cache,
             memo: None,
             appending: false,
@@ -158,26 +200,40 @@ impl<'a> ApplyManifold<'a> {
         }
     }
 
-    /// Record that the `n` ops from `op_index` land at `pos`, carrying
-    /// `sub` succ entries and `val` value bytes between them.
+    /// Record that the `n` ops from `at` land at `pos`, carrying `sub`
+    /// succ entries and `val` value bytes between them.
     fn push_run(&mut self, pos: usize, n: usize, sub: usize, val: usize) {
-        let i = self.op_index;
-        let (sub0, val0) = (self.sub_consumed, self.val_consumed);
-        self.sub_consumed += sub;
-        self.val_consumed += val;
+        let SrcPos { src, row: i, .. } = self.at;
+        let (sub0, val0) = (self.at.sub, self.at.val);
+        self.at.sub += sub;
+        self.at.val += val;
         match self.insert_runs.last_mut() {
-            Some(cr) if cr.pos == pos && cr.range.end == i => {
+            Some(cr) if cr.pos == pos && cr.src == src && cr.range.end == i => {
                 cr.range.end = i + n;
-                cr.sub_range.end = self.sub_consumed;
-                cr.val_range.end = self.val_consumed;
+                cr.sub_range.end = self.at.sub;
+                cr.val_range.end = self.at.val;
             }
             _ => self.insert_runs.push(CopyRange {
+                src,
                 pos,
                 range: i..i + n,
-                sub_range: sub0..self.sub_consumed,
-                val_range: val0..self.val_consumed,
+                sub_range: sub0..self.at.sub,
+                val_range: val0..self.at.val,
             }),
         }
+    }
+
+    fn batch_row(&self) -> BatchRow {
+        BatchRow {
+            src: self.at.src,
+            row: self.at.row,
+        }
+    }
+
+    fn read_op<'b, I: Inlet<'b>>(&mut self, src: &mut I) -> ManifoldOp<'b> {
+        let op = src.next_op();
+        self.at = op.at;
+        op
     }
 
     fn push_pos(&mut self, pos: usize, sub: usize, val: usize) {
@@ -199,16 +255,16 @@ impl<'a> ApplyManifold<'a> {
     /// Fails with [`AutomergeError::MalformedBundle`] if an op's position
     /// hint overshoots its target row: hints are floors in any document
     /// holding the bundle's deps, so the sender computed it wrong.
-    pub(crate) fn apply_bundle_ops(
+    pub(crate) fn apply_bundle_ops<'b, I: Inlet<'b>>(
         mut self,
-        src: &mut ManifoldOps<'_>,
+        src: &mut I,
     ) -> Result<ManifoldResult, AutomergeError> {
-        while src.pos < src.len {
+        while !src.is_empty() {
             if self.tail_ready(src) {
                 self.consume_tail(src);
                 continue;
             }
-            let op = src.next_op();
+            let op = self.read_op(src);
             self.apply_op(&op);
             if self.hint_overshot {
                 return Err(
@@ -219,6 +275,13 @@ impl<'a> ApplyManifold<'a> {
         Ok(self.finish())
     }
 
+    /// Know `objs` from the start, rather than only the objects whose
+    /// make rows the inlet hands over decoded.
+    pub(crate) fn with_objects(mut self, objs: ObjIndex) -> Self {
+        self.obj_info = objs;
+        self
+    }
+
     fn push_slot(&mut self, pos: usize, sub: usize, val: usize) {
         self.push_pos(pos, sub, val);
         self.appending = pos == self.obj_scope.end && self.memo.is_none();
@@ -226,18 +289,18 @@ impl<'a> ApplyManifold<'a> {
 
     fn land(&mut self, op: &ManifoldOp<'_>, slot: usize) {
         self.push_slot(slot, op.sub_len, op.val_len);
-        self.top.candidate(op, slot, self.op_index);
+        self.top.candidate(op, slot, self.batch_row());
     }
 
     fn doc_spent(&self) -> bool {
         self.obj_scope.end >= self.op_set.len()
     }
 
-    fn tail_ready(&self, src: &ManifoldOps<'_>) -> bool {
-        if !self.appending || src.pos >= src.len {
+    fn tail_ready<'b, I: Inlet<'b>>(&self, src: &I) -> bool {
+        if !self.appending || src.is_empty() {
             return false;
         }
-        let rem = src.same_obj_run(src.len - src.pos);
+        let rem = src.same_obj_run(src.remaining());
         rem > 0 && src.pred_free_run() >= rem
     }
 
@@ -258,9 +321,9 @@ impl<'a> ApplyManifold<'a> {
     /// Consume the rest of the current object, all of it landing at the
     /// object end. The scope open at the transition may still hold doc
     /// rows, so ops resolve one at a time until it closes.
-    fn consume_tail(&mut self, src: &mut ManifoldOps<'_>) {
+    fn consume_tail<'b, I: Inlet<'b>>(&mut self, src: &mut I) {
         let end = self.obj_scope.end;
-        let mut rem = src.same_obj_run(src.len - src.pos);
+        let mut rem = src.same_obj_run(src.remaining());
         let mut straddling = true;
         while rem > 0 && straddling {
             let n = src.clean_insert_run().min(rem);
@@ -269,16 +332,17 @@ impl<'a> ApplyManifold<'a> {
                 self.close_scope();
                 // each clean insert is a single-candidate scope, so it
                 // registers no top candidate
+                self.at = src.position();
                 let run = src.skip_clean(n);
                 self.push_run(end, n, 0, run.val_bytes);
-                self.op_index += n;
+                self.at.row += n;
                 self.last_insert = Some(run.last_id);
                 self.elem = None;
                 rem -= n;
                 continue;
             }
 
-            let op = src.next_op();
+            let op = self.read_op(src);
             debug_assert!(op.preds.is_empty(), "tail op carries doc preds");
             debug_assert!(op.action != Action::Delete, "tail delete has no row");
             self.record_if_object(&op);
@@ -307,14 +371,18 @@ impl<'a> ApplyManifold<'a> {
                 self.close_scope();
             }
             if pending_after_run {
-                self.top.candidate_raw(end, self.op_index - 1, true);
+                let prev = BatchRow {
+                    src: self.at.src,
+                    row: self.at.row - 1,
+                };
+                self.top.candidate_raw(end, prev, true);
             }
             if op.insert {
                 self.last_insert = Some(op.id);
             }
             self.push_pos(end, op.sub_len, op.val_len);
-            self.top.candidate(&op, end, self.op_index);
-            self.op_index += 1;
+            self.top.candidate(&op, end, self.batch_row());
+            self.at.row += 1;
             rem -= 1;
         }
         if rem > 0 {
@@ -332,27 +400,29 @@ impl<'a> ApplyManifold<'a> {
 
     /// Take the object's remaining `rem` ops, all landing at `end`. Every
     /// scope left is fragment-only, so only `Make*` rows are decoded.
-    fn consume_blank(&mut self, src: &mut ManifoldOps<'_>, end: usize, mut rem: usize) {
+    fn consume_blank<'b, I: Inlet<'b>>(&mut self, src: &mut I, end: usize, mut rem: usize) {
         // Past the last document row nothing is left to decide for any
         // object, and the fragment's own index build supplies `obj_info`:
         // the rest of the fragment is one copy range.
         if self.doc_spent() {
-            rem = src.len - src.pos;
+            rem = src.remaining();
             if rem == 0 {
                 return;
             }
+            self.at = src.position();
             let (sub_end, val_end) = src.consume_rest();
-            let (sub, val) = (sub_end - self.sub_consumed, val_end - self.val_consumed);
+            let (sub, val) = (sub_end - self.at.sub, val_end - self.at.val);
             self.push_run(end, rem, sub, val);
-            self.op_index += rem;
+            self.at.row += rem;
             return;
         }
         while rem > 0 {
             let n = src.make_free_run(rem);
             if n > 0 {
+                self.at = src.position();
                 let run = src.skip_tail(n);
                 self.push_run(end, n, run.sub, run.val);
-                self.op_index += n;
+                self.at.row += n;
                 if let Some((_, id)) = run.last_insert {
                     self.last_insert = Some(id);
                 }
@@ -360,7 +430,7 @@ impl<'a> ApplyManifold<'a> {
                 continue;
             }
 
-            let op = src.next_op();
+            let op = self.read_op(src);
             debug_assert!(op.preds.is_empty(), "tail op carries doc preds");
             let is_object = self.record_if_object(&op);
             assert!(is_object, "make-bounded run");
@@ -368,7 +438,7 @@ impl<'a> ApplyManifold<'a> {
                 self.last_insert = Some(op.id);
             }
             self.push_pos(end, op.sub_len, op.val_len);
-            self.op_index += 1;
+            self.at.row += 1;
             rem -= 1;
         }
     }
@@ -385,7 +455,7 @@ impl<'a> ApplyManifold<'a> {
         } else {
             self.apply_elem_update(op);
         }
-        self.op_index += 1;
+        self.at.row += 1;
     }
 
     fn enter_object(&mut self, obj: ObjId) {
@@ -433,7 +503,7 @@ impl<'a> ApplyManifold<'a> {
 
         self.close_scope();
         // an insert's scope has no doc rows, so the slot is unused
-        self.top.candidate(op, 0, self.op_index);
+        self.top.candidate(op, 0, self.batch_row());
         self.elem = None;
 
         if !e.is_head() && self.clock.covers(&e.0) {
@@ -608,13 +678,13 @@ struct TopCalc {
     /// this batch deletes
     deleted_from: usize,
     doc_tops: Vec<(usize, bool)>,
-    batch_tops: Vec<(usize, bool)>,
+    batch_tops: Vec<(BatchRow, bool)>,
 }
 
 struct BatchTop {
     /// the document row this op lands in front of
     slot: usize,
-    batch_row: usize,
+    batch_row: BatchRow,
     alive: bool,
 }
 
@@ -636,14 +706,14 @@ impl TopCalc {
 
     /// Increments change a counter's value, not which op the register
     /// shows, so they never compete.
-    fn candidate(&mut self, op: &ManifoldOp<'_>, slot: usize, batch_row: usize) {
+    fn candidate(&mut self, op: &ManifoldOp<'_>, slot: usize, batch_row: BatchRow) {
         if op.action == Action::Increment {
             return;
         }
         self.candidate_raw(slot, batch_row, op.alive);
     }
 
-    fn candidate_raw(&mut self, slot: usize, batch_row: usize, alive: bool) {
+    fn candidate_raw(&mut self, slot: usize, batch_row: BatchRow, alive: bool) {
         self.batch.push(BatchTop {
             slot,
             batch_row,
