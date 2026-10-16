@@ -14,6 +14,57 @@ function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
 }
 
 describe("the fragments API", () => {
+  it("keeps fragment metadata and bytes independent of concurrent arrival order", () => {
+    // These are hardcoded changes that reproduce a structure like this:
+    // 
+    //
+    //           F  (level 1)
+    //          / \
+    //         H   K
+    //  (level 1) (level 2)
+    // 
+    // F = emptyChange(init({ actor: "aa" }), { time: 304 })
+    // H = emptyChange(clone(F, { actor: "cc" }), { time: 381 })
+    // K = emptyChange(clone(F, { actor: "bb" }), { time: 17758 })
+    // Each hex string is that document's own change (not its ancestors).
+    // Keeping the mined bytes avoids searching for a level-2 hash at runtime.
+    const [f, h, k] = [
+      "856f4a8300779194010a0001aa0101b002000000",
+      "856f4a8300619aad012a01007791944ed174f20cb0268401fab1528d20835916d604b0a0fe591eb690ad2201cc0101fd02000000",
+      "856f4a8300001334012b01007791944ed174f20cb0268401fab1528d20835916d604b0a0fe591eb690ad2201bb0101de8a01000000",
+    ].map(bytes => new Uint8Array(Buffer.from(bytes, "hex")))
+    const headF = Automerge.decodeChange(f).hash!
+    const headH = Automerge.decodeChange(h).hash!
+
+    function snapshot(order: Uint8Array[]) {
+      let doc = Automerge.init()
+      for (const change of order) {
+        ;[doc] = Automerge.applyChanges(doc, [change])
+      }
+      const metadata = Automerge.getFragmentMetadata(doc).sort((a, b) =>
+        a.head.localeCompare(b.head),
+      )
+      const fragment = Automerge.getFragmentMeta(doc, headH)
+      assert.deepStrictEqual(fragment, {
+        head: headH,
+        level: 1,
+        boundary: [headF],
+        checkpoints: [],
+        members: [headH],
+      })
+      const [bytes] = Automerge.bundleFragmentMetadata(doc, [fragment!])
+      const bundle = Automerge.readBundle(bytes)
+      assert.deepStrictEqual(bundle.deps, [headF])
+      assert.deepStrictEqual(bundle.changes.map(change => change.hash), [headH])
+      return {
+        metadata,
+        bundles: Automerge.bundleFragmentMetadata(doc, metadata),
+      }
+    }
+
+    assert.deepStrictEqual(snapshot([f, h, k]), snapshot([f, k, h]))
+  })
+
   it("returns fragment metadata with level filtering and lookup", () => {
     const doc = makeDoc()
 
@@ -72,6 +123,10 @@ describe("the fragments API", () => {
     for (const fragment of fragments) {
       assert.ok(fragment.members.includes(fragment.head))
       assert.ok(!fragment.checkpoints.includes(fragment.head))
+      for (const checkpoint of fragment.checkpoints) {
+        const level = leadingZeroBytes(checkpoint)
+        assert.ok(level > 0 && level < fragment.level)
+      }
       for (const boundary of fragment.boundary) {
         assert.ok(!fragment.checkpoints.includes(boundary))
       }
