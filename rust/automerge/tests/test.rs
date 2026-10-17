@@ -2444,7 +2444,7 @@ fn regression_insert_opid() {
     for i in 0..=N {
         values.push((
             Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64))),
-            ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
+            ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), None),
             false,
         ));
     }
@@ -2456,13 +2456,13 @@ fn regression_insert_opid() {
                 key: "list".to_string(),
                 value: (
                     Value::Object(ObjType::List),
-                    ObjId::Id(1, doc.get_actor().clone(), 0),
+                    ObjId::Id(1, doc.get_actor().clone(), None),
                 ),
                 conflict: false,
             },
         },
         Patch {
-            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
+            obj: ObjId::Id(1, doc.get_actor().clone(), None),
             path: vec![(ROOT, Prop::Map("list".into()))],
             action: PatchAction::Insert { index: 0, values },
         },
@@ -4661,4 +4661,43 @@ fn cursor_from_another_object_is_invalid() {
         doc.get_cursor_position(&lb, &cursor, None),
         Err(AutomergeError::InvalidCursor(cursor))
     );
+}
+
+#[test]
+fn objid_bytes_are_the_same_after_a_merge_moves_the_actor() {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from([0xff; 16]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    // An actor that sorts before the document's
+    let mut fork = doc.fork().with_actor(ActorId::from([0x00; 16]));
+    fork.splice_text(&text, 0, 0, "hello").unwrap();
+    doc.merge(&mut fork).unwrap();
+
+    let (_, text_after) = doc.get(ROOT, "text").unwrap().unwrap();
+    assert!(matches!(text, ObjId::Id(_, _, Some(0))));
+    assert!(matches!(text_after, ObjId::Id(_, _, Some(1))));
+    assert_eq!(text, text_after);
+    assert_eq!(text.to_bytes(), text_after.to_bytes());
+}
+
+#[test]
+fn objid_resolves_with_any_hint() {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from([0xff; 16]));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "hello").unwrap();
+    let mut fork = doc.fork().with_actor(ActorId::from([0x00; 16]));
+    fork.splice_text(&text, 5, 0, " world").unwrap();
+    doc.merge(&mut fork).unwrap();
+
+    let ObjId::Id(counter, actor, _) = &text else {
+        panic!("expected an ObjId::Id");
+    };
+    let current = ObjId::Id(*counter, actor.clone(), Some(1));
+    let stale = ObjId::Id(*counter, actor.clone(), Some(0));
+    let out_of_range = ObjId::Id(*counter, actor.clone(), Some(99));
+    let none = ObjId::Id(*counter, actor.clone(), None);
+    let from_bytes = ObjId::try_from(&text.to_bytes()[..]).unwrap();
+    for id in [current, stale, out_of_range, none, from_bytes] {
+        assert_eq!(doc.text(&id).unwrap(), "hello world", "{:?}", id);
+    }
 }
