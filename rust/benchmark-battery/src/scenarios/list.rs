@@ -10,10 +10,10 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
         SampledBenchmark::no_setup("list", "list/list_cursor_now", list_cursor_now),
         SampledBenchmark::no_setup("list", "list/list_cursor_at", list_cursor_at),
-        SampledBenchmark::no_setup("list", "list/list_update_at", list_update_at),
-        SampledBenchmark::no_setup("list", "list/list_update_now", list_update_now),
-        SampledBenchmark::no_setup("list", "list/list_splice_index_now", list_splice_index_now),
-        SampledBenchmark::no_setup("list", "list/list_splice_index_at", list_splice_index_at),
+        SampledBenchmark::accumulating("list", "list/list_update_at", list_update_at),
+        SampledBenchmark::accumulating("list", "list/list_update_now", list_update_now),
+        SampledBenchmark::accumulating("list", "list/list_splice_index_now", list_splice_index_now),
+        SampledBenchmark::accumulating("list", "list/list_splice_index_at", list_splice_index_at),
     ]
 }
 

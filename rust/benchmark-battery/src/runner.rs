@@ -203,7 +203,11 @@ fn run_sampled(benchmark: &SampledBenchmark, options: RunOptions) -> SampledResu
     for _ in 0..options.warmup_count.max(1) {
         fastest = fastest.min(operation.run_sample(1));
     }
-    let iters_per_sample = iters_for(options, fastest);
+    let iters_per_sample = if benchmark.fixed_iters {
+        options.iters_per_sample
+    } else {
+        iters_for(options, fastest)
+    };
 
     let mut samples = Vec::with_capacity(options.sample_count);
     for _ in 0..options.sample_count {
