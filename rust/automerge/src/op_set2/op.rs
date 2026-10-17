@@ -1118,7 +1118,7 @@ impl<'a> Op<'a> {
             ExId::Id(
                 id.counter(),
                 op_set.get_actor(id.actor()).clone(),
-                id.actor(),
+                Some(id.actor()),
             )
         }
     }
