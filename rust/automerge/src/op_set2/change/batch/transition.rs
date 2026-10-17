@@ -12,8 +12,8 @@
 
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
-use crate::patches::Events;
-use crate::types::{ObjId, OpId, Prop, ScalarValue, SequenceType};
+use crate::patches::{winner_unchanged, Events};
+use crate::types::{ObjId, OpId, ScalarValue, SequenceType};
 use crate::TextEncoding;
 
 #[cfg(test)]
@@ -53,6 +53,22 @@ impl PresentCandidates {
     /// Returns `true` if there is more than one candidate.
     fn conflicted(&self) -> bool {
         self.other_candidates > 0
+    }
+
+    /// Convert a before (`self`) and `after` [`PresentCandidates`] into a
+    /// [`winner_unchanged::Facts`], so that it can be used for patch emission.
+    fn to_winner_unchanged_facts(&self, after: &Self) -> winner_unchanged::Facts {
+        let counter_delta = match (&self.winner.value, &after.winner.value) {
+            (
+                Value::Scalar(ScalarValue::Counter(old)),
+                Value::Scalar(ScalarValue::Counter(new)),
+            ) => winner_unchanged::CounterDelta::new(new.current.saturating_sub(old.current)),
+            _ => winner_unchanged::CounterDelta::empty(),
+        };
+        winner_unchanged::Facts {
+            conflict: winner_unchanged::Conflict::new(self.conflicted(), after.conflicted()),
+            counter_delta,
+        }
     }
 }
 
@@ -170,24 +186,9 @@ impl ValueTransition {
                 put_map(obj, key, after, log);
             }
             Transition::Disappeared { .. } => log.delete_map(obj, key),
-            Transition::WinnerUnchanged { before, after } => {
-                match WinnerUnchangedPatch::new(&before, &after) {
-                    WinnerUnchangedPatch::Unchanged => {}
-                    WinnerUnchangedPatch::Put => put_map(obj, key, after, log),
-                    WinnerUnchangedPatch::Increment {
-                        delta,
-                        conflict_appeared,
-                    } => {
-                        log.increment_map(obj, key, delta, after.winner.id);
-                        if conflict_appeared {
-                            log.flag_conflict(obj, &Prop::from(key));
-                        }
-                    }
-                    WinnerUnchangedPatch::ConflictAppeared => {
-                        log.flag_conflict(obj, &Prop::from(key))
-                    }
-                }
-            }
+            Transition::WinnerUnchanged { before, after } => before
+                .to_winner_unchanged_facts(&after)
+                .emit_map(obj, key, after.winner.id, after.winner.value, log),
         }
     }
 
@@ -238,37 +239,20 @@ impl ValueTransition {
                 replace(obj, index, &before, after, seq_type, encoding, marks, log);
             }
             Transition::WinnerUnchanged { before, after } => {
-                let patch = WinnerUnchangedPatch::new(&before, &after);
-                // A text element can still acquire mark changes, independently
-                // of counter or conflict changes. A replacement carries its
-                // complete format itself instead.
-                if is_text && patch != WinnerUnchangedPatch::Put {
-                    emit_text_marks(obj, index, &after.winner.value, encoding, marks, log);
-                }
-                match patch {
-                    WinnerUnchangedPatch::Unchanged => {}
-                    // A replacement inserts fresh text, even for an unchanged
-                    // winner whose conflict clears.
-                    WinnerUnchangedPatch::Put => {
-                        replace(obj, index, &before, after, seq_type, encoding, marks, log);
+                let facts = before.to_winner_unchanged_facts(&after);
+                let elem = if is_text {
+                    winner_unchanged::Seq::Text {
+                        before: &before.winner.value,
+                        after: after.winner.value,
+                        encoding,
+                        marks,
                     }
-                    WinnerUnchangedPatch::Increment {
-                        delta,
-                        conflict_appeared,
-                    } => {
-                        // Counters render as an unchanged replacement
-                        // character in text.
-                        if !is_text {
-                            log.increment_seq(obj, index, delta, after.winner.id);
-                        }
-                        if conflict_appeared {
-                            log.flag_conflict(obj, &Prop::from(index));
-                        }
+                } else {
+                    winner_unchanged::Seq::List {
+                        after: after.winner.value,
                     }
-                    WinnerUnchangedPatch::ConflictAppeared => {
-                        log.flag_conflict(obj, &Prop::from(index))
-                    }
-                }
+                };
+                facts.emit_sequence(obj, index, after.winner.id, elem, log);
             }
         }
     }
@@ -320,72 +304,4 @@ fn replace(
         encoding,
         marks.after.current().cloned(),
     );
-}
-
-/// Log the mark delta over the rendered width of `value`, if any.
-fn emit_text_marks(
-    obj: ObjId,
-    index: usize,
-    value: &Value,
-    encoding: TextEncoding,
-    marks: &RichTextDiff<'_>,
-    log: &mut Events<'_>,
-) {
-    if let Some(delta) = marks.current().export() {
-        log.mark(
-            obj,
-            index,
-            value.width(SequenceType::Text, encoding),
-            &delta,
-        );
-    }
-}
-
-/// The existing patch instructions that express a winner's value and conflict
-/// changes.
-///
-/// An unchanged winner is semantically unchanged in identity, but the patch
-/// vocabulary cannot clear a conflict with an increment, so a clearing conflict
-/// is encoded as a `Put` of the final value even when the value is a counter
-/// with a nonzero delta.
-#[derive(Debug, PartialEq, Eq)]
-enum WinnerUnchangedPatch {
-    /// No value or conflict patch is required.
-    Unchanged,
-    /// Put the final after-value with its conflict state; this clears a
-    /// conflict and does not also emit a counter delta.
-    Put,
-    /// The same counter has a nonzero delta and no conflict cleared. Also flag
-    /// the conflict if one appeared.
-    Increment { delta: i64, conflict_appeared: bool },
-    /// Only a conflict appeared.
-    ConflictAppeared,
-}
-
-impl WinnerUnchangedPatch {
-    /// Decide how to encode an unchanged winner from its concrete endpoints.
-    fn new(before: &PresentCandidates, after: &PresentCandidates) -> WinnerUnchangedPatch {
-        if before.conflicted() && !after.conflicted() {
-            return WinnerUnchangedPatch::Put;
-        }
-        let conflict_appeared = !before.conflicted() && after.conflicted();
-        if let (
-            Value::Scalar(ScalarValue::Counter(old)),
-            Value::Scalar(ScalarValue::Counter(new)),
-        ) = (&before.winner.value, &after.winner.value)
-        {
-            let delta = new.current - old.current;
-            if delta != 0 {
-                return WinnerUnchangedPatch::Increment {
-                    delta,
-                    conflict_appeared,
-                };
-            }
-        }
-        if conflict_appeared {
-            WinnerUnchangedPatch::ConflictAppeared
-        } else {
-            WinnerUnchangedPatch::Unchanged
-        }
-    }
 }
