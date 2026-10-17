@@ -1,6 +1,6 @@
 use super::meta::ValueMeta;
 use super::op::OpLike;
-use super::op_set::MarkIndexColumn;
+use super::op_set::{CounterIndex, MarkIndexColumn};
 use super::types::{Action, ActorIdx, ScalarValue};
 use crate::actor::ActorTable;
 use crate::storage::columns::compression::Uncompressed;
@@ -42,6 +42,8 @@ pub(super) struct Indexes {
     pub(super) visible: hexane::Column<bool>,
     pub(super) inc: hexane::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
+    /// Each counter op's current total; see [`CounterIndex`].
+    pub(super) counter: CounterIndex,
 }
 
 impl Default for Indexes {
@@ -52,6 +54,7 @@ impl Default for Indexes {
             visible: hexane::Column::new(),
             inc: hexane::Column::new(),
             mark: MarkIndexColumn::new(),
+            counter: CounterIndex::new(),
         }
     }
 }
@@ -413,6 +416,9 @@ impl Columns {
         self.index.text.splice(pos, del, [] as [Option<u32>; 0]);
         self.index.top.splice(pos, del, [] as [bool; 0]);
         self.index.visible.splice(pos, del, [] as [bool; 0]);
+        self.index
+            .counter
+            .splice(pos, del, std::iter::empty::<&O>());
 
         ops.count()
     }
@@ -488,6 +494,7 @@ impl Columns {
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+        self.index.counter.splice(pos, 0, ops.clone());
 
         ops.count()
     }
