@@ -106,6 +106,7 @@ pub(crate) struct ApplyManifold<'a> {
     op_set: &'a OpSet,
     clock: Clock,
     mask: Option<&'a Clock>,
+    known_objs: &'a ObjIndex,
     obj_info: ObjIndex,
 
     obj_id_iter: ObjIdIter<'a>,
@@ -149,8 +150,6 @@ pub(crate) struct ApplyManifold<'a> {
 
 impl<'a> ApplyManifold<'a> {
     pub(crate) fn new(op_set: &'a OpSet, clock: Clock, mask: Option<&'a Clock>) -> Self {
-        let obj_info = op_set.obj_info.clone();
-
         let mut obj_id_iter = op_set.obj_id_iter();
         let mut id_iter = op_set.id_iter();
         let mut key_iter = op_set.key_str_iter();
@@ -173,7 +172,8 @@ impl<'a> ApplyManifold<'a> {
             op_set,
             clock,
             mask,
-            obj_info,
+            known_objs: &op_set.obj_info,
+            obj_info: ObjIndex::default(),
             obj_id_iter,
             id_iter,
             key_iter,
@@ -277,8 +277,8 @@ impl<'a> ApplyManifold<'a> {
 
     /// Know `objs` from the start, rather than only the objects whose
     /// make rows the inlet hands over decoded.
-    pub(crate) fn with_objects(mut self, objs: ObjIndex) -> Self {
-        self.obj_info = objs;
+    pub(crate) fn with_objects(mut self, objs: &'a ObjIndex) -> Self {
+        self.known_objs = objs;
         self
     }
 
@@ -463,7 +463,11 @@ impl<'a> ApplyManifold<'a> {
 
         self.obj = obj;
         self.obj_scope = self.obj_id_iter.seek_to_value(self.obj);
-        self.obj_type = self.obj_info.object_type(&self.obj).unwrap();
+        self.obj_type = self
+            .obj_info
+            .object_type(&self.obj)
+            .or_else(|| self.known_objs.object_type(&self.obj))
+            .unwrap();
 
         self.id_iter.shift(self.obj_scope.clone());
         self.pred_iter.shift(self.obj_scope.clone());

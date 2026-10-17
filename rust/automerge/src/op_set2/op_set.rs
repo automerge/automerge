@@ -1743,7 +1743,7 @@ impl OpSet {
         has_deps: bool,
         mask: Option<&Clock>,
     ) -> Result<Self, ReadOpError> {
-        self.index_bundle_with(actor_map, doc, ObjSeed::Copy(&doc.obj_info), has_deps, mask)
+        self.index_bundle_with(actor_map, doc, ObjSeed::Doc(&doc.obj_info), has_deps, mask)
     }
 
     /// [`Self::index_bundle`] for one of several fragments applied
@@ -1778,14 +1778,17 @@ impl OpSet {
         }
         let mut builder = IndexBuilder::new(text_encoding);
         // without their types, sequences created by `doc` would register-split like maps
-        match objs {
-            ObjSeed::Copy(objs) => builder.seed_obj_info(objs),
-            ObjSeed::Shared(objs) => builder.share_obj_info(objs),
-        }
+        let known = match objs {
+            ObjSeed::Doc(objs) => objs,
+            ObjSeed::Shared(objs) => {
+                builder.skip_objs();
+                objs
+            }
+        };
         if has_deps {
             builder.split_by_elem();
         }
-        builder.process_op_set(&op_set)?;
+        builder.process_op_set_with(&op_set, Some(known))?;
         let (indexes, _mark_order) = builder.finish();
         op_set.set_indexes(indexes);
         Ok(op_set)
@@ -2523,10 +2526,10 @@ impl SuccUndo {
 
 /// The objects a fragment's index build knows besides its own.
 pub(crate) enum ObjSeed<'a> {
-    /// copied into the fragment's object index
-    Copy(&'a ObjIndex),
-    /// looked up only: the fragment's object index holds just its own
-    Shared(std::sync::Arc<ObjIndex>),
+    /// the fragment's object index holds just its own objects
+    Doc(&'a ObjIndex),
+    /// holds the fragment's objects too, so the fragment's index holds none
+    Shared(&'a ObjIndex),
 }
 
 #[cfg(test)]

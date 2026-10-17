@@ -86,11 +86,10 @@ impl<H: HashRetention> Automerge<H> {
         let clock = self.change_graph.current_clock().empty_like();
 
         // every fragment's index needs the types of objects the others create
-        let mut objs = self.ops.obj_info.clone();
+        let mut shared = self.ops.obj_info.clone();
         for s in &staged {
-            created_objects(&s.bundle, &s.actor_map, s.frag.len(), &mut objs);
+            created_objects(&s.bundle, &s.actor_map, s.frag.len(), &mut shared);
         }
-        let shared = std::sync::Arc::new(objs);
         let mut frags = Vec::with_capacity(staged.len());
         for s in &mut staged {
             let frag = std::mem::replace(&mut s.frag, OpSet::new(self.text_encoding()));
@@ -98,7 +97,7 @@ impl<H: HashRetention> Automerge<H> {
                 frag.index_bundle_with(
                     &s.actor_map,
                     &self.ops,
-                    ObjSeed::Shared(shared.clone()),
+                    ObjSeed::Shared(&shared),
                     true,
                     None,
                 )
@@ -116,7 +115,7 @@ impl<H: HashRetention> Automerge<H> {
             let resolved = self
                 .ops
                 .apply_manifold(clock, None)
-                .with_objects((*shared).clone())
+                .with_objects(&shared)
                 .apply_bundle_ops(&mut intake)?;
             (resolved, intake.finish()?)
         };
@@ -133,7 +132,7 @@ impl<H: HashRetention> Automerge<H> {
         }
         self.ops.merge_many(frags, &r.insert_runs, fixes);
         // the fragments' indexes leave their objects to `shared`
-        self.ops.obj_info = std::sync::Arc::try_unwrap(shared).unwrap_or_else(|s| (*s).clone());
+        self.ops.obj_info = shared;
         debug_assert!(self.ops.validate_op_order(), "op order violated");
 
         self.debug_assert_mask_indexes();

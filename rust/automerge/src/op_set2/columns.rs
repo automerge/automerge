@@ -289,6 +289,7 @@ impl Columns {
                 &mut key_str_src,
                 rare,
                 None,
+                None,
             )?;
         }
         index.flush();

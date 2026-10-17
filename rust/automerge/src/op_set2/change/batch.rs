@@ -331,11 +331,11 @@ impl BatchApply {
             .collect();
         idxs.sort_unstable_by(|&a, &b| doc_order_cmp(&self.ops[a as usize], &self.ops[b as usize]));
 
-        let mut obj_info = doc.ops().obj_info.clone();
+        let mut new_objs = crate::op_set2::op_set::ObjIndex::default();
         for &i in &idxs {
             let op = &self.ops[i as usize];
             if let Some(info) = op.obj_info() {
-                obj_info.insert(op.id(), info);
+                new_objs.insert(op.id(), info);
             }
         }
         let mut walker = ObjWalker::new(doc.ops());
@@ -346,7 +346,10 @@ impl BatchApply {
             while end < idxs.len() && self.ops[idxs[end] as usize].bld.obj == obj {
                 end += 1;
             }
-            if matches!(obj_info.object_type(&obj), Some(t) if t.is_sequence()) {
+            let obj_type = new_objs
+                .object_type(&obj)
+                .or_else(|| doc.ops().obj_info.object_type(&obj));
+            if matches!(obj_type, Some(t) if t.is_sequence()) {
                 let obj_range = walker.seek_to_obj(obj);
                 untangle_order_idx(
                     &self.ops,

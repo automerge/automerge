@@ -35,7 +35,7 @@ pub(crate) struct IndexBuilder {
     marks: RleEncoder<'static, Option<MarkIdx>>,
     mark_cache: HashMap<OpId, MarkData<'static>>,
     obj_info: ObjIndex,
-    shared_objs: Option<std::sync::Arc<ObjIndex>>,
+    record_objs: bool,
     text_encoding: TextEncoding,
     mark_order: MarkOrderValidator,
     split_by_elem: bool,
@@ -305,7 +305,7 @@ impl IndexBuilder {
             marks: RleEncoder::new().with_segments(),
             mark_cache: HashMap::new(),
             obj_info: ObjIndex::default(),
-            shared_objs: None,
+            record_objs: true,
             text_encoding: encoding,
             mark_order: MarkOrderValidator::default(),
             split_by_elem: false,
@@ -319,17 +319,10 @@ impl IndexBuilder {
         self.split_by_elem = true;
     }
 
-    /// Seed the object-type index with objects from outside the columns
-    /// being processed.
-    pub(crate) fn seed_obj_info(&mut self, info: &ObjIndex) {
-        self.obj_info = info.clone();
-    }
-
-    /// [`Self::seed_obj_info`] without the copy, for `info` that already
-    /// holds every object the processed columns create: the built index
-    /// then holds none.
-    pub(crate) fn share_obj_info(&mut self, info: std::sync::Arc<ObjIndex>) {
-        self.shared_objs = Some(info);
+    /// Leave the processed columns' objects out of the built index, for
+    /// a `known` index that already holds them.
+    pub(crate) fn skip_objs(&mut self) {
+        self.record_objs = false;
     }
 
     fn ops_flushed(&self) -> usize {
@@ -401,7 +394,7 @@ impl IndexBuilder {
         self.apply_increment(id, inc_value, true);
 
         if let Some(obj_info) = obj_info {
-            if self.shared_objs.is_none() {
+            if self.record_objs {
                 self.obj_info.insert(id, obj_info);
             }
             if self.split_by_elem {
@@ -425,7 +418,7 @@ impl IndexBuilder {
         self.push_mark(mark_index);
         self.apply_increment(op.id, op.get_increment_value(), visible);
 
-        if let Some(obj_info) = op.obj_info().filter(|_| self.shared_objs.is_none()) {
+        if let Some(obj_info) = op.obj_info().filter(|_| self.record_objs) {
             self.obj_info.insert(op.id, obj_info);
         }
 
@@ -501,6 +494,16 @@ impl IndexBuilder {
 
     /// Build the index from a loaded op set's columns.
     pub(crate) fn process_op_set(&mut self, op_set: &OpSet) -> Result<(), ReadOpError> {
+        self.process_op_set_with(op_set, None)
+    }
+
+    /// [`Self::process_op_set`] for columns whose ops may belong to
+    /// objects created outside them, in `known`.
+    pub(crate) fn process_op_set_with(
+        &mut self,
+        op_set: &OpSet,
+        known: Option<&ObjIndex>,
+    ) -> Result<(), ReadOpError> {
         let rare = RareOps::new(
             OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
             super::MarkInfoIter::new(op_set.cols.mark_name.iter(), op_set.cols.expand.iter()),
@@ -526,6 +529,7 @@ impl IndexBuilder {
             op_set.cols.key_str.iter(),
             rare,
             elem,
+            known,
         )
     }
 
@@ -542,6 +546,7 @@ impl IndexBuilder {
         keys: K,
         mut rare: RareOps<'_>,
         elem: Option<ElemBounds<'_>>,
+        known: Option<&ObjIndex>,
     ) -> Result<(), ReadOpError>
     where
         OA: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
@@ -561,7 +566,7 @@ impl IndexBuilder {
             let obj_type = self
                 .obj_info
                 .object_type(&obj)
-                .or_else(|| self.shared_objs.as_ref()?.object_type(&obj));
+                .or_else(|| known?.object_type(&obj));
             let seq = matches!(obj_type, Some(ObjType::List) | Some(ObjType::Text));
             let split = self.split_by_elem && !self.own_objs.contains(&obj);
             bounds.start_obj(seq, obj_len, split)?;
