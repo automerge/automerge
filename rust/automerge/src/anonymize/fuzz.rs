@@ -4,9 +4,12 @@ use super::{
     shape::{assert_private_data_changed, ShapeSignature},
     Anonymization,
 };
+use crate::autocommit::AutoCommit;
+use crate::automerge::Automerge;
 use crate::marks::{ExpandMark, Mark};
-use crate::transaction::{CommitOptions, Transactable};
-use crate::{ActorId, AutoCommit, Automerge, ObjId, ObjType, ReadDoc, ScalarValue, ROOT};
+use crate::read::ReadDoc;
+use crate::tx::{CommitOptions, Transactable};
+use crate::{ActorId, ObjId, ObjType, ScalarValue, ROOT};
 
 const REPLICA_COUNT: usize = 3;
 const ROOT_KEYS: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
@@ -15,6 +18,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
+    #[cfg_attr(not(feature = "deep_fuzz"), ignore = "deep fuzz: run with --features deep_fuzz")]
     fn randomized_documents_retain_their_shape(
         program in proptest::collection::vec(any::<u8>(), 0..192),
         seed in any::<[u8; 32]>(),
@@ -26,13 +30,15 @@ proptest! {
         prop_assert_eq!(source_shape, ShapeSignature::new(&anonymized));
         assert_private_data_changed(&source, &anonymized);
 
-        let reloaded = Automerge::load(&anonymized.save()).unwrap();
+        let reloaded = load_audit(&anonymized.save());
         prop_assert_eq!(ShapeSignature::new(&anonymized), ShapeSignature::new(&reloaded));
     }
 }
 
-fn document_from_program(program: &[u8]) -> Automerge {
-    let mut base = AutoCommit::new();
+fn document_from_program(program: &[u8]) -> Automerge<crate::hash_retention::Full> {
+    let base = AutoCommit::new();
+    // merging from a replica needs dep hashes a fragment-forming commit would free
+    let mut base = base.enable_audit_mode().unwrap();
     base.set_actor(actor(0));
     let list = base.put_object(ROOT, "items", ObjType::List).unwrap();
     let text = base.put_object(ROOT, "notes", ObjType::Text).unwrap();
@@ -60,10 +66,19 @@ fn document_from_program(program: &[u8]) -> Automerge {
         replicas[0].merge(&mut incoming).unwrap();
     }
 
-    Automerge::load(&replicas[0].save()).unwrap()
+    load_audit(&replicas[0].save())
 }
 
-fn apply_instruction(replicas: &mut [AutoCommit], list: &ObjId, text: &ObjId, instruction: &[u8]) {
+fn load_audit(bytes: &[u8]) -> Automerge<crate::hash_retention::Full> {
+    Automerge::load(bytes).unwrap().enable_audit_mode().unwrap()
+}
+
+fn apply_instruction<H: crate::hash_retention::HashRetention>(
+    replicas: &mut [AutoCommit<H>],
+    list: &ObjId,
+    text: &ObjId,
+    instruction: &[u8],
+) {
     let byte = |index| instruction.get(index).copied().unwrap_or_default();
     let opcode = byte(0) % 11;
     let replica_index = byte(1) as usize % replicas.len();

@@ -1,5 +1,55 @@
 ## Unreleased
 
+### Breaking Changes
+
+* `PatchLog` is gone, along with `make_patches`, the `*_log_patches` methods,
+  `transaction_log_patches`, `transact_and_log_patches(_with)`,
+  `LoadOptions::patch_log`, `Success::patch_log` and `PatchLogMismatch`. To see
+  what an operation changed, take the heads before it and call
+  `diff(&before, &after)` afterwards. `Transaction::commit` now returns just the
+  change hash, `OwnedTransaction::commit` the document and the hash,
+  `Automerge::transaction_at` and `into_transaction` no longer take a patch log,
+  and `LoadOptions` no longer has a lifetime parameter.
+* Patches describe the net change between two states of the document. Their
+  order and grouping can differ from the operation-by-operation patches the
+  patch log produced (for example a conflict may arrive as a put marked
+  `conflict: true`), but applying them still takes the old state to the new.
+* The sync protocol has moved to the `automerge-sync` crate. Its types and
+  `SyncDoc` trait are unchanged apart from `receive_sync_message_log_patches`:
+  change `automerge::sync::…` imports to `automerge_sync::…`, and import
+  `automerge_sync::AutoCommitSync` for `AutoCommit::sync()` and
+  `has_our_changes()`.
+* The experimental bundle API (`bundle`, `bundle_fragments`,
+  `BundleChangeIter` and `AutomergeError::Unbundle`) is gone, and `Bundle` and
+  `BundleChange` now name the new bundle format (see Added). Bundles that API
+  saved in 0.8 to 0.12 (chunk type 3, now called BundleV0) still load.
+* `AutomergeError` has new variants (`AuditModeRequired`, `InvalidChangeId`,
+  `DecodeBundle`, `InvalidFragment`, `MalformedBundle`).
+
+### Added
+
+* `automerge::next`: `Automerge` and `AutoCommit` types which keep only the
+  change hashes a document needs rather than the hash of every change in its
+  history, which makes them smaller and faster to load. They name history by
+  `ChangeId` (an actor and sequence number), return errors where an operation
+  needs history the document has not kept, and save in a compact bundle
+  format by default (`SaveFormat::Legacy` writes the document format older
+  versions read). The default types convert with `into_next()`, and next
+  documents back with `into_audit()`, which recomputes every hash.
+* `ChangeId`, `Bundle` and the bundle loader: every type loads bundles as
+  well as everything earlier versions saved.
+* Write-frontiers: `mask_author(author, heads)` hides an author's changes
+  outside the history of `heads` from every read, diff and patch, without
+  removing them from the history; `reveal_author`, `set_write_frontier`,
+  `get_write_frontier`, `is_author_masked` and `LoadOptions::write_frontier`
+  manage the policy, which is local to the document instance. The `next` types
+  name the heads by `ChangeId`.
+* `Viewpoint`: `viewpoint()` snapshots a document's heads together with its
+  write-frontier. `diff` and `diff_obj` take heads or a viewpoint on either
+  side; a viewpoint is read under its own write-frontier, so masking and
+  revealing authors, which leave the heads unchanged, show up in the patches.
+  `diff_incremental` reports these changes too.
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character

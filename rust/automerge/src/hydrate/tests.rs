@@ -1,8 +1,10 @@
 use text_value::ConcreteTextValue;
 
 use crate::exid::ExId;
-use crate::transaction::Transactable;
+use crate::tx::Transactable;
 use crate::*;
+#[allow(unused_imports)]
+use crate::{autocommit::AutoCommit, automerge::Automerge, read::ReadDoc};
 
 #[test]
 fn simple_hydrate() -> Result<(), AutomergeError> {
@@ -29,7 +31,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     assert_eq!(doc.text(&text)?, "hello big bad world".to_owned());
     let heads = doc.get_heads();
     let cursor = doc.diff_cursor().to_vec();
-    let patches = doc.diff(&cursor, &heads);
+    let patches = doc.diff(&cursor, &heads)?;
     doc.update_diff_cursor();
     hydrated.apply_patches(TextEncoding::platform_default(), patches)?;
     let hydrate::Value::Text(val) = &hydrated.as_map().unwrap().get("text").unwrap() else {

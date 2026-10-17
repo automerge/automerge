@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+* `Automerge.maskAuthor(doc, author, heads)`, `Automerge.revealAuthor(doc,
+  author)` and `Automerge.isAuthorMasked(doc, author)` hide and restore an
+  author's changes beyond a set of heads; the patch callback receives the
+  resulting patches.
+
+### Changed
+
+* Patches describe the net change between two states of the document. Their
+  order and grouping can differ from before (for example several splices
+  arrive in final-position order, and a conflict may arrive as a put marked
+  `conflict: true`), but applying them still takes the old state to the new.
+* `addCommits` also accepts the bundles `getCommits` now produces, and
+  still checks each commit's `head` and `parents` against its bytes.
+
+### Removed
+
+* The experimental `saveBundle` function. `readBundle` remains but reads only
+  the bundles `bundleFragmentMetadata` produces, not the BundleV0 format
+  `saveBundle` wrote in 3.2 to 3.5; `load` and `loadIncremental` still load
+  those.
+
 ## 3.5.0
 
 Changes since 3.4.1.

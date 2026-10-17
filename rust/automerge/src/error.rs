@@ -5,10 +5,6 @@ use crate::value::DataType;
 use crate::{Change, ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use thiserror::Error;
 
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
-#[error("patch logs cannot be shared between documents; this probably means a PatchLog created for one document was reused with another")]
-pub struct PatchLogMismatch;
-
 #[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error(transparent)]
@@ -35,6 +31,8 @@ pub enum AutomergeError {
     InvalidCharacter(usize),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
+    #[error("this operation needs change hashes that are only kept in audit mode, call enable_audit_mode() first")]
+    AuditModeRequired,
     #[error("index {0} is out of bounds")]
     InvalidIndex(usize),
     #[error("invalid obj id `{0}`")]
@@ -64,6 +62,8 @@ pub enum AutomergeError {
     MissingCounter,
     #[error("hash {0} does not correspond to a change in this document")]
     MissingHash(ChangeHash),
+    #[error("change id {0} does not correspond to a change in this document")]
+    InvalidChangeId(String),
     #[error("change's deps should already be in the document")]
     MissingDeps,
     #[error("compressed chunk was not a change")]
@@ -72,12 +72,17 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
-    #[error(transparent)]
-    PatchLogMismatch(#[from] PatchLogMismatch),
     #[error("{0}")]
     EncodingError(String),
-    #[error("failed to unbundle: {0}")]
-    Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("failed to decode bundle: {0}")]
+    DecodeBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    /// A caller-supplied [`crate::Fragment`] names history this document
+    /// cannot resolve.
+    #[error("invalid fragment: {0}")]
+    InvalidFragment(&'static str),
+    /// A bundle is malformed or its metadata contradicts its contents.
+    #[error(transparent)]
+    MalformedBundle(#[from] crate::MalformedBundle),
 }
 
 impl AutomergeError {

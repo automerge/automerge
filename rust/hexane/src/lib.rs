@@ -5,8 +5,7 @@
 macro_rules! log {
      ( $( $t:tt )* ) => {
           {
-            use $crate::__log;
-            __log!( $( $t )* );
+            $crate::__log!( $( $t )* );
           }
      }
  }
@@ -101,6 +100,8 @@ pub mod bijou {
 
 pub mod bool;
 pub(crate) mod btree;
+#[cfg(feature = "debug")]
+pub use btree::debug;
 pub mod codec;
 pub mod column;
 pub mod delta;
@@ -113,11 +114,11 @@ pub mod prefix;
 pub mod raw;
 pub mod rle;
 pub mod shift;
-pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs, Splice};
+pub use column::{Column, ColumnEncoder, ColumnLoadIter, Iter, IterState, Runs, Splice};
 pub use delta::indexed::FindByRange;
 pub use delta::{
-    DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaRun, DeltaRuns,
-    DeltaValue,
+    DeltaColumn, DeltaColumnEncoder, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState,
+    DeltaRun, DeltaRuns, DeltaValue,
 };
 pub use shift::{Ranges, Shiftable, Unshift};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding<C>`.
@@ -174,6 +175,8 @@ mod sealed {
     pub trait Sealed {}
 }
 
+#[cfg(test)]
+mod copy_many_tests;
 #[cfg(test)]
 mod splice_fuzz;
 #[cfg(test)]

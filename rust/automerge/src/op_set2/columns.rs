@@ -1,6 +1,11 @@
 use super::meta::ValueMeta;
 use super::op::OpLike;
+use super::op_set::index::{IndexBuilder, ObjRunWalk, RareOps};
+use super::op_set::intake::Fixes;
+use super::op_set::manifold::CopyRange;
+use super::op_set::MappedColumn;
 use super::op_set::MarkIndexColumn;
+use super::op_set::{MarkInfoIter, OpIdIter};
 use super::types::{Action, ActorIdx, ScalarValue};
 use crate::actor::ActorTable;
 use crate::storage::columns::compression::Uncompressed;
@@ -16,15 +21,15 @@ use std::ops::Range;
 
 #[derive(Debug, Clone)]
 pub(super) struct Columns {
-    pub(super) id_actor: hexane::Column<ActorIdx>,
+    pub(super) id_actor: MappedColumn<ActorIdx>,
     pub(super) id_ctr: hexane::DeltaColumn<u32>,
-    pub(super) obj_actor: hexane::Column<Option<ActorIdx>>,
+    pub(super) obj_actor: MappedColumn<Option<ActorIdx>>,
     pub(super) obj_ctr: hexane::Column<Option<u32>>,
-    pub(super) key_actor: hexane::Column<Option<ActorIdx>>,
+    pub(super) key_actor: MappedColumn<Option<ActorIdx>>,
     pub(super) key_ctr: hexane::DeltaColumn<Option<u32>>,
     pub(super) key_str: hexane::Column<Option<String>>,
     pub(super) succ_count: hexane::PrefixColumn<u32>,
-    pub(super) succ_actor: hexane::Column<ActorIdx>,
+    pub(super) succ_actor: MappedColumn<ActorIdx>,
     pub(super) succ_ctr: hexane::DeltaColumn<u32>,
     pub(super) insert: hexane::PrefixColumn<bool>,
     pub(super) action: hexane::Column<Action>,
@@ -42,6 +47,9 @@ pub(super) struct Indexes {
     pub(super) visible: hexane::Column<bool>,
     pub(super) inc: hexane::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
+    // rows touched since the last incremental diff; never persisted and
+    // not reproducible by an index rebuild
+    pub(super) dirty: hexane::Column<bool>,
 }
 
 impl Default for Indexes {
@@ -52,6 +60,7 @@ impl Default for Indexes {
             visible: hexane::Column::new(),
             inc: hexane::Column::new(),
             mark: MarkIndexColumn::new(),
+            dirty: hexane::Column::new(),
         }
     }
 }
@@ -59,15 +68,15 @@ impl Default for Indexes {
 impl Default for Columns {
     fn default() -> Self {
         Self {
-            id_actor: hexane::Column::new(),
+            id_actor: MappedColumn::new(),
             id_ctr: hexane::DeltaColumn::new(),
-            obj_actor: hexane::Column::new(),
+            obj_actor: MappedColumn::new(),
             obj_ctr: hexane::Column::new(),
-            key_actor: hexane::Column::new(),
+            key_actor: MappedColumn::new(),
             key_ctr: hexane::DeltaColumn::new(),
             key_str: hexane::Column::new(),
             succ_count: hexane::PrefixColumn::new(),
-            succ_actor: hexane::Column::new(),
+            succ_actor: MappedColumn::new(),
             succ_ctr: hexane::DeltaColumn::new(),
             insert: hexane::PrefixColumn::new(),
             action: hexane::Column::new(),
@@ -184,39 +193,6 @@ impl Columns {
         (raw, data)
     }
 
-    #[cfg(test)]
-    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
-        [
-            // op
-            ("id_actor", self.id_actor.save()),
-            ("id_ctr", self.id_ctr.save()),
-            ("obj_actor", self.obj_actor.save()),
-            ("obj_ctr", self.obj_ctr.save()),
-            ("key_actor", self.key_actor.save()),
-            ("key_ctr", self.key_ctr.save()),
-            ("key_str", self.key_str.save()),
-            ("insert", self.insert.save()),
-            ("action", self.action.save()),
-            ("value_meta", self.value_meta.save()),
-            ("value", self.value.save()),
-            ("mark_name", self.mark_name.save()),
-            ("expand", self.expand.save()),
-            // succ
-            ("succ_count", self.succ_count.save()),
-            ("succ_actor", self.succ_actor.save()),
-            ("succ_ctr", self.succ_ctr.save()),
-            // indexes
-            ("visible", self.index.visible.save()),
-            ("inc", self.index.inc.save()),
-            ("mark", self.index.mark.save()),
-            ("text", self.index.text.save()),
-            ("top", self.index.top.save()),
-            ("visible", self.index.visible.save()),
-        ]
-        .into_iter()
-        .collect()
-    }
-
     pub(crate) fn validate(
         bytes: usize,
         cols: &RawColumns<Uncompressed>,
@@ -250,62 +226,151 @@ impl Columns {
             .collect())
     }
 
+    /// Load the op columns while building the op indexes in the same
+    /// decode pass.
+    pub(crate) fn load_indexed(
+        cols: BTreeMap<ColumnSpec, Range<usize>>,
+        data: &[u8],
+        text_encoding: TextEncoding,
+    ) -> Result<(Self, IndexBuilder), super::op_set::ReadOpError> {
+        use super::op_set::ReadOpError;
+        let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
+
+        let id_actor = MappedColumn::<ActorIdx>::load(_d(ID_ACTOR_COL_SPEC))?;
+        let len = id_actor.len();
+        let opts = hexane::LoadOpts::new().with_length(len);
+
+        let id_ctr = hexane::DeltaColumn::<u32>::load_with(_d(ID_COUNTER_COL_SPEC), opts)?;
+        let key_actor = MappedColumn::<Option<ActorIdx>>::load_with(
+            _d(KEY_ACTOR_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+        let key_ctr = hexane::DeltaColumn::<Option<u32>>::load_with(
+            _d(KEY_COUNTER_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+        let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+        let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
+        let succ_actor = MappedColumn::<ActorIdx>::load(_d(SUCC_ACTOR_COL_SPEC))?;
+        let succ_ctr = hexane::DeltaColumn::<u32>::load(_d(SUCC_COUNTER_COL_SPEC))?;
+        let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
+
+        let mut action_src = hexane::Column::<Action>::load_iter(_d(ACTION_COL_SPEC), opts);
+        let mut meta_src =
+            hexane::PrefixColumn::<ValueMeta>::load_iter(_d(VALUE_META_COL_SPEC), opts);
+        let mut succ_src = hexane::PrefixColumn::<u32>::load_iter(_d(SUCC_COUNT_COL_SPEC), opts);
+        let mut key_str_src = hexane::Column::load_iter(_d(KEY_STR_COL_SPEC), opts.with_fill(None));
+        let mut obj_actor_src = hexane::Column::<Option<ActorIdx>>::load_iter(
+            _d(OBJ_ID_ACTOR_COL_SPEC),
+            opts.with_fill(None),
+        );
+        let mut obj_ctr_src = hexane::Column::<Option<u32>>::load_iter(
+            _d(OBJ_ID_COUNTER_COL_SPEC),
+            opts.with_fill(None),
+        );
+        let mut insert_src =
+            hexane::PrefixColumn::<bool>::load_iter(_d(INSERT_COL_SPEC), opts.with_fill(false));
+
+        let mut index = IndexBuilder::new(text_encoding);
+        {
+            let rare = RareOps::new(
+                OpIdIter::new(id_actor.iter(), id_ctr.iter()),
+                MarkInfoIter::new(mark_name.iter(), expand.iter()),
+                OpIdIter::new(succ_actor.iter(), succ_ctr.iter()),
+                value.iter(),
+            );
+            let objs = ObjRunWalk::new(&mut obj_actor_src, &mut obj_ctr_src);
+            index.process_columns(
+                objs,
+                &mut action_src,
+                &mut meta_src,
+                &mut succ_src,
+                &mut insert_src,
+                &mut key_str_src,
+                rare,
+                None,
+                None,
+            )?;
+        }
+        index.flush();
+        if index.ops_len() != len {
+            return Err(PackError::InvalidLength(index.ops_len(), len).into());
+        }
+
+        let action = action_src.finalize()?;
+        let value_meta = meta_src.finalize()?;
+        let succ_count = succ_src.finalize()?;
+        let key_str = key_str_src.finalize()?;
+        let obj_actor = MappedColumn::identity(obj_actor_src.finalize()?);
+        let obj_ctr = obj_ctr_src.finalize()?;
+        let insert = insert_src.finalize()?;
+
+        let succ_total = succ_count.get_prefix(len) as usize;
+        if succ_actor.len() != succ_total {
+            return Err(PackError::InvalidLength(succ_actor.len(), succ_total).into());
+        }
+        if succ_ctr.len() != succ_total {
+            return Err(PackError::InvalidLength(succ_ctr.len(), succ_total).into());
+        }
+        let raw_total = value_meta.get_prefix(len);
+        if value.len() as u64 != raw_total {
+            return Err(ReadOpError::MissingValue("raw value bytes"));
+        }
+
+        let columns = Self {
+            id_actor,
+            id_ctr,
+            obj_actor,
+            obj_ctr,
+            key_actor,
+            key_ctr,
+            key_str,
+            succ_count,
+            succ_actor,
+            succ_ctr,
+            insert,
+            action,
+            value_meta,
+            value,
+            mark_name,
+            expand,
+            index: Indexes::default(),
+        };
+        Ok((columns, index))
+    }
+
+    /// Load op columns, from a document or a fragment.
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
         _actors: &ActorTable,
     ) -> Result<Self, PackError> {
-        let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
+        let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 
-        let id_actor = hexane::Column::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
+        let id_actor = MappedColumn::<ActorIdx>::load(_d(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
-
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let id_ctr = hexane::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts)?;
-
-        let obj_actor = hexane::Column::<Option<ActorIdx>>::load_with(
-            data_for(OBJ_ID_ACTOR_COL_SPEC),
-            opts.with_fill(None),
-        )?;
-
-        let obj_ctr = hexane::Column::<Option<u32>>::load_with(
-            data_for(OBJ_ID_COUNTER_COL_SPEC),
-            opts.with_fill(None),
-        )?;
-
-        let key_actor = hexane::Column::<Option<ActorIdx>>::load_with(
-            data_for(KEY_ACTOR_COL_SPEC),
-            opts.with_fill(None),
-        )?;
-
-        let key_ctr = hexane::DeltaColumn::<Option<u32>>::load_with(
-            data_for(KEY_COUNTER_COL_SPEC),
-            opts.with_fill(None),
-        )?;
-        let key_str = hexane::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
-        let insert =
-            hexane::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
-        let action = hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts)?;
-        let mark_name =
-            hexane::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
-
-        let expand = hexane::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
-
-        let succ_count =
-            hexane::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts)?;
+        let id_ctr = hexane::DeltaColumn::load_with(_d(ID_COUNTER_COL_SPEC), opts)?;
+        let obj_actor = MappedColumn::load_with(_d(OBJ_ID_ACTOR_COL_SPEC), opts.with_fill(None))?;
+        let obj_ctr = hexane::Column::load_with(_d(OBJ_ID_COUNTER_COL_SPEC), opts.with_fill(None))?;
+        let key_actor = MappedColumn::load_with(_d(KEY_ACTOR_COL_SPEC), opts.with_fill(None))?;
+        let key_ctr =
+            hexane::DeltaColumn::load_with(_d(KEY_COUNTER_COL_SPEC), opts.with_fill(None))?;
+        let key_str = hexane::Column::load_with(_d(KEY_STR_COL_SPEC), opts.with_fill(None))?;
+        let insert = hexane::PrefixColumn::load_with(_d(INSERT_COL_SPEC), opts.with_fill(false))?;
+        let action = hexane::Column::load_with(_d(ACTION_COL_SPEC), opts)?;
+        let value_meta = hexane::PrefixColumn::load_with(_d(VALUE_META_COL_SPEC), opts)?;
+        let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
+        let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+        let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
+        let succ_count = hexane::PrefixColumn::load_with(_d(SUCC_COUNT_COL_SPEC), opts)?;
 
         let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
         let succ_opts = hexane::LoadOpts::new().with_length(succ_len);
-        let succ_actor =
-            hexane::Column::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts)?;
 
-        let succ_ctr =
-            hexane::DeltaColumn::<u32>::load_with(data_for(SUCC_COUNTER_COL_SPEC), succ_opts)?;
-
-        let value_meta =
-            hexane::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts)?;
-        let value = hexane::RawColumn::load(data_for(VALUE_COL_SPEC))?;
+        let succ_actor = MappedColumn::load_with(_d(SUCC_ACTOR_COL_SPEC), succ_opts)?;
+        let succ_ctr = hexane::DeltaColumn::load_with(_d(SUCC_COUNTER_COL_SPEC), succ_opts)?;
 
         let index = Indexes::default();
 
@@ -330,16 +395,257 @@ impl Columns {
         })
     }
 
-    fn remap_actors<F>(&mut self, f: &F)
+    /// Splice the fragment rows of each of `runs` (op and index columns)
+    /// into this one at the run's pre-merge position. Fragment rows not
+    /// covered by a run are dropped.
+    pub(super) fn merge(&mut self, frag: Columns, runs: &[CopyRange]) {
+        let bundle_len = frag.len();
+        let subs: Vec<hexane::Splice> = runs
+            .iter()
+            .map(|cr| hexane::Splice {
+                pos: self.succ_count.get_prefix(cr.pos) as usize,
+                delete: 0,
+                range: cr.sub_range.clone(),
+            })
+            .collect();
+        // slab boundaries stay on value boundaries, so `RawColumn::get`
+        // stays a single slice
+        let vals = runs.iter().map(|cr| hexane::Splice {
+            pos: self.value_meta.get_prefix(cr.pos) as usize,
+            delete: 0,
+            range: cr.val_range.clone(),
+        });
+        self.value.copy_ranges(frag.value, vals);
+
+        let rows = || {
+            runs.iter().map(|cr| hexane::Splice {
+                pos: cr.pos,
+                delete: 0,
+                range: cr.range.clone(),
+            })
+        };
+        self.id_actor.copy_ranges(frag.id_actor, rows());
+        self.id_ctr.copy_ranges(frag.id_ctr, rows());
+        self.obj_actor.copy_ranges(frag.obj_actor, rows());
+        self.obj_ctr.copy_ranges(frag.obj_ctr, rows());
+        self.key_actor.copy_ranges(frag.key_actor, rows());
+        self.key_ctr.copy_ranges(frag.key_ctr, rows());
+        self.key_str.copy_ranges(frag.key_str, rows());
+        self.insert.copy_ranges(frag.insert, rows());
+        self.action.copy_ranges(frag.action, rows());
+        self.mark_name.copy_ranges(frag.mark_name, rows());
+        self.expand.copy_ranges(frag.expand, rows());
+        self.value_meta.copy_ranges(frag.value_meta, rows());
+
+        self.succ_count.copy_ranges(frag.succ_count, rows());
+        self.succ_actor
+            .copy_ranges(frag.succ_actor, subs.iter().cloned());
+        self.succ_ctr
+            .copy_ranges(frag.succ_ctr, subs.iter().cloned());
+
+        self.index
+            .inc
+            .copy_ranges(frag.index.inc, subs.iter().cloned());
+        self.index.visible.copy_ranges(frag.index.visible, rows());
+        self.index.top.copy_ranges(frag.index.top, rows());
+        self.index.text.copy_ranges(frag.index.text, rows());
+        self.index.mark.merge_from(frag.index.mark, rows());
+        self.index
+            .dirty
+            .copy_ranges(hexane::Column::fill(bundle_len, true), rows());
+    }
+
+    /// [`Self::merge`] for several fragments: `runs` are in final order,
+    /// name their fragment by its index in `frags`, and land at
+    /// pre-merge positions of this one.
+    pub(super) fn merge_many(&mut self, frags: Vec<Columns>, runs: &[CopyRange]) {
+        let lens: Vec<usize> = frags.iter().map(|f| f.len()).collect();
+        let splice = |cr: &CopyRange, pos: usize, range: std::ops::Range<usize>| {
+            (
+                cr.src as usize,
+                hexane::Splice {
+                    pos,
+                    delete: 0,
+                    range,
+                },
+            )
+        };
+        let rows: Vec<_> = runs
+            .iter()
+            .map(|cr| splice(cr, cr.pos, cr.range.clone()))
+            .collect();
+        let subs: Vec<_> = runs
+            .iter()
+            .map(|cr| {
+                let pos = self.succ_count.get_prefix(cr.pos) as usize;
+                splice(cr, pos, cr.sub_range.clone())
+            })
+            .collect();
+        let vals: Vec<_> = runs
+            .iter()
+            .map(|cr| {
+                let pos = self.value_meta.get_prefix(cr.pos) as usize;
+                splice(cr, pos, cr.val_range.clone())
+            })
+            .collect();
+
+        let mut frags = frags;
+        macro_rules! merge_col {
+            ($frags:ident, $($field:ident).+, $splices:expr) => {{
+                let srcs = $frags.iter_mut().map(|f| std::mem::take(&mut f.$($field).+)).collect();
+                self.$($field).+.copy_many_ranges(srcs, $splices.iter().cloned());
+            }};
+        }
+        merge_col!(frags, value, vals);
+        merge_col!(frags, id_actor, rows);
+        merge_col!(frags, id_ctr, rows);
+        merge_col!(frags, obj_actor, rows);
+        merge_col!(frags, obj_ctr, rows);
+        merge_col!(frags, key_actor, rows);
+        merge_col!(frags, key_ctr, rows);
+        merge_col!(frags, key_str, rows);
+        merge_col!(frags, insert, rows);
+        merge_col!(frags, action, rows);
+        merge_col!(frags, mark_name, rows);
+        merge_col!(frags, expand, rows);
+        merge_col!(frags, value_meta, rows);
+        merge_col!(frags, succ_count, rows);
+        merge_col!(frags, succ_actor, subs);
+        merge_col!(frags, succ_ctr, subs);
+        merge_col!(frags, index.inc, subs);
+        merge_col!(frags, index.visible, rows);
+        merge_col!(frags, index.top, rows);
+        merge_col!(frags, index.text, rows);
+        let marks = frags
+            .iter_mut()
+            .map(|f| std::mem::take(&mut f.index.mark))
+            .collect();
+        self.index.mark.merge_many_from(marks, rows.iter().cloned());
+        let dirty = lens
+            .iter()
+            .map(|n| hexane::Column::fill(*n, true))
+            .collect();
+        self.index
+            .dirty
+            .copy_many_ranges(dirty, rows.iter().cloned());
+    }
+
+    /// Overwrite the fixed rows' index bits, and where marked their
+    /// successors; `placed` gives each fix's row and first succ entry,
+    /// ascending.
+    pub(super) fn apply_fixes(&mut self, placed: &[(usize, usize)], fixes: Fixes) {
+        if placed.is_empty() {
+            return;
+        }
+        let each_row = || {
+            placed
+                .iter()
+                .enumerate()
+                .map(|(k, (row, _))| hexane::Splice {
+                    pos: *row,
+                    delete: 1,
+                    range: k..k + 1,
+                })
+        };
+        self.index.visible.copy_ranges(fixes.visible, each_row());
+        self.index.top.copy_ranges(fixes.top, each_row());
+        self.index.text.copy_ranges(fixes.text, each_row());
+
+        let mut counts = Vec::new();
+        let mut subs = Vec::new();
+        for ((row, sub), fix) in placed.iter().zip(&fixes.rows) {
+            if !fix.succ {
+                continue;
+            }
+            counts.push(*row);
+            subs.push((*sub, fix.sub_len));
+        }
+        if counts.is_empty() {
+            return;
+        }
+        // each replaced slice's new entries, in order
+        let lens: Vec<usize> = fixes.succ_count.iter().map(|n| n.value as usize).collect();
+        let mut at = 0;
+        let sub_splices: Vec<hexane::Splice> = subs
+            .iter()
+            .zip(&lens)
+            .map(|((pos, delete), len)| {
+                let sp = hexane::Splice {
+                    pos: *pos,
+                    delete: *delete,
+                    range: at..at + len,
+                };
+                at += len;
+                sp
+            })
+            .collect();
+        let mut actors = MappedColumn::identity(fixes.succ_actor);
+        let map = self.succ_actor.actor_map().clone();
+        if !map.is_identity() {
+            actors.remap_into(&|a| a, map);
+        }
+        self.succ_actor
+            .copy_ranges(actors, sub_splices.iter().cloned());
+        self.succ_ctr
+            .copy_ranges(fixes.succ_ctr, sub_splices.iter().cloned());
+        self.index
+            .inc
+            .copy_ranges(fixes.inc, sub_splices.iter().cloned());
+        let count_splices = counts.iter().enumerate().map(|(k, row)| hexane::Splice {
+            pos: *row,
+            delete: 1,
+            range: k..k + 1,
+        });
+        self.succ_count.copy_ranges(fixes.succ_count, count_splices);
+    }
+
+    pub(super) fn actor_map(&self) -> std::sync::Arc<super::op_set::ActorMap> {
+        self.id_actor.actor_map().clone()
+    }
+
+    /// O(1): no slab is touched.
+    pub(super) fn set_actor_map(&mut self, map: std::sync::Arc<super::op_set::ActorMap>) {
+        self.id_actor.set_map(map.clone());
+        self.obj_actor.set_map(map.clone());
+        self.key_actor.set_map(map.clone());
+        self.succ_actor.set_map(map);
+    }
+
+    /// Rewrite stored codes to logical and reset to the identity map.
+    /// O(actor columns).
+    pub(super) fn flush_actor_map(&mut self) {
+        self.id_actor.flush();
+        self.obj_actor.flush();
+        self.key_actor.flush();
+        self.succ_actor.flush();
+    }
+
+    /// Map the actor columns' logical values through `f` and adopt
+    /// `target` as their map.
+    pub(super) fn rebase_actors<F>(
+        &mut self,
+        f: &F,
+        target: &std::sync::Arc<super::op_set::ActorMap>,
+    ) where
+        F: Fn(ActorIdx) -> ActorIdx,
+    {
+        self.id_actor.remap_into(f, target.clone());
+        self.succ_actor.remap_into(f, target.clone());
+        self.obj_actor.remap_into(f, target.clone());
+        self.key_actor.remap_into(f, target.clone());
+    }
+
+    pub(super) fn remap_actors<F>(&mut self, f: &F)
     where
         F: Fn(ActorIdx) -> ActorIdx,
     {
         self.id_actor.remap(f);
         self.succ_actor.remap(f);
-        self.obj_actor.remap(&|a: Option<ActorIdx>| a.map(f));
-        self.key_actor.remap(&|a: Option<ActorIdx>| a.map(f));
+        self.obj_actor.remap(f);
+        self.key_actor.remap(f);
     }
 
+    #[cfg(test)]
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         let idx = idx as u32;
         self.remap_actors(&move |a| match a {
@@ -413,6 +719,7 @@ impl Columns {
         self.index.text.splice(pos, del, [] as [Option<u32>; 0]);
         self.index.top.splice(pos, del, [] as [bool; 0]);
         self.index.visible.splice(pos, del, [] as [bool; 0]);
+        self.index.dirty.splice(pos, del, [] as [bool; 0]);
 
         ops.count()
     }
@@ -488,6 +795,7 @@ impl Columns {
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+        self.index.dirty.splice(pos, 0, ops.clone().map(|_| true));
 
         ops.count()
     }
@@ -508,6 +816,28 @@ impl Columns {
 
     pub(crate) fn sub_len(&self) -> usize {
         self.succ_actor.len()
+    }
+
+    /// Whether every op column has one entry per row and the succ sub
+    /// columns match the succ counts' total.
+    pub(super) fn columns_agree(&self) -> bool {
+        let len = self.len();
+        let sub = self.succ_count.get_prefix(len) as usize;
+        len == self.id_ctr.len()
+            && len == self.obj_actor.len()
+            && len == self.obj_ctr.len()
+            && len == self.key_actor.len()
+            && len == self.key_ctr.len()
+            && len == self.key_str.len()
+            && len == self.insert.len()
+            && len == self.action.len()
+            && len == self.value_meta.len()
+            && len == self.mark_name.len()
+            && len == self.expand.len()
+            && len == self.succ_count.len()
+            && sub == self.succ_actor.len()
+            && sub == self.succ_ctr.len()
+            && self.value_meta.get_prefix(len) as usize == self.value.len()
     }
 
     pub(crate) fn dump(&self) {

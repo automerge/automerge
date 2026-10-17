@@ -1,25 +1,33 @@
+use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 use crate::author::Author;
 use crate::automerge::view::ReadAt;
-use crate::automerge::{HistoryUpdate, SaveOptions};
+use crate::automerge::view::Viewpoint;
+use crate::automerge::LoadOptions;
+use crate::automerge::SaveOptions;
+use crate::automerge::{Automerge, EnableAuditModeError};
+use crate::change_graph::Fragment;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
-use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
+use crate::hash_retention::{Full, HashRetention, Retained};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
 use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
-use crate::patches::PatchLog;
-use crate::sync::SyncDoc;
-use crate::transaction::{CommitOptions, Transactable};
-use crate::types::ObjMeta;
-use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
-use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
+use crate::patches::PatchAccumulator;
+use crate::read::ReadDoc;
+use crate::tx::{CommitOptions, Transactable};
+use crate::types::{ObjId, ObjMeta};
+use crate::write_frontier::{Boundary, WriteFrontier};
+use crate::VerificationMode;
+use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
 use crate::{
-    transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
-    Prop, Value,
+    tx::TransactionInner, ActorId, AutomergeError, Change, ChangeHash, ChangeId, Cursor, Prop,
+    Value,
 };
-use crate::{LoadOptions, VerificationMode};
+use crate::{ObjType, Patch, ScalarValue, ROOT};
+use std::borrow::Cow;
 
 /// An automerge document that automatically manages transactions.
 ///
@@ -45,7 +53,8 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// ## Synchronization
 ///
-/// To synchronise call [`Self::sync()`] which returns an implementation of [`SyncDoc`]
+/// To synchronise, hand [`Self::document()`] or [`Self::document_mut()`]
+/// to a replication protocol such as `automerge-sync`.
 ///
 /// ## Patches, maintaining materialized views
 ///
@@ -61,254 +70,291 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// See the ["Authors and Actors"](`Automerge#authors-and-actors`) docs.
 #[derive(Debug, Clone)]
-pub struct AutoCommit {
-    pub(crate) doc: Automerge,
-    transaction: Option<(PatchLog, TransactionInner)>,
-    patch_log: PatchLog,
-    diff_cursor: Vec<ChangeHash>,
-    save_cursor: Vec<ChangeHash>,
-    isolation: Option<Vec<ChangeHash>>,
+pub struct AutoCommit<H: crate::hash_retention::HashRetention = crate::hash_retention::Retained> {
+    pub(crate) doc: Automerge<H>,
+    transaction: Option<TransactionInner>,
+    diff_cursor: Viewpoint,
+    /// keyed on the visibility epoch too: a write-frontier change alters what
+    /// the same heads show
+    diff_cache: Option<(OpRange, ObjId, bool, u64, Vec<Patch>)>,
+    save_cursor: Vec<ChangeId>,
+    pub(crate) isolation: Option<Vec<ChangeId>>,
 }
 
-/// An autocommit document with an inactive [`PatchLog`]
-///
-/// See [`AutoCommit`]
-impl Default for AutoCommit {
+impl Default for AutoCommit<Retained> {
     fn default() -> Self {
-        AutoCommit {
-            doc: Automerge::new(),
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        }
+        AutoCommit::from_doc(Automerge::new().with_manual_gc(), Vec::new())
     }
 }
 
-impl AutoCommit {
-    pub fn new() -> AutoCommit {
-        AutoCommit::default()
-    }
-
-    pub fn diff_opset(&self, other: &AutoCommit) -> Result<(), AutomergeError> {
-        self.doc.diff_opset(&other.doc)
-    }
-
-    pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
-        let doc = Automerge::new_with_encoding(encoding);
+impl<H: HashRetention> AutoCommit<H> {
+    pub(crate) fn from_doc(doc: Automerge<H>, save_cursor: Vec<ChangeId>) -> Self {
         AutoCommit {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
+            diff_cursor: Viewpoint::default(),
+            diff_cache: None,
+            save_cursor,
             isolation: None,
         }
+    }
+
+    pub(crate) fn load_as(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
+        let options = options.gc_or(crate::automerge::GcMode::Manual);
+        let doc = Automerge::<H>::load_with_options_and_mark_validation(
+            data,
+            options,
+            crate::storage::load::MarkOrderValidation::Validate,
+        )?;
+        let save_cursor = if H::AUDIT == crate::automerge::AuditMode::Enabled {
+            Vec::new()
+        } else {
+            doc.get_heads()
+        };
+        Ok(Self::from_doc(doc, save_cursor))
+    }
+
+    fn map_doc<H2: HashRetention>(
+        mut self,
+        f: impl FnOnce(Automerge<H>) -> Automerge<H2>,
+    ) -> AutoCommit<H2> {
+        self.ensure_transaction_closed();
+        let AutoCommit {
+            doc,
+            transaction: _,
+            diff_cursor,
+            diff_cache,
+            save_cursor,
+            isolation,
+        } = self;
+        AutoCommit {
+            doc: f(doc),
+            transaction: None,
+            diff_cursor,
+            diff_cache,
+            save_cursor,
+            isolation,
+        }
+    }
+
+    pub fn diff_opset(&self, other: &Self) -> Result<(), AutomergeError> {
+        self.doc.diff_opset(&other.doc)
     }
 
     /// Return a copy of this document with its data anonymized.
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
         self.ensure_transaction_closed();
-        Ok(Self {
-            doc: self.doc.anonymize()?,
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        })
+        Ok(Self::from_doc(
+            self.doc.anonymize()?.with_manual_gc(),
+            Vec::new(),
+        ))
     }
 
-    pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        let doc = Automerge::load(data)?;
-        Ok(Self {
-            doc,
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        })
-    }
-
-    pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        let doc = Automerge::load_unverified_heads(data)?;
-        Ok(Self {
-            doc,
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        })
-    }
-
-    #[deprecated(since = "0.5.2", note = "use `load_with_options` instead")]
-    pub fn load_with(
-        data: &[u8],
-        on_error: OnPartialLoad,
-        mode: VerificationMode,
-    ) -> Result<Self, AutomergeError> {
-        Self::load_with_options(
-            data,
-            LoadOptions::new()
-                .on_partial_load(on_error)
-                .verification_mode(mode),
-        )
-    }
-
-    pub fn load_with_options(
-        data: &[u8],
-        options: LoadOptions<'_>,
-    ) -> Result<Self, AutomergeError> {
-        let doc = Automerge::load_with_options(data, options)?;
-        Ok(Self {
-            doc,
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        })
-    }
-
-    /// Erases the diff cursor created by [`Self::update_diff_cursor()`] and
-    /// stops recording patches for [`Self::diff_incremental()`].
+    /// Resets the diff cursor to the empty document: the next
+    /// [`Self::diff_incremental()`] returns the whole current state.
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_log = PatchLog::inactive();
-        self.diff_cursor = Vec::new();
+        self.doc.clear_dirty();
+        self.diff_cursor = Viewpoint::default();
     }
 
-    /// Sets the [`Self::diff_cursor()`] to the current view heads, discards any
-    /// accumulated patches, and begins recording subsequent view changes for
-    /// [`Self::diff_incremental()`]. This includes write-frontier visibility
-    /// changes and transitions into or out of isolation.
-    ///
-    /// Tracking can be disabled with [`Self::reset_diff_cursor()`].
+    /// Sets the diff cursor to the current view, so the next
+    /// [`Self::diff_incremental()`] reports only what changes after this call,
+    /// including write-frontier changes and entering or leaving isolation.
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        let heads = self.get_heads();
-        self.patch_log.truncate();
-        self.patch_log
-            .transition_to(&self.doc, |d| d.visible(&heads))
-            .expect("AutoCommit's patch log always belongs to its document");
-        self.diff_cursor = heads;
+        self.doc.clear_dirty();
+        self.diff_cursor = self.viewpoint();
     }
 
     /// Returns the cursor set by [`Self::update_diff_cursor()`]
-    pub fn diff_cursor(&self) -> Vec<ChangeHash> {
-        self.diff_cursor.clone()
+    pub fn diff_cursor(&self) -> Vec<ChangeId> {
+        self.diff_cursor.heads().to_vec()
     }
 
-    /// Generate the patches recorded in `patch_log`
-    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
-        self.doc.make_patches(patch_log)
+    /// The document's current [`Viewpoint`], at the isolated heads when isolated.
+    pub fn viewpoint(&mut self) -> Viewpoint {
+        self.ensure_transaction_closed();
+        match &self.isolation {
+            Some(heads) => self.doc.viewpoint_at(heads.clone()),
+            None => self.doc.viewpoint(),
+        }
     }
 
-    /// Compares the document at historical heads `before` and `after`, using
-    /// the current write-frontier state for both. Equal heads produce no
-    /// patches, even if write-frontier visibility has changed since those heads
-    /// were observed. The heads need not be chronological, and isolation does
-    /// not change the meaning of these explicit heads.
+    /// See [`Automerge::mask_author`]. Call [`Self::update_diff_cursor`]
+    /// beforehand to get the resulting patches from
+    /// [`Self::diff_incremental`].
+    pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeId]) {
+        self.ensure_transaction_closed();
+        self.doc.mask_author(author, heads);
+    }
+
+    /// See [`Automerge::reveal_author`].
+    pub fn reveal_author(&mut self, author: &Author<'static>) {
+        self.ensure_transaction_closed();
+        self.doc.reveal_author(author);
+    }
+
+    /// See [`Automerge::set_write_frontier`].
+    pub fn set_write_frontier(&mut self, write_frontier: HashMap<Author<'static>, Vec<ChangeId>>) {
+        self.ensure_transaction_closed();
+        self.doc.set_write_frontier(write_frontier);
+    }
+
+    pub(crate) fn set_write_frontier_boundaries(&mut self, write_frontier: WriteFrontier) {
+        self.ensure_transaction_closed();
+        self.doc.set_write_frontier_boundaries(write_frontier);
+    }
+
+    pub(crate) fn mask_author_boundaries(&mut self, author: Author<'static>, heads: Vec<Boundary>) {
+        self.ensure_transaction_closed();
+        self.doc.mask_author_boundaries(author, heads);
+    }
+
+    pub fn get_write_frontier(&self) -> HashMap<Author<'static>, Vec<ChangeId>> {
+        self.doc.get_write_frontier()
+    }
+
+    /// Whether `author` is masked, e.g. so an application can disable editing
+    /// for a masked local author.
+    pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
+        self.doc.is_author_masked(author)
+    }
+
+    /// Generates a diff from `before` to `after`
     ///
-    /// This comparison does not consume or use the accumulated patch log. Use
-    /// [`Self::diff_incremental()`] to update a previously observed view,
-    /// including visibility changes caused by the write-frontier.
+    /// Each side is heads, read under the current write-frontier, or a
+    /// [`Viewpoint`], read under its own so that masking and revealing authors
+    /// is reported even when the heads did not move.
     ///
-    /// Diffs generally require a sequential scan of the document's operations.
-    pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
-        self.diff_inner(ObjMeta::root(), before, after, true)
+    /// To do a fast indexed diff `before` must equal [`Self::diff_cursor()`] and
+    /// `after` must equal [`Self::get_heads()`]. The diff cursor is managed with
+    /// [`Self::update_diff_cursor()`] and [`Self::reset_diff_cursor()`]
+    ///
+    /// Managing the diff index has a small but non-zero overhead.  It should be
+    /// disabled if no longer needed.  If a signifigantly large change is applied
+    /// to the document it may be faster to reset the index before applying it,
+    /// doing an unindxed diff afterwards and then reenable the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `before` - heads or a [`Viewpoint`] at the beginning point
+    /// * `after` - heads or a [`Viewpoint`] at the ending point
+    ///
+    /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
+    /// Normal use might look like:
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use automerge::{ AutoCommit };
+    ///
+    /// let mut doc = AutoCommit::new(); // or AutoCommit::load(data)
+    /// // make some changes - use and update the index
+    /// let heads = doc.get_heads();
+    /// let diff_cursor = doc.diff_cursor();
+    /// let patches = doc.diff(&diff_cursor, &heads);
+    /// doc.update_diff_cursor();
+    /// ```
+    ///
+    /// See [`Self::diff_incremental()`] for encapsulating this pattern.
+    ///
+    /// Returns [`AutomergeError::InvalidChangeId`] if `before` or `after` names a change this
+    /// document does not have.
+    pub fn diff(
+        &mut self,
+        before: impl Into<Viewpoint>,
+        after: impl Into<Viewpoint>,
+    ) -> Result<Vec<Patch>, AutomergeError> {
+        self.diff_inner(ObjMeta::root(), before.into(), after.into(), true)
     }
 
     fn diff_inner(
         &mut self,
         obj: ObjMeta,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: Viewpoint,
+        after: Viewpoint,
         recursive: bool,
-    ) -> Vec<Patch> {
+    ) -> Result<Vec<Patch>, AutomergeError> {
         self.ensure_transaction_closed();
-        if before == after {
-            return Vec::new();
+        let heads_only = before.write_frontier.is_none() && after.write_frontier.is_none();
+        let range = OpRange::new(before.heads(), after.heads());
+        let epoch = self.doc.visibility_epoch();
+        if let Some((r, id, rec, e, patches)) = &self.diff_cache {
+            if heads_only && r == &range && id == &obj.id && *rec == recursive && *e == epoch {
+                // we could skip this clone and return &[Patch]
+                return Ok(patches.clone());
+            }
         }
-        let heads = self.doc.get_heads();
-        if before.is_empty() && after == heads {
-            // The view set by `log_current_state` equals the current visible
-            // clock, so patches are generated fast: no historical clocks are
-            // needed.
-            let mut patch_log = PatchLog::active();
-            self.doc.log_current_state(obj, &mut patch_log, recursive);
-            patch_log.make_patches(&self.doc)
+        // the dirty bits were cleared at the cursor; it and `before` must
+        // both have seen today's mask
+        let before_sees_today = before.write_frontier.is_none() || before.epoch == Some(epoch);
+        let patches = if self.doc.is_current(&after)
+            && obj.id.is_root()
+            && recursive
+            && before.heads() == self.diff_cursor.heads()
+            && self.diff_cursor.epoch == Some(epoch)
+            && before_sees_today
+        {
+            self.doc
+                .dirty_diff_patches(&self.diff_cursor)
+                .expect("dirty diff should support AutoCommit cursor intervals")
+        } else if range.before().is_empty() && self.doc.is_current(&after) {
+            let mut patch_accumulator = PatchAccumulator::event_log();
+            // This if statement is only active if the current heads are the same as `after`
+            // so we don't need to tell the patch log to target a specific heads and consequently
+            // it wll be able to generate patches very fast as it doesn't need to make any clocks
+            patch_accumulator.heads_clock = None;
+            self.doc
+                .log_current_state(obj, &mut patch_accumulator, recursive);
+            patch_accumulator.make_patches(&self.doc)
         } else {
-            let clock = self.doc.clock_range(before, after);
-            let mut patch_log = PatchLog::active();
-            patch_log
-                .record(
-                    &self.doc,
-                    |events| {
-                        DiffIter::log(&self.doc, obj, clock, events, recursive);
-                    },
-                    |d| d.visible(after),
-                )
-                .expect("a fresh patch log belongs to any document");
-            patch_log.make_patches(&self.doc)
+            self.doc.diff_obj_inner(obj, &before, &after, recursive)?
+        };
+        if heads_only {
+            self.diff_cache = Some((range, obj.id, recursive, epoch, patches.clone()));
         }
+        Ok(patches)
     }
 
-    /// Compares historical heads for a given object, using the current
-    /// write-frontier state for both, as in [`Self::diff()`]. The accumulated
-    /// patch log is not used or consumed.
-    ///
-    /// `diff(before, after)` is equivalent to
-    /// `diff_obj(&ROOT, before, after, true)`.
-    ///
-    /// # Arguments
-    ///
-    /// * `obj` - The object to start the diff at.
-    /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
-    /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
-    /// * `recursive` - if false, do not also diff child objects
-    ///
-    /// Note: `before` and `after` do not have to be chronological. Document state can move backward.
+    /// [`Self::diff()`] starting at `obj`; with `recursive` false, child
+    /// objects are not diffed.
     pub fn diff_obj(
         &mut self,
         obj: &ExId,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before: impl Into<Viewpoint>,
+        after: impl Into<Viewpoint>,
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let meta = self.doc.exid_to_obj(obj)?;
-        Ok(self.diff_inner(meta, before, after, recursive))
+        self.diff_inner(meta, before.into(), after.into(), recursive)
     }
 
     /// Returns patches updating the view observed at the diff cursor to the
     /// current view, then advances the cursor and begins tracking again.
     ///
-    /// While tracking is active, this returns accumulated view transitions,
-    /// including write-frontier visibility changes even when the heads are
-    /// unchanged. Unlike [`Self::diff()`], it preserves changes from the
-    /// previously observed write-frontier state rather than comparing both
-    /// histories under today's state.
+    /// Write-frontier changes are reported even when the heads did not move:
+    /// unlike [`Self::diff()`], the before side is read under the
+    /// write-frontier the cursor was taken with.
     ///
-    /// Before tracking starts, after [`Self::reset_diff_cursor()`], or while
-    /// the cursor is still at the empty document, this falls back to a
-    /// historical diff from the empty document to the current view. Call
+    /// Before the cursor is set, or after [`Self::reset_diff_cursor()`], this
+    /// returns the whole current state. Call
     /// [`Self::update_diff_cursor()`] to start tracking from an existing view
     /// without returning its patches.
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
-        self.ensure_transaction_closed();
-        let patches = if self.patch_log.is_active() && !self.diff_cursor.is_empty() {
-            let heads = self.get_heads();
-            self.patch_to(&heads);
-            self.patch_log.make_patches(&self.doc)
+        let after = self.viewpoint();
+        let before = std::mem::take(&mut self.diff_cursor);
+        let patches = if after.heads() != self.doc.get_heads() {
+            // the dirty diff only covers intervals ending at the document's heads
+            self.doc
+                .diff(&before, &after)
+                .expect("the diff cursor and heads are this document's own change ids")
         } else {
-            let heads = self.get_heads();
-            let diff_cursor = self.diff_cursor();
-            self.diff(&diff_cursor, &heads)
+            self.doc
+                .dirty_diff_patches_and_clear(&before)
+                .expect("dirty diff should support AutoCommit incremental intervals")
         };
-        self.update_diff_cursor();
+        self.diff_cursor = after;
         patches
     }
 
@@ -317,20 +363,20 @@ impl AutoCommit {
         Self {
             doc: self.doc.fork(),
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(),
-            diff_cursor: vec![],
+            diff_cursor: Viewpoint::default(),
+            diff_cache: None,
             save_cursor: vec![],
             isolation: None,
         }
     }
 
-    pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+    pub fn fork_at(&mut self, heads: &[ChangeId]) -> Result<Self, AutomergeError> {
         self.ensure_transaction_closed();
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(),
-            diff_cursor: vec![],
+            diff_cursor: Viewpoint::default(),
+            diff_cache: None,
             save_cursor: vec![],
             isolation: None,
         })
@@ -338,17 +384,26 @@ impl AutoCommit {
 
     /// Get the inner document.
     #[doc(hidden)]
-    pub fn document(&mut self) -> &Automerge {
+    pub fn document(&mut self) -> &Automerge<H> {
         self.ensure_transaction_closed();
         &self.doc
     }
 
+    /// Get the inner document mutably, committing any open transaction first.
+    #[doc(hidden)]
+    pub fn document_mut(&mut self) -> &mut Automerge<H> {
+        self.ensure_transaction_closed();
+        &mut self.doc
+    }
+
+    /// Set the actor id for this document.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.ensure_transaction_closed();
         self.doc.set_actor(actor);
         self
     }
 
+    /// Set the actor id for this document.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         self.ensure_transaction_closed();
         self.doc.set_actor(actor);
@@ -387,143 +442,51 @@ impl AutoCommit {
         self.doc.get_authors()
     }
 
-    /// Mask all changes made by `author` after `heads`.
-    ///
-    /// Changes beyond a masked author's write-frontier — including this
-    /// document's own author — are still recorded and synced but hidden.
-    /// Positions in sequence operations refer to the visible document.
-    ///
-    /// Use [`Self::update_diff_cursor()`] before masking the author to track
-    /// the resulting patches, then retrieve them with
-    /// [`Self::diff_incremental()`].
-    pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
-        self.update_write_frontiers(|doc, patch_log| doc.mask_author(author, heads, patch_log))
-    }
-
-    /// Whether `author` is currently masked, e.g. so an application can
-    /// disable editing for a masked local author.
-    pub fn is_author_masked(&self, author: &Author<'_>) -> bool {
-        self.doc.is_author_masked(author)
-    }
-
-    /// Reveal all the changes of `author`.
-    ///
-    /// Use [`Self::update_diff_cursor()`] before revealing the author to track
-    /// the resulting patches, then retrieve them with
-    /// [`Self::diff_incremental()`].
-    pub fn reveal_author(&mut self, author: &Author<'static>) {
-        self.update_write_frontiers(|doc, patch_log| doc.reveal_author(author, patch_log))
-    }
-
-    fn update_write_frontiers(
-        &mut self,
-        update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<(), crate::PatchLogMismatch>,
-    ) {
-        self.with_patch_log(update)
-            .expect("AutoCommit's patch log always belongs to its document");
-    }
-
-    /// Run a document mutation, recording its effect on the observed view.
-    ///
-    /// Closes any pending transaction first. When not isolated, passes the
-    /// existing patch log directly to `update`.
-    ///
-    /// When isolated, runs `update` with an inactive log and reconciles the
-    /// existing log with the isolated view before and after the mutation.
-    /// This excludes ordinary import patches while recording changes to
-    /// visibility at the isolated heads, such as write-frontier changes or
-    /// resolution of a pending write-frontier boundary.
-    ///
-    /// Reconciliation happens even if `update` returns an error, since the
-    /// mutation may have made partial progress. It does not enable inactive
-    /// patch tracking.
-    fn with_patch_log<T, E>(
-        &mut self,
-        update: impl FnOnce(&mut Automerge, &mut PatchLog) -> Result<T, E>,
-    ) -> Result<T, E> {
+    pub fn isolate(&mut self, heads: &[ChangeId]) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if let Some(heads) = self.isolation.clone() {
-            self.patch_log
-                .transition_to(&self.doc, |d| d.visible(&heads))
-                .expect("AutoCommit's patch log always belongs to its document");
-            let result = update(&mut self.doc, &mut PatchLog::inactive());
-            // Reconcile even when an import reports an error after partial progress.
-            self.patch_log
-                .transition_to(&self.doc, |d| d.visible(&heads))
-                .expect("AutoCommit's patch log always belongs to its document");
-            result
-        } else {
-            update(&mut self.doc, &mut self.patch_log)
-        }
-    }
-
-    /// Pin the document's causal history to `heads`. Incoming changes are not
-    /// visible until integration, but resolving a pending write-frontier
-    /// boundary can change visibility at these heads. When diff tracking is
-    /// active, these visibility changes are recorded immediately.
-    pub fn isolate(&mut self, heads: &[ChangeHash]) {
-        self.ensure_transaction_closed();
+        // changes committed in isolation record these heads' hashes as deps
+        self.doc.resolve_heads(heads)?;
         self.patch_to(heads);
         self.isolation = Some(heads.to_vec());
+        Ok(())
     }
 
     pub fn integrate(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_to(self.doc.get_heads().as_slice());
+        self.patch_to(&self.doc.get_heads());
         self.isolation = None;
     }
 
     pub(crate) fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args(self.isolation.as_deref());
-            // This is AutoCommit's internal patch log, so unlike caller-supplied PatchLogs it
-            // always belongs to this document and can never mismatch.
-            self.patch_log
-                .begin_transaction(&self.doc, &args)
-                .expect("AutoCommit's patch log always belongs to its document");
-            let inner = TransactionInner::new(args);
-            let branch = self.patch_log.branch();
-            self.transaction = Some((branch, inner));
+            self.transaction = Some(TransactionInner::new(args));
         }
     }
 
     pub(crate) fn ensure_transaction_closed(&mut self) {
-        if let Some((patch_log, tx)) = self.transaction.take() {
-            self.patch_log.merge(patch_log);
-            let (hash, history) = match tx.commit(&mut self.doc, None, None) {
-                Some((hash, history)) => (Some(hash), history),
-                None => (None, HistoryUpdate::Unchanged),
-            };
-            if self.isolation.is_some() && hash.is_some() {
-                self.isolation = hash.map(|h| vec![h])
+        if let Some(tx) = self.transaction.take() {
+            let hash = tx.commit(&mut self.doc, None, None);
+            if self.isolation.is_some() {
+                if let Some(h) = hash {
+                    let id = self
+                        .doc
+                        .hash_to_change_id(&h)
+                        .expect("just-committed hashes are always known")
+                        .expect("the just-committed change is in the document");
+                    self.isolation = Some(vec![id]);
+                }
             }
-            let heads = self
-                .isolation
-                .clone()
-                .unwrap_or_else(|| self.doc.get_heads());
-            self.patch_log
-                .finish_transaction(&self.doc, |d| d.visible(&heads));
-            self.publish_resolved_boundary(history, &heads);
         }
     }
 
-    /// If a local commit resolved a pending write-frontier boundary, publish the
-    /// new visibility. Called after the commit's op-set mutation is complete
-    /// and the internal log's view has been advanced past the commit, so the
-    /// mask-constant invariant holds; the log observes the mask change as a
-    /// diff at its own (possibly isolated) view.
-    fn publish_resolved_boundary(&mut self, history: HistoryUpdate, heads: &[ChangeHash]) {
-        if let HistoryUpdate::BoundaryResolved = history {
-            self.doc
-                .republish_mask(&mut PatchLog::inactive(), |_| {})
-                .expect("a fresh patch log belongs to any document");
-            // The internal log always belongs to this document and
-            // `finish_transaction` just realigned its actors, so this cannot
-            // mismatch.
-            self.patch_log
-                .transition_to(&self.doc, |d| d.visible(heads))
-                .expect("AutoCommit's patch log always belongs to its document");
-        }
+    fn with_transaction<R>(
+        &mut self,
+        f: impl FnOnce(&mut TransactionInner, &mut Automerge<H>) -> R,
+    ) -> R {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        f(tx, &mut self.doc)
     }
 
     /// Load an incremental save of a document.
@@ -534,27 +497,34 @@ impl AutoCommit {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.with_patch_log(|doc, log| doc.load_incremental_log_patches(data, log))
+        self.ensure_transaction_closed();
+        self.doc.load_incremental(data)
     }
 
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.with_patch_log(|doc, log| doc.apply_changes_log_patches(changes, log))
+        self.ensure_transaction_closed();
+        self.doc.apply_changes(changes)
     }
 
     pub fn apply_changes_batch(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.with_patch_log(|doc, log| doc.apply_changes_batch_log_patches(changes, log))
+        self.ensure_transaction_closed();
+        self.doc.apply_changes_batch(changes)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge<H2: HashRetention>(
+        &mut self,
+        other: &mut AutoCommit<H2>,
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        self.with_patch_log(|doc, log| doc.merge_and_log_patches(&mut other.doc, log))
+        self.doc.merge(&mut other.doc)
     }
 
     /// Save the entirety of this document in a compact form.
@@ -562,36 +532,25 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
+    /// [`Self::save`] with [`SaveOptions`].
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
-        self.doc.remove_unused_actors(true);
+        if options.format == crate::automerge::SaveFormat::Legacy {
+            self.doc.remove_unused_actors(false);
+        }
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
+        self.doc.gc();
         bytes
     }
 
     /// Save the document and attempt to load it before returning - slow!
     pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
-        Self::load(&bytes)?;
+        Self::load_as(&bytes, LoadOptions::new())?;
         Ok(bytes)
-    }
-
-    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
-    ///
-    /// A "bundle" is a compact representation of a set of changes which uses
-    /// the same compression tricks as the document encoding we use in
-    /// [`Automerge::save`].
-    ///
-    /// This is an experimental API, the bundle format is still subject to change
-    /// and so should not be used in production just yet.
-    pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
-    where
-        I: IntoIterator<Item = ChangeHash>,
-    {
-        self.doc.bundle(hashes)
     }
 
     #[cfg(test)]
@@ -612,18 +571,22 @@ impl AutoCommit {
         })
     }
 
-    /// Save the changes since the last call to [`Self::save()`]
-    ///
-    /// The output of this will not be a compressed document format, but a series of individual
-    /// changes. This is useful if you know you have only made a small change since the last [`Self::save()`]
-    /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
-    /// text object).
+    /// The changes since the last save; empty when there are none.
     pub fn save_incremental(&mut self) -> Vec<u8> {
+        self.save_incremental_with_options(SaveOptions::default())
+    }
+
+    /// [`Self::save_incremental`] with [`SaveOptions`].
+    pub fn save_incremental_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
-        let bytes = self.doc.save_after(&self.save_cursor);
+        let bytes = self
+            .doc
+            .save_after_with_options(&self.save_cursor, options)
+            .expect("the save cursor names changes this document has");
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
+        self.doc.gc();
         bytes
     }
 
@@ -631,45 +594,91 @@ impl AutoCommit {
         self.doc.is_empty()
     }
 
-    /// Save everything which is not a (transitive) dependency of `heads`
-    pub fn save_after(&mut self, heads: &[ChangeHash]) -> Vec<u8> {
-        self.ensure_transaction_closed();
-        self.doc.save_after(heads)
+    /// Everything which is not a (transitive) dependency of `heads`
+    pub fn save_after(&mut self, heads: &[ChangeId]) -> Result<Vec<u8>, AutomergeError> {
+        self.save_after_with_options(heads, SaveOptions::default())
     }
 
-    pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+    /// [`Self::save_after`] with [`SaveOptions`].
+    pub fn save_after_with_options(
+        &mut self,
+        heads: &[ChangeId],
+        options: SaveOptions,
+    ) -> Result<Vec<u8>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.save_after_with_options(heads, options)
+    }
+
+    pub fn get_missing_deps(
+        &mut self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_missing_deps(heads)
     }
 
-    /// Get the last change made by this documents actor ID
-    pub fn get_last_local_change(&mut self) -> Option<Change> {
+    /// The last change made by this document's actor, as a change chunk
+    pub fn get_last_local_change_legacy(&mut self) -> Result<Option<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.get_last_local_change_legacy()
+    }
+
+    /// The last change made by this document's actor, as a bundle
+    pub fn get_last_local_change(&mut self) -> Result<Option<Bundle>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<Change> {
+    pub fn get_changes(&mut self, have_deps: &[ChangeId]) -> Result<Vec<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }
 
-    pub fn get_changes_meta(&mut self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
+    pub fn get_changes_meta(
+        &mut self,
+        have_deps: &[ChangeId],
+    ) -> Result<Vec<ChangeMetadata<'_>>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes_meta(have_deps)
     }
 
-    pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<Change> {
+    pub fn get_change_by_hash(
+        &mut self,
+        hash: &ChangeHash,
+    ) -> Result<Option<Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_change_by_hash(hash)
     }
 
-    pub fn get_change_meta_by_hash(&mut self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
+    /// See [`Automerge::get_change_by_id`].
+    pub fn get_change_by_id(&mut self, id: &ChangeId) -> Result<Option<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.get_change_by_id(id)
+    }
+
+    pub fn get_change_meta_by_hash(
+        &mut self,
+        hash: &ChangeHash,
+    ) -> Result<Option<ChangeMetadata<'_>>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_change_meta_by_hash(hash)
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added(&mut self, other: &mut Self) -> Vec<Change> {
+    /// [`Self::get_changes_added`] as change chunks
+    pub fn get_changes_added_legacy<H2: HashRetention>(
+        &mut self,
+        other: &mut AutoCommit<H2>,
+    ) -> Result<Vec<Change>, AutomergeError> {
+        self.ensure_transaction_closed();
+        other.ensure_transaction_closed();
+        self.doc.get_changes_added_legacy(&other.doc)
+    }
+
+    pub fn get_changes_added<H2: HashRetention>(
+        &mut self,
+        other: &mut AutoCommit<H2>,
+    ) -> Result<Option<Bundle>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
@@ -691,39 +700,31 @@ impl AutoCommit {
         self.doc.dump()
     }
 
-    /// EXPERIMENTAL: Return the fragments covering the document history at
-    /// the given levels, ordered oldest to newest.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
+    /// See [`Automerge::audit_mode`]
     #[doc(hidden)]
+    pub fn audit_mode(&self) -> crate::automerge::AuditMode {
+        self.doc.audit_mode()
+    }
+
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
         self.doc.fragments(levels)
     }
 
-    /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
         self.doc.get_fragment(head)
     }
 
-    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
-    /// (level-0 fragments with one member) or as a bundle.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
-    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
-        self.doc.bundle_fragments(fragments)
+    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
+        &self,
+        fragments: I,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        self.doc.bundles_for_fragments(fragments)
     }
 
     /// Get the current heads of the document.
     ///
     /// This closes the transaction first, if one is in progress.
-    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
+    pub fn get_heads(&mut self) -> Vec<ChangeId> {
         self.ensure_transaction_closed();
         if let Some(i) = &self.isolation {
             i.clone()
@@ -732,10 +733,57 @@ impl AutoCommit {
         }
     }
 
+    /// The heads of this document as [`ChangeHash`]es, committing any open
+    /// transaction first.
+    pub fn get_head_hashes(&mut self) -> Vec<ChangeHash> {
+        self.ensure_transaction_closed();
+        self.doc.get_head_hashes()
+    }
+
+    /// Get the [`ChangeId`] of the change that contains the given `opid`.
+    ///
+    /// Returns [`None`] if the `opid` is the root object id, does not
+    /// exist in this document, or is for an operation in the open
+    /// transaction.
+    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
+        self.doc.change_id_for_opid(opid)
+    }
+
+    /// Whether this document contains the change identified by `id`.
+    pub fn has_change_id(&self, id: &ChangeId) -> bool {
+        self.doc.has_change_id(id)
+    }
+
+    /// See [`Automerge::change_id_to_hash`]
+    pub fn change_id_to_hash(&self, id: &ChangeId) -> Result<Option<ChangeHash>, AutomergeError> {
+        self.doc.change_id_to_hash(id)
+    }
+
+    /// See [`Automerge::hash_to_change_id`]
+    pub fn hash_to_change_id(&self, hash: &ChangeHash) -> Result<Option<ChangeId>, AutomergeError> {
+        self.doc.hash_to_change_id(hash)
+    }
+
+    /// See [`Automerge::hashes_to_change_ids`]
+    pub fn hashes_to_change_ids(
+        &self,
+        hashes: &[ChangeHash],
+    ) -> Result<Vec<ChangeId>, AutomergeError> {
+        self.doc.hashes_to_change_ids(hashes)
+    }
+
+    /// See [`Automerge::change_ids_to_hashes`]
+    pub fn change_ids_to_hashes(
+        &self,
+        ids: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.doc.change_ids_to_hashes(ids)
+    }
+
     /// Commit any uncommitted changes
     ///
     /// Returns [`None`] if there were no operations to commit
-    pub fn commit(&mut self) -> Option<ChangeHash> {
+    pub fn commit(&mut self) -> Option<ChangeId> {
         self.commit_with(CommitOptions::default())
     }
 
@@ -756,37 +804,28 @@ impl AutoCommit {
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeHash> {
+    pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeId> {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.take().unwrap();
-        self.patch_log.merge(patch_log);
-        let (hash, history) = match tx.commit(&mut self.doc, options.message, options.time) {
-            Some((hash, history)) => (Some(hash), history),
-            None => (None, HistoryUpdate::Unchanged),
-        };
-        if self.isolation.is_some() && hash.is_some() {
-            self.isolation = hash.map(|h| vec![h])
+        let tx = self.transaction.take().unwrap();
+        let hash = tx.commit(&mut self.doc, options.message, options.time);
+        let id = hash.map(|h| {
+            self.doc
+                .hash_to_change_id(&h)
+                .expect("hash of a newly committed change is always known")
+                .expect("newly committed change must be in the document")
+        });
+        if self.isolation.is_some() && id.is_some() {
+            self.isolation = id.clone().map(|i| vec![i])
         }
-        let heads = self
-            .isolation
-            .clone()
-            .unwrap_or_else(|| self.doc.get_heads());
-        self.patch_log
-            .finish_transaction(&self.doc, |d| d.visible(&heads));
-        self.publish_resolved_boundary(history, &heads);
-        hash
+        id
     }
 
     /// Remove any changes that have been made in the current transaction from the document
     pub fn rollback(&mut self) -> usize {
         self.transaction
             .take()
-            .map(|(_, tx)| {
-                let num = tx.rollback(&mut self.doc);
-                self.patch_log.abandon_transaction(self.doc.actors());
-                num
-            })
+            .map(|tx| tx.rollback(&mut self.doc))
             .unwrap_or(0)
     }
 
@@ -797,109 +836,165 @@ impl AutoCommit {
     ///
     /// Because this structure is an "autocommit" there may actually be outstanding operations to
     /// submit. If this is the case this function will create two changes, one with the outstanding
-    /// operations and a new one with no operations. The returned [`ChangeHash`] will always be the
-    /// hash of the empty change.
-    pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
-        self.with_patch_log(|doc, log| {
-            let args = doc.transaction_args(None);
-            log.begin_transaction(doc, &args)?;
-            let (result, history) =
-                TransactionInner::empty(doc, args, options.message, options.time);
-            log.finish_transaction(doc, |d| d.visible_current());
-            if let HistoryUpdate::BoundaryResolved = history {
-                // The empty change is fully recorded and the log's view has
-                // been advanced past it, so the resolved boundary's
-                // visibility can be published now.
-                doc.republish_mask(log, |_| {})?;
-            }
-            Ok::<_, crate::PatchLogMismatch>(result)
-        })
-        .expect("AutoCommit's patch log always belongs to its document")
-    }
-
-    /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
-    ///
-    /// This ensures that any outstanding transactions for this document are committed before
-    /// taking part in the sync protocol
-    pub fn sync(&mut self) -> impl SyncDoc + '_ {
+    /// operations and a new one with no operations. The returned id is always that of the
+    /// empty change.
+    pub fn empty_change(&mut self, options: CommitOptions) -> ChangeId {
         self.ensure_transaction_closed();
-        SyncWrapper { inner: self }
+        let args = self.doc.transaction_args(None);
+        let hash = TransactionInner::empty(&mut self.doc, args, options.message, options.time);
+        self.doc
+            .hash_to_change_id(&hash)
+            .expect("hash of a newly created change is always known")
+            .expect("newly created change must be in the document")
     }
 
-    /// Get the hash of the change that contains the given `opid`.
+    /// See [`Automerge::hash_for_opid`]
     ///
-    /// Returns [`None`] if the `opid`:
-    /// - Is the root object id
-    /// - Does not exist in this document
-    /// - Is for an operation in a transaction
-    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+    /// Also returns `Ok(None)` for operations in the open transaction.
+    pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
         self.doc.hash_for_opid(opid)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> ReadAt<'_> {
-        // heads arg takes priority
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
         if let Some(h) = heads {
-            // the heads == current-heads shortcut (an unscoped read) is only
-            // sound with no transaction in flight: pending ops are already in
-            // the op set but not yet under the graph's heads
+            // pending ops are in the op set but not under the graph's heads, so
+            // with a transaction in flight current heads must not read unscoped
             return if self.transaction.is_none() {
                 self.doc.read_at(Some(h))
             } else {
-                self.doc
-                    .read_scoped(std::borrow::Cow::Owned(self.doc.visible(h)))
+                Ok(self.doc.read_scoped(Cow::Owned(self.doc.visible(h)?)))
             };
         }
-        match (&self.isolation, &self.transaction) {
-            // then look at in progress isolated transaction
-            (Some(_), Some((_, t))) => t.read_at(&self.doc),
-            // then look at clock for isolation (no transaction is open, so
-            // isolation at the current heads can read unscoped)
-            (Some(i), None) => self.doc.read_at(Some(i)),
+        Ok(match (&self.isolation, &self.transaction) {
+            (Some(_), Some(t)) => match t.get_scope() {
+                Some(scope) => self.doc.read_scoped(Cow::Borrowed(scope)),
+                None => self.doc.read_current(),
+            },
+            (Some(i), None) => self
+                .doc
+                .read_at(Some(i))
+                .expect("isolation ids are always known"),
             _ => self.doc.read_current(),
+        })
+    }
+
+    fn patch_to(&mut self, after: &[ChangeId]) {
+        let before = self.get_heads();
+        if before.as_slice() != after {
+            // a view transition can touch any object
+            self.doc.ops_mut().mark_all_dirty();
         }
-    }
-
-    fn patch_to(&mut self, after: &[ChangeHash]) {
-        self.patch_log
-            .transition_to(&self.doc, |d| d.visible(after))
-            .expect("AutoCommit's patch log always belongs to its document");
-    }
-
-    /// Whether the peer represented by `other` has all the changes we have
-    pub fn has_our_changes(&mut self, state: &crate::sync::State) -> bool {
-        self.ensure_transaction_closed();
-        self.doc.has_our_changes(state)
     }
 }
 
-impl ReadDoc for AutoCommit {
+impl AutoCommit<Retained> {
+    pub fn new() -> Self {
+        AutoCommit::default()
+    }
+
+    pub fn new_with_encoding(encoding: TextEncoding) -> Self {
+        Self::from_doc(
+            Automerge::new_with_encoding(encoding).with_manual_gc(),
+            Vec::new(),
+        )
+    }
+
+    pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
+        Self::load_with_options(data, LoadOptions::new())
+    }
+
+    pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
+        Self::load_with_options(
+            data,
+            LoadOptions::new().verification_mode(VerificationMode::DontCheck),
+        )
+    }
+
+    #[deprecated(since = "0.5.2", note = "use `load_with_options` instead")]
+    pub fn load_with(
+        data: &[u8],
+        on_error: OnPartialLoad,
+        mode: VerificationMode,
+    ) -> Result<Self, AutomergeError> {
+        Self::load_with_options(
+            data,
+            LoadOptions::new()
+                .on_partial_load(on_error)
+                .verification_mode(mode),
+        )
+    }
+
+    pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
+        Self::load_as(data, options)
+    }
+
+    /// See [`Automerge::enable_audit_mode`].
+    #[doc(hidden)]
+    pub fn enable_audit_mode(mut self) -> Result<AutoCommit<Full>, EnableAuditModeError<Self>> {
+        self.ensure_transaction_closed();
+        match self.doc.verified_hashes() {
+            Ok(hashes) => Ok(self.map_doc(|doc| doc.into_full_with(hashes))),
+            Err(error) => Err(EnableAuditModeError {
+                error,
+                doc: Box::new(self),
+            }),
+        }
+    }
+}
+
+impl AutoCommit<Full> {
+    /// See [`Automerge::disable_audit_mode`].
+    #[doc(hidden)]
+    pub fn disable_audit_mode(self) -> AutoCommit<Retained> {
+        self.map_doc(Automerge::disable_audit_mode)
+    }
+}
+
+impl<H: HashRetention> ReadDoc for AutoCommit<H> {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        self.doc.parents_for(obj.as_ref(), self.get_scope(None))
+        self.doc.parents_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Parents<'_>, AutomergeError> {
         self.doc
-            .parents_for(obj.as_ref(), self.get_scope(Some(heads)))
+            .parents_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.doc.keys_for(obj.as_ref(), self.get_scope(None))
+        self.doc.keys_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
+    fn keys_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Keys<'_>, AutomergeError> {
+        Ok(self
+            .doc
+            .keys_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
-    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
-        self.doc.iter_for(obj.as_ref(), self.get_scope(heads))
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<DocIter<'_>, AutomergeError> {
+        Ok(self.doc.iter_for(obj.as_ref(), self.get_scope(heads)?))
     }
 
     fn iter(&self) -> DocIter<'_> {
-        self.doc.iter_for(&ROOT, self.get_scope(None))
+        self.doc
+            .iter_for(&ROOT, self.get_scope(None).expect("no heads to resolve"))
     }
 
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
@@ -907,51 +1002,75 @@ impl ReadDoc for AutoCommit {
         obj: O,
         range: R,
     ) -> MapRange<'a> {
-        self.doc
-            .map_range_for(obj.as_ref(), range, self.get_scope(None))
+        self.doc.map_range_for(
+            obj.as_ref(),
+            range,
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a> {
-        self.doc
-            .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
+        heads: &[ChangeId],
+    ) -> Result<MapRange<'a>, AutomergeError> {
+        Ok(self
+            .doc
+            .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
-        self.doc
-            .list_range_for(obj.as_ref(), range, self.get_scope(None))
+        self.doc.list_range_for(
+            obj.as_ref(),
+            range,
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
         &self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_> {
-        self.doc
-            .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
+        heads: &[ChangeId],
+    ) -> Result<ListRange<'_>, AutomergeError> {
+        Ok(self
+            .doc
+            .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.doc.values_for(obj.as_ref(), self.get_scope(None))
+        self.doc.values_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        self.doc
-            .values_for(obj.as_ref(), self.get_scope(Some(heads)))
+    fn values_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Values<'_>, AutomergeError> {
+        Ok(self
+            .doc
+            .values_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.doc.length_for(obj.as_ref(), self.get_scope(None))
+        self.doc.length_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        self.doc
-            .length_for(obj.as_ref(), self.get_scope(Some(heads)))
+    fn length_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<usize, AutomergeError> {
+        Ok(self
+            .doc
+            .length_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
@@ -959,63 +1078,73 @@ impl ReadDoc for AutoCommit {
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
-        self.doc.marks_for(obj.as_ref(), self.get_scope(None))
+        self.doc.marks_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc
-            .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
+            .marks_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn get_marks<O: AsRef<ExId>>(
         &self,
         obj: O,
         index: usize,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<MarkSet, AutomergeError> {
         self.doc
-            .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
+            .get_marks_for(obj.as_ref(), index, self.get_scope(heads)?)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.doc.text_for(obj.as_ref(), self.get_scope(None))
+        self.doc.text_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<String, AutomergeError> {
-        self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
+        self.doc
+            .text_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
-        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+        self.doc.spans_for(
+            obj.as_ref(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Spans<'_>, AutomergeError> {
         self.doc
-            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
     fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<Cursor, AutomergeError> {
         self.doc.get_cursor_for(
             obj.as_ref(),
             position.into(),
-            self.get_scope(at),
+            self.get_scope(at)?,
             MoveCursor::After,
         )
     }
@@ -1024,13 +1153,13 @@ impl ReadDoc for AutoCommit {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
         self.doc.get_cursor_for(
             obj.as_ref(),
             position.into(),
-            self.get_scope(at),
+            self.get_scope(at)?,
             move_cursor,
         )
     }
@@ -1039,22 +1168,19 @@ impl ReadDoc for AutoCommit {
         &self,
         obj: O,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<usize, AutomergeError> {
         self.doc
-            .get_cursor_position_for(obj.as_ref(), cursor, self.get_scope(at))
+            .get_cursor_position_for(obj.as_ref(), cursor, self.get_scope(at)?)
     }
 
     fn hydrate<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError> {
-        // Like every other read, hydration goes through `get_scope` so an
-        // isolated document (or one with a transaction in flight) hydrates
-        // the view the other reads see.
         self.doc
-            .hydrate_obj_for(obj.as_ref(), self.get_scope(heads))
+            .hydrate_obj_for(obj.as_ref(), self.get_scope(heads)?)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1062,18 +1188,21 @@ impl ReadDoc for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_for(obj.as_ref(), prop.into(), self.get_scope(None))
+        self.doc.get_for(
+            obj.as_ref(),
+            prop.into(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc
-            .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+            .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
     }
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1081,25 +1210,28 @@ impl ReadDoc for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(None))
+        self.doc.get_all_for(
+            obj.as_ref(),
+            prop.into(),
+            self.get_scope(None).expect("no heads to resolve"),
+        )
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
         self.doc.get_change_by_hash(hash)
     }
 
@@ -1112,11 +1244,11 @@ impl ReadDoc for AutoCommit {
     }
 }
 
-impl Transactable for AutoCommit {
+impl<H: HashRetention> Transactable for AutoCommit<H> {
     fn pending_ops(&self) -> usize {
         self.transaction
             .as_ref()
-            .map(|(_, t)| t.pending_ops())
+            .map(|t| t.pending_ops())
             .unwrap_or(0)
     }
 
@@ -1126,15 +1258,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.put(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            prop,
-            value,
-        )
+        self.with_transaction(|tx, doc| tx.put(doc, obj.as_ref(), prop, value))
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1143,15 +1267,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.put_object(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            prop,
-            value,
-        )
+        self.with_transaction(|tx, doc| tx.put_object(doc, obj.as_ref(), prop, value))
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -1160,15 +1276,7 @@ impl Transactable for AutoCommit {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.insert(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            index,
-            value,
-        )
+        self.with_transaction(|tx, doc| tx.insert(doc, obj.as_ref(), index, value))
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -1177,15 +1285,7 @@ impl Transactable for AutoCommit {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.insert_object(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            index,
-            value,
-        )
+        self.with_transaction(|tx, doc| tx.insert_object(doc, obj.as_ref(), index, value))
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1194,15 +1294,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.increment(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            prop,
-            value,
-        )
+        self.with_transaction(|tx, doc| tx.increment(doc, obj.as_ref(), prop, value))
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1210,9 +1302,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.delete(&mut self.doc, &mut patch_log.events(), obj.as_ref(), prop)
+        self.with_transaction(|tx, doc| tx.delete(doc, obj.as_ref(), prop))
     }
 
     /// Splice new elements into the given sequence
@@ -1223,16 +1313,7 @@ impl Transactable for AutoCommit {
         del: isize,
         vals: I,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            pos,
-            del,
-            vals,
-        )
+        self.with_transaction(|tx, doc| tx.splice(doc, obj.as_ref(), pos, del, vals))
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -1242,17 +1323,7 @@ impl Transactable for AutoCommit {
         del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice_text(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            pos,
-            del,
-            text,
-        )?;
-        Ok(())
+        self.with_transaction(|tx, doc| tx.splice_text(doc, obj.as_ref(), pos, del, text))
     }
 
     fn mark<O: AsRef<ExId>>(
@@ -1261,15 +1332,7 @@ impl Transactable for AutoCommit {
         mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.mark(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            mark,
-            expand,
-        )
+        self.with_transaction(|tx, doc| tx.mark(doc, obj.as_ref(), mark, expand))
     }
 
     fn unmark<O: AsRef<ExId>>(
@@ -1280,48 +1343,34 @@ impl Transactable for AutoCommit {
         end: usize,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.unmark(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            key,
-            start,
-            end,
-            expand,
-        )
+        self.with_transaction(|tx, doc| tx.unmark(doc, obj.as_ref(), key, start, end, expand))
     }
 
     fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>,
     {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.split_block(&mut self.doc, &mut patch_log.events(), obj.as_ref(), index)
+        self.with_transaction(|tx, doc| tx.split_block(doc, obj.as_ref(), index))
     }
 
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.join_block(&mut self.doc, &mut patch_log.events(), text.as_ref(), index)
+        self.with_transaction(|tx, doc| tx.join_block(doc, text.as_ref(), index))
     }
 
     fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>,
     {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.replace_block(&mut self.doc, &mut patch_log.events(), text.as_ref(), index)
+        self.with_transaction(|tx, doc| tx.replace_block(doc, text.as_ref(), index))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
-            i.clone()
+            self.doc
+                .resolve_heads(i)
+                .expect("isolation ids were validated when isolating")
         } else {
-            self.doc.get_heads()
+            self.doc.get_head_hashes()
         }
     }
 
@@ -1330,9 +1379,7 @@ impl Transactable for AutoCommit {
         obj: &ExId,
         new_text: S,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        crate::text_diff::myers_diff(&mut self.doc, tx, &mut patch_log.events(), obj, new_text)
+        self.with_transaction(|tx, doc| crate::text_diff::myers_diff(doc, tx, obj, new_text))
     }
 
     fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
@@ -1341,16 +1388,9 @@ impl Transactable for AutoCommit {
         config: UpdateSpansConfig,
         new_text: I,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        crate::text_diff::myers_block_diff(
-            &mut self.doc,
-            tx,
-            &mut patch_log.events(),
-            text.as_ref(),
-            new_text,
-            &config,
-        )
+        self.with_transaction(|tx, doc| {
+            crate::text_diff::myers_block_diff(doc, tx, text.as_ref(), new_text, &config)
+        })
     }
 
     fn update_object<O: AsRef<ExId>>(
@@ -1358,14 +1398,7 @@ impl Transactable for AutoCommit {
         obj: O,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.update_object(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            new_value,
-        )
+        self.with_transaction(|tx, doc| tx.update_object(doc, obj.as_ref(), new_value))
     }
 
     fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1375,71 +1408,248 @@ impl Transactable for AutoCommit {
         value: &crate::hydrate::Value,
         insert: bool,
     ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.batch_create_object(
-            &mut self.doc,
-            &mut patch_log.events(),
-            obj.as_ref(),
-            prop.into(),
-            value,
-            insert,
-        )
+        self.with_transaction(|tx, doc| {
+            tx.batch_create_object(doc, obj.as_ref(), prop.into(), value, insert)
+        })
     }
 
     fn init_root_from_hydrate(
         &mut self,
         value: &crate::hydrate::Map,
     ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.batch_init_root_map(&mut self.doc, &mut patch_log.events(), value)?;
-        Ok(())
+        self.with_transaction(|tx, doc| tx.batch_init_root_map(doc, value))
     }
 }
 
-// A wrapper we return from [`AutoCommit::sync()`] to ensure that transactions are closed before we
-// start syncing
-struct SyncWrapper<'a> {
-    inner: &'a mut AutoCommit,
+#[derive(Debug, Clone, PartialEq)]
+struct OpRange {
+    before_len: usize,
+    ids: Vec<ChangeId>,
 }
 
-impl SyncDoc for SyncWrapper<'_> {
-    fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
-        self.inner.doc.generate_sync_message(sync_state)
+impl OpRange {
+    fn new(before: &[ChangeId], after: &[ChangeId]) -> Self {
+        let mut ids = Vec::with_capacity(before.len() + after.len());
+        ids.extend_from_slice(before);
+        ids.extend_from_slice(after);
+        let range = Self {
+            before_len: before.len(),
+            ids,
+        };
+        assert_eq!(before, range.before());
+        assert_eq!(after, range.after());
+        range
     }
 
-    fn receive_sync_message(
-        &mut self,
-        sync_state: &mut sync::State,
-        message: sync::Message,
-    ) -> Result<(), AutomergeError> {
-        self.inner.with_patch_log(|doc, log| {
-            doc.receive_sync_message_log_patches(sync_state, message, log)
-        })
+    fn before(&self) -> &[ChangeId] {
+        &self.ids[0..self.before_len]
     }
 
-    // I dont like this function - it makes sense on automerge but not autocommit
-    // FIXME
-    fn receive_sync_message_log_patches(
-        &mut self,
-        sync_state: &mut sync::State,
-        message: sync::Message,
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        self.inner
-            .doc
-            .receive_sync_message_log_patches(sync_state, message, patch_log)
+    fn after(&self) -> &[ChangeId] {
+        &self.ids[self.before_len..]
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::{tx::Transactable, ObjType, ROOT};
+
+    use super::AutoCommit;
 
     fn is_send<S: Send>() {}
 
+    fn assert_incremental_matches_diff<H: crate::hash_retention::HashRetention>(
+        doc: &mut AutoCommit<H>,
+    ) {
+        let before = doc.diff_cursor();
+        let after = doc.get_heads();
+        let expected = doc.diff(&before, &after).unwrap();
+        let actual = doc.diff_incremental();
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc.document(),
+            &before,
+            &after,
+            "incremental diff",
+            &actual,
+            "cursor diff",
+            &expected,
+        );
+        assert!(doc.diff_incremental().is_empty());
+    }
+
     #[test]
     fn test_autocommit_is_send() {
-        is_send::<super::AutoCommit>();
+        is_send::<AutoCommit>();
+    }
+
+    #[test]
+    fn diff_incremental_public_style_local_mutations() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "map", 1).unwrap();
+        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "abc").unwrap();
+        assert_incremental_matches_diff(&mut doc);
+
+        doc.put(ROOT, "map", 2).unwrap();
+        doc.put(&list, 0, "A").unwrap();
+        doc.splice_text(&text, 1, 1, "B").unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_with_cursor_uses_dirty_diff_without_consuming_dirty_bits() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "base", 1).unwrap();
+        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        doc.update_diff_cursor();
+        let before = doc.diff_cursor();
+
+        doc.put(ROOT, "base", 2).unwrap();
+        doc.put(&list, 0, "A").unwrap();
+        let after = doc.get_heads();
+
+        let patches = doc.diff(&before, &after).unwrap();
+        assert!(!patches.is_empty());
+        assert!(doc.document().ops().dirty_runs().next().is_some());
+        let incremental = doc.diff_incremental();
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc.document(),
+            &before,
+            &after,
+            "incremental diff",
+            &incremental,
+            "cursor diff",
+            &patches,
+        );
+        assert!(doc.document().ops().dirty_runs().next().is_none());
+    }
+
+    #[test]
+    fn diff_incremental_public_style_object_creation_ordering_fallback() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "base", 1).unwrap();
+        doc.update_diff_cursor();
+
+        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, "a").unwrap();
+        doc.put(ROOT, "base", 2).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_apply_changes() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+        let changes = source.get_changes(&[]).unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.apply_changes(changes).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_apply_changes_batch() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+        let list = source.put_object(ROOT, "list", ObjType::List).unwrap();
+        source.insert(&list, 0, "a").unwrap();
+        let changes = source.get_changes(&[]).unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.apply_changes_batch(changes).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_load_incremental() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "base", 1).unwrap();
+        let base_heads = source.get_heads();
+        let base_data = source.save();
+
+        let mut doc = AutoCommit::new();
+        doc.load_incremental(&base_data).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+
+        source.put(ROOT, "later", 2).unwrap();
+        let data = source.save_after(&base_heads).unwrap();
+        doc.load_incremental(&data).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_merge() {
+        let mut source = AutoCommit::new();
+        source.put(ROOT, "key", 1).unwrap();
+
+        let mut doc = AutoCommit::new();
+        doc.merge(&mut source).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_sync_receive() {
+        let mut source = AutoCommit::new().enable_audit_mode().unwrap();
+        source.put(ROOT, "key", 1).unwrap();
+
+        // what receiving a v2 sync message does
+        let mut doc = AutoCommit::new().enable_audit_mode().unwrap();
+        doc.load_incremental(&source.save()).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_reset_and_rollback() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "key", 1).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+
+        let heads = doc.get_heads();
+        let expected = doc.diff(&[], &heads).unwrap();
+        doc.reset_diff_cursor();
+        let incremental = doc.diff_incremental();
+        crate::patches::effect::assert_patches_have_same_effect(
+            doc.document(),
+            &[],
+            &heads,
+            "incremental diff",
+            &incremental,
+            "full diff",
+            &expected,
+        );
+        assert!(doc.diff_incremental().is_empty());
+
+        doc.put(ROOT, "key", 2).unwrap();
+        assert_eq!(doc.rollback(), 1);
+        assert!(doc.diff_incremental().is_empty());
+
+        doc.put(ROOT, "key", 3).unwrap();
+        assert_incremental_matches_diff(&mut doc);
+    }
+
+    #[test]
+    fn diff_incremental_public_style_isolate_and_integrate() {
+        let mut doc = AutoCommit::new();
+        let beginning = doc.get_heads();
+
+        let name = doc.put_object(ROOT, "name", ObjType::Text).unwrap();
+        doc.splice_text(&name, 0, 0, "name").unwrap();
+
+        doc.isolate(&beginning).unwrap();
+        let color = doc.put_object(ROOT, "color", ObjType::Text).unwrap();
+        doc.splice_text(&color, 0, 0, "red").unwrap();
+        doc.integrate();
+        assert_incremental_matches_diff(&mut doc);
+
+        doc.commit();
+        doc.isolate(&beginning).unwrap();
+        let color = doc.put_object(ROOT, "color", ObjType::Text).unwrap();
+        doc.splice_text(&color, 0, 0, "unset").unwrap();
+        doc.commit();
+        doc.integrate();
+        assert_incremental_matches_diff(&mut doc);
     }
 }

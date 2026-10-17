@@ -1,18 +1,21 @@
 use hexane::PackError;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
 use crate::actor::ActorList;
 use crate::author::Authors;
-use crate::change_graph::{ChangeGraph, ChangeGraphCols};
-use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
+use crate::automerge::Automerge;
+use crate::change_graph::{ChangeGraph, ChangeGraphCols, GraphLoadError};
+use crate::hash_retention::Full;
+use crate::op_set2::change::{ChangeCollector, CollectedHashes, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Author, Automerge, Change, ChangeHash, TextEncoding};
+use crate::write_frontier::WriteFrontier;
+use crate::{ActorId, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -134,10 +137,15 @@ impl<'a> Document<'a> {
 
         // parse the suffix, which may be empty if this document was produced by an older version
         // of the JS automerge implementation
-        let (i, Range { start: suffix, .. }) = parse::range_only_unless_empty(
-            |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
-            i,
-        )?;
+        let (i, suffix) = if i.is_empty() {
+            (i, 0)
+        } else {
+            let (i, parsed) = parse::range_of(
+                |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
+                i,
+            )?;
+            (i, parsed.range.start)
+        };
 
         let compression::Decompressed {
             change_bytes,
@@ -164,7 +172,7 @@ impl<'a> Document<'a> {
         })?;
 
         let change_metadata =
-            ChangeGraph::validate(change_bytes.len(), &changes).map_err(|error| {
+            <ChangeGraph>::validate(change_bytes.len(), &changes).map_err(|error| {
                 parse::ParseError::Error(ParseError::BadColumnLayout {
                     column_type: "changes",
                     error,
@@ -195,9 +203,9 @@ impl<'a> Document<'a> {
         &self.bytes[self.change_bytes.clone()]
     }
 
-    pub(crate) fn new(
+    pub(crate) fn new<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
-        change_graph: &ChangeGraph,
+        change_graph: &ChangeGraph<H>,
         compress: CompressConfig,
     ) -> Document<'static> {
         let (op_metadata, ops_out_b) = op_set.export();
@@ -205,8 +213,6 @@ impl<'a> Document<'a> {
         let mut change_out = Vec::new();
         let change_metadata = change_graph.encode(&mut change_out);
 
-        // The ActorTable is sorted by construction, so the stored order is
-        // canonical and a later load can adopt the columns directly.
         let actors = ActorList::from_stored(op_set.actors.to_vec());
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
@@ -300,7 +306,6 @@ impl<'a> Document<'a> {
         self.header.checksum_valid()
     }
 
-    /// The document's actor list, in the order it was stored.
     pub(crate) fn actors(&self) -> &ActorList {
         &self.actors
     }
@@ -311,14 +316,14 @@ impl<'a> Document<'a> {
 
     fn verify_changes(
         &self,
-        cc: &CollectedChanges,
+        cc: &CollectedHashes,
         mode: VerificationMode,
     ) -> Result<(), ReconstructError> {
         if mode == VerificationMode::Check && !self.heads().iter().eq(cc.heads.iter()) {
             let expected_heads: BTreeSet<_> = self.heads().iter().cloned().collect();
             tracing::error!(?expected_heads, ?cc.heads, "mismatching heads");
             Err(ReconstructError::MismatchingHeads(MismatchedHeads {
-                changes: cc.changes.clone(),
+                num_changes: cc.hashes.len(),
                 expected_heads,
                 derived_heads: cc.heads.clone(),
             }))
@@ -331,41 +336,41 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
-        write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
-    ) -> Result<Automerge, ReconstructError> {
-        let mut op_set = OpSet::load(self, text_encoding)?;
+        allow_invalid_marks: bool,
+        write_frontier: WriteFrontier,
+    ) -> Result<Automerge<Full>, ReconstructError> {
+        let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
-        let mut index = op_set.index_builder();
+        // the op scan checks neither actor index ranges nor succ/value totals
+        op_set.column_validation()?;
 
-        let change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
-        let mut change_collector = change_collector.with_index(&mut index);
-
-        change_collector.process_ops(&op_set)?;
-
-        let changes = change_collector.collect(&op_set)?;
-
+        let mut collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?.hashing();
+        collector.process_all_ops(&op_set)?;
+        let changes = collector.collect_hashes()?;
         self.verify_changes(&changes, mode)?;
 
         let (indexes, mut mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::new(&op_set.actors);
-        let change_graph = change_cols.finalize(&changes.changes, &mut authors)?;
-
-        debug_assert_eq!(changes.changes.len(), change_graph.len());
+        let change_graph = change_cols
+            .finalize(changes, &mut authors)
+            .map_err(|e| match e {
+                GraphLoadError::AuthorOnNonInitialSeq { seq, actor } => {
+                    ReconstructError::AuthorOnNonInitialSeq(seq, op_set.actors[actor].clone())
+                }
+            })?;
 
         debug_assert!(op_set.validate_top_index());
 
         let doc = Automerge::from_parts(op_set, change_graph, authors, write_frontier);
 
-        if let Some(err) = mark_order_validator.take_error() {
-            Err(ReconstructError::InvalidMarkOrderDoc {
-                doc: Box::new(doc),
-                error_message: err,
-            })
-        } else {
-            Ok(doc)
+        match mark_order_validator.take_error() {
+            Some(error_message) if !allow_invalid_marks => {
+                Err(ReconstructError::InvalidMarkOrderDoc { error_message })
+            }
+            _ => Ok(doc),
         }
     }
 
@@ -377,9 +382,9 @@ impl<'a> Document<'a> {
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut mark_order = MarkOrderValidator::default();
-        let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
+        let mut change_collector = ChangeCollector::try_new(change_cols.iter(), &op_set.actors)?;
         change_collector.process_ops(&op_set, &mut mark_order)?;
-        let changes = change_collector.collect(&op_set)?.changes;
+        let changes = change_collector.collect(&op_set)?;
         if let Some(err) = mark_order.take_error() {
             return Err(ReconstructError::InvalidMarkOrderChanges {
                 changes,
@@ -410,19 +415,20 @@ pub(crate) enum ReconstructError {
     UnsortedActors(#[from] crate::actor::UnsortedActors),
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
+    #[error(transparent)]
+    InvalidColumns(#[from] crate::op_set2::op_set::ColumnValidationError),
     #[error("invalid actor id {0}")]
     InvalidActorId(usize),
     #[error("invalid column length {0:?}")]
     InvalidColumnLength(ColumnSpec),
     #[error("max_op is lower than start_op")]
     InvalidMaxOp,
+    #[error("change dep index out of range")]
+    InvalidDepIndex,
     #[error("author provided for change with non-initial sequence number: {0}")]
     AuthorOnNonInitialSeq(u64, ActorId),
     #[error("invalid mark operation order: {error_message}")]
-    InvalidMarkOrderDoc {
-        doc: Box<Automerge>,
-        error_message: String,
-    },
+    InvalidMarkOrderDoc { error_message: String },
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderChanges {
         changes: Vec<Change>,
@@ -433,7 +439,7 @@ pub(crate) enum ReconstructError {
 }
 
 pub(crate) struct MismatchedHeads {
-    changes: Vec<Change>,
+    num_changes: usize,
     expected_heads: BTreeSet<ChangeHash>,
     derived_heads: BTreeSet<ChangeHash>,
 }
@@ -441,7 +447,7 @@ pub(crate) struct MismatchedHeads {
 impl std::fmt::Debug for MismatchedHeads {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MismatchedHeads")
-            .field("changes", &self.changes.len())
+            .field("num_changes", &self.num_changes)
             .field("expected_heads", &self.expected_heads)
             .field("derived_heads", &self.derived_heads)
             .finish()

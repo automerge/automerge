@@ -1,4 +1,4 @@
-use automerge::sync::ReadMessageError;
+use automerge_sync::ReadMessageError;
 
 use crate::color_json::print_colored_json;
 
@@ -27,7 +27,7 @@ pub(crate) fn examine_sync<W: std::io::Write>(
         .read_to_end(&mut buf)
         .map_err(ExamineSyncError::ReadMessage)?;
 
-    let message = automerge::sync::Message::decode(&buf)?;
+    let message = automerge_sync::Message::decode(&buf)?;
     let json = serde_json::to_value(message).unwrap();
     if is_tty {
         print_colored_json(&json).map_err(ExamineSyncError::WriteMessage)?;

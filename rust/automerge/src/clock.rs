@@ -18,6 +18,10 @@ pub(crate) struct Clock(ActorIndexed<u32>);
 pub(crate) struct SeqClock(ActorIndexed<Option<NonZeroU32>>);
 
 impl SeqClock {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, Option<NonZeroU32>)> + '_ {
+        self.0.iter().copied().enumerate()
+    }
+
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
         self.0.remove(removal);
     }
@@ -33,6 +37,19 @@ impl SeqClock {
     /// An empty clock with a slot for every actor in `actors`.
     pub(crate) fn new(actors: &ActorTable) -> Self {
         Self(ActorIndexed::new(actors))
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.0.as_mut_slice().fill(None);
+    }
+
+    /// Panics unless `other` covers the same actors.
+    pub(crate) fn copy_from(&mut self, other: &SeqClock) {
+        self.0.as_mut_slice().copy_from_slice(&other.0);
+    }
+
+    pub(crate) fn clock_for_each_actor(&self, mut f: impl FnMut(usize) -> u32) -> Clock {
+        Clock(ActorIndexed::from_slots_of(&self.0, |actor, _| f(actor)))
     }
 
     /// An empty clock covering the same actors as `self`.
@@ -107,11 +124,6 @@ impl Clock {
         self.0.iter().copied()
     }
 
-    /// Number of actors this clock covers.
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
     /// An empty clock covering the same actors as `self`.
     pub(crate) fn empty_like(&self) -> Self {
         Self(ActorIndexed::new_like(&self.0))
@@ -167,8 +179,12 @@ impl Clock {
     ///
     /// If the `actor` index is out of bounds of the internal vector.
     #[inline]
-    fn set_counter_of(&mut self, actor: usize, counter: u32) {
+    pub(crate) fn set_counter_of(&mut self, actor: usize, counter: u32) {
         self.0.as_mut_slice()[actor] = counter;
+    }
+
+    pub(crate) fn max_op(&self, actor: usize) -> u64 {
+        self.0[actor] as u64
     }
 
     /// A clock from explicit per-actor counters, for tests which model the

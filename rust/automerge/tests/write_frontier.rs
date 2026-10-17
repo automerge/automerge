@@ -1,7 +1,7 @@
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    ActorId, Author, AutoCommit, Automerge, ObjType, PatchAction, PatchLog, ReadDoc, ScalarValue,
+    ActorId, Author, AutoCommit, Automerge, ObjType, PatchAction, ReadDoc, ScalarValue,
     TextEncoding, ROOT,
 };
 
@@ -135,8 +135,7 @@ fn mask_apply_changes() {
 fn pending_change_hides_author_entirely() {
     let (mut doc, alice, _) = two_authors();
     let unseen = automerge::ChangeHash([7; 32]);
-    doc.mask_author(alice, &[unseen], &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice, &[unseen]);
     assert!(doc.get(ROOT, "x").unwrap().is_none());
     assert!(doc.get(ROOT, "y").unwrap().is_none());
     assert_eq!(doc.get(ROOT, "z").unwrap().unwrap().0.as_i64(), Some(3));
@@ -148,8 +147,7 @@ fn pending_change_hides_author_entirely() {
 fn partially_unknown_boundary_reveals_known_history() {
     let (mut doc, alice, epoch) = two_authors();
     let unseen = automerge::ChangeHash([7; 32]);
-    doc.mask_author(alice, &[epoch[0], unseen], &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice, &[epoch[0], unseen]);
     assert_eq!(doc.get(ROOT, "x").unwrap().unwrap().0.as_i64(), Some(1));
     assert!(doc.get(ROOT, "y").unwrap().is_none());
     assert_eq!(doc.get(ROOT, "z").unwrap().unwrap().0.as_i64(), Some(3));
@@ -184,8 +182,7 @@ fn current_slow_paths_honour_mask() {
     b.commit();
     a.merge(&mut b).unwrap();
     let mut doc = Automerge::load(&a.save()).unwrap();
-    doc.mask_author(alice, &epoch, &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice, &epoch);
 
     assert_eq!(doc.text(&text).unwrap(), "bob hello");
     assert!(doc.marks(&text).unwrap().is_empty());
@@ -237,8 +234,7 @@ fn current_state_patches_honour_mask() {
     b.commit();
     a.merge(&mut b).unwrap();
     let mut doc = Automerge::load(&a.save()).unwrap();
-    doc.mask_author(alice, &epoch, &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice, &epoch);
 
     // sanity: the direct read path is masked
     assert_eq!(doc.get(ROOT, "c").unwrap().unwrap().0.as_i64(), Some(11));
@@ -979,7 +975,7 @@ fn write_frontier_preserves_pending_patch_paths_and_order() {
 }
 
 #[test]
-fn caller_owned_write_frontier_log_tracks_actor_reordering() {
+fn write_frontier_view_diff_tracks_actor_reordering() {
     let author = Author::try_from("aaaa").unwrap();
     let mut doc = Automerge::new_with_encoding(TextEncoding::UnicodeCodePoint)
         .with_author(Some(author.clone()))
@@ -988,24 +984,24 @@ fn caller_owned_write_frontier_log_tracks_actor_reordering() {
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     tx.splice_text(&text, 0, 0, "abc").unwrap();
     tx.commit();
-    doc.mask_author(author.clone(), &[], &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(author.clone(), &[]);
     let mut view = doc.hydrate(None);
-    let mut log = PatchLog::active();
-    doc.reveal_author(&author, &mut log).unwrap();
+    let before = doc.viewpoint();
+    doc.reveal_author(&author);
 
-    // The fresh write-frontier log already references actor 0x80. A subsequent
-    // transaction inserts actor 0x00 before it in the actor table. These fixed
-    // identities make the required reindexing deterministic.
+    // The view taken before the reveal already references actor 0x80. A
+    // subsequent transaction inserts actor 0x00 before it in the actor table.
+    // These fixed identities make the required reindexing deterministic.
     doc.set_author(Some(Author::try_from("bbbb").unwrap()));
     doc.set_actor(ActorId::from(vec![0x00]));
-    let mut tx = doc.transaction_log_patches(log).unwrap();
+    let mut tx = doc.transaction();
     tx.put(ROOT, "other", 1).unwrap();
-    let (_, mut log) = tx.commit();
+    tx.commit();
 
     assert_eq!(doc.text(&text).unwrap(), "abc");
     assert_eq!(doc.get(ROOT, "other").unwrap().unwrap().0, 1.into());
-    view.apply_patches(TextEncoding::UnicodeCodePoint, doc.make_patches(&mut log))
+    let patches = doc.diff(&before, doc.viewpoint());
+    view.apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
     assert_eq!(view, doc.hydrate(None));
 }
@@ -1044,7 +1040,7 @@ fn mask_tracks_the_isolated_view() {
 // documents and policies on every occurrence.
 
 #[test]
-fn set_write_frontier_log_patches_replays_to_hydrate() {
+fn set_write_frontier_view_diff_replays_to_hydrate() {
     use std::collections::HashMap;
 
     let (mut doc, alice, epoch) = two_authors();
@@ -1052,20 +1048,18 @@ fn set_write_frontier_log_patches_replays_to_hydrate() {
     doc.set_write_frontier(HashMap::from([(alice.clone(), epoch.clone())]));
 
     let mut view = doc.hydrate(None);
-    let mut log = PatchLog::active();
-    doc.set_write_frontier_log_patches(HashMap::from([(bob, Vec::new())]), &mut log)
-        .unwrap();
-    view.apply_patches(doc.text_encoding(), doc.make_patches(&mut log))
-        .unwrap();
+    let before = doc.viewpoint();
+    doc.set_write_frontier(HashMap::from([(bob, Vec::new())]));
+    let patches = doc.diff(&before, doc.viewpoint());
+    view.apply_patches(doc.text_encoding(), patches).unwrap();
     assert_eq!(view, doc.hydrate(None));
 
-    // Replacing with the empty policy is also one logged transition, and
+    // Replacing with the empty policy is also one view transition, and
     // restores full visibility.
-    let mut log = PatchLog::active();
-    doc.set_write_frontier_log_patches(HashMap::new(), &mut log)
-        .unwrap();
-    view.apply_patches(doc.text_encoding(), doc.make_patches(&mut log))
-        .unwrap();
+    let before = doc.viewpoint();
+    doc.set_write_frontier(HashMap::new());
+    let patches = doc.diff(&before, doc.viewpoint());
+    view.apply_patches(doc.text_encoding(), patches).unwrap();
     assert_eq!(view, doc.hydrate(None));
     assert!(doc.get_write_frontier().is_empty());
     assert_eq!(doc.get(ROOT, "y").unwrap().unwrap().0.as_i64(), Some(2));
@@ -1083,19 +1077,16 @@ fn load_change_chunks_applies_write_frontier() {
         bytes.extend(c.raw_bytes());
     }
     let write_frontier: HashMap<_, _> = [(alice, epoch)].into_iter().collect();
-    let mut log = PatchLog::active();
     let loaded = Automerge::load_with_options(
         &bytes,
-        automerge::LoadOptions::new()
-            .patch_log(&mut log)
-            .write_frontier(write_frontier.clone()),
+        automerge::LoadOptions::new().write_frontier(write_frontier.clone()),
     )
     .unwrap();
     assert!(loaded.get(ROOT, "y").unwrap().is_none());
     assert_eq!(loaded.keys(ROOT).count(), 2);
     assert_eq!(loaded.get_write_frontier(), write_frontier);
-    // The current-state patches logged during load must be masked too.
-    let patches = loaded.make_patches(&mut log);
+    // The initial-state patches after load must be masked too.
+    let patches = loaded.diff(&[], &loaded.get_heads());
     assert!(!patches
         .iter()
         .any(|p| matches!(&p.action, PatchAction::PutMap { key, .. } if key == "y")));
@@ -1178,8 +1169,7 @@ fn load_with_write_frontier_before_heads_hides_later_ops() {
 fn load_incremental_into_empty_doc_preserves_author() {
     let alice = Author::try_from("aaaa").unwrap();
     let mut doc = Automerge::new().with_author(Some(alice.clone()));
-    doc.mask_author(alice.clone(), &[], &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice.clone(), &[]);
 
     // A non-empty document from another author.
     let mut other = AutoCommit::new().with_author(Some(Author::try_from("bbbb").unwrap()));
@@ -1217,8 +1207,7 @@ fn load_incremental_into_empty_doc_preserves_author() {
 #[test]
 fn fork_and_fork_at_carry_write_frontier() {
     let (mut doc, alice, epoch) = two_authors();
-    doc.mask_author(alice.clone(), &epoch, &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice.clone(), &epoch);
     assert!(doc.get(ROOT, "y").unwrap().is_none());
 
     let fork = doc.fork();
@@ -1239,8 +1228,7 @@ fn fork_and_fork_at_carry_write_frontier() {
 #[test]
 fn forced_slow_hydrate_matches_current_under_mask() {
     let (mut doc, alice, epoch) = two_authors();
-    doc.mask_author(alice, &epoch, &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice, &epoch);
     assert_eq!(
         doc.hydrate(None),
         doc.read_forced_slow_hydrate(),
@@ -1278,4 +1266,121 @@ fn rich_model_replays_mark_patches() {
         }
     }
     assert_eq!(model, rich_model::RichText::from_doc(doc.document(), &text));
+}
+
+/// A hash boundary resolved during a load survives conversion to the `next`
+/// API, which frees interior hashes: the author stays masked at the boundary
+/// rather than becoming entirely hidden.
+#[test]
+fn loaded_hash_boundary_survives_into_next() {
+    use automerge::next::ReadDoc as _;
+    let alice = Author::try_from("aaaa").unwrap();
+    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    a.put(ROOT, "early", 1).unwrap();
+    a.commit();
+    let boundary = a.get_heads();
+    for i in 0..40 {
+        a.put(ROOT, format!("late{i}"), i).unwrap();
+        a.commit();
+    }
+    let saved = a.save();
+
+    let options = automerge::LoadOptions::new()
+        .write_frontier(std::collections::HashMap::from([(alice.clone(), boundary)]));
+    let mut next = Automerge::load_with_options(&saved, options)
+        .unwrap()
+        .into_next();
+    assert_eq!(next.get_write_frontier()[&alice].len(), 1);
+
+    let mut other = AutoCommit::new();
+    other.put(ROOT, "other", 1).unwrap();
+    next.apply_changes(other.get_changes(&[])).unwrap();
+
+    assert!(next.get(ROOT, "early").unwrap().is_some());
+    assert!(next.get(ROOT, "late0").unwrap().is_none());
+    assert_eq!(next.get_write_frontier()[&alice].len(), 1);
+}
+
+/// A view's cached clock is only reused by the document that made it: a fork
+/// with the same number of actors but a different table must not reuse it.
+#[test]
+fn view_from_a_fork_is_not_trusted() {
+    use automerge::next::{transaction::Transactable as _, AutoCommit as Next};
+    let mut a = Next::new();
+    a.put(ROOT, "x", 1).unwrap();
+    a.commit();
+    let mut b = a.fork();
+    a.set_actor(ActorId::from(vec![0x10]));
+    a.put(ROOT, "p", 1).unwrap();
+    a.commit();
+    b.set_actor(ActorId::from(vec![0x20]));
+    b.put(ROOT, "q", 1).unwrap();
+    b.commit();
+    let view = a.viewpoint();
+    let after = b.viewpoint();
+    assert!(matches!(
+        b.diff(&view, &after),
+        Err(automerge::AutomergeError::InvalidChangeId(_))
+    ));
+}
+
+/// A view built from heads and a write-frontier counts a boundary outside the
+/// history of its heads as pending, hiding the author entirely.
+#[test]
+fn view_new_counts_boundaries_outside_its_heads_as_pending() {
+    use automerge::next::{transaction::Transactable as _, AutoCommit as Next};
+    use automerge::Viewpoint;
+    let alice = Author::try_from("aaaa").unwrap();
+    let mut doc = Next::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "a1", 1).unwrap();
+    doc.commit();
+    let early = doc.get_heads();
+    doc.put(ROOT, "a2", 2).unwrap();
+    doc.commit();
+    let late = doc.get_heads();
+    doc.set_author(None);
+    doc.put(ROOT, "other", 3).unwrap();
+    doc.commit();
+
+    let frontier = std::collections::HashMap::from([(alice.clone(), late)]);
+    let before = Viewpoint::new(early, frontier.clone());
+    let after = Viewpoint::new(doc.get_heads(), frontier);
+    let patches = doc.diff(&before, &after).unwrap();
+    let keys: Vec<_> = patches
+        .iter()
+        .filter_map(|p| match &p.action {
+            PatchAction::PutMap { key, .. } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    // before: alice's boundary is outside `early`, so a1 was hidden too
+    assert_eq!(keys, vec!["a1", "a2", "other"]);
+}
+
+/// A masked author's new actor arriving in an apply is hidden from its first
+/// op, without a rebuild: its author is known before the ops are indexed.
+#[test]
+fn masked_authors_new_actor_is_hidden_on_arrival() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    doc.put(ROOT, "early", 1).unwrap();
+    doc.commit();
+    let boundary = doc.get_heads();
+
+    let mut other = AutoCommit::new();
+    other.put(ROOT, "other", 1).unwrap();
+    doc.merge(&mut other).unwrap();
+    doc.mask_author(alice.clone(), &boundary);
+
+    let mut device = doc.fork().with_author(Some(alice));
+    device.put(ROOT, "late", 2).unwrap();
+    device.put(ROOT, "early", 3).unwrap();
+    device.commit();
+    doc.merge(&mut device).unwrap();
+
+    assert_eq!(doc.get(ROOT, "late").unwrap(), None);
+    assert_eq!(
+        doc.get(ROOT, "early").unwrap().map(|(v, _)| v.as_i64()),
+        Some(Some(1))
+    );
 }

@@ -1,5 +1,3 @@
-use automerge as am;
-
 use crate::result::{to_result, AMresult};
 
 /// \struct AMsyncHave
@@ -7,16 +5,16 @@ use crate::result::{to_result, AMresult};
 /// \brief A summary of the changes that the sender of a synchronization
 ///        message already has.
 #[derive(Clone, Eq, PartialEq)]
-pub struct AMsyncHave(am::sync::Have);
+pub struct AMsyncHave(automerge_sync::Have);
 
 impl AMsyncHave {
-    pub fn new(have: am::sync::Have) -> Self {
+    pub fn new(have: automerge_sync::Have) -> Self {
         Self(have)
     }
 }
 
-impl AsRef<am::sync::Have> for AMsyncHave {
-    fn as_ref(&self) -> &am::sync::Have {
+impl AsRef<automerge_sync::Have> for AMsyncHave {
+    fn as_ref(&self) -> &automerge_sync::Have {
         &self.0
     }
 }

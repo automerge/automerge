@@ -16,7 +16,7 @@ An Actor is a unique id that distinguishes a single writer to a document.  It ca
 
 An Object id uniquely identifies a Map, List or Text object within a document.  It can be treated as an opaque string and can be used across documents.  This id comes as a string in the form of `{number}@{actor}` - so `"10@aabbcc"` for example.  The string `"_root"` or `"/"` can also be used to refer to the document root.  These strings are durable and can be used on any descendant or copy of the document that generated them.
 
-Heads refers to a set of hashes that uniquely identifies a point in time in a document's history.  Heads are useful for comparing documents state or retrieving past states from the document.
+Heads refers to a set of change ids that uniquely identifies a point in time in a document's history.  Like object ids they come as strings in the form `{seq}@{actor}`.  Heads are useful for comparing documents state or retrieving past states from the document.  (The change hashes for the same point, as used by the sync protocol and storage, are available via `getHeadHashes()`.)
 
 ### Automerge Scalar Types
 
@@ -243,7 +243,7 @@ Generally speaking you don't need to think about transactions when using Automer
 
 ### Viewing Old Versions of the Document
 
-All query functions can take an optional argument of `heads` which allow you to query a prior document state. Heads are a set of change hashes that uniquely identify a point in the document history.  The `getHeads()` method can retrieve these at any point.
+All query functions can take an optional argument of `heads` which allow you to query a prior document state. Heads are a set of change ids (`"seq@actor"` strings) that uniquely identify a point in the document history.  The `getHeads()` method can retrieve these at any point; if you need the change hashes instead (e.g. for the sync protocol) use `getHeadHashes()`.
 
 ```javascript
     let doc = create()

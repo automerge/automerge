@@ -2,10 +2,9 @@
 mod tests {
     use std::{borrow::Cow, fs};
 
-    use crate::{
-        patches::PatchLog, read::ReadDoc, transaction::Transactable, Automerge, ObjType, Patch,
-        PatchAction, Prop, Value,
-    };
+    use crate::{read::ReadDoc, tx::Transactable, ObjType, Patch, PatchAction, Prop, Value};
+
+    use crate::automerge::Automerge;
 
     // Patches often carry a "tagged value", which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don't care about the
@@ -199,7 +198,7 @@ mod tests {
 
     #[test]
     fn basic_test() {
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = crate::autocommit::AutoCommit::new();
         doc.put(crate::ROOT, "key", "value").unwrap();
         let map = doc.put_object(crate::ROOT, "map", ObjType::Map).unwrap();
         doc.put(&map, "nested_key", "value").unwrap();
@@ -258,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_deleted_ops_omitted() {
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = crate::autocommit::AutoCommit::new();
         doc.put(crate::ROOT, "key", "value").unwrap();
         doc.delete(crate::ROOT, "key").unwrap();
         let map = doc.put_object(crate::ROOT, "map", ObjType::Map).unwrap();
@@ -310,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_text_spliced() {
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = crate::autocommit::AutoCommit::new();
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.insert(&text, 0, "a").unwrap();
         doc.splice_text(&text, 1, 0, "bcdef").unwrap();
@@ -340,7 +339,7 @@ mod tests {
     fn test_counters() {
         let actor1 = crate::ActorId::from("aa".as_bytes());
         let actor2 = crate::ActorId::from("bb".as_bytes());
-        let mut doc = crate::AutoCommit::new().with_actor(actor2);
+        let mut doc = crate::autocommit::AutoCommit::new().with_actor(actor2);
 
         let mut doc2 = doc.fork().with_actor(actor1);
         doc2.put(crate::ROOT, "key", "someval").unwrap();
@@ -369,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_multiple_list_insertions() {
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = crate::autocommit::AutoCommit::new();
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, 1).unwrap();
@@ -400,16 +399,24 @@ mod tests {
         );
     }
 
+    fn commit_with_fixed_time(doc: &mut crate::autocommit::AutoCommit) {
+        doc.commit_with(crate::tx::CommitOptions::default().with_time(0));
+    }
+
     #[test]
     fn test_concurrent_insertions_at_same_index() {
-        let mut doc = crate::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
+        let mut doc =
+            crate::autocommit::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
+        commit_with_fixed_time(&mut doc);
 
         let mut doc2 = doc.fork().with_actor(crate::ActorId::from("bb".as_bytes()));
 
         doc.insert(&list, 0, 1).unwrap();
+        commit_with_fixed_time(&mut doc);
         doc2.insert(&list, 0, 2).unwrap();
+        commit_with_fixed_time(&mut doc2);
 
         doc.merge(&mut doc2).unwrap();
 
@@ -447,7 +454,8 @@ mod tests {
 
     #[test]
     fn test_insert_objects() {
-        let mut doc = crate::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
+        let mut doc =
+            crate::autocommit::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
 
@@ -482,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_insert_and_update() {
-        let mut doc = crate::AutoCommit::new();
+        let mut doc = crate::autocommit::AutoCommit::new();
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
 
@@ -522,16 +530,14 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut patch_log = PatchLog::active();
-        let _doc = Automerge::load_with_options(
+        let doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
-            crate::LoadOptions::new()
+            crate::automerge::LoadOptions::new()
                 .on_partial_load(crate::OnPartialLoad::Error)
-                .verification_mode(crate::VerificationMode::Check)
-                .patch_log(&mut patch_log),
+                .verification_mode(crate::VerificationMode::Check),
         )
         .unwrap();
-        let p = _doc.make_patches(&mut patch_log);
+        let p = doc.current_state();
 
         assert_eq!(
             Patches::from(p),

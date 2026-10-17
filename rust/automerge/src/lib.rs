@@ -8,17 +8,17 @@
 //! the same data structure.
 //!
 //! In addition to the core data structure (which we generally refer to as a
-//! "document"), we also provide an implementation of a sync protocol (in
-//! [`crate::sync`]) which can be used over any reliable in-order transport; and
+//! "document"), we also provide an implementation of a sync protocol (in the
+//! `automerge-sync` crate) which can be used over any reliable in-order transport; and
 //! an efficient binary storage format.
 //!
 //! This crate is organised around two representations of a document -
 //! [`Automerge`] and [`AutoCommit`]. The difference between the two is that
 //! [`AutoCommit`] manages transactions for you. Both of these representations
-//! implement [`ReadDoc`] for reading values from a document and provide access
-//! to a [`sync::SyncDoc`] implementation (`Automerge` implements it directly
-//! whilst [`AutoCommit`] provides [`AutoCommit::sync`]) for taking part in the
-//! sync protocol. [`AutoCommit`] directly implements
+//! implement [`ReadDoc`] for reading values from a document, and can take part
+//! in the sync protocol (`Automerge` implements the `automerge-sync` crate's
+//! `SyncDoc` directly, whilst [`AutoCommit`] gets `sync()` from its
+//! `AutoCommitSync` trait). [`AutoCommit`] directly implements
 //! [`transaction::Transactable`] for making changes to a document, whilst
 //! [`Automerge`] requires you to explicitly create a
 //! [`transaction::Transaction`].
@@ -90,19 +90,27 @@
 //!
 //! ## Sync Protocol
 //!
-//! See the [`sync`] module.
+//! See the `automerge-sync` crate.
 //!
 //! ## Patches, maintaining materialized state
 //!
 //! Often you will have some state which represents the "current" state of the document. E.g. some
 //! text in a UI which is a view of a text object in the document. Rather than re-rendering this
-//! text every single time a change comes in you can use a [`PatchLog`] to capture incremental
-//! changes made to the document and then use [`Automerge::make_patches()`] to get a set of patches
-//! to apply to the materialized state.
+//! text every single time a change comes in you can ask for the [`Patch`]es which take the
+//! materialized state from one point in the document's history to another:
+//! [`Automerge::diff()`] between any two sets of heads, or [`AutoCommit::diff_incremental()`]
+//! for everything since the last time you asked. Patches describe the net change between the
+//! two states.
 //!
-//! Many of the methods on [`Automerge`], [`crate::sync::SyncDoc`] and
-//! [`crate::transaction::Transactable`] have a `*_log_patches()` variant which allow you to pass in
-//! a [`PatchLog`] to collect these incremental changes.
+//! ## The `next` API
+//!
+//! The types above can name any point in a document's history by [`ChangeHash`].
+//! [`next::Automerge`] and [`next::AutoCommit`] do not keep every change hash, which makes
+//! them smaller and faster to load. They name history by [`ChangeId`] (an actor and sequence
+//! number) instead, return errors where an operation needs history the document has not kept,
+//! and save in the compact bundle format by default. Convert between the two with
+//! [`Automerge::into_next()`] and [`next::Automerge::into_audit()`] (or the [`AutoCommit`]
+//! equivalents); `into_audit` costs a pass over the whole history.
 //!
 //! ## Serde serialization
 //!
@@ -218,7 +226,6 @@
     dead_code,
     improper_ctypes,
     non_shorthand_field_patterns,
-    no_mangle_generic_items,
     overflowing_literals,
     path_statements,
     patterns_in_fns_without_body,
@@ -235,8 +242,7 @@
 macro_rules! log {
      ( $( $t:tt )* ) => {
           {
-            use $crate::__log;
-            __log!( $( $t )* );
+            $crate::__log!( $( $t )* );
           }
      }
  }
@@ -263,10 +269,11 @@ mod actor;
 pub mod anonymize;
 mod author;
 mod autocommit;
-mod automerge;
+pub(crate) mod automerge;
 mod autoserde;
 mod change;
-mod change_graph;
+pub(crate) mod change_graph;
+mod change_id;
 mod change_queue;
 mod clock;
 mod columnar;
@@ -274,6 +281,7 @@ mod convert;
 mod cursor;
 pub mod error;
 mod exid;
+pub(crate) mod hash_retention;
 pub mod hydrate;
 mod indexed_cache;
 pub mod iter;
@@ -286,35 +294,50 @@ pub mod patches;
 mod read;
 mod sequence_tree;
 mod storage;
-pub mod sync;
 mod text_diff;
 mod text_value;
-pub mod transaction;
+pub(crate) mod tx;
+/// Transactions: groups of operations committed as a single change.
+pub mod transaction {
+    pub use crate::audit::transaction::{
+        BlockOrText, Failure, OwnedTransaction, Result, Success, Transaction,
+    };
+    pub use crate::audit::Transactable;
+    pub use crate::tx::CommitOptions;
+}
+mod audit;
+pub mod next;
 mod types;
 mod value;
 mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
-pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
+pub use crate::audit::{
+    AutoCommit, Automerge, HeadsOrViewpoint, LoadOptions, ReadDoc, SaveOptions,
+};
+pub use crate::automerge::view::Viewpoint;
+pub use crate::automerge::{OnPartialLoad, StringMigration};
+#[doc(hidden)]
+pub use audit::Fragment;
 pub use author::Author;
-pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
-#[doc(hidden)]
-pub use change_graph::Fragment;
+pub use change_id::{ChangeId, ParseChangeIdError};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
+pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
-pub use error::{AutomergeError, PatchLogMismatch};
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};
-pub use patches::{Patch, PatchAction, PatchLog};
-pub use read::{ReadDoc, Stats};
+pub use patches::{Patch, PatchAction};
+pub use read::Stats;
 pub use sequence_tree::SequenceTree;
-pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
+pub use storage::{
+    AuditedMember, Bundle, BundleChange, InvalidBundle, MalformedBundle, VerificationMode,
+};
 pub use text_value::ConcreteTextValue;
-pub use transaction::BlockOrText;
+pub use tx::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 

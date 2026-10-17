@@ -12,6 +12,34 @@ use std::sync::Arc;
 use crate::iter::tools::{BoolColumnSkipper, Shiftable, Skipper};
 
 impl Shiftable for VisIter<'_> {
+    fn get_pos(&self) -> usize {
+        match self {
+            Self::Indexed(index) => index.get_pos(),
+            Self::Scan(scan) => scan.get_pos(),
+        }
+    }
+
+    fn get_max(&self) -> usize {
+        match self {
+            Self::Indexed(index) => index.get_max(),
+            Self::Scan(scan) => scan.get_max(),
+        }
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        match self {
+            Self::Indexed(index) => index.set_max(pos),
+            Self::Scan(scan) => scan.set_max(pos),
+        }
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        match self {
+            Self::Indexed(index) => index.shift(range),
+            Self::Scan(scan) => scan.shift(range),
+        }
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         match self {
             Self::Indexed(index) => index.shift_next(range),
@@ -21,11 +49,37 @@ impl Shiftable for VisIter<'_> {
 }
 
 impl Shiftable for ScanVisIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.id.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.id.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.id.set_max(pos);
+        self.action.set_max(pos);
+        self.succ.set_max(pos);
+    }
+
+    // items are skip counts, so the default item-walking shift is wrong
+    fn shift(&mut self, range: Range<usize>) {
+        self.id.shift(range.clone());
+        self.action.shift(range.clone());
+        self.succ.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
-        let id = self.id.shift_next(range.clone());
-        let action = self.action.shift_next(range.clone());
-        let succ = self.succ.shift_next(range);
-        let vis = Self::is_visible(id?, action?, succ?, &self.clock);
+        let id = self.id.shift_next(range.clone())?;
+        let action = self.action.shift_next(range.clone())?;
+        let vis = if Self::hidden_whatever_succ(id, action, &self.clock) {
+            self.succ.shift_skip_next(range)?;
+            false
+        } else {
+            let succ = self.succ.shift_next(range)?;
+            Self::is_visible_with_succ(succ, &self.clock)
+        };
         if vis {
             Some(0)
         } else {
@@ -36,6 +90,22 @@ impl Shiftable for ScanVisIter<'_> {
 }
 
 impl Shiftable for IndexedVisIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.iter.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.iter.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         self.iter.shift_next(range)
     }
@@ -87,7 +157,7 @@ impl<'a> IndexedVisIter<'a> {
     fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
         let iter = op_set.cols.index.visible.iter_range(range.clone());
         Self {
-            iter: BoolColumnSkipper::new(iter, range),
+            iter: BoolColumnSkipper::new(iter),
         }
     }
 }
@@ -121,22 +191,27 @@ impl<'a> ScanVisIter<'a> {
         }
     }
 
-    fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
-        let is_inc = action == Action::Increment;
-        let mut deleted = false;
+    fn hidden_whatever_succ(id: OpId, action: Action, clock: &Clock) -> bool {
+        action == Action::Increment || !clock.covers(&id)
+    }
+
+    fn is_visible_with_succ(succ: SuccCursors<'_>, clock: &Clock) -> bool {
         for (id, inc) in succ.with_inc() {
             if inc.is_none() && clock.covers(&id) {
-                deleted = true;
+                return false;
             }
         }
-        !(deleted || !clock.covers(&id) || is_inc)
+        true
     }
 
     fn next_visible(&mut self) -> Option<bool> {
         let id = self.id.next()?;
         let action = self.action.next()?;
-        let succ = self.succ.next()?;
-        Some(Self::is_visible(id, action, succ, &self.clock))
+        if Self::hidden_whatever_succ(id, action, &self.clock) {
+            self.succ.skip_next()?;
+            return Some(false);
+        }
+        Some(!self.succ.next_deleted_in(&self.clock)?)
     }
 }
 

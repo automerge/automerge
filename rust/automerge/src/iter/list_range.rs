@@ -5,7 +5,7 @@ use crate::iter::Diff;
 use crate::op_set2::op_set::{ActionIter, InsertAcc, OpIdIter, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::op_set2::OpSet;
-use crate::patches::Events;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, OpId, TextEncoding};
 
 use std::fmt::Debug;
@@ -37,67 +37,129 @@ impl ListRangeItem<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ListDiff<'a>(ListDiffInner<'a>);
-
-#[derive(Clone, Debug)]
-enum ListDiffInner<'a> {
-    Empty,
-    Reading {
-        op_set: &'a OpSet,
-        iter: Box<Unshift<DiffIter<'a, ListIter<'a>>>>,
-        index: usize,
-        clock: ClockRange<'a>,
-    },
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ListDiff<'a> {
+    op_set: Option<&'a OpSet>,
+    iter: Unshift<DiffIter<'a, ListIter<'a>>>,
+    id: OpIdIter<'a>,
+    id_pos: usize,
+    value: ValueIter<'a>,
+    value_pos: usize,
+    index: usize,
+    clock: ClockRange<'a>,
 }
 
 impl<'a> ListDiff<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange<'a>) -> Self {
-        let inserts = op_set.insert_acc_range(&range);
-        let action = op_set.action_iter_range(&range);
-        let value = op_set.value_iter_range(&range);
-        let id = op_set.id_iter_range(&range);
-
-        let list_iter = ListIter {
-            action,
-            inserts,
-            value,
-            id,
-        };
-
-        let skip = DiffIter::new(op_set, list_iter, clock.clone(), range);
-        let iter = Box::new(Unshift::new(skip));
-
-        Self(ListDiffInner::Reading {
-            op_set,
-            iter,
-            clock,
-            index: 0,
-        })
+        Self::new_with_index(op_set, range, clock, 0)
     }
 
-    #[inline]
-    const fn empty() -> Self {
-        Self(ListDiffInner::Empty)
+    pub(crate) fn new_with_index(
+        op_set: &'a OpSet,
+        range: Range<usize>,
+        clock: ClockRange<'a>,
+        index: usize,
+    ) -> Self {
+        let inserts = op_set.insert_acc_range(&range);
+        let action = op_set.action_iter_range(&range);
+        let id = op_set.id_iter_range(&range);
+        let id_pos = range.start;
+        let value = op_set.value_iter_range(&range);
+        let value_pos = range.start;
+
+        let list_iter = ListIter { action, inserts };
+
+        let skip = DiffIter::new(op_set, list_iter, clock.clone(), range);
+        let iter = Unshift::new(skip);
+
+        Self {
+            op_set: Some(op_set),
+            iter,
+            id,
+            id_pos,
+            value,
+            value_pos,
+            clock,
+            index,
+        }
+    }
+
+    fn materialize(&mut self, pending: PendingListDiffItem) -> ListDiffItem<'a> {
+        let PendingListDiffItem {
+            mut diff,
+            list,
+            mut state,
+            index,
+        } = pending;
+        if state.expose && diff == Diff::Same {
+            diff = Diff::Add;
+        }
+        let List { action, pos, .. } = list;
+        let id = self.id_at(pos);
+        if diff == Diff::Add && self.clock.predates(&id) {
+            state.expose = true;
+        }
+        let (value, inc) = self.value_at(pos, action);
+        ListDiffItem {
+            diff,
+            value,
+            inc,
+            index,
+            update: diff == Diff::Add && state.num_old > 0,
+            conflict: state.conflict,
+            expose: state.expose,
+            id,
+        }
+    }
+
+    fn id_at(&mut self, pos: usize) -> OpId {
+        let skip = pos.saturating_sub(self.id_pos);
+        let id = self.id.nth(skip).unwrap_or(crate::types::ROOT);
+        self.id_pos = pos + 1;
+        id
+    }
+
+    fn value_at(&mut self, pos: usize, action: Action) -> (ValueRef<'a>, i64) {
+        let Some(op_set) = self.op_set else {
+            return (ValueRef::Scalar(ScalarValue::Null), 0);
+        };
+        let skip = pos.saturating_sub(self.value_pos);
+        let value = self.value.nth(skip).unwrap_or(ScalarValue::Null);
+        self.value_pos = pos + 1;
+        match action {
+            Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable => {
+                (ValueRef::from_action_value(action, ScalarValue::Null), 0)
+            }
+            Action::Delete => (ValueRef::Scalar(ScalarValue::Null), 0),
+            _ => {
+                if let ScalarValue::Counter(c) = &value {
+                    let (inc1, inc2) = op_set.get_increment_diff_at_pos(pos, &self.clock);
+                    (
+                        ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc2)),
+                        inc2 - inc1,
+                    )
+                } else {
+                    (ValueRef::from_action_value(action, value), 0)
+                }
+            }
+        }
+    }
+
+    /// Forward only; `index` is the list index at `range.start`.
+    pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
+        self.iter.shift(range.clone());
+        if let Some(op_set) = self.op_set {
+            self.id = op_set.id_iter_range(&range);
+            self.id_pos = range.start;
+            self.value = op_set.value_iter_range(&range);
+            self.value_pos = range.start;
+        }
+        self.index = index;
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.shift(range);
+        self.shift_with_index(range, 0);
         self.next()
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        if let ListDiffInner::Reading { iter, index, .. } = &mut self.0 {
-            iter.shift(range);
-            *index = 0;
-        }
-    }
-
-    fn op_set(&self) -> Option<&'a OpSet> {
-        match self.0 {
-            ListDiffInner::Empty => None,
-            ListDiffInner::Reading { op_set, .. } => Some(op_set),
-        }
     }
 }
 
@@ -107,51 +169,26 @@ struct ListState {
     num_new: usize,
     conflict: bool,
     expose: bool,
-    inc: i64,
 }
-impl ListState {
-    fn diff_item<'a>(
-        &self,
-        id: OpId,
-        value: ValueRef<'a>,
-        index: usize,
-        mut diff: Diff,
-    ) -> ListDiffItem<'a> {
-        if self.expose && diff == Diff::Same {
-            diff = Diff::Add;
-        }
-        let update = diff == Diff::Add && self.num_old > 0;
-        ListDiffItem {
-            diff,
-            value,
-            inc: self.inc,
-            index,
-            update,
-            conflict: self.conflict,
-            expose: self.expose,
-            id,
-        }
-    }
+
+#[derive(Debug, Clone)]
+struct PendingListDiffItem {
+    diff: Diff,
+    list: List,
+    state: ListState,
+    index: usize,
 }
 
 impl<'a> Iterator for ListDiff<'a> {
     type Item = ListDiffItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Self(ListDiffInner::Reading {
-            op_set,
-            iter,
-            index,
-            clock,
-        }) = self
-        else {
-            return None;
-        };
+        self.op_set?;
         let mut last_is_same = false;
-        let mut last_visible: Option<Self::Item> = None;
+        let mut last_visible: Option<PendingListDiffItem> = None;
         let mut state = ListState::default();
 
-        while let Some((diff, list)) = iter.next() {
+        while let Some((diff, list)) = self.iter.next() {
             if list.action == Action::Mark {
                 continue;
             }
@@ -169,54 +206,56 @@ impl<'a> Iterator for ListDiff<'a> {
                 Diff::Add => {
                     last_is_same = false;
                     state.num_new += 1;
-                    state.expose = clock.predates(&list.id);
+                    state.expose = false;
                 }
             }
-
-            let value = if let ScalarValue::Counter(c) = &list.value {
-                let (inc1, inc2) = op_set.get_increment_diff_at_pos(list.pos, clock);
-                state.inc = inc2 - inc1;
-                ValueRef::from_action_value(list.action, ScalarValue::Counter(*c + inc2))
-            } else {
-                state.inc = 0;
-                ValueRef::from_action_value(list.action, list.value.clone())
-            };
 
             let old_conflict = diff == Diff::Same && state.num_old > 1;
             state.conflict = state.num_new > 1 && !old_conflict;
 
-            if let Some((next_diff, next_list)) = iter.peek() {
+            if let Some((next_diff, next_list)) = self.iter.peek() {
                 if next_list.inserts == list.inserts {
                     if diff.is_visible() && next_diff.is_del() {
-                        last_visible = Some(state.diff_item(list.id, value, *index, diff));
+                        last_visible = Some(PendingListDiffItem {
+                            diff,
+                            list,
+                            state: state.clone(),
+                            index: self.index,
+                        });
                     }
                     continue;
                 }
             }
 
-            if let Some(mut last) = last_visible {
+            let item = if let Some(mut last) = last_visible {
                 let newly_visible = last.diff == Diff::Same;
-                last.update(state.expose || newly_visible);
+                last.state.expose |= state.expose || newly_visible;
+                if last.state.expose && last.diff == Diff::Same {
+                    last.diff = Diff::Add;
+                }
                 // Deleting the winning value exposes `last`, so its put
                 // patch must carry the remaining register's conflict state.
-                last.conflict = state.num_new > 1;
-                if last.diff.is_visible() {
-                    *index += 1;
-                }
-                return Some(last);
+                last.state.conflict = state.num_new > 1;
+                last.state.num_old = state.num_old;
+                self.materialize(last)
             } else {
-                let mut item = state.diff_item(list.id, value, *index, diff);
-                if diff == Diff::Same && state.num_old > 1 && state.num_new == 1 {
-                    // The surviving value is unchanged, but removing the other
-                    // visible values clears its conflict flag. Emit a Put and,
-                    // for objects, expose children which are unchanged too.
-                    item.update(true);
+                let mut pending = PendingListDiffItem {
+                    diff,
+                    list,
+                    state,
+                    index: self.index,
+                };
+                if diff == Diff::Same && pending.state.num_old > 1 && pending.state.num_new == 1 {
+                    // the survivor is unchanged but loses its conflict flag
+                    pending.state.expose = true;
+                    pending.diff = Diff::Add;
                 }
-                if item.diff.is_visible() {
-                    *index += 1;
-                }
-                return Some(item);
+                self.materialize(pending)
+            };
+            if item.diff.is_visible() {
+                self.index += 1;
             }
+            return Some(item);
         }
         None
     }
@@ -244,7 +283,7 @@ impl<'a> ListDiffItem<'a> {
             maybe_exid,
         }
     }
-    pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchAccumulator, encoding: TextEncoding) {
         let Self {
             diff,
             update,
@@ -264,6 +303,11 @@ impl<'a> ListDiffItem<'a> {
                     log.insert_and_maybe_expose(obj, index, value, id, conflict, expose);
                 }
             }
+            // a counter both incremented and newly conflicted is put whole:
+            // the conflict flag only travels on a put
+            Diff::Same if inc != 0 && conflict => {
+                log.put_seq(obj, index, value.hydrate(encoding), id, true, false)
+            }
             Diff::Same => {
                 if inc != 0 {
                     log.increment_seq(obj, index, inc, id);
@@ -274,92 +318,82 @@ impl<'a> ListDiffItem<'a> {
             Diff::Del => log.delete_seq(obj, index, 1),
         }
     }
-
-    fn update(&mut self, expose: bool) {
-        self.expose |= expose;
-        if self.expose && self.diff == Diff::Same {
-            self.diff = Diff::Add;
-        }
-        self.update = true;
-    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct ListRange<'a> {
     iter: ListDiff<'a>,
     range: Range<usize>,
 }
 
-impl<'a> ListRange<'a> {
-    /// A range over no document; yields nothing.
-    #[inline]
-    pub(crate) const fn empty() -> Self {
-        Self {
-            iter: ListDiff::empty(),
-            range: 0..0,
-        }
+impl ListRange<'_> {
+    pub(crate) fn empty() -> Self {
+        Self::default()
     }
 }
 
 #[derive(Clone, Default, Debug)]
 struct ListIter<'a> {
-    id: OpIdIter<'a>,
     inserts: InsertAcc<'a>,
     action: ActionIter<'a>,
-    value: ValueIter<'a>,
 }
 
 impl Shiftable for ListIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.action.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.action.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.action.set_max(pos);
+        self.inserts.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let id = self.id.shift_next(range.clone());
         let action = self.action.shift_next(range.clone());
-        let value = self.value.shift_next(range.clone());
-        let inserts = self.inserts.shift_next(range)?.total();
-        let pos = self.id.pos() - 1;
-        Some(List::new(inserts, action?, value?, id?, pos))
+        let inserts = self.inserts.shift_next(range);
+
+        let inserts = inserts?.total();
+        let pos = self.action.pos() - 1;
+        Some(List::new(inserts, action?, pos))
     }
 }
 
 #[derive(Clone, Debug)]
-struct List<'a> {
+struct List {
     inserts: usize,
     action: Action,
-    value: ScalarValue<'a>,
-    id: OpId,
     pos: usize,
 }
 
-impl<'a> List<'a> {
-    fn new(inserts: usize, action: Action, value: ScalarValue<'a>, id: OpId, pos: usize) -> Self {
+impl List {
+    fn new(inserts: usize, action: Action, pos: usize) -> Self {
         Self {
             inserts,
             action,
-            value,
-            id,
             pos,
         }
     }
 }
 
-impl<'a> Iterator for ListIter<'a> {
-    type Item = List<'a>;
+impl Iterator for ListIter<'_> {
+    type Item = List;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.id.next()?;
         let inserts = self.inserts.next()?.total();
         let action = self.action.next()?;
-        let value = self.value.next()?;
-        let pos = self.id.pos() - 1;
-        Some(List::new(inserts, action, value, id, pos))
+        let pos = self.action.pos() - 1;
+        Some(List::new(inserts, action, pos))
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let id = self.id.nth(n)?;
         let inserts = self.inserts.nth(n)?.total();
         let action = self.action.nth(n)?;
-        let value = self.value.nth(n)?;
-        let pos = self.id.pos() - 1;
-        Some(List::new(inserts, action, value, id, pos))
+        let pos = self.action.pos() - 1;
+        Some(List::new(inserts, action, pos))
     }
 }
 
@@ -379,8 +413,7 @@ impl<'a> ListRange<'a> {
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.iter.shift(range);
-        self.next()
+        Some(self.iter.shift_next(range)?.export(self.iter.op_set?))
     }
 }
 
@@ -393,7 +426,7 @@ impl<'a> Iterator for ListRange<'a> {
             if !self.range.contains(&item.index) {
                 continue;
             }
-            return Some(item.export(self.iter.op_set()?));
+            return Some(item.export(self.iter.op_set?));
         }
     }
 }
@@ -416,10 +449,12 @@ fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::automerge::Automerge;
     use crate::marks::{ExpandMark, Mark};
-    use crate::transaction::Transactable;
+    use crate::read::ReadDoc;
+    use crate::tx::Transactable;
     use crate::types;
-    use crate::{Automerge, ObjType, ReadDoc, ROOT};
+    use crate::{ObjType, ROOT};
 
     #[test]
     fn list_range_bounds() {
@@ -449,6 +484,7 @@ mod tests {
 
     #[test]
     fn list_range_conflict() {
+        // pinned time: a fragment-head commit would free hashes `merge` needs
         let actor1 = "aaaaaaaa".try_into().unwrap();
         let actor2 = "bbbbbbbb".try_into().unwrap();
         let mut doc1 = Automerge::new().with_actor(actor1);
@@ -459,17 +495,17 @@ mod tests {
             .map(types::ScalarValue::Int)
             .collect::<Vec<_>>();
         tx1.splice(&list, 0, 0, values.clone()).unwrap();
-        tx1.commit();
+        tx1.commit_with(crate::tx::CommitOptions::default().with_time(0));
 
         let mut doc2 = doc1.fork().with_actor(actor2);
 
         let mut tx2 = doc2.transaction();
         tx2.put(&list, 3, 11).unwrap();
-        tx2.commit();
+        tx2.commit_with(crate::tx::CommitOptions::default().with_time(0));
 
         let mut tx1 = doc1.transaction();
         tx1.put(&list, 3, 10).unwrap();
-        tx1.commit();
+        tx1.commit_with(crate::tx::CommitOptions::default().with_time(0));
 
         doc2.merge(&mut doc1).unwrap();
 

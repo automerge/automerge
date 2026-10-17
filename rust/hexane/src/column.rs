@@ -6,7 +6,7 @@ use std::ops::{AddAssign, Range, SubAssign};
 
 use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::edit::Edit;
-use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::encoding::{ColumnEncoding, EncoderApi, RunDecoder};
 use crate::index::ColumnIndex;
 use crate::PackError;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, LoadOpts, MaybeFill, Run};
@@ -382,6 +382,22 @@ impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
     }
 }
 
+impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
+    /// Move to the next slab; false at the end of the column.  Kept out of
+    /// line so `next`, which runs per item, stays small enough to inline.
+    #[inline(never)]
+    fn next_slab(&mut self) -> bool {
+        self.slab_idx += 1;
+        if self.slab_idx >= self.slabs.len() {
+            self.items_left = 0;
+            return false;
+        }
+        self.slab_remaining = self.slabs[self.slab_idx].len;
+        self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
+        true
+    }
+}
+
 impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     type Item = T::Get<'a>;
 
@@ -397,13 +413,9 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
                 self.pos += 1;
                 return Some(v);
             }
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                self.items_left = 0;
+            if !self.next_slab() {
                 return None;
             }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
         }
     }
 
@@ -659,11 +671,16 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 
 // ── copy_ranges support ─────────────────────────────────────────────────────
 
+/// Below this many source slabs, inverting never pays.
+const INVERT_MIN_SLABS: usize = 8;
+
 /// Execution strategy for `copy_ranges`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CopyStrategy {
     Direct,
     Invert,
+    /// All of a small source into an empty destination: move it in.
+    Take,
 }
 
 /// Safety factor favouring Direct in [`Column::copy_strategy`].  The
@@ -766,6 +783,310 @@ pub(crate) fn normalize_splices(
         }
     }
     out
+}
+
+/// The result of copying `splices` into `cols[0]` from `cols[1..]`, as
+/// pieces in order: `(column, rows)`.
+///
+/// # Panics
+///
+/// As [`Column::copy_many_ranges`].
+pub(crate) fn pieces<L: Len>(
+    cols: &[L],
+    splices: impl IntoIterator<Item = (usize, Splice)>,
+) -> Vec<(usize, Range<usize>)> {
+    let mut pieces = Vec::new();
+    let mut at = 0;
+    let mut src_at = vec![0usize; cols.len()];
+    let dest_len = cols[0].length();
+    for (s, sp) in splices {
+        assert!(
+            sp.pos >= at,
+            "destination regions must be ascending and non-overlapping"
+        );
+        assert!(sp.pos + sp.delete <= dest_len, "splice out of bounds");
+        let c = s + 1;
+        assert!(
+            sp.range.start >= src_at[c],
+            "src ranges must be ascending and non-overlapping"
+        );
+        src_at[c] = src_at[c].max(sp.range.end);
+        pieces.push((0, at..sp.pos));
+        at = sp.pos + sp.delete;
+        let len = cols[c].length();
+        pieces.push((c, sp.range.start.min(len)..sp.range.end.min(len)));
+    }
+    pieces.push((0, at..dest_len));
+    pieces.retain(|(_, r)| !r.is_empty());
+    pieces
+}
+
+/// A column's length, for [`pieces`].
+pub(crate) trait Len {
+    fn length(&self) -> usize;
+}
+
+impl<T, C, WF, Idx> Len for Column<T, C, WF, Idx>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    WF: WeightFn<T, C>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    fn length(&self) -> usize {
+        self.len()
+    }
+}
+
+/// Builds a [`Column`] value by value, keeping each slab's index weight
+/// as it goes, so [`into_column`](Self::into_column) neither re-encodes
+/// nor re-decodes anything.
+pub struct ColumnEncoder<'a, T: ColumnValueRef, C: Codec = Leb128, WF: WeightFn<T, C> = LenWeight> {
+    enc: EncoderOf<'a, T, C>,
+    /// one per slab rollover has completed
+    weights: Vec<WF::Weight>,
+    /// of the slab being filled
+    current: WF::Weight,
+    max_segments: usize,
+}
+
+impl<'a, T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> Default for ColumnEncoder<'a, T, C, WF> {
+    fn default() -> Self {
+        Self::with_max_segments(DEFAULT_MAX_SEG)
+    }
+}
+
+impl<'a, T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> ColumnEncoder<'a, T, C, WF> {
+    /// An encoder whose column's slabs hold up to `max_segments` segments.
+    pub fn with_max_segments(max_segments: usize) -> Self {
+        Self {
+            enc: T::Encoding::<C>::encoder().with_max_segments(max_segments),
+            weights: Vec::new(),
+            current: WF::Weight::default(),
+            max_segments,
+        }
+    }
+
+    /// Items appended so far.
+    pub fn len(&self) -> usize {
+        self.enc.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.enc.is_empty()
+    }
+
+    pub fn append(&mut self, value: T::Get<'a>) {
+        self.append_n(value, 1);
+    }
+
+    /// Append `n` copies of `value`.
+    pub fn append_n(&mut self, value: T::Get<'a>, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let cut = self.enc.slabs_cut();
+        self.enc.append_n(value, n);
+        self.accumulate(cut, n, value);
+    }
+
+    /// Append `n` copies of an owned `value`.
+    pub fn append_n_owned(&mut self, value: T, n: usize)
+    where
+        T: AsColumnRef<T>,
+    {
+        if n == 0 {
+            return;
+        }
+        let cut = self.enc.slabs_cut();
+        self.enc.append_n_owned(value.clone(), n);
+        self.accumulate(cut, n, value.as_column_ref());
+    }
+
+    fn accumulate(&mut self, cut: usize, n: usize, value: T::Get<'_>) {
+        // rollover only ever cuts before an append, so everything counted
+        // so far belongs to the slab it completed
+        if self.enc.slabs_cut() > cut {
+            self.weights.push(std::mem::take(&mut self.current));
+        }
+        WF::accumulate_run(&mut self.current, n, value).expect("an encodable value has a weight");
+    }
+
+    /// The column, its index built from the weights already kept.
+    pub fn into_column<Idx: ColumnIndex<WF::Weight>>(self) -> Column<T, C, WF, Idx> {
+        let max = self.max_segments;
+        let (slabs, weights) = self.into_parts();
+        if slabs.is_empty() {
+            return Column::with_max_segments(max);
+        }
+        Column::from_slabs_weighted(slabs, weights, max)
+    }
+
+    /// The encoded slabs and their weights.
+    pub(crate) fn into_parts(self) -> (Slabs<T, C>, Vec<WF::Weight>) {
+        let max = self.max_segments;
+        let mut weights = self.weights;
+        let slabs = self.enc.into_slabs();
+        if slabs.len() > weights.len() {
+            weights.push(self.current);
+        }
+        debug_assert_eq!(slabs.len(), weights.len(), "a weight per slab");
+        let mut out = Vec::with_capacity(slabs.len());
+        let mut out_weights = Vec::with_capacity(slabs.len());
+        for (s, w) in slabs.into_iter().zip(weights) {
+            push_joined::<T, C, WF>(&mut out, &mut out_weights, s, w, max);
+        }
+        (out, out_weights)
+    }
+}
+
+type Slabs<T, C> = Vec<Slab<TailOf<T, C>>>;
+pub(crate) type Parts<T, C, W> = Vec<Part<Slab<TailOf<T, C>>, W>>;
+
+/// A slab of the column being assembled: one already encoded, with its
+/// weight, or slab `.1` of column `.0`, moved in only once the walk is
+/// done.
+pub(crate) enum Part<S, W> {
+    Own(S, W),
+    Moved(usize, usize),
+}
+
+type EncoderOf<'a, T, C> = <<T as ColumnValueRef>::Encoding<C> as ColumnEncoding>::Encoder<'a>;
+
+/// A column built front to back from other columns' rows: slabs a range
+/// covers whole are moved, everything else goes through one encoder.
+pub(crate) struct SlabAssembly<'a, T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> {
+    parts: Parts<T, C, WF::Weight>,
+    enc: ColumnEncoder<'a, T, C, WF>,
+    max_segments: usize,
+}
+
+impl<'a, T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> SlabAssembly<'a, T, C, WF>
+where
+    for<'b> T::Get<'b>: AsColumnRef<T>,
+{
+    pub(crate) fn new(max_segments: usize) -> Self {
+        Self {
+            parts: Vec::new(),
+            enc: ColumnEncoder::with_max_segments(max_segments),
+            max_segments,
+        }
+    }
+
+    /// Append rows `range` of column `id`, read through `runs`, which
+    /// only ever moves forward.
+    pub(crate) fn push<Idx: ColumnIndex<WF::Weight>>(
+        &mut self,
+        id: usize,
+        col: &'a Column<T, C, WF, Idx>,
+        runs: &mut Runs<'a, T, C>,
+        range: Range<usize>,
+        movable: bool,
+    ) {
+        use crate::shift::Shiftable;
+        let mut pos = range.start;
+        while pos < range.end {
+            let (si, off) = col.index.find_slab(pos);
+            let slab_end = pos - off + col.slabs[si].len;
+            let end = slab_end.min(range.end);
+            if movable && off == 0 && end == slab_end {
+                self.flush();
+                self.parts.push(Part::Moved(id, si));
+            } else {
+                runs.shift(pos..end);
+                for run in runs.by_ref() {
+                    self.enc.append_n(run.value, run.count);
+                }
+            }
+            pos = end;
+        }
+    }
+
+    pub(crate) fn push_owned(&mut self, value: T, n: usize)
+    where
+        T: AsColumnRef<T>,
+    {
+        self.enc.append_n_owned(value, n);
+    }
+
+    fn flush(&mut self) {
+        if self.enc.is_empty() {
+            return;
+        }
+        let fresh = ColumnEncoder::with_max_segments(self.max_segments);
+        let (slabs, weights) = std::mem::replace(&mut self.enc, fresh).into_parts();
+        self.parts
+            .extend(slabs.into_iter().zip(weights).map(|(s, w)| Part::Own(s, w)));
+    }
+
+    /// The assembled slabs, with no borrow of the columns left.
+    pub(crate) fn into_parts(mut self) -> Parts<T, C, WF::Weight> {
+        self.flush();
+        self.parts
+    }
+}
+
+/// Build the column `parts` describe, taking moved slabs out of `cols`.
+/// Moved slabs keep the weights their column's index already holds.
+pub(crate) fn assemble<T, C, WF, Idx>(
+    parts: Parts<T, C, WF::Weight>,
+    cols: &mut [Column<T, C, WF, Idx>],
+    max_segments: usize,
+) -> Column<T, C, WF, Idx>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    WF: WeightFn<T, C>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    let mut col_weights: Vec<Option<Vec<WF::Weight>>> = (0..cols.len()).map(|_| None).collect();
+    let mut out = Vec::with_capacity(parts.len());
+    let mut weights = Vec::with_capacity(parts.len());
+    for p in parts {
+        match p {
+            Part::Own(slab, w) => {
+                push_joined::<T, C, WF>(&mut out, &mut weights, slab, w, max_segments)
+            }
+            Part::Moved(c, si) => {
+                let w = col_weights[c].get_or_insert_with(|| cols[c].index.weights())[si].clone();
+                let slab = std::mem::replace(&mut cols[c].slabs[si], Slab::new(Vec::new(), 0, 0));
+                push_joined::<T, C, WF>(&mut out, &mut weights, slab, w, max_segments);
+            }
+        }
+    }
+    if out.is_empty() {
+        return Column::with_max_segments(max_segments);
+    }
+    Column::from_slabs_weighted(out, weights, max_segments)
+}
+
+/// Append `slab`, joining it onto the last slab when either is small
+/// and both fit in one, the rule every other write path keeps.
+fn push_joined<T, C, WF>(
+    out: &mut Vec<Slab<TailOf<T, C>>>,
+    weights: &mut Vec<WF::Weight>,
+    slab: Slab<TailOf<T, C>>,
+    w: WF::Weight,
+    max_segments: usize,
+) where
+    T: ColumnValueRef,
+    C: Codec,
+    WF: WeightFn<T, C>,
+{
+    if slab.len == 0 {
+        return;
+    }
+    let min = (max_segments / 4).max(1);
+    if let (Some(last), Some(last_w)) = (out.last_mut(), weights.last_mut()) {
+        let (a, b) = (last.segments, slab.segments);
+        if (a < min || b < min) && a + b <= max_segments {
+            T::Encoding::<C>::merge_slabs(last, slab);
+            *last_w = WF::Weight::merge(last_w, &w);
+            return;
+        }
+    }
+    out.push(slab);
+    weights.push(w);
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────
@@ -1199,6 +1520,24 @@ where
     /// `len` / `segments` / `tail` metadata and `segments <= max_segments`
     /// (debug builds verify).  Used by the streaming encoders'
     /// `into_column` fast path.
+    /// [`Self::from_slabs`] with each slab's weight already known.
+    pub(crate) fn from_slabs_weighted(
+        slabs: Vec<Slab<TailOf<T, C>>>,
+        weights: Vec<WF::Weight>,
+        max_segments: usize,
+    ) -> Self {
+        debug_assert_eq!(slabs.len(), weights.len());
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
+        Self {
+            slabs,
+            index: Idx::from_weights(weights),
+            total_len,
+            max_segments,
+            counter: 0,
+            _phantom: PhantomData,
+        }
+    }
+
     pub(crate) fn from_slabs(slabs: Vec<Slab<TailOf<T, C>>>, max_segments: usize) -> Self {
         #[cfg(debug_assertions)]
         for s in &slabs {
@@ -1588,9 +1927,57 @@ where
         if splices.is_empty() {
             return;
         }
-        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-        let strategy = self.copy_strategy(&src, &ranges, splices.len());
+        let strategy = self.copy_strategy_for(&src, &splices);
         self.copy_splices_with(src, &splices, strategy);
+    }
+
+    /// [`copy_ranges`](Self::copy_ranges) from several sources at once:
+    /// each splice names its source by index into `srcs`. Splices must
+    /// ascend in this column without overlapping, and each source's ranges
+    /// must ascend without overlapping; ranges are clamped to their
+    /// source's length. Equivalent, values and `save()` bytes alike, to
+    /// applying each source's splices with `copy_ranges` in turn at
+    /// shifted positions, but builds the result in one pass: slabs a
+    /// range covers whole move across without being decoded.
+    ///
+    /// # Panics
+    ///
+    /// If a splice names a source out of range, or the ordering above
+    /// does not hold.
+    pub fn copy_many_ranges<I>(&mut self, srcs: Vec<Self>, splices: I)
+    where
+        I: IntoIterator<Item = (usize, Splice)>,
+        for<'b> T::Get<'b>: AsColumnRef<T>,
+    {
+        let mut srcs = srcs;
+        if srcs.len() == 1 {
+            let src = srcs.pop().unwrap();
+            return self.copy_ranges(src, splices.into_iter().map(|(_, sp)| sp));
+        }
+        let counter = srcs
+            .iter()
+            .map(|s| s.counter)
+            .max()
+            .unwrap_or(0)
+            .max(self.counter)
+            + 1;
+        let max = self.max_segments;
+        let dest = std::mem::replace(self, Self::with_max_segments(max));
+        // the destination is column 0, sources follow
+        let mut cols: Vec<Self> = std::iter::once(dest).chain(srcs).collect();
+        let pieces = pieces(&cols, splices);
+        let parts = {
+            let mut asm = SlabAssembly::new(max);
+            let mut runs: Vec<Runs<'_, T, C>> = cols.iter().map(|c| c.iter().runs()).collect();
+            for (c, range) in pieces {
+                // slabs built under another budget would break this one's
+                let movable = cols[c].max_segments == max;
+                asm.push(c, &cols[c], &mut runs[c], range, movable);
+            }
+            asm.into_parts()
+        };
+        *self = assemble(parts, &mut cols, max);
+        self.counter = counter;
     }
 
     /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
@@ -1619,6 +2006,7 @@ where
                 }
                 e.finish();
             }
+            CopyStrategy::Take => self.swap_contents(&mut src),
             CopyStrategy::Invert => {
                 // keep src's slabs: swap, drop the gaps (interior slabs
                 // undecoded), then splice the old column's kept
@@ -1639,6 +2027,22 @@ where
         }
     }
 
+    /// Strategy for copying normalized `splices` out of `src`.
+    pub(crate) fn copy_strategy_for(&self, src: &Self, splices: &[Splice]) -> CopyStrategy {
+        if src.slabs.len() >= INVERT_MIN_SLABS {
+            let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
+            return self.copy_strategy(src, &ranges, splices.len());
+        }
+        // Moving a large source in keeps its slab layout, which made later
+        // edits slower than re-encoding it; only small sources are moved.
+        let takes_all = self.is_empty() && matches!(splices, [sp] if sp.range == (0..src.len()));
+        if takes_all && self.max_segments == src.max_segments {
+            CopyStrategy::Take
+        } else {
+            CopyStrategy::Direct
+        }
+    }
+
     /// Decide direct vs inverted for [`copy_ranges`](Self::copy_ranges)
     /// from stored per-slab item/segment counts — O(slabs), no data
     /// decoded.
@@ -1650,7 +2054,7 @@ where
     ) -> CopyStrategy {
         // Inverting keeps src's slabs, built under src's segment
         // budget — only sound when the budgets match.
-        if self.max_segments != src.max_segments || src.slabs.len() < 8 {
+        if self.max_segments != src.max_segments || src.slabs.len() < INVERT_MIN_SLABS {
             return CopyStrategy::Direct;
         }
 
@@ -1715,7 +2119,7 @@ where
                 use crate::shift::Shiftable;
                 self.splice_runs(index, del, src.iter().runs().ranges(ranges));
             }
-            CopyStrategy::Invert => {
+            CopyStrategy::Invert | CopyStrategy::Take => {
                 let old_len = self.len();
                 self.swap_contents(&mut src);
                 self.retain_ranges(&ranges);

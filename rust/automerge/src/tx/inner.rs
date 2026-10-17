@@ -1,0 +1,1477 @@
+use std::borrow::Cow;
+use std::collections::{HashSet, VecDeque};
+use std::num::NonZeroU64;
+use std::ops::Range;
+use std::sync::Arc;
+
+use crate::change_graph::ChangeGraph;
+use crate::op_set2::op_set::ResolvedAction;
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::author::Author;
+use crate::automerge::view::{ReadAt, VisibleClock};
+use crate::automerge::Automerge;
+use crate::exid::ExId;
+use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::op_set2::change::build_change;
+use crate::op_set2::{Op, OpSet, SuccInsert, TxOp};
+use crate::read::ReadDoc;
+use crate::types::{ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
+use crate::{hydrate, AutomergeError, ObjType, OpType};
+use crate::{Change, ChangeHash, Prop};
+
+#[derive(Debug, Clone)]
+pub struct TransactionInner {
+    actor: usize,
+    seq: u64,
+    start_op: NonZeroU64,
+    time: i64,
+    message: Option<String>,
+    deps: Vec<ChangeHash>,
+    scope: Option<VisibleClock>,
+    pending: Vec<TxOp>,
+    author: Option<Author<'static>>,
+    /// The transaction's actor belongs to a masked author: its ops are
+    /// committed but indexed as hidden. The mask cannot change while a
+    /// transaction is open.
+    masked: bool,
+}
+
+/// Arguments required to create a new transaction
+pub(crate) struct TransactionArgs {
+    /// The index of the actor ID this transaction will create ops for in the
+    /// [`OpSet::actors`]
+    pub(crate) actor_index: usize,
+    /// The sequence number of the change this transaction will create
+    pub(crate) seq: u64,
+    /// The start op of the change this transaction will create
+    pub(crate) start_op: NonZeroU64,
+    /// The dependencies of the change this transaction will create
+    pub(crate) deps: Vec<ChangeHash>,
+    /// The scope that should be visible to the transaction
+    pub(crate) scope: Option<VisibleClock>,
+    /// The author of the change
+    pub(crate) author: Option<Author<'static>>,
+    /// Whether the visibility mask hides the ops this transaction creates
+    pub(crate) masked: bool,
+}
+
+struct InsertedOp {
+    id: OpId,
+    pos: usize,
+    index: usize,
+}
+
+impl TransactionInner {
+    fn exid_to_obj_in_scope<H: crate::hash_retention::HashRetention>(
+        &self,
+        doc: &Automerge<H>,
+        id: &ExId,
+    ) -> Result<ObjMeta, AutomergeError> {
+        let obj = doc.exid_to_obj(id)?;
+        let created_in_transaction = obj.id.0.actor() == self.actor
+            && obj.id.0.counter() >= self.start_op.get()
+            && obj.id.0.counter() < self.start_op.get() + self.pending_ops() as u64;
+        if !obj.id.is_root()
+            && !created_in_transaction
+            && self
+                .scope
+                .as_ref()
+                .is_some_and(|scope| !scope.covers(&obj.id.0))
+        {
+            return Err(AutomergeError::InvalidObjId(id.to_string()));
+        }
+        Ok(obj)
+    }
+
+    pub(crate) fn new(
+        TransactionArgs {
+            actor_index: actor,
+            seq,
+            start_op,
+            deps,
+            scope,
+            author,
+            masked,
+        }: TransactionArgs,
+    ) -> Self {
+        TransactionInner {
+            actor,
+            seq,
+            start_op,
+            time: 0,
+            message: None,
+            deps,
+            pending: vec![],
+            scope,
+            author,
+            masked,
+        }
+    }
+
+    /// Create an empty change
+    pub(crate) fn empty<H: crate::hash_retention::HashRetention>(
+        doc: &mut Automerge<H>,
+        args: TransactionArgs,
+        message: Option<String>,
+        time: Option<i64>,
+    ) -> ChangeHash {
+        Self::new(args).commit_impl(doc, message, time)
+    }
+
+    pub(crate) fn pending_ops(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Commit the operations performed in this transaction, returning the hashes corresponding to
+    /// the new heads.
+    ///
+    /// Returns `None` if there were no operations to commit
+    #[tracing::instrument(skip(self, doc))]
+    pub(crate) fn commit<H: crate::hash_retention::HashRetention>(
+        self,
+        doc: &mut Automerge<H>,
+        message: Option<String>,
+        time: Option<i64>,
+    ) -> Option<ChangeHash> {
+        if self.pending_ops() == 0 {
+            if self.seq == 1 {
+                // we added an actor for this tx - now roll it back
+                doc.remove_actor(self.actor);
+            }
+            doc.remove_unused_actors(true);
+            return None;
+        }
+        Some(self.commit_impl(doc, message, time))
+    }
+
+    pub(crate) fn commit_impl<H: crate::hash_retention::HashRetention>(
+        mut self,
+        doc: &mut Automerge<H>,
+        message: Option<String>,
+        time: Option<i64>,
+    ) -> ChangeHash {
+        if message.is_some() {
+            self.message = message;
+        }
+
+        if let Some(t) = time {
+            self.time = t;
+        }
+
+        let change = self.export(doc.ops(), doc.changes());
+        let hash = change.hash();
+        #[cfg(not(feature = "slow_path_assertions"))]
+        tracing::trace!(commit=?hash, deps=?change.deps(), "committing transaction");
+        #[cfg(feature = "slow_path_assertions")]
+        {
+            let ops = change.iter_ops().collect::<Vec<_>>();
+            tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
+        }
+        doc.pin_incoming_boundaries(std::slice::from_ref(&change));
+        doc.update_history(&change);
+        doc.remove_unused_actors(true);
+        doc.debug_assert_mask_indexes();
+        // a local change can be the pending boundary of a write-frontier
+        doc.republish_if_pending();
+        hash
+    }
+
+    pub(crate) fn change_meta<'a>(
+        &self,
+        deps: Vec<u64>,
+    ) -> crate::op_set2::change::BuildChangeMetadata<'a> {
+        crate::op_set2::change::BuildChangeMetadata {
+            actor: self.actor,
+            seq: self.seq,
+            start_op: self.start_op.get(),
+            max_op: self.start_op.get() + self.pending.len() as u64 - 1,
+            timestamp: self.time,
+            message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
+            extra: self.extra_bytes(),
+            builder: 0,
+            deps,
+        }
+    }
+
+    // TODO(finto): it feels strange that this is the inverse of reading the Author in StoredChange.
+    // This encodes the Author, whereas in change.rs, we are decoding.
+    fn extra_bytes<'a>(&self) -> Cow<'a, [u8]> {
+        crate::change::encode_author_footer(&self.author)
+    }
+
+    pub(crate) fn export<H: crate::hash_retention::HashRetention>(
+        mut self,
+        op_set: &OpSet,
+        change_graph: &ChangeGraph<H>,
+    ) -> Change {
+        self.deps.sort_unstable();
+        let deps_index = self
+            .deps
+            .iter()
+            .filter_map(|hash| Some(change_graph.hash_to_index(hash)? as u64))
+            .collect();
+        let meta = self.change_meta(deps_index);
+        let stored = build_change(&self.pending, &meta, change_graph, &op_set.actors);
+        Change::new(stored)
+    }
+
+    /// Undo the operations added in this transaction, returning the number of cancelled
+    /// operations.
+    pub(crate) fn rollback<H: crate::hash_retention::HashRetention>(
+        self,
+        doc: &mut Automerge<H>,
+    ) -> usize {
+        let num = self.pending.len();
+
+        for o in self.pending.iter().rev() {
+            doc.ops.undo_op(o);
+        }
+
+        if self.seq == 1 {
+            doc.remove_actor(self.actor);
+        }
+
+        doc.remove_unused_actors(true);
+        num
+    }
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    pub(crate) fn put<
+        P: Into<Prop>,
+        V: Into<ScalarValue>,
+        H: crate::hash_retention::HashRetention,
+    >(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        let value = value.into();
+        let prop = prop.into();
+        match (&prop, obj.typ) {
+            (Prop::Map(_), ObjType::Map) => Ok(()),
+            (Prop::Seq(_), ObjType::List) => Ok(()),
+            (Prop::Seq(_), ObjType::Text) => Ok(()),
+            _ => Err(AutomergeError::InvalidOp(obj.typ)),
+        }?;
+        self.local_op(doc, &obj, prop, value.into())?;
+        Ok(())
+    }
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    pub(crate) fn put_object<P: Into<Prop>, H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        prop: P,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        let prop = prop.into();
+        match (&prop, obj.typ) {
+            (Prop::Map(_), ObjType::Map) => Ok(()),
+            (Prop::Seq(_), ObjType::List) => Ok(()),
+            _ => Err(AutomergeError::InvalidOp(obj.typ)),
+        }?;
+        self.local_op(doc, &obj, prop, value.into())
+            .map(|opid| doc.id_to_exid(opid.unwrap()))
+    }
+
+    pub(super) fn next_id(&self) -> OpId {
+        OpId::new(self.start_op.get() + self.pending_ops() as u64, self.actor)
+    }
+
+    fn next_delete(&mut self, obj: ObjMeta, index: usize, elemid: ElemId, ops: &[Op<'_>]) -> TxOp {
+        TxOp::list_del(
+            self.next_id(),
+            obj,
+            index,
+            elemid,
+            ops.iter().map(|op| op.id),
+        )
+        .masked(self.masked)
+    }
+
+    fn insert_local_op<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        mut op: TxOp,
+        succ: &[SuccInsert],
+        range: Range<usize>,
+    ) {
+        let added = doc.ops_mut().splice(op.pos, &[&op]);
+
+        op.undo = doc.ops_mut().add_succ_with_undo(succ);
+
+        if self.scope.is_some() {
+            doc.ops_mut().reset_top(range.start..(range.end + added));
+            op.reset_range = Some(range);
+        }
+
+        self.pending.push(op);
+    }
+
+    pub(crate) fn insert<V: Into<ScalarValue>, H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        };
+        let value = value.into();
+        tracing::trace!(obj=?obj, value=?value, "inserting value");
+        self.do_insert(doc, &obj, seq_type, index, value.into())?;
+        Ok(())
+    }
+
+    pub(crate) fn insert_object<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        index: usize,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        };
+        let id = self.do_insert(doc, &obj, seq_type, index, value.into())?;
+        Ok(doc.ops().id_to_exid(id))
+    }
+
+    fn do_insert<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        seq_type: SequenceType,
+        index: usize,
+        action: OpType,
+    ) -> Result<OpId, AutomergeError> {
+        Ok(self.do_insert_op(doc, obj, seq_type, index, action)?.id)
+    }
+
+    fn do_insert_op<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        seq_type: SequenceType,
+        index: usize,
+        action: OpType,
+    ) -> Result<InsertedOp, AutomergeError> {
+        let id = self.next_id();
+
+        let query = doc
+            .ops()
+            .query_insert_at(&obj.id, index, seq_type, &self.read_at(doc))?;
+
+        let pos = query.pos;
+
+        let op = TxOp::insert(id, *obj, pos, index, action, query.elemid).masked(self.masked);
+        let inserted = InsertedOp {
+            id,
+            pos: op.pos,
+            index: op.index,
+        };
+
+        doc.ops_mut().splice(op.pos, &[&op]);
+        self.pending.push(op);
+
+        Ok(inserted)
+    }
+
+    fn insert_mark_end<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        begin: &InsertedOp,
+        index: usize,
+        expand: bool,
+    ) -> Result<InsertedOp, AutomergeError> {
+        // inside one multi-width element both anchors resolve to the same position
+        let end_pos = doc
+            .ops()
+            .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at(doc))?
+            .pos;
+        if end_pos > begin.pos {
+            self.do_insert_op(doc, obj, SequenceType::Text, index, OpType::MarkEnd(expand))
+        } else {
+            Ok(self.insert_mark_end_after(doc, obj, begin, expand))
+        }
+    }
+
+    fn insert_mark_end_after<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        begin: &InsertedOp,
+        expand: bool,
+    ) -> InsertedOp {
+        let id = self.next_id();
+        let op = TxOp::insert(
+            id,
+            *obj,
+            begin.pos + 1,
+            begin.index,
+            OpType::MarkEnd(expand),
+            ElemId(begin.id),
+        )
+        .masked(self.masked);
+        let inserted = InsertedOp {
+            id,
+            pos: op.pos,
+            index: op.index,
+        };
+        doc.ops_mut().splice(op.pos, &[&op]);
+        self.pending.push(op);
+        inserted
+    }
+
+    pub(crate) fn local_op<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        prop: Prop,
+        action: OpType,
+    ) -> Result<Option<OpId>, AutomergeError> {
+        match prop {
+            Prop::Map(s) => self.local_map_op(doc, obj, s, action),
+            Prop::Seq(n) => self.local_list_op(doc, obj, n, action),
+        }
+    }
+
+    fn local_map_op<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        prop: String,
+        action: OpType,
+    ) -> Result<Option<OpId>, AutomergeError> {
+        let id = self.next_id();
+
+        let mut query = doc
+            .ops()
+            .seek_ops_by_map_key(&obj.id, &prop, &self.read_at(doc));
+
+        let Some(resolved_action) = query.resolve_action(action) else {
+            return Ok(None);
+        };
+
+        // increment operations are only valid against counter values.
+        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
+        if resolved_action.is_increment() && query.ops.iter().all(|op| !op.is_counter()) {
+            return Err(AutomergeError::MissingCounter);
+        }
+
+        let pred = query.ops.iter().map(|op| op.id).collect();
+        let op =
+            TxOp::map(id, *obj, query.end_pos, resolved_action, prop, pred).masked(self.masked);
+
+        let inc_value = op.get_increment_value();
+
+        // A masked op's successor links must not delete or increment: the
+        // index records the link without flipping visibility.
+        let masked = self.masked;
+        let succ: Vec<_> = query
+            .ops
+            .iter()
+            // on a non-counter target an increment acts as an overwrite
+            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter()), masked))
+            .collect();
+
+        self.insert_local_op(doc, op, &succ, query.range);
+
+        Ok(Some(id))
+    }
+
+    fn local_list_op<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ObjMeta,
+        index: usize,
+        action: OpType,
+    ) -> Result<Option<OpId>, AutomergeError> {
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        };
+        let mut query = doc
+            .ops()
+            .seek_ops_by_index(&obj.id, index, seq_type, &self.read_at(doc));
+        let id = self.next_id();
+        let eid = query
+            .ops
+            .first()
+            .and_then(|op| op.cursor().ok())
+            .ok_or(AutomergeError::InvalidIndex(index))?;
+
+        let Some(resolved_action) = query.resolve_action(action) else {
+            return Ok(None);
+        };
+
+        // increment operations are only valid against counter values.
+        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
+
+        if resolved_action.is_increment() && query.ops.iter().all(|op| !op.is_counter()) {
+            return Err(AutomergeError::MissingCounter);
+        }
+
+        let pred = query.ops.iter().map(|op| op.id).collect();
+        let op = TxOp::list(id, *obj, query.end_pos, index, resolved_action, eid, pred)
+            .masked(self.masked);
+        let inc_value = op.get_increment_value();
+        let masked = self.masked;
+        let succ = query
+            .ops
+            .iter()
+            // on a non-counter target an increment acts as an overwrite
+            .map(|op| op.add_succ(id, inc_value.filter(|_| op.is_counter()), masked))
+            .collect::<Vec<_>>();
+
+        self.insert_local_op(doc, op, &succ, query.range);
+
+        // overwriting a conflicted winner can reveal a counter beneath it; a
+        // masked op overwrites nothing
+        if let Some((i, s)) = succ.iter().rev().enumerate().find(|(_, s)| s.inc.is_some()) {
+            if i > 0 && !self.masked {
+                doc.ops.expose(s.pos)
+            }
+        }
+
+        Ok(Some(id))
+    }
+
+    pub(crate) fn increment<P: Into<Prop>, H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ExId,
+        prop: P,
+        value: i64,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+        self.local_op(doc, &obj, prop.into(), OpType::Increment(value))?;
+        Ok(())
+    }
+
+    pub(crate) fn delete<P: Into<Prop>, H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        prop: P,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        let prop = prop.into();
+        if obj.typ == ObjType::Text {
+            let index = prop.as_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
+            self.inner_splice(
+                doc,
+                SpliceArgs {
+                    obj,
+                    index,
+                    del: 1,
+                    splice_type: SpliceType::Text(""),
+                },
+            )?;
+        } else {
+            self.local_op(doc, &obj, prop, OpType::Delete)?;
+        }
+        Ok(())
+    }
+
+    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
+    /// the new elements.
+    ///
+    /// Values can be scalars or nested objects (maps, lists, text). Scalar
+    /// values are inserted directly, while nested objects are created using
+    /// batch insertion for efficiency.
+    pub(crate) fn splice<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        index: usize,
+        del: isize,
+        vals: impl IntoIterator<Item = impl Into<hydrate::Value>>,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        if !matches!(obj.typ, ObjType::List | ObjType::Text) {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
+        let values: Vec<hydrate::Value> = vals.into_iter().map(Into::into).collect();
+        if obj.typ == ObjType::Text {
+            let text = values_to_splice_text(values)?;
+            self.inner_splice(
+                doc,
+                SpliceArgs {
+                    obj,
+                    index,
+                    del,
+                    splice_type: SpliceType::Text(&text),
+                },
+            )?;
+        } else {
+            self.inner_splice(
+                doc,
+                SpliceArgs {
+                    obj,
+                    index,
+                    del,
+                    splice_type: SpliceType::List(values),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Splice string into a text object
+    pub(crate) fn splice_text<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        index: usize,
+        del: isize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        if obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
+        self.inner_splice(
+            doc,
+            SpliceArgs {
+                obj,
+                index,
+                del,
+                splice_type: SpliceType::Text(text),
+            },
+        )
+    }
+
+    fn inner_splice<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        SpliceArgs {
+            obj,
+            mut index,
+            mut del,
+            splice_type,
+        }: SpliceArgs<'_>,
+    ) -> Result<(), AutomergeError> {
+        if del < 0 {
+            if let Some(n) = index.checked_add_signed(del) {
+                index = n;
+                del = del.abs();
+            } else {
+                return Err(AutomergeError::InvalidIndex(index));
+            }
+        }
+
+        let seq_type = splice_type.seq_type();
+
+        let inserted_width = if !splice_type.is_empty() {
+            let query = doc
+                .ops()
+                .query_insert_at(&obj.id, index, seq_type, &self.read_at(doc))?;
+
+            index = query.index;
+
+            let inserted_width = match splice_type {
+                SpliceType::Text(t) => {
+                    let mut batch = BatchInsertion::new(self, doc, query.pos);
+                    let SpliceResult { inserted_width } =
+                        batch.splice_text(obj, query.index, query.elemid, t, query.marks);
+                    batch.finish();
+                    inserted_width
+                }
+                SpliceType::List(values) => {
+                    let num_values = values.len();
+                    let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
+
+                    // Batch 1: root insert ops at query.pos
+                    {
+                        let mut batch = BatchInsertion::new(self, doc, query.pos);
+                        let mut elemid = query.elemid;
+
+                        for (i, value) in values.iter().enumerate() {
+                            let (child_obj_type, op_type) = value_to_op_type(value);
+
+                            let id = batch.append(move |pos, id| {
+                                TxOp::insert(id, obj, pos, query.index + i, op_type, elemid)
+                            });
+                            elemid = ElemId(id);
+
+                            if let Some(obj_type) = child_obj_type {
+                                let child_obj_meta = ObjMeta {
+                                    id: crate::types::ObjId(id),
+                                    typ: obj_type,
+                                };
+                                queue.push_back((child_obj_meta, value));
+                            }
+                        }
+
+                        batch.finish();
+                    }
+
+                    // Batch 2: all descendants at end of OpSet
+                    if !queue.is_empty() {
+                        let desc_pos = doc.ops().len();
+                        let mut batch = BatchInsertion::new(self, doc, desc_pos);
+                        batch_bfs(&mut batch, &mut queue)?;
+                        batch.finish();
+                    }
+
+                    num_values
+                }
+            };
+
+            inserted_width
+        } else {
+            0
+        };
+
+        // Deletion targets are selected from the visible sequence. In a
+        // maskless transaction the inserted items are visible (the targets
+        // sit after them) and each deletion collapses the sequence back
+        // onto the cursor. A masked transaction's inserts have no visible
+        // width and its deletes do not collapse positions, so the cursor
+        // starts at `index` and must step over each deleted element.
+        let mut delete_index = if self.masked {
+            index
+        } else {
+            index + inserted_width
+        };
+        let mut deleted: usize = 0;
+        while deleted < (del as usize) {
+            // TODO: could do this with a single custom query
+
+            let query =
+                doc.ops()
+                    .seek_ops_by_index(&obj.id, delete_index, seq_type, &self.read_at(doc));
+
+            let step = if let Some(op) = query.ops.last() {
+                op.width(seq_type, doc.text_encoding())
+            } else {
+                break;
+            };
+
+            // if we delete in the middle of a multi-character
+            // move cursor to the next character
+            if query.index < delete_index {
+                delete_index = query.index + step;
+                continue;
+            }
+
+            let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
+            let mut op = self.next_delete(obj, delete_index, query_elemid, &query.ops);
+            let masked = self.masked;
+            let ops_pos = query
+                .ops
+                .iter()
+                .map(|o| o.add_succ(op.id(), None, masked))
+                .collect::<Vec<_>>();
+
+            op.undo = doc.ops_mut().add_succ_with_undo(&ops_pos);
+
+            deleted += step;
+            if masked {
+                // The masked delete left its target visible: move past it so
+                // the next query does not select the same element again.
+                delete_index += step;
+            }
+
+            self.pending.push(op);
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn mark<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        mark: Mark,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        if ObjType::Text != obj.typ {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
+        if mark.start == mark.end && expand == ExpandMark::None {
+            // In peritext terms this is the same as a mark which has a begin anchor before one
+            // character and an end anchor after the character preceding that character. E.g in the
+            // following sequence where the "<",">" symbols represent the mark anchor points:
+            //
+            // |   |  |   |  |   |
+            // < a >  < b >  < c >
+            // |   |  |   |  |   |
+            //
+            // A mark from 1 to 1 with expand set to none would begin at the anchor point before
+            // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
+            return Ok(());
+        }
+        let action = OpType::MarkBegin(expand.before(), mark.old_data());
+        let begin = self.do_insert_op(doc, &obj, SequenceType::Text, mark.start, action)?;
+
+        let end = if mark.start == mark.end {
+            self.insert_mark_end_after(doc, &obj, &begin, expand.after())
+        } else {
+            self.insert_mark_end(doc, &obj, &begin, mark.end, expand.after())?
+        };
+        debug_assert!(
+            end.pos > begin.pos,
+            "mark end (pos {}) must follow its begin (pos {})",
+            end.pos,
+            begin.pos
+        );
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn unmark<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        name: &str,
+        start: usize,
+        end: usize,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        let mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
+        self.mark(doc, ex_obj, mark, expand)
+    }
+
+    pub(crate) fn split_block<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_obj: &ExId,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = self.exid_to_obj_in_scope(doc, ex_obj)?;
+        if obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
+
+        let query =
+            doc.ops()
+                .query_insert_at(&obj.id, index, SequenceType::Text, &self.read_at(doc))?;
+
+        let pos = query.pos;
+
+        let id = self.next_id();
+
+        let op =
+            TxOp::insert_obj(id, obj, pos, index, ObjType::Map, query.elemid).masked(self.masked);
+
+        doc.ops_mut().splice(op.pos, &[&op]);
+
+        self.pending.push(op);
+
+        Ok(doc.ops().id_to_exid(id))
+    }
+
+    pub(crate) fn join_block<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        text: &ExId,
+        index: usize,
+    ) -> Result<(), AutomergeError> {
+        let text_obj = doc.exid_to_obj(text)?;
+
+        if text_obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(text_obj.typ));
+        }
+
+        // FIXME - how is this different than a normal delete?
+        // 1. can only happen on a text
+        // 2. it doesn't seem to validate that what its deleting is a block??
+        // --> self.local_op(doc, &obj, Prop::Seq(index), OpType::Delete)?;
+
+        let target_query = doc.ops().seek_ops_by_index(
+            &text_obj.id,
+            index,
+            SequenceType::Text,
+            &self.read_at(doc),
+        );
+        let target = target_query
+            .ops
+            .into_iter()
+            .next_back()
+            .ok_or(AutomergeError::InvalidIndex(index))?;
+        let block_id = target.id;
+
+        let elemid = target.elemid_or_key().elemid().unwrap();
+
+        // FIXME - no clock?
+        let found = doc
+            .ops()
+            .seek_list_opid(
+                &text_obj.id,
+                block_id,
+                SequenceType::Text,
+                &self.read_at(doc),
+            )
+            .unwrap();
+
+        let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id])
+            .masked(self.masked);
+
+        let succ_pos = vec![found.op.add_succ(op.id(), None, self.masked)];
+
+        op.undo = doc.ops_mut().add_succ_with_undo(&succ_pos);
+
+        self.pending.push(op);
+
+        Ok(())
+    }
+
+    pub(crate) fn replace_block<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        text: &ExId,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        self.join_block(doc, text, index)?;
+        self.split_block(doc, text, index)
+    }
+
+    pub(crate) fn update_object<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        obj: &ExId,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        let obj_meta = doc.exid_to_obj(obj)?;
+        match (obj_meta.typ, new_value) {
+            (ObjType::Map, crate::hydrate::Value::Map(map)) => Ok(self.update_map(doc, obj, map)?),
+            (ObjType::List, crate::hydrate::Value::List(list)) => {
+                Ok(self.update_list(doc, obj, list)?)
+            }
+            (ObjType::Text, crate::hydrate::Value::Text(new_text)) => Ok(
+                crate::text_diff::myers_diff(doc, self, obj, new_text.to_string().as_str())?,
+            ),
+            _ => Err(crate::error::UpdateObjectError::ChangeType),
+        }
+    }
+
+    pub(crate) fn update_map<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        map: &crate::ObjId,
+        new_value: &crate::hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        let mut delenda = HashSet::new();
+        let obj = doc.exid_to_obj(map)?;
+        let current_vals = doc
+            .ops()
+            .map_range(&obj.id, .., self.read_at(doc))
+            .map(|m| (m.key.to_string(), m.value.to_value(), m.id()))
+            .collect::<Vec<_>>();
+
+        let mut present_keys = HashSet::new();
+        for (key, value, id) in current_vals {
+            present_keys.insert(key.clone());
+            match new_value.get(&key) {
+                Some(new_value) => {
+                    self.update_value(doc, map, key.into(), new_value, Some((id, value)))?
+                }
+                None => {
+                    delenda.insert(key.clone());
+                }
+            }
+        }
+        for (key, new_value) in new_value.iter() {
+            if !present_keys.contains(key) {
+                self.update_value(doc, map, key.into(), &new_value.value, None)?;
+            }
+        }
+        for key in delenda {
+            self.delete(doc, map, key)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn update_list<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        list: &crate::ObjId,
+        new_value: &crate::hydrate::List,
+    ) -> Result<(), AutomergeError> {
+        let old_items = doc
+            .list_range(list, ..)
+            .map(|item| Some((item.value.to_value(), item.id())))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain(std::iter::repeat_with(|| None));
+        let new_values = new_value
+            .iter()
+            .map(Some)
+            .chain(std::iter::repeat_with(|| None));
+
+        let mut to_delete = 0;
+        for (index, (old, new)) in std::iter::zip(old_items, new_values).enumerate() {
+            match (old, new) {
+                (Some((value, id)), Some(new_value)) => {
+                    self.update_value(
+                        doc,
+                        list,
+                        Prop::Seq(index),
+                        &new_value.value,
+                        Some((id, value)),
+                    )?;
+                }
+                (Some(_), None) => {
+                    to_delete += 1;
+                }
+                (None, Some(new_value)) => {
+                    self.update_value(doc, list, Prop::Seq(index), &new_value.value, None)?;
+                }
+                (None, None) => {
+                    break;
+                }
+            }
+        }
+        for i in (0..to_delete).rev() {
+            self.delete(doc, list, Prop::Seq(i))?;
+        }
+        Ok(())
+    }
+
+    fn update_value<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        parent: &crate::ObjId,
+        key: Prop,
+        new_value: &crate::hydrate::Value,
+        old_value: Option<(ExId, crate::Value<'_>)>,
+    ) -> Result<(), AutomergeError> {
+        match (old_value, new_value) {
+            (Some((id, crate::Value::Object(ObjType::Map))), crate::hydrate::Value::Map(new)) => {
+                self.update_map(doc, &id, new)
+            }
+            (Some((id, crate::Value::Object(ObjType::List))), crate::hydrate::Value::List(new)) => {
+                self.update_list(doc, &id, new)
+            }
+            (Some((id, crate::Value::Object(ObjType::Text))), crate::hydrate::Value::Text(new)) => {
+                crate::text_diff::myers_diff(doc, self, &id, new.to_string().as_str())
+            }
+            (old, new) => {
+                // Here we are either changing the type of the existing object, or inserting an
+                // entirely new object
+                let mut make_obj = |typ: ObjType| match (&old, &key) {
+                    (None, Prop::Seq(index)) => self.insert_object(doc, parent, *index, typ),
+                    _ => self.put_object(doc, parent, key.clone(), typ),
+                };
+                match new {
+                    crate::hydrate::Value::Map(new) => {
+                        let map_id = make_obj(ObjType::Map)?;
+                        self.update_map(doc, &map_id, new)
+                    }
+
+                    crate::hydrate::Value::List(new) => {
+                        let list_id = make_obj(ObjType::List)?;
+                        self.update_list(doc, &list_id, new)
+                    }
+
+                    crate::hydrate::Value::Text(new) => {
+                        let text_id = make_obj(ObjType::Text)?;
+                        self.splice_text(doc, &text_id, 0, 0, new.to_string().as_str())
+                    }
+
+                    crate::hydrate::Value::Scalar(val) => match (old, &key) {
+                        (None, Prop::Seq(index)) => self.insert(doc, parent, *index, val.clone()),
+                        _ => self.put(doc, parent, key.clone(), val.clone()),
+                    },
+                }
+            }
+        }
+    }
+
+    /// Put or insert a nested `hydrate::Value` into the document as a batch
+    /// operation.
+    ///
+    /// This is much more efficient than decomposing the value into individual
+    /// put/insert operations because it only requires two OpSet splices:
+    /// one for the root op in the parent, and one bulk append for all descendants.
+    ///
+    /// When `insert` is true and `prop` is `Prop::Seq`, the value is inserted
+    /// at the given index (shifting subsequent elements). When `insert` is
+    /// false, the value replaces the existing element at that index. For
+    /// `Prop::Map` the `insert` flag is ignored (maps always use put semantics).
+    pub(crate) fn batch_create_object<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        ex_parent: &ExId,
+        prop: Prop,
+        value: &hydrate::Value,
+        insert: bool,
+    ) -> Result<ExId, AutomergeError> {
+        let parent = self.exid_to_obj_in_scope(doc, ex_parent)?;
+
+        match (&prop, insert, parent.typ) {
+            (Prop::Map(_), _, ObjType::Map) => Ok(()),
+            (Prop::Seq(_), _, ObjType::List) => Ok(()),
+            (Prop::Seq(_), true, ObjType::Text) => Ok(()),
+            _ => Err(AutomergeError::InvalidOp(parent.typ)),
+        }?;
+
+        // Determine the ObjType for the root of the value being inserted
+        let root_obj_type = match value {
+            hydrate::Value::Map(_) => ObjType::Map,
+            hydrate::Value::List(_) => ObjType::List,
+            hydrate::Value::Text(_) => ObjType::Text,
+            hydrate::Value::Scalar(_) => return Err(AutomergeError::NotAnObject),
+        };
+
+        // First insert the root of the new object
+        let root_id = match (&prop, insert) {
+            (Prop::Seq(index), true) => self.do_insert(
+                doc,
+                &parent,
+                parent
+                    .typ
+                    .as_sequence_type()
+                    .ok_or(AutomergeError::InvalidOp(parent.typ))?,
+                *index,
+                OpType::Make(root_obj_type),
+            )?,
+            _ => self
+                .local_op(doc, &parent, prop, OpType::Make(root_obj_type))?
+                .expect("creating a new object"),
+        };
+
+        let root_obj_id = crate::types::ObjId(root_id);
+        let root_obj_meta = ObjMeta {
+            id: root_obj_id,
+            typ: root_obj_type,
+        };
+
+        let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
+        queue.push_back((root_obj_meta, value));
+        let insert_pos = doc.ops().len();
+        let mut batch = BatchInsertion::new(self, doc, insert_pos);
+
+        batch_bfs(&mut batch, &mut queue)?;
+
+        batch.finish();
+
+        Ok(doc.id_to_exid(root_id))
+    }
+
+    /// Initialize the root object of an empty document from a `hydrate::Map`.
+    pub(crate) fn batch_init_root_map<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+        value: &hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        let root_meta = ObjMeta {
+            id: crate::types::ObjId::root(),
+            typ: ObjType::Map,
+        };
+
+        let insert_pos = doc.ops().len();
+        let mut batch = BatchInsertion::new(self, doc, insert_pos);
+        let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
+
+        let mut keys: Vec<_> = value.iter().collect();
+        keys.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        for (key, map_value) in keys {
+            let child_value = &map_value.value;
+            let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+            let id = batch.append(|pos, id| {
+                TxOp::map(
+                    id,
+                    root_meta,
+                    pos,
+                    ResolvedAction::VisibleUpdate(op_type),
+                    key.to_string(),
+                    vec![],
+                )
+            });
+
+            if let Some(obj_type) = child_obj_type {
+                let child_obj_meta = ObjMeta {
+                    id: crate::types::ObjId(id),
+                    typ: obj_type,
+                };
+                queue.push_back((child_obj_meta, child_value));
+            }
+        }
+
+        batch_bfs(&mut batch, &mut queue)?;
+
+        batch.finish();
+        Ok(())
+    }
+
+    pub(crate) fn get_scope(&self) -> &Option<VisibleClock> {
+        &self.scope
+    }
+
+    /// The read position of this transaction: its isolation scope if any,
+    /// otherwise the current document (which carries the write-frontier mask).
+    pub(crate) fn read_at<'a, H: crate::hash_retention::HashRetention>(
+        &'a self,
+        doc: &'a Automerge<H>,
+    ) -> ReadAt<'a> {
+        match &self.scope {
+            Some(scope) => doc.read_scoped(std::borrow::Cow::Borrowed(scope)),
+            None => doc.read_current(),
+        }
+    }
+
+    pub(crate) fn get_deps(&self) -> Vec<ChangeHash> {
+        self.deps.clone()
+    }
+}
+
+fn values_to_splice_text(values: Vec<hydrate::Value>) -> Result<String, AutomergeError> {
+    let mut text = String::new();
+    for value in values {
+        match value {
+            hydrate::Value::Scalar(ScalarValue::Str(value)) => text.push_str(&value),
+            unexpected => {
+                return Err(AutomergeError::InvalidValueType {
+                    expected: "a string".to_string(),
+                    unexpected: format!("{unexpected:?}"),
+                });
+            }
+        }
+    }
+    Ok(text)
+}
+
+enum SpliceType<'a> {
+    List(Vec<hydrate::Value>),
+    Text(&'a str),
+}
+
+impl SpliceType<'_> {
+    fn seq_type(&self) -> SequenceType {
+        match self {
+            SpliceType::List(_) => SequenceType::List,
+            SpliceType::Text(_) => SequenceType::Text,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::List(v) => v.is_empty(),
+            Self::Text(v) => v.is_empty(),
+        }
+    }
+}
+
+struct SpliceArgs<'a> {
+    obj: ObjMeta,
+    index: usize,
+    del: isize,
+    splice_type: SpliceType<'a>,
+}
+
+struct BatchInsertion<'a, H: crate::hash_retention::HashRetention = crate::hash_retention::Retained>
+{
+    inner: &'a mut TransactionInner,
+    doc: &'a mut Automerge<H>,
+    pending_start: usize,
+    insert_pos: usize,
+}
+
+impl<'a, H: crate::hash_retention::HashRetention> BatchInsertion<'a, H> {
+    fn new(inner: &'a mut TransactionInner, doc: &'a mut Automerge<H>, start_pos: usize) -> Self {
+        let pending_start = inner.pending.len();
+        Self {
+            inner,
+            doc,
+            pending_start,
+            insert_pos: start_pos,
+        }
+    }
+
+    fn next_pos(&self) -> usize {
+        self.inner.pending[self.pending_start..].len() + self.insert_pos
+    }
+
+    fn append<F: FnOnce(usize, OpId) -> TxOp>(&mut self, factory: F) -> OpId {
+        let id = self.inner.next_id();
+        let op = factory(self.next_pos(), id).masked(self.inner.masked);
+        self.inner.pending.push(op);
+        id
+    }
+
+    fn splice_text(
+        &mut self,
+        container: ObjMeta,
+        index: usize,
+        after: ElemId,
+        text_str: &str,
+        marks: Option<Arc<MarkSet>>,
+    ) -> SpliceResult {
+        let char_values: Vec<ScalarValue> = match self.doc.text_encoding() {
+            // Arguably we should do this for all text, rather than just the grapheme cluster encoding.
+            // However, at the time which I (Alex Good) am writing this code the existing implementation
+            // uses the unicode code points and the grapheme cluster text encoding is a new thing. I
+            // don't want to change the existing behaviour for the existing text encodings without a
+            // little more thought.
+            TextEncoding::GraphemeCluster => {
+                text_str.graphemes(true).map(ScalarValue::from).collect()
+            }
+            _ => text_str.chars().map(ScalarValue::from).collect(),
+        };
+        let mut inserted_width = 0;
+        let mut elemid = after;
+        for char in char_values {
+            let op = TxOp::insert_val(
+                self.inner.next_id(),
+                container,
+                self.next_pos(),
+                char,
+                elemid,
+            )
+            .masked(self.inner.masked);
+            inserted_width += op.bld.width(SequenceType::Text, self.doc.text_encoding());
+            elemid = ElemId(op.id());
+            self.inner.pending.push(op);
+        }
+
+        let _ = (container, index, marks);
+        SpliceResult { inserted_width }
+    }
+
+    fn finish(self) {
+        let new_ops = &self.inner.pending[self.pending_start..];
+        if !new_ops.is_empty() {
+            self.doc.ops_mut().splice(self.insert_pos, new_ops);
+        }
+    }
+}
+
+struct SpliceResult {
+    inserted_width: usize,
+}
+
+fn value_to_op_type(value: &hydrate::Value) -> (Option<ObjType>, OpType) {
+    match value {
+        hydrate::Value::Map(_) => (Some(ObjType::Map), OpType::Make(ObjType::Map)),
+        hydrate::Value::List(_) => (Some(ObjType::List), OpType::Make(ObjType::List)),
+        hydrate::Value::Text(_) => (Some(ObjType::Text), OpType::Make(ObjType::Text)),
+        hydrate::Value::Scalar(s) => (None, OpType::Put(s.clone())),
+    }
+}
+
+/// BFS traversal of nested hydrate values, appending ops to a `BatchInsertion`.
+///
+/// This is the shared logic used by `batch_create_object`, `batch_init_map`,
+/// and `inner_splice` to populate the children of container objects.
+fn batch_bfs<H: crate::hash_retention::HashRetention>(
+    batch: &mut BatchInsertion<'_, H>,
+    queue: &mut VecDeque<(ObjMeta, &'_ hydrate::Value)>,
+) -> Result<(), AutomergeError> {
+    while let Some((container_meta, container_value)) = queue.pop_front() {
+        match (container_meta.typ, container_value) {
+            (ObjType::Map, hydrate::Value::Map(map)) => {
+                let mut keys: Vec<_> = map.iter().collect();
+                keys.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+                for (key, map_value) in keys {
+                    let child_value = &map_value.value;
+                    let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+                    let id = batch.append(|pos, id| {
+                        TxOp::map(
+                            id,
+                            container_meta,
+                            pos,
+                            ResolvedAction::VisibleUpdate(op_type),
+                            key.to_string(),
+                            vec![],
+                        )
+                    });
+
+                    if let Some(obj_type) = child_obj_type {
+                        let child_obj_meta = ObjMeta {
+                            id: crate::types::ObjId(id),
+                            typ: obj_type,
+                        };
+                        queue.push_back((child_obj_meta, child_value));
+                    }
+                }
+            }
+            (ObjType::List, hydrate::Value::List(list)) => {
+                let mut elemid = HEAD;
+                for (index, list_value) in list.iter().enumerate() {
+                    let child_value = &list_value.value;
+                    let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+                    let id = batch.append(move |pos, id| {
+                        TxOp::insert(id, container_meta, pos, index, op_type, elemid)
+                    });
+                    elemid = ElemId(id);
+
+                    if let Some(obj_type) = child_obj_type {
+                        let child_obj_meta = ObjMeta {
+                            id: crate::types::ObjId(id),
+                            typ: obj_type,
+                        };
+                        queue.push_back((child_obj_meta, child_value));
+                    }
+                }
+            }
+            (ObjType::Text, hydrate::Value::Text(text)) => {
+                let text_str = text.to_string();
+                batch.splice_text(container_meta, 0, ElemId::head(), &text_str, None);
+            }
+            _ => {
+                return Err(AutomergeError::InvalidOp(container_meta.typ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::read::ReadDoc;
+    use crate::{tx::Transactable, ROOT};
+
+    use super::*;
+
+    #[test]
+    fn map_rollback_doesnt_panic() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+
+        let a = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
+        tx.put(&a, "b", 1).unwrap();
+        assert!(tx.get(&a, "b").unwrap().is_some());
+    }
+}

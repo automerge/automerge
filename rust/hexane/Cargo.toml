@@ -1,6 +1,6 @@
 [package]
 name = "hexane"
-version = "1.0.0-alpha.5"
+version = "1.0.0-alpha.6"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -18,6 +18,8 @@ slow_path_assertions = []
 # Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
 deep_fuzz = []
 bijou64 = ["dep:bijoux"]
+# Read-only views of column internals (hexane::debug) for inspectors.
+debug = []
 
 
 [dependencies]
@@ -29,6 +31,42 @@ bijoux = { version = "^0.3.1", optional = true, default-features = false, featur
 proptest = { version = "^1.7", default-features = false, features = ["std"] }
 rand = { version = "^0.10", optional = false }
 divan = "0.1.15"
+
+[[bench]]
+name = "btree_b_sweep"
+harness = false
+
+[[bench]]
+name = "column_ops"
+harness = false
+
+[[bench]]
+name = "column_u64_mutations"
+harness = false
+
+[[bench]]
+name = "load"
+harness = false
+
+[[bench]]
+name = "max_segments"
+harness = false
+
+[[bench]]
+name = "profile_bool_replace"
+harness = false
+
+[[bench]]
+name = "profile_str_splice"
+harness = false
+
+[[bench]]
+name = "remap"
+harness = false
+
+[[bench]]
+name = "seek_to_value"
+harness = false
 
 [profile.release]
 debug = true

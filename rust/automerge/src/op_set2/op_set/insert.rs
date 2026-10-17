@@ -67,11 +67,9 @@ impl<'a> InsertQuery<'a> {
             }
         }
 
-        // sticky marks: only visible mark ops attract the insertion point.
-        // A mark hidden by the clock — a masked author or an
-        // isolation scope that does not cover it — must not move the
-        // insert past its boundary; the indexed fast path already excludes
-        // such marks because the indexes are rebuilt under the mask.
+        // sticky marks: only visible mark ops attract the insertion point. A
+        // mark hidden by the clock (a masked author, or outside an isolation
+        // scope) must not move the insert past its boundary.
         if visible && !self.candidates.is_empty() {
             // if we find a begin/end pair - ignore them
             if let OpType::MarkEnd(_) = op.action() {
@@ -101,6 +99,11 @@ impl<'a> InsertQuery<'a> {
         while let Some(mut op) = self.iter.next() {
             let op_pos = op.pos;
             if op.is_inc() {
+                // increments carry no visibility/width but they DO
+                // occupy a row: the end-of-object fallback below
+                // returns `pos + 1`, and skipping without recording
+                // `pos` would place a trailing insert BEFORE the
+                // increment row, splitting its element's group
                 pos = op_pos;
                 continue;
             }

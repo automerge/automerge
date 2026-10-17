@@ -92,6 +92,7 @@ pub struct SampledBenchmark {
     pub group: &'static str,
     pub name: &'static str,
     pub make_runner: Box<dyn Fn() -> Runner>,
+    pub fixed_iters: bool,
 }
 
 impl SampledBenchmark {
@@ -110,6 +111,24 @@ impl SampledBenchmark {
                 let mut operation = operation();
                 Runner::batched((), move |()| operation())
             }),
+            fixed_iters: false,
+        }
+    }
+
+    /// [`Self::no_setup`] for an operation that changes the state later
+    /// iterations run on, so every sample runs the same number of
+    /// iterations rather than enough to fill a minimum time.
+    pub fn accumulating<Operation>(
+        group: &'static str,
+        name: &'static str,
+        operation: Operation,
+    ) -> Self
+    where
+        Operation: Fn() -> Box<dyn FnMut()> + 'static,
+    {
+        Self {
+            fixed_iters: true,
+            ..Self::no_setup(group, name, operation)
         }
     }
 
@@ -129,6 +148,7 @@ impl SampledBenchmark {
             group,
             name,
             make_runner: Box::new(move || Runner::batched(setup(), run.clone())),
+            fixed_iters: false,
         }
     }
 }

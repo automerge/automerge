@@ -7,13 +7,16 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use super::{change::Unverified, parse, BundleStorage, Change, Compressed, Document, MAGIC_BYTES};
+use super::bundle_v0::BundleV0Storage;
+use super::{change::Unverified, parse, Change, Compressed, Document, MAGIC_BYTES};
 use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
-    Bundle(BundleStorage<'a, Unverified>),
+    /// A BundleV0 (chunk type 3), a frozen format — see [`super::bundle_v0`].
+    BundleV0(Box<BundleV0Storage<'a, Unverified>>),
+    BundleColumns(Box<crate::storage::Bundle>, Header),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
@@ -27,8 +30,10 @@ pub(crate) mod error {
         LeftoverData,
         #[error(transparent)]
         Leb128(#[from] parse::leb128::Error),
-        #[error("failed to parse bundle: {0}")]
-        Bundle(#[from] bundle::ParseError),
+        #[error("failed to parse BundleV0: {0}")]
+        BundleV0(#[from] bundle::ParseError),
+        #[error("invalid bundle: {0}")]
+        Bundle(#[from] crate::storage::bundle::InvalidBundle),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
         #[error("bad change chunk: {0}")]
@@ -98,14 +103,19 @@ impl<'a> Chunk<'a> {
                     Compressed::new(header.checksum, Cow::Borrowed(chunk_input.bytes())),
                 )
             }
-            ChunkType::Bundle => {
+            ChunkType::BundleV0 => {
                 let (remaining, bundle) =
-                    BundleStorage::parse_following_header(chunk_input, header)
+                    BundleV0Storage::parse_following_header(chunk_input, header)
                         .map_err(|e| e.lift())?;
                 if !remaining.is_empty() {
                     return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                Chunk::Bundle(bundle)
+                Chunk::BundleV0(Box::new(bundle))
+            }
+            ChunkType::Bundle => {
+                let bundle = crate::storage::Bundle::parse_after_header(chunk_input)
+                    .map_err(|e| parse::ParseError::Error(error::Chunk::Bundle(e)))?;
+                Chunk::BundleColumns(Box::new(bundle), header)
             }
         };
         Ok((remaining, chunk))
@@ -118,7 +128,8 @@ impl<'a> Chunk<'a> {
             Self::CompressedChange(change, compressed) => {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
-            Self::Bundle(b) => b.checksum_valid(),
+            Self::BundleV0(b) => b.checksum_valid(),
+            Self::BundleColumns(_, header) => header.checksum_valid(),
         }
     }
 }
@@ -128,6 +139,9 @@ pub(crate) enum ChunkType {
     Document,
     Change,
     Compressed,
+    /// BundleV0, a frozen format — see [`super::bundle_v0`].
+    BundleV0,
+    /// A [`crate::storage::Bundle`].
     Bundle,
 }
 
@@ -139,7 +153,8 @@ impl TryFrom<u8> for ChunkType {
             0 => Ok(Self::Document),
             1 => Ok(Self::Change),
             2 => Ok(Self::Compressed),
-            3 => Ok(Self::Bundle),
+            3 => Ok(Self::BundleV0),
+            4 => Ok(Self::Bundle),
             other => Err(other),
         }
     }
@@ -151,7 +166,8 @@ impl From<ChunkType> for u8 {
             ChunkType::Document => 0,
             ChunkType::Change => 1,
             ChunkType::Compressed => 2,
-            ChunkType::Bundle => 3,
+            ChunkType::BundleV0 => 3,
+            ChunkType::Bundle => 4,
         }
     }
 }
@@ -229,6 +245,10 @@ impl Header {
         self.header_size
     }
 
+    pub(crate) fn chunk_type(&self) -> ChunkType {
+        self.chunk_type
+    }
+
     pub(crate) fn write(&self, out: &mut Vec<u8>) {
         out.extend(MAGIC_BYTES);
         out.extend(self.checksum.bytes());
@@ -300,12 +320,20 @@ impl Header {
 }
 
 fn hash(typ: ChunkType, data: &[u8]) -> ChangeHash {
+    hash_parts(typ, &[data])
+}
+
+/// The hash of a chunk whose data is `parts` concatenated.
+pub(crate) fn hash_parts(typ: ChunkType, parts: &[&[u8]]) -> ChangeHash {
+    let len: usize = parts.iter().map(|p| p.len()).sum();
     let mut header = Vec::with_capacity(5);
     header.push(u8::from(typ));
-    leb128::write::unsigned(&mut header, data.len() as u64).unwrap();
+    leb128::write::unsigned(&mut header, len as u64).unwrap();
     let mut hasher = Sha256::new();
     hasher.update(&header);
-    hasher.update(data);
+    for part in parts {
+        hasher.update(part);
+    }
     let hash_result = hasher.finalize();
     let array: [u8; 32] = hash_result.into();
     ChangeHash(array)

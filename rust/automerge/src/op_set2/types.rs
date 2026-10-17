@@ -257,6 +257,10 @@ impl<'a> From<ValueRef<'a>> for types::Value<'static> {
 }
 
 impl<'a> ScalarValue<'a> {
+    pub fn is_counter(&self) -> bool {
+        matches!(&self, ScalarValue::Counter(_))
+    }
+
     pub fn as_i64(&self) -> i64 {
         match self {
             Self::Int(i) | Self::Timestamp(i) => *i,
@@ -580,12 +584,6 @@ impl<'a> From<&'a str> for ScalarValue<'a> {
     fn from(s: &'a str) -> Self {
         ScalarValue::Str(Cow::Borrowed(s))
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum PropRef<'a> {
-    Map(Cow<'a, str>),
-    Seq(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]

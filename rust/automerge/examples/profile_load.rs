@@ -1,0 +1,33 @@
+// Load a doc repeatedly — profiler target for the full-load path.
+// Args: [doc] [iterations] [mode: audit|default]
+// default re-saves the doc first: the raw egwalker files lack the head-index suffix.
+use automerge::next::Automerge;
+fn main() {
+    let name = std::env::args().nth(1).unwrap_or_else(|| "S3".into());
+    let n: usize = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    let mode = std::env::args().nth(3).unwrap_or_else(|| "audit".into());
+    let raw = std::fs::read(format!("/Users/orion/automerge-blog/data/{name}.am")).unwrap();
+    let bytes = if mode == "audit" {
+        raw
+    } else {
+        Automerge::load(&raw).unwrap().save()
+    };
+    let t = std::time::Instant::now();
+    for _ in 0..n {
+        if mode == "audit" {
+            std::hint::black_box(automerge::Automerge::load(&bytes).unwrap());
+        } else {
+            std::hint::black_box(Automerge::load(&bytes).unwrap());
+        }
+    }
+    eprintln!(
+        "{} x{} mode={} avg {:.4}s",
+        name,
+        n,
+        mode,
+        t.elapsed().as_secs_f64() / n as f64
+    );
+}

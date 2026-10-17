@@ -27,11 +27,15 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
 
-/// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
-/// larger = fewer nodes + more per-node cost.  64 is empirically a good
-/// compromise across the `marks_at` (query-heavy) and `insert_null`
-/// (mutation-heavy) workloads.
-const B: usize = 64;
+#[cfg(feature = "debug")]
+#[path = "debug.rs"]
+pub mod debug;
+
+/// Branching factor.  Smaller = more levels, each costing dependent loads
+/// and a mispredict; larger = longer linear scans per node.  32 measured
+/// equal or better than 16 and 64 on real document columns; 8 is
+/// clearly worse.
+const B: usize = 32;
 
 // ── SlabAggregate trait ─────────────────────────────────────────────────────
 
@@ -196,6 +200,74 @@ where
 
 type NodeId = u32;
 
+/// Root-to-leaf `(node, child_idx)` steps.  Every splice and slab update
+/// builds one, so it stays off the heap unless the tree is unusually deep.
+#[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
+enum Path {
+    Inline {
+        len: usize,
+        steps: [(NodeId, usize); INLINE_DEPTH],
+    },
+    Heap(Vec<(NodeId, usize)>),
+}
+
+const INLINE_DEPTH: usize = 16;
+
+impl Default for Path {
+    fn default() -> Self {
+        Path::Inline {
+            len: 0,
+            steps: [(0, 0); INLINE_DEPTH],
+        }
+    }
+}
+
+impl std::ops::Deref for Path {
+    type Target = [(NodeId, usize)];
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Path::Inline { len, steps } => &steps[..*len],
+            Path::Heap(v) => v,
+        }
+    }
+}
+
+impl Path {
+    fn from_slice(steps: &[(NodeId, usize)]) -> Self {
+        let mut p = Self::default();
+        for &s in steps {
+            p.push(s);
+        }
+        p
+    }
+
+    fn push(&mut self, step: (NodeId, usize)) {
+        match self {
+            Path::Inline { len, steps } if *len < INLINE_DEPTH => {
+                steps[*len] = step;
+                *len += 1;
+            }
+            Path::Inline { steps, .. } => {
+                let mut v = steps.to_vec();
+                v.push(step);
+                *self = Path::Heap(v);
+            }
+            Path::Heap(v) => v.push(step),
+        }
+    }
+
+    fn pop(&mut self) -> Option<(NodeId, usize)> {
+        match self {
+            Path::Inline { len, steps } => {
+                *len = len.checked_sub(1)?;
+                Some(steps[*len])
+            }
+            Path::Heap(v) => v.pop(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum Node<A: SlabAggregate> {
     Leaf(Leaf<A>),
@@ -249,11 +321,10 @@ impl<A: SlabAggregate> Default for SlabBTree<A> {
 }
 
 impl<A: SlabAggregate> SlabBTree<A> {
+    /// Allocates nothing until the first splice.
     pub(crate) fn new() -> Self {
-        let mut nodes = Vec::with_capacity(8);
-        nodes.push(Some(Node::Leaf(Leaf::default())));
         Self {
-            nodes,
+            nodes: Vec::new(),
             free: Vec::new(),
             root: 0,
             total_slabs: 0,
@@ -270,8 +341,27 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.total_slabs == 0
     }
 
+    /// Every slab's aggregate, in slab order.
+    pub(crate) fn weights(&self) -> Vec<A> {
+        let mut out = Vec::with_capacity(self.total_slabs);
+        if self.nodes.is_empty() {
+            return out;
+        }
+        let mut stack = vec![self.root];
+        while let Some(id) = stack.pop() {
+            match self.node(id) {
+                Node::Leaf(l) => out.extend(l.aggs.iter().cloned()),
+                Node::Internal(n) => stack.extend(n.children.iter().rev().map(|c| c.id)),
+            }
+        }
+        out
+    }
+
     #[allow(dead_code)]
     pub(crate) fn root_agg(&self) -> A {
+        if self.nodes.is_empty() {
+            return A::default();
+        }
         match self.node(self.root) {
             Node::Leaf(l) => merge_all(&l.aggs),
             Node::Internal(n) => merge_all(n.children.iter().map(|c| &c.agg)),
@@ -316,11 +406,21 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     pub(crate) fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
         let aggs: Vec<A> = iter.into_iter().collect();
-        let mut tree = Self::new();
         if aggs.is_empty() {
+            return Self::new();
+        }
+        let leaves = aggs.len().div_ceil(B);
+        let mut tree = Self {
+            nodes: Vec::with_capacity(leaves + leaves.div_ceil(B - 1)),
+            free: Vec::new(),
+            root: 0,
+            total_slabs: aggs.len(),
+            _phantom: PhantomData,
+        };
+        if leaves == 1 {
+            tree.nodes.push(Some(Node::Leaf(Leaf { aggs })));
             return tree;
         }
-        tree.total_slabs = aggs.len();
 
         let mut level: Vec<(NodeId, A, usize)> = aggs
             .chunks(B)
@@ -355,9 +455,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 .collect();
         }
 
-        let (root_id, _, _) = level[0];
-        tree.free(tree.root);
-        tree.root = root_id;
+        tree.root = level[0].0;
         tree
     }
 
@@ -366,7 +464,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     pub(crate) fn update_slab(&mut self, slab_idx: usize, new_agg: A) {
         assert!(slab_idx < self.total_slabs, "update_slab out of bounds");
         // Descend to the leaf, recording each (node, child_idx_taken).
-        let mut path: Vec<(NodeId, usize)> = Vec::with_capacity(8);
+        let mut path = Path::default();
         let mut remaining = slab_idx;
         let mut node_id = self.root;
         loop {
@@ -395,7 +493,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
 
         // Walk back up, refreshing each internal node's cached child agg.
-        for (parent_id, child_idx) in path.into_iter().rev() {
+        for &(parent_id, child_idx) in path.iter().rev() {
             // Find which child id this was in the parent (we only stored child_idx).
             let child_id = match self.node(parent_id) {
                 Node::Internal(n) => n.children[child_idx].id,
@@ -412,7 +510,15 @@ impl<A: SlabAggregate> SlabBTree<A> {
     pub(crate) fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_aggs: I) {
         assert!(range.end <= self.total_slabs, "splice out of bounds");
         assert!(range.start <= range.end, "invalid range");
-        let new: Vec<A> = new_aggs.into_iter().collect();
+        let mut new_aggs = new_aggs.into_iter();
+        let new: Vec<A> = if range.len() == 1 {
+            match (new_aggs.next(), new_aggs.next()) {
+                (Some(a), None) => return self.update_slab(range.start, a),
+                (a, b) => a.into_iter().chain(b).chain(new_aggs).collect(),
+            }
+        } else {
+            new_aggs.collect()
+        };
 
         if range.is_empty() && new.is_empty() {
             return;
@@ -604,7 +710,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         };
 
         // Propagate up.
-        let lca_path_vec = lca_path.to_vec();
+        let lca_path_vec = Path::from_slice(lca_path);
         if new_lca_len == 0 {
             // Every child of the LCA was deleted (`new` must be empty for
             // the combined span to vanish).  An empty internal node is not
@@ -654,7 +760,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// `path` is an ancestor path as produced by `locate_leaf_for_start`:
     /// `path[i] = (ancestor_id, child_idx_taken)`, ending with the parent
     /// of the node being removed.
-    fn remove_and_cascade(&mut self, mut path: Vec<(NodeId, usize)>) {
+    fn remove_and_cascade(&mut self, mut path: Path) {
         while let Some((parent_id, child_idx)) = path.pop() {
             let child_id = match self.node(parent_id) {
                 Node::Internal(n) => n.children[child_idx].id,
@@ -779,6 +885,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
             return self.make_fresh_leaves(aggs);
         }
         let below = self.build_children_at_height(aggs, height - 1);
+        self.group_into_internals(below)
+    }
+
+    fn group_into_internals(&mut self, below: Vec<ChildSlot<A>>) -> Vec<ChildSlot<A>> {
         if below.is_empty() {
             return Vec::new();
         }
@@ -831,7 +941,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         result
     }
 
-    fn split_and_propagate(&mut self, node_id: NodeId, path: Vec<(NodeId, usize)>) {
+    fn split_and_propagate(&mut self, node_id: NodeId, path: Path) {
         let total = match self.node(node_id) {
             Node::Internal(n) => n.children.len(),
             _ => unreachable!(),
@@ -879,6 +989,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
     fn splice_into_empty(&mut self, new: &[A]) {
         if new.is_empty() {
             return;
+        }
+        if self.nodes.is_empty() {
+            self.nodes.push(Some(Node::Leaf(Leaf::default())));
         }
         if new.len() <= B {
             match self.node_mut(self.root) {
@@ -972,8 +1085,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// entry).  Handles the append case (`start == total_slabs`) by
     /// landing in the last leaf.
     #[allow(clippy::type_complexity)]
-    fn locate_leaf_for_start(&self, start: usize) -> Option<(Vec<(NodeId, usize)>, NodeId, usize)> {
-        let mut path: Vec<(NodeId, usize)> = Vec::with_capacity(8);
+    fn locate_leaf_for_start(&self, start: usize) -> Option<(Path, NodeId, usize)> {
+        let mut path = Path::default();
         let mut remaining = start;
         let mut leaf_start = 0usize;
         let mut node_id = self.root;
@@ -1069,8 +1182,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// parent, split the parent and produce a new replacement set for
     /// the next level up.  If we run out of path (reached the root) and
     /// still have multiple replacements, grow a new root.
-    fn propagate_splits(&mut self, path: Vec<(NodeId, usize)>, mut replacement: Vec<ChildSlot<A>>) {
-        for (parent_id, child_idx) in path.into_iter().rev() {
+    fn propagate_splits(&mut self, path: Path, mut replacement: Vec<ChildSlot<A>>) {
+        for &(parent_id, child_idx) in path.iter().rev() {
             let new_total = {
                 let p = match self.node_mut(parent_id) {
                     Node::Internal(n) => n,
@@ -1142,6 +1255,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
             }
             _ => {
                 // Root overflowed — grow a new root one level up.
+                while replacement.len() > B {
+                    replacement = self.group_into_internals(replacement);
+                }
                 let new_root = Internal {
                     children: replacement,
                 };
@@ -1190,6 +1306,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// covers the remainder), so no upfront root-aggregate merge is
     /// needed — this runs on every positional lookup.
     pub(crate) fn find_by_prefix(&self, pos: usize) -> Option<(usize, usize)> {
+        if self.nodes.is_empty() {
+            return None;
+        }
         let mut node = self.root;
         let mut pos = pos;
         let mut slab_idx_base = 0;
@@ -1230,6 +1349,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// slab count, accumulating the item lengths of skipped siblings.
     /// `slab_idx` may equal the total slab count (returns total items).
     pub(crate) fn items_before_slab(&self, slab_idx: usize) -> usize {
+        if self.nodes.is_empty() {
+            return 0;
+        }
         let mut remaining = slab_idx;
         let mut items = 0;
         let mut node = self.root;
@@ -1281,6 +1403,11 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// * every cached `slab_count` and `agg.len()` matches recomputation;
     ///   `total_slabs` matches the real slab count
     pub(crate) fn check_invariants(&self) {
+        if self.nodes.is_empty() {
+            assert_eq!(self.total_slabs, 0, "slabs without nodes");
+            assert!(self.free.is_empty(), "free list without nodes");
+            return;
+        }
         let mut reachable = vec![false; self.nodes.len()];
         let mut leaf_depth: Option<usize> = None;
         if let Node::Internal(n) = self.node(self.root) {
@@ -1392,8 +1519,12 @@ impl<'a> FindByValue<'a> {
         let mut s = Self {
             tree,
             target,
-            stack: Vec::with_capacity(16),
+            stack: Vec::new(),
         };
+        if tree.nodes.is_empty() {
+            return s;
+        }
+        s.stack.reserve(16);
         s.stack.push(Frame {
             node: tree.root,
             next_child: 0,
@@ -1470,8 +1601,12 @@ impl<'a> FindByValueRange<'a> {
             tree,
             lo,
             hi,
-            stack: Vec::with_capacity(16),
+            stack: Vec::new(),
         };
+        if tree.nodes.is_empty() {
+            return s;
+        }
+        s.stack.reserve(16);
         s.stack.push(Frame {
             node: tree.root,
             next_child: 0,
@@ -1564,6 +1699,13 @@ impl<A: PrefixAggregate> SlabBTree<A> {
         let mut prefix = A::Prefix::default();
         let mut pos = 0usize;
         let mut slab_base = 0usize;
+        if self.nodes.is_empty() {
+            return FoundSlab {
+                index: slab_base,
+                prefix,
+                pos,
+            };
+        }
         let mut remaining = item_idx;
         let mut node = self.root;
         loop {
@@ -1629,6 +1771,9 @@ where
         let mut acc_prefix = A::Prefix::default();
         let mut acc_items = 0usize;
         let mut slab_base = 0usize;
+        if self.nodes.is_empty() {
+            return (slab_base, acc_prefix, acc_items);
+        }
         let mut node = self.root;
         loop {
             match self.node(node) {
@@ -2281,14 +2426,15 @@ mod tests {
     #[test]
     fn exact_internal_span_delete() {
         // Pure delete exactly covering the middle level-1 internal's span.
-        let n = 64 * 64 * 3;
-        let aggs: Vec<_> = (0..n).map(|i| simple_agg(i as i64, 1)).collect();
+        let span = B * B;
+        let aggs: Vec<_> = (0..span * 3).map(|i| simple_agg(i as i64, 1)).collect();
         let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
         assert_eq!(t.subtree_height(t.root), 2);
-        t.splice(4096..8192, std::iter::empty());
-        assert_eq!(t.len(), 8192);
-        assert_eq!(t.find_by_prefix(5000), Some((5000, 5000)));
-        assert_eq!(t.root_agg().len, 8192);
+        t.splice(span..span * 2, std::iter::empty());
+        assert_eq!(t.len(), span * 2);
+        let p = span + B / 2;
+        assert_eq!(t.find_by_prefix(p), Some((p, p)));
+        assert_eq!(t.root_agg().len, span * 2);
         t.check_invariants();
     }
 
@@ -2329,7 +2475,7 @@ mod tests {
 
     #[test]
     fn root_collapses_after_mass_delete() {
-        let n = 64 * 64 + 5;
+        let n = B * B + 5;
         let aggs: Vec<_> = (0..n).map(|i| simple_agg(i as i64, 1)).collect();
         let mut t = SlabBTree::<SlabAgg>::from_iter(aggs);
         assert_eq!(t.subtree_height(t.root), 2);
@@ -2348,6 +2494,27 @@ mod tests {
 
     // ── Deep structural fuzz ────────────────────────────────────────────
     //
+    #[test]
+    fn path_spills_past_inline_depth() {
+        let steps: Vec<(NodeId, usize)> = (0..INLINE_DEPTH as u32 + 5)
+            .map(|i| (i, i as usize))
+            .collect();
+        let mut p = Path::from_slice(&steps);
+        assert_eq!(&p[..], &steps[..]);
+        for s in steps.iter().rev() {
+            assert_eq!(p.pop(), Some(*s));
+        }
+        assert_eq!(p.pop(), None);
+    }
+
+    #[test]
+    fn bulk_insert_past_b_cubed_slabs_keeps_root_within_b() {
+        let mut t = SlabBTree::<SlabAgg>::from_iter((0..B as i64 + 1).map(|i| simple_agg(i, 1)));
+        let n = B * B * B + 1;
+        t.splice(1..1, (0..n).map(|i| simple_agg(i as i64, 1)));
+        t.check_invariants();
+    }
+
     // The older fuzzers run at ~10-70 slabs, which at B=64 almost never
     // leaves a single root leaf.  This one starts at 200-1500 slabs so
     // splits, LCA splices, underflow removal, sibling merges, and root

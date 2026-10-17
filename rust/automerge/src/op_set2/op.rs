@@ -1,5 +1,5 @@
 use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction, SuccUndo};
-use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
+use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 use super::{ValueMeta, ValueRef};
 
 use crate::clock::Clock;
@@ -7,7 +7,7 @@ use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::types;
 use crate::types::{ElemId, ObjId, ObjMeta, ObjType, OpId, SequenceType};
-use crate::{hydrate, TextEncoding};
+use crate::TextEncoding;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -48,136 +48,27 @@ impl AsBuilder for &TxOp {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SuccessorValue {
-    id: OpId,
-    increment: Option<i64>,
-    masked: bool,
-}
-
-impl SuccessorValue {
-    /// Construct a new [`SuccessorValue`].
-    pub(crate) fn new(id: OpId, counter: Option<i64>, masked: bool) -> Self {
-        Self {
-            id,
-            increment: counter,
-            masked,
-        }
-    }
-
-    /// Reset the increment, by setting its value to `None`.
-    pub(crate) fn reset_increment(&mut self) {
-        self.increment.take();
-    }
-
-    /// Return the increment value, if there is one, and the successor is not
-    /// masked.
-    fn increment(&self) -> Option<i64> {
-        self.increment.filter(|_| !self.masked)
-    }
-
-    /// Returns `true` if the successor has no increment and is not masked.
-    fn has_succ(&self) -> bool {
-        self.increment.is_none() && !self.masked
-    }
-
-    /// Return the [`OpId`] of the successor.
-    pub(crate) fn get_id(&self) -> OpId {
-        self.id
-    }
-
-    /// Return the increment value of the successor, regardless of masking.
-    pub(crate) fn get_increment(&self) -> Option<i64> {
-        self.increment
-    }
-
-    /// Returns `true` if the successor is masked.
-    pub(crate) fn is_masked(&self) -> bool {
-        self.masked
-    }
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
-    pub(crate) succ: Vec<SuccessorValue>,
-    pub(crate) pos: Option<usize>,
-    pub(crate) subsort: usize,
+    pub(crate) succ: Vec<(OpId, Option<i64>)>,
     pub(crate) conflicted: bool,
-    /// Whether this incoming op is hidden by the mask snapshot the batch
-    /// walks under. An import-time fact only; never stored on a doc op.
-    pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
 impl ChangeOp {
-    pub(crate) fn prop_static(&self) -> Option<PropRef<'static>> {
-        match &self.bld.key {
-            KeyRef::Map(s) => Some(PropRef::Map(Cow::Owned(String::from(s.as_ref())))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn prop(&self) -> Option<PropRef<'_>> {
-        match &self.bld.key {
-            KeyRef::Map(Cow::Owned(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
-            KeyRef::Map(Cow::Borrowed(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn mark_data(&self) -> Option<MarkData<'static>> {
-        let name = self.bld.mark_name.as_ref()?.clone();
-        let value = self.bld.value.clone();
-        Some(MarkData { name, value })
-    }
-
-    pub(crate) fn hydrate_value_and_fix_counters(
-        &self,
-        text_encoding: TextEncoding,
-    ) -> hydrate::Value {
-        if self.bld.action == Action::Set {
-            if let ScalarValue::Counter(c) = &self.bld.value {
-                let inc: i64 = self.succ.iter().filter_map(|value| value.increment()).sum();
-                hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
-            } else {
-                hydrate::Value::Scalar(self.bld.value.to_owned())
-            }
-        } else {
-            self.bld.hydrate_value(text_encoding)
-        }
-    }
-
-    pub(crate) fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
-        self.bld.width(seq_type, text_encoding)
-    }
-
     pub(crate) fn visible(&self) -> bool {
-        !(self.masked || self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+        !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
     }
 
     pub(crate) fn has_succ(&self) -> bool {
-        self.succ.iter().any(|value| value.has_succ())
+        self.succ.iter().any(|(_, inc)| inc.is_none())
     }
 
     pub(crate) fn insert(&self) -> bool {
         self.bld.insert
     }
 
-    pub(crate) fn is_set_or_make(&self) -> bool {
-        matches!(
-            self.bld.action,
-            Action::Set | Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
-        )
-    }
-
-    pub(crate) fn action(&self) -> Action {
-        self.bld.action
-    }
     pub(crate) fn key(&self) -> &KeyRef<'static> {
         &self.bld.key
-    }
-
-    pub(crate) fn pred(&self) -> &[OpId] {
-        &self.bld.pred
     }
 
     pub(crate) fn id(&self) -> OpId {
@@ -206,13 +97,9 @@ impl ChangeOp {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TxOp {
-    pub(crate) obj_type: ObjType,
     pub(crate) index: usize,
     pub(crate) pos: usize,
-    pub(crate) noop: bool,
-    /// Whether the visibility mask hides this op (the transaction's actor
-    /// belongs to a masked author). Mirrors `ChangeOp::masked`: a masked
-    /// op is recorded but never indexed as visible.
+    /// Hidden by the write-frontier mask, so indexed as invisible.
     pub(crate) masked: bool,
     pub(crate) bld: OpBuilder<'static>,
     pub(crate) undo: Vec<SuccUndo>,
@@ -284,20 +171,6 @@ impl OpBuilder<'_> {
             _ => None,
         }
     }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        // FIXME
-        match self.action {
-            Action::Set => hydrate::Value::Scalar(self.value.to_owned()),
-            Action::MakeMap => hydrate::Value::map(),
-            Action::MakeList => hydrate::Value::list(),
-            Action::MakeText => hydrate::Value::new(ObjType::Text, text_encoding),
-            Action::MakeTable => hydrate::Value::new(ObjType::Table, text_encoding),
-            //Action::Mark if self.mark_name.is_some() => hydrate::Value::new(&self.value, text_rep),
-            //Action::Mark => hydrate::Value::Scalar("markEnd".into()),
-            _ => panic!("cant convert op into a value"),
-        }
-    }
 }
 
 impl TxOp {
@@ -321,16 +194,14 @@ impl TxOp {
         elemid: ElemId,
         pred: Vec<OpId>,
     ) -> Self {
-        let (op_type, noop) = match action {
-            ResolvedAction::ConflictResolution(action) => (action, true),
-            ResolvedAction::VisibleUpdate(action) => (action, false),
+        let op_type = match action {
+            ResolvedAction::ConflictResolution(action) => action,
+            ResolvedAction::VisibleUpdate(action) => action,
         };
         let (action, value, expand, mark_name) = op_type.decompose();
         TxOp {
-            obj_type: obj.typ,
             pos,
             index,
-            noop,
             masked: false,
             undo: vec![],
             reset_range: None,
@@ -356,16 +227,14 @@ impl TxOp {
         prop: String,
         pred: Vec<OpId>,
     ) -> Self {
-        let (action, noop) = match action {
-            ResolvedAction::ConflictResolution(action) => (action, true),
-            ResolvedAction::VisibleUpdate(action) => (action, false),
+        let action = match action {
+            ResolvedAction::ConflictResolution(action) => action,
+            ResolvedAction::VisibleUpdate(action) => action,
         };
         let (action, value, expand, mark_name) = action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             index: 0,
             pos,
-            noop,
             masked: false,
             undo: vec![],
             reset_range: None,
@@ -393,10 +262,8 @@ impl TxOp {
     ) -> Self {
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             pos,
             index,
-            noop: false,
             masked: false,
             undo: vec![],
             reset_range: None,
@@ -426,8 +293,6 @@ impl TxOp {
         TxOp {
             pos,
             index: 0,
-            obj_type: obj.typ,
-            noop: false,
             masked: false,
             undo: vec![],
             reset_range: None,
@@ -456,10 +321,8 @@ impl TxOp {
         let _action = types::OpType::Make(obj_type);
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             pos,
             index,
-            noop: false,
             masked: false,
             undo: vec![],
             reset_range: None,
@@ -487,10 +350,8 @@ impl TxOp {
         let _action = types::OpType::Delete;
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
-            obj_type: obj.typ,
             pos: 0,
             index,
-            noop: false,
             masked: false,
             undo: vec![],
             reset_range: None,
@@ -508,32 +369,8 @@ impl TxOp {
         }
     }
 
-    pub(crate) fn prop(&self) -> PropRef<'_> {
-        if let KeyRef::Map(s) = &self.bld.key {
-            PropRef::Map(s.clone())
-        } else {
-            PropRef::Seq(self.index)
-        }
-    }
-
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        self.bld.hydrate_value(text_encoding)
-    }
-
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
         self.bld.get_increment_value()
-    }
-
-    pub(crate) fn is_delete(&self) -> bool {
-        self.bld.is_delete()
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        self.bld.as_str()
-    }
-
-    pub(crate) fn is_mark(&self) -> bool {
-        self.bld.is_mark()
     }
 }
 
@@ -623,12 +460,7 @@ impl OpLike for TxOp {
     type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        // A hidden mark must not enter the mark index.
-        if op.masked {
-            None
-        } else {
-            op.bld.mark_index()
-        }
+        op.bld.mark_index()
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -707,11 +539,7 @@ impl OpLike for ChangeOp {
     type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
 
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
-        if op.masked {
-            None
-        } else {
-            op.bld.mark_index()
-        }
+        op.bld.mark_index()
     }
 
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
@@ -744,15 +572,11 @@ impl OpLike for ChangeOp {
     }
 
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
-        Box::new(
-            op.succ
-                .iter()
-                .map(|SuccessorValue { increment, .. }| *increment),
-        )
+        Box::new(op.succ.iter().map(|o| o.1))
     }
 
     fn succ(&self) -> Self::SuccIter<'_> {
-        Box::new(self.succ.iter().map(|SuccessorValue { id, .. }| *id))
+        Box::new(self.succ.iter().map(|o| o.0))
     }
 
     fn id(&self) -> OpId {
@@ -919,7 +743,7 @@ pub(crate) struct Op<'a> {
 #[derive(Clone, Default)]
 pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
-    pub(super) succ_actor: hexane::Iter<'a, super::types::ActorIdx>,
+    pub(super) succ_actor: super::op_set::MappedIter<'a, super::types::ActorIdx>,
     pub(super) succ_counter: hexane::DeltaIter<'a, u32>,
     pub(super) inc_values: hexane::Iter<'a, Option<i64>>,
 }
@@ -930,6 +754,31 @@ impl<'a> SuccCursors<'a> {
     }
     pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
         SuccIncCursors(self)
+    }
+
+    pub(crate) fn add_succ(
+        mut self,
+        pos: usize,
+        id: OpId,
+        inc: Option<i64>,
+        masked: bool,
+    ) -> SuccInsert {
+        let len = self.len() as u64;
+        let mut sub_pos = self.pos();
+        while let Some(i) = self.next() {
+            if i > id {
+                break;
+            }
+            sub_pos = self.pos();
+        }
+        SuccInsert {
+            id,
+            pos,
+            inc,
+            len,
+            sub_pos,
+            masked,
+        }
     }
 }
 
@@ -948,6 +797,7 @@ struct IncCursors<'a>(SuccCursors<'a>);
 impl Iterator for SuccCursors<'_> {
     type Item = OpId;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             None
@@ -969,6 +819,7 @@ impl ExactSizeIterator for SuccCursors<'_> {
 impl Iterator for SuccIncCursors<'_> {
     type Item = (OpId, Option<i64>);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.0.len == 0 {
             None
@@ -986,6 +837,7 @@ impl Iterator for SuccIncCursors<'_> {
 impl Iterator for IncCursors<'_> {
     type Item = Option<i64>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.0.len == 0 {
             None
@@ -1015,6 +867,52 @@ pub(crate) struct SuccInsert {
     pub(crate) masked: bool,
 }
 
+/// A batch of document succ additions, consumed whole by `OpSet::add_succ`.
+#[derive(Debug, Default)]
+pub(crate) struct DocSucc {
+    /// pre-splice sub positions, ascending
+    pub(crate) splices: Vec<hexane::Splice>,
+    pub(crate) actors: Vec<ActorIdx>,
+    pub(crate) ctrs: Vec<u32>,
+    pub(crate) incs: Vec<Option<i64>>,
+    /// (row, new succ count), ascending
+    pub(crate) counts: Vec<(usize, u32)>,
+    /// rows that become invisible, ascending
+    pub(crate) clears: Vec<usize>,
+}
+
+impl DocSucc {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.actors.is_empty()
+    }
+
+    pub(crate) fn push(&mut self, s: SuccInsert) {
+        debug_assert!(
+            self.splices.last().is_none_or(|sp| sp.pos <= s.sub_pos),
+            "succ entries must arrive in ascending sub order"
+        );
+        let k = self.actors.len();
+        self.actors.push(s.id.actoridx());
+        self.ctrs.push(s.id.counter() as u32);
+        self.incs.push(s.inc);
+        match self.splices.last_mut() {
+            Some(sp) if sp.pos == s.sub_pos => sp.range.end = k + 1,
+            _ => self.splices.push(hexane::Splice {
+                pos: s.sub_pos,
+                delete: 0,
+                range: k..k + 1,
+            }),
+        }
+        match self.counts.last_mut() {
+            Some((p, c)) if *p == s.pos => *c += 1,
+            _ => self.counts.push((s.pos, s.len as u32 + 1)),
+        }
+        if s.inc.is_none() && !s.masked && self.clears.last() != Some(&s.pos) {
+            self.clears.push(s.pos);
+        }
+    }
+}
+
 impl<'a> Op<'a> {
     pub(crate) fn mark_index(&self) -> Option<MarkIndexBuilder> {
         match (&self.action, &self.mark_name) {
@@ -1029,37 +927,13 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
-        self.add_succ_with_mask(id, inc, false)
-    }
-
-    pub(crate) fn add_succ_with_mask(
-        &self,
-        id: OpId,
-        mut inc: Option<i64>,
-        masked: bool,
-    ) -> SuccInsert {
-        let pos = self.pos;
-        let mut succ = self.succ_cursors.clone();
-        if inc.is_some() && !self.is_counter() {
-            inc = None;
-        }
-        let len = succ.len() as u64;
-        let mut sub_pos = succ.pos();
-        while let Some(i) = succ.next() {
-            if i > id {
-                break;
-            }
-            sub_pos = succ.pos();
-        }
-        SuccInsert {
-            id,
-            pos,
-            inc,
-            len,
-            sub_pos,
-            masked,
-        }
+    /// `inc` is taken as given: pass `None` for an increment of a
+    /// non-counter target. A `masked` successor keeps the link but neither
+    /// hides nor increments.
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>, masked: bool) -> SuccInsert {
+        self.succ_cursors
+            .clone()
+            .add_succ(self.pos, id, inc, masked)
     }
 
     pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
@@ -1191,16 +1065,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
-        match &self.action() {
-            OpType::Make(obj_type) => hydrate::Value::new(*obj_type, text_encoding),
-            OpType::Put(scalar) => hydrate::Value::Scalar(scalar.to_owned()),
-            OpType::MarkBegin(_, mark) => hydrate::Value::new(&mark.value, text_encoding),
-            OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
-            _ => panic!("cant convert op into a value"),
-        }
-    }
-
     pub(crate) fn action(&self) -> OpType<'a> {
         self.op_type()
     }
@@ -1210,7 +1074,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn is_counter(&self) -> bool {
-        matches!(&self.value, ScalarValue::Counter(_))
+        self.value.is_counter()
     }
 
     pub(crate) fn is_mark(&self) -> bool {
@@ -1245,11 +1109,6 @@ impl<'a> Op<'a> {
             mark_name: None,
             succ_cursors: SuccCursors::default(),
         }
-    }
-
-    pub(crate) fn prop(&self) -> Option<PropRef<'a>> {
-        let key_str = self.key.key_str()?;
-        Some(PropRef::Map(key_str))
     }
 }
 

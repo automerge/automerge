@@ -1,6 +1,6 @@
 use crate::automerge::view::ReadAt;
 use crate::op_set2::{Op, OpSet, OpType};
-use crate::types::{ObjId, ScalarValue, SequenceType};
+use crate::types::{ObjId, ScalarValue};
 use crate::TextEncoding;
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
@@ -13,7 +13,7 @@ mod text;
 #[cfg(test)]
 mod tests;
 
-use crate::Automerge;
+use crate::automerge::Automerge;
 
 pub use list::{List, ListValue};
 pub use map::{Map, MapValue};
@@ -56,13 +56,6 @@ impl Value {
 
     pub fn is_scalar(&self) -> bool {
         matches!(self, Value::Scalar(_))
-    }
-
-    pub(crate) fn width(&self, seq_type: SequenceType, encoding: TextEncoding) -> usize {
-        match seq_type {
-            SequenceType::List => 1,
-            SequenceType::Text => encoding.width(self.as_str()),
-        }
     }
 
     pub fn is_object(&self) -> bool {
@@ -229,7 +222,7 @@ impl From<ScalarValue> for Value {
     }
 }
 
-impl Automerge {
+impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     pub(crate) fn hydrate_map(&self, obj: &ObjId, read: &ReadAt<'_>) -> Value {
         self.ops().hydrate_map(obj, read, self.text_encoding())
     }

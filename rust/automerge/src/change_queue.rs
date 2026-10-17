@@ -18,6 +18,10 @@ impl ChangeBatch {
         }
     }
 
+    pub(crate) fn has_hash(&self, hash: &ChangeHash) -> bool {
+        self.hashes.contains(hash)
+    }
+
     pub(crate) fn push(&mut self, change: Change) -> Result<(), AutomergeError> {
         let hash = change.hash();
         if self.hashes.contains(&hash) {
@@ -63,8 +67,17 @@ impl ChangeQueue {
         self.changes.is_empty()
     }
 
+    pub(crate) fn has_hash(&self, hash: &ChangeHash) -> bool {
+        self.hashes.contains(hash)
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Change> {
         self.changes.iter()
+    }
+
+    pub(crate) fn has_actor_seq(&self, c: &Change) -> bool {
+        self.incoming_actor_seqs
+            .contains(&(c.actor_id().clone(), c.seq()))
     }
 
     /// Remove queued changes at or after an incompatible actor sequence,
@@ -95,8 +108,12 @@ impl ChangeQueue {
             }
         }
 
+        self.remove_present(|change| removed.contains(&change.hash()));
+    }
+
+    pub(crate) fn remove_present(&mut self, mut present: impl FnMut(&Change) -> bool) {
         self.changes.retain(|change| {
-            if removed.contains(&change.hash()) {
+            if present(change) {
                 self.hashes.remove(&change.hash());
                 self.incoming_actor_seqs
                     .remove(&(change.actor_id().clone(), change.seq()));
@@ -120,7 +137,10 @@ impl ChangeQueue {
 
     /// Return the causally ready (according to ChangeGraph) changes in
     /// topological order, removing them from the queue
-    pub(crate) fn pop_topo_sorted_ready(&mut self, change_graph: &ChangeGraph) -> Vec<Change> {
+    pub(crate) fn pop_topo_sorted_ready<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        change_graph: &ChangeGraph<H>,
+    ) -> Vec<Change> {
         // Kahn's algorithm: topological sort of the pool.
         let n = self.changes.len();
         let mut unsatisfied = vec![0u32; n];
@@ -128,7 +148,8 @@ impl ChangeQueue {
 
         for (i, c) in self.changes.iter().enumerate() {
             for dep in c.deps() {
-                if !change_graph.has_change(dep) {
+                // unknown on an unchecked graph: leave the change queued
+                if !change_graph.has_change(dep).unwrap_or(false) {
                     unsatisfied[i] += 1;
                     waiting_on.entry(*dep).or_default().push(i);
                 }

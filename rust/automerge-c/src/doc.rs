@@ -1,7 +1,7 @@
 use automerge as am;
-use automerge::sync::SyncDoc;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::ReadDoc;
+use automerge_sync::{AutoCommitSync, SyncDoc};
 use std::ops::{Deref, DerefMut};
 
 use crate::actor_id::{to_actor_id, AMactorId};

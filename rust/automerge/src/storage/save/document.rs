@@ -12,9 +12,9 @@ use crate::{
 /// * If any of ops in `ops` reference an actor which is not in `actors`
 /// * If any of ops in `ops` reference a property which is not in `props`
 /// * If any of the changes reference a dependency index which is not in `changes`
-pub(crate) fn save_document(
+pub(crate) fn save_document<H: crate::hash_retention::HashRetention>(
     op_set: &OpSet,
-    change_graph: &ChangeGraph,
+    change_graph: &ChangeGraph<H>,
     config: Option<CompressConfig>,
 ) -> Vec<u8> {
     assert_eq!(op_set.actors.len(), change_graph.actor_ids().count());

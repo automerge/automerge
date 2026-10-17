@@ -20,7 +20,7 @@ use automerge::{
     marks::{ExpandMark, Mark as TextMark},
     transaction::Transactable,
     ActorId, Author, AutoCommit, Automerge, ChangeHash, LoadOptions, ObjId, ObjType, Patch,
-    PatchAction, PatchLog, ReadDoc, ScalarValue, TextEncoding, Value, ROOT,
+    PatchAction, ReadDoc, ScalarValue, TextEncoding, Value, ROOT,
 };
 use proptest::prelude::*;
 use proptest::test_runner::{TestCaseError, TestRunner};
@@ -114,7 +114,7 @@ enum Op {
         peer: usize,
     },
     /// Replace the whole write-frontier policy at once. Verified against a twin
-    /// document driven through `set_write_frontier_log_patches` (one logged
+    /// document driven through `set_write_frontier` (the view diff across the
     /// transition replays to hydrate) and a fresh load under the new policy;
     /// the main doc is then moved to the same policy through individual
     /// mask_author/reveal_author transitions, which must land on the same view.
@@ -335,7 +335,7 @@ struct Runner {
     history: Vec<Vec<ChangeHash>>,
     /// Head snapshots the main doc has actually held; isolation targets.
     main_history: Vec<Vec<ChangeHash>>,
-    /// Heads the patch log currently observes, if isolated. Local commits
+    /// Heads the document currently observes, if isolated. Local commits
     /// made during isolation extend this set (their deps are the isolation
     /// heads), keeping `hydrate(Some(..))` applicable as the oracle.
     isolated: Option<Vec<ChangeHash>>,
@@ -715,11 +715,10 @@ impl Runner {
         Ok(())
     }
 
-    /// Verify a whole-policy replacement three ways: `set_write_frontier_log_patches`
-    /// on a twin is one logged transition that replays to hydrate; a fresh
-    /// load under the new policy hydrates identically; and moving the main
-    /// doc through individual mask_author/reveal_author transitions lands on the same
-    /// view.
+    /// Verify a whole-policy replacement three ways: the view diff across
+    /// `set_write_frontier` on a twin replays to hydrate; a fresh load under
+    /// the new policy hydrates identically; and moving the main doc through
+    /// individual mask_author/reveal_author transitions lands on the same view.
     fn bulk_replace_policy(
         &mut self,
         new_policy: HashMap<Author<'static>, Vec<ChangeHash>>,
@@ -731,10 +730,9 @@ impl Runner {
                 .expect("saved document reloads")
                 .with_write_frontier(old_policy.clone());
         let mut view = twin.hydrate(None);
-        let mut log = PatchLog::active();
-        twin.set_write_frontier_log_patches(new_policy.clone(), &mut log)
-            .expect("a fresh patch log belongs to any document");
-        let patches = twin.make_patches(&mut log);
+        let before = twin.viewpoint();
+        twin.set_write_frontier(new_policy.clone());
+        let patches = twin.diff(&before, twin.viewpoint());
         // `hydrate::Value` cannot replay text `Mark` patches; both sides of
         // the comparison leave marks out of the hydrated text value.
         let replayable = patches
@@ -762,8 +760,7 @@ impl Runner {
             "replacing the write-frontier differs from a fresh load with the new policy"
         );
         // Move the main doc to the same policy through individual
-        // transitions; each is logged in the main doc's own patch log and
-        // drained by the model later.
+        // transitions; the model picks them up at the next drain.
         for author in old_policy.keys() {
             if !new_policy.contains_key(author) {
                 self.main.reveal_author(author);
@@ -781,8 +778,8 @@ impl Runner {
     }
 
     /// Replace the main doc with a fresh load of its saved bytes under the
-    /// same policy. Requires a drained patch log (the old log dies with the
-    /// old document).
+    /// same policy. Requires a drained diff cursor (the old cursor dies with
+    /// the old document).
     fn save_load_round_trip(&mut self) -> Result<(), TestCaseError> {
         let policy = self.main.document().get_write_frontier();
         let before = self.main.document().hydrate(None);
@@ -1031,19 +1028,18 @@ proptest! {
         let bytes = a.save();
 
         // Record patches under policy A (no write-frontier)...
-        let mut log = PatchLog::active();
         let mut doc = Automerge::load_with_options(
             &bytes,
-            LoadOptions::new().text_encoding(ENCODING).patch_log(&mut log),
+            LoadOptions::new().text_encoding(ENCODING),
         )
         .expect("saved document reloads");
-        let under_a = doc.make_patches(&mut log.clone());
+        let under_a = doc.diff(&[], &doc.get_heads());
         // ...switch to policy B with the same visible clock...
         let view_a = doc.hydrate(None);
         doc.set_write_frontier(HashMap::from([(alice, boundary)]));
         prop_assert_eq!(&view_a, &doc.hydrate(None), "policies A and B must be observationally equal");
         // ...and materialise the same recorded events under B.
-        let under_b = doc.make_patches(&mut log);
+        let under_b = doc.diff(&[], &doc.get_heads());
         prop_assert_eq!(under_a, under_b);
     }
 }
@@ -1147,4 +1143,117 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
         RichText::from_doc(main.document(), &text),
         "patch-replayed rich text disagrees with spans() after the reveal"
     );
+}
+
+/// Shrunk from `patches_replay_to_hydrate`: masking the local author hides a
+/// delete it made, restoring the deleted text. A delete has no row of its
+/// own, so the incremental diff only sees the restoration if the target is
+/// marked dirty.
+#[test]
+fn regression_masking_a_delete_restores_its_target() {
+    let ops = vec![
+        Op::LocalMaskedSplice {
+            pos: 0,
+            del: 0,
+            text: "a".into(),
+        },
+        Op::LocalEdit { key: 0, val: 0 },
+        Op::Merge { peer: 0 },
+        Op::LocalMaskedSplice {
+            pos: 350340731212537646,
+            del: 4341317184634499833,
+            text: "".into(),
+        },
+        Op::BatchBoundary {
+            peer: 0,
+            key: 0,
+            val: 0,
+            swap: false,
+        },
+        Op::LocalEdit { key: 0, val: 0 },
+        Op::Drain,
+        Op::LocalEdit { key: 0, val: 0 },
+        Op::BatchBoundary {
+            peer: 0,
+            key: 0,
+            val: 2,
+            swap: false,
+        },
+        Op::BulkReplacePolicy {
+            alice_at: None,
+            bob_at: None,
+            carol_at: Some(1461082592729446183),
+        },
+    ];
+    let mut runner = Runner::new();
+    for op in ops {
+        runner.step(op).unwrap();
+        runner.check_doc_oracles().unwrap();
+    }
+    runner.drain().unwrap();
+}
+
+/// Shrunk from `patches_replay_to_hydrate`: an incremental diff taken while
+/// isolated reads the isolated view under the boundaries resolved at the time,
+/// not as pending relative to the isolated heads.
+#[test]
+fn regression_isolated_view_keeps_resolved_boundaries() {
+    let ops = vec![
+        Op::BatchBoundary {
+            peer: 0,
+            key: 0,
+            val: 0,
+            swap: false,
+        },
+        Op::SpliceText {
+            peer: 0,
+            pos: 0,
+            del: 393877660259198,
+            text: "bh".into(),
+        },
+        Op::Merge { peer: 1 },
+        Op::LocalMaskedSplice {
+            pos: 10169069255943407342,
+            del: 506345507072112964,
+            text: "x".into(),
+        },
+        Op::LocalEdit {
+            key: 119,
+            val: 7368442221219951118,
+        },
+        Op::Merge { peer: 0 },
+        Op::BatchBoundary {
+            peer: 0,
+            key: 253,
+            val: -6749247707124256236,
+            swap: false,
+        },
+        Op::LocalNested {
+            key: 10,
+            child: 80,
+            val: 283354405265841743,
+        },
+        Op::BulkReplacePolicy {
+            alice_at: None,
+            bob_at: Some(4601837744069311024),
+            carol_at: Some(8043579550870084571),
+        },
+        Op::BatchBoundary {
+            peer: 0,
+            key: 84,
+            val: -6602820708787838047,
+            swap: true,
+        },
+        Op::EditDuringIsolation {
+            key: 71,
+            val: -2701749776008830845,
+            at_history: 13696995772983865118,
+        },
+    ];
+    let mut runner = Runner::new();
+    for op in ops {
+        runner.step(op).unwrap();
+        runner.check_doc_oracles().unwrap();
+    }
+    runner.drain().unwrap();
 }

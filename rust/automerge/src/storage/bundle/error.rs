@@ -16,6 +16,8 @@ pub(crate) enum ParseError {
     Header(#[from] chunk::error::Header),
     #[error("invalid change column")]
     InvalidChangeColumn(u32),
+    #[error("invalid change metadata: {0}")]
+    InvalidChangeMetadata(&'static str),
     #[error("invalid op column")]
     InvalidOpColumn(u32),
     #[error(transparent)]
@@ -28,8 +30,8 @@ pub(crate) enum ParseError {
     Pack(#[from] hexane::PackError),
     #[error(transparent)]
     Deflate(#[from] std::io::Error),
-    #[error("failed to unbundle: {0}")]
-    Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("failed to decode bundle: {0}")]
+    DecodeBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("failed to decode ID_CTR_INVERSE column")]
     InverseDecode,
     #[error("ID_CTR_INVERSE length does not match op count")]

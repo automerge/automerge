@@ -4,7 +4,7 @@ version = "${PROJECT_VERSION}"
 authors = ["Orion Henry <orion.henry@gmail.com>", "Jason Kankiewicz <jason.kankiewicz@gmail.com>"]
 edition = "2021"
 license = "MIT"
-rust-version = "1.73.0"
+rust-version = "1.90.0"
 
 [lib]
 name = "${BINDINGS_NAME}"
@@ -14,6 +14,7 @@ doc = false
 
 [dependencies]
 ${LIBRARY_NAME} = { path = "../${LIBRARY_NAME}" }
+automerge-sync = { path = "../automerge-sync" }
 hex = "^0.4.3"
 libc = "^0.2"
 smol_str = "0.3"
