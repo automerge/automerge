@@ -167,6 +167,12 @@ impl SyncDoc for Automerge {
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
         let our_heads = self.get_heads();
 
+        // Avoid computing sync message contents when we will not send those contents anyway.
+        let heads_unchanged = sync_state.last_sent_heads == our_heads;
+        if heads_unchanged && sync_state.have_responded && sync_state.in_flight {
+            return None;
+        }
+
         let our_need = if sync_state.read_only {
             vec![]
         } else {
@@ -235,17 +241,14 @@ impl SyncDoc for Automerge {
             MessageBuilder::new(vec![], sync_state)
         };
 
-        let heads_unchanged = sync_state.last_sent_heads == our_heads;
-
         let heads_equal = sync_state.their_heads.as_ref() == Some(&our_heads);
 
-        if heads_unchanged && sync_state.have_responded {
-            if (heads_equal || sync_state.read_only) && message_builder.is_empty() {
-                return None;
-            }
-            if sync_state.in_flight {
-                return None;
-            }
+        if heads_unchanged
+            && sync_state.have_responded
+            && (heads_equal || sync_state.read_only)
+            && message_builder.is_empty()
+        {
+            return None;
         }
 
         sync_state.have_responded = true;
@@ -975,6 +978,39 @@ mod tests {
 
         assert!(doc.sync().generate_sync_message(&mut sync_state).is_some());
         assert!(doc.sync().generate_sync_message(&mut sync_state).is_none());
+    }
+
+    #[test]
+    fn generating_while_the_doc_is_in_flight_does_not_save_it() {
+        // The peer tells us it has nothing, so we send it the whole document.
+        // Until the peer answers, we send it nothing more, so calling
+        // generate_sync_message again must not serialise and compress the whole
+        // document only to drop it.
+        let mut doc1 = crate::AutoCommit::new();
+        for i in 0..10 {
+            doc1.put(crate::ROOT, format!("key{}", i), i).unwrap();
+            doc1.commit();
+        }
+        let mut doc2 = crate::AutoCommit::new();
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        let m2 = doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .expect("first message");
+        doc1.sync().receive_sync_message(&mut s1, m2).unwrap();
+        assert!(s1.send_doc());
+
+        let saves = || crate::automerge::SAVES.with(|n| n.get());
+        let before = saves();
+        assert!(doc1.sync().generate_sync_message(&mut s1).is_some());
+        assert_eq!(saves(), before + 1, "the whole document is sent once");
+
+        for _ in 0..3 {
+            assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
+        }
+        assert_eq!(saves(), before + 1, "nothing is saved while in flight");
     }
 
     #[test]
