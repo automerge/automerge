@@ -2,10 +2,10 @@
 
 ### Breaking Changes
 
-* The actor index hint in `ExId::Id` is now an `Option<usize>`. It's `Some`
+* The actor index hint in `ExId::Id` is now an `Option<u32>`. It's `Some`
   for IDs the document produced, and `None` for IDs read with
-  `TryFrom<&[u8]>`. Code that constructs or destructures `ExId::Id` must be
-  updated.
+  `TryFrom<&[u8]>`. Using a `u32` keeps `ExId` the same size. Code that
+  constructs or destructures `ExId::Id` must be updated.
 
 ### Fixed
 
