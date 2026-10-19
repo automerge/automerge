@@ -22,6 +22,9 @@ use crate::{
     Change, ChangeHash,
 };
 
+mod boundary_memo;
+use boundary_memo::BoundaryMemo;
+
 /// The graph of changes
 ///
 /// This is a sort of adjacency list based representation, except that instead of using linked
@@ -51,6 +54,7 @@ pub(crate) struct ChangeGraph {
     seq_index: ActorIndexed<Vec<NodeIdx>>,
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
+    boundary_memo: BoundaryMemo,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -110,6 +114,7 @@ impl ChangeGraph {
             seq_index: ActorIndexed::new(actors),
             fragments: vec![],
             fragment_top: SeqClock::new(actors),
+            boundary_memo: BoundaryMemo::default(),
         }
     }
 
@@ -667,7 +672,21 @@ impl ChangeGraph {
     /// Find the first equal-or-higher-level ancestors on each path. This must
     /// consult the change DAG, not the covering cache: a concurrent, higher-level
     /// fragment may have removed an ancestor's standalone cache entry.
-    fn fragment_boundary(&self, head: NodeIdx, level: usize) -> Vec<NodeIdx> {
+    fn fragment_boundary(&mut self, head: NodeIdx, level: usize) -> Vec<NodeIdx> {
+        let graph = boundary_memo::Graph {
+            hashes: &self.hashes,
+            parents: &self.parents,
+            edges: &self.edges,
+        };
+        let boundary = self.boundary_memo.boundary(&graph, head, level);
+        #[cfg(feature = "slow_path_assertions")]
+        assert_eq!(boundary, self.fragment_boundary_slow(head, level));
+        boundary
+    }
+
+    /// Reference walk for checking the memo.
+    #[cfg(any(test, feature = "slow_path_assertions"))]
+    fn fragment_boundary_slow(&self, head: NodeIdx, level: usize) -> Vec<NodeIdx> {
         let mut pending: Vec<_> = self.parents(head).collect();
         let mut seen = HashSet::new();
         let mut boundary = Vec::new();
@@ -1092,6 +1111,7 @@ impl ChangeGraphCols {
             seq_index,
             fragments,
             fragment_top,
+            boundary_memo: BoundaryMemo::default(),
         }))
     }
 }
@@ -1114,6 +1134,47 @@ mod tests {
     use rand::RngExt;
 
     use super::*;
+
+    /// Real-data check of the boundary memo against the reference DFS.
+    /// Run with `cargo test --release -p automerge --lib real_history_boundaries -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_history_boundaries() {
+        for file in ["S1.am", "A2.am", "C1.am", "C2.am"] {
+            let Ok(bytes) = std::fs::read(format!("../benchmark-battery/egwalker-paper/{file}"))
+            else {
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let mut graph = doc.change_graph.clone();
+            graph.boundary_memo = BoundaryMemo::default();
+            let heads: Vec<_> = graph
+                .node_ids()
+                .filter(|n| graph.hashes[n.0 as usize].fragment_level() > 0)
+                .collect();
+            let start = std::time::Instant::now();
+            let memo: Vec<_> = heads
+                .iter()
+                .map(|&h| graph.fragment_boundary(h, graph.hashes[h.0 as usize].fragment_level()))
+                .collect();
+            let memo_time = start.elapsed();
+            let start = std::time::Instant::now();
+            let slow: Vec<_> = heads
+                .iter()
+                .map(|&h| {
+                    graph.fragment_boundary_slow(h, graph.hashes[h.0 as usize].fragment_level())
+                })
+                .collect();
+            let slow_time = start.elapsed();
+            assert_eq!(memo, slow);
+            let (sets, bytes) = graph.boundary_memo.footprint();
+            println!(
+                "{file}: nodes={} heads={} memo={memo_time:?} dfs={slow_time:?} distinct_sets={sets} memo_bytes={bytes}",
+                graph.len(),
+                heads.len(),
+            );
+        }
+    }
 
     #[test]
     fn clock_by_heads() {
