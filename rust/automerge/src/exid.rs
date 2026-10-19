@@ -14,11 +14,14 @@ use std::hash::{Hash, Hasher};
 ///
 /// `Id` holds the counter, the actor, and a hint for the actor's index in the document's
 /// actors. The hint is `Some` when the document produced this ID, and `None` when it was
-/// read from bytes. Equality, ordering, hashing, formatting and serialization all ignore it.
+/// read from bytes or the index doesn't fit in a `u32`. Equality, ordering, hashing,
+/// formatting and serialization all ignore it.
+///
+/// The hint is a `u32` rather than a `usize` so that `Option` doesn't make `ExId` larger.
 #[derive(Debug, Clone)]
 pub enum ExId {
     Root,
-    Id(u64, ActorId, Option<usize>),
+    Id(u64, ActorId, Option<u32>),
 }
 
 const SERIALIZATION_VERSION_TAG: u8 = 0;
@@ -88,7 +91,7 @@ impl ExId {
     pub(crate) fn to_internal_obj(&self) -> ObjId {
         match self {
             ExId::Root => ObjId::root(),
-            ExId::Id(ctr, _, Some(actor)) => ObjId(OpId::new(*ctr, *actor)),
+            ExId::Id(ctr, _, Some(actor)) => ObjId(OpId::new(*ctr, *actor as usize)),
             ExId::Id(_, _, None) => {
                 panic!("ExId without an actor index hint can't be converted to an ObjId")
             }
@@ -236,7 +239,7 @@ mod tests {
     }
 
     prop_compose! {
-        fn gen_non_root_objid()(actor in gen_actorid(), counter in any::<u64>(), hint in any::<Option<usize>>()) -> ExId {
+        fn gen_non_root_objid()(actor in gen_actorid(), counter in any::<u64>(), hint in any::<Option<u32>>()) -> ExId {
             ExId::Id(counter, actor, hint)
         }
     }
@@ -254,7 +257,7 @@ mod tests {
         }
 
         #[test]
-        fn to_bytes_ignores_the_hint(actor in gen_actorid(), counter in any::<u64>(), hint in any::<usize>()) {
+        fn to_bytes_ignores_the_hint(actor in gen_actorid(), counter in any::<u64>(), hint in any::<u32>()) {
             let with_hint = ExId::Id(counter, actor.clone(), Some(hint));
             let without_hint = ExId::Id(counter, actor, None);
             assert_eq!(with_hint.to_bytes(), without_hint.to_bytes());
@@ -264,8 +267,8 @@ mod tests {
         fn comparisons_ignore_the_hint(
             actor in gen_actorid(),
             counter in any::<u64>(),
-            hint1 in any::<Option<usize>>(),
-            hint2 in any::<Option<usize>>(),
+            hint1 in any::<Option<u32>>(),
+            hint2 in any::<Option<u32>>(),
         ) {
             let a = ExId::Id(counter, actor.clone(), hint1);
             let b = ExId::Id(counter, actor.clone(), hint2);

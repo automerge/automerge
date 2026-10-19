@@ -1102,7 +1102,7 @@ impl OpSet {
             ExId::Id(
                 id.counter(),
                 self.actors[id.actor()].clone(),
-                Some(id.actor()),
+                u32::try_from(id.actor()).ok(),
             )
         }
     }

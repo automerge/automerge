@@ -154,7 +154,7 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 
     if let Some(obj_id) = obj_id.as_ref() {
         match obj_id.as_ref() {
-            Id(_, _, index) => index.unwrap_or(0),
+            Id(_, _, index) => index.map_or(0, |index| index as usize),
             Root => 0,
         }
     } else {
