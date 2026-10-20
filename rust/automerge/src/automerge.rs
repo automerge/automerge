@@ -853,12 +853,13 @@ impl Automerge {
                 seq = self.change_graph.seq_for_actor(actor_index) + 1;
                 deps = self.get_heads();
                 scope = None;
-                if seq > 1 {
-                    let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
-                    if !deps.contains(&last_hash) {
-                        deps.push(last_hash);
-                    }
-                }
+            }
+        }
+
+        if seq > 1 {
+            let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
+            if !deps.contains(&last_hash) {
+                deps.push(last_hash);
             }
         }
 
@@ -1670,18 +1671,35 @@ impl Automerge {
         }
     }
 
+    /// Selects an actor for a transaction isolated at `heads`, returning its
+    /// next change sequence number and operation visibility clock.
+    ///
+    /// Reuses a candidate actor only if it has no changes or its latest change
+    /// is in the ancestry of `heads`. Otherwise, tries successive concurrency
+    /// actors derived from the document's actor.
+    ///
+    /// For an unmasked actor, adjusts the returned clock to make its new
+    /// operations visible within the transaction. For a masked actor, leaves
+    /// the clock unchanged so its operations remain hidden.
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
         let mut actor_index = self.get_isolated_actor_index(0);
         let mut clock = self.visible(heads);
+        let mut seq_clock = self.change_graph.seq_clock_for_heads(heads);
 
         for i in 1.. {
+            let latest_seq = self.change_graph.seq_for_actor(actor_index);
             let max_op = self.change_graph.max_op_for_actor(actor_index);
-            // Only actors whose latest change is in the isolation scope can safely
-            // advance their sequence under it. Masked actors can also be selected,
-            // but their counter is not isolated: doing so would unmask their own
-            // ops. A fresh actor belongs to a masked local author if `transaction_args`
-            // would mark it masked.
-            if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
+
+            // Check the change ancestry, since an empty change advances the
+            // actor's sequence without introducing any operations.
+            let can_reuse = latest_seq == 0
+                || seq_clock
+                    .get_for_actor(&actor_index)
+                    .is_some_and(|covered| u64::from(covered.get()) >= latest_seq);
+
+            if can_reuse {
+                // Preserve masking, including for a fresh actor whose local author
+                // already has a write frontier.
                 let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
                     || (max_op == 0
                         && self.author.as_ref().is_some_and(|a| {
@@ -1695,8 +1713,10 @@ impl Automerge {
                 break;
             }
             actor_index = self.get_isolated_actor_index(i);
-            // need to recompute the clock b/c the actor indexes may have changed
+            // Creating a concurrency actor can shift actor indices, so rebuild
+            // both clocks against the updated actor table.
             clock = self.visible(heads);
+            seq_clock = self.change_graph.seq_clock_for_heads(heads);
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
