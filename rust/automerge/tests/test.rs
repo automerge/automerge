@@ -4662,3 +4662,33 @@ fn cursor_from_another_object_is_invalid() {
         Err(AutomergeError::InvalidCursor(cursor))
     );
 }
+
+#[test]
+fn load_all_returns_the_changes_of_each_incremental_save() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    let snapshot = doc.save();
+    doc.put(ROOT, "b", 2).unwrap();
+    let first = doc.save_incremental();
+    doc.put(ROOT, "c", 3).unwrap();
+    doc.commit();
+    doc.put(ROOT, "d", 4).unwrap();
+    let second = doc.save_incremental();
+
+    let mut changes = Change::load_all(&first).unwrap();
+    changes.extend(Change::load_all(&second).unwrap());
+    let mut loaded = AutoCommit::load(&snapshot).unwrap();
+    assert_eq!(changes.len(), 3);
+    loaded.apply_changes(changes).unwrap();
+    assert_eq!(loaded.get_heads(), doc.get_heads());
+}
+
+#[test]
+fn load_all_is_an_error_when_a_chunk_does_not_parse() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    let mut data = doc.save_incremental();
+    data.extend_from_slice(&[0x85, 0x6f, 0x4a, 0x83, 1, 2, 3, 4, 5]);
+
+    assert!(Change::load_all(&data).is_err());
+}

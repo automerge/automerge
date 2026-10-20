@@ -1,5 +1,10 @@
 ## Unreleased
 
+### Added
+
+* `Change::load_all` reads every change in a saved buffer, and returns an
+  error if any chunk does not parse.
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character
