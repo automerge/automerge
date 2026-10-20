@@ -1042,7 +1042,7 @@ impl Automerge {
             if !self.change_graph.has_change(&hash) {
                 return Err(AutomergeError::InvalidHash(hash));
             }
-            for dep in self.change_graph.deps_for_hash(&hash) {
+            for dep in self.change_graph.deps(&hash) {
                 if seen.insert(dep) {
                     heads.push(dep);
                 }
@@ -1992,7 +1992,7 @@ impl Automerge {
             if !seen_hashes.contains(&hash) && !self.has_change(&hash) {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
-                stack.extend(other.change_graph.deps_for_hash(&hash));
+                stack.extend(other.change_graph.deps(&hash));
             }
         }
         // Return those changes in the reverse of the order in which the depth-first search
