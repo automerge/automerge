@@ -1003,8 +1003,7 @@ impl Automerge {
                 continue;
             }
             if self.has_actor_seq(&change) {
-                self.queue
-                    .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
+                self.queue.remove_dependents_of(hash);
                 return Err(AutomergeError::duplicate_seq(&change));
             }
             if actor_seqs
