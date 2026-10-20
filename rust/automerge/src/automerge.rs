@@ -1181,7 +1181,7 @@ impl Automerge {
     /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
     ///                 the document once loaded
     #[deprecated(since = "0.5.2", note = "Use `load_with_options` instead")]
-    #[tracing::instrument(skip(data), err)]
+    #[tracing::instrument(skip(data))]
     pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
@@ -1202,7 +1202,7 @@ impl Automerge {
     /// # Arguments
     /// * `data` - The data to load
     /// * `options` - The options to use when loading
-    #[tracing::instrument(skip(data), err)]
+    #[tracing::instrument(skip(data))]
     pub fn load_with_options(
         data: &[u8],
         options: LoadOptions<'_>,
