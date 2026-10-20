@@ -343,18 +343,6 @@ impl ChangeGraph {
         self.hashes.get(node_idx.0 as usize).cloned()
     }
 
-    pub(crate) fn deps_for_hash(&self, hash: &ChangeHash) -> impl Iterator<Item = ChangeHash> + '_ {
-        let node_idx = self.nodes_by_hash.get(hash);
-        let mut edge_idx = node_idx.and_then(|n| self.parents[n.0 as usize]);
-        std::iter::from_fn(move || {
-            let this_edge_idx = edge_idx?;
-            let edge = &self.edges[this_edge_idx.get()];
-            edge_idx = edge.next;
-            let hash = self.hashes[edge.target.0 as usize];
-            Some(hash)
-        })
-    }
-
     pub(crate) fn has_change(&self, hash: &ChangeHash) -> bool {
         self.nodes_by_hash.contains_key(hash)
     }
