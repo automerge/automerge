@@ -9,6 +9,8 @@
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
 * `SyncDoc::receive_sync_message` returns an error, and applies nothing, when
   a message's changes do not parse.
+* `SyncDoc::receive_sync_message` also returns an error for changes that do
+  not parse when the receiving document is empty.
 
 ## 0.12.0
 

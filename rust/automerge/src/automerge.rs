@@ -1207,10 +1207,12 @@ impl Automerge {
         data: &[u8],
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
+        let on_missing_deps = options.on_partial_load;
         Self::load_with_options_and_mark_validation(
             data,
             options,
             load::MarkOrderValidation::Validate,
+            on_missing_deps,
         )
     }
 
@@ -1222,6 +1224,7 @@ impl Automerge {
             data,
             Default::default(),
             load::MarkOrderValidation::AllowInvalid,
+            OnPartialLoad::Error,
         )?
         .hydrate(None))
     }
@@ -1230,6 +1233,7 @@ impl Automerge {
         data: &[u8],
         options: LoadOptions<'_>,
         mark_order: load::MarkOrderValidation,
+        on_missing_deps: OnPartialLoad,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -1317,7 +1321,7 @@ impl Automerge {
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
                 if !am.queue.is_empty()
                     && !first_chunk_was_doc
-                    && options.on_partial_load == OnPartialLoad::Error
+                    && on_missing_deps == OnPartialLoad::Error
                 {
                     return Err(AutomergeError::MissingDeps);
                 }
@@ -1393,12 +1397,14 @@ impl Automerge {
         on_partial_load: OnPartialLoad,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc = Self::load_with_options(
+            let mut doc = Self::load_with_options_and_mark_validation(
                 data,
                 LoadOptions::new()
                     .text_encoding(self.text_encoding())
-                    .on_partial_load(OnPartialLoad::Ignore)
+                    .on_partial_load(on_partial_load)
                     .verification_mode(VerificationMode::Check),
+                load::MarkOrderValidation::Validate,
+                OnPartialLoad::Ignore,
             )?;
             // Ensure that the author, actor, and write-frontier state are carried
             // over for an empty document.

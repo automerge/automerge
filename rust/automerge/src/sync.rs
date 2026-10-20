@@ -1371,6 +1371,51 @@ mod tests {
         assert_eq!(doc2.get_heads(), heads);
     }
 
+    #[test]
+    fn receiving_changes_that_do_not_parse_into_an_empty_document_is_an_error() {
+        let mut doc1 = crate::AutoCommit::new();
+        doc1.put(crate::ROOT, "x", 1).unwrap();
+        let mut doc2 = crate::AutoCommit::new();
+
+        let mut message = doc1
+            .sync()
+            .generate_sync_message(&mut State::new())
+            .unwrap();
+        message.changes = vec![
+            doc1.save_incremental(),
+            vec![0x85, 0x6f, 0x4a, 0x83, 1, 2, 3, 4, 5],
+        ]
+        .into();
+
+        assert!(doc2
+            .sync()
+            .receive_sync_message(&mut State::new(), message)
+            .is_err());
+        assert_eq!(doc2.get_heads(), Vec::new());
+    }
+
+    #[test]
+    fn receiving_changes_missing_their_deps_into_an_empty_document_queues_them() {
+        let mut doc1 = crate::AutoCommit::new();
+        doc1.put(crate::ROOT, "x", 1).unwrap();
+        let first = doc1.get_heads();
+        doc1.save_incremental();
+        doc1.put(crate::ROOT, "y", 2).unwrap();
+        let mut doc2 = crate::AutoCommit::new();
+
+        let mut message = doc1
+            .sync()
+            .generate_sync_message(&mut State::new())
+            .unwrap();
+        message.changes = vec![doc1.save_incremental()].into();
+
+        doc2.sync()
+            .receive_sync_message(&mut State::new(), message)
+            .unwrap();
+        assert_eq!(doc2.get_heads(), Vec::new());
+        assert_eq!(doc2.get_missing_deps(&[]), first);
+    }
+
     fn sync(
         a: &mut crate::AutoCommit,
         b: &mut crate::AutoCommit,
