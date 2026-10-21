@@ -122,6 +122,18 @@ impl Signature {
         }
     }
 
+    /// Inspect the exact signature bytes without allocating a buffer.
+    ///
+    /// Opaque bytes are borrowed directly. Ed25519 bytes are copied into a
+    /// fixed-size stack array that remains valid for the duration of `inspect`.
+    /// The result cannot borrow from that temporary array.
+    pub(crate) fn with_bytes<T>(&self, inspect: impl FnOnce(&[u8]) -> T) -> T {
+        match &self.repr {
+            SignatureRepr::Ed25519(signature) => inspect(&signature.to_bytes()),
+            SignatureRepr::Opaque { bytes, .. } => inspect(bytes.as_bytes()),
+        }
+    }
+
     /// Copy the exact signature bytes into an owned, size-checked buffer.
     ///
     /// This does not encode the scheme tag or any storage framing.
@@ -401,6 +413,21 @@ mod tests {
             prop_assert_eq!(signature.tag(), SignatureTag::ED25519);
             let bytes = signature.to_bytes();
             prop_assert_eq!(bytes.as_bytes(), input.as_slice());
+        }
+
+        #[test]
+        fn byte_view_preserves_typed_and_opaque_bytes(input in any::<[u8; 64]>()) {
+            let typed = Signature::ed25519(Ed25519Signature::from_bytes(input));
+            let opaque = Signature::new(
+                SignatureTag::new(255),
+                SignatureBytes::new(input.to_vec()).expect("size-bounded input"),
+            );
+
+            for signature in [typed, opaque] {
+                let (len, matches) = signature.with_bytes(|bytes| (bytes.len(), bytes == input));
+                prop_assert_eq!(len, 64);
+                prop_assert!(matches);
+            }
         }
 
         #[test]
