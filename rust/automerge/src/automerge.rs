@@ -1683,8 +1683,11 @@ impl Automerge {
     /// the clock unchanged so its operations remain hidden.
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
         let mut actor_index = self.get_isolated_actor_index(0);
-        let mut clock = self.visible(heads);
         let mut seq_clock = self.change_graph.seq_clock_for_heads(heads);
+        let mut clock = VisibleClock::new(
+            self.change_graph.clock_from_seq_clock(&seq_clock),
+            self.mask(),
+        );
 
         for i in 1.. {
             let latest_seq = self.change_graph.seq_for_actor(actor_index);
@@ -1715,8 +1718,11 @@ impl Automerge {
             actor_index = self.get_isolated_actor_index(i);
             // Creating a concurrency actor can shift actor indices, so rebuild
             // both clocks against the updated actor table.
-            clock = self.visible(heads);
             seq_clock = self.change_graph.seq_clock_for_heads(heads);
+            clock = VisibleClock::new(
+                self.change_graph.clock_from_seq_clock(&seq_clock),
+                self.mask(),
+            );
         }
 
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;

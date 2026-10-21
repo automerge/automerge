@@ -794,19 +794,23 @@ impl ChangeGraph {
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes.collect())
-            .map_to_clock(|actor, seq| {
-                self.seq_index
-                    .get(actor)
-                    .and_then(|v| v.get(seq.get() as usize - 1))
-                    .and_then(|i| self.max_ops.get(i.0 as usize))
-                    .copied()
-            })
+        self.clock_from_seq_clock(&self.calculate_clock(nodes.collect()))
     }
 
     pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes.collect())
+    }
+
+    #[inline]
+    pub(crate) fn clock_from_seq_clock(&self, clock: &SeqClock) -> Clock {
+        clock.map_to_clock(|actor, seq| {
+            self.seq_index
+                .get(actor)
+                .and_then(|v| v.get(seq.get() as usize - 1))
+                .and_then(|i| self.max_ops.get(i.0 as usize))
+                .copied()
+        })
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
