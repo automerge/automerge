@@ -396,4 +396,14 @@ describe("Automerge", () => {
     const block = Automerge.block(doc, ["text"], 0)
     assert.equal(block?.smallnum, smallnum)
   })
+
+  it("should not truncate the float just below 1 to an int", () => {
+    // Exercise an issue where the last floating point value before 1.0
+    // was converted to 0 when stored in a list
+    const almostOne = 0.9999999999999999
+    let doc = Automerge.from<any>({ nested: { almostOne }, list: [] })
+    doc = Automerge.change(doc, d => { d.list.push(almostOne) })
+    assert.strictEqual(doc.nested.almostOne, almostOne)
+    assert.strictEqual(doc.list[0], almostOne)    
+  })
 })
