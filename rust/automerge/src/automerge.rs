@@ -25,7 +25,9 @@ use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
 use crate::staging::StagedChanges;
 use crate::storage::document::ReconstructError;
-use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
+use crate::storage::{
+    self, change, load, parse, Bundle, CompressConfig, Document, VerificationMode,
+};
 use crate::transaction::{
     self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
     TransactionArgs,
@@ -1237,83 +1239,51 @@ impl Automerge {
             }
             return Ok(doc);
         }
-        tracing::trace!("loading first chunk");
-        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
-            .map_err(|e| load::Error::Parse(Box::new(e)))?;
-        if !first_chunk.checksum_valid() {
-            return Err(load::Error::BadChecksum.into());
-        }
+        tracing::trace!("loading first chunk group");
+        let mut reader = storage::load::ChunkGroupReader::new(parse::Input::new(data));
+        let first_group = reader
+            .next()
+            .transpose()
+            .map_err(|e| e.error)?
+            .expect("nonempty input must yield a chunk group or a loading error");
 
-        let mut changes = vec![];
-        let mut first_chunk_was_doc = false;
-        // If `first_chunk` is `storage::Chunk::Document`, then these
-        // write-frontier is consumed. For every other variant, the
-        // write-frontier is applied after the match.
+        // Snapshot reconstruction consumes the write frontier. For other
+        // bodies, apply it after loading the changes below.
         let mut write_frontier = Some(options.write_frontier);
-        let mut am = match first_chunk {
-            storage::Chunk::Document(d) => {
-                tracing::trace!("first chunk is document chunk, inflating");
-                first_chunk_was_doc = true;
-                match d.reconstruct(
-                    options.verification_mode,
-                    options.text_encoding,
-                    write_frontier.take().unwrap_or_default(),
-                ) {
-                    Ok(doc) => doc,
-                    Err(ReconstructError::InvalidMarkOrderDoc {
-                        doc,
-                        error_message: _,
-                    }) if mark_order.allows_invalid() => *doc,
-                    // Same policy violation, same error as the apply path.
-                    Err(ReconstructError::AuthorOnNonInitialSeq(seq, actor)) => {
-                        return Err(AutomergeError::AuthorOnNonInitialSeq(seq, actor))
-                    }
-                    Err(e) => return Err(load::Error::InflateDocument(Box::new(e)).into()),
+        let initial = first_group.initialize_with::<Automerge, AutomergeError>(|document| {
+            match document.reconstruct(
+                options.verification_mode,
+                options.text_encoding,
+                write_frontier.take().unwrap_or_default(),
+            ) {
+                Ok(doc) => Ok(doc),
+                Err(ReconstructError::InvalidMarkOrderDoc {
+                    doc,
+                    error_message: _,
+                }) if mark_order.allows_invalid() => Ok(*doc),
+                // Same policy violation, same error as the apply path.
+                Err(ReconstructError::AuthorOnNonInitialSeq(seq, actor)) => {
+                    Err(AutomergeError::AuthorOnNonInitialSeq(seq, actor))
                 }
+                Err(e) => Err(load::Error::InflateDocument(Box::new(e)).into()),
             }
-            storage::Chunk::Change(stored_change) => {
-                tracing::trace!("first chunk is change chunk");
-                changes.push(
-                    Change::new_from_unverified(stored_change.into_owned(), None)
-                        .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
-                );
-                Self::new_with_encoding(options.text_encoding)
-            }
-            storage::Chunk::Bundle(bundle) => {
-                tracing::trace!("first chunk is change chunk");
-                let bundle = Bundle::new_from_unverified(bundle.into_owned())
-                    .map_err(|e| load::Error::InvalidBundleColumn(Box::new(e)))?;
-                let bundle_changes = bundle
-                    .to_changes()
-                    .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
-                changes.extend(bundle_changes);
-                Self::new_with_encoding(options.text_encoding)
-            }
-            storage::Chunk::CompressedChange(stored_change, compressed) => {
-                tracing::trace!("first chunk is compressed change");
-                changes.push(
-                    Change::new_from_unverified(
-                        stored_change.into_owned(),
-                        Some(compressed.into_owned()),
-                    )
-                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
-                );
-                Self::new_with_encoding(options.text_encoding)
-            }
+        })?;
+        let (mut document, pending_changes, from_snapshot) = match initial {
+            load::InitialLoad::Document(document) => (document, Vec::new(), true),
+            load::InitialLoad::Changes(changes) => (
+                Self::new_with_encoding(options.text_encoding),
+                changes,
+                false,
+            ),
         };
-        tracing::trace!("loading change chunks");
-        match load::load_changes(
-            remaining.reset(),
-            options.text_encoding,
-            &am.change_graph,
-            mark_order,
-        ) {
+        tracing::trace!("loading remaining chunk groups");
+        match reader.load_changes(options.text_encoding, &document.change_graph, mark_order) {
             load::LoadedChanges::Complete(c) => {
-                am.apply_changes(changes.into_iter().chain(c))?;
-                // Only allow missing deps if the first chunk was a document chunk
+                document.apply_changes(pending_changes.into_iter().chain(c))?;
+                // Only allow missing deps if the first group contained a document
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.staged.is_empty()
-                    && !first_chunk_was_doc
+                if !document.staged.is_empty()
+                    && !from_snapshot
                     && options.on_partial_load == OnPartialLoad::Error
                 {
                     return Err(AutomergeError::MissingDeps);
@@ -1326,22 +1296,22 @@ impl Automerge {
             }
         }
         if let StringMigration::ConvertToText = options.string_migration {
-            am.convert_scalar_strings_to_text()?;
+            document.convert_scalar_strings_to_text()?;
         }
-        // For non-document chunks the write-frontier was not threaded through
-        // `reconstruct`; apply them now, before any current-state patches are
-        // logged, so the logged state is masked.
+        // For non-document bodies the write frontier was not passed through
+        // `reconstruct`. Apply it before logging current-state patches so the
+        // logged state is masked.
         if let Some(write_frontier) = write_frontier.take() {
             if !write_frontier.is_empty() {
-                am.set_write_frontier(write_frontier);
+                document.set_write_frontier(write_frontier);
             }
         }
         if let Some(patch_log) = options.patch_log {
             if patch_log.is_active() {
-                am.log_current_state(ObjMeta::root(), patch_log, true);
+                document.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(am.with_author(options.author))
+        Ok(document.with_author(options.author))
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -1404,12 +1374,12 @@ impl Automerge {
             *self = doc;
             return Ok(self.ops.len());
         }
-        let changes = match load::load_changes(
-            storage::parse::Input::new(data),
-            self.text_encoding(),
-            &self.change_graph,
-            load::MarkOrderValidation::Validate,
-        ) {
+        let changes = match storage::load::ChunkGroupReader::new(storage::parse::Input::new(data))
+            .load_changes(
+                self.text_encoding(),
+                &self.change_graph,
+                load::MarkOrderValidation::Validate,
+            ) {
             load::LoadedChanges::Complete(c) => c,
             load::LoadedChanges::Partial { error, loaded, .. } => {
                 tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
