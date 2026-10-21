@@ -7,5 +7,8 @@ JS_PROJECT=$THIS_SCRIPT/../../javascript;
 
 npm --prefix $JS_PROJECT install
 node $JS_PROJECT/scripts/build.mjs
+# Verify the public type surface against the committed API report
+# (etc/automerge.api.md). Regenerate locally with `npm run api-update`.
+npm --prefix $JS_PROJECT run api-check
 npm --prefix $JS_PROJECT test
 npm --prefix $JS_PROJECT run packaging-tests
