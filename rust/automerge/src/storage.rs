@@ -7,6 +7,7 @@ pub(crate) mod columns;
 pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
+pub(crate) mod signatures;
 
 pub use bundle::{Bundle, BundleChange, BundleChangeIter};
 pub use load::VerificationMode;

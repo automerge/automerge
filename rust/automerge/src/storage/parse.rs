@@ -500,7 +500,6 @@ where
 ///
 /// Returns the parsed value with the original input cursor.
 /// Errors, including incomplete input, are propagated unchanged
-#[cfg(test)]
 pub(super) fn peek<'a, O, E, F>(mut parser: F) -> impl FnMut(Input<'a>) -> ParseResult<'a, O, E>
 where
     F: Parser<'a, O, E>,
