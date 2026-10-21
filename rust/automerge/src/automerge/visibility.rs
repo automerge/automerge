@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use super::view::Mask;
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::author::Authors;
-use crate::change_graph::ChangeGraph;
+use crate::change_graph::{ChangeGraph, FreshActor};
 use crate::clock::{Clock, SeqClock};
 use crate::types::OpId;
 use crate::write_frontier::WriteFrontier;
@@ -90,6 +90,14 @@ impl FrontierVisibility {
     pub(super) fn remove_actor(&mut self, removal: &ActorRemoval) {
         if let Some(mask) = self.mask.as_mut() {
             mask.remove_actor(removal);
+        }
+    }
+
+    /// If there is a [`Mask`], then mutate it with
+    /// [`Mask::set_fresh_bound_masked`].
+    pub(super) fn bound_masked_actor(&mut self, actor: &FreshActor) {
+        if let Some(mask) = self.mask.as_mut() {
+            mask.set_fresh_bound_masked(actor);
         }
     }
 
@@ -264,6 +272,76 @@ mod tests {
             )))
         );
         assert!(derived.pending.is_empty());
+    }
+
+    /// Registering a masked author's fresh actor leaves the mask equal to a
+    /// full derivation.
+    #[test]
+    fn registering_a_masked_authors_fresh_actor_matches_a_full_derivation() {
+        let mut built = build(&[3, 1]);
+        let (_, c2, _) = built.commits[1];
+        built.doc.mask_author(author(0), &[c2]);
+        built.doc.mask_author(author(5), &[c2]);
+
+        built.doc.set_author(Some(author(5)));
+        built.doc.put(ROOT, "k", 99).unwrap();
+        built.doc.commit();
+
+        let doc = built.doc.document();
+        let derived = FrontierVisibility::new(
+            &doc.write_frontier,
+            &doc.change_graph,
+            &doc.authors,
+            doc.actors(),
+        );
+        assert_eq!(doc.mask(), derived.mask());
+    }
+
+    /// Registering actors in bulk leaves the mask equal to a full derivation.
+    #[test]
+    fn bulk_registration_matches_a_full_derivation() {
+        let mut built = build(&[2]);
+        let (_, c1, _) = built.commits[0];
+        built.doc.mask_author(author(1), &[c1]);
+
+        // Author 1 is masked, author 2 is not.
+        let mut remote = built.doc.fork();
+        for a in [1usize, 2] {
+            remote.set_author(Some(author(a)));
+            remote.put(ROOT, "k", a as i64).unwrap();
+            remote.commit();
+        }
+        let heads = built.doc.get_heads();
+        let changes: Vec<_> = remote.get_changes(&heads);
+        built.doc.apply_changes(changes).unwrap();
+
+        let doc = built.doc.document();
+        let derived = FrontierVisibility::new(
+            &doc.write_frontier,
+            &doc.change_graph,
+            &doc.authors,
+            doc.actors(),
+        );
+        assert_eq!(doc.mask(), derived.mask());
+    }
+
+    /// Registration does not clear a pending boundary.
+    #[test]
+    fn registering_an_actor_preserves_pending() {
+        let mut built = build(&[2]);
+        let unknown = unknown_hash(0xEE);
+        built.doc.mask_author(author(0), &[unknown]);
+        built.doc.mask_author(author(5), &[unknown]);
+        assert!(built.doc.document().visibility.is_pending(&unknown));
+
+        built.doc.set_author(Some(author(5)));
+        built.doc.put(ROOT, "k", 1).unwrap();
+        built.doc.commit();
+
+        assert!(
+            built.doc.document().visibility.is_pending(&unknown),
+            "registration dropped a pending boundary"
+        );
     }
 
     /// One boundary head in a generated policy: either a known commit
