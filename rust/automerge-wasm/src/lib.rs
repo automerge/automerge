@@ -1649,7 +1649,6 @@ impl Automerge {
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
-        self.doc.update_diff_cursor();
         let mut cache = interop::ExportCache::new(self)?;
         Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
     }
