@@ -17,7 +17,7 @@ pub(crate) use crate::read::ReadDoc;
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
 use crate::change_queue::ChangeQueue;
-use crate::clock::Clock;
+use crate::clock::{Clock, SeqClock};
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::hydrate;
@@ -1606,6 +1606,12 @@ impl Automerge {
         VisibleClock::new(self.change_graph.clock_at(heads), self.mask())
     }
 
+    /// Similar to [`Automerge::visible`], but the [`SeqClock`] is predefined
+    /// rather than calculated from a set of heads.
+    fn visible_from(&self, clock: &SeqClock) -> VisibleClock {
+        VisibleClock::new(self.change_graph.clock_from_seq_clock(clock), self.mask())
+    }
+
     /// The visible clock at the current heads.
     pub(crate) fn visible_current(&self) -> VisibleClock {
         self.visible(&self.get_heads())
@@ -1661,72 +1667,79 @@ impl Automerge {
         ReadAt::at(scope)
     }
 
-    fn get_isolated_actor_index(&mut self, level: usize) -> usize {
-        if level == 0 {
-            self.get_or_create_actor_index()
-        } else {
-            let base_actor = self.get_actor();
-            let new_actor = base_actor.with_concurrency(level);
-            self.put_actor(new_actor)
+    /// Choose an actor for a transaction isolated at the heads `seq_clock` was
+    /// built from, without mutating the document.
+    ///
+    /// Prefers `base_index`, then successive concurrency actors derived from it:
+    ///   * [`ChosenIsolatedActor::Existing`] for an actor already in the table
+    ///     whose latest change is in the ancestry, or
+    ///   * [`ChosenIsolatedActor::Fresh`] for the first derived actor absent from
+    ///     the table, which therefore has no changes.
+    fn choose_isolation_actor(
+        &self,
+        base_index: usize,
+        seq_clock: &SeqClock,
+    ) -> ChosenIsolatedActor {
+        if self
+            .change_graph
+            .is_actor_chain_within(base_index, seq_clock)
+        {
+            return ChosenIsolatedActor::Existing(base_index);
         }
+        let base = self.ops.get_actor(base_index).clone();
+        (1..)
+            .find_map(|level| {
+                let derived = base.with_concurrency(level);
+                match self.ops.lookup_actor(&derived) {
+                    None => Some(ChosenIsolatedActor::Fresh(derived)),
+                    Some(idx) if self.change_graph.is_actor_chain_within(idx, seq_clock) => {
+                        Some(ChosenIsolatedActor::Existing(idx))
+                    }
+                    Some(_) => None,
+                }
+            })
+            .expect("unused concurrency levels are unbounded")
     }
 
-    /// Selects an actor for a transaction isolated at `heads`, returning its
-    /// next change sequence number and operation visibility clock.
-    ///
-    /// Reuses a candidate actor only if it has no changes or its latest change
-    /// is in the ancestry of `heads`. Otherwise, tries successive concurrency
-    /// actors derived from the document's actor.
+    /// Selects an actor for a transaction isolated at `heads` (see
+    /// [`Automerge::choose_isolation_actor`]), returning its next change sequence
+    /// number and operation visibility clock.
     ///
     /// For an unmasked actor, adjusts the returned clock to make its new
     /// operations visible within the transaction. For a masked actor, leaves
     /// the clock unchanged so its operations remain hidden.
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
-        let mut actor_index = self.get_isolated_actor_index(0);
-        let mut seq_clock = self.change_graph.seq_clock_for_heads(heads);
-        let mut clock = VisibleClock::new(
-            self.change_graph.clock_from_seq_clock(&seq_clock),
-            self.mask(),
-        );
+        // This may widen the actor table, so it must always happen before
+        // computing the `seq_clock` below.
+        let base_index = self.get_or_create_actor_index();
+        let seq_clock = self.change_graph.seq_clock_for_heads(heads);
 
-        for i in 1.. {
-            let latest_seq = self.change_graph.seq_for_actor(actor_index);
-            let max_op = self.change_graph.max_op_for_actor(actor_index);
-
-            // Check the change ancestry, since an empty change advances the
-            // actor's sequence without introducing any operations.
-            let can_reuse = latest_seq == 0
-                || seq_clock
-                    .get_for_actor(&actor_index)
-                    .is_some_and(|covered| u64::from(covered.get()) >= latest_seq);
-
-            if can_reuse {
-                // Preserve masking, including for a fresh actor whose local author
-                // already has a write frontier.
-                let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
-                    || (max_op == 0
-                        && self.author.as_ref().is_some_and(|a| {
-                            self.write_frontier
-                                .get_write_frontier_for_author(a)
-                                .is_some()
-                        }));
-                if !masked {
-                    clock.isolate(actor_index);
-                }
-                break;
+        let (actor_index, mut clock) = match self.choose_isolation_actor(base_index, &seq_clock) {
+            // The actor is already in the actor table, so actor indices are
+            // unchanged. Derive the `VisibleClock` from `seq_clock`.
+            ChosenIsolatedActor::Existing(idx) => (idx, self.visible_from(&seq_clock)),
+            // The actor table is modified by `put_actor`, making `seq_clock`
+            // stale. Build a fresh `VisibleClock`.
+            ChosenIsolatedActor::Fresh(actor_id) => {
+                let idx = self.put_actor(actor_id);
+                (idx, self.visible(heads))
             }
-            actor_index = self.get_isolated_actor_index(i);
-            // Creating a concurrency actor can shift actor indices, so rebuild
-            // both clocks against the updated actor table.
-            seq_clock = self.change_graph.seq_clock_for_heads(heads);
-            clock = VisibleClock::new(
-                self.change_graph.clock_from_seq_clock(&seq_clock),
-                self.mask(),
-            );
+        };
+
+        // Preserve masking, including for a fresh actor whose local author
+        // already has a write frontier.
+        let max_op = self.change_graph.max_op_for_actor(actor_index);
+        let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
+            || (max_op == 0
+                && self.author.as_ref().is_some_and(|a| {
+                    self.write_frontier
+                        .get_write_frontier_for_author(a)
+                        .is_some()
+                }));
+        if !masked {
+            clock.isolate(actor_index);
         }
-
         let seq = self.change_graph.seq_for_actor(actor_index) + 1;
-
         Isolation {
             actor_index,
             seq,
@@ -2823,4 +2836,13 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: VisibleClock,
+}
+
+/// A candidate actor for an isolated transaction.
+enum ChosenIsolatedActor {
+    /// The actor is already in the actor table, so actor indices are unchanged.
+    Existing(usize),
+    /// The actor is absent from the actor table, so it has no changes and no
+    /// index yet.
+    Fresh(ActorId),
 }
