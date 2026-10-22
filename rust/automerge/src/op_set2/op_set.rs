@@ -341,6 +341,94 @@ impl OpSet {
         undo
     }
 
+    /// `splice` for ops at several positions: see `Columns::splice_many`.
+    pub(crate) fn splice_many<O: OpLike>(&mut self, ops: &[(usize, O)]) -> usize {
+        #[cfg(any(test, feature = "splice-counters"))]
+        crate::splice_counters::count_op_splice();
+        let added = self.cols.splice_many(ops, self.text_encoding);
+        for (_, op) in ops {
+            if let Some(obj_info) = op.obj_info() {
+                self.obj_info.insert(op.id(), obj_info);
+            }
+        }
+        added
+    }
+
+    /// `add_succ_with_undo` for several ops' predecessors at once, one
+    /// cursor per column.
+    ///
+    /// `inserts` is sorted by `pos` then `sub_pos`, in the columns'
+    /// coordinates before the call, each with what it does to its
+    /// predecessor's visibility, decided by the caller per op the way
+    /// `add_succ_with_undo` decides it as it goes. The records come back
+    /// in the same order with those same coordinates; the caller shifts
+    /// them to where the rows end up.
+    pub(crate) fn add_succ_many(&mut self, inserts: &[(SuccInsert, SuccKind)]) -> Vec<SuccUndo> {
+        #[cfg(any(test, feature = "splice-counters"))]
+        crate::splice_counters::count_succ_splices(1);
+        debug_assert!(inserts
+            .windows(2)
+            .all(|w| (w[0].0.pos, w[0].0.sub_pos) <= (w[1].0.pos, w[1].0.sub_pos)));
+        let mut undo = Vec::with_capacity(inserts.len());
+        {
+            let mut count = self.cols.succ_count.edit();
+            let mut visible = self.cols.index.visible.edit();
+            let mut text = self.cols.index.text.edit();
+            let mut top = self.cols.index.top.edit();
+            let mut i = 0;
+            while i < inserts.len() {
+                let pos = inserts[i].0.pos;
+                let mut j = i;
+                while j < inserts.len() && inserts[j].0.pos == pos {
+                    j += 1;
+                }
+                count.seek(pos).replace(|c| c + (j - i) as u32);
+                // one row: the first insert that changes it records what it
+                // had, later ones record what the first left, so that
+                // `undo_succ`, walking backwards, restores the row last
+                let mut changed = false;
+                for (insert, kind) in &inserts[i..j] {
+                    let record = match kind {
+                        SuccKind::Keep => SuccUndo::new(*insert, None, None, None),
+                        SuccKind::Delete if !changed => {
+                            changed = true;
+                            let was_visible = visible.seek(pos).peek();
+                            let was_text = text.seek(pos).peek();
+                            let was_top = top.seek(pos).peek();
+                            visible.replace(|_| false);
+                            text.replace(|_| None::<u32>);
+                            top.replace(|_| false);
+                            SuccUndo::new(*insert, was_visible, was_text, was_top)
+                        }
+                        SuccKind::Delete => {
+                            SuccUndo::new(*insert, Some(false), Some(None), Some(false))
+                        }
+                        SuccKind::Expose if !changed => {
+                            changed = true;
+                            let was_top = top.seek(pos).peek();
+                            top.replace(|_| true);
+                            SuccUndo::new(*insert, None, None, was_top)
+                        }
+                        SuccKind::Expose => SuccUndo::new(*insert, None, None, Some(true)),
+                    };
+                    undo.push(record);
+                }
+                i = j;
+            }
+        }
+        {
+            let mut actor = self.cols.succ_actor.edit();
+            let mut ctr = self.cols.succ_ctr.edit();
+            let mut inc = self.cols.index.inc.edit();
+            for (i, _) in inserts {
+                actor.seek(i.sub_pos).insert(i.id.actoridx());
+                ctr.seek(i.sub_pos).insert(i.id.counter() as u32);
+                inc.seek(i.sub_pos).insert(i.inc);
+            }
+        }
+        undo
+    }
+
     pub(crate) fn undo_succ(&mut self, op_pos: &[SuccUndo]) {
         for undo in op_pos.iter().rev() {
             let i = undo.succ;
@@ -1672,6 +1760,43 @@ impl Iterator for IterObjIds<'_> {
             (None, None) => None,
             _ => panic!(),
         }
+    }
+}
+
+/// What a successor does to its predecessor's visibility, as
+/// `add_succ_with_undo` decides it op by op: nothing (a masked
+/// successor, or an increment that exposes nothing), a delete (the
+/// predecessor leaves the visible set), or an expose (a counter's next
+/// value becomes top once the winner is deleted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SuccKind {
+    Keep,
+    Delete,
+    Expose,
+}
+
+impl SuccKind {
+    /// The kinds of one op's successor links, `succ` being its
+    /// predecessors in ascending position, the order `add_succ_with_undo`
+    /// walks backwards.
+    pub(crate) fn of(succ: &[SuccInsert]) -> Vec<SuccKind> {
+        let mut kinds = vec![SuccKind::Keep; succ.len()];
+        let mut delete = false;
+        let mut expose = false;
+        for (k, i) in succ.iter().enumerate().rev() {
+            kinds[k] = if i.masked {
+                SuccKind::Keep
+            } else if i.inc.is_none() {
+                delete = true;
+                SuccKind::Delete
+            } else if delete && !expose {
+                expose = true;
+                SuccKind::Expose
+            } else {
+                SuccKind::Keep
+            };
+        }
+        kinds
     }
 }
 

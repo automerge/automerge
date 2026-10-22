@@ -492,6 +492,71 @@ impl Columns {
         ops.count()
     }
 
+    /// `splice` for ops at several positions, in one pass per column.
+    ///
+    /// `ops` is sorted by position, in the column's coordinates before
+    /// the call: an op at `p` goes in front of the row that was at `p`
+    /// and behind the ops listed before it. No op is a delete, and none
+    /// carries succ.
+    pub(crate) fn splice_many<O>(
+        &mut self,
+        ops: &[(usize, O)],
+        text_encoding: TextEncoding,
+    ) -> usize
+    where
+        O: OpLike,
+    {
+        debug_assert!(ops.windows(2).all(|w| w[0].0 <= w[1].0));
+        debug_assert!(ops.iter().all(|(_, o)| O::action(o) != Action::Delete));
+        debug_assert!(ops.iter().all(|(_, o)| o.succ().len() == 0));
+        // raw value offsets, read before value_meta moves
+        let value_pos: Vec<usize> = ops
+            .iter()
+            .map(|(p, _)| self.value_meta.get_prefix(*p) as usize)
+            .collect();
+        macro_rules! insert_each {
+            ($col:expr, $f:expr) => {{
+                let mut e = $col.edit();
+                for (pos, op) in ops {
+                    e.seek(*pos).insert(($f)(op));
+                }
+                e.finish();
+            }};
+        }
+        insert_each!(self.id_actor, |o: &O| O::id_actor(o));
+        insert_each!(self.id_ctr, |o: &O| O::id_ctr(o) as u32);
+        insert_each!(self.obj_actor, |o: &O| O::obj_actor(o));
+        insert_each!(self.obj_ctr, |o: &O| O::obj_ctr(o).map(|v| v as u32));
+        insert_each!(self.key_actor, |o: &O| O::key_actor(o));
+        insert_each!(self.key_ctr, |o: &O| O::key_ctr(o).map(|v| v as u32));
+        insert_each!(self.key_str, O::key_str);
+        insert_each!(self.insert, |o: &O| O::insert(o));
+        insert_each!(self.action, |o: &O| O::action(o));
+        insert_each!(self.expand, |o: &O| O::expand(o));
+        insert_each!(self.mark_name, O::mark_name);
+        insert_each!(self.value_meta, |o: &O| o.meta_value());
+        let mut inserted = 0;
+        for ((_, op), vp) in ops.iter().zip(value_pos) {
+            if let Some(raw) = op.raw_value() {
+                self.value.splice_slice(vp + inserted, 0, &raw);
+                inserted += raw.len();
+            }
+        }
+        insert_each!(self.succ_count, |o: &O| o.succ().len() as u32);
+        // no succ: succ_actor, succ_ctr and index.inc are untouched
+        self.index
+            .mark
+            .extend_many(ops.iter().map(|(p, o)| (*p, O::mark_index(o))));
+        insert_each!(self.index.text, |o: &O| if O::top(o) {
+            Some(O::width(o, SequenceType::Text, text_encoding) as u32)
+        } else {
+            None
+        });
+        insert_each!(self.index.top, |o: &O| O::top(o));
+        insert_each!(self.index.visible, |o: &O| O::visible(o));
+        ops.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn new<'a, I: Iterator<Item = super::op::Op<'a>> + ExactSizeIterator + Clone>(
         ops: I,

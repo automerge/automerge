@@ -316,7 +316,7 @@ pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
-pub use transaction::BlockOrText;
+pub use transaction::{BatchWrite, BlockOrText};
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 

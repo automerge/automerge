@@ -8,7 +8,7 @@ mod transactable;
 use crate::automerge::HistoryUpdate;
 
 pub use self::commit::CommitOptions;
-pub use self::transactable::{BlockOrText, Transactable};
+pub use self::transactable::{BatchWrite, BlockOrText, Transactable};
 pub(crate) use inner::{TransactionArgs, TransactionInner};
 pub use manual_transaction::Transaction;
 pub use owned_transaction::OwnedTransaction;
@@ -542,6 +542,27 @@ macro_rules! impl_transactable_for_tx {
             ) -> Result<(), crate::error::UpdateObjectError> {
                 self.do_tx(move |tx, doc, hist| {
                     tx.update_object(doc, hist, obj.as_ref(), new_value)
+                })
+            }
+
+            fn batch_write<
+                O: AsRef<ExId>,
+                P: Into<crate::Prop>,
+                I: IntoIterator<Item = (O, P, crate::transaction::BatchWrite)>,
+            >(
+                &mut self,
+                writes: I,
+            ) -> Result<Vec<Option<ExId>>, crate::AutomergeError> {
+                let writes: Vec<_> = writes
+                    .into_iter()
+                    .map(|(obj, prop, write)| (obj.as_ref().clone(), prop.into(), write))
+                    .collect();
+                self.do_tx(move |tx, doc, hist| {
+                    let ids = tx.batch_write(doc, hist, writes)?;
+                    Ok(ids
+                        .into_iter()
+                        .map(|id| id.map(|id| doc.id_to_exid(id)))
+                        .collect())
                 })
             }
 

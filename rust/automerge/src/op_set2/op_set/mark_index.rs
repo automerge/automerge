@@ -294,6 +294,27 @@ impl MarkIndexColumn {
         self.data.splice(index, 0, mark_values);
     }
 
+    /// `extend` at several positions in one pass: `items` is sorted by
+    /// position, in the index's coordinates before the call.
+    pub(crate) fn extend_many(
+        &mut self,
+        items: impl Iterator<Item = (usize, Option<MarkIndexBuilder>)>,
+    ) {
+        let mut e = self.data.edit();
+        for (pos, v) in items {
+            let v = match v {
+                None => None,
+                Some(MarkIndexBuilder::Start(id, mark)) => {
+                    self.cache.insert(id, mark);
+                    Some(MarkIdx::Start(id))
+                }
+                Some(MarkIndexBuilder::End(id)) => Some(MarkIdx::End(id)),
+            };
+            e.seek(pos).insert(v);
+        }
+        e.finish();
+    }
+
     pub(crate) fn undo(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
         let del = values.len();
         for v in &values {

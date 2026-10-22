@@ -1,11 +1,13 @@
 use std::borrow::Cow;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::Arc;
 
 use crate::change_graph::ChangeGraph;
-use crate::op_set2::op_set::ResolvedAction;
+use crate::op_set2::op_set::{ResolvedAction, SuccKind, SuccUndo};
+use crate::op_set2::types::Action;
+use crate::transaction::BatchWrite;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::author::Author;
@@ -16,7 +18,7 @@ use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, PropRef, SuccInsert, TxOp};
 use crate::patches::Events;
-use crate::types::{ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
+use crate::types::{ElemId, ObjId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
 use crate::Automerge;
 use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
@@ -39,6 +41,8 @@ pub(crate) struct TransactionInner {
     /// creation. Masked ops are still committed but they are never logged as
     /// visible patches.
     masked: bool,
+    /// Ranges of `pending` that landed together as a `batch_write`.
+    batches: Vec<Range<usize>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +104,7 @@ impl TransactionInner {
             scope,
             author,
             masked,
+            batches: vec![],
         }
     }
 
@@ -236,8 +241,31 @@ impl TransactionInner {
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending.len();
 
-        for o in self.pending.iter().rev() {
-            doc.ops.undo_op(o);
+        // An op spliced one at a time was undone by the ops after it
+        // before its own undo runs, so its recorded positions hold; the
+        // ops of a batch landed together, with their final positions
+        // recorded, so a batch is undone from the highest position down.
+        let mut end = num;
+        let mut batches = self.batches.clone();
+        while end > 0 {
+            match batches.last() {
+                Some(b) if b.end == end => {
+                    let mut by_pos: Vec<usize> = (b.start..b.end).collect();
+                    by_pos.sort_by(|a, c| self.pending[*c].pos.cmp(&self.pending[*a].pos));
+                    for i in by_pos {
+                        doc.ops.undo_op(&self.pending[i]);
+                    }
+                    end = b.start;
+                    batches.pop();
+                }
+                last => {
+                    let start = last.map_or(0, |b| b.end);
+                    for o in self.pending[start..end].iter().rev() {
+                        doc.ops.undo_op(o);
+                    }
+                    end = start;
+                }
+            }
         }
 
         //doc.ops_mut().load_checkpoint(self.checkpoint);
@@ -248,6 +276,202 @@ impl TransactionInner {
 
         doc.remove_unused_actors(true);
         num
+    }
+
+    /// See [`Transactable::batch_write`](crate::transaction::Transactable::batch_write).
+    ///
+    /// Each write is sought by key against the columns as they stand,
+    /// built as the op it will be and kept aside with the successor links
+    /// it gives its predecessors; once every write is recorded, the
+    /// predecessors' links go into the op set in one pass per column and
+    /// the ops in another, each at its own position. A second write to a
+    /// key already recorded lands what is recorded first and starts a new
+    /// batch with it. A write the batch cannot keep aside, a put of the
+    /// value already there or an increment of what is not a counter,
+    /// lands what is recorded and then takes the usual path. Either way
+    /// the result is the ops `put` and `increment` would have made, in
+    /// the same order with the same ids. Patches are logged in write
+    /// order.
+    ///
+    /// A transaction with an isolation scope, or one whose ops are masked,
+    /// takes the usual path for every write: its splices also reset the
+    /// `top` index over the key's range, or record successors that leave
+    /// their predecessors visible, which the batched route does not do.
+    pub(crate) fn batch_write(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut Events<'_>,
+        writes: Vec<(ExId, Prop, BatchWrite)>,
+    ) -> Result<Vec<Option<OpId>>, AutomergeError> {
+        let mut ids = Vec::with_capacity(writes.len());
+        let mut batch = Batch::default();
+        let direct = self.scope.is_some() || self.masked;
+        for (ex_obj, prop, write) in writes {
+            let obj = match self.exid_to_obj(doc, &ex_obj) {
+                Ok(obj) => obj,
+                Err(e) => {
+                    self.flush(doc, &mut batch);
+                    return Err(e);
+                }
+            };
+            let (Prop::Map(key), ObjType::Map | ObjType::Table) = (prop, obj.typ) else {
+                self.flush(doc, &mut batch);
+                return Err(AutomergeError::InvalidOp(obj.typ));
+            };
+            let action = match write {
+                BatchWrite::Put(value) => OpType::Put(value),
+                BatchWrite::Increment(n) => OpType::Increment(n),
+            };
+            if batch.holds(&obj.id, &key) {
+                self.flush(doc, &mut batch);
+            }
+            let recorded = if direct {
+                Err((key, action))
+            } else {
+                self.record_map_op(doc, patch_log, &obj, key, action, &mut batch)
+            };
+            match recorded {
+                Ok(id) => ids.push(Some(id)),
+                Err((key, action)) => {
+                    self.flush(doc, &mut batch);
+                    match self.local_map_op(doc, patch_log, &obj, key, action) {
+                        Ok(id) => ids.push(id),
+                        Err(e) => {
+                            self.flush(doc, &mut batch);
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+        }
+        self.flush(doc, &mut batch);
+        Ok(ids)
+    }
+
+    /// `local_map_op` up to the op and its successor links, kept in
+    /// `batch` instead of spliced; `Err` gives the key and action back
+    /// when the write is not a plain put or increment, for the usual path.
+    fn record_map_op(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut Events<'_>,
+        obj: &ObjMeta,
+        key: String,
+        action: OpType,
+        batch: &mut Batch,
+    ) -> Result<OpId, (String, OpType)> {
+        debug_assert!(self.scope.is_none() && !self.masked);
+        let id = self.next_id();
+        let mut query = doc
+            .ops()
+            .seek_ops_by_map_key(&obj.id, &key, &self.read_at(doc));
+        let plain = match &action {
+            OpType::Put(v) => !query
+                .ops
+                .last()
+                .is_some_and(|op| op.action == Action::Set && &op.value == v),
+            OpType::Increment(_) => query.ops.iter().any(|op| op.is_counter()),
+            _ => false,
+        };
+        if !plain {
+            return Err((key, action));
+        }
+        let resolved_action = query
+            .resolve_action(action)
+            .expect("a plain put or increment resolves to a visible update");
+        let increment_replacement =
+            increment_replacement(&query.ops, &resolved_action, doc.text_encoding());
+        let pred = query.ops.iter().map(|op| op.id).collect();
+        let op = TxOp::map(id, *obj, query.end_pos, resolved_action, key.clone(), pred);
+        let inc_value = op.get_increment_value();
+        let succ: Vec<_> = query
+            .ops
+            .iter()
+            .map(|op| op.add_succ(id, inc_value))
+            .collect();
+        self.finalize_op(
+            doc.text_encoding(),
+            patch_log,
+            &op,
+            None,
+            increment_replacement.as_ref(),
+        );
+        batch.record(obj.id, key, self.pending.len(), succ);
+        self.pending.push(op);
+        Ok(id)
+    }
+
+    /// Puts `batch`'s recorded ops into the op set, one pass per column,
+    /// and sets each op's final position and undo records, so that
+    /// `rollback` can take them out again.
+    fn flush(&mut self, doc: &mut Automerge, batch: &mut Batch) {
+        let deferred = std::mem::take(&mut batch.deferred);
+        batch.keys.clear();
+        let Some(first) = deferred.first() else {
+            return;
+        };
+        let (first, last) = (first.index, deferred[deferred.len() - 1].index + 1);
+        debug_assert!(deferred
+            .iter()
+            .enumerate()
+            .all(|(k, d)| d.index == first + k));
+        // by original position; ops bound for the same position go in
+        // op-set order, object (root first) then key
+        let mut order: Vec<usize> = (0..deferred.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (oa, ob) = (
+                &self.pending[deferred[a].index],
+                &self.pending[deferred[b].index],
+            );
+            (
+                oa.pos,
+                oa.bld.obj.counter(),
+                oa.bld.obj.actor(),
+                &deferred[a].key,
+            )
+                .cmp(&(
+                    ob.pos,
+                    ob.bld.obj.counter(),
+                    ob.bld.obj.actor(),
+                    &deferred[b].key,
+                ))
+        });
+        let base: Vec<usize> = order
+            .iter()
+            .map(|&k| self.pending[deferred[k].index].pos)
+            .collect();
+        // the predecessors first, in the columns' original coordinates
+        let mut succ: Vec<(SuccInsert, SuccKind)> = deferred
+            .iter()
+            .flat_map(|d| d.succ.iter().copied().zip(SuccKind::of(&d.succ)))
+            .collect();
+        succ.sort_by_key(|(s, _)| (s.pos, s.sub_pos));
+        let undo = doc.ops_mut().add_succ_many(&succ);
+        // each record shifted to where its row ends up: rows move down by
+        // the ops inserted at or before them, succ entries by the entries
+        // inserted before them
+        let mut by_id: HashMap<OpId, Vec<SuccUndo>> = HashMap::new();
+        for (n, mut u) in undo.into_iter().enumerate() {
+            u.succ.pos += base.partition_point(|&b| b <= u.succ.pos);
+            u.succ.sub_pos += n;
+            by_id.entry(u.succ.id).or_default().push(u);
+        }
+        // then the ops, each at its own position
+        let ops: Vec<(usize, &TxOp)> = order
+            .iter()
+            .map(|&k| {
+                let op = &self.pending[deferred[k].index];
+                (op.pos, op)
+            })
+            .collect();
+        doc.ops_mut().splice_many(&ops);
+        drop(ops);
+        for (rank, &k) in order.iter().enumerate() {
+            let op = &mut self.pending[deferred[k].index];
+            op.pos += rank;
+            op.undo = by_id.remove(&op.id()).unwrap_or_default();
+        }
+        self.batches.push(first..last);
     }
 
     /// Set the value of property `P` to value `V` in object `obj`.
@@ -1665,6 +1889,33 @@ fn batch_bfs(
         }
     }
     Ok(())
+}
+
+/// A `batch_write` in progress: the ops recorded and not yet in the op
+/// set, by `pending` index, with the successor links each gives its
+/// predecessors, and the keys written so far by object.
+#[derive(Debug, Default)]
+struct Batch {
+    deferred: Vec<Deferred>,
+    keys: HashMap<ObjId, HashSet<String>>,
+}
+
+#[derive(Debug)]
+struct Deferred {
+    index: usize,
+    key: String,
+    succ: Vec<SuccInsert>,
+}
+
+impl Batch {
+    fn holds(&self, obj: &ObjId, key: &str) -> bool {
+        self.keys.get(obj).is_some_and(|keys| keys.contains(key))
+    }
+
+    fn record(&mut self, obj: ObjId, key: String, index: usize, succ: Vec<SuccInsert>) {
+        self.keys.entry(obj).or_default().insert(key.clone());
+        self.deferred.push(Deferred { index, key, succ });
+    }
 }
 
 fn increment_replacement(
