@@ -18,6 +18,7 @@ use crate::AutomergeError;
 
 use super::op::{Op, OpLike, SuccCursors, SuccInsert, TxOp};
 
+use super::change::{ChangeOpsColumns, EncodedOps};
 use super::columns::Columns;
 
 use super::types::{Action, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
@@ -246,6 +247,12 @@ impl OpSet {
                 self.obj_info.insert(op.id(), obj_info);
             }
         }
+    }
+
+    /// Removes every op, keeping the actors.
+    pub(crate) fn clear_ops(&mut self) {
+        self.cols = Columns::default();
+        self.obj_info = ObjIndex::default();
     }
 
     pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) -> usize {
@@ -1692,6 +1699,204 @@ impl SuccUndo {
             text,
             top,
         }
+    }
+}
+
+/// A root written breadth first into an empty document, encoded op by op
+/// straight into its change's columns and the op set's indexes, so that no
+/// op need be kept once it is encoded.
+///
+/// Every op is by one actor, overwrites nothing and carries no mark, as a
+/// hydrate's ops written into an empty document are; `push` asserts as much.
+pub(crate) struct RootStream<'h> {
+    actor: usize,
+    encoding: TextEncoding,
+    ops: usize,
+    obj_actor: hexane::Encoder<'h, Option<ActorIdx>>,
+    obj_ctr: hexane::Encoder<'h, Option<u64>>,
+    key_actor: hexane::Encoder<'h, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaEncoder<'h, Option<i64>>,
+    key_str: hexane::Encoder<'h, Option<String>>,
+    insert: hexane::Encoder<'h, bool>,
+    action: hexane::Encoder<'h, Action>,
+    value_meta: hexane::Encoder<'h, super::meta::ValueMeta>,
+    value: Vec<u8>,
+    expand: hexane::Encoder<'h, bool>,
+    id_ctr: hexane::DeltaEncoder<'h, i64>,
+    text: hexane::Encoder<'h, Option<u32>>,
+    top: hexane::Encoder<'h, bool>,
+    visible: hexane::Encoder<'h, bool>,
+    obj_info: Vec<(OpId, ObjInfo)>,
+}
+
+impl<'h> RootStream<'h> {
+    /// A stream of ops by `actor`, an index into the op set's actors.
+    pub(crate) fn new(actor: usize, encoding: TextEncoding) -> Self {
+        use hexane::EncoderApi;
+        RootStream {
+            actor,
+            encoding,
+            ops: 0,
+            obj_actor: Default::default(),
+            obj_ctr: Default::default(),
+            key_actor: Default::default(),
+            key_ctr: Default::default(),
+            key_str: Default::default(),
+            insert: Default::default(),
+            action: Default::default(),
+            value_meta: Default::default(),
+            value: Vec::new(),
+            expand: Default::default(),
+            id_ctr: Default::default(),
+            // The indexes are handed to the op set as columns, so their
+            // encoders cut slabs as they go.
+            text: hexane::Encoder::<Option<u32>>::default().with_segments(),
+            top: hexane::Encoder::<bool>::default().with_segments(),
+            visible: hexane::Encoder::<bool>::default().with_segments(),
+            obj_info: Vec::new(),
+        }
+    }
+
+    /// How many ops have been pushed.
+    pub(crate) fn len(&self) -> usize {
+        self.ops
+    }
+
+    /// Encodes `op`, whose key, where it has a string one, is `key`.
+    pub(crate) fn push(&mut self, op: &TxOp, key: Option<&'h str>) {
+        use super::op::AsChangeOp;
+        let actor = self.actor;
+        // The change numbers its own actor 0.
+        let only = |a: Option<ActorIdx>| {
+            a.map(|a| {
+                assert_eq!(usize::from(a), actor, "a root's ops are all by one actor");
+                ActorIdx(0)
+            })
+        };
+        assert!(
+            AsChangeOp::pred(op).is_empty(),
+            "a root's ops overwrite nothing"
+        );
+        assert!(AsChangeOp::mark_name(op).is_none() && op.bld.mark_index().is_none());
+        debug_assert_eq!(AsChangeOp::key_str(op), key);
+        self.obj_actor.append(only(AsChangeOp::obj_actor(op)));
+        self.obj_ctr.append(AsChangeOp::obj_ctr(op));
+        self.key_actor.append(only(AsChangeOp::key_actor(op)));
+        self.key_ctr.append(AsChangeOp::key_ctr(op).map(|c| *c));
+        self.key_str.append(key);
+        self.insert.append(AsChangeOp::insert(op));
+        self.action.append(AsChangeOp::action(op));
+        self.value_meta.append(AsChangeOp::value_meta(op));
+        if let Some(bytes) = AsChangeOp::value(op) {
+            self.value.extend_from_slice(&bytes);
+        }
+        self.expand.append(AsChangeOp::expand(op));
+        self.id_ctr.append(<TxOp as OpLike>::id_ctr(op));
+        // As `Columns::splice` indexes an op.
+        let top = <TxOp as OpLike>::top(op);
+        self.text.append(
+            top.then(|| <TxOp as OpLike>::width(op, SequenceType::Text, self.encoding) as u32),
+        );
+        self.top.append(top);
+        self.visible.append(<TxOp as OpLike>::visible(op));
+        if let Some(info) = OpLike::obj_info(op) {
+            self.obj_info.push((op.id(), info));
+        }
+        self.ops += 1;
+    }
+}
+
+impl OpSet {
+    /// Fills this op set, which must be empty, with the ops `stream`
+    /// encoded, loading its columns from the change's bytes rather than
+    /// splicing the ops in, and gives those bytes for the commit.
+    pub(crate) fn load_stream(&mut self, stream: RootStream<'_>) -> EncodedOps {
+        use super::columns::ids::*;
+        use hexane::EncoderApi;
+        assert_eq!(self.len(), 0, "load_stream fills an empty op set");
+        let n = stream.ops;
+        count_write!(ops_encoded, n);
+        let mut data = Vec::new();
+        let d = &mut data;
+        // The change's columns, as `encode_change_ops` lays them out.
+        let obj_actor = stream.obj_actor.save_to_unless(d, None);
+        let obj_ctr = stream.obj_ctr.save_to_unless(d, None);
+        let key_actor = stream.key_actor.save_to_unless(d, None);
+        let key_ctr = stream.key_ctr.save_to_unless(d, None);
+        let key_str = stream.key_str.save_to_unless(d, None);
+        let insert = stream.insert.save_to(d);
+        let action = stream.action.save_to(d);
+        let value_meta = stream.value_meta.save_to(d);
+        let start = d.len();
+        d.extend_from_slice(&stream.value);
+        let value = start..d.len();
+        let pred_count = hexane::Encoder::<u32>::encode_to(d, std::iter::repeat_n(0u32, n));
+        let pred_actor = hexane::Encoder::<ActorIdx>::default().save_to(d);
+        let pred_ctr = hexane::DeltaEncoder::<i64>::default().save_to(d);
+        let expand = stream.expand.save_to_unless(d, false);
+        let mark_name = hexane::Encoder::<Option<String>>::default().save_to_unless(d, None);
+        let cols = ChangeOpsColumns {
+            obj_actor,
+            obj_ctr,
+            key_actor,
+            key_ctr,
+            key_str,
+            insert,
+            action,
+            value_meta,
+            value,
+            pred_count,
+            pred_actor,
+            pred_ctr,
+            expand,
+            mark_name,
+        };
+        let change_len = d.len();
+        // The op set's columns the change lacks: ids and successors.
+        let id_actor = hexane::Encoder::<ActorIdx>::encode_to(
+            d,
+            std::iter::repeat_n(ActorIdx::from(stream.actor), n),
+        );
+        let id_ctr = stream.id_ctr.save_to(d);
+        let succ_count = cols.pred_count.clone();
+        let map = std::collections::BTreeMap::from([
+            (ID_ACTOR_COL_SPEC, id_actor),
+            (ID_COUNTER_COL_SPEC, id_ctr),
+            (OBJ_ID_ACTOR_COL_SPEC, cols.obj_actor.clone()),
+            (OBJ_ID_COUNTER_COL_SPEC, cols.obj_ctr.clone()),
+            (KEY_ACTOR_COL_SPEC, cols.key_actor.clone()),
+            (KEY_COUNTER_COL_SPEC, cols.key_ctr.clone()),
+            (KEY_STR_COL_SPEC, cols.key_str.clone()),
+            (INSERT_COL_SPEC, cols.insert.clone()),
+            (ACTION_COL_SPEC, cols.action.clone()),
+            (VALUE_META_COL_SPEC, cols.value_meta.clone()),
+            (VALUE_COL_SPEC, cols.value.clone()),
+            (SUCC_COUNT_COL_SPEC, succ_count),
+            (EXPAND_COL_SPEC, cols.expand.clone()),
+            (MARK_NAME_COL_SPEC, cols.mark_name.clone()),
+        ]);
+        self.cols = Columns::load(map, &data, &self.actors)
+            .expect("columns load from the bytes just encoded");
+        data.truncate(change_len);
+        if stream.actor != 0 {
+            // The change numbered the actor 0; the op set numbers it as
+            // its actor table does.
+            let actor = ActorIdx::from(stream.actor);
+            self.cols.obj_actor.remap(|a| a.map(|_| actor));
+            self.cols.key_actor.remap(|a| a.map(|_| actor));
+        }
+        let mut obj_info = ObjIndex::default();
+        obj_info.0.reserve(stream.obj_info.len());
+        obj_info.0.extend(stream.obj_info);
+        self.set_indexes(Indexes {
+            text: hexane::PrefixColumn::from_column(stream.text.into_column()),
+            top: hexane::PrefixColumn::from_column(stream.top.into_column()),
+            visible: stream.visible.into_column(),
+            inc: hexane::Column::new(),
+            mark: MarkIndexColumn::unmarked(n),
+            obj_info,
+        });
+        EncodedOps { ops: n, data, cols }
     }
 }
 
