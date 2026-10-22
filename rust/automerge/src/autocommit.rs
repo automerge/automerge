@@ -867,6 +867,17 @@ impl AutoCommit {
             .hydrate_gathered_at(gathered, obj, &self.get_scope(None))
     }
 
+    /// The object `obj` built from `gathered` as a [`hydrate::Node`]. See
+    /// [`Automerge::take_gathered`].
+    pub fn take_gathered(
+        &self,
+        gathered: &mut hydrate::Gathered,
+        obj: &ExId,
+    ) -> Result<hydrate::Node, AutomergeError> {
+        self.doc
+            .take_gathered_at(gathered, obj, &self.get_scope(None))
+    }
+
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> ReadAt<'_> {
         // heads arg takes priority
         if let Some(h) = heads {

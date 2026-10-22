@@ -1,7 +1,9 @@
-//! `hydrate_in_one_pass`, and `hydrate_gathered` object by object, read what
-//! `hydrate` reads with no heads, for every kind of object and value, after
-//! deletions, overwrites, increments, merges with conflicts, a save and
-//! load, and under isolation and a write-frontier mask.
+//! `hydrate_in_one_pass`, and `hydrate_gathered` and `take_gathered` object
+//! by object, read what `hydrate` reads with no heads, for every kind of
+//! object and value, after deletions, overwrites, increments, merges with
+//! conflicts, a save and load, and under isolation and a write-frontier
+//! mask.
+use automerge::hydrate::Node;
 use automerge::marks::{ExpandMark, Mark};
 use automerge::transaction::Transactable;
 use automerge::{ActorId, Author, AutoCommit, ObjType, ReadDoc, ScalarValue, ROOT};
@@ -9,6 +11,32 @@ use automerge::{ActorId, Author, AutoCommit, ObjType, ReadDoc, ScalarValue, ROOT
 fn same(doc: &AutoCommit) {
     assert_eq!(doc.hydrate_in_one_pass(), doc.hydrate(&ROOT, None).unwrap());
     same_one_at_a_time(doc);
+    same_as_trees(doc);
+}
+
+/// `take_gathered` builds the root, and each object under `children` from a
+/// gathering of its own, as `hydrate` gives it converted to a node.
+fn same_as_trees(doc: &AutoCommit) {
+    let mut gathered = doc.gather_in_one_pass();
+    let root = doc.take_gathered(&mut gathered, &ROOT).unwrap();
+    assert_eq!(root, Node::from(&doc.hydrate(&ROOT, None).unwrap()));
+    let Some((_, children)) = doc.get(&ROOT, "children").unwrap() else {
+        return;
+    };
+    let mut gathered = doc.gather_in_one_pass();
+    for item in doc.map_range(&children, ..) {
+        let id = item.id();
+        if !matches!(item.value, automerge::ValueRef::Object(_)) {
+            continue;
+        }
+        let taken = doc.take_gathered(&mut gathered, &id).unwrap();
+        assert_eq!(
+            taken,
+            Node::from(&doc.hydrate(&id, None).unwrap()),
+            "{}",
+            item.key
+        );
+    }
 }
 
 /// Each object under `children`, built from one gathering in turn, is what
@@ -290,6 +318,44 @@ fn a_masked_author_making_and_deleting_objects_is_hidden() {
     same(&doc);
 }
 
+/// A map's keys come out sorted as `str` sorts them, whatever their case,
+/// length or script, and `Node::from` sorts a hydrated map's.
+#[test]
+fn map_keys_come_out_sorted() {
+    let mut doc = AutoCommit::new();
+    let map = doc.put_object(&ROOT, "keys", ObjType::Map).unwrap();
+    let keys = [
+        "b",
+        "B",
+        "a",
+        "aa",
+        "\u{e9}",
+        "Z",
+        "",
+        "a b",
+        "\u{1F600}",
+        "10",
+        "9",
+    ];
+    for (i, key) in keys.iter().enumerate() {
+        doc.put(&map, *key, i as i64).unwrap();
+    }
+    let mut sorted: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+    sorted.sort();
+    for node in [
+        doc.take_gathered(&mut doc.gather_in_one_pass(), &map)
+            .unwrap(),
+        Node::from(&doc.hydrate(&map, None).unwrap()),
+    ] {
+        let Node::Map(entries) = node else {
+            panic!("a map");
+        };
+        let got: Vec<String> = entries.into_iter().map(|(key, _)| key).collect();
+        assert_eq!(got, sorted);
+    }
+    same(&doc);
+}
+
 /// A document with no deleted or replaced objects: building the root takes
 /// every gathered object out, block maps inside text included.
 #[test]
@@ -323,4 +389,42 @@ fn building_the_root_takes_everything() {
     assert!(!gathered.is_empty());
     doc.hydrate_gathered(&mut gathered, &ROOT).unwrap();
     assert!(gathered.is_empty(), "{} objects left", gathered.len());
+
+    let mut gathered = doc.gather_in_one_pass();
+    doc.take_gathered(&mut gathered, &ROOT).unwrap();
+    assert!(gathered.is_empty(), "{} objects left", gathered.len());
+}
+
+/// `take_gathered` builds any object by id as `hydrate` does: a text, an
+/// object deleted from the tree, and an object inside a deleted one. An id
+/// from another document is an error for both.
+#[test]
+fn take_gathered_reads_any_object() {
+    let mut doc = everything("aaaa");
+    let children = doc.get(&ROOT, "children").unwrap().unwrap().1;
+    let c07 = doc.get(&children, "c07").unwrap().unwrap().1;
+    let text = doc.get(&c07, "lines").unwrap().unwrap().1;
+    let items = doc.get(&c07, "items").unwrap().unwrap().1;
+    doc.delete(&children, "c07").unwrap();
+    doc.commit();
+    for obj in [&text, &c07, &items] {
+        assert_eq!(
+            doc.take_gathered(&mut doc.gather_in_one_pass(), obj)
+                .unwrap(),
+            Node::from(&doc.hydrate(obj, None).unwrap()),
+            "{obj}"
+        );
+    }
+    assert!(matches!(
+        doc.take_gathered(&mut doc.gather_in_one_pass(), &text)
+            .unwrap(),
+        Node::Text(_)
+    ));
+
+    let mut gathered = doc.gather_in_one_pass();
+    let mut other = AutoCommit::new().with_actor(ActorId::from(b"zzzz".as_slice()));
+    let foreign = other.put_object(&ROOT, "map", ObjType::Map).unwrap();
+    assert!(doc.hydrate(&foreign, None).is_err());
+    assert!(doc.take_gathered(&mut gathered, &foreign).is_err());
+    assert!(doc.hydrate_gathered(&mut gathered, &foreign).is_err());
 }

@@ -2127,6 +2127,23 @@ impl Automerge {
         self.hydrate_gathered_at(gathered, obj, &self.read_current())
     }
 
+    /// The object `obj` built from `gathered`, as [`Self::hydrate_gathered`]
+    /// builds it, but as a [`hydrate::Node`]: a plain tree with each map's
+    /// entries in a sorted vector, rather than a hash map of values with
+    /// their conflict flags. The object's entries, and those of the objects
+    /// inside it, are taken out of `gathered`.
+    ///
+    /// # Errors
+    ///
+    /// If `obj` is not an object in this document.
+    pub fn take_gathered(
+        &self,
+        gathered: &mut hydrate::Gathered,
+        obj: &ExId,
+    ) -> Result<hydrate::Node, AutomergeError> {
+        self.take_gathered_at(gathered, obj, &self.read_current())
+    }
+
     /// Test oracle: the current view materialised through the filtered
     /// (non-indexed) path. Never use for production reads.
     ///

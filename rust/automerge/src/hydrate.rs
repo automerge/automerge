@@ -27,6 +27,61 @@ pub enum Value {
     Text(Text),
 }
 
+/// A value as [`Automerge::take_gathered`] builds it: what [`Value`] holds,
+/// for a reader that only reads it, with no hash map per map and no
+/// conflict flags or marks.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Node {
+    /// A map's or table's entries. The keys are unique and in ascending
+    /// order as `str`'s `Ord` sorts them, which is the order Automerge keeps
+    /// map keys in, so a reader may binary search them.
+    Map(Vec<(String, Node)>),
+    /// A list's elements, in order.
+    List(Vec<Node>),
+    /// A scalar.
+    Scalar(ScalarValue),
+    /// A text object's characters.
+    Text(String),
+}
+
+impl Node {
+    /// A map of `entries`, whose keys must be unique. They are sorted if
+    /// they are not already, which costs one comparison per entry when they
+    /// are, as they are when gathered.
+    fn map(mut entries: Vec<(String, Node)>) -> Self {
+        if !entries.windows(2).all(|pair| pair[0].0 < pair[1].0) {
+            entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        }
+        debug_assert!(
+            entries.windows(2).all(|pair| pair[0].0 < pair[1].0),
+            "map keys unique"
+        );
+        Node::Map(entries)
+    }
+}
+
+impl From<&Value> for Node {
+    /// The node holding what `value` holds: a map's entries sorted by key, a
+    /// text's characters, and neither conflict flags nor marks.
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Scalar(scalar) => Node::Scalar(scalar.clone()),
+            Value::Map(map) => {
+                // In the hash map's order; `Node::map` sorts them.
+                Node::map(
+                    map.iter()
+                        .map(|(key, entry)| (key.clone(), Node::from(&entry.value)))
+                        .collect(),
+                )
+            }
+            Value::List(list) => {
+                Node::List(list.iter().map(|entry| Node::from(&entry.value)).collect())
+            }
+            Value::Text(text) => Node::Text(text.to_string()),
+        }
+    }
+}
+
 impl Value {
     pub fn new<'a, V: Into<crate::Value<'a>>>(value: V, text_encoding: TextEncoding) -> Self {
         match value.into() {
@@ -250,6 +305,17 @@ impl Automerge {
         let obj = self.exid_to_obj(obj)?;
         Ok(gathered.hydrate(self.ops(), &obj.id, obj.typ, read, self.text_encoding()))
     }
+
+    /// The object `obj` taken under `read` from `gathered` as a [`Node`].
+    pub(crate) fn take_gathered_at(
+        &self,
+        gathered: &mut Gathered,
+        obj: &crate::ObjId,
+        read: &ReadAt<'_>,
+    ) -> Result<Node, crate::AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        Ok(gathered.take(self.ops(), &obj.id, obj.typ, read))
+    }
 }
 
 impl OpSet {
@@ -342,17 +408,18 @@ impl OpSet {
     }
 }
 
-/// Every object's visible contents, read from a document by
-/// [`Automerge::gather_in_one_pass`] (or [`crate::AutoCommit::gather_in_one_pass`])
-/// so that objects can then be built from it without going back to the
-/// document's ops for each one.
+/// Every object's visible contents, read from a document in one pass by
+/// [`Automerge::gather_in_one_pass`] (or `AutoCommit`'s), so that objects
+/// can then be built from it without going back to the document's ops for
+/// each one.
 ///
-/// Building an object with [`Automerge::hydrate_gathered`] takes its
-/// entries, and those of the objects inside it, out of the gathering, so a
-/// caller that builds a large document's objects one at a time holds the
-/// gathering and one object rather than the whole tree twice. Each object
-/// can be built once; built again, it is empty. Text is read from the
-/// document when its object is built.
+/// Building an object with [`Automerge::hydrate_gathered`], or taking it as
+/// a [`Node`] with [`Automerge::take_gathered`], takes its entries, and
+/// those of the objects inside it, out of the gathering, so a caller that
+/// builds a large document's objects one at a time holds the gathering and
+/// one object rather than the whole tree twice. Each object can be built
+/// once; built again, it is empty. Text is read from the document when its
+/// object is built.
 ///
 /// Objects no longer reachable from the root, such as a deleted map, are
 /// gathered too, so that they can be built by id as [`ReadDoc::hydrate`]
@@ -454,6 +521,43 @@ impl Gathered {
     fn take_text_objects(&mut self, text: &ObjId) {
         for obj in self.in_text.remove(text).unwrap_or_default() {
             self.objects.remove(&obj);
+        }
+    }
+
+    /// The value of `obj`, of type `typ`, as [`Gathered::hydrate`] builds it,
+    /// but as a [`Node`]: its gathered entries and, recursively, those of the
+    /// objects they make, each taken out of the gathering. Text is read from
+    /// `ops` under `read`. An object with no entries, or one already taken,
+    /// is empty.
+    pub(crate) fn take(
+        &mut self,
+        ops: &OpSet,
+        obj: &ObjId,
+        typ: ObjType,
+        read: &ReadAt<'_>,
+    ) -> Node {
+        if typ == ObjType::Text {
+            self.take_text_objects(obj);
+            return Node::Text(ops.text(obj, read.borrow()));
+        }
+        let entries = self.objects.remove(obj).unwrap_or_default();
+        let mut node = |slot| match slot {
+            Slot::Scalar(scalar) => Node::Scalar(scalar),
+            Slot::Object(child, typ) => self.take(ops, &child, typ, read),
+        };
+        match typ {
+            ObjType::Map | ObjType::Table => Node::map(
+                entries
+                    .into_iter()
+                    .map(|Entry { key, slot, .. }| (key.unwrap_or_default(), node(slot)))
+                    .collect(),
+            ),
+            ObjType::List | ObjType::Text => Node::List(
+                entries
+                    .into_iter()
+                    .map(|Entry { slot, .. }| node(slot))
+                    .collect(),
+            ),
         }
     }
 
