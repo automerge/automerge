@@ -21,6 +21,43 @@ use crate::column::{
 use crate::PackError;
 use std::ops::Range;
 
+/// Counts of the bytes [`RawColumn`] splices copy, so that tests can pin
+/// what a splice costs without timing it.
+///
+/// A byte is counted each time a splice or a slab merge copies or moves a
+/// byte that was already in the column to another place: a slab's tail
+/// split off into a new slab, a slab appended to its neighbour, the bytes
+/// after a splice point shifted within their slab. Bytes a splice inserts
+/// are not counted, nor is a buffer's reallocation as it grows. Counts are
+/// kept per thread.
+///
+/// Built only with the `raw-counters` feature, and in this crate's own
+/// tests.
+#[cfg(any(test, feature = "raw-counters"))]
+pub mod counters {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COPIED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// The bytes copied on this thread since the last call, which resets
+    /// the count to zero.
+    pub fn take_copied() -> usize {
+        COPIED.with(|c| c.replace(0))
+    }
+
+    pub(crate) fn copied(n: usize) {
+        COPIED.with(|c| c.set(c.get() + n));
+    }
+}
+
+#[cfg(not(any(test, feature = "raw-counters")))]
+mod counters {
+    #[inline(always)]
+    pub(crate) fn copied(_: usize) {}
+}
+
 /// Default per-slab byte budget.  Chosen empirically via the `raw_compare`
 /// bench (`benches/raw_compare.rs`): on a random-insert workload, 4 KiB sits
 /// at the bottom of a shallow plateau that runs from ~3 KiB to ~5 KiB — ~5×
@@ -284,6 +321,7 @@ impl RawColumn {
         if (a_len < min || b_len < min) && a_len + b_len <= max {
             let slab_b = self.slabs.remove(b);
             self.slabs[a].data.extend_from_slice(&slab_b.data);
+            counters::copied(slab_b.data.len());
             true
         } else {
             false
@@ -484,6 +522,15 @@ impl RawColumn {
     }
 }
 
+#[cfg(any(test, feature = "raw-counters"))]
+impl RawColumn {
+    /// The bytes the column's slabs hold allocated, used or not, beside
+    /// the slab list itself. Built with the same flag as [`counters`].
+    pub fn heap_bytes(&self) -> usize {
+        self.slabs.iter().map(|s| s.data.capacity()).sum()
+    }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Splice a single slab: delete up to `del` bytes at `index`, insert
@@ -518,7 +565,7 @@ fn splice_slab(
     let new_len = slab_len - local_del + values.len();
     if new_len <= max_segments {
         // Fast path: in-place splice, no overflow.
-        splice_bytes(&mut slab.data, index, local_del, values);
+        splice_in_place(&mut slab.data, index, local_del, values);
         return (Vec::new(), overflow_del);
     }
 
@@ -527,7 +574,7 @@ fn splice_slab(
         // Edge split wouldn't actually reduce size — happens when a single
         // inserted blob is itself larger than `max_segments`.  Leave the
         // slab oversize (invariant still holds: the blob lives as one unit).
-        splice_bytes(&mut slab.data, index, local_del, values);
+        splice_in_place(&mut slab.data, index, local_del, values);
         return (Vec::new(), overflow_del);
     }
 
@@ -536,6 +583,7 @@ fn splice_slab(
     // distribute `values` to whichever side the balanced split picked.  This
     // saves the in-place suffix memmove that a post-splice split would do.
     let suffix = slab.data.split_off(index + local_del);
+    counters::copied(suffix.len());
     slab.data.truncate(index); // drop the deleted bytes
 
     let right_data = if split_at == index {
@@ -543,6 +591,7 @@ fn splice_slab(
         let mut right = Vec::with_capacity(values.len() + suffix.len());
         right.extend_from_slice(values);
         right.extend_from_slice(&suffix);
+        counters::copied(suffix.len());
         right
     } else {
         // Split *after* the inserted bytes: left = prefix + values, right = suffix.
@@ -551,6 +600,15 @@ fn splice_slab(
     };
 
     (vec![RawSlab { data: right_data }], overflow_del)
+}
+
+/// [`splice_bytes`], counting the bytes after the deleted range that it
+/// shifts when the splice changes the slab's length.
+fn splice_in_place(data: &mut Vec<u8>, index: usize, del: usize, values: &[u8]) {
+    if values.len() != del {
+        counters::copied(data.len() - index - del);
+    }
+    splice_bytes(data, index, del, values);
 }
 
 /// Pick the byte offset at which to split a slab that has just overflowed.
@@ -906,6 +964,34 @@ mod tests {
         let mut it = col.iter();
         // take(8) would cross — must panic.
         let _ = it.take(8);
+    }
+
+    /// The copy counter counts the bytes a splice shifts within its slab,
+    /// the tail it splits off, and a slab merged into its neighbour, but
+    /// not the bytes it inserts.
+    #[test]
+    fn counters_count_the_bytes_a_splice_copies() {
+        let mut col = RawColumn::with_max_segments(8);
+        counters::take_copied();
+        col.splice_slice(0, 0, b"abcdef");
+        assert_eq!(counters::take_copied(), 0, "an insert into nothing");
+        col.splice_slice(2, 0, b"X");
+        assert_eq!(counters::take_copied(), 4, "\"cdef\" shifted");
+        col.splice_slice(2, 1, b"Z");
+        assert_eq!(counters::take_copied(), 0, "a same-length replace");
+        // Nine bytes overflow the budget of 8: the more balanced split is
+        // after "aYY", so the tail "bZcdef" is split off.
+        col.splice_slice(1, 0, b"YY");
+        assert_eq!(counters::take_copied(), 6, "the tail split off");
+        drive(&col, b"aYYbZcdef");
+        assert_eq!(col.slabs.len(), 2);
+        // Deleting most of the tail leaves it under the merge threshold
+        // (8 / 4 = 2 bytes), so it is appended to "aYY".
+        col.splice_slice(4, 5, b"");
+        assert_eq!(counters::take_copied(), 1, "the merged slab \"b\"");
+        drive(&col, b"aYYb");
+        assert_eq!(col.slabs.len(), 1);
+        assert!(col.heap_bytes() >= 4);
     }
 
     #[test]
