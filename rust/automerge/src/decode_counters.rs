@@ -1,7 +1,8 @@
 //! Counts of the op columns decoded by the instrumented op readers, so that
 //! tests can check what a read costs without timing it.
 //!
-//! Only `OpIter`, which builds whole ops, counts what it decodes; readers
+//! Only `OpIter`, which builds whole ops, and `TopRows`, which reads the
+//! columns a whole-document read keeps, count what they decode; readers
 //! that decode a few columns for their own purposes, such as the
 //! visibility and `top` index walks, are not counted.
 //!

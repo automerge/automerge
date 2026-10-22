@@ -1,5 +1,6 @@
 use crate::automerge::view::ReadAt;
-use crate::op_set2::{KeyRef, Op, OpSet, OpType, TopOps};
+use crate::op_set2::types::Action;
+use crate::op_set2::{KeyRef, Op, OpSet, OpType, TopRow, TopRows};
 use crate::types::{ObjId, ScalarValue, SequenceType};
 use crate::TextEncoding;
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
@@ -379,13 +380,12 @@ impl OpSet {
             for (obj, _) in self.iter_obj_ids() {
                 if last != Some(obj) {
                     last = Some(obj);
-                    let tops = self.top_ops(&obj, read.borrow());
+                    let tops = self.top_ops(&obj, read.borrow()).map(TopRow::from);
                     gathered.gather(self, tops, &mut text_of);
                 }
             }
         } else {
-            let tops = TopOps::new(self, read, 0..self.len());
-            gathered.gather(self, tops, &mut text_of);
+            gathered.gather(self, TopRows::new(self, read), &mut text_of);
         }
         gathered.objects.shrink_to_fit();
         gathered
@@ -471,7 +471,7 @@ impl Gathered {
     fn gather<'a>(
         &mut self,
         ops: &OpSet,
-        tops: impl Iterator<Item = Op<'a>>,
+        tops: impl Iterator<Item = TopRow<'a>>,
         text_of: &mut HashMap<ObjId, ObjId>,
     ) {
         let mut current: Option<(ObjId, Option<Vec<Entry>>)> = None;
@@ -495,13 +495,18 @@ impl Gathered {
             let Some((_, Some(entries))) = current.as_mut() else {
                 continue;
             };
-            let key = match top.elemid_or_key() {
+            // A sequence element's key column is a `Seq` key whether it was
+            // inserted or overwrites an element.
+            let key = match top.key_col {
                 KeyRef::Map(key) => Some(key.into_owned()),
                 KeyRef::Seq(_) => None,
             };
-            let slot = match top.action() {
-                OpType::Make(typ) => Slot::Object(top.id.into(), typ),
-                OpType::Put(scalar) => Slot::Scalar(scalar.into()),
+            let slot = match top.action {
+                Action::MakeMap => Slot::Object(top.id.into(), ObjType::Map),
+                Action::MakeTable => Slot::Object(top.id.into(), ObjType::Table),
+                Action::MakeList => Slot::Object(top.id.into(), ObjType::List),
+                Action::MakeText => Slot::Object(top.id.into(), ObjType::Text),
+                Action::Set => Slot::Scalar(top.value.into()),
                 // Only text has marks; nothing else is a top op.
                 _ => continue,
             };

@@ -843,7 +843,7 @@ impl<'a> ActionIter<'a> {
         self.iter.next().ok_or(ReadOpError::MissingValue("action"))
     }
 
-    fn try_nth(&mut self, n: usize) -> Result<Action, ReadOpError> {
+    pub(super) fn try_nth(&mut self, n: usize) -> Result<Action, ReadOpError> {
         self.iter.nth(n).ok_or(ReadOpError::MissingValue("action"))
     }
 

@@ -99,3 +99,33 @@ fn reading_many_small_maps_in_one_pass_seeks_once() {
     // tenth of the way from after to before.
     assert!(one_pass <= 100, "{one_pass} seeks to read each map");
 }
+
+/// The one-pass gather keeps each top op's object, id, key, action and
+/// value, and a counter's successors, to add up its increments; it need not
+/// decode the insert or mark columns, nor other ops' successors, nor build
+/// each top op as a whole op.
+#[test]
+fn gathering_decodes_only_the_columns_it_keeps() {
+    use crate::decode_counters::{op_columns_decoded, reset};
+
+    let (mut doc, ids) = many_small_maps(1000);
+    // A counter in every tenth map, every other one incremented.
+    for (i, id) in ids.iter().enumerate().step_by(10) {
+        doc.put(id, "n", ScalarValue::counter(i as i64)).unwrap();
+        if i % 20 == 0 {
+            doc.increment(id, "n", 1).unwrap();
+        }
+    }
+    doc.commit();
+    reset();
+    let gathered = doc.gather_in_one_pass();
+    let decoded = op_columns_decoded();
+    // The root, `children` and each of its maps.
+    assert_eq!(gathered.len(), 1002);
+    // 3,101 top ops: the root's, `children`'s, two in each map and 100
+    // counters. Before this read only the columns it keeps, it built each as
+    // a whole op: 24,808 columns (eight each); after: 15,605 (five each, and
+    // the successors of each counter). The gate is a tenth of the way from
+    // after to before.
+    assert!(decoded <= 16_525, "{decoded} op columns decoded to gather");
+}

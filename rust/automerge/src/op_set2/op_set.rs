@@ -54,7 +54,7 @@ pub(crate) use op_iter::{
     OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
-pub(crate) use top_op::{TopIter, TopOps};
+pub(crate) use top_op::{TopIter, TopOps, TopRow, TopRows};
 pub(crate) use visible::{VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
