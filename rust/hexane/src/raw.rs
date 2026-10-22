@@ -14,10 +14,9 @@
 //! callers splice at value boundaries, no value ever crosses a slab — which
 //! is what makes the zero-copy [`RawColumn::get`] API safe.
 
-use crate::column::{
-    bit_point_update, find_slab_bit, normalize_splices, rebuild_bit, splice_bytes,
-    try_merge_range_skeleton, Splice,
-};
+use crate::btree::SlabBTree;
+use crate::column::{normalize_splices, splice_bytes, try_merge_range_skeleton, Splice};
+use crate::index::ColumnIndex;
 use crate::PackError;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
@@ -172,9 +171,12 @@ impl SlabBytes {
 #[derive(Debug, Clone)]
 pub struct RawColumn {
     slabs: Vec<RawSlab>,
-    /// Fenwick tree of slab byte lengths, 1-indexed.  `bit[0]` is unused,
-    /// `bit[1..=slabs.len()]` holds the tree.
-    bit: Vec<usize>,
+    /// B-tree of slab byte lengths: the slab holding a byte offset in
+    /// O(log S), and a slab's new length, or a change in the slab count,
+    /// in O(log S) too. A Fenwick tree answered the first as fast but
+    /// was rebuilt for the last, and a splice into loaded bytes changes
+    /// the count more often than not.
+    index: SlabBTree<usize>,
     total_len: usize,
     /// Target per-slab byte budget (not a hard cap — single blobs larger
     /// than this live in their own oversize slab).
@@ -196,7 +198,7 @@ impl RawColumn {
         assert!(max_segments > 0, "max_segments must be non-zero");
         Self {
             slabs: Vec::new(),
-            bit: vec![0],
+            index: SlabBTree::default(),
             total_len: 0,
             max_segments,
         }
@@ -273,7 +275,7 @@ impl RawColumn {
     /// Flow mirrors `Column`'s `Encoding::splice`: locate the target slab,
     /// delegate to `splice_slab` which handles one slab plus any overflow,
     /// then clean up cross-slab deletes, merge undersized neighbours, and
-    /// update the BIT.
+    /// update the index.
     pub fn try_splice_slice(
         &mut self,
         index: usize,
@@ -299,7 +301,8 @@ impl RawColumn {
             self.slabs.push(RawSlab {
                 data: SlabBytes::default(),
             });
-            self.rebuild_index();
+            self.index = SlabBTree::from_weights([0]);
+            counters::visited(1);
         }
 
         let (si, offset) = self.find_slab(index);
@@ -378,35 +381,58 @@ impl RawColumn {
 
         // A delete can leave an empty slab behind, for example when a tiny
         // value is inserted at the front of a loaded oversize slab and then
-        // removed again. Empty slabs have zero weight in the BIT but are not
+        // removed again. Empty slabs have zero weight in the index but are not
         // transparent to sequential readers, so drop them before rebuilding
         // the index.
+        // Only the rebuilt range can hold one: every other slab was
+        // non-empty before this splice and is untouched by it. Scanning
+        // just the range keeps a splice from walking every slab.
         let slabs_before_empty_cleanup = self.slabs.len();
-        counters::visited(slabs_before_empty_cleanup);
-        if let Some(first) = self.slabs.iter().position(|s| s.data.is_empty()) {
-            let kept = self.slabs[first..].iter().filter(|s| !s.data.is_empty());
-            counters::moved(kept.count());
+        let mut range = range;
+        let mut i = range.start;
+        while i < range.end.min(self.slabs.len()) {
+            counters::visited(1);
+            if self.slabs[i].data.is_empty() {
+                counters::moved(self.slabs.len() - i - 1);
+                self.slabs.remove(i);
+                range.end -= 1;
+            } else {
+                i += 1;
+            }
         }
-        self.slabs.retain(|slab| !slab.data.is_empty());
+        debug_assert!(self.slabs.iter().all(|slab| !slab.data.is_empty()));
         let removed_empty_slabs = self.slabs.len() != slabs_before_empty_cleanup;
 
-        // Update BIT: point update if exactly one slab's weight changed,
-        // full rebuild otherwise.
+        // Update the index: one slab's new length when that is all that
+        // changed, else the range's slabs in place of the ones they
+        // replaced. Nothing before the range changed (its left merges
+        // only ever pull its start down, and every removal above was
+        // inside it or past it), so the replaced slabs are the ones that
+        // stood at the range's start, as many as the count says: the
+        // range's slabs, plus one for each slab the splice removed, less
+        // one for each it added.
+        debug_assert!(range.start <= self.slabs.len());
+        debug_assert!(range.end <= self.slabs.len());
         if !removed_empty_slabs && self.slabs.len() == old_slab_count && range.len() == 1 {
             let new_weight = self.slabs[range.start].data.len();
-            counters::visited(1);
-            bit_point_update(&mut self.bit, range.start, old_weight, new_weight);
+            if new_weight != old_weight {
+                counters::visited(1);
+                self.index.update_slab(range.start, new_weight);
+            }
         } else {
-            self.rebuild_index();
+            let replaced = range.len() + old_slab_count - self.slabs.len();
+            let lengths: Vec<usize> = self.slabs[range.clone()]
+                .iter()
+                .map(|s| s.data.len())
+                .collect();
+            counters::visited(lengths.len());
+            self.index
+                .splice(range.start..range.start + replaced, lengths);
         }
+        debug_assert_eq!(self.index.len(), self.slabs.len());
+        debug_assert_eq!(self.index.items_before(self.index.len()), self.total_len);
 
         Ok(())
-    }
-
-    /// Rebuilds the slab index from every slab's length.
-    fn rebuild_index(&mut self) {
-        counters::visited(self.slabs.len());
-        self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
     }
 
     fn find_slab(&self, index: usize) -> (usize, usize) {
@@ -415,7 +441,7 @@ impl RawColumn {
             let last = self.slabs.len() - 1;
             (last, self.slabs[last].data.len())
         } else {
-            find_slab_bit(&self.bit, index, self.slabs.len())
+            self.index.find_slab(index)
         }
     }
 
@@ -540,7 +566,7 @@ impl RawColumn {
         if range.is_empty() {
             return Ok(&[]);
         }
-        let (slab_idx, offset) = find_slab_bit(&self.bit, range.start, self.slabs.len());
+        let (slab_idx, offset) = self.index.find_slab(range.start);
         let span = range.end - range.start;
         let slab = &self.slabs[slab_idx];
         if offset + span > slab.data.len() {
@@ -583,7 +609,7 @@ impl RawColumn {
                 pos,
             };
         }
-        let (slab_idx, offset) = find_slab_bit(&self.bit, pos, self.slabs.len());
+        let (slab_idx, offset) = self.index.find_slab(pos);
         RawColumnIter {
             slabs: &self.slabs,
             slab_idx,
@@ -625,10 +651,10 @@ impl RawColumn {
             data: SlabBytes::loaded(data, max_segments),
         };
         let slabs = vec![slab];
-        let bit = rebuild_bit(&slabs, |s| s.data.len());
+        let index = SlabBTree::from_weights(slabs.iter().map(|s| s.data.len()));
         Ok(Self {
             slabs,
-            bit,
+            index,
             total_len: data.len(),
             max_segments,
         })
@@ -878,6 +904,29 @@ impl<'a> RawColumnIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The index has one weight per slab, each slab's bytes start where
+    /// the index says, and the index finds each slab by its first byte.
+    fn assert_index(col: &RawColumn, what: &str) {
+        assert_eq!(col.index.len(), col.slabs.len(), "{what}: slab count");
+        let mut before = 0;
+        for (i, slab) in col.slabs.iter().enumerate() {
+            assert_eq!(
+                col.index.items_before(i),
+                before,
+                "{what}: bytes before slab {i}"
+            );
+            if !slab.data.is_empty() {
+                assert_eq!(
+                    col.index.find_slab(before),
+                    (i, 0),
+                    "{what}: slab {i} by its first byte"
+                );
+            }
+            before += slab.data.len();
+        }
+        assert_eq!(before, col.len(), "{what}: total length");
+    }
 
     fn drive(col: &RawColumn, expected: &[u8]) {
         assert_eq!(col.len(), expected.len(), "len mismatch");
@@ -1172,7 +1221,7 @@ mod tests {
         drive(&col, &model);
         assert_eq!(col.save(), model);
         assert!(col.slabs.iter().all(|s| !s.data.is_empty()), "empty slab");
-        assert_eq!(col.bit, rebuild_bit(&col.slabs, |s| s.data.len()));
+        assert_index(&col, "after the splices");
         // Each splice used to copy the tail past its point and leave the
         // head holding the whole loaded buffer: 110,288,695 bytes copied
         // and 110,283,986 held, against 23 and 1,049,192 now. Each gate
@@ -1180,6 +1229,86 @@ mod tests {
         assert!(copied <= 11_028_890, "copied {copied} bytes");
         let heap = col.heap_bytes();
         assert!(heap <= 11_972_671, "holds {heap} bytes");
+    }
+
+    /// A splice into the middle of loaded bytes splits their slab in
+    /// three without copying them, so the slab count changes; the index
+    /// follows, finds each of the three by its first byte, and a second
+    /// splice into the shared suffix changes the count again.
+    #[test]
+    fn a_splice_into_loaded_bytes_keeps_the_index_with_the_slabs() {
+        let loaded: Vec<u8> = (0..300u32).map(|i| i as u8).collect();
+        let mut col = RawColumn::load_with_max_segments(&loaded, 64).unwrap();
+        assert_eq!(col.slabs.len(), 1);
+        col.splice_slice(100, 0, b"abc");
+        assert_eq!(col.slabs.len(), 3, "prefix, inserted bytes, suffix");
+        assert_index(&col, "after the first splice");
+        assert_eq!(col.get(100..103), b"abc");
+        assert_eq!(col.get(103..104), &loaded[100..101]);
+        col.splice_slice(250, 10, b"xy");
+        assert_index(&col, "after the second splice");
+        let mut model = loaded.clone();
+        model.splice(100..100, b"abc".iter().copied());
+        model.splice(250..260, b"xy".iter().copied());
+        assert_eq!(col.save(), model);
+    }
+
+    /// Deleting every byte, across every slab, leaves no slab and an
+    /// empty index, and the column takes bytes again afterwards.
+    #[test]
+    fn deleting_everything_empties_the_index() {
+        let loaded: Vec<u8> = (0..1000u32).map(|i| i as u8).collect();
+        let mut col = RawColumn::load_with_max_segments(&loaded, 64).unwrap();
+        for at in [10, 500, 900] {
+            col.splice_slice(at, 0, b"zz");
+        }
+        assert!(col.slabs.len() > 3);
+        col.splice_slice(0, col.len(), &[]);
+        assert_eq!(col.len(), 0);
+        assert!(col.slabs.is_empty(), "no slab left");
+        assert_index(&col, "after deleting everything");
+        col.splice_slice(0, 0, b"again");
+        assert_eq!(col.save(), b"again");
+        assert_index(&col, "after refilling");
+    }
+
+    /// Splices scattered over a loaded column, in no order and mixing
+    /// inserts, deletes and replaces, as automerge's local ops land: each
+    /// leaves the bytes as a plain vector given the same splices, no
+    /// empty slab, and the index agreeing with the slabs. The index is
+    /// spliced from the splice's own range and only that range is
+    /// scanned for empties, so this pins both against every split, merge
+    /// and cascading delete the splices make.
+    #[test]
+    fn scattered_splices_keep_the_tree_and_no_empty_slab() {
+        let loaded: Vec<u8> = (0..1u32 << 16).map(|i| (i % 251) as u8).collect();
+        let mut col = RawColumn::load_with_max_segments(&loaded, 64).unwrap();
+        let mut model = loaded;
+        let mut seed = 0x5eed_u64;
+        let mut next = |below: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((seed >> 33) as usize) % below.max(1)
+        };
+        for k in 0..2_000usize {
+            let at = next(model.len() + 1);
+            let del = match k % 4 {
+                0 => 0,
+                1 => next(4).min(model.len() - at),
+                _ => next(200).min(model.len() - at),
+            };
+            let bytes = vec![b'a' + (k % 26) as u8; next(3) * (1 + k % 90)];
+            col.splice_slice(at, del, &bytes);
+            model.splice(at..at + del, bytes.iter().copied());
+            assert!(
+                col.slabs.iter().all(|s| !s.data.is_empty()),
+                "empty slab at {k}"
+            );
+            assert_index(&col, &format!("splice {k}"));
+        }
+        drive(&col, &model);
+        assert_eq!(col.save(), model);
     }
 
     /// A shared slab that a merge or a fitting splice writes to becomes
@@ -1204,29 +1333,65 @@ mod tests {
         let take = || (counters::take_visited(), counters::take_moved());
         take();
         // The loaded slab splits in three, appended at the list's end:
-        // each splice scans the 3 slabs and rebuilds their index.
+        // the splice scans the 3 slabs of its range and writes their
+        // lengths into the index.
         col.splice_slice(30, 0, b"x");
         assert_eq!(take(), (3 + 3, 0));
         // It splits again before the other two (2 moved), then the 5-byte
-        // prefix and "y" merge, moving the 3 after them back.
+        // prefix and "y" merge, moving the 3 after them back. Two slabs
+        // are left in the splice's range.
         col.splice_slice(5, 0, b"y");
         assert_eq!(col.slabs.len(), 4);
-        assert_eq!(take(), (4 + 4, 2 + 3));
+        assert_eq!(take(), (2 + 2, 2 + 3));
         // A replace at the front of a shared slab leaves its empty prefix
         // and "z" to merge into their neighbours, each moving the rest.
         col.splice_slice(6, 1, b"z");
         assert_eq!(col.slabs.len(), 4);
-        assert_eq!(take(), (4 + 4, 2 + 3 + 3));
-        // A delete within an owned slab scans the list and updates one
+        assert_eq!(take(), (2 + 2, 2 + 3 + 3));
+        // A delete within an owned slab scans that slab and updates its
         // length in the index, moving nothing.
         col.splice_slice(5, 1, b"");
-        assert_eq!(take(), (4 + 1, 0));
+        assert_eq!(take(), (1 + 1, 0));
         let mut model = loaded.clone();
         model.splice(30..30, *b"x");
         model.splice(5..5, *b"y");
         model.splice(6..7, *b"z");
         model.splice(5..6, []);
         drive(&col, &model);
+    }
+
+    /// Splices walking forward, then backward, through a loaded column
+    /// visit and move only the slabs near them. Each used to scan the
+    /// whole slab list and rebuild its index, and to shift the slabs after
+    /// it as it split the loaded bytes and merged the pieces back, so each
+    /// cost more than the last.
+    #[test]
+    fn splices_through_a_loaded_column_visit_and_move_few_slabs() {
+        let loaded: Vec<u8> = (0..1u32 << 20).map(|i| (i % 251) as u8).collect();
+        let mut col = RawColumn::load(&loaded).unwrap();
+        let mut model = loaded.clone();
+        counters::take_visited();
+        let value = [7u8; 50];
+        // Forward: each splice lands just after the last one's bytes.
+        for k in 0..2_000usize {
+            let at = k * 250 + k * value.len();
+            col.splice_slice(at, 0, &value);
+            model.splice(at..at, value);
+        }
+        // Backward: each lands a value before the last.
+        for k in (0..2_000usize).rev() {
+            let at = 700_000 + k * 100;
+            col.splice_slice(at, 0, &value);
+            model.splice(at..at, value);
+        }
+        let visited = counters::take_visited();
+        drive(&col, &model);
+        assert_eq!(col.save(), model);
+        // Scanning the whole list and rebuilding the index on every splice
+        // visited 1,087,538 slabs; scanning the splice's range and
+        // splicing the index there visits 16,002. The gate is a tenth of
+        // the way from the new count to the old.
+        assert!(visited <= 123_155, "visited {visited} slabs");
     }
 
     #[test]
@@ -1295,13 +1460,9 @@ mod tests {
 
         assert_eq!(dst.save(), expected, "merged bytes");
         assert_eq!(dst.len(), expected.len(), "merged len");
-        // the BIT and the slab vector must agree, and no slab may be empty
+        // the index and the slab vector must agree, and no slab may be empty
         assert!(dst.slabs.iter().all(|s| !s.data.is_empty()), "empty slab");
-        assert_eq!(
-            dst.bit,
-            rebuild_bit(&dst.slabs, |s| s.data.len()),
-            "BIT out of sync"
-        );
+        assert_index(&dst, "after copy_ranges");
         // every byte must still be reachable through the sequential reader
         let mut it = dst.iter();
         let mut seen = Vec::new();
