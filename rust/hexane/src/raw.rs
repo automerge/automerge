@@ -19,7 +19,8 @@ use crate::column::{
     try_merge_range_skeleton, Splice,
 };
 use crate::PackError;
-use std::ops::Range;
+use std::ops::{Deref, Range};
+use std::sync::Arc;
 
 /// Counts of the bytes [`RawColumn`] splices copy, so that tests can pin
 /// what a splice costs without timing it.
@@ -67,7 +68,70 @@ const DEFAULT_MAX_SEGMENTS: usize = 4_096;
 
 #[derive(Debug, Clone)]
 struct RawSlab {
-    data: Vec<u8>,
+    data: SlabBytes,
+}
+
+/// A slab's bytes: its own, or a range of a buffer loaded whole and
+/// shared with the slabs split from it.  A loaded column is one slab, so
+/// a splice into it splits that range in place instead of copying the
+/// bytes after the splice point, and nothing keeps capacity it no longer
+/// uses.
+#[derive(Debug, Clone)]
+enum SlabBytes {
+    Owned(Vec<u8>),
+    Shared(Arc<[u8]>, Range<usize>),
+}
+
+impl Default for SlabBytes {
+    fn default() -> Self {
+        SlabBytes::Owned(Vec::new())
+    }
+}
+
+impl Deref for SlabBytes {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            SlabBytes::Owned(v) => v,
+            SlabBytes::Shared(buf, range) => &buf[range.clone()],
+        }
+    }
+}
+
+impl SlabBytes {
+    /// Bytes `data` read whole: shared if larger than one slab's budget.
+    fn loaded(data: &[u8], max_segments: usize) -> Self {
+        if data.len() > max_segments {
+            SlabBytes::Shared(Arc::from(data), 0..data.len())
+        } else {
+            SlabBytes::Owned(data.to_vec())
+        }
+    }
+
+    /// The bytes as a vector of their own, copying a shared range first.
+    fn owned(&mut self) -> &mut Vec<u8> {
+        if let SlabBytes::Shared(buf, range) = self {
+            counters::copied(range.len());
+            *self = SlabBytes::Owned(buf[range.clone()].to_vec());
+        }
+        match self {
+            SlabBytes::Owned(v) => v,
+            SlabBytes::Shared(..) => unreachable!(),
+        }
+    }
+
+    /// `range` of these bytes, sharing them when they are shared.
+    fn sub(&self, range: Range<usize>) -> Self {
+        match self {
+            SlabBytes::Owned(v) => {
+                counters::copied(range.len());
+                SlabBytes::Owned(v[range].to_vec())
+            }
+            SlabBytes::Shared(buf, at) => {
+                SlabBytes::Shared(buf.clone(), at.start + range.start..at.start + range.end)
+            }
+        }
+    }
 }
 
 /// A byte arena with O(log S) random splices.
@@ -201,7 +265,9 @@ impl RawColumn {
 
         // Ensure we have at least one slab to land in.
         if self.slabs.is_empty() {
-            self.slabs.push(RawSlab { data: Vec::new() });
+            self.slabs.push(RawSlab {
+                data: SlabBytes::default(),
+            });
             self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
         }
 
@@ -320,7 +386,7 @@ impl RawColumn {
         };
         if (a_len < min || b_len < min) && a_len + b_len <= max {
             let slab_b = self.slabs.remove(b);
-            self.slabs[a].data.extend_from_slice(&slab_b.data);
+            self.slabs[a].data.owned().extend_from_slice(&slab_b.data);
             counters::copied(slab_b.data.len());
             true
         } else {
@@ -509,7 +575,7 @@ impl RawColumn {
             return Ok(Self::with_max_segments(max_segments));
         }
         let slab = RawSlab {
-            data: data.to_vec(),
+            data: SlabBytes::loaded(data, max_segments),
         };
         let slabs = vec![slab];
         let bit = rebuild_bit(&slabs, |s| s.data.len());
@@ -525,9 +591,18 @@ impl RawColumn {
 #[cfg(any(test, feature = "raw-counters"))]
 impl RawColumn {
     /// The bytes the column's slabs hold allocated, used or not, beside
-    /// the slab list itself. Built with the same flag as [`counters`].
+    /// the slab list itself; a buffer that several slabs share counts
+    /// once. Built with the same flag as [`counters`].
     pub fn heap_bytes(&self) -> usize {
-        self.slabs.iter().map(|s| s.data.capacity()).sum()
+        let mut shared = std::collections::HashSet::new();
+        self.slabs
+            .iter()
+            .map(|s| match &s.data {
+                SlabBytes::Owned(v) => v.capacity(),
+                SlabBytes::Shared(buf, _) if shared.insert(buf.as_ptr()) => buf.len(),
+                SlabBytes::Shared(..) => 0,
+            })
+            .sum()
     }
 }
 
@@ -565,8 +640,27 @@ fn splice_slab(
     let new_len = slab_len - local_del + values.len();
     if new_len <= max_segments {
         // Fast path: in-place splice, no overflow.
-        splice_in_place(&mut slab.data, index, local_del, values);
+        splice_in_place(slab.data.owned(), index, local_del, values);
         return (Vec::new(), overflow_del);
+    }
+
+    if let SlabBytes::Shared(..) = slab.data {
+        // A loaded slab is split where the splice lands, sharing its
+        // bytes: the prefix stays here, then the inserted bytes as a slab
+        // of their own, then the suffix. Nothing past the splice point is
+        // copied.
+        let suffix = slab.data.sub(index + local_del..slab_len);
+        slab.data = slab.data.sub(0..index);
+        let mut overflow = Vec::with_capacity(2);
+        if !values.is_empty() {
+            overflow.push(RawSlab {
+                data: SlabBytes::Owned(values.to_vec()),
+            });
+        }
+        if !suffix.is_empty() {
+            overflow.push(RawSlab { data: suffix });
+        }
+        return (overflow, overflow_del);
     }
 
     let split_at = pick_split(index, values.len(), new_len);
@@ -574,7 +668,7 @@ fn splice_slab(
         // Edge split wouldn't actually reduce size — happens when a single
         // inserted blob is itself larger than `max_segments`.  Leave the
         // slab oversize (invariant still holds: the blob lives as one unit).
-        splice_in_place(&mut slab.data, index, local_del, values);
+        splice_in_place(slab.data.owned(), index, local_del, values);
         return (Vec::new(), overflow_del);
     }
 
@@ -582,9 +676,11 @@ fn splice_slab(
     // as its own Vec, truncate the original down to just the prefix, then
     // distribute `values` to whichever side the balanced split picked.  This
     // saves the in-place suffix memmove that a post-splice split would do.
-    let suffix = slab.data.split_off(index + local_del);
+    let data = slab.data.owned();
+    let suffix = data.split_off(index + local_del);
     counters::copied(suffix.len());
-    slab.data.truncate(index); // drop the deleted bytes
+    data.truncate(index); // drop the deleted bytes
+    data.shrink_to_fit();
 
     let right_data = if split_at == index {
         // Split *before* the inserted bytes: left = prefix, right = values + suffix.
@@ -595,11 +691,16 @@ fn splice_slab(
         right
     } else {
         // Split *after* the inserted bytes: left = prefix + values, right = suffix.
-        slab.data.extend_from_slice(values);
+        data.extend_from_slice(values);
         suffix
     };
 
-    (vec![RawSlab { data: right_data }], overflow_del)
+    (
+        vec![RawSlab {
+            data: SlabBytes::Owned(right_data),
+        }],
+        overflow_del,
+    )
 }
 
 /// [`splice_bytes`], counting the bytes after the deleted range that it
@@ -807,8 +908,8 @@ mod tests {
         drive(&col, b"PPPPXSSSSSSSS");
         assert_eq!(col.slabs.len(), 2);
         // Better split is "after insert": left=5 bytes, right=8.
-        assert_eq!(col.slabs[0].data, b"PPPPX");
-        assert_eq!(col.slabs[1].data, b"SSSSSSSS");
+        assert_eq!(&col.slabs[0].data[..], b"PPPPX");
+        assert_eq!(&col.slabs[1].data[..], b"SSSSSSSS");
     }
 
     #[test]
@@ -822,8 +923,8 @@ mod tests {
         col.splice_slice(9, 0, b"X");
         drive(&col, b"PPPPPPPPPXS");
         assert_eq!(col.slabs.len(), 2);
-        assert_eq!(col.slabs[0].data, b"PPPPPPPPP");
-        assert_eq!(col.slabs[1].data, b"XS");
+        assert_eq!(&col.slabs[0].data[..], b"PPPPPPPPP");
+        assert_eq!(&col.slabs[1].data[..], b"XS");
     }
 
     #[test]
@@ -994,13 +1095,65 @@ mod tests {
         assert!(col.heap_bytes() >= 4);
     }
 
+    /// Splices into a loaded column copy at most a slab's budget of the
+    /// bytes already there and keep no tail-sized buffer alive. Each one
+    /// used to copy the whole tail past its point into a new slab, and
+    /// leave the head holding the loaded buffer's full capacity.
+    #[test]
+    fn splices_into_a_loaded_column_copy_only_near_them() {
+        let loaded: Vec<u8> = (0..1u32 << 20).map(|i| (i % 251) as u8).collect();
+        let mut col = RawColumn::load_with_max_segments(&loaded, 64).unwrap();
+        let mut model = loaded.clone();
+        counters::take_copied();
+        // Ascending points, as automerge applies a change's ops, then a
+        // few deletes and a replace, across loaded and new slabs.
+        for k in 0..200usize {
+            let at = k * 5000 + k % 3;
+            let bytes = vec![b'a' + (k % 26) as u8; 1 + k % 5];
+            col.splice_slice(at, 0, &bytes);
+            model.splice(at..at, bytes.iter().copied());
+        }
+        for (at, del, bytes) in [
+            (10usize, 7usize, &b"zz"[..]),
+            (20_000, 300, b""),
+            (40_000, 1, b"q"),
+        ] {
+            col.splice_slice(at, del, bytes);
+            model.splice(at..at + del, bytes.iter().copied());
+        }
+        let copied = counters::take_copied();
+        drive(&col, &model);
+        assert_eq!(col.save(), model);
+        assert!(col.slabs.iter().all(|s| !s.data.is_empty()), "empty slab");
+        assert_eq!(col.bit, rebuild_bit(&col.slabs, |s| s.data.len()));
+        // Each splice used to copy the tail past its point and leave the
+        // head holding the whole loaded buffer: 110,288,695 bytes copied
+        // and 110,283,986 held, against 23 and 1,049,192 now. Each gate
+        // is a tenth of the way from the new count to the old.
+        assert!(copied <= 11_028_890, "copied {copied} bytes");
+        let heap = col.heap_bytes();
+        assert!(heap <= 11_972_671, "holds {heap} bytes");
+    }
+
+    /// A shared slab that a merge or a fitting splice writes to becomes
+    /// owned first, and the buffer it shared is left as it was.
+    #[test]
+    fn writing_a_shared_slab_copies_only_it() {
+        let mut col = RawColumn::load_with_max_segments(b"0123456789ABCDEF", 8).unwrap();
+        let other = col.clone();
+        col.splice_slice(8, 0, b"x"); // splits the shared bytes at 8
+        col.splice_slice(1, 1, b""); // a small shared prefix, written
+        drive(&col, b"0234567x89ABCDEF");
+        drive(&other, b"0123456789ABCDEF");
+    }
+
     #[test]
     fn delete_front_insert_from_loaded_oversize_slab() {
         let mut col = RawColumn::load_with_max_segments(b"abcdef", 4).unwrap();
         assert_eq!(col.slabs.len(), 1);
 
         col.splice_slice(0, 0, b"X");
-        assert_eq!(col.slabs[0].data, b"X");
+        assert_eq!(&col.slabs[0].data[..], b"X");
         col.splice_slice(0, 1, b"");
 
         drive(&col, b"abcdef");
