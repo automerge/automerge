@@ -7,6 +7,8 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* `SyncDoc::receive_sync_message` returns an error, and applies nothing, when
+  a message's changes do not parse.
 
 ## 0.12.0
 
