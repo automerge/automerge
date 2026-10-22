@@ -93,6 +93,10 @@ fn put_walk(doc: &mut AutoCommit, puts: usize, backward: bool) {
 /// it where they land visits 3,996. The gate is a tenth of the way from
 /// the new count to the old.
 const MOST_VISITED: usize = 103_496;
+/// The most slabs they may move. Splitting the loaded values at each and
+/// merging the pieces back moved 998; joining the slab beside each put
+/// moves 498. A tenth of the way again.
+const MOST_MOVED: usize = 548;
 
 /// The slabs visited and moved as a loaded copy of the document
 /// receives 1,000 puts made in another, walking forward or backward.
@@ -112,12 +116,14 @@ fn received_walk_counts(backward: bool) -> (usize, usize) {
 
 #[test]
 fn received_puts_walking_forward_visit_and_move_few_slabs() {
-    let (visited, _) = received_walk_counts(false);
+    let (visited, moved) = received_walk_counts(false);
     assert!(visited <= MOST_VISITED, "visited {visited} slabs");
+    assert!(moved <= MOST_MOVED, "moved {moved} slabs");
 }
 
 #[test]
 fn received_puts_walking_backward_visit_and_move_few_slabs() {
-    let (visited, _) = received_walk_counts(true);
+    let (visited, moved) = received_walk_counts(true);
     assert!(visited <= MOST_VISITED, "visited {visited} slabs");
+    assert!(moved <= MOST_MOVED, "moved {moved} slabs");
 }
