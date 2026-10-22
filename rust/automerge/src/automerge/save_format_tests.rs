@@ -117,25 +117,8 @@ fn big_bundle_missing_hashes() -> (Automerge<Retained>, crate::storage::Bundle) 
 }
 
 #[test]
-#[cfg(debug_assertions)]
-#[should_panic(expected = "left out")]
-fn a_big_bundle_missing_hashes_fails_fast_in_debug() {
+#[should_panic(expected = "must retain")]
+fn a_bundle_missing_retained_hashes_panics() {
     let (_, bundle) = big_bundle_missing_hashes();
-    Automerge::<Retained>::new().apply_bundle(bundle).unwrap();
-}
-
-#[test]
-#[cfg(not(debug_assertions))]
-fn a_big_bundle_missing_hashes_rehashes_the_document() {
-    let (doc, bundle) = big_bundle_missing_hashes();
-    let mut other = Automerge::<Retained>::new().with_manual_gc();
-    other.apply_bundle(bundle).unwrap();
-    assert!(other
-        .change_graph
-        .unhashed_retained_nodes(0..other.change_graph.len() as u32)
-        .is_empty());
-    assert!(other
-        .change_graph
-        .held_hashes()
-        .is_subset(&doc.change_graph.held_hashes()));
+    let _ = Automerge::<Retained>::new().apply_bundle(bundle);
 }

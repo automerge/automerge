@@ -17,6 +17,10 @@ utf16-indexing = []
 slow_path_assertions = ["hexane/slow_path_assertions"]
 # Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
 deep_fuzz = ["hexane/deep_fuzz"]
+# Test only: fragment levels count leading zero nibbles rather than bytes,
+# so a few thousand changes build a deep fragment hierarchy. Documents
+# fragment differently, so never enable it outside tests.
+small_fragments = []
 
 [dependencies]
 cfg-if = "1.0"

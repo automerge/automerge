@@ -34,6 +34,12 @@ impl SeqClock {
         self.0.get(*actor_index).copied().flatten()
     }
 
+    /// Lowers the clock so it no longer covers `seq` of the actor.
+    pub(crate) fn uncover(&mut self, actor_index: usize, seq: u32) {
+        let slot = &mut self.0.as_mut_slice()[actor_index];
+        *slot = (*slot).min(NonZeroU32::new(seq - 1));
+    }
+
     /// An empty clock with a slot for every actor in `actors`.
     pub(crate) fn new(actors: &ActorTable) -> Self {
         Self(ActorIndexed::new(actors))
@@ -89,9 +95,7 @@ impl SeqClock {
 
     pub(crate) fn merge(a: &mut Self, b: &Self) {
         for (a, b) in std::iter::zip(a.0.as_mut_slice().iter_mut(), b.0.iter()) {
-            if *a < *b {
-                *a = *b;
-            }
+            *a = (*a).max(*b);
         }
     }
 

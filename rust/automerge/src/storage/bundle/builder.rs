@@ -59,7 +59,7 @@ impl<'a> BundleBuilder<'a> {
         change_graph: &'a crate::change_graph::ChangeGraph<H>,
         nodes: &[crate::change_graph::NodeIdx],
         mut mapper: ActorMapper<'a>,
-    ) -> Result<BundleBuilder<'a>, crate::change_graph::MissingDep> {
+    ) -> Result<BundleBuilder<'a>, crate::change_graph::UnretainedHashes> {
         let mut change_writer = BundleChangeWriter::new(nodes.len());
         change_graph.write_bundle_changes(nodes, &mut change_writer, &mut mapper)?;
         let mut builders: Vec<_> = change_graph

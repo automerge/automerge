@@ -9,6 +9,9 @@ use thiserror::Error;
 pub enum AutomergeError {
     #[error(transparent)]
     ChangeGraph(#[from] crate::change_graph::MissingDep),
+    /// Writing a bundle needs hashes this document has freed.
+    #[error(transparent)]
+    UnretainedHashes(#[from] crate::change_graph::UnretainedHashes),
     #[error("failed to load compressed data: {0}")]
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]

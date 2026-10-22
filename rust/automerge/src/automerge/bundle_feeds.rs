@@ -139,7 +139,7 @@ impl<H: HashRetention> Automerge<H> {
         self.republish_if_pending();
         for s in staged {
             if let Some(rehash) = s.rehash {
-                owes_gc |= self.rehash_bundle(&s.bundle, rehash)?;
+                owes_gc |= self.rehash_bundle(&s.bundle, rehash);
             }
         }
         if owes_gc {

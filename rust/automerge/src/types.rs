@@ -678,9 +678,18 @@ impl ChangeHash {
     }
 
     /// The fragment level this hash sorts into: its count of leading
-    /// zero bytes.
+    /// zero bytes (zero nibbles with the `small_fragments` feature).
     pub fn fragment_level(&self) -> usize {
-        self.0.iter().take_while(|&&b| b == 0).count()
+        if cfg!(feature = "small_fragments") {
+            let zero_bits = self
+                .0
+                .iter()
+                .position(|b| *b != 0)
+                .map_or(256, |i| i * 8 + self.0[i].leading_zeros() as usize);
+            zero_bits / 4
+        } else {
+            self.0.iter().take_while(|&&b| b == 0).count()
+        }
     }
 }
 

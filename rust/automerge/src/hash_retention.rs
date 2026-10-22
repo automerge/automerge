@@ -149,6 +149,10 @@ impl Retained {
     pub(crate) fn new(map: HashMap<NodeIdx, ChangeHash>, len: usize) -> Self {
         Retained { map, len }
     }
+
+    pub(crate) fn forget(&mut self, node: NodeIdx) {
+        self.map.remove(&node);
+    }
 }
 
 impl HashRetention for Retained {
