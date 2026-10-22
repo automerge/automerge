@@ -496,6 +496,21 @@ where
     }
 }
 
+/// Apply `parser` without consuming input.
+///
+/// Returns the parsed value with the original input cursor.
+/// Errors, including incomplete input, are propagated unchanged
+#[cfg(test)]
+pub(super) fn peek<'a, O, E, F>(mut parser: F) -> impl FnMut(Input<'a>) -> ParseResult<'a, O, E>
+where
+    F: Parser<'a, O, E>,
+{
+    move |input: Input<'a>| {
+        let (_, value) = parser.parse(input)?;
+        Ok((input, value))
+    }
+}
+
 /// Parse a length prefixed actor ID
 ///
 /// This first parses a LEB128 encoded u64 from the input, then the corresponding number of bytes
@@ -616,4 +631,68 @@ where
 /// Parse all the remaining input from the parser. This can never fail
 pub(crate) fn take_rest<E>(input: Input<'_>) -> ParseResult<'_, &'_ [u8], E> {
     input.rest()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{peek, take1, take_n, Input, Needed, ParseError, ParseResult};
+    use std::num::NonZeroUsize;
+
+    #[test]
+    fn peek_returns_value_without_consuming_input() {
+        let input = Input::new(&[7, 8]);
+        let mut parser = peek(take1::<()>);
+
+        let (remaining, value) = parser(input).unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(remaining, input);
+        // An ordinary parse must still see the same first byte.
+        let (remaining, value) = take1::<()>(remaining).unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(remaining.unconsumed_bytes(), &[8]);
+    }
+
+    #[test]
+    fn peek_preserves_nonzero_position_and_borrowed_output() {
+        let bytes = [10, 20, 30, 40];
+        let input = Input::with_position(&bytes, 1);
+        let mut parser = peek(|input| take_n::<()>(2, input));
+
+        let (remaining, value) = parser(input).unwrap();
+        assert_eq!(value, &[20, 30]);
+        assert_eq!(value.as_ptr(), bytes[1..].as_ptr());
+        // Equality checks the position and original buffer as well as the
+        // unconsumed bytes: rebuilding Input from the suffix is not equivalent.
+        assert_eq!(remaining, input);
+        assert_eq!(remaining.bytes(), &bytes);
+        assert_eq!(remaining.unconsumed_bytes(), &[20, 30, 40]);
+    }
+
+    #[test]
+    fn peek_propagates_errors_after_partial_consumption() {
+        fn reject(input: Input<'_>) -> ParseResult<'_, (), &'static str> {
+            let (_remaining, _) = take1(input)?;
+            Err(ParseError::Error("invalid tag"))
+        }
+
+        let input = Input::new(&[7, 8]);
+        let result = peek(reject)(input);
+        assert_eq!(result, Err(ParseError::Error("invalid tag")));
+    }
+
+    #[test]
+    fn peek_preserves_incomplete_byte_requirement() {
+        fn read_pair(input: Input<'_>) -> ParseResult<'_, u8, ()> {
+            let (remaining, _) = take1(input)?;
+            take1(remaining)
+        }
+
+        let result = peek(read_pair)(Input::new(&[7]));
+        assert_eq!(
+            result,
+            Err(ParseError::Incomplete(Needed::Size(
+                NonZeroUsize::new(1).unwrap()
+            )))
+        );
+    }
 }
