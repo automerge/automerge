@@ -1,5 +1,6 @@
 use hexane::PackError;
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
@@ -7,6 +8,7 @@ use super::{parse, shift_range, ChunkType, Header, RawColumns};
 use crate::actor::ActorList;
 use crate::author::Authors;
 use crate::change_graph::{ChangeGraph, ChangeGraphCols};
+use crate::op_set2::change::collector::index_ops;
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::op_set::MarkOrderValidator;
 use crate::op_set2::{OpSet, ReadOpError};
@@ -327,16 +329,48 @@ impl<'a> Document<'a> {
         }
     }
 
+    /// Load the document in this chunk.
+    ///
+    /// With `deferred_hashes`, the bytes of this chunk as stored, the changes
+    /// are not rebuilt from the ops to learn their hashes: the stored head is
+    /// trusted, and the other hashes are computed from those bytes when first
+    /// needed (see [`ChangeGraphCols::finalize_deferred`]). A chunk that
+    /// cannot be loaded so is loaded in full.
     pub(crate) fn reconstruct(
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
         write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+        deferred_hashes: Option<Arc<[u8]>>,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
         let change_cols = ChangeGraphCols::load(self, &op_set.actors)?;
 
         let mut index = op_set.index_builder();
+
+        let change_cols = match deferred_hashes {
+            Some(chunk) => {
+                let mut authors = Authors::new(&op_set.actors);
+                match change_cols.finalize_deferred(
+                    &op_set.actors,
+                    &mut authors,
+                    chunk,
+                    text_encoding,
+                )? {
+                    Ok(change_graph) => {
+                        index_ops(&op_set, &mut index)?;
+                        let (indexes, mark_order_validator) = index.finish();
+                        op_set.set_indexes(indexes);
+                        debug_assert!(op_set.validate_top_index());
+                        let doc =
+                            Automerge::from_parts(op_set, change_graph, authors, write_frontier);
+                        return Self::check_mark_order(doc, mark_order_validator);
+                    }
+                    Err(change_cols) => *change_cols,
+                }
+            }
+            None => change_cols,
+        };
 
         let change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
         let mut change_collector = change_collector.with_index(&mut index);
@@ -347,7 +381,7 @@ impl<'a> Document<'a> {
 
         self.verify_changes(&changes, mode)?;
 
-        let (indexes, mut mark_order_validator) = index.finish();
+        let (indexes, mark_order_validator) = index.finish();
         op_set.set_indexes(indexes);
 
         let mut authors = Authors::new(&op_set.actors);
@@ -359,6 +393,13 @@ impl<'a> Document<'a> {
 
         let doc = Automerge::from_parts(op_set, change_graph, authors, write_frontier);
 
+        Self::check_mark_order(doc, mark_order_validator)
+    }
+
+    fn check_mark_order(
+        doc: Automerge,
+        mut mark_order_validator: MarkOrderValidator,
+    ) -> Result<Automerge, ReconstructError> {
         if let Some(err) = mark_order_validator.take_error() {
             Err(ReconstructError::InvalidMarkOrderDoc {
                 doc: Box::new(doc),
@@ -390,8 +431,23 @@ impl<'a> Document<'a> {
     }
 }
 
+/// The changes of the document chunk `chunk`, as stored, rebuilt from its ops.
+pub(crate) fn rebuild_changes(
+    chunk: &[u8],
+    text_encoding: TextEncoding,
+) -> Result<Vec<Change>, ReconstructError> {
+    match super::Chunk::parse(parse::Input::new(chunk)) {
+        Ok((_, super::Chunk::Document(doc))) => doc.reconstruct_changes(text_encoding),
+        _ => Err(ReconstructError::NotADocumentChunk),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReconstructError {
+    #[error("the stored document chunk could not be parsed again")]
+    NotADocumentChunk,
+    #[error("the document chunk has {expected} changes but its ops rebuild into {rebuilt}")]
+    RebuiltChangeCount { expected: usize, rebuilt: usize },
     // FIXME - I need to do this check
     //#[error("the document contained ops which were out of order")]
     //OpsOutOfOrder,
@@ -436,6 +492,20 @@ pub(crate) struct MismatchedHeads {
     changes: Vec<Change>,
     expected_heads: BTreeSet<ChangeHash>,
     derived_heads: BTreeSet<ChangeHash>,
+}
+
+impl MismatchedHeads {
+    pub(crate) fn new(
+        changes: Vec<Change>,
+        expected_heads: BTreeSet<ChangeHash>,
+        derived_heads: BTreeSet<ChangeHash>,
+    ) -> Self {
+        Self {
+            changes,
+            expected_heads,
+            derived_heads,
+        }
+    }
 }
 
 impl std::fmt::Debug for MismatchedHeads {

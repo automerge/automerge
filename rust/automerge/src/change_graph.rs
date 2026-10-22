@@ -4,10 +4,12 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroU32;
 use std::ops::Add;
 use std::ops::RangeBounds;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(test)]
 use crate::actor::ActorInsert;
 use crate::actor::{ActorIndexed, ActorRefs, ActorRemoval, ActorShift, ActorTable};
+use crate::change::decode_author_footer;
 use crate::storage::BundleMetadata;
 use crate::{
     author::Authors,
@@ -17,9 +19,10 @@ use crate::{
     storage::columns::compression::Uncompressed,
     storage::columns::BadColumnLayout,
     storage::document::ReconstructError as LoadError,
+    storage::document::{rebuild_changes, MismatchedHeads},
     storage::{Columns, Document, RawColumn, RawColumns},
     types::OpId,
-    Change, ChangeHash,
+    ActorId, Author, Change, ChangeHash, TextEncoding,
 };
 
 /// The graph of changes
@@ -51,6 +54,80 @@ pub(crate) struct ChangeGraph {
     seq_index: ActorIndexed<Vec<NodeIdx>>,
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
+    /// Set when the graph was loaded without computing the loaded changes'
+    /// hashes (see [`ChangeGraphCols::finalize_deferred`]); cleared once they
+    /// are computed and a `&mut self` method folds them in.
+    ///
+    /// While it is set, the first `loaded` nodes are the loaded changes and,
+    /// of those, only the hash of the head (`head_index`) is in `hashes` and
+    /// `nodes_by_hash`; the others are in [`DeferredHashes::known`], computed
+    /// on first use. Their entries in `num_ops` are estimates, and `fragments`
+    /// and `fragment_top` are unused: the exact counts and the fragments are
+    /// in [`Known`] too. Nodes from `loaded` on were added since the load and
+    /// are complete.
+    deferred: Option<Box<DeferredHashes>>,
+}
+
+/// The loaded changes' hashes of a graph loaded with deferred hashes, and
+/// what is needed to compute them.
+#[derive(Clone)]
+struct DeferredHashes {
+    /// The document chunk the graph was loaded from, as stored.
+    chunk: Arc<[u8]>,
+    text_encoding: TextEncoding,
+    /// How many of the graph's first nodes were loaded.
+    loaded: usize,
+    /// The loaded head's node.
+    head_index: usize,
+    /// The loaded changes' hashes once computed, or why they could not be.
+    known: OnceLock<Result<Known, Arc<LoadError>>>,
+}
+
+/// What computing a deferred graph's hashes learns.
+#[derive(Clone)]
+struct Known {
+    /// The loaded changes' hashes, indexed by node.
+    hashes: Vec<ChangeHash>,
+    /// The loaded changes' nodes, by hash.
+    nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
+    /// The loaded changes' exact op counts, indexed by node.
+    num_ops: Vec<u64>,
+    /// The fragments of the whole graph, as of the computation.
+    fragments: Vec<FragmentNode>,
+    fragment_top: SeqClock,
+}
+
+impl DeferredHashes {
+    /// The loaded changes' hashes, computing them from `graph`'s stored
+    /// document chunk on first use, or why they could not be computed.
+    fn known(&self, graph: &ChangeGraph) -> &Result<Known, Arc<LoadError>> {
+        self.known
+            .get_or_init(|| graph.compute_known(self).map_err(Arc::new))
+    }
+
+    /// As [`DeferredHashes::known`], panicking on an error.
+    fn known_or_panic(&self, graph: &ChangeGraph) -> &Known {
+        match self.known(graph) {
+            Ok(known) => known,
+            Err(e) => panic!(
+                "the hashes of a document loaded with deferred hashes could not be \
+                 verified ({e}); call verify_hashes to handle this as an error"
+            ),
+        }
+    }
+}
+
+impl std::fmt::Debug for DeferredHashes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeferredHashes")
+            .field("loaded", &self.loaded)
+            .field("head_index", &self.head_index)
+            .field(
+                "known",
+                &self.known.get().map(|known| known.as_ref().map(|_| ())),
+            )
+            .finish()
+    }
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -110,6 +187,7 @@ impl ChangeGraph {
             seq_index: ActorIndexed::new(actors),
             fragments: vec![],
             fragment_top: SeqClock::new(actors),
+            deferred: None,
         }
     }
 
@@ -147,9 +225,7 @@ impl ChangeGraph {
     }
 
     pub(crate) fn head_indexes(&self) -> impl Iterator<Item = u64> + '_ {
-        self.heads
-            .iter()
-            .map(|h| self.nodes_by_hash.get(h).unwrap().0 as u64)
+        self.heads.iter().map(|h| self.node_of(h).unwrap().0 as u64)
     }
 
     /// The subset of `heads` not yet witnessed by this graph.
@@ -160,10 +236,7 @@ impl ChangeGraph {
     where
         'b: 'a,
     {
-        heads
-            .iter()
-            .filter(|h| !self.nodes_by_hash.contains_key(h))
-            .copied()
+        heads.iter().filter(|h| !self.has_change(h)).copied()
     }
 
     /// Get the maximum operation of the `actor` and `seq` number.
@@ -177,6 +250,7 @@ impl ChangeGraph {
 
     /// Make room for an actor just inserted into the document's actor table.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
+        self.settle();
         self.actors.shift_actors(shift);
 
         for clock in self.clock_cache.values_mut() {
@@ -192,6 +266,7 @@ impl ChangeGraph {
     /// Forget an actor just removed from the document's actor table. The
     /// actor must have no changes in the graph.
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
+        self.settle();
         let idx = removal.index();
         self.actors
             .remove_actor(removal)
@@ -217,12 +292,113 @@ impl ChangeGraph {
         self.actors.is_empty()
     }
 
+    /// Computes the loaded changes' hashes if they are deferred, checks that
+    /// they agree with the stored head, and folds them into the graph.
+    ///
+    /// # Errors
+    ///
+    /// What a full load of the document chunk would have reported: the
+    /// changes could not be rebuilt from the ops, or the stored head is not
+    /// the hash of the change they rebuild into. The graph stays deferred,
+    /// and the next use of an unknown hash panics with the same error.
+    pub(crate) fn verify_hashes(&mut self) -> Result<(), Arc<LoadError>> {
+        let Some(deferred) = &self.deferred else {
+            return Ok(());
+        };
+        if let Err(e) = deferred.known(self) {
+            return Err(e.clone());
+        }
+        self.settle();
+        Ok(())
+    }
+
+    /// Computes the deferred hashes, if any, and folds them in, panicking if
+    /// they cannot be verified.
+    fn fill(&mut self) {
+        if let Some(deferred) = &self.deferred {
+            deferred.known_or_panic(self);
+            self.settle();
+        }
+    }
+
+    /// Folds the deferred hashes into the graph if they have been computed.
+    /// Every `&mut self` method that changes the graph calls this first, so
+    /// that [`Known`] always describes the graph as it is.
+    fn settle(&mut self) {
+        match self.deferred.as_ref().and_then(|d| d.known.get()) {
+            Some(Ok(_)) => {}
+            _ => return,
+        }
+        let deferred = self.deferred.take().unwrap();
+        let loaded = deferred.loaded;
+        let known = deferred.known.into_inner().unwrap().unwrap();
+        for (i, hash) in known.hashes.into_iter().enumerate() {
+            self.hashes[i] = hash;
+        }
+        self.nodes_by_hash.extend(known.nodes_by_hash);
+        self.num_ops = known
+            .num_ops
+            .into_iter()
+            .chain(self.num_ops.iter().skip(loaded))
+            .collect();
+        self.fragments = known.fragments;
+        self.fragment_top = known.fragment_top;
+    }
+
+    /// The deferred hashes, computing them if need be, or `None` if no
+    /// hashes are deferred.
+    ///
+    /// # Panics
+    ///
+    /// If they cannot be verified: see [`ChangeGraph::verify_hashes`].
+    fn known(&self) -> Option<&Known> {
+        Some(self.deferred.as_ref()?.known_or_panic(self))
+    }
+
+    /// The node of `hash`, if the graph has the change.
+    fn node_of(&self, hash: &ChangeHash) -> Option<NodeIdx> {
+        match self.nodes_by_hash.get(hash) {
+            Some(node) => Some(*node),
+            None => self.known()?.nodes_by_hash.get(hash).copied(),
+        }
+    }
+
+    /// The hash of `node`, computing the deferred hashes if it is one of
+    /// them.
+    fn hash_of(&self, node: NodeIdx) -> &ChangeHash {
+        let i = node.0 as usize;
+        match &self.deferred {
+            Some(d) if i < d.loaded && i != d.head_index => &d.known_or_panic(self).hashes[i],
+            _ => &self.hashes[i],
+        }
+    }
+
+    /// The number of ops in the change of node `i`.
+    fn num_ops_of(&self, i: usize) -> u64 {
+        match &self.deferred {
+            Some(d) if i < d.loaded => d.known_or_panic(self).num_ops[i],
+            _ => self.num_ops.get(i).unwrap_or_default(),
+        }
+    }
+
+    /// The fragments and the clock they cover.
+    fn fragment_state(&self) -> (&[FragmentNode], &SeqClock) {
+        match self.known() {
+            Some(known) => (&known.fragments, &known.fragment_top),
+            None => (&self.fragments, &self.fragment_top),
+        }
+    }
+
     pub(crate) fn hash_to_index(&self, hash: &ChangeHash) -> Option<usize> {
-        self.nodes_by_hash.get(hash).map(|n| n.0 as usize)
+        self.node_of(hash).map(|n| n.0 as usize)
     }
 
     pub(crate) fn index_to_hash(&self, index: usize) -> Option<&ChangeHash> {
-        self.hashes.get(index)
+        if index < self.len() {
+            Some(self.hash_of(NodeIdx(index as u32)))
+        } else {
+            None
+        }
     }
 
     pub(crate) fn max_op(&self) -> u64 {
@@ -327,7 +503,7 @@ impl ChangeGraph {
         let index = actor_indices
             .binary_search_by(|n| {
                 let i = n.0 as usize;
-                let num_ops = self.num_ops.get(i).unwrap_or_default();
+                let num_ops = self.num_ops_of(i);
                 let max_op = self.max_ops[i];
                 let start = max_op as u64 - num_ops + 1;
                 if counter < start {
@@ -340,11 +516,11 @@ impl ChangeGraph {
             })
             .ok()?;
         let node_idx = actor_indices[index];
-        self.hashes.get(node_idx.0 as usize).cloned()
+        Some(*self.hash_of(node_idx))
     }
 
     pub(crate) fn has_change(&self, hash: &ChangeHash) -> bool {
-        self.nodes_by_hash.contains_key(hash)
+        self.node_of(hash).is_some()
     }
 
     pub(crate) fn get_bundle_metadata<I>(
@@ -355,16 +531,12 @@ impl ChangeGraph {
         I: IntoIterator<Item = ChangeHash>,
     {
         hashes.into_iter().map(|hash| {
-            let index = self
-                .nodes_by_hash
-                .get(&hash)
-                .cloned()
-                .ok_or(MissingDep(hash))?;
+            let index = self.node_of(&hash).ok_or(MissingDep(hash))?;
             let i = index.0 as usize;
             let actor = self.actors[i].into();
             let timestamp = self.timestamps.get(i).unwrap_or_default();
             let max_op = self.max_ops[i] as u64;
-            let num_ops = self.num_ops.get(i).unwrap_or_default();
+            let num_ops = self.num_ops_of(i);
             let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
             let meta = self.extra_bytes_meta.get(i).unwrap();
@@ -373,7 +545,7 @@ impl ChangeGraph {
 
             let deps = self
                 .parents(index)
-                .map(|p| self.hashes[p.0 as usize])
+                .map(|p| *self.hash_of(p))
                 .collect::<Vec<_>>();
 
             let start_op = max_op - num_ops + 1;
@@ -402,12 +574,7 @@ impl ChangeGraph {
     {
         let indexes: Vec<_> = hashes
             .into_iter()
-            .map(|hash| {
-                self.nodes_by_hash
-                    .get(&hash)
-                    .cloned()
-                    .ok_or(MissingDep(hash))
-            })
+            .map(|hash| self.node_of(&hash).ok_or(MissingDep(hash)))
             .collect::<Result<_, _>>()?;
 
         Ok(self.get_build_metadata_for_indexes(indexes))
@@ -440,7 +607,7 @@ impl ChangeGraph {
                 let actor = self.actors[i].into();
                 let timestamp = self.timestamps.get(i).unwrap_or_default();
                 let max_op = self.max_ops[i] as u64;
-                let num_ops = self.num_ops.get(i).unwrap_or_default();
+                let num_ops = self.num_ops_of(i);
                 let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
                 let meta = self.extra_bytes_meta.get(i).unwrap();
@@ -486,15 +653,14 @@ impl ChangeGraph {
     }
 
     pub(crate) fn get_hashes(&self, have_deps: &[ChangeHash]) -> Cow<'_, [ChangeHash]> {
-        if have_deps.is_empty() {
+        if have_deps.is_empty() && self.deferred.is_none() {
             Cow::Borrowed(&self.hashes)
         } else {
             let clock = self.seq_clock_for_heads(have_deps);
             Cow::Owned(
                 self.get_build_indexes(clock)
                     .into_iter()
-                    .filter_map(|node| self.hashes.get(node.0 as usize))
-                    .copied()
+                    .map(|node| *self.hash_of(node))
                     .collect(),
             )
         }
@@ -517,9 +683,8 @@ impl ChangeGraph {
         self.seq_index
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
-            .and_then(|i| self.hashes.get(i.0 as usize))
+            .map(|i| *self.hash_of(*i))
             .ok_or(AutomergeError::InvalidSeq(seq))
-            .copied()
     }
 
     fn update_heads(&mut self, change: &Change) {
@@ -555,22 +720,23 @@ impl ChangeGraph {
     }
 
     pub(crate) fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        let n = self.nodes_by_hash.get(&head).copied()?;
+        let n = self.node_of(&head)?;
         if head.fragment_level() == 0 {
             self.loose_commit(n)
         } else {
-            assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
-            self.fragments
+            let (fragments, _) = self.fragment_state();
+            assert!(fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
+            fragments
                 .binary_search_by_key(&n.0, |f| f.head.0)
                 .ok()
-                .map(|i| self.fragments[i].export(self))
+                .map(|i| fragments[i].export(self))
         }
     }
 
     fn loose_commit(&self, n: NodeIdx) -> Option<Fragment> {
-        let head = self.hashes.get(n.0 as usize).copied()?;
+        let head = *self.index_to_hash(n.0 as usize)?;
         assert_eq!(head.fragment_level(), 0);
-        let boundary = self.parents(n).map(|p| self.hashes[p.0 as usize]).collect();
+        let boundary = self.parents(n).map(|p| *self.hash_of(p)).collect();
         let members = vec![head];
         let checkpoints = vec![];
         let level = head.fragment_level();
@@ -589,11 +755,12 @@ impl ChangeGraph {
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
         let heads = if levels.contains(&0) { heads } else { &[] };
+        let (fragments, _) = self.fragment_state();
         self.loose_fragments(heads).chain(
-            self.fragments
+            fragments
                 .iter()
                 .rev()
-                .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
+                .filter(move |f| levels.contains(&self.hash_of(f.head).fragment_level()))
                 .map(|f| f.export(self)),
         )
     }
@@ -605,8 +772,9 @@ impl ChangeGraph {
         let nodes = heads
             .iter()
             .filter(|h| h.fragment_level() == 0)
-            .filter_map(|h| self.nodes_by_hash.get(h).copied());
-        self.bfs_until_clock(nodes, &self.fragment_top)
+            .filter_map(|h| self.node_of(h));
+        let (_, fragment_top) = self.fragment_state();
+        self.bfs_until_clock(nodes, fragment_top)
             .filter_map(|n| self.loose_commit(n))
     }
 
@@ -616,7 +784,7 @@ impl ChangeGraph {
         clock: &'a SeqClock,
     ) -> impl Iterator<Item = ChangeHash> + 'a {
         self.bfs_until_clock([node], clock)
-            .map(|n| self.hashes[n.0 as usize])
+            .map(|n| *self.hash_of(n))
     }
 
     fn bfs_until_clock<'a, I>(
@@ -653,17 +821,40 @@ impl ChangeGraph {
     }
 
     fn cache_fragment(&mut self, head: NodeIdx) {
-        let hash = &self.hashes[head.0 as usize];
-        let level = hash.fragment_level();
-        if level == 0 {
+        if self.hashes[head.0 as usize].fragment_level() == 0 {
+            return;
+        }
+        let mut fragments = std::mem::take(&mut self.fragments);
+        let mut fragment_top = self.fragment_top.clone();
+        self.add_fragment(
+            head,
+            |n| self.hashes[n.0 as usize].fragment_level(),
+            &mut fragments,
+            &mut fragment_top,
+        );
+        self.fragments = fragments;
+        self.fragment_top = fragment_top;
+    }
+
+    /// Adds the fragment headed by `head`, if it heads one, to `fragments`,
+    /// which cover `fragment_top`. `level` gives each node's fragment level.
+    fn add_fragment<F: Fn(NodeIdx) -> usize>(
+        &self,
+        head: NodeIdx,
+        level: F,
+        fragments: &mut Vec<FragmentNode>,
+        fragment_top: &mut SeqClock,
+    ) {
+        let head_level = level(head);
+        if head_level == 0 {
             return;
         }
         let mut deps = vec![];
         let mut supercede = vec![];
         let clock = self.calculate_clock([head].into());
-        for (i, f) in self.fragments.iter().enumerate().rev() {
+        for (i, f) in fragments.iter().enumerate().rev() {
             if clock.covers(&f.clock) {
-                if self.hashes[f.head.0 as usize].fragment_level() >= level {
+                if level(f.head) >= head_level {
                     deps.push(f.head);
                 } else {
                     supercede.push(i);
@@ -671,10 +862,54 @@ impl ChangeGraph {
             }
         }
         for i in supercede {
-            self.fragments.remove(i);
+            fragments.remove(i);
         }
-        SeqClock::merge(&mut self.fragment_top, &clock);
-        self.fragments.push(FragmentNode { head, deps, clock });
+        SeqClock::merge(fragment_top, &clock);
+        fragments.push(FragmentNode { head, deps, clock });
+    }
+
+    /// Computes the loaded changes' hashes of a deferred graph, from the
+    /// stored document chunk, and checks the loaded head's against them.
+    fn compute_known(&self, deferred: &DeferredHashes) -> Result<Known, LoadError> {
+        let changes = rebuild_changes(&deferred.chunk, deferred.text_encoding)?;
+        if changes.len() != deferred.loaded {
+            return Err(LoadError::RebuiltChangeCount {
+                expected: deferred.loaded,
+                rebuilt: changes.len(),
+            });
+        }
+        let stored_head = self.hashes[deferred.head_index];
+        let derived_head = changes[deferred.head_index].hash();
+        if derived_head != stored_head {
+            return Err(LoadError::MismatchingHeads(MismatchedHeads::new(
+                changes,
+                [stored_head].into(),
+                [derived_head].into(),
+            )));
+        }
+        let hashes: Vec<ChangeHash> = changes.iter().map(|c| c.hash()).collect();
+        let nodes_by_hash = hashes
+            .iter()
+            .enumerate()
+            .map(|(i, hash)| (*hash, NodeIdx(i as u32)))
+            .collect();
+        let num_ops = changes.iter().map(|c| c.len() as u64).collect();
+        let level = |n: NodeIdx| {
+            let i = n.0 as usize;
+            hashes.get(i).unwrap_or(&self.hashes[i]).fragment_level()
+        };
+        let mut fragments = vec![];
+        let mut fragment_top = self.fragment_top.empty_like();
+        for n in self.node_ids() {
+            self.add_fragment(n, level, &mut fragments, &mut fragment_top);
+        }
+        Ok(Known {
+            hashes,
+            nodes_by_hash,
+            num_ops,
+            fragments,
+            fragment_top,
+        })
     }
 
     pub(crate) fn add_change(
@@ -684,6 +919,24 @@ impl ChangeGraph {
         authors: &mut Authors,
     ) -> Result<ChangeHash, MissingDep> {
         let hash = change.hash();
+
+        // With deferred hashes, `nodes_by_hash` knows only the loaded head
+        // and the changes added since. That is enough for a change which
+        // builds on those and which is new to its actor, such as a local
+        // commit; anything else needs every hash.
+        if self.deferred.is_some() {
+            let unknown_dep = change
+                .deps()
+                .iter()
+                .any(|h| !self.nodes_by_hash.contains_key(h));
+            let maybe_present =
+                change.seq() as usize <= self.seq_index.get(actor).map_or(0, |s| s.len());
+            if unknown_dep || maybe_present {
+                self.fill();
+            } else {
+                self.settle();
+            }
+        }
 
         if self.nodes_by_hash.contains_key(&hash) {
             return Ok(hash);
@@ -722,7 +975,13 @@ impl ChangeGraph {
             self.cache_clock(node_idx);
         }
 
-        self.cache_fragment(node_idx);
+        // While hashes are deferred, `fragments` is unused and the loaded
+        // changes' entries in `hashes` are placeholders, so there is nothing
+        // to add this change's fragment to: `compute_known` rebuilds the
+        // fragments of every node, this one included.
+        if self.deferred.is_none() {
+            self.cache_fragment(node_idx);
+        }
 
         Ok(hash)
     }
@@ -765,10 +1024,10 @@ impl ChangeGraph {
     }
 
     pub(crate) fn deps(&self, hash: &ChangeHash) -> impl Iterator<Item = ChangeHash> + '_ {
-        let mut iter = self.nodes_by_hash.get(hash).map(|node| self.parents(*node));
+        let mut iter = self.node_of(hash).map(|node| self.parents(node));
         std::iter::from_fn(move || {
             let next = iter.as_mut()?.next()?;
-            self.hashes.get(next.0 as usize).copied()
+            Some(*self.hash_of(next))
         })
     }
 
@@ -786,10 +1045,7 @@ impl ChangeGraph {
         &self,
         heads: &'a [ChangeHash],
     ) -> impl Iterator<Item = NodeIdx> + use<'a, '_> {
-        heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h))
-            .copied()
+        heads.iter().filter_map(|h| self.node_of(h))
     }
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
@@ -858,8 +1114,7 @@ impl ChangeGraph {
     ) {
         let nodes = self.heads_to_nodes(heads);
         self.traverse_ancestors(nodes.collect(), |idx| {
-            let hash = &self.hashes[idx.0 as usize];
-            changes.remove(hash);
+            changes.remove(self.hash_of(idx));
             true
         });
     }
@@ -880,6 +1135,33 @@ impl ChangeGraph {
     }
 }
 
+/// Assigns `author`, the author footer of a loaded change, if it has one,
+/// to the change's actor, `actor` (whose id `actor_id` gives).
+///
+/// # Errors
+///
+/// [`LoadError::AuthorOnNonInitialSeq`] if the change is not its actor's
+/// first. Honest encoders only carry the author footer on seq=1, and the
+/// apply path rejects anything else. Loading must reject it too: skipping
+/// the footer would leave the ops unattributed (so masking could never hide
+/// them) while `Change::author` still reports the author.
+fn assign_loaded_author(
+    author: Option<Author<'_>>,
+    seq: u64,
+    actor: usize,
+    actor_id: impl FnOnce() -> ActorId,
+    authors: &mut Authors,
+) -> Result<(), LoadError> {
+    let Some(author) = author else {
+        return Ok(());
+    };
+    if seq != 1 {
+        return Err(LoadError::AuthorOnNonInitialSeq(seq, actor_id()));
+    }
+    authors.assign_author(author.into_owned(), actor);
+    Ok(())
+}
+
 impl ChangeGraphCols {
     pub(crate) fn len(&self) -> usize {
         self.0.len()
@@ -887,6 +1169,69 @@ impl ChangeGraphCols {
 
     pub(crate) fn iter(&self) -> ChangeIter<'_> {
         self.0.iter()
+    }
+
+    /// The graph of a document chunk loaded without rebuilding its changes,
+    /// trusting its stored head: the loaded changes' hashes are computed from
+    /// `chunk`, the chunk as stored, when first needed (see
+    /// [`ChangeGraph::verify_hashes`]).
+    ///
+    /// Only a chunk of one head whose changes have exactly one change without
+    /// children can be loaded so, since the graph alone must say which change
+    /// the head is; for any other the columns are given back.
+    pub(crate) fn finalize_deferred(
+        self,
+        actor_table: &ActorTable,
+        authors: &mut Authors,
+        chunk: Arc<[u8]>,
+        text_encoding: TextEncoding,
+    ) -> Result<Result<ChangeGraph, Box<Self>>, LoadError> {
+        let len = self.0.len();
+        let mut has_child = vec![false; len];
+        for edge in &self.0.edges {
+            has_child[edge.target.0 as usize] = true;
+        }
+        let mut childless = (0..len).filter(|i| !has_child[*i]);
+        let (Some(head_index), None) = (childless.next(), childless.next()) else {
+            return Ok(Err(Box::new(self)));
+        };
+        let mut heads = self.0.heads.iter();
+        let (Some(&head), None) = (heads.next(), heads.next()) else {
+            return Ok(Err(Box::new(self)));
+        };
+
+        let mut graph = self.0;
+        debug_assert!(graph.hashes.is_empty());
+        graph.hashes = vec![ChangeHash([0; 32]); len];
+        graph.hashes[head_index] = head;
+        graph.nodes_by_hash.insert(head, NodeIdx(head_index as u32));
+
+        for i in 0..len {
+            let meta = graph.extra_bytes_meta.get(i).unwrap();
+            let range = meta.prefix() as usize..meta.total() as usize;
+            assign_loaded_author(
+                decode_author_footer(&graph.extra_bytes_raw[range]),
+                graph.seq[i] as u64,
+                graph.actors[i].into(),
+                || actor_table[graph.actors[i]].clone(),
+                authors,
+            )?;
+        }
+
+        for n in 0..(len as u32) {
+            if (n + 1) % CACHE_STEP == 0 {
+                graph.cache_clock(NodeIdx(n));
+            }
+        }
+
+        graph.deferred = Some(Box::new(DeferredHashes {
+            chunk,
+            text_encoding,
+            loaded: len,
+            head_index,
+            known: OnceLock::new(),
+        }));
+        Ok(Ok(graph))
     }
 
     pub(crate) fn finalize(
@@ -910,20 +1255,13 @@ impl ChangeGraphCols {
             let node_idx = NodeIdx(idx as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
             graph.hashes.push(hash);
-            if let Some(author) = c.author() {
-                // Honest encoders only carry the author footer on seq=1; the
-                // apply path rejects anything else. Loading must reject it
-                // too: skipping the footer would leave the ops unattributed
-                // (so masking could never hide them) while Change::author
-                // still reports the author.
-                if c.seq() != 1 {
-                    return Err(LoadError::AuthorOnNonInitialSeq(
-                        c.seq(),
-                        c.actor_id().clone(),
-                    ));
-                }
-                authors.assign_author(author.into_owned(), graph.actors[idx].into());
-            }
+            assign_loaded_author(
+                c.author(),
+                c.seq(),
+                graph.actors[idx].into(),
+                || c.actor_id().clone(),
+                authors,
+            )?;
         }
 
         for n in 0..(graph.len() as u32) {
@@ -1062,6 +1400,7 @@ impl ChangeGraphCols {
             seq_index,
             fragments,
             fragment_top,
+            deferred: None,
         }))
     }
 }
@@ -1157,6 +1496,53 @@ mod tests {
         assert!(
             matches!(err, LoadError::AuthorOnNonInitialSeq(2, _)),
             "expected AuthorOnNonInitialSeq(2, _), got {err:?}"
+        );
+    }
+
+    /// If the stored chunk a deferred graph computes its hashes from does
+    /// not rebuild into as many changes as the graph has, the hashes are
+    /// refused with an error that says so. The graph is loaded from one
+    /// document and given another's chunk, since a chunk cannot disagree
+    /// with itself.
+    #[test]
+    fn a_deferred_graph_refuses_a_chunk_of_another_change_count() {
+        use crate::storage::{parse::Input, Chunk};
+
+        let mut doc = AutoCommit::new();
+        for i in 0..3 {
+            doc.put(ROOT, "k", i).unwrap();
+            doc.commit();
+        }
+        let three = doc.save();
+        let mut doc = AutoCommit::new();
+        for i in 0..2 {
+            doc.put(ROOT, "k", i).unwrap();
+            doc.commit();
+        }
+        let two: Arc<[u8]> = Arc::from(doc.save());
+
+        let (_, chunk) = Chunk::parse(Input::new(&three)).unwrap();
+        let Chunk::Document(document) = chunk else {
+            panic!("expected a document chunk");
+        };
+        let actors = document.actors().clone().into_table().unwrap();
+        let cols = ChangeGraphCols::load(&document, &actors).unwrap();
+        let mut authors = Authors::new(&actors);
+        let Ok(Ok(mut graph)) =
+            cols.finalize_deferred(&actors, &mut authors, two, TextEncoding::platform_default())
+        else {
+            panic!("a chunk of one head loads deferred");
+        };
+        let err = graph.verify_hashes().unwrap_err();
+        assert!(
+            matches!(
+                *err,
+                LoadError::RebuiltChangeCount {
+                    expected: 3,
+                    rebuilt: 2
+                }
+            ),
+            "expected RebuiltChangeCount, got {err:?}"
         );
     }
 
@@ -1831,13 +2217,9 @@ struct FragmentNode {
 
 impl FragmentNode {
     fn export(&self, graph: &ChangeGraph) -> Fragment {
-        let head = graph.hashes[self.head.0 as usize];
+        let head = *graph.hash_of(self.head);
         let level = head.fragment_level();
-        let boundary = self
-            .deps
-            .iter()
-            .map(|d| graph.hashes[d.0 as usize])
-            .collect();
+        let boundary = self.deps.iter().map(|d| *graph.hash_of(*d)).collect();
         let clock = graph.calculate_clock(self.deps.clone().into_iter().collect());
         let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
         let checkpoints = members
