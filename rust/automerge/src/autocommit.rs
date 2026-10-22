@@ -836,6 +836,37 @@ impl AutoCommit {
         self.doc.hash_for_opid(opid)
     }
 
+    /// The whole document, as [`ReadDoc::hydrate`] gives it with no heads,
+    /// read in one ordered pass over the ops. See
+    /// [`Automerge::hydrate_in_one_pass`].
+    pub fn hydrate_in_one_pass(&self) -> hydrate::Value {
+        let mut gathered = self.gather_in_one_pass();
+        self.hydrate_gathered(&mut gathered, &ROOT)
+            .expect("the root is a map")
+    }
+
+    /// Every object's visible contents, as the other reads of this document
+    /// see them, read in one ordered pass over the ops. See
+    /// [`Automerge::gather_in_one_pass`].
+    ///
+    /// The document must not change until the last object is built from the
+    /// gathering, since text is read from the document when its object is
+    /// built.
+    pub fn gather_in_one_pass(&self) -> hydrate::Gathered {
+        self.doc.ops().gather(&self.get_scope(None))
+    }
+
+    /// The object `obj` built from `gathered`, which must have been gathered
+    /// from this document as it is now. See [`Automerge::hydrate_gathered`].
+    pub fn hydrate_gathered(
+        &self,
+        gathered: &mut hydrate::Gathered,
+        obj: &ExId,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc
+            .hydrate_gathered_at(gathered, obj, &self.get_scope(None))
+    }
+
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> ReadAt<'_> {
         // heads arg takes priority
         if let Some(h) = heads {

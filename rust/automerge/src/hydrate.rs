@@ -1,5 +1,5 @@
 use crate::automerge::view::ReadAt;
-use crate::op_set2::{Op, OpSet, OpType};
+use crate::op_set2::{KeyRef, Op, OpSet, OpType, TopOps};
 use crate::types::{ObjId, ScalarValue, SequenceType};
 use crate::TextEncoding;
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
@@ -239,6 +239,17 @@ impl Automerge {
     pub(crate) fn hydrate_text(&self, obj: &ObjId, read: &ReadAt<'_>) -> Value {
         self.ops().hydrate_text(obj, read, self.text_encoding())
     }
+
+    /// The object `obj`, of type `typ`, built under `read` from `gathered`.
+    pub(crate) fn hydrate_gathered_at(
+        &self,
+        gathered: &mut Gathered,
+        obj: &crate::ObjId,
+        read: &ReadAt<'_>,
+    ) -> Result<Value, crate::AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        Ok(gathered.hydrate(self.ops(), &obj.id, obj.typ, read, self.text_encoding()))
+    }
 }
 
 impl OpSet {
@@ -286,6 +297,34 @@ impl OpSet {
         Value::Text(Text::new(encoding, text))
     }
 
+    /// Every object's top ops under `read`, gathered for [`Gathered::hydrate`]
+    /// to build objects from.
+    ///
+    /// For a current read this is one ordered pass over the whole op set,
+    /// with one seek, where [`OpSet::hydrate_map`] seeks every column to each
+    /// object it reads: for a document of many small objects the seeks cost
+    /// more than reading the ops. A historical read can only decide which ops
+    /// are on top within one object, so it is gathered object by object.
+    pub(crate) fn gather(&self, read: &ReadAt<'_>) -> Gathered {
+        let mut gathered = Gathered::default();
+        let mut text_of = HashMap::new();
+        if read.historical().is_some() {
+            let mut last = None;
+            for (obj, _) in self.iter_obj_ids() {
+                if last != Some(obj) {
+                    last = Some(obj);
+                    let tops = self.top_ops(&obj, read.borrow());
+                    gathered.gather(self, tops, &mut text_of);
+                }
+            }
+        } else {
+            let tops = TopOps::new(self, read, 0..self.len());
+            gathered.gather(self, tops, &mut text_of);
+        }
+        gathered.objects.shrink_to_fit();
+        gathered
+    }
+
     pub(crate) fn hydrate_op(
         &self,
         op: Op<'_>,
@@ -299,6 +338,167 @@ impl OpSet {
             OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), read, encoding),
             OpType::Put(scalar) => Value::Scalar(scalar.into()),
             _ => panic!("invalid op to hydrate"),
+        }
+    }
+}
+
+/// Every object's visible contents, read from a document by
+/// [`Automerge::gather_in_one_pass`] (or [`crate::AutoCommit::gather_in_one_pass`])
+/// so that objects can then be built from it without going back to the
+/// document's ops for each one.
+///
+/// Building an object with [`Automerge::hydrate_gathered`] takes its
+/// entries, and those of the objects inside it, out of the gathering, so a
+/// caller that builds a large document's objects one at a time holds the
+/// gathering and one object rather than the whole tree twice. Each object
+/// can be built once; built again, it is empty. Text is read from the
+/// document when its object is built.
+///
+/// Objects no longer reachable from the root, such as a deleted map, are
+/// gathered too, so that they can be built by id as [`ReadDoc::hydrate`]
+/// builds them; they stay in the gathering until they are.
+///
+/// [`ReadDoc::hydrate`]: crate::ReadDoc::hydrate
+#[derive(Debug, Default)]
+pub struct Gathered {
+    objects: HashMap<ObjId, Vec<Entry>>,
+    /// For each text object, the objects inside it (block maps and the
+    /// objects in those), which building the text, read whole from the
+    /// document, takes out of the gathering.
+    in_text: HashMap<ObjId, Vec<ObjId>>,
+}
+
+/// One visible top op of an object, as [`Gathered`] holds it: its map key,
+/// if the object is a map, and its value or the object it makes.
+#[derive(Debug)]
+struct Entry {
+    key: Option<String>,
+    slot: Slot,
+    conflict: bool,
+}
+
+#[derive(Debug)]
+enum Slot {
+    Scalar(ScalarValue),
+    Object(ObjId, ObjType),
+}
+
+impl Gathered {
+    /// How many objects are gathered and not yet built. An object with no
+    /// visible entries, such as an empty map, is not counted.
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Whether every gathered object has been built.
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+
+    /// Adds the entries of `tops`, which are top ops in op set order. The
+    /// ops of a text object are passed over: text is read whole when its
+    /// object is built. An object inside a text, such as a block map, is
+    /// gathered and recorded in `in_text`; `text_of` maps each object met
+    /// inside a text to that text. An object comes after its parent in op
+    /// set order, so its parent has been met.
+    fn gather<'a>(
+        &mut self,
+        ops: &OpSet,
+        tops: impl Iterator<Item = Op<'a>>,
+        text_of: &mut HashMap<ObjId, ObjId>,
+    ) {
+        let mut current: Option<(ObjId, Option<Vec<Entry>>)> = None;
+        for top in tops {
+            if current.as_ref().map(|(obj, _)| *obj) != Some(top.obj) {
+                if let Some((obj, Some(entries))) = current.take() {
+                    self.objects.insert(obj, entries);
+                }
+                let is_text = ops.object_type(&top.obj) == Some(ObjType::Text);
+                if is_text {
+                    text_of.insert(top.obj, top.obj);
+                } else if let Some(text) = ops
+                    .object_parent(&top.obj)
+                    .and_then(|parent| text_of.get(&parent).copied())
+                {
+                    text_of.insert(top.obj, text);
+                    self.in_text.entry(text).or_default().push(top.obj);
+                }
+                current = Some((top.obj, (!is_text).then(Vec::new)));
+            }
+            let Some((_, Some(entries))) = current.as_mut() else {
+                continue;
+            };
+            let key = match top.elemid_or_key() {
+                KeyRef::Map(key) => Some(key.into_owned()),
+                KeyRef::Seq(_) => None,
+            };
+            let slot = match top.action() {
+                OpType::Make(typ) => Slot::Object(top.id.into(), typ),
+                OpType::Put(scalar) => Slot::Scalar(scalar.into()),
+                // Only text has marks; nothing else is a top op.
+                _ => continue,
+            };
+            entries.push(Entry {
+                key,
+                slot,
+                conflict: top.conflict,
+            });
+        }
+        if let Some((obj, Some(entries))) = current {
+            self.objects.insert(obj, entries);
+        }
+    }
+
+    /// Takes the objects inside the text `text` out of the gathering: the
+    /// text is read whole from the document.
+    fn take_text_objects(&mut self, text: &ObjId) {
+        for obj in self.in_text.remove(text).unwrap_or_default() {
+            self.objects.remove(&obj);
+        }
+    }
+
+    /// The value of `obj`, of type `typ`, built from its gathered entries
+    /// and, recursively, those of the objects they make, each taken out of
+    /// the gathering. Text is read from `ops` under `read`. An object with no
+    /// entries, or one already built, is empty.
+    pub(crate) fn hydrate(
+        &mut self,
+        ops: &OpSet,
+        obj: &ObjId,
+        typ: ObjType,
+        read: &ReadAt<'_>,
+        encoding: TextEncoding,
+    ) -> Value {
+        if typ == ObjType::Text {
+            self.take_text_objects(obj);
+            return ops.hydrate_text(obj, read, encoding);
+        }
+        let entries = self.objects.remove(obj).unwrap_or_default();
+        let mut value = |slot| match slot {
+            Slot::Scalar(scalar) => Value::Scalar(scalar),
+            Slot::Object(child, typ) => self.hydrate(ops, &child, typ, read, encoding),
+        };
+        match typ {
+            ObjType::Map | ObjType::Table => {
+                let mut map = Map::new();
+                for Entry {
+                    key,
+                    slot,
+                    conflict,
+                } in entries
+                {
+                    let value = value(slot);
+                    map.insert(key.unwrap_or_default(), MapValue { value, conflict });
+                }
+                Value::Map(map)
+            }
+            ObjType::List | ObjType::Text => {
+                let mut list = List::new();
+                for Entry { slot, conflict, .. } in entries {
+                    list.push_value(value(slot), conflict);
+                }
+                Value::List(list)
+            }
         }
     }
 }

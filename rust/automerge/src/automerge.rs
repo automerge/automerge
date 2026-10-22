@@ -2083,6 +2083,50 @@ impl Automerge {
         self.hydrate_map(&ObjId::root(), &read)
     }
 
+    /// The whole document at its current heads, as [`Self::hydrate`] gives
+    /// it with no heads, but read in one ordered pass over the ops.
+    ///
+    /// [`Self::hydrate`] seeks to each object's ops in turn, which for a
+    /// document of many small objects costs more than reading them; this
+    /// reads every object's ops in the order they are stored, then builds the
+    /// tree. To build a large document's objects one at a time instead, use
+    /// [`Self::gather_in_one_pass`] and [`Self::hydrate_gathered`].
+    pub fn hydrate_in_one_pass(&self) -> hydrate::Value {
+        let mut gathered = self.gather_in_one_pass();
+        self.hydrate_gathered(&mut gathered, &crate::ROOT)
+            .expect("the root is a map")
+    }
+
+    /// Every object's visible contents at the current heads, read in one
+    /// ordered pass over the ops, for [`Self::hydrate_gathered`] to build
+    /// objects from.
+    ///
+    /// The gathering is of the document as it is now: the document must not
+    /// change until the last object is built from it, since text is read
+    /// from the document when its object is built.
+    pub fn gather_in_one_pass(&self) -> hydrate::Gathered {
+        self.ops().gather(&self.read_current())
+    }
+
+    /// The object `obj` built from `gathered`, as [`ReadDoc::hydrate`] gives
+    /// it with no heads.
+    ///
+    /// `gathered` must have been gathered from this document as it is now.
+    /// The object's entries, and those of the objects inside it, are taken
+    /// out of `gathered`, so building it again, or an object inside it,
+    /// gives an empty object.
+    ///
+    /// # Errors
+    ///
+    /// If `obj` is not an object in this document.
+    pub fn hydrate_gathered(
+        &self,
+        gathered: &mut hydrate::Gathered,
+        obj: &ExId,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.hydrate_gathered_at(gathered, obj, &self.read_current())
+    }
+
     /// Test oracle: the current view materialised through the filtered
     /// (non-indexed) path. Never use for production reads.
     ///

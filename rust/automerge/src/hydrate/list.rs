@@ -107,6 +107,11 @@ impl List {
     pub(crate) fn new() -> Self {
         Self(Default::default())
     }
+
+    /// Appends `value`, with no id to record.
+    pub(crate) fn push_value(&mut self, value: Value, conflict: bool) {
+        self.0.push(ListValue::new(value, conflict))
+    }
 }
 
 impl ListValue {
