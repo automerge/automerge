@@ -7,6 +7,9 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* `Automerge::load_with` and `load_with_options` no longer log an error at
+  ERROR level when they return it, as they did for every `MissingDeps` from
+  loading part of a document.
 
 ## 0.12.0
 
