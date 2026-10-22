@@ -18,6 +18,9 @@ slow_path_assertions = ["hexane/slow_path_assertions"]
 # Count how often reads seek the op columns to an object (see the
 # `seek_counters` module); for tests and measurement only
 seek-counters = []
+# Count how many op columns reads decode (see the `decode_counters`
+# module); for tests and measurement only
+decode-counters = []
 
 [dependencies]
 cfg-if = "1.0"

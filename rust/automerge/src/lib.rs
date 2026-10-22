@@ -272,6 +272,8 @@ mod clock;
 mod columnar;
 mod convert;
 mod cursor;
+#[cfg(any(test, feature = "decode-counters"))]
+pub mod decode_counters;
 pub mod error;
 mod exid;
 pub mod hydrate;

@@ -110,6 +110,8 @@ impl<'a> OpIter<'a> {
         let pos = self.pos;
         let conflict = false;
         self.pos += 1;
+        #[cfg(any(test, feature = "decode-counters"))]
+        crate::decode_counters::count_op_columns(8);
         Ok(Some(Op {
             pos,
             conflict,
@@ -139,6 +141,8 @@ impl<'a> OpIter<'a> {
         let pos = self.pos + n;
         let conflict = false;
         self.pos += n + 1;
+        #[cfg(any(test, feature = "decode-counters"))]
+        crate::decode_counters::count_op_columns(8);
         Ok(Some(Op {
             pos,
             conflict,
