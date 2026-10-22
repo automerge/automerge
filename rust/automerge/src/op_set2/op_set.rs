@@ -249,6 +249,8 @@ impl OpSet {
     }
 
     pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) -> usize {
+        #[cfg(any(test, feature = "splice-counters"))]
+        crate::splice_counters::count_op_splice();
         let added = self.cols.splice(pos, ops, self.text_encoding);
         self.splice_objects(ops);
         added
@@ -294,6 +296,8 @@ impl OpSet {
     }
 
     pub(crate) fn add_succ_with_undo(&mut self, op_pos: &[SuccInsert]) -> Vec<SuccUndo> {
+        #[cfg(any(test, feature = "splice-counters"))]
+        crate::splice_counters::count_succ_splices(op_pos.len());
         let mut undo = vec![];
         let mut succ_inc = 0;
         let mut last_pos = None;

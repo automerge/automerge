@@ -285,6 +285,8 @@ pub mod op_set2;
 pub mod patches;
 mod read;
 mod sequence_tree;
+#[cfg(any(test, feature = "splice-counters"))]
+pub mod splice_counters;
 mod storage;
 pub mod sync;
 mod text_diff;
