@@ -22,15 +22,20 @@ use crate::PackError;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
 
-/// Counts of the bytes [`RawColumn`] splices copy, so that tests can pin
-/// what a splice costs without timing it.
+/// Counts of the work [`RawColumn`] splices do, so that tests can pin
+/// what a splice costs without timing it. Counts are kept per thread.
 ///
-/// A byte is counted each time a splice or a slab merge copies or moves a
-/// byte that was already in the column to another place: a slab's tail
-/// split off into a new slab, a slab appended to its neighbour, the bytes
-/// after a splice point shifted within their slab. Bytes a splice inserts
-/// are not counted, nor is a buffer's reallocation as it grows. Counts are
-/// kept per thread.
+/// - **Copied bytes**: a byte is counted each time a splice or a slab
+///   merge copies or moves a byte that was already in the column to
+///   another place: a slab's tail split off into a new slab, a slab
+///   appended to its neighbour, the bytes after a splice point shifted
+///   within their slab. Bytes a splice inserts are not counted, nor is a
+///   buffer's reallocation as it grows.
+/// - **Visited slabs**: each entry of the slab list that a splice reads to
+///   look for empty slabs, and each slab length it writes into the slab
+///   index, count once.
+/// - **Moved slabs**: each entry of the slab list shifted to another place
+///   in it, as slabs are inserted or removed before it, counts once.
 ///
 /// Built only with the `raw-counters` feature, and in this crate's own
 /// tests.
@@ -40,6 +45,8 @@ pub mod counters {
 
     thread_local! {
         static COPIED: Cell<usize> = const { Cell::new(0) };
+        static VISITED: Cell<usize> = const { Cell::new(0) };
+        static MOVED: Cell<usize> = const { Cell::new(0) };
     }
 
     /// The bytes copied on this thread since the last call, which resets
@@ -48,8 +55,28 @@ pub mod counters {
         COPIED.with(|c| c.replace(0))
     }
 
+    /// The slabs visited on this thread since the last call, which resets
+    /// the count to zero.
+    pub fn take_visited() -> usize {
+        VISITED.with(|c| c.replace(0))
+    }
+
+    /// The slabs moved on this thread since the last call, which resets
+    /// the count to zero.
+    pub fn take_moved() -> usize {
+        MOVED.with(|c| c.replace(0))
+    }
+
     pub(crate) fn copied(n: usize) {
         COPIED.with(|c| c.set(c.get() + n));
+    }
+
+    pub(crate) fn visited(n: usize) {
+        VISITED.with(|c| c.set(c.get() + n));
+    }
+
+    pub(crate) fn moved(n: usize) {
+        MOVED.with(|c| c.set(c.get() + n));
     }
 }
 
@@ -57,6 +84,10 @@ pub mod counters {
 mod counters {
     #[inline(always)]
     pub(crate) fn copied(_: usize) {}
+    #[inline(always)]
+    pub(crate) fn visited(_: usize) {}
+    #[inline(always)]
+    pub(crate) fn moved(_: usize) {}
 }
 
 /// Default per-slab byte budget.  Chosen empirically via the `raw_compare`
@@ -268,7 +299,7 @@ impl RawColumn {
             self.slabs.push(RawSlab {
                 data: SlabBytes::default(),
             });
-            self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
+            self.rebuild_index();
         }
 
         let (si, offset) = self.find_slab(index);
@@ -285,6 +316,7 @@ impl RawColumn {
         if !overflow.is_empty() {
             let pos = range.end;
             range.end += overflow.len();
+            counters::moved(self.slabs.len() - pos);
             self.slabs.splice(pos..pos, overflow);
         }
 
@@ -310,6 +342,7 @@ impl RawColumn {
                 if !partial_overflow.is_empty() {
                     let pos = range.end;
                     range.end += partial_overflow.len();
+                    counters::moved(self.slabs.len() - pos);
                     self.slabs.splice(pos..pos, partial_overflow);
                 }
                 break;
@@ -323,6 +356,7 @@ impl RawColumn {
                 range.end - drain_start - 1
             };
             if partial > 0 {
+                counters::moved(self.slabs.len() - drain_start - partial);
                 self.slabs.drain(drain_start..drain_start + partial);
                 range.end -= partial;
             }
@@ -348,6 +382,11 @@ impl RawColumn {
         // transparent to sequential readers, so drop them before rebuilding
         // the index.
         let slabs_before_empty_cleanup = self.slabs.len();
+        counters::visited(slabs_before_empty_cleanup);
+        if let Some(first) = self.slabs.iter().position(|s| s.data.is_empty()) {
+            let kept = self.slabs[first..].iter().filter(|s| !s.data.is_empty());
+            counters::moved(kept.count());
+        }
         self.slabs.retain(|slab| !slab.data.is_empty());
         let removed_empty_slabs = self.slabs.len() != slabs_before_empty_cleanup;
 
@@ -355,12 +394,19 @@ impl RawColumn {
         // full rebuild otherwise.
         if !removed_empty_slabs && self.slabs.len() == old_slab_count && range.len() == 1 {
             let new_weight = self.slabs[range.start].data.len();
+            counters::visited(1);
             bit_point_update(&mut self.bit, range.start, old_weight, new_weight);
         } else {
-            self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
+            self.rebuild_index();
         }
 
         Ok(())
+    }
+
+    /// Rebuilds the slab index from every slab's length.
+    fn rebuild_index(&mut self) {
+        counters::visited(self.slabs.len());
+        self.bit = rebuild_bit(&self.slabs, |s| s.data.len());
     }
 
     fn find_slab(&self, index: usize) -> (usize, usize) {
@@ -385,6 +431,7 @@ impl RawColumn {
             return false;
         };
         if (a_len < min || b_len < min) && a_len + b_len <= max {
+            counters::moved(self.slabs.len() - b - 1);
             let slab_b = self.slabs.remove(b);
             self.slabs[a].data.owned().extend_from_slice(&slab_b.data);
             counters::copied(slab_b.data.len());
@@ -1145,6 +1192,41 @@ mod tests {
         col.splice_slice(1, 1, b""); // a small shared prefix, written
         drive(&col, b"0234567x89ABCDEF");
         drive(&other, b"0123456789ABCDEF");
+    }
+
+    /// The slab counters count the slab-list entries a splice scans for
+    /// empty slabs, the slab lengths it writes into the index, and the
+    /// entries it shifts along the list.
+    #[test]
+    fn counters_count_the_slabs_a_splice_visits_and_moves() {
+        let loaded: Vec<u8> = (0..40u8).collect();
+        let mut col = RawColumn::load_with_max_segments(&loaded, 8).unwrap();
+        let take = || (counters::take_visited(), counters::take_moved());
+        take();
+        // The loaded slab splits in three, appended at the list's end:
+        // each splice scans the 3 slabs and rebuilds their index.
+        col.splice_slice(30, 0, b"x");
+        assert_eq!(take(), (3 + 3, 0));
+        // It splits again before the other two (2 moved), then the 5-byte
+        // prefix and "y" merge, moving the 3 after them back.
+        col.splice_slice(5, 0, b"y");
+        assert_eq!(col.slabs.len(), 4);
+        assert_eq!(take(), (4 + 4, 2 + 3));
+        // A replace at the front of a shared slab leaves its empty prefix
+        // and "z" to merge into their neighbours, each moving the rest.
+        col.splice_slice(6, 1, b"z");
+        assert_eq!(col.slabs.len(), 4);
+        assert_eq!(take(), (4 + 4, 2 + 3 + 3));
+        // A delete within an owned slab scans the list and updates one
+        // length in the index, moving nothing.
+        col.splice_slice(5, 1, b"");
+        assert_eq!(take(), (4 + 1, 0));
+        let mut model = loaded.clone();
+        model.splice(30..30, *b"x");
+        model.splice(5..5, *b"y");
+        model.splice(6..7, *b"z");
+        model.splice(5..6, []);
+        drive(&col, &model);
     }
 
     #[test]
