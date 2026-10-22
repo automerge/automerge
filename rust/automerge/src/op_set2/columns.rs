@@ -35,6 +35,16 @@ pub(super) struct Columns {
     pub(super) index: Indexes,
 }
 
+/// Op set columns built already, which [`Columns::load_with_built`] takes
+/// in place of loading them: those an encoder handed over as slabs, so the
+/// bytes it just wrote need not be decoded and checked again.
+#[derive(Default)]
+pub(crate) struct Built {
+    pub(crate) key_str: Option<hexane::Column<Option<String>>>,
+    pub(crate) action: Option<hexane::Column<Action>>,
+    pub(crate) value_meta: Option<hexane::PrefixColumn<ValueMeta>>,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct Indexes {
     pub(super) text: hexane::PrefixColumn<Option<u32>>,
@@ -253,8 +263,29 @@ impl Columns {
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
-        _actors: &ActorTable,
+        actors: &ActorTable,
     ) -> Result<Self, PackError> {
+        Self::load_with_built(cols, data, actors, Built::default())
+    }
+
+    /// [`Columns::load`], taking the columns `built` holds as they are
+    /// rather than loading them from `data`, where their ranges are
+    /// ignored. Each must be as long as the id columns.
+    pub(crate) fn load_with_built(
+        mut cols: BTreeMap<ColumnSpec, Range<usize>>,
+        data: &[u8],
+        _actors: &ActorTable,
+        built: Built,
+    ) -> Result<Self, PackError> {
+        if built.key_str.is_some() {
+            cols.remove(&KEY_STR_COL_SPEC);
+        }
+        if built.action.is_some() {
+            cols.remove(&ACTION_COL_SPEC);
+        }
+        if built.value_meta.is_some() {
+            cols.remove(&VALUE_META_COL_SPEC);
+        }
         let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
         count_write!(
             column_bytes_decoded,
@@ -287,10 +318,16 @@ impl Columns {
             data_for(KEY_COUNTER_COL_SPEC),
             opts.with_fill(None),
         )?;
-        let key_str = hexane::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
+        let key_str = match built.key_str {
+            Some(column) => column,
+            None => hexane::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?,
+        };
         let insert =
             hexane::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
-        let action = hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts)?;
+        let action = match built.action {
+            Some(column) => column,
+            None => hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts)?,
+        };
         let mark_name =
             hexane::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
 
@@ -307,8 +344,12 @@ impl Columns {
         let succ_ctr =
             hexane::DeltaColumn::<u32>::load_with(data_for(SUCC_COUNTER_COL_SPEC), succ_opts)?;
 
-        let value_meta =
-            hexane::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts)?;
+        let value_meta = match built.value_meta {
+            Some(column) => column,
+            None => {
+                hexane::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts)?
+            }
+        };
         let value = hexane::RawColumn::load(data_for(VALUE_COL_SPEC))?;
 
         let index = Indexes::default();

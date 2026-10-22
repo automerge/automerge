@@ -1844,6 +1844,12 @@ mod tests {
         // 13,000.
         assert!(c.ops_spliced <= 1_300, "{c:?}");
         assert!(c.ops_held <= 1_300, "{c:?}");
+        // The key, action and value metadata columns are handed to the op
+        // set as the encoder's slabs, not decoded back from the change's
+        // bytes: the op set decoded 88,046 bytes of op columns before that,
+        // 50,132 after. The gate sits a tenth of the way from the second to
+        // the first.
+        assert!(c.column_bytes_decoded <= 53_923, "{c:?}");
     }
 
     /// Ops written after such a root in the same transaction are spliced,
