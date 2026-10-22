@@ -939,6 +939,9 @@ impl<'a> ChangeCollector<'a> {
 
             let hash = change.hash();
 
+            #[cfg(any(test, feature = "change-rebuild-counters"))]
+            crate::rebuild_counters::count_rebuilt(change.len() as u64);
+
             for dep in change.dependencies() {
                 heads.remove(dep);
             }
