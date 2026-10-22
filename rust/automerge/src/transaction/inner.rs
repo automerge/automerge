@@ -227,6 +227,7 @@ impl TransactionInner {
             .filter_map(|hash| Some(change_graph.hash_to_index(hash)? as u64))
             .collect();
         let meta = self.change_meta(deps_index);
+        count_write!(ops_held, self.pending.len());
         let stored = build_change(&self.pending, &meta, change_graph, &op_set.actors);
         Change::new(stored)
     }

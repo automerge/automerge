@@ -256,6 +256,10 @@ impl Columns {
         _actors: &ActorTable,
     ) -> Result<Self, PackError> {
         let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
+        count_write!(
+            column_bytes_decoded,
+            cols.values().map(|r| r.len()).sum::<usize>()
+        );
 
         let id_actor = hexane::Column::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
@@ -422,6 +426,8 @@ impl Columns {
         O: OpLike,
     {
         let ops = ops.iter().filter(|o| O::action(o) != Action::Delete);
+        let added = ops.clone().count();
+        count_write!(ops_spliced, added);
 
         let value_pos = self.value_meta.get_prefix(pos) as usize;
         let succ_pos = self.succ_count.get_prefix(pos) as usize;
@@ -489,7 +495,7 @@ impl Columns {
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
 
-        ops.count()
+        added
     }
 
     #[cfg(test)]

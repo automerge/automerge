@@ -197,6 +197,7 @@ where
     }
 
     mapper.remap_actors(ops, change_actor);
+    count_write!(ops_encoded, ops.len());
 
     use hexane::EncoderApi;
 
