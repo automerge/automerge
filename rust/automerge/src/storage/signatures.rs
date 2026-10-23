@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::signature::{error as signature_error, Signature, SignatureBytes, SignatureTag};
 use crate::storage::parse::{Input, ParseResult};
+use crate::storage::ChunkType;
 use crate::ChangeHash;
 
 use super::{parse, Header};
 
+pub(crate) use error::HashEntries as EntriesError;
 pub(super) use error::Signatures as ParseError;
 
 const MAX_SIGNATURES_PER_HASH: usize = 16;
@@ -28,7 +30,7 @@ const MAX_SIGNATURES_PER_HASH: usize = 16;
 /// by an unsigned LEB128 signature length and exactly that many signature bytes.
 /// The declared length is checked before reading or copying the payload.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) struct SignatureEntry(Signature);
+struct SignatureEntry(Signature);
 
 impl SignatureEntry {
     fn parse<'a>(input: Input<'a>) -> ParseResult<'a, Self, error::Signatures> {
@@ -44,6 +46,14 @@ impl SignatureEntry {
         let bytes =
             SignatureBytes::new(bytes.to_vec()).map_err(|e| parse::ParseError::Error(e.into()))?;
         ParseResult::Ok((i, Self(Signature::new(SignatureTag::new(tag), bytes))))
+    }
+
+    fn encode(&self, buffer: &mut Vec<u8>) {
+        buffer.push(self.0.tag().inner_tag());
+        self.0.with_bytes(|bytes| {
+            leb128::write::unsigned(buffer, bytes.len() as u64).unwrap();
+            buffer.extend_from_slice(bytes);
+        });
     }
 }
 
@@ -66,12 +76,13 @@ impl Ord for SignatureEntry {
 
 /// Ordered, unique signature entries grouped by change hash.
 ///
-/// Each hash has at most 16 distinct [`SignatureEntry`] values across all
-/// tags. The total entry count counts signatures rather than hashes.
+/// Each hash has at most 16 distinct signatures across all tags. The total
+/// entry count counts signatures rather than hashes. Construct from domain
+/// signatures with [`HashEntries::canonicalize`] before encoding a chunk.
 ///
-/// Wire entries must arrive in strictly increasing `(hash, tag, bytes)`
-/// order. Duplicate or descending entries are rejected rather than
-/// normalized.
+/// In-memory construction sorts and deduplicates the supplied entries. Parsing
+/// instead requires strictly increasing `(hash, tag, bytes)` wire order and
+/// rejects duplicate or descending entries rather than normalizing them.
 ///
 /// # Encoding
 ///
@@ -79,7 +90,7 @@ impl Ord for SignatureEntry {
 /// Each entry repeats its 32-byte change hash before its signature scheme
 /// tag, signature length, and signature bytes.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct HashEntries {
+pub(crate) struct HashEntries {
     inner: BTreeMap<ChangeHash, BTreeSet<SignatureEntry>>,
     total: usize,
 }
@@ -97,9 +108,25 @@ impl HashEntries {
         self.total
     }
 
-    #[cfg(test)]
-    pub(super) fn is_empty(&self) -> bool {
-        self.len() == 0
+    /// Take ownership of domain signatures, sorting and discarding exact duplicates.
+    ///
+    /// Signature bytes are already size-checked. This does not verify signatures
+    /// or select proofs. Unknown schemes and malformed Ed25519 lengths are kept.
+    /// Empty input produces an empty collection.
+    ///
+    /// # Errors
+    ///
+    /// Rejects more than 16 distinct signatures for any hash, counting all schemes
+    /// together. Duplicates do not count toward the limit, even at capacity.
+    pub(crate) fn canonicalize(
+        entries: impl IntoIterator<Item = (ChangeHash, Signature)>,
+    ) -> Result<Self, EntriesError> {
+        entries
+            .into_iter()
+            .try_fold(Self::new(), |mut entries, (hash, signature)| {
+                entries.insert_bounded(hash, SignatureEntry(signature))?;
+                Ok(entries)
+            })
     }
 
     /// Append an entry in strictly increasing `(hash, tag, bytes)` order.
@@ -160,6 +187,18 @@ impl HashEntries {
         self.total += 1;
         Ok(())
     }
+
+    fn encode(&self, buffer: &mut Vec<u8>) {
+        leb128::write::unsigned(buffer, self.total as u64).unwrap();
+        for (hash, entry) in self
+            .inner
+            .iter()
+            .flat_map(|(hash, entries)| entries.iter().map(move |e| (hash, e)))
+        {
+            buffer.extend_from_slice(hash.as_bytes());
+            entry.encode(buffer);
+        }
+    }
 }
 
 /// A storage chunk containing signature entries keyed by change hash.
@@ -196,14 +235,42 @@ pub(crate) struct SignaturesChunk<'a> {
     header: Header,
 }
 
+impl SignaturesChunk<'static> {
+    /// Encode a validated collection as a complete chunk in canonical order.
+    ///
+    /// Consumes the collection and retains it for inspection through
+    /// [`SignaturesChunk::iter`]. The bytes include the header and checksum.
+    /// Encoding does not verify or discard any of the supplied signatures.
+    pub(crate) fn encode(entries: HashEntries) -> Self {
+        let mut buffer = Vec::new();
+        entries.encode(&mut buffer);
+        let header = Header::new(ChunkType::Signatures, &buffer);
+        let mut bytes = Vec::with_capacity(header.len() + buffer.len());
+        header.write(&mut bytes);
+        bytes.extend_from_slice(&buffer);
+        Self {
+            entries,
+            bytes: Cow::Owned(bytes),
+            header,
+        }
+    }
+}
+
 impl<'a> SignaturesChunk<'a> {
+    /// Borrow domain signatures in canonical `(hash, tag, bytes)` order.
+    ///
+    /// Hashes are copied and signatures are borrowed. Works identically for
+    /// parsed and newly encoded chunks, without verifying their signatures.
     #[cfg(test)]
-    pub(super) fn entries(&self) -> &HashEntries {
-        &self.entries
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (ChangeHash, &Signature)> {
+        self.entries
+            .inner
+            .iter()
+            .flat_map(|(hash, entries)| entries.iter().map(move |entry| (*hash, &entry.0)))
     }
 
-    #[cfg(test)]
-    pub(super) fn bytes(&self) -> &[u8] {
+    /// Borrow the complete encoded chunk, including its header and checksum.
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
@@ -306,6 +373,7 @@ pub(super) mod error {
 #[cfg(test)]
 mod tests {
     mod domain;
+    mod properties;
 
     use super::{error, HashEntries, SignatureEntry, SignaturesChunk};
     use crate::signature::{error as signature_error, Signature, SignatureBytes, SignatureTag};
@@ -316,10 +384,8 @@ mod tests {
 
     fn flattened_entries(chunk: &SignaturesChunk<'_>) -> Vec<(ChangeHash, SignatureEntry)> {
         chunk
-            .entries()
-            .inner
             .iter()
-            .flat_map(|(hash, entries)| entries.iter().cloned().map(move |entry| (*hash, entry)))
+            .map(|(hash, signature)| (hash, SignatureEntry(signature.clone())))
             .collect()
     }
 
@@ -552,6 +618,116 @@ mod tests {
             Chunk::parse(Input::new(&bytes[..bytes.len() - 1])),
             Err(ParseError::Incomplete(_))
         ));
+    }
+
+    // Literal limits pin the format contract independently of implementation constants.
+    #[test]
+    fn encoding_accepts_a_1024_byte_signature() {
+        let hash = ChangeHash([1; 32]);
+        let signature = signature(1, vec![7; 1024]).0;
+        let chunk = SignaturesChunk::encode(
+            HashEntries::canonicalize([(hash, signature.clone())]).unwrap(),
+        );
+        assert_eq!(chunk.iter().collect::<Vec<_>>(), vec![(hash, &signature)]);
+        assert!(chunk.checksum_valid());
+    }
+
+    #[test]
+    fn encoding_accepts_16_entries_for_each_of_two_hashes() {
+        let entries: Vec<_> = [ChangeHash([1; 32]), ChangeHash([2; 32])]
+            .into_iter()
+            .flat_map(|hash| (0u8..16).map(move |value| (hash, signature(1, vec![value]))))
+            .collect();
+        let chunk = SignaturesChunk::encode(
+            HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
+                .unwrap(),
+        );
+        assert_eq!(flattened_entries(&chunk), entries);
+        assert!(chunk.checksum_valid());
+    }
+
+    #[test]
+    fn canonicalization_rejects_17_entries_for_one_hash_and_tag() {
+        let hash = ChangeHash([1; 32]);
+        let result =
+            HashEntries::canonicalize((0u8..17).map(|value| (hash, signature(1, vec![value]).0)));
+        assert!(
+            matches!(result, Err(error::HashEntries::TooManyForHash(actual)) if actual == hash)
+        );
+    }
+
+    #[test]
+    fn canonicalization_rejects_17_entries_for_one_hash_across_tags() {
+        let hash = ChangeHash([1; 32]);
+        let result =
+            HashEntries::canonicalize((0u8..17).map(|tag| (hash, signature(tag, vec![7]).0)));
+        assert!(
+            matches!(result, Err(error::HashEntries::TooManyForHash(actual)) if actual == hash)
+        );
+    }
+
+    #[test]
+    fn canonicalization_counts_the_per_hash_limit_after_deduplication() {
+        let entries: Vec<_> = (0u8..16)
+            .map(|value| (ChangeHash([1; 32]), signature(1, vec![value])))
+            .collect();
+        // 32 inputs, but only 16 distinct entries; reverse order also exercises sorting.
+        let duplicated = entries
+            .iter()
+            .rev()
+            .chain(entries.iter())
+            .map(|(hash, entry)| (*hash, entry.0.clone()));
+        let chunk = SignaturesChunk::encode(HashEntries::canonicalize(duplicated).unwrap());
+        let canonical = SignaturesChunk::encode(
+            HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
+                .unwrap(),
+        );
+        assert_eq!(flattened_entries(&chunk), entries);
+        assert_eq!(chunk.bytes(), canonical.bytes());
+    }
+
+    #[test]
+    fn encoding_keeps_flat_wire_entries_in_canonical_order() {
+        let a = ChangeHash([1; 32]);
+        let b = ChangeHash([2; 32]);
+        let entry = |tag, byte| signature(tag, vec![byte]).0;
+        let chunk = SignaturesChunk::encode(
+            HashEntries::canonicalize([
+                (b, entry(0, 9)),
+                (a, entry(2, 3)),
+                (a, entry(1, 8)),
+                (a, entry(1, 7)),
+                (a, entry(1, 7)),
+            ])
+            .unwrap(),
+        );
+
+        // Four distinct entries, not two hash groups or five inputs. Hashes
+        // repeat on the wire; the nested collections are only an in-memory model.
+        let mut body = vec![4];
+        for (hash, tag, byte) in [(a, 1, 7), (a, 1, 8), (a, 2, 3), (b, 0, 9)] {
+            body.extend_from_slice(hash.as_bytes());
+            body.extend_from_slice(&[tag, 1, byte]);
+        }
+        let mut expected = Vec::new();
+        Header::new(ChunkType::Signatures, &body).write(&mut expected);
+        expected.extend_from_slice(&body);
+        assert_eq!(chunk.bytes(), expected.as_slice());
+    }
+
+    #[test]
+    fn empty_signatures_encode_a_zero_entry_count() {
+        let chunk = SignaturesChunk::encode(HashEntries::canonicalize([]).unwrap());
+
+        // The body is a single unsigned LEB128 zero (the entry count).
+        let body = [0];
+        let mut expected = Vec::new();
+        Header::new(ChunkType::Signatures, &body).write(&mut expected);
+        expected.extend_from_slice(&body);
+
+        assert_eq!(chunk.iter().count(), 0);
+        assert_eq!(chunk.bytes(), expected.as_slice());
+        assert!(chunk.checksum_valid());
     }
 
     #[test]
