@@ -1435,9 +1435,35 @@ impl<H: HashRetention> Automerge<H> {
         self.assemble_bundle(&heads, &external_deps, &nodes, storage, names)
     }
 
+    /// The fragments, loose commits included, holding a change `heads`
+    /// does not cover, in causal order. A fragment that also holds older
+    /// changes is included whole. [`Self::bundles_for_fragments`] encodes
+    /// them as a stack that [`Self::load_incremental`] takes in order. Ids
+    /// this document does not know are ignored.
+    pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
+        let nodes: Vec<_> = heads
+            .iter()
+            .filter_map(|id| self.node_for_change_id(id))
+            .collect();
+        let covered = self.change_graph.seq_clock_for_nodes(nodes);
+        Ok(self
+            .change_graph
+            .fragments_after(&self.get_head_hashes(), &covered, &self.ops.actors))
+    }
+
+    /// [`Self::fragments_after`] as encoded bundles; empty when `heads`
+    /// covers the document. [`Self::save_after`] gives just the new
+    /// changes as one bundle.
+    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        self.bundles_for_fragments(self.fragments_after(heads)?)
+    }
+
     /// The changes `heads` does not already cover, as one bundle; `None`
     /// when there are none. Ids this document does not know are ignored.
-    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Option<Bundle>, AutomergeError> {
+    pub(crate) fn single_bundle_after(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Option<Bundle>, AutomergeError> {
         let nodes: Vec<_> = heads
             .iter()
             .filter_map(|id| self.node_for_change_id(id))
@@ -1507,7 +1533,7 @@ impl<H: HashRetention> Automerge<H> {
             return Ok(bytes);
         }
         Ok(self
-            .bundle_after(heads)?
+            .single_bundle_after(heads)?
             .map(|b| {
                 if options.deflate {
                     b.bytes()

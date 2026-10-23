@@ -1429,6 +1429,48 @@ impl<H: HashRetention> ChangeGraph<H> {
         out
     }
 
+    /// The fragments, loose commits included, holding a node `covered`
+    /// does not cover: by head in causal order.
+    pub(crate) fn fragments_after(
+        &self,
+        heads: &[ChangeHash],
+        covered: &SeqClock,
+        actors: &ActorTable,
+    ) -> Vec<Fragment> {
+        let fresh = |n: &NodeIdx| !self.is_covered_by(*n, covered);
+        let fragments: Vec<&FragmentNode> =
+            self.fragments.iter().filter(|f| fresh(&f.head)).collect();
+        debug_assert!(
+            !fragments.iter().any(|f| self.inside_higher_fragment(f)),
+            "a fragment lies inside a larger one"
+        );
+        let mut out: Vec<(NodeIdx, Fragment)> = fragments
+            .into_iter()
+            .map(|f| (f.head, self.cached_fragment(f, actors)))
+            .collect();
+        // loose commits lie above every fragment
+        let tips = heads
+            .iter()
+            .filter(|h| h.fragment_level() == 0)
+            .filter_map(|h| self.nodes_by_hash.get(h).copied());
+        out.extend(
+            self.ancestry_until_clock(tips, &self.fragment_top)
+                .filter(fresh)
+                .filter_map(|n| Some((n, self.loose_commit(n, actors)?))),
+        );
+        out.sort_unstable_by_key(|(n, _)| *n);
+        out.into_iter().map(|(_, f)| f).collect()
+    }
+
+    /// Levels nest, so `f` lies inside a higher-level fragment exactly
+    /// when its head is one of that fragment's members.
+    fn inside_higher_fragment(&self, f: &FragmentNode) -> bool {
+        self.fragments.iter().filter(|k| k.level > f.level).any(|k| {
+            self.is_covered_by(f.head, &k.clock)
+                && !self.is_covered_by(f.head, &self.calculate_clock(k.deps.clone()))
+        })
+    }
+
     /// The loose commits above the fragment index, oldest first.
     fn loose_commits(&self, heads: &[ChangeHash], actors: &ActorTable) -> Vec<Fragment> {
         let nodes = heads
@@ -3562,6 +3604,99 @@ mod tests {
         let a = doc.save();
         let b = loaded.save();
         assert_eq!(a, b);
+    }
+
+    /// `doc.bundle_after(heads)` applied one bundle at a time to `at`, a
+    /// save of `doc` at `heads`: each must apply as it arrives, no
+    /// fragment may lie inside another, and the result must hold `doc`'s
+    /// changes, as an audit-mode load confirms.
+    /// Returns how many fragments straddle `heads`.
+    fn assert_bundle_after_rebuilds(doc: &Automerge, heads: &[ChangeId], at: &[u8]) -> usize {
+        let fragments = doc.fragments_after(heads).unwrap();
+        let bundles = doc.bundle_after(heads).unwrap();
+        assert_eq!(bundles, doc.bundles_for_fragments(fragments.clone()).unwrap());
+        for f in &fragments {
+            let inside = fragments.iter().any(|g| {
+                g.head != f.head && f.members.iter().all(|m| g.members.contains(m))
+            });
+            assert!(!inside, "{f:?} lies inside another fragment");
+        }
+        let mut fork = Automerge::load(at).unwrap();
+        let straddling = fragments
+            .iter()
+            .filter(|f| f.members.iter().any(|m| fork.has_change_id(m)))
+            .count();
+        assert_eq!(fork.get_heads(), {
+            let mut h = heads.to_vec();
+            h.sort();
+            h
+        });
+        for (f, bundle) in fragments.iter().zip(&bundles) {
+            fork.load_incremental(bundle).unwrap();
+            assert!(fork.has_change(&f.head).unwrap(), "{f:?} waits on a later one");
+        }
+        assert_eq!(fork.get_heads(), doc.get_heads());
+        assert_eq!(fork.hydrate(None).unwrap(), doc.hydrate(None).unwrap());
+        let audited = Automerge::load(&fork.save())
+            .unwrap()
+            .enable_audit_mode()
+            .unwrap();
+        assert_eq!(audited.get_heads(), doc.get_heads());
+        straddling
+    }
+
+    #[test]
+    fn bundle_after_rebuilds_the_document_from_any_heads() {
+        let mut rng = make_rng();
+        let mut doc = Automerge::new();
+        let cuts = [1, 300, 999, 1_500, 1_999];
+        let mut snapshots = vec![(vec![], vec![])];
+        for i in 1..=2_000 {
+            let key = format!("k{}", rng.random::<u32>() % 32);
+            let mut tx = doc.transaction();
+            tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
+            tx.commit();
+            if cuts.contains(&i) {
+                snapshots.push((doc.get_heads(), doc.save()));
+            }
+        }
+        assert!(
+            doc.fragments(1..).len() > 2,
+            "the history spans several fragments"
+        );
+        let straddling: usize = snapshots
+            .iter()
+            .map(|(heads, at)| assert_bundle_after_rebuilds(&doc, heads, at))
+            .sum();
+        assert!(straddling > 0, "a fragment straddling heads is sent whole");
+        assert!(doc.fragments_after(&doc.get_heads()).unwrap().is_empty());
+        assert!(doc.bundle_after(&doc.get_heads()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn bundle_after_brings_in_a_concurrent_branch() {
+        let mut rng = make_rng();
+        let mut doc = Automerge::new();
+        for i in 0..600 {
+            let mut tx = doc.transaction();
+            tx.put(ROOT, "base", i as i64).unwrap();
+            tx.commit();
+        }
+        let mut other = doc.fork();
+        for doc in [&mut doc, &mut other] {
+            for _ in 0..700 {
+                let key = format!("k{}", rng.random::<u32>() % 32);
+                let mut tx = doc.transaction();
+                tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
+                tx.commit();
+            }
+        }
+        let (ours, ours_at) = (doc.get_heads(), doc.save());
+        let (theirs, theirs_at) = (other.get_heads(), other.save());
+        doc.merge(&mut other).unwrap();
+        let straddling = assert_bundle_after_rebuilds(&doc, &ours, &ours_at)
+            + assert_bundle_after_rebuilds(&doc, &theirs, &theirs_at);
+        assert!(straddling > 0, "a fragment straddling heads is sent whole");
     }
 
     /// Apply the same fragments through the walk and the manifold

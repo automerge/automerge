@@ -1277,7 +1277,7 @@ mod tests {
                 NonZeroU64::new(seq).unwrap(),
             )
         };
-        let mut cs = src.bundle_after(&[at(2)]).unwrap().unwrap();
+        let mut cs = src.single_bundle_after(&[at(2)]).unwrap().unwrap();
         assert_eq!(cs.dep_ids, vec![at(2)]);
         cs.dep_ids[0] = at(1);
         for (_, id) in &mut cs.boundary {
@@ -1378,7 +1378,7 @@ mod tests {
         for cs in doc.bundles_for_fragments(frags.clone()).unwrap() {
             assert_audits(&Bundle::try_from(&cs[..]).unwrap());
         }
-        assert_audits(&doc.bundle_after(&[first_change()]).unwrap().unwrap());
+        assert_audits(&doc.single_bundle_after(&[first_change()]).unwrap().unwrap());
 
         let retained = crate::automerge::Automerge::load(&doc.save()).unwrap();
         assert_audits(&retained.bundle_document().unwrap());
@@ -1390,7 +1390,7 @@ mod tests {
     #[test]
     fn audit_rejects_a_bundle_that_misdescribes_its_changes() {
         let doc = audit_fixture();
-        let good = doc.bundle_after(&[first_change()]).unwrap().unwrap();
+        let good = doc.single_bundle_after(&[first_change()]).unwrap().unwrap();
         assert_audits(&good);
         assert!(!good.boundary.is_empty(), "fixture needs a boundary");
         assert!(!good.checkpoints.is_empty(), "fixture needs a checkpoint");

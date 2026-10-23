@@ -714,6 +714,16 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.get_fragment(head)
     }
 
+    /// See [`Automerge::fragments_after`].
+    pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
+        self.doc.fragments_after(heads)
+    }
+
+    /// See [`Automerge::bundle_after`].
+    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        self.doc.bundle_after(heads)
+    }
+
     pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
         &self,
         fragments: I,
