@@ -264,6 +264,13 @@ impl MarkIndexColumn {
         self.cache.shift_actors(shift);
     }
 
+    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
+        self.remap_values(|m| m.removed(removal).expect("a removed actor has no marks"));
+        self.cache
+            .remove_actor(removal)
+            .expect("a removed actor has no marks");
+    }
+
     /// Rebuild the data column with `f` applied to every mark idx —
     /// run at a time, so an unmarked document (all-null runs) costs a
     /// handful of run headers rather than a per-row materialize.
