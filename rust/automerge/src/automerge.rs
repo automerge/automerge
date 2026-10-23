@@ -9,6 +9,12 @@ use itertools::Itertools;
 use crate::author::{Author, Authors};
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has saved a whole document
+    pub(crate) static SAVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 pub(crate) use crate::op_set2::{
     ChangeMetadata, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
@@ -1513,6 +1519,8 @@ impl Automerge {
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         self.assert_no_unused_actors(true);
+        #[cfg(test)]
+        SAVES.with(|n| n.set(n.get() + 1));
 
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
         let mut bytes = doc.into_bytes();
