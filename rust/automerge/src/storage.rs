@@ -9,6 +9,9 @@ pub(crate) mod load;
 pub(crate) mod parse;
 pub(crate) mod signatures;
 
+#[cfg(test)]
+mod signatures_tests;
+
 pub use bundle::{Bundle, BundleChange, BundleChangeIter};
 pub use load::VerificationMode;
 
