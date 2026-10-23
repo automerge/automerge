@@ -55,9 +55,25 @@ impl<'a> BundleBuilder<'a> {
         mut changes: Vec<BundleMetadata<'a>>,
         mut mapper: ActorMapper<'a>,
     ) -> BundleBuilder<'a> {
-        // change[n].builder starts off as NodeIdx which is topo order
-        // writing the changes in topo order prevents un-needed hashes in the external buffer
-        changes.sort_by(|a, b| a.builder.cmp(&b.builder));
+        // NodeIdx gives a topological order, but depends on arrival order. Use
+        // it only to compute depths within this bundle, then order by depth,
+        // operation counter and hash so all peers encode the same bytes.
+        // Parents must precede children to avoid spurious external dependencies,
+        // including for empty changes whose operation counters may be equal.
+        changes.sort_unstable_by_key(|c| c.builder);
+        let mut depths = HashMap::new();
+        for change in &changes {
+            let depth = change
+                .deps
+                .iter()
+                .filter_map(|dep| depths.get(dep))
+                .copied()
+                .max()
+                .unwrap_or(0usize)
+                + 1;
+            depths.insert(change.hash, depth);
+        }
+        changes.sort_unstable_by_key(|c| (depths[&c.hash], c.start_op, c.hash));
 
         let mut builders: Vec<_> = changes
             .iter()
@@ -130,7 +146,11 @@ impl<'a> BundleBuilder<'a> {
 
     pub(crate) fn flush_deletes(&mut self) {
         if let Some((obj, key)) = self.last.take() {
-            for (id, pred) in &self.preds {
+            // HashMap iteration would give concurrent deletes a random wire
+            // order even when the fragment's members are identical.
+            let mut deletes: Vec<_> = self.preds.iter().collect();
+            deletes.sort_unstable_by_key(|(id, _)| **id);
+            for (id, pred) in deletes {
                 let op = Op::del(*id, obj, key.clone());
                 let op = op.build(pred.to_vec());
                 if let Some(index) = self.builders_index(op.id) {
