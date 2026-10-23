@@ -672,6 +672,24 @@ impl Automerge {
             .collect()
     }
 
+    /// EXPERIMENTAL: The fragments, loose commits included, holding a change
+    /// `heads` does not cover, in causal order. A fragment that also holds
+    /// older changes is included whole. Hashes this document does not know
+    /// are ignored.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_after(&self, heads: &[ChangeHash]) -> Result<Vec<Fragment>, AutomergeError> {
+        let ids = super::known_ids(&self.0, heads);
+        Ok(self
+            .0
+            .fragments_after(&ids)?
+            .into_iter()
+            .map(|f| Fragment::from_next(&self.0, f))
+            .collect())
+    }
+
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
     ///
     /// This is an experimental API, it may change or be removed without

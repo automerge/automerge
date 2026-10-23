@@ -355,6 +355,7 @@ interface Automerge {
 
     getFragmentMetadata(levels?: FragmentLevelRange): FragmentMeta[];
     getFragmentMeta(head: Hash): FragmentMeta | null;
+    getFragmentMetadataAfter(heads: Heads): FragmentMeta[];
     bundleFragmentMetadata(fragments: FragmentMeta[]): Uint8Array[];
     addCommits(commits: Commit[]): void;
     addFragments(fragments: Fragment[]): void;
@@ -1486,6 +1487,18 @@ impl Automerge {
         Ok(fragment.unwrap_or(JsValue::null()))
     }
 
+    /// The fragments, loose commits included, holding a change `heads` does
+    /// not cover, in causal order; a fragment that also holds older changes is
+    /// included whole. Heads this document does not know are ignored.
+    #[wasm_bindgen(js_name = getFragmentMetadataAfter, unchecked_return_type = "FragmentMeta[]")]
+    pub fn get_fragment_metadata_after(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
+    ) -> Result<Array, error::Get> {
+        let heads = self.doc.parse_heads(heads)?;
+        Ok(self.doc.fragments_after(heads.as_ref())?)
+    }
+
     #[wasm_bindgen(js_name = bundleFragmentMetadata, unchecked_return_type = "Uint8Array[]")]
     pub fn bundle_fragment_metadata(
         &mut self,
@@ -1531,14 +1544,11 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
     ) -> Result<(), error::AddFragments> {
-        let fragments = Vec::<FragmentInput>::try_from(JS(fragments))?;
-        let mut bytes = Vec::new();
-        for fragment in fragments {
-            // Touch the metadata so parsing validates the whole input shape even
-            // though the bundle bytes remain the authoritative representation.
-            let _metadata = fragment.fragment;
-            bytes.extend(fragment.bytes);
-        }
+        // the metadata is only validated: the bytes are authoritative
+        let bytes = match &self.doc {
+            Doc::Audit(_) => fragment_bytes::<am::Fragment>(fragments)?,
+            Doc::Next(_) => fragment_bytes::<am::next::Fragment>(fragments)?,
+        };
         self.doc.load_incremental(&bytes)?;
         Ok(())
     }
@@ -2305,24 +2315,30 @@ impl TryFrom<JS> for Vec<Commit> {
     }
 }
 
-struct FragmentInput {
-    fragment: am::Fragment,
+/// A fragment's bytes, its metadata checked to have the shape the document's
+/// mode gives fragments: `F` is [`am::Fragment`] in audit mode and
+/// [`am::next::Fragment`] outside it.
+struct FragmentInput<F> {
+    _fragment: F,
     bytes: Vec<u8>,
 }
 
-impl TryFrom<JS> for FragmentInput {
+impl<F: TryFrom<JS, Error = error::BadJSFragmentInput>> TryFrom<JS> for FragmentInput<F> {
     type Error = error::BadJSFragmentInput;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
-        let fragment = am::Fragment::try_from(JS(value.0.clone()))?;
+        let fragment = F::try_from(JS(value.0.clone()))?;
         let bytes = js_get(&value.0, "bytes")?
             .try_into()
             .map_err(error::BadJSFragmentInput::BadBytes)?;
-        Ok(Self { fragment, bytes })
+        Ok(Self {
+            _fragment: fragment,
+            bytes,
+        })
     }
 }
 
-impl TryFrom<JS> for Vec<FragmentInput> {
+impl<F: TryFrom<JS, Error = error::BadJSFragmentInput>> TryFrom<JS> for Vec<FragmentInput<F>> {
     type Error = error::BadJSFragmentInputs;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -2339,6 +2355,16 @@ impl TryFrom<JS> for Vec<FragmentInput> {
             })
             .collect()
     }
+}
+
+/// The bytes of `fragments` in order.
+fn fragment_bytes<F: TryFrom<JS, Error = error::BadJSFragmentInput>>(
+    fragments: JsValue,
+) -> Result<Vec<u8>, error::BadJSFragmentInputs> {
+    Ok(Vec::<FragmentInput<F>>::try_from(JS(fragments))?
+        .into_iter()
+        .flat_map(|f| f.bytes)
+        .collect())
 }
 
 impl TryFrom<JS> for am::Fragment {

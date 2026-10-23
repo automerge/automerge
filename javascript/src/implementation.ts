@@ -990,7 +990,10 @@ export function getAuthors<T>(doc: Doc<T>): Author[] {
   return state.handle.getAuthors()
 }
 
-export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+export function getAuthorForActor<T>(
+  doc: Doc<T>,
+  actor: ActorId,
+): Author | null {
   const state = _state(doc)
   return state.handle.getAuthorForActor(actor)
 }
@@ -2027,6 +2030,41 @@ export function getFragmentMeta(
 ): FragmentMeta | null {
   const state = _state(doc, false)
   return state.handle.getFragmentMeta(head)
+}
+
+/**
+ * EXPERIMENTAL: Return the fragments, loose commits included, holding a change
+ * that `heads` does not cover, in causal order. A fragment that also holds
+ * older changes is included whole. Heads the document does not know are
+ * ignored, so an empty array returns every fragment.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragmentMetadataAfter(
+  doc: Doc<unknown>,
+  heads: Heads,
+): FragmentMeta[] {
+  const state = _state(doc, false)
+  return state.handle.getFragmentMetadataAfter(heads)
+}
+
+/**
+ * EXPERIMENTAL: {@link getFragmentMetadataAfter} with each fragment's bytes,
+ * in the shape {@link addFragments} takes. Adding them in the order given
+ * brings a document at `heads` up to date with `doc`.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragmentsAfter(doc: Doc<unknown>, heads: Heads): Fragment[] {
+  const state = _state(doc, false)
+  const fragmentMetadata = state.handle.getFragmentMetadataAfter(heads)
+  const bytes = state.handle.bundleFragmentMetadata(fragmentMetadata)
+  return fragmentMetadata.map((fragment, index) => ({
+    ...fragment,
+    bytes: bytes[index],
+  }))
 }
 
 /**

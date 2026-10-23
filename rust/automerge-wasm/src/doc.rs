@@ -525,6 +525,21 @@ impl Doc {
         }
     }
 
+    pub(crate) fn fragments_after(&self, heads: Option<&Heads>) -> Result<Array, AutomergeError> {
+        Ok(match self {
+            Doc::Audit(d) => d
+                .fragments_after(heads.map_or(&[], Heads::hashes))?
+                .iter()
+                .map(crate::fragment_to_js)
+                .collect(),
+            Doc::Next(d) => d
+                .fragments_after(heads.map_or(&[], Heads::ids))?
+                .iter()
+                .map(crate::next_fragment_to_js)
+                .collect(),
+        })
+    }
+
     pub(crate) fn get_missing_deps(
         &mut self,
         heads: Option<&Heads>,

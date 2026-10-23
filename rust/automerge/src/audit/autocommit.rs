@@ -533,6 +533,20 @@ impl AutoCommit {
             .collect()
     }
 
+    /// EXPERIMENTAL: See [`crate::Automerge::fragments_after`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_after(&self, heads: &[ChangeHash]) -> Result<Vec<Fragment>, AutomergeError> {
+        let doc = &self.0.doc;
+        Ok(doc
+            .fragments_after(&super::known_ids(doc, heads))?
+            .into_iter()
+            .map(|f| Fragment::from_next(doc, f))
+            .collect())
+    }
+
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
     ///
     /// This is an experimental API, it may change or be removed without
