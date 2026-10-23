@@ -15,7 +15,6 @@ use crate::{
 use crate::clock::Clock;
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::iter::Peekable;
 use std::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -314,6 +313,13 @@ impl<'a> CtrWalker<'a> {
     }
 }
 
+impl CtrWalker<'_> {
+    /// The next run of consecutive matching rows.
+    pub(crate) fn next_range(&mut self) -> Option<Range<usize>> {
+        self.ctr.next_range()
+    }
+}
+
 impl Iterator for CtrWalker<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
@@ -324,30 +330,101 @@ impl Iterator for CtrWalker<'_> {
     }
 }
 
+/// The rows owning a successor whose counter is in a range, ascending.
 pub(crate) struct SuccWalker<'a> {
-    acc: usize,
+    /// the successor entries in range
+    ctr: CtrWalker<'a>,
+    /// entries found but not yet mapped to rows
+    pending: Range<usize>,
     count: hexane::PrefixIter<'a, u32>,
-    ctr: Peekable<CtrWalker<'a>>,
+    /// the first row and entry of the unread part of the current run
+    row: usize,
+    entry: usize,
+    /// rows left in the current run, and the successors of each
+    left: usize,
+    per_row: usize,
 }
+
+/// Successor entries past which [`SuccWalker`] seeks the count column
+/// rather than reading its runs.
+const SUCC_SEEK: usize = 256;
 
 impl<'a> SuccWalker<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
-        let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range).peekable();
+        let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range);
         let count = op_set.cols.succ_count.iter();
-        Self { acc: 0, count, ctr }
+        Self {
+            ctr,
+            pending: 0..0,
+            count,
+            row: 0,
+            entry: 0,
+            left: 0,
+            per_row: 0,
+        }
+    }
+
+    /// The next found entries not in a row already returned.
+    fn next_entries(&mut self) -> Option<Range<usize>> {
+        loop {
+            if self.pending.is_empty() {
+                self.pending = self.ctr.next_range()?;
+            }
+            self.pending.start = self.pending.start.max(self.entry);
+            if !self.pending.is_empty() {
+                return Some(std::mem::replace(&mut self.pending, 0..0));
+            }
+        }
+    }
+
+    /// The row owning entry `e`, which is past every row returned so far;
+    /// the walk moves past that row.
+    fn row_of(&mut self, e: usize) -> Option<usize> {
+        loop {
+            let run_end = self.entry + self.per_row * self.left;
+            if e < run_end {
+                let i = (e - self.entry) / self.per_row;
+                let row = self.row + i;
+                self.row += i + 1;
+                self.left -= i + 1;
+                self.entry += self.per_row * (i + 1);
+                return Some(row);
+            }
+            self.row += self.left;
+            self.entry = run_end;
+            self.left = 0;
+            if e - self.entry > SUCC_SEEK {
+                let found = self.count.advance_prefix((e - self.entry) as u64)?;
+                self.row = found.pos + 1;
+                self.entry = found.pv.total() as usize;
+                return Some(found.pos);
+            }
+            let run = self.count.next_run()?;
+            self.left = run.count;
+            self.per_row = run.value.value as usize;
+        }
+    }
+
+    /// The rows owning the next run of found entries.
+    pub(crate) fn next_range(&mut self) -> Option<Range<usize>> {
+        let entries = self.next_entries()?;
+        let first = self.row_of(entries.start)?;
+        let last = match entries.end - 1 {
+            e if e < self.entry => first,
+            e => self.row_of(e)?,
+        };
+        Some(first..last + 1)
     }
 }
 
 impl Iterator for SuccWalker<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
-        while self.ctr.peek()? < &self.acc {
-            self.ctr.next();
-        }
-        let delta = *self.ctr.peek()? - self.acc;
-        let c = self.count.advance_prefix(delta as u64)?;
-        self.acc = c.pv.total() as usize;
-        Some(c.pos)
+        let mut entries = self.next_entries()?;
+        let row = self.row_of(entries.start)?;
+        entries.start += 1;
+        self.pending = entries;
+        Some(row)
     }
 }
 

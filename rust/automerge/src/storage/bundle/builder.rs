@@ -17,6 +17,8 @@ use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
 use super::{BundleChange, BundleStorage, Compressed, ParseError};
 
+mod walk;
+
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
 fn save_opt_actor_unless_empty(
@@ -47,13 +49,14 @@ pub(crate) struct BundleBuilder<'a> {
     builders: Vec<ChangeBuilder>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
-    max_op: u64,
     copier: Option<crate::op_set2::op_set::RowCopier<'a>>,
     verbatim_rows: Option<Range<usize>>,
     /// the document rows of the members' ops, in walk order
     member_rows: Vec<usize>,
     /// each hint target, with the row of a member op that targets it
     target_rows: Vec<(OpId, usize)>,
+    /// the first row whose op a pending delete removes
+    pred_row: Option<usize>,
 }
 
 impl<'a> BundleBuilder<'a> {
@@ -82,11 +85,11 @@ impl<'a> BundleBuilder<'a> {
             builders,
             last: None,
             preds: HashMap::default(),
-            max_op: 0,
             copier: Some(crate::op_set2::op_set::RowCopier::new(op_set)),
             verbatim_rows: None,
             member_rows: Vec::new(),
             target_rows: Vec::new(),
+            pred_row: None,
         })
     }
 
@@ -108,11 +111,11 @@ impl<'a> BundleBuilder<'a> {
             builders: Vec::new(),
             last: None,
             preds: HashMap::default(),
-            max_op: 0,
             copier: None,
             verbatim_rows: None,
             member_rows: Vec::new(),
             target_rows: Vec::new(),
+            pred_row: None,
         }
     }
 
@@ -128,8 +131,6 @@ impl<'a> BundleBuilder<'a> {
     }
 
     fn process_op_internal(&mut self, op: Op<'a>, succ: &[OpId], flush: bool) {
-        self.max_op = std::cmp::max(self.max_op, op.id.counter());
-
         if flush {
             self.flush_deletes();
         }
@@ -174,21 +175,51 @@ impl<'a> BundleBuilder<'a> {
         }
     }
 
-    pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
-        self.max_op = std::cmp::max(self.max_op, succ_id.counter());
+    /// [`Self::process_op`] and [`Self::process_succ`] for an op outside
+    /// the bundle.
+    pub(crate) fn process_foreign(
+        &mut self,
+        row: usize,
+        obj: ObjId,
+        key: KeyRef<'a>,
+        id: OpId,
+        succ: &[OpId],
+    ) {
+        debug_assert!(!self.is_member(id));
+        let next = Some((obj, key));
+        if self.last != next {
+            self.flush_deletes();
+            self.last = next;
+        }
+        for s in succ {
+            self.process_succ(id, row, *s);
+        }
+    }
+
+    pub(crate) fn process_succ(&mut self, op_id: OpId, row: usize, succ_id: OpId) {
         // member-to-member relationships ride the succ column instead
         if !self.is_member(op_id) && self.is_member(succ_id) {
             self.preds.entry(succ_id).or_default().push(op_id);
+            self.pred_row.get_or_insert(row);
         }
     }
 
     /// Deletes whose targets are all members get no row: their ids live in
     /// the targets' succ column.
     pub(crate) fn flush_deletes(&mut self) {
+        if self.preds.is_empty() {
+            self.last = None;
+            return;
+        }
         // the copied rows precede the deletes of their key group
         self.flush_verbatim_rows();
+        let pred_row = self.pred_row.take();
         if let Some((obj, key)) = self.last.take() {
             let target = self.hint_target(&key);
+            // the deleted ops share the target's key group, so it is near
+            if let (Some(t), Some(row)) = (target, pred_row) {
+                self.target_rows.push((t, row + 1));
+            }
             // `HashMap` order is seeded per instance; sort so the bytes
             // depend only on content
             let mut pending: Vec<(OpId, Vec<OpId>)> = self.preds.drain().collect();
@@ -204,12 +235,28 @@ impl<'a> BundleBuilder<'a> {
     }
 
     fn push_verbatim_row(&mut self, pos: usize) {
+        self.push_verbatim_rows(pos..pos + 1);
+    }
+
+    fn push_verbatim_rows(&mut self, rows: Range<usize>) {
         match &mut self.verbatim_rows {
-            Some(run) if run.end == pos => run.end += 1,
+            Some(run) if run.end == rows.start => run.end = rows.end,
             _ => {
                 self.flush_verbatim_rows();
-                self.verbatim_rows = Some(pos..pos + 1);
+                self.verbatim_rows = Some(rows);
             }
+        }
+    }
+
+    /// Copies member rows at once, keeping only the successors that are
+    /// members.
+    fn copy_keeping_member_succ(&mut self, rows: Range<usize>) {
+        self.flush_verbatim_rows();
+        let builders = &self.builders;
+        if let Some(copier) = &mut self.copier {
+            copier.copy_keeping(rows, &mut self.op_writer, &mut self.mapper, |id| {
+                builders_index(builders, id).is_some()
+            });
         }
     }
 
@@ -252,6 +299,7 @@ impl<'a> BundleBuilder<'a> {
         ranks: &std::collections::HashMap<OpId, u64>,
     ) -> BundleStorage<'static, crate::storage::change::Verified> {
         self.flush_deletes();
+        self.flush_verbatim_rows();
 
         let mut mapper = self.mapper;
 
@@ -307,19 +355,23 @@ impl<'a> BundleBuilder<'a> {
     }
 
     fn builders_index(&self, id: OpId) -> Option<usize> {
-        self.builders
-            .binary_search_by(|builder| {
-                builder
-                    .actor
-                    .cmp(&id.actor())
-                    .then_with(|| match id.counter() {
-                        c if c < builder.start_op => Ordering::Greater,
-                        c if c > builder.max_op => Ordering::Less,
-                        _ => Ordering::Equal,
-                    })
-            })
-            .ok()
+        builders_index(&self.builders, id)
     }
+}
+
+fn builders_index(builders: &[ChangeBuilder], id: OpId) -> Option<usize> {
+    builders
+        .binary_search_by(|builder| {
+            builder
+                .actor
+                .cmp(&id.actor())
+                .then_with(|| match id.counter() {
+                    c if c < builder.start_op => Ordering::Greater,
+                    c if c > builder.max_op => Ordering::Less,
+                    _ => Ordering::Equal,
+                })
+        })
+        .ok()
 }
 
 /// Feeds a [`hexane::DeltaEncoder`] a run of equal deltas at a time.

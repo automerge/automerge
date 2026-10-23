@@ -1,3 +1,4 @@
+use super::run_head::{Rle, RunHead};
 use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::clock::Clock;
 use crate::iter::tools::Shiftable;
@@ -194,51 +195,45 @@ pub(crate) struct Indexes {
 
 /// Object ranges from the obj_actor / obj_ctr run streams. Errors if an id
 /// is half null or the ids are not strictly increasing.
-pub(crate) struct ObjRunWalk<A, C> {
-    actor: A,
-    ctr: C,
-    actor_head: Option<(Option<crate::op_set2::ActorIdx>, usize)>,
-    ctr_head: Option<(Option<u32>, usize)>,
+pub(crate) struct ObjRunWalk<'a, A, C>
+where
+    A: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+    C: RunSrc<'a, Option<u32>>,
+{
+    actor: RunHead<Rle<'a, Option<crate::op_set2::ActorIdx>, A>>,
+    ctr: RunHead<Rle<'a, Option<u32>, C>>,
     pos: usize,
     prev: Option<ObjId>,
 }
 
-impl<A, C> ObjRunWalk<A, C> {
+impl<'a, A, C> ObjRunWalk<'a, A, C>
+where
+    A: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+    C: RunSrc<'a, Option<u32>>,
+{
     pub(crate) fn new(actor: A, ctr: C) -> Self {
         Self {
-            actor,
-            ctr,
-            actor_head: None,
-            ctr_head: None,
+            actor: RunHead::rle(actor, "obj_actor"),
+            ctr: RunHead::rle(ctr, "obj_ctr"),
             pos: 0,
             prev: None,
         }
     }
 
-    fn try_next_obj<'a>(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError>
-    where
-        A: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
-        C: RunSrc<'a, Option<u32>>,
-    {
-        if self.actor_head.is_none() {
-            self.actor_head = self.actor.try_next_run()?.map(|r| (r.value, r.count));
-        }
-        if self.ctr_head.is_none() {
-            self.ctr_head = self.ctr.try_next_run()?.map(|r| (r.value, r.count));
-        }
-        let (Some((actor, a_left)), Some((ctr, c_left))) = (self.actor_head, self.ctr_head) else {
+    fn try_next_obj(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError> {
+        let (Some(actor), Some(ctr)) = (self.actor.peek()?, self.ctr.peek()?) else {
             return Ok(None);
         };
-        let obj =
-            ObjId::load(ctr.map(|c| c as u64), actor).ok_or(ReadOpError::InvalidObjId(self.pos))?;
+        let obj = ObjId::load(ctr.value.map(|c| c as u64), actor.value)
+            .ok_or(ReadOpError::InvalidObjId(self.pos))?;
         if self.prev.is_some_and(|p| obj <= p) {
             return Err(ReadOpError::ObjOutOfOrder(self.pos));
         }
         self.prev = Some(obj);
-        let count = a_left.min(c_left);
+        let count = actor.count.min(ctr.count);
         self.pos += count;
-        self.actor_head = (a_left > count).then_some((actor, a_left - count));
-        self.ctr_head = (c_left > count).then_some((ctr, c_left - count));
+        self.actor.consume(count);
+        self.ctr.consume(count);
         Ok(Some((obj, count)))
     }
 }
@@ -538,7 +533,7 @@ impl IndexBuilder {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_columns<'a, OA, OC, A, M, S, I, K>(
         &mut self,
-        mut objs: ObjRunWalk<OA, OC>,
+        mut objs: ObjRunWalk<'a, OA, OC>,
         action: A,
         meta: M,
         succ: S,
@@ -870,11 +865,13 @@ impl ElemBounds<'_> {
 /// Yields the register lengths of the current object: key_str runs for
 /// maps (runs are canonical, so each is one key), insert-run structure for
 /// sequences, refined by [`ElemBounds`] when present.
-struct BoundaryIter<'a, I, K> {
-    inserts: I,
-    keys: K,
-    insert_head: Option<(bool, usize)>,
-    key_head: Option<usize>,
+struct BoundaryIter<'e, 'a, I, K>
+where
+    I: RunSrc<'a, bool>,
+    K: RunSrc<'a, Option<String>>,
+{
+    inserts: RunHead<Rle<'a, bool, I>>,
+    keys: RunHead<Rle<'a, Option<String>, K>>,
     /// items owed to each stream by objects that did not consult it
     insert_owed: usize,
     keys_owed: usize,
@@ -886,7 +883,7 @@ struct BoundaryIter<'a, I, K> {
     ones: usize,
     /// rows pulled from the insert stream so far
     abs: usize,
-    elem: Option<ElemBounds<'a>>,
+    elem: Option<ElemBounds<'e>>,
     split: bool,
     /// non-insert rows of the current run not yet assigned to a register
     /// (split objects only)
@@ -894,13 +891,15 @@ struct BoundaryIter<'a, I, K> {
     false_start: usize,
 }
 
-impl<'e, I, K> BoundaryIter<'e, I, K> {
+impl<'e, 'a, I, K> BoundaryIter<'e, 'a, I, K>
+where
+    I: RunSrc<'a, bool>,
+    K: RunSrc<'a, Option<String>>,
+{
     fn new(inserts: I, keys: K, elem: Option<ElemBounds<'e>>) -> Self {
         Self {
-            inserts,
-            keys,
-            insert_head: None,
-            key_head: None,
+            inserts: RunHead::rle(inserts, "insert"),
+            keys: RunHead::rle(keys, "key_str"),
             insert_owed: 0,
             keys_owed: 0,
             seq: false,
@@ -930,88 +929,37 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
     }
 
     /// The next insert run, clipped to the current object.
-    fn next_insert_run<'a>(&mut self) -> Result<Option<(bool, usize)>, ReadOpError>
-    where
-        I: RunSrc<'a, bool>,
-    {
-        while self.insert_owed > 0 {
-            let (value, left) = match self.insert_head.take() {
-                Some(h) => h,
-                None => match self.inserts.try_next_run()? {
-                    Some(r) => (r.value, r.count),
-                    None => return Err(ReadOpError::MissingValue("insert")),
-                },
-            };
-            let take = left.min(self.insert_owed);
-            self.insert_owed -= take;
-            self.abs += take;
-            if left > take {
-                self.insert_head = Some((value, left - take));
-            }
-        }
+    fn next_insert_run(&mut self) -> Result<Option<(bool, usize)>, ReadOpError> {
+        self.inserts.skip(self.insert_owed)?;
+        self.abs += self.insert_owed;
+        self.insert_owed = 0;
         if self.remaining == 0 {
             return Ok(None);
         }
-        let (value, left) = match self.insert_head.take() {
-            Some(h) => h,
-            None => match self.inserts.try_next_run()? {
-                Some(r) => (r.value, r.count),
-                None => return Err(ReadOpError::MissingValue("insert")),
-            },
-        };
-        let take = left.min(self.remaining);
+        let run = self.inserts.peek_some()?;
+        let take = run.count.min(self.remaining);
+        self.inserts.consume(take);
         self.remaining -= take;
         self.abs += take;
-        if left > take {
-            self.insert_head = Some((value, left - take));
-        }
-        Ok(Some((value, take)))
+        Ok(Some((run.value, take)))
     }
 
     /// The next key run length, clipped to the current object.
-    fn next_key_run<'a>(&mut self) -> Result<Option<usize>, ReadOpError>
-    where
-        K: RunSrc<'a, Option<String>>,
-    {
-        while self.keys_owed > 0 {
-            let left = match self.key_head.take() {
-                Some(h) => h,
-                None => match self.keys.try_next_run()? {
-                    Some(r) => r.count,
-                    None => return Err(ReadOpError::MissingValue("key_str")),
-                },
-            };
-            let take = left.min(self.keys_owed);
-            self.keys_owed -= take;
-            if left > take {
-                self.key_head = Some(left - take);
-            }
-        }
+    fn next_key_run(&mut self) -> Result<Option<usize>, ReadOpError> {
+        self.keys.skip(self.keys_owed)?;
+        self.keys_owed = 0;
         if self.remaining == 0 {
             return Ok(None);
         }
-        let left = match self.key_head.take() {
-            Some(h) => h,
-            None => match self.keys.try_next_run()? {
-                Some(r) => r.count,
-                None => return Err(ReadOpError::MissingValue("key_str")),
-            },
-        };
-        let take = left.min(self.remaining);
+        let take = self.keys.peek_some()?.count.min(self.remaining);
+        self.keys.consume(take);
         self.remaining -= take;
-        if left > take {
-            self.key_head = Some(left - take);
-        }
         Ok(Some(take))
     }
 
     /// The next batch of registers as `(len, repeat)`: `repeat` consecutive
     /// registers of `len` ops each. `repeat > 1` only when `len == 1`.
-    fn next_batch<'a>(&mut self) -> Result<Option<(usize, usize)>, ReadOpError>
-    where
-        I: RunSrc<'a, bool>,
-        K: RunSrc<'a, Option<String>>,
-    {
+    fn next_batch(&mut self) -> Result<Option<(usize, usize)>, ReadOpError> {
         if self.seq {
             self.next_seq()
         } else {
@@ -1019,10 +967,7 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
         }
     }
 
-    fn next_seq<'a>(&mut self) -> Result<Option<(usize, usize)>, ReadOpError>
-    where
-        I: RunSrc<'a, bool>,
-    {
+    fn next_seq(&mut self) -> Result<Option<(usize, usize)>, ReadOpError> {
         loop {
             if self.ones > 1 {
                 let repeat = self.ones - 1;
@@ -1079,13 +1024,15 @@ impl<'e, I, K> BoundaryIter<'e, I, K> {
 }
 
 /// The action, value meta and succ count streams, advanced run-at-a-time.
-struct IndexIter<A, M, S> {
-    action: A,
-    meta: M,
-    succ: S,
-    action_head: Option<(Action, usize)>,
-    meta_head: Option<(ValueMeta, usize)>,
-    succ_head: Option<(u32, usize)>,
+struct IndexIter<'a, A, M, S>
+where
+    A: RunSrc<'a, Action>,
+    M: RunSrc<'a, ValueMeta>,
+    S: RunSrc<'a, u32>,
+{
+    action: RunHead<Rle<'a, Action, A>>,
+    meta: RunHead<Rle<'a, ValueMeta, M>>,
+    succ: RunHead<Rle<'a, u32, S>>,
     /// absolute succ-column offset at the current position
     succ_prefix: u64,
     /// absolute raw value byte offset at the current position
@@ -1116,59 +1063,45 @@ pub(crate) struct IndexRun {
     pub(crate) raw_prefix: u64,
 }
 
-impl<A, M, S> IndexIter<A, M, S> {
+impl<'a, A, M, S> IndexIter<'a, A, M, S>
+where
+    A: RunSrc<'a, Action>,
+    M: RunSrc<'a, ValueMeta>,
+    S: RunSrc<'a, u32>,
+{
     fn new(action: A, meta: M, succ: S) -> Self {
         Self {
-            action,
-            meta,
-            succ,
-            action_head: None,
-            meta_head: None,
-            succ_head: None,
+            action: RunHead::rle(action, "action"),
+            meta: RunHead::rle(meta, "value_meta"),
+            succ: RunHead::rle(succ, "succ_count"),
             succ_prefix: 0,
             raw_prefix: 0,
         }
     }
 
     /// The next run of at most `max` ops sharing action, meta and succ.
-    fn next_run<'a>(&mut self, max: usize) -> Result<Option<IndexRun>, ReadOpError>
-    where
-        A: RunSrc<'a, Action>,
-        M: RunSrc<'a, ValueMeta>,
-        S: RunSrc<'a, u32>,
-    {
-        if self.action_head.is_none() {
-            self.action_head = self.action.try_next_run()?.map(|r| (r.value, r.count));
-        }
-        if self.meta_head.is_none() {
-            self.meta_head = self.meta.try_next_run()?.map(|r| (r.value, r.count));
-        }
-        if self.succ_head.is_none() {
-            self.succ_head = self.succ.try_next_run()?.map(|r| (r.value, r.count));
-        }
-        let (Some((action, a_left)), Some((meta, m_left)), Some((succ, s_left))) =
-            (self.action_head, self.meta_head, self.succ_head)
+    fn next_run(&mut self, max: usize) -> Result<Option<IndexRun>, ReadOpError> {
+        let (Some(action), Some(meta), Some(succ)) =
+            (self.action.peek()?, self.meta.peek()?, self.succ.peek()?)
         else {
             return Ok(None);
         };
-
-        let count = max.min(a_left).min(m_left).min(s_left);
+        let count = max.min(action.count).min(meta.count).min(succ.count);
         debug_assert!(count > 0);
-
-        self.action_head = (a_left > count).then_some((action, a_left - count));
-        self.meta_head = (m_left > count).then_some((meta, m_left - count));
-        self.succ_head = (s_left > count).then_some((succ, s_left - count));
+        self.action.consume(count);
+        self.meta.consume(count);
+        self.succ.consume(count);
 
         let run = IndexRun {
             count,
-            action,
-            meta,
-            succ,
+            action: action.value,
+            meta: meta.value,
+            succ: succ.value,
             succ_prefix: self.succ_prefix,
             raw_prefix: self.raw_prefix,
         };
-        self.succ_prefix += succ as u64 * count as u64;
-        self.raw_prefix += meta.length() as u64 * count as u64;
+        self.succ_prefix += succ.value as u64 * count as u64;
+        self.raw_prefix += meta.value.length() as u64 * count as u64;
         Ok(Some(run))
     }
 }

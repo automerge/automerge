@@ -315,9 +315,7 @@ impl Bundle {
         )
     }
 
-    /// [`Self::storage_for_nodes`] for several bundles at once. Hint
-    /// ranks need a walk of the document's id column; batching shares one
-    /// walk rather than paying O(bundles × document).
+    /// [`Self::storage_for_nodes`] for several bundles at once.
     pub(crate) fn storage_for_node_sets<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
@@ -328,84 +326,174 @@ impl Bundle {
         for nodes in node_sets {
             let clock = change_graph.clock_for_nodes(nodes.clone());
             let mapper = ActorMapper::new(&op_set.actors);
-            let collector = BundleBuilder::from_graph(op_set, change_graph, &nodes, mapper)?;
-            let collector = Self::walk_ops(op_set, collector);
-            let mut job = HintJob {
-                targets_by_obj: collector.hint_targets_by_obj(),
-                ranks: std::collections::HashMap::new(),
-                clock,
-                collector,
-            };
-            if job
-                .clock
+            let mut collector = BundleBuilder::from_graph(op_set, change_graph, &nodes, mapper)?;
+            collector
+                .walk(op_set)
+                .expect("the document's own columns decode");
+            let covers_all = clock
                 .counters()
                 .zip(current.counters())
-                .all(|(c, d)| c >= d)
-            {
-                let member_rows = job.collector.take_member_rows();
-                let target_rows = job.collector.take_target_rows();
-                Self::rank_hints_by_position(op_set, &member_rows, &target_rows, &mut job);
-            }
-            jobs.push(job);
+                .all(|(c, d)| c >= d);
+            jobs.push(HintJob {
+                targets_by_obj: collector.hint_targets_by_obj(),
+                ranks: std::collections::HashMap::new(),
+                member_rows: collector.take_member_rows(),
+                near: collector.take_target_rows(),
+                covers_all,
+                clock,
+                collector,
+            });
         }
-
-        Self::resolve_hint_ranks(op_set, &mut jobs);
+        Self::rank_hints(op_set, &mut jobs);
         Ok(jobs
             .into_iter()
             .map(|j| j.collector.finish_with_ranks(&j.ranks))
             .collect())
     }
 
-    /// [`Self::resolve_hint_ranks`] for a job whose clock covers every op
-    /// in the document: every row of an object before a target counts
-    /// except the members', so a target's rank needs only its position.
-    /// O(targets · log rows + members).
-    fn rank_hints_by_position(
-        op_set: &OpSet,
-        member_rows: &[usize],
-        target_rows: &[(crate::types::OpId, usize)],
-        job: &mut HintJob<'_>,
-    ) {
+    /// A target's rank is the number of rows before it in its object that
+    /// its job's clock covers, less the job's members. For a job whose
+    /// clock covers the whole document that is the target's position;
+    /// otherwise the object's id runs, read once for every job, are
+    /// counted. O(targets · log rows + members + jobs · id runs before the
+    /// targets).
+    fn rank_hints(op_set: &OpSet, jobs: &mut [HintJob<'_>]) {
         #[cfg(feature = "slow_path_assertions")]
-        let expected = {
-            let targets = job.targets_by_obj.clone();
-            Self::resolve_hint_ranks(op_set, std::slice::from_mut(job));
-            job.targets_by_obj = targets;
-            std::mem::take(&mut job.ranks)
+        let expected: Vec<_> = {
+            let targets: Vec<_> = jobs.iter().map(|j| j.targets_by_obj.clone()).collect();
+            Self::resolve_hint_ranks(op_set, jobs);
+            jobs.iter_mut()
+                .zip(targets)
+                .map(|(j, t)| {
+                    j.targets_by_obj = t;
+                    std::mem::take(&mut j.ranks)
+                })
+                .collect()
         };
-        // an anchor almost always sits just before the op that targets it,
-        // and a short scan back costs less than a column search
-        const NEAR: usize = 32;
-        let near: rustc_hash::FxHashMap<_, _> = target_rows.iter().copied().collect();
+        let mut starts: std::collections::BTreeMap<crate::types::ObjId, usize> = jobs
+            .iter()
+            .flat_map(|j| j.targets_by_obj.keys().map(|obj| (*obj, 0)))
+            .collect();
         let mut obj_id_iter = op_set.obj_id_iter();
-        let mut objs: Vec<_> = job.targets_by_obj.drain().collect();
-        objs.sort_unstable_by_key(|(obj, _)| *obj);
-        for (obj, targets) in objs {
-            let start = obj_id_iter.seek_to_value(obj).start;
-            for target in targets {
-                let nearby = near.get(&target).and_then(|&after| {
-                    let from = after.saturating_sub(NEAR).max(start);
-                    op_set
-                        .id_iter_range(&(from..after))
-                        .position(|id| id == target)
-                        .map(|i| from + i)
-                });
-                let row = nearby
-                    .or_else(|| op_set.get_op_id_pos(target))
-                    .expect("a hint target is an op of the document");
-                let members_before = member_rows.partition_point(|r| *r < row)
-                    - member_rows.partition_point(|r| *r < start);
-                job.ranks
-                    .insert(target, (row - start - members_before) as u64);
+        for (obj, start) in starts.iter_mut() {
+            *start = obj_id_iter.seek_to_value(*obj).start;
+        }
+        // each object's targets, by job, with their rows ascending
+        type Targets = Vec<(usize, crate::types::OpId)>;
+        let mut by_obj: std::collections::BTreeMap<crate::types::ObjId, Vec<(usize, Targets)>> =
+            std::collections::BTreeMap::new();
+        for (j, job) in jobs.iter_mut().enumerate() {
+            let rows = Self::target_rows(op_set, &job.targets_by_obj, &starts, &job.near);
+            for (obj, targets) in job.targets_by_obj.drain() {
+                let mut targets: Targets = targets.into_iter().map(|t| (rows[&t], t)).collect();
+                targets.sort_unstable();
+                by_obj.entry(obj).or_default().push((j, targets));
+            }
+        }
+        for (obj, entries) in by_obj {
+            let start = starts[&obj];
+            let end = entries
+                .iter()
+                .filter(|(j, _)| !jobs[*j].covers_all)
+                .filter_map(|(_, targets)| targets.last().map(|(row, _)| *row))
+                .max();
+            let runs = match end {
+                Some(end) => op_set
+                    .id_runs(start..end)
+                    .expect("the document's own columns decode"),
+                None => Vec::new(),
+            };
+            for (j, targets) in entries {
+                let job = &mut jobs[j];
+                let members_from = job.member_rows.partition_point(|r| *r < start);
+                let mut next = 0;
+                let mut covered = 0;
+                for (row, target) in targets {
+                    let before = if job.covers_all {
+                        row - start
+                    } else {
+                        while next < runs.len() && runs[next].row + runs[next].count <= row {
+                            covered += runs[next].covered(runs[next].count, &job.clock);
+                            next += 1;
+                        }
+                        covered
+                            + runs
+                                .get(next)
+                                .map_or(0, |r| r.covered(row - r.row, &job.clock))
+                    };
+                    let members_before =
+                        job.member_rows.partition_point(|r| *r < row) - members_from;
+                    job.ranks.insert(target, (before - members_before) as u64);
+                }
             }
         }
         #[cfg(feature = "slow_path_assertions")]
-        assert_eq!(
-            job.ranks, expected,
-            "hint ranks by position diverge from the scan"
-        );
+        for (job, expected) in jobs.iter().zip(expected) {
+            assert_eq!(
+                job.ranks, expected,
+                "hint ranks by position diverge from the scan"
+            );
+        }
     }
 
+    /// The row of each hint target. `near` names, for some, a row the
+    /// target precedes; an anchor almost always sits just before the op
+    /// that targets it, so the rows just before those are read first, in
+    /// one forward pass, and only the rest are searched for.
+    fn target_rows(
+        op_set: &OpSet,
+        targets_by_obj: &std::collections::HashMap<
+            crate::types::ObjId,
+            rustc_hash::FxHashSet<crate::types::OpId>,
+        >,
+        starts: &std::collections::BTreeMap<crate::types::ObjId, usize>,
+        near: &[(crate::types::OpId, usize)],
+    ) -> rustc_hash::FxHashMap<crate::types::OpId, usize> {
+        let near: rustc_hash::FxHashMap<_, _> = near.iter().copied().collect();
+        let mut rows = rustc_hash::FxHashMap::default();
+        let mut wanted: rustc_hash::FxHashMap<_, _> = targets_by_obj
+            .iter()
+            .flat_map(|(obj, targets)| targets.iter().map(|t| (*t, starts[obj])))
+            .collect();
+        // a short look back finds nearly all; a longer one most of the rest
+        for (skip, back) in [(0, 32), (32, 1024)] {
+            let mut windows: Vec<_> = wanted
+                .iter()
+                .filter_map(|(t, &start)| {
+                    let after = near.get(t)?.saturating_sub(skip);
+                    (after > start).then(|| after.saturating_sub(back - skip).max(start)..after)
+                })
+                .collect();
+            windows.sort_unstable_by_key(|w| w.start);
+            let mut ids = op_set.id_iter();
+            let mut next = 0;
+            for w in windows {
+                let from = w.start.max(next);
+                if from >= w.end {
+                    continue;
+                }
+                if from > ids.pos() {
+                    ids.nth(from - ids.pos() - 1);
+                }
+                for row in from..w.end {
+                    let id = ids.next().expect("a row of the document");
+                    if wanted.remove(&id).is_some() {
+                        rows.insert(id, row);
+                    }
+                }
+                next = w.end;
+            }
+        }
+        for t in wanted.into_keys() {
+            let row = op_set
+                .get_op_id_pos(t)
+                .expect("a hint target is an op of the document");
+            rows.insert(t, row);
+        }
+        rows
+    }
+
+    #[cfg(feature = "slow_path_assertions")]
     fn resolve_hint_ranks(op_set: &OpSet, jobs: &mut [HintJob<'_>]) {
         // `ObjId` order is document order, so one forward-only cursor
         // covers every object
@@ -467,19 +555,6 @@ impl Bundle {
             }
             debug_assert!(active.is_empty(), "hint target missing from its object",);
         }
-    }
-
-    fn walk_ops<'a>(op_set: &'a OpSet, mut collector: BundleBuilder<'a>) -> BundleBuilder<'a> {
-        for op in op_set.iter_ctr_range(collector.op_counters()) {
-            let op_id = op.id;
-            let op_succ: Vec<_> = op.succ().collect();
-            collector.process_op(op, &op_succ);
-
-            for id in op_succ {
-                collector.process_succ(op_id, id);
-            }
-        }
-        collector
     }
 
     /// The encoded chunk, with large columns DEFLATE-compressed.
@@ -614,6 +689,12 @@ impl Bundle {
 struct HintJob<'a> {
     collector: BundleBuilder<'a>,
     clock: crate::clock::Clock,
+    /// the clock covers every op of the document
+    covers_all: bool,
+    /// see [`BundleBuilder::take_member_rows`]
+    member_rows: Vec<usize>,
+    /// see [`BundleBuilder::take_target_rows`]
+    near: Vec<(crate::types::OpId, usize)>,
     targets_by_obj:
         std::collections::HashMap<crate::types::ObjId, rustc_hash::FxHashSet<crate::types::OpId>>,
     ranks: std::collections::HashMap<crate::types::OpId, u64>,

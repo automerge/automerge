@@ -34,7 +34,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod bundle_copy;
-pub(crate) use bundle_copy::RowCopier;
+pub(crate) use bundle_copy::{RowCopier, RowRun, RowRuns, Steps, SuccRuns};
 mod found_op;
 pub(crate) mod index;
 mod insert;
@@ -46,6 +46,7 @@ mod marks;
 mod op_iter;
 mod op_query;
 mod overlap;
+pub(crate) mod run_head;
 mod top_op;
 mod visible;
 
@@ -2008,6 +2009,25 @@ impl OpSet {
             )
             .skip(),
         )
+    }
+
+    /// Ranges holding the rows whose id counter, or one of whose
+    /// successors' counters, is in `counters`: ascending, and apart by at
+    /// least `gap` rows.
+    pub(crate) fn ctr_ranges(&self, counters: Range<usize>, gap: usize) -> Vec<Range<usize>> {
+        let mut ids = CtrWalker::new(&self.cols.id_ctr, counters.clone());
+        let mut succ = SuccWalker::new(self, counters);
+        let mut rows: Vec<_> = std::iter::from_fn(|| ids.next_range()).collect();
+        rows.extend(std::iter::from_fn(|| succ.next_range()));
+        rows.sort_unstable_by_key(|r| r.start);
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(rows.len());
+        for r in rows {
+            match merged.last_mut() {
+                Some(last) if r.start < last.end + gap => last.end = last.end.max(r.end),
+                _ => merged.push(r),
+            }
+        }
+        merged
     }
 
     pub(crate) fn prop_range(&self, obj: &ObjId, prop: &str) -> Range<usize> {
