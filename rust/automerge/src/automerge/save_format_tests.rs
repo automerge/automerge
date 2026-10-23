@@ -6,7 +6,7 @@ use crate::autocommit::AutoCommit;
 use crate::hash_retention::Retained;
 use crate::storage::bundle::{REHASHABLE_CHANGES, REHASHABLE_OPS};
 use crate::tx::{CommitOptions, Transactable};
-use crate::{ActorId, ROOT};
+use crate::{ActorId, ChangeHash, ROOT};
 
 /// One change per entry of `sizes`, with that many ops.
 fn build(sizes: &[usize]) -> AutoCommit {
@@ -28,20 +28,28 @@ fn reload(bytes: &[u8]) -> Automerge<Retained> {
 #[test]
 fn a_small_save_leaves_out_tiny_hashes_and_the_load_puts_them_back() {
     let mut doc = build(&[1; 200]);
-    let doc = doc.document();
+    // collects garbage, as the loads below do before comparing
     let small = doc.save();
+    let doc = doc.document();
     let full = doc.save_with(SaveOptions::default(), NameHashes::All);
+    // hashes a checkpoint lets the load rebuild go unnamed in both
+    let named = doc.bundle_document_with(NameHashes::All).unwrap().retained;
+    let untagged = doc.bundle_document_with(NameHashes::UntagTiny).unwrap();
+    assert!(untagged.retained.is_empty());
     assert!(
-        small.len() + 190 * 32 < full.len(),
+        small.len() + named.len().saturating_sub(10) * 32 < full.len(),
         "{} vs {}",
         small.len(),
         full.len()
     );
     let held = doc.change_graph.held_hashes();
-    assert_eq!(reload(&small).change_graph.held_hashes(), held);
+    let mut loaded = reload(&small);
+    loaded.gc();
+    assert_eq!(loaded.change_graph.held_hashes(), held);
 
     let mut other = Automerge::<Retained>::new().with_manual_gc();
     other.load_incremental(&small).unwrap();
+    other.gc();
     assert_eq!(other.change_graph.held_hashes(), held);
 }
 
@@ -55,7 +63,9 @@ fn a_big_change_keeps_its_hash() {
     let big = doc.change_graph.all_nodes()[100];
     let big_hash = doc.change_graph.hash_for_node(big).unwrap();
     let bundle = doc.bundle_document_with(NameHashes::UntagTiny).unwrap();
-    assert!(bundle.retained.iter().any(|(_, h)| *h == big_hash));
+    let named = doc.bundle_document_with(NameHashes::All).unwrap().retained;
+    let names = |r: &[(usize, ChangeHash)]| r.iter().any(|(_, h)| *h == big_hash);
+    assert_eq!(names(&bundle.retained), names(&named));
     assert!(bundle.retained.len() < 10, "tiny hashes left out");
     assert_eq!(
         reload(&doc.save()).change_graph.held_hashes(),

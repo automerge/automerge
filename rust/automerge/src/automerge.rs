@@ -5266,9 +5266,11 @@ mod dirty_diff_tests {
 
     #[test]
     fn dirty_diff_matches_full_diff_for_remote_map_conflict_resolution_exposes_value() {
-        // pinned time: a random hash could land on a fragment head and free
-        // hashes this test needs
-        let mut doc1 = Automerge::new().with_actor(ActorId::from([1]));
+        // `get_changes` needs every hash it names
+        let mut doc1 = Automerge::new()
+            .enable_audit_mode()
+            .unwrap()
+            .with_actor(ActorId::from([1]));
         let mut tx = doc1.transaction();
         tx.put(ROOT, "key", "base").unwrap();
         tx.commit_with(crate::tx::CommitOptions::default().with_time(0));

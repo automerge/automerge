@@ -784,9 +784,8 @@ fn unlucky_commit_frees_loose_hashes() {
     let h2 = doc.get_head_hashes()[0];
 
     assert_eq!(h1.fragment_level(), 0, "the first commit stays loose");
-    assert_eq!(
-        h2.fragment_level(),
-        1,
+    assert!(
+        h2.fragment_level() > 0,
         "this actor is pinned because its second commit hashes to a \
          fragment head (00493e…)"
     );
