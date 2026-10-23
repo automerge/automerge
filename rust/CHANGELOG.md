@@ -7,6 +7,13 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* Patches for text inserted by `apply_changes`, `load_incremental` and `merge`
+  into a range where a mark was removed no longer carry that mark with a null
+  value. They now match `diff` and local edits.
+* Applying a change made elsewhere to a long text or list no longer walks the
+  whole object. It finds where the change lands through the op set's index, as
+  a local edit does. In the `apply/single_char_incremental_load` benchmark a
+  step went from 14.7ms to 0.47ms.
 
 ## 0.12.0
 
