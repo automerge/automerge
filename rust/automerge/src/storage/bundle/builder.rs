@@ -65,13 +65,13 @@ impl<'a> BundleBuilder<'a> {
     pub(crate) fn from_graph<H: crate::hash_retention::HashRetention>(
         op_set: &'a crate::op_set2::OpSet,
         change_graph: &'a crate::change_graph::ChangeGraph<H>,
-        nodes: &[crate::change_graph::NodeIdx],
+        members: &crate::change_graph::Members<'_>,
         mut mapper: ActorMapper<'a>,
     ) -> Result<BundleBuilder<'a>, crate::change_graph::UnretainedHashes> {
-        let mut change_writer = BundleChangeWriter::new(nodes.len());
-        change_graph.write_bundle_changes(nodes, &mut change_writer, &mut mapper)?;
+        let mut change_writer = BundleChangeWriter::new(members.nodes().len());
+        change_graph.write_bundle_changes(members, &mut change_writer, &mut mapper)?;
         let mut builders: Vec<_> = change_graph
-            .op_spans(nodes)
+            .op_spans(members.nodes())
             .map(|(actor, seq, start_op, max_op)| ChangeBuilder {
                 actor,
                 seq,

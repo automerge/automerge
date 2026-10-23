@@ -1429,10 +1429,11 @@ impl<H: HashRetention> Automerge<H> {
 
     pub(crate) fn bundle_document_with(&self, names: NameHashes) -> Result<Bundle, AutomergeError> {
         let nodes = self.change_graph.all_nodes();
-        let storage = Bundle::storage_for_document(&self.ops, &self.change_graph, &nodes)?;
+        let members = self.change_graph.bundle_members(&nodes);
+        let storage = Bundle::storage_for_document(&self.ops, &self.change_graph, &members)?;
         let heads = self.get_head_hashes();
         let external_deps: [ChangeHash; 0] = [];
-        self.assemble_bundle(&heads, &external_deps, &nodes, storage, names)
+        self.assemble_bundle(&heads, &external_deps, &members, storage, names)
     }
 
     /// The fragments, loose commits included, holding a change `heads`
@@ -1483,7 +1484,8 @@ impl<H: HashRetention> Automerge<H> {
         if nodes.is_empty() {
             return Ok(None);
         }
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
+        let members = self.change_graph.bundle_members(&nodes);
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
         let heads: Vec<ChangeHash> = self
             .get_head_hashes()
             .into_iter()
@@ -1503,7 +1505,7 @@ impl<H: HashRetention> Automerge<H> {
             })
             .collect();
         Ok(Some(self.assemble_bundle(
-            &heads, &boundary, &nodes, storage, names,
+            &heads, &boundary, &members, storage, names,
         )?))
     }
 
@@ -2089,7 +2091,8 @@ impl<H: HashRetention> Automerge<H> {
             .map(hash_of)
             .collect::<Result<Vec<_>, _>>()?;
 
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, members.clone())?;
+        let members = self.change_graph.bundle_members(&members);
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
         self.assemble_bundle(
             &head_hashes,
             &boundary_hashes,
@@ -2160,27 +2163,26 @@ impl<H: HashRetention> Automerge<H> {
     #[doc(hidden)]
     pub fn bundle_for_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
         let nodes = self.fragment_nodes(f)?;
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes.clone())?;
-        self.assemble_bundle(&[f.head], &f.boundary, &nodes, storage, NameHashes::All)
+        let members = self.change_graph.bundle_members(&nodes);
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
+        self.assemble_bundle(&[f.head], &f.boundary, &members, storage, NameHashes::All)
     }
 
     fn assemble_bundle(
         &self,
         heads: &[ChangeHash],
         boundary: &[ChangeHash],
-        nodes: &[crate::change_graph::NodeIdx],
+        members: &crate::change_graph::Members<'_>,
         storage: crate::storage::BundleStorage<'static, crate::storage::change::Verified>,
         names: NameHashes,
     ) -> Result<Bundle, AutomergeError> {
-        let members = crate::change_graph::Members::new(nodes);
         let crate::change_graph::ReceiverHashes { retained, outside } =
-            self.change_graph.hashes_to_retain(nodes, names)?;
+            self.change_graph.hashes_to_retain(members, names)?;
         let retained: Vec<(usize, ChangeHash)> = retained
             .into_iter()
             .filter(|(_, h)| h.fragment_level() == 0 && !heads.contains(h))
             .collect();
         let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
-        // a bundle lists its members in node order
         let member_index = |h: &ChangeHash| -> Option<usize> {
             members.position(self.change_graph.node_by_hash(h)?)
         };
@@ -2191,7 +2193,7 @@ impl<H: HashRetention> Automerge<H> {
             .ok_or_else(unknown)?;
         let mut checkpoints = self
             .change_graph
-            .leveled_members(&members)
+            .leveled_members(members)
             .filter(|(_, h)| !heads.iter().any(|(head, _)| head == h))
             .map(|(n, h)| members.position(n).map(|i| (i, h)))
             .collect::<Option<Vec<_>>>()
@@ -2226,12 +2228,13 @@ impl<H: HashRetention> Automerge<H> {
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
         // the bundle's actors are a sorted subset of the document's
-        let mut actor_index = vec![crate::op_set2::types::ActorIdx::default(); self.ops.actors.len()];
+        let mut actor_index =
+            vec![crate::op_set2::types::ActorIdx::default(); self.ops.actors.len()];
         for (i, actor) in storage.actors.iter().enumerate() {
             let doc_index = self.ops.actors.lookup(actor).ok_or_else(unknown)?;
             actor_index[doc_index] = crate::op_set2::types::ActorIdx::from(i);
         }
-        let (member_actors, member_seqs) = self.change_graph.actors_and_seqs(nodes, &actor_index);
+        let (member_actors, member_seqs) = self.change_graph.actors_and_seqs(members, &actor_index);
 
         Ok(Bundle {
             heads,
@@ -2254,11 +2257,15 @@ impl<H: HashRetention> Automerge<H> {
             .iter()
             .map(|f| self.fragment_nodes(f))
             .collect::<Result<Vec<_>, _>>()?;
+        let members: Vec<_> = nodes
+            .iter()
+            .map(|n| self.change_graph.bundle_members(n))
+            .collect();
         // one shared pass rather than a document walk per bundle
-        let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, nodes.clone())?;
+        let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, &members)?;
         fragments
             .iter()
-            .zip(nodes.iter())
+            .zip(members.iter())
             .zip(storages)
             .map(|((f, n), storage)| {
                 Ok(self
@@ -2855,7 +2862,8 @@ impl<H: HashRetention> Automerge<H> {
 
     /// `nodes` must be sorted and include every unhashed ancestor.
     fn rehash(&self, nodes: Vec<crate::change_graph::NodeIdx>) -> Option<Vec<ChangeHash>> {
-        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes).ok()?;
+        let members = crate::change_graph::Members::new(&nodes);
+        let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members).ok()?;
         let changes = storage.to_changes().ok()?;
         Some(changes.iter().map(|c| c.hash()).collect())
     }
@@ -3020,7 +3028,8 @@ impl<H: HashRetention> Automerge<H> {
             return Ok(None);
         };
         let nodes = self.change_graph.nodes_back_to_retained([node]);
-        let changes = Bundle::storage_for_nodes(&self.ops, &self.change_graph, nodes)?
+        let members = crate::change_graph::Members::new(&nodes);
+        let changes = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?
             .to_changes()
             .map_err(|e| AutomergeError::DecodeBundle(Box::new(e)))?;
         Ok(changes
@@ -6283,7 +6292,7 @@ mod retained_hash_tests {
         let nodes = doc.change_graph.all_nodes();
         let expected = doc
             .change_graph
-            .hashes_to_retain(&nodes, NameHashes::All)
+            .hashes_to_retain(&doc.change_graph.bundle_members(&nodes), NameHashes::All)
             .unwrap()
             .retained;
         assert!(!expected.is_empty());

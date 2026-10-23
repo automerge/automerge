@@ -67,15 +67,19 @@ pub(crate) struct ChangeGraphCols {
 
 const CACHE_STEP: u32 = 16;
 
-/// Sorted, distinct nodes. `position` is O(1) when they are contiguous,
-/// otherwise a binary search.
+/// Sorted, distinct nodes, and the order a bundle lists them in.
+/// `position` is O(1) when they are contiguous, otherwise a binary search.
 #[derive(Debug)]
 pub struct Members<'a> {
     nodes: &'a [NodeIdx],
     contiguous: bool,
+    /// the bundle order, and each sorted index's place in it; `None` when
+    /// that is `nodes` itself
+    order: Option<(Vec<NodeIdx>, Vec<u32>)>,
 }
 
 impl<'a> Members<'a> {
+    /// Listed in node order.
     pub(crate) fn new(nodes: &'a [NodeIdx]) -> Self {
         debug_assert!(
             nodes.windows(2).all(|w| w[0] < w[1]),
@@ -85,14 +89,35 @@ impl<'a> Members<'a> {
             (Some(first), Some(last)) => (last.0 - first.0) as usize + 1 == nodes.len(),
             _ => true,
         };
-        Members { nodes, contiguous }
+        Members {
+            nodes,
+            contiguous,
+            order: None,
+        }
     }
 
     pub(crate) fn nodes(&self) -> &'a [NodeIdx] {
         self.nodes
     }
 
+    /// The members in bundle order.
+    pub(crate) fn in_order(&self) -> &[NodeIdx] {
+        match &self.order {
+            Some((order, _)) => order,
+            None => self.nodes,
+        }
+    }
+
+    /// `n`'s place in bundle order.
     pub(crate) fn position(&self, n: NodeIdx) -> Option<usize> {
+        let i = self.sorted_index(n)?;
+        Some(match &self.order {
+            Some((_, rank)) => rank[i] as usize,
+            None => i,
+        })
+    }
+
+    fn sorted_index(&self, n: NodeIdx) -> Option<usize> {
         if self.contiguous {
             let i = n.0.checked_sub(self.nodes.first()?.0)? as usize;
             (i < self.nodes.len()).then_some(i)
@@ -428,10 +453,11 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// left out.
     pub(crate) fn hashes_to_retain(
         &self,
-        nodes: &[NodeIdx],
+        members: &Members<'_>,
         names: crate::automerge::NameHashes,
     ) -> Result<ReceiverHashes, UnretainedHashes> {
         use crate::storage::bundle::{rehashable, REHASHABLE_CHANGES, TINY_CHANGE_OPS};
+        let nodes = members.nodes();
         let num_ops = |n: &NodeIdx| self.num_ops.get(n.0 as usize).unwrap_or_default();
         let untag_tiny = names == crate::automerge::NameHashes::UntagTiny
             && nodes.len() <= REHASHABLE_CHANGES
@@ -439,10 +465,9 @@ impl<H: HashRetention> ChangeGraph<H> {
         let rehashed_on_load = |n: &NodeIdx, h: Option<ChangeHash>| {
             untag_tiny && h.is_none_or(|h| h.fragment_level() == 0) && num_ops(n) <= TINY_CHANGE_OPS
         };
-        let members = Members::new(nodes);
-        let carried: Vec<NodeIdx> = self.leveled_members(&members).map(|(n, _)| n).collect();
+        let carried: Vec<NodeIdx> = self.leveled_members(members).map(|(n, _)| n).collect();
         let frontier = self.calculate_clock(carried.clone());
-        let loose = self.loose_members(&members, &frontier);
+        let loose = self.loose_members(members, &frontier);
         let mut required = self.retained_from(carried.into_iter().chain(loose), &frontier);
         required.extend(self.member_tips(nodes));
         // a receiver pins these when it caches the fragment, and may have
@@ -479,12 +504,13 @@ impl<H: HashRetention> ChangeGraph<H> {
                 what: "changes its receiver must retain",
             });
         }
-        let named = required
+        let mut named: Vec<(usize, ChangeHash)> = required
             .into_iter()
             .filter_map(|n| Some((members.position(n)?, n, self.hashes.get(n)?)))
             .filter(|(_, n, h)| !rehashed_on_load(n, Some(*h)))
             .map(|(i, _, h)| (i, h))
             .collect();
+        named.sort_unstable();
         Ok(ReceiverHashes {
             retained: named,
             outside,
@@ -505,13 +531,92 @@ impl<H: HashRetention> ChangeGraph<H> {
         last.into_iter().flatten()
     }
 
+    /// `nodes` (sorted) in the order every peer holding them lists them,
+    /// whatever order they arrived in: parents first; then a change's
+    /// successor by its own actor when emitting it freed one; otherwise
+    /// the least ready `(actor, seq)`. O(nodes) when only one order is
+    /// causal, O(nodes · log width) otherwise.
+    pub(crate) fn bundle_members<'a>(&self, nodes: &'a [NodeIdx]) -> Members<'a> {
+        let mut members = Members::new(nodes);
+        let linear = nodes
+            .windows(2)
+            .all(|w| self.parent_slice(w[1]).contains(&w[0]));
+        if linear {
+            return members;
+        }
+        let m = nodes.len();
+        let mut waiting = vec![0u32; m];
+        let mut child_start = vec![0u32; m + 1];
+        for (i, n) in nodes.iter().enumerate() {
+            for p in self.parent_slice(*n) {
+                if let Some(j) = members.sorted_index(*p) {
+                    waiting[i] += 1;
+                    child_start[j + 1] += 1;
+                }
+            }
+        }
+        for j in 0..m {
+            child_start[j + 1] += child_start[j];
+        }
+        let mut fill = child_start.clone();
+        let mut children = vec![0u32; child_start[m] as usize];
+        for (i, n) in nodes.iter().enumerate() {
+            for p in self.parent_slice(*n) {
+                if let Some(j) = members.sorted_index(*p) {
+                    children[fill[j] as usize] = i as u32;
+                    fill[j] += 1;
+                }
+            }
+        }
+        let key = |i: u32| {
+            let n = nodes[i as usize].0 as usize;
+            (self.actors[n], self.seq[n], i)
+        };
+        let mut ready: std::collections::BinaryHeap<_> = (0..m as u32)
+            .filter(|i| waiting[*i as usize] == 0)
+            .map(|i| std::cmp::Reverse(key(i)))
+            .collect();
+        let mut order = Vec::with_capacity(m);
+        let mut rank = vec![0u32; m];
+        let mut next = None;
+        while let Some(i) = next.take().or_else(|| ready.pop().map(|r| r.0 .2)) {
+            rank[i as usize] = order.len() as u32;
+            order.push(nodes[i as usize]);
+            let (actor, ..) = key(i);
+            for c in
+                &children[child_start[i as usize] as usize..child_start[i as usize + 1] as usize]
+            {
+                waiting[*c as usize] -= 1;
+                if waiting[*c as usize] > 0 {
+                    continue;
+                }
+                let k = key(*c);
+                match next {
+                    _ if k.0 != actor => ready.push(std::cmp::Reverse(k)),
+                    Some(n) if key(n) < k => ready.push(std::cmp::Reverse(k)),
+                    Some(n) => {
+                        ready.push(std::cmp::Reverse(key(n)));
+                        next = Some(*c);
+                    }
+                    None => next = Some(*c),
+                }
+            }
+        }
+        debug_assert_eq!(order.len(), m, "members hold a cycle");
+        if order.as_slice() != nodes {
+            members.order = Some((order, rank));
+        }
+        members
+    }
+
     /// Each node's actor, through `actor_index`, and seq.
     pub(crate) fn actors_and_seqs(
         &self,
-        nodes: &[NodeIdx],
+        members: &Members<'_>,
         actor_index: &[ActorIdx],
     ) -> (Vec<ActorIdx>, Vec<std::num::NonZeroU64>) {
-        nodes
+        members
+            .in_order()
             .iter()
             .map(|n| {
                 let i = n.0 as usize;
@@ -869,17 +974,26 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// A dep outside `nodes` is written by hash, so its hash must be retained.
     pub(crate) fn write_bundle_changes<'a>(
         &'a self,
-        nodes: &[NodeIdx],
+        members: &Members<'_>,
         writer: &mut crate::storage::BundleChangeWriter<'a>,
         mapper: &mut crate::op_set2::change::ActorMapper<'_>,
     ) -> Result<(), UnretainedHashes> {
-        debug_assert!(nodes.is_sorted());
         let mut unnamed = 0;
         use crate::storage::DeltaRunGrouper;
-        let members = Members::new(nodes);
         let (mut seq, mut max_op, mut deps) =
             <(DeltaRunGrouper, DeltaRunGrouper, DeltaRunGrouper)>::default();
-        for range in node_ranges(nodes) {
+        let mut ranges = node_ranges(members.in_order());
+        let span = match (members.nodes().first(), members.nodes().last()) {
+            (Some(lo), Some(hi)) => (hi.0 - lo.0) as usize + 1,
+            _ => 0,
+        };
+        // a run's seeks cost about as much as decoding this many rows
+        const SEEK_ROWS: usize = 32;
+        if ranges.len() > 1 && ranges.len() * SEEK_ROWS >= span {
+            self.write_gathered(members, writer, mapper, [&mut seq, &mut max_op, &mut deps])?;
+            ranges.clear();
+        }
+        for range in ranges {
             let n = range.len();
             for run in self.actors[range.clone()].chunk_by(|a, b| a == b) {
                 mapper.process_actor(usize::from(run[0]));
@@ -928,17 +1042,7 @@ impl<H: HashRetention> ChangeGraph<H> {
                 writer.dep_count.append_n(count as u32, run);
             }
             for i in range {
-                for p in self.parent_slice(NodeIdx(i as u32)) {
-                    let idx = match (members.position(*p), self.hashes.get(*p)) {
-                        (Some(pos), _) => pos as i64,
-                        (None, Some(hash)) => writer.external_dep_index(hash),
-                        (None, None) => {
-                            unnamed += 1;
-                            continue;
-                        }
-                    };
-                    deps.push(&mut writer.deps, idx);
-                }
+                unnamed += self.write_member_deps(NodeIdx(i as u32), members, writer, &mut deps);
             }
             writer.len += n;
         }
@@ -952,6 +1056,113 @@ impl<H: HashRetention> ChangeGraph<H> {
         max_op.flush(&mut writer.max_op);
         deps.flush(&mut writer.deps);
         Ok(())
+    }
+
+    /// Writes members whose bundle order breaks into many short runs of
+    /// nodes: every column is decoded once over their span rather than
+    /// sought for each run.
+    fn write_gathered<'a>(
+        &'a self,
+        members: &Members<'_>,
+        writer: &mut crate::storage::BundleChangeWriter<'a>,
+        mapper: &mut crate::op_set2::change::ActorMapper<'_>,
+        [seq, max_op, deps]: [&mut crate::storage::DeltaRunGrouper; 3],
+    ) -> Result<(), UnretainedHashes> {
+        let nodes = members.nodes();
+        let lo = nodes[0].0 as usize;
+        let span = lo..nodes[nodes.len() - 1].0 as usize + 1;
+        let num_ops: Vec<_> = self.num_ops.iter_range(span.clone()).collect();
+        let timestamps: Vec<_> = self.timestamps.iter_range(span.clone()).collect();
+        let messages: Vec<_> = self.messages.iter_range(span.clone()).collect();
+        let extra: Vec<_> = self
+            .extra_bytes_meta
+            .iter_range(span)
+            .map(|m| (m.value, m.prefix() as usize..m.total() as usize))
+            .collect();
+        let mut timestamp = crate::storage::DeltaRunGrouper::default();
+        let mut actor = Run(None);
+        let mut ops = Run(None);
+        let mut message = Run(None);
+        let mut meta = Run(None);
+        let mut dep_count = Run(None);
+        let mut unnamed = 0;
+        for n in members.in_order() {
+            let i = n.0 as usize;
+            let j = i - lo;
+            let a = self.actors[i];
+            if actor.0.is_none_or(|(last, _)| last != a) {
+                mapper.process_actor(usize::from(a));
+            }
+            if let Some((v, k)) = actor.push(a) {
+                writer.actor.append_n(v, k);
+            }
+            seq.push(&mut writer.seq, self.seq[i] as i64);
+            max_op.push(&mut writer.max_op, self.max_ops[i] as i64);
+            if let Some((v, k)) = ops.push(num_ops[j]) {
+                writer.num_ops.append_n(v, k);
+            }
+            timestamp.push(&mut writer.timestamp, timestamps[j]);
+            if let Some((v, k)) = message.push(messages[j]) {
+                writer.message.append_n(v, k);
+            }
+            if let Some((v, k)) = meta.push(extra[j].0) {
+                writer.extra_meta.append_n(v, k);
+            }
+            writer
+                .extra
+                .extend_from_slice(&self.extra_bytes_raw[extra[j].1.clone()]);
+            if let Some((v, k)) = dep_count.push(self.parent_slice(*n).len() as u32) {
+                writer.dep_count.append_n(v, k);
+            }
+            unnamed += self.write_member_deps(*n, members, writer, deps);
+        }
+        if let Some((v, k)) = actor.0 {
+            writer.actor.append_n(v, k);
+        }
+        if let Some((v, k)) = ops.0 {
+            writer.num_ops.append_n(v, k);
+        }
+        if let Some((v, k)) = message.0 {
+            writer.message.append_n(v, k);
+        }
+        if let Some((v, k)) = meta.0 {
+            writer.extra_meta.append_n(v, k);
+        }
+        if let Some((v, k)) = dep_count.0 {
+            writer.dep_count.append_n(v, k);
+        }
+        timestamp.flush(&mut writer.timestamp);
+        writer.len += nodes.len();
+        if unnamed > 0 {
+            return Err(UnretainedHashes {
+                count: unnamed,
+                what: "changes outside the bundle that its members depend on",
+            });
+        }
+        Ok(())
+    }
+
+    /// The number of `n`'s parents it could not name.
+    fn write_member_deps(
+        &self,
+        n: NodeIdx,
+        members: &Members<'_>,
+        writer: &mut crate::storage::BundleChangeWriter<'_>,
+        deps: &mut crate::storage::DeltaRunGrouper,
+    ) -> usize {
+        let mut unnamed = 0;
+        for p in self.parent_slice(n) {
+            let idx = match (members.position(*p), self.hashes.get(*p)) {
+                (Some(pos), _) => pos as i64,
+                (None, Some(hash)) => writer.external_dep_index(hash),
+                (None, None) => {
+                    unnamed += 1;
+                    continue;
+                }
+            };
+            deps.push(&mut writer.deps, idx);
+        }
+        unnamed
     }
 
     /// `(actor, seq, start_op, max_op)` for each node.
@@ -1390,12 +1601,15 @@ impl<H: HashRetention> ChangeGraph<H> {
         actors: &ActorTable,
     ) -> Fragment {
         // interior hashes may be freed; checkpoint hashes never are
-        let checkpoints = nodes
+        let mut checkpoints: Vec<ChangeHash> = nodes
             .iter()
             .filter_map(|n| self.hashes.get(*n))
             .filter(|h| *h != head && h.fragment_level() > 0)
             .collect();
-        let members = nodes.iter().map(|n| self.change_id(*n, actors)).collect();
+        checkpoints.sort_unstable();
+        let mut by_id = nodes.to_vec();
+        by_id.sort_unstable_by_key(|n| (self.actors[n.0 as usize], self.seq[n.0 as usize]));
+        let members = by_id.iter().map(|n| self.change_id(*n, actors)).collect();
         Fragment {
             head,
             level,
@@ -1430,7 +1644,8 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// The fragments, loose commits included, holding a node `covered`
-    /// does not cover: by head in causal order.
+    /// does not cover: by head in the order a bundle of every such node
+    /// lists them.
     pub(crate) fn fragments_after(
         &self,
         heads: &[ChangeHash],
@@ -1458,17 +1673,24 @@ impl<H: HashRetention> ChangeGraph<H> {
                 .filter(fresh)
                 .filter_map(|n| Some((n, self.loose_commit(n, actors)?))),
         );
-        out.sort_unstable_by_key(|(n, _)| *n);
+        if out.len() > 1 {
+            let fresh = self.get_build_indexes(covered.clone());
+            let members = self.bundle_members(&fresh);
+            out.sort_unstable_by_key(|(n, _)| members.position(*n));
+        }
         out.into_iter().map(|(_, f)| f).collect()
     }
 
     /// Levels nest, so `f` lies inside a higher-level fragment exactly
     /// when its head is one of that fragment's members.
     fn inside_higher_fragment(&self, f: &FragmentNode) -> bool {
-        self.fragments.iter().filter(|k| k.level > f.level).any(|k| {
-            self.is_covered_by(f.head, &k.clock)
-                && !self.is_covered_by(f.head, &self.calculate_clock(k.deps.clone()))
-        })
+        self.fragments
+            .iter()
+            .filter(|k| k.level > f.level)
+            .any(|k| {
+                self.is_covered_by(f.head, &k.clock)
+                    && !self.is_covered_by(f.head, &self.calculate_clock(k.deps.clone()))
+            })
     }
 
     /// The loose commits above the fragment index, oldest first.
@@ -3614,11 +3836,14 @@ mod tests {
     fn assert_bundle_after_rebuilds(doc: &Automerge, heads: &[ChangeId], at: &[u8]) -> usize {
         let fragments = doc.fragments_after(heads).unwrap();
         let bundles = doc.bundle_after(heads).unwrap();
-        assert_eq!(bundles, doc.bundles_for_fragments(fragments.clone()).unwrap());
+        assert_eq!(
+            bundles,
+            doc.bundles_for_fragments(fragments.clone()).unwrap()
+        );
         for f in &fragments {
-            let inside = fragments.iter().any(|g| {
-                g.head != f.head && f.members.iter().all(|m| g.members.contains(m))
-            });
+            let inside = fragments
+                .iter()
+                .any(|g| g.head != f.head && f.members.iter().all(|m| g.members.contains(m)));
             assert!(!inside, "{f:?} lies inside another fragment");
         }
         let mut fork = Automerge::load(at).unwrap();
@@ -3633,7 +3858,10 @@ mod tests {
         });
         for (f, bundle) in fragments.iter().zip(&bundles) {
             fork.load_incremental(bundle).unwrap();
-            assert!(fork.has_change(&f.head).unwrap(), "{f:?} waits on a later one");
+            assert!(
+                fork.has_change(&f.head).unwrap(),
+                "{f:?} waits on a later one"
+            );
         }
         assert_eq!(fork.get_heads(), doc.get_heads());
         assert_eq!(fork.hydrate(None).unwrap(), doc.hydrate(None).unwrap());
@@ -3697,6 +3925,69 @@ mod tests {
         let straddling = assert_bundle_after_rebuilds(&doc, &ours, &ours_at)
             + assert_bundle_after_rebuilds(&doc, &theirs, &theirs_at);
         assert!(straddling > 0, "a fragment straddling heads is sent whole");
+    }
+
+    #[test]
+    fn exports_do_not_depend_on_arrival_order() {
+        let mut rng = make_rng();
+        let mut base = AutoCommit::new().with_actor(crate::ActorId::from(&[0u8][..]));
+        let text = base.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
+        for _ in 0..50 {
+            base.splice_text(&text, 0, 0, "ab").unwrap();
+            base.commit();
+        }
+        let mut branches: Vec<AutoCommit> = (1..=3u8)
+            .map(|a| base.fork().with_actor(crate::ActorId::from(&[a][..])))
+            .collect();
+        let (mut x, mut y) = (base.fork(), base.fork());
+        for round in 0..4 {
+            for b in branches.iter_mut() {
+                for i in 0..40 {
+                    let len = crate::read::ReadDoc::length(b, &text);
+                    let pos = rng.random::<u32>() as usize % (len + 1);
+                    if i % 3 == 0 && len > 0 {
+                        b.splice_text(&text, pos.min(len - 1), 1, "").unwrap();
+                    } else {
+                        b.splice_text(&text, pos, 0, "x").unwrap();
+                    }
+                    b.put(ROOT, format!("k{}", i % 7), i as i64).unwrap();
+                    b.commit();
+                }
+            }
+            for i in [0, 1, 2] {
+                x.merge(&mut branches[i]).unwrap();
+            }
+            for i in [2, 1, 0] {
+                y.merge(&mut branches[i]).unwrap();
+            }
+            // some branches see each other between rounds
+            let (a, b) = branches.split_at_mut(round % 2 + 1);
+            a[0].merge(&mut b[0]).unwrap();
+        }
+        let (x, y) = (x.document(), y.document());
+        assert_eq!(x.get_heads(), y.get_heads());
+        let by_head = |doc: &Automerge| {
+            let mut f = doc.fragments(..);
+            f.sort_by_key(|f| (f.head, f.level));
+            f
+        };
+        let (fx, fy) = (by_head(x), by_head(y));
+        assert_eq!(fx.len(), fy.len());
+        assert!(fx.len() > 1);
+        let bx = x.bundles_for_fragments(fx).unwrap();
+        let by = y.bundles_for_fragments(fy).unwrap();
+        for (i, (a, b)) in bx.iter().zip(&by).enumerate() {
+            assert!(a == b, "fragment {i} differs");
+        }
+        assert!(x.save() == y.save(), "saves differ");
+        assert!(
+            x.bundle_after(&[]).unwrap() == y.bundle_after(&[]).unwrap(),
+            "bundle_after differs"
+        );
+        assert_eq!(
+            x.fragments_after(&[]).unwrap(),
+            y.fragments_after(&[]).unwrap()
+        );
     }
 
     /// Apply the same fragments through the walk and the manifold
@@ -3935,13 +4226,30 @@ pub struct Fragment {
     pub head: ChangeHash,
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
-    /// Non-zero-level members of the fragment, excluding its head.
+    /// Non-zero-level members of the fragment, excluding its head, sorted.
     pub checkpoints: Vec<ChangeHash>,
-    /// By [`ChangeId`], since interior change hashes may have been freed.
+    /// By [`ChangeId`], since interior change hashes may have been freed;
+    /// by actor, then seq.
     pub members: Vec<ChangeId>,
 }
 
-/// The maximal runs of consecutive indexes in sorted `nodes`.
+/// Equal values gathered into runs, so an encoder takes a run at a time.
+struct Run<V>(Option<(V, usize)>);
+
+impl<V: Copy + PartialEq> Run<V> {
+    /// The run `value` ends, if it starts a new one.
+    fn push(&mut self, value: V) -> Option<(V, usize)> {
+        match &mut self.0 {
+            Some((v, n)) if *v == value => {
+                *n += 1;
+                None
+            }
+            run => run.replace((value, 1)),
+        }
+    }
+}
+
+/// The maximal runs of consecutive indexes in `nodes`.
 fn node_ranges(nodes: &[NodeIdx]) -> Vec<Range<usize>> {
     let mut ranges: Vec<Range<usize>> = Vec::new();
     for n in nodes {

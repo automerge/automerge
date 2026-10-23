@@ -281,17 +281,17 @@ impl Bundle {
             .collect::<Option<Vec<_>>>()
             .ok_or(crate::change_graph::MissingDep)?;
         nodes.sort_unstable();
-        Self::storage_for_nodes(op_set, change_graph, nodes)
+        let members = crate::change_graph::Members::new(&nodes);
+        Self::storage_for_nodes(op_set, change_graph, &members)
     }
 
-    /// `nodes` must be sorted ascending.
     pub(crate) fn storage_for_nodes<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
-        nodes: Vec<crate::change_graph::NodeIdx>,
+        members: &crate::change_graph::Members<'_>,
     ) -> Result<BundleStorage<'static, Verified>, AutomergeError> {
         Ok(
-            Self::storage_for_node_sets(op_set, change_graph, vec![nodes])?
+            Self::storage_for_node_sets(op_set, change_graph, std::slice::from_ref(members))?
                 .pop()
                 .expect("one set in, one out"),
         )
@@ -302,11 +302,11 @@ impl Bundle {
     pub(crate) fn storage_for_document<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
-        nodes: &[crate::change_graph::NodeIdx],
+        members: &crate::change_graph::Members<'_>,
     ) -> Result<BundleStorage<'static, Verified>, AutomergeError> {
         let mut mapper = ActorMapper::new(&op_set.actors);
-        let mut change_writer = BundleChangeWriter::new(nodes.len());
-        change_graph.write_bundle_changes(nodes, &mut change_writer, &mut mapper)?;
+        let mut change_writer = BundleChangeWriter::new(members.nodes().len());
+        change_graph.write_bundle_changes(members, &mut change_writer, &mut mapper)?;
         let builder = if mapper.sees_every_actor() {
             let mut data = Vec::new();
             let ops = op_set.write_bundle_op_columns(&mut data);
@@ -323,14 +323,14 @@ impl Bundle {
     pub(crate) fn storage_for_node_sets<H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
-        node_sets: Vec<Vec<crate::change_graph::NodeIdx>>,
+        node_sets: &[crate::change_graph::Members<'_>],
     ) -> Result<Vec<BundleStorage<'static, Verified>>, AutomergeError> {
         let mut jobs = Vec::with_capacity(node_sets.len());
         let current = change_graph.current_clock();
-        for nodes in node_sets {
-            let clock = change_graph.clock_for_nodes(nodes.clone());
+        for members in node_sets {
+            let clock = change_graph.clock_for_nodes(members.nodes().to_vec());
             let mapper = ActorMapper::new(&op_set.actors);
-            let mut collector = BundleBuilder::from_graph(op_set, change_graph, &nodes, mapper)?;
+            let mut collector = BundleBuilder::from_graph(op_set, change_graph, members, mapper)?;
             collector
                 .walk(op_set)
                 .expect("the document's own columns decode");
