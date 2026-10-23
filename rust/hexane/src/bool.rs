@@ -1047,7 +1047,7 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             }
             pos = next_pos;
             run_index += 1;
-            slab_items += count;
+            slab_items = slab_items.checked_add(count).ok_or(PackError::BadFormat)?;
             slab_segs += 1;
             if slab_segs >= target_segments {
                 slabs.push(Slab {
@@ -1619,6 +1619,69 @@ mod suspend_tests {
         let resumed: Vec<bool> =
             BoolDecoder::<Leb128>::resume(&bytes, &BoolDecoderState::start()).collect();
         assert_eq!(fresh, resumed);
+    }
+}
+
+#[cfg(test)]
+mod arithmetic_tests {
+    use super::*;
+
+    fn counts(counts: &[usize]) -> Vec<u8> {
+        counts
+            .iter()
+            .flat_map(|&n| Leb128::encode_count(n))
+            .collect()
+    }
+
+    #[test]
+    fn finalize_rejects_slab_length_overflow() {
+        let data = counts(&[usize::MAX, 1]);
+        assert!(BoolLoadIter::<Leb128>::new(&data, 16).finalize().is_err());
+    }
+
+    #[test]
+    fn finalize_rejects_slab_length_overflow_after_partial_pull() {
+        let data = counts(&[usize::MAX, 1]);
+        let mut loader = BoolLoadIter::<Leb128>::new(&data, 16);
+        assert_eq!(loader.try_next_run().unwrap().unwrap().count, usize::MAX);
+        assert!(loader.finalize().is_err());
+    }
+
+    #[test]
+    fn try_next_run_rejects_slab_length_overflow() {
+        let data = counts(&[usize::MAX, 1]);
+        let mut loader = BoolLoadIter::<Leb128>::new(&data, 16);
+        assert_eq!(loader.try_next_run().unwrap().unwrap().count, usize::MAX);
+        assert!(loader.try_next_run().is_err());
+    }
+
+    #[test]
+    fn column_rejects_cross_slab_length_overflow() {
+        let data = counts(&[usize::MAX - 1, 1, 1]);
+        let opts = crate::LoadOpts::new().with_max_segments(4);
+        assert!(crate::Column::<bool>::load_with(&data, opts).is_err());
+    }
+
+    #[test]
+    fn accepts_maximum_column_length() {
+        let data = counts(&[usize::MAX - 2, 1, 1]);
+        for max_segments in [4, 16] {
+            let opts = crate::LoadOpts::new().with_max_segments(max_segments);
+            let col = crate::Column::<bool>::load_with(&data, opts).unwrap();
+            assert_eq!(col.len(), usize::MAX);
+        }
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn rejects_oversized_count() {
+        let data = Leb128::encode_unsigned(u32::MAX as u64 + 3);
+        assert!(bool_validate_encoding::<Leb128>(data.as_bytes()).is_err());
+        let mut loader = BoolLoadIter::<Leb128>::new(data.as_bytes(), 16);
+        assert!(loader.try_next_run().is_err());
+        assert!(BoolLoadIter::<Leb128>::new(data.as_bytes(), 16)
+            .finalize()
+            .is_err());
     }
 }
 

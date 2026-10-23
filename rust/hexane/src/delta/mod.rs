@@ -2209,6 +2209,8 @@ mod overflow_tests {
         col.push(Some(u64::MAX));
     }
 
+    // Every usize fits in i64 on 32-bit targets.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     #[should_panic(expected = "must fit in i64")]
     fn delta_usize_write_panics_above_2_63() {
