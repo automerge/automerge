@@ -1245,6 +1245,11 @@ impl<H: HashRetention> Automerge<H> {
     /// Unlike [`Self::load()`] this imports changes into an existing document. It will work with
     /// both the output of [`Self::save()`] and [`Self::save_after()`]
     ///
+    /// Into an empty document this is [`Self::load()`], which takes chunks in any order.
+    /// Otherwise chunks apply in the order given: legacy changes whose dependencies are missing
+    /// are queued as by [`Self::apply_changes`], but a bundle is rejected as by
+    /// [`Self::apply_bundle`], failing the call with chunks before it applied and none after.
+    ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
@@ -1340,6 +1345,13 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
     /// ignored.
+    ///
+    /// A change whose dependencies are missing is queued until they arrive. A change names its
+    /// dependencies only by hash, so once this document has freed the hash of a change some
+    /// incoming change depends on, it cannot tell that dependency from one it has never seen and
+    /// fails with [`AutomergeError::AuditModeRequired`] without applying it. Send such changes
+    /// as bundles, which also name their dependencies by [`ChangeId`], or use
+    /// [`AuditMode::Enabled`].
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
@@ -2277,6 +2289,10 @@ impl<H: HashRetention> Automerge<H> {
 
     /// Apply a bundle's changes. To apply one bundle to several documents,
     /// clone it.
+    ///
+    /// Bundles are not queued: one depending on a change this document lacks
+    /// fails with [`AutomergeError::MissingDeps`] and changes nothing, and
+    /// must be applied again once its dependencies have been.
     pub fn apply_bundle(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
         // a failed apply can leave unused actors; the legacy save sweeps them
         let result = self.apply_bundle_inner(bundle);

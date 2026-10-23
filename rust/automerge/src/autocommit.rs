@@ -494,6 +494,9 @@ impl<H: HashRetention> AutoCommit<H> {
     /// Unlike [`Self::load()`] this imports changes into an existing document. It will work with both
     /// the output of [`Self::save()`] and [`Self::save_incremental()`]
     ///
+    /// See [`Automerge::load_incremental`] for what happens to chunks whose dependencies are
+    /// missing.
+    ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
@@ -501,6 +504,7 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.load_incremental(data)
     }
 
+    /// See [`Automerge::apply_changes`].
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
