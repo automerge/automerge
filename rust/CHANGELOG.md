@@ -7,6 +7,8 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* Loading a document no longer sets aside room for a mark at every op. This
+  lowers peak memory by about 20% in a test on a large document.
 
 ## 0.12.0
 

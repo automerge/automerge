@@ -470,9 +470,7 @@ impl Columns {
             .inc
             .splice(succ_pos, 0, ops.clone().flat_map(O::succ_inc));
 
-        self.index
-            .mark
-            .extend(pos, ops.clone().map(O::mark_index).collect());
+        self.index.mark.extend(pos, ops.clone().map(O::mark_index));
         self.index.text.splice(
             pos,
             0,
