@@ -83,6 +83,8 @@ pub(crate) enum ReadOpError {
     InvalidObjId(usize),
     #[error("ops out of order: the object id at op {0} does not increase")]
     ObjOutOfOrder(usize),
+    #[error("ops out of order: the key or id at op {0} does not increase")]
+    KeyOutOfOrder(usize),
     #[error(transparent)]
     ColumnValidation(#[from] super::ColumnValidationError),
 }

@@ -46,7 +46,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaDecoder<'a, T, C> {
         let run = self.inner.next_run_max(max)?;
         let value = T::Inner::to_opt(run.value);
         if let Some(d) = value {
-            self.running += d * run.count as i64;
+            self.running = self.running.wrapping_add(d.wrapping_mul(run.count as i64));
         }
         Some(crate::Run {
             count: run.count,
@@ -72,7 +72,7 @@ impl<T: DeltaValue, C: Codec> Iterator for DeltaDecoder<'_, T, C> {
         match T::Inner::to_opt(self.inner.next()?) {
             None => Some(T::null_value()),
             Some(d) => {
-                self.running += d;
+                self.running = self.running.wrapping_add(d);
                 Some(T::from_i64(self.running))
             }
         }

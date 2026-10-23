@@ -1006,28 +1006,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn step(&self, stepper: &mut OpStepper<'a>) -> bool {
-        if self.obj != stepper.obj {
-            let ok = self.obj > stepper.obj;
-            stepper.obj = self.obj;
-            stepper.key = self.elemid_or_key();
-            stepper.id = self.id;
-            ok
-        } else {
-            let ok = if self.elemid_or_key() == stepper.key {
-                self.id > stepper.id
-            } else {
-                match (&self.key, &stepper.key) {
-                    (KeyRef::Map(s1), KeyRef::Map(s2)) => s1 > s2,
-                    (KeyRef::Seq(e1), KeyRef::Seq(e2)) if self.insert => {
-                        e1 == e2 || ElemId(self.id) < *e2
-                    }
-                    _ => false,
-                }
-            };
-            stepper.key = self.elemid_or_key();
-            stepper.id = self.id;
-            ok
-        }
+        stepper.step(self.obj, self.key.clone(), self.insert, self.id)
     }
 
     pub(crate) fn cursor(&self) -> Result<ElemId, AutomergeError> {
@@ -1300,6 +1279,33 @@ pub(crate) struct OpStepper<'a> {
     obj: ObjId,
     key: KeyRef<'a>,
     id: OpId,
+}
+
+impl<'a> OpStepper<'a> {
+    /// Whether an op with these fields may follow the last one stepped
+    /// in document order.
+    pub(crate) fn step(&mut self, obj: ObjId, key: KeyRef<'a>, insert: bool, id: OpId) -> bool {
+        let elemid_or_key = if insert {
+            KeyRef::Seq(ElemId(id))
+        } else {
+            key.clone()
+        };
+        let ok = if obj != self.obj {
+            obj > self.obj
+        } else if elemid_or_key == self.key {
+            id > self.id
+        } else {
+            match (&key, &self.key) {
+                (KeyRef::Map(s1), KeyRef::Map(s2)) => s1 > s2,
+                (KeyRef::Seq(e1), KeyRef::Seq(e2)) if insert => e1 == e2 || ElemId(id) < *e2,
+                _ => false,
+            }
+        };
+        self.obj = obj;
+        self.key = elemid_or_key;
+        self.id = id;
+        ok
+    }
 }
 
 impl Default for OpStepper<'_> {

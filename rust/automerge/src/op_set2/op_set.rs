@@ -18,7 +18,7 @@ use crate::types::{
 };
 use crate::AutomergeError;
 
-use super::op::{DocSucc, Op, OpLike, SuccCursors, SuccInsert, TxOp};
+use super::op::{DocSucc, Op, OpLike, OpStepper, SuccCursors, SuccInsert, TxOp};
 
 use super::columns::Columns;
 
@@ -1728,6 +1728,83 @@ impl OpSet {
         op_set.column_validation_with(num_actors)?;
         validate_pred_columns(raw, data, num_rows, num_actors)?;
         Ok(op_set)
+    }
+
+    /// The checks [`Self::load_bundle_cols`] leaves to bundles from
+    /// outside: what a bundle this crate built always gets right.
+    pub(crate) fn validate_foreign_bundle(
+        &self,
+        raw: &RawColumns<Uncompressed>,
+        data: &[u8],
+        has_deps: bool,
+    ) -> Result<(), ReadOpError> {
+        self.validate_keys(has_deps)?;
+        let column = |spec| {
+            raw.iter()
+                .find(|c| c.spec() == spec)
+                .map(|c| &data[c.data()])
+        };
+        self.validate_values(column(super::columns::VALUE_COL_SPEC).unwrap_or_default())?;
+        if let Some(hint) = column(crate::storage::bundle::ops::HINT) {
+            use hexane::ColumnEncoding;
+            <Option<i64> as hexane::ColumnValueRef>::Encoding::<hexane::Leb128>::validate_encoding(
+                hint,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Every row's value decodes, and the values fill `value` exactly.
+    fn validate_values(&self, value: &[u8]) -> Result<(), ReadOpError> {
+        let mut at = 0;
+        for meta in self.cols.value_meta.iter() {
+            let meta = meta.value;
+            let raw = value
+                .get(at..at + meta.length())
+                .ok_or(ReadOpError::MissingValue("value"))?;
+            ScalarValue::from_raw(meta, raw)?;
+            at += meta.length();
+        }
+        if at != value.len() {
+            return Err(ReadOpError::MissingValue("value"));
+        }
+        Ok(())
+    }
+
+    /// Every row has exactly one key, of its object's kind. A bundle
+    /// without deps is copied as is, so its rows must be in document order;
+    /// the merge places a dependent bundle's rows, which need only their
+    /// objects and map keys in order.
+    fn validate_keys(&self, has_deps: bool) -> Result<(), ReadOpError> {
+        let rows = self
+            .obj_id_iter()
+            .zip(self.cols.key_str.iter())
+            .zip(self.cols.key_actor.iter())
+            .zip(self.cols.key_ctr.iter())
+            .zip(self.cols.insert.iter())
+            .zip(self.id_iter());
+        let mut stepper = OpStepper::default();
+        let mut prev: Option<(ObjId, Option<&str>)> = None;
+        for (pos, (((((obj, key_str), key_actor), key_ctr), insert), id)) in rows.enumerate() {
+            let key = KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from))?;
+            let in_order = if has_deps {
+                match prev {
+                    Some((p_obj, p_key)) if p_obj == obj => match (p_key, key_str) {
+                        (Some(p), Some(k)) => p <= k,
+                        (None, None) => true,
+                        _ => false,
+                    },
+                    _ => true,
+                }
+            } else {
+                stepper.step(obj, key, insert.value, id)
+            };
+            if !in_order {
+                return Err(ReadOpError::KeyOutOfOrder(pos));
+            }
+            prev = Some((obj, key_str));
+        }
+        Ok(())
     }
 
     /// The document-dependent half of [`Self::load_bundle`]: rebase the

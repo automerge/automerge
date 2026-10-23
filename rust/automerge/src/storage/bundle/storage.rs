@@ -184,6 +184,10 @@ impl<'a> BundleStorage<'a, Unverified> {
             (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
         {
             let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops.value, actors.len())
+                .and_then(|o| {
+                    o.validate_foreign_bundle(&ops_meta, ops.value, !deps.is_empty())?;
+                    Ok(o)
+                })
                 .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
             return Ok((
                 parse::Input::empty(),
@@ -233,9 +237,13 @@ impl<'a> BundleStorage<'a, Unverified> {
         out.extend_from_slice(&ops_data_buf);
         let new_ops_end = out.len();
 
-        let bundle_ops =
-            OpSet::load_bundle_cols(&ops_meta, &out[new_ops_start..new_ops_end], actors.len())
-                .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
+        let ops_data = &out[new_ops_start..new_ops_end];
+        let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops_data, actors.len())
+            .and_then(|o| {
+                o.validate_foreign_bundle(&ops_meta, ops_data, !deps.is_empty())?;
+                Ok(o)
+            })
+            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
 
         Ok((
             parse::Input::empty(),
@@ -255,10 +263,14 @@ impl<'a> BundleStorage<'a, Unverified> {
         ))
     }
 
-    /// `parse_columns` has already validated the columns. Rows malformed in
-    /// ways a column decode cannot see (a map op with a null key, say) are
-    /// only caught by [`Self::to_changes`].
+    /// `parse_columns` has already validated the op columns. Rows malformed
+    /// in ways a column decode cannot see (a map op with a null key, say)
+    /// are only caught by [`Self::to_changes`].
     pub(crate) fn verify(self) -> Result<BundleStorage<'a, Verified>, ParseError> {
+        self.change_cols()?.validate()?;
+        for change in self.iter_change_meta()? {
+            change?;
+        }
         Ok(BundleStorage {
             bytes: self.bytes,
             compressed_bytes: self.compressed_bytes,
@@ -285,19 +297,6 @@ impl BundleStorage<'_, Verified> {
         self.feed(&ops, &mut collector)?;
         collector
             .decode_bundle(&actors, &self.deps)
-            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))
-    }
-
-    pub(crate) fn member_hashes(
-        &self,
-        known: &[Option<ChangeHash>],
-    ) -> Result<Vec<ChangeHash>, ParseError> {
-        let actors = ActorTable::from_sorted(self.actors.clone())?;
-        let ops = self.ops()?;
-        let mut collector = self.collector(&actors)?.skipping(known);
-        self.feed(&ops, &mut collector)?;
-        collector
-            .member_hashes(&self.deps, known)
             .map_err(|e| ParseError::DecodeBundle(Box::new(e)))
     }
 

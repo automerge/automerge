@@ -95,17 +95,6 @@ impl Bundle {
             })
     }
 
-    /// Every member's hash, in member order: `known[i]` where given,
-    /// otherwise rebuilt from this bundle's ops. Reads every op row.
-    pub(crate) fn member_hashes(
-        &self,
-        known: &[Option<ChangeHash>],
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.storage
-            .member_hashes(known)
-            .map_err(|e| AutomergeError::DecodeBundle(Box::new(e)))
-    }
-
     pub(crate) fn change_cols(&self) -> BundleChangeCols<'_> {
         self.storage
             .change_cols()

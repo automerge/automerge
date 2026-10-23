@@ -108,7 +108,7 @@ pub(crate) struct ChangeCollector<'a> {
     changes: Vec<BuildChangeMetadata<'a>>,
     pub(crate) builders: Vec<ChangeBuilder<'a>>,
     last: Option<(ObjId, KeyRef<'a>)>,
-    preds: HashMap<OpId, Vec<OpId>>,
+    preds: rustc_hash::FxHashMap<OpId, Vec<OpId>>,
     hashing: Option<Box<HashCursor>>,
     /// the first failure while hashing as changes complete, reported when
     /// collecting
@@ -146,8 +146,6 @@ pub(crate) struct ChangeBuilder<'a> {
     start_op: u64,
     num_ops: u64,
     received: u64,
-    /// the change's hash is already known, so its ops are dropped
-    skip: bool,
     encoder: OpEncoderStrategy<'a>,
 }
 
@@ -266,19 +264,21 @@ struct ChangeTail {
 fn deps_prefix<G: GetHash>(
     change: &BuildChangeMetadata<'_>,
     graph: &G,
-) -> (Vec<u8>, Vec<ChangeHash>) {
-    // FIXME missing value here is changes out of order error
-    let deps: Vec<_> = change
-        .deps
-        .iter()
-        .map(|i| graph.get_hash(*i as usize).unwrap())
-        .collect();
+) -> Result<(Vec<u8>, Vec<ChangeHash>), Error> {
+    let mut deps = Vec::with_capacity(change.deps.len());
+    for i in &change.deps {
+        deps.push(
+            graph
+                .get_hash(*i as usize)
+                .ok_or(Error::ChangesOutOfOrder)?,
+        );
+    }
     let mut data = Vec::with_capacity(1 + deps.len() * 32);
     leb128::write::unsigned(&mut data, deps.len() as u64).unwrap();
     for hash in &deps {
         data.write_all(hash.as_bytes()).unwrap();
     }
-    (data, deps)
+    Ok((data, deps))
 }
 
 fn assemble(
@@ -334,9 +334,11 @@ impl<'a> VecEncoder<'a> {
         Ok(Self { data })
     }
 
+    /// A duplicate op is dropped; `finish` then finds a slot missing.
     fn add(&mut self, index: usize, op: OpBuilder<'a>) {
-        assert!(self.data[index].is_none());
-        self.data[index] = Some(op);
+        if let Some(slot @ None) = self.data.get_mut(index) {
+            *slot = Some(op);
+        }
     }
 
     fn finish(
@@ -351,7 +353,9 @@ impl<'a> VecEncoder<'a> {
         }
 
         if let Some(Some(last)) = ops.last() {
-            assert_eq!(last.id.counter(), change.max_op);
+            if last.id.counter() != change.max_op {
+                return Err(Error::IncorrectMaxOp);
+            }
         }
 
         let mut data = vec![];
@@ -626,7 +630,6 @@ impl<'a> ChangeBuilder<'a> {
             start_op: meta.start_op,
             num_ops: meta.num_ops() as u64,
             received: 0,
-            skip: false,
             encoder: OpEncoderStrategy::Unstarted,
         }
     }
@@ -648,9 +651,6 @@ impl<'a> ChangeBuilder<'a> {
 
     /// Whether `op` was the change's last.
     fn add(&mut self, op: OpBuilder<'a>) -> Result<bool, OutOfMemory> {
-        if self.skip {
-            return Ok(false);
-        }
         self.start()?;
         let index = (op.id.counter() - self.start_op) as usize;
         self.encoder.add(index, op);
@@ -684,18 +684,20 @@ impl<'a> ChangeBuilder<'a> {
         graph: &G,
         mapper: &mut ActorMapper<'_>,
     ) -> Result<StoredChange<'static, Verified>, Error> {
-        let (prefix, deps) = deps_prefix(change, graph);
+        let (prefix, deps) = deps_prefix(change, graph)?;
         let tail = self.take_tail(change, mapper, prefix)?;
         Ok(assemble(change, deps, tail))
     }
 
+    // inlined, it spreads the per-op load loop over more of the i-cache
+    #[inline(never)]
     fn hash<G: GetHash>(
         &mut self,
         change: &BuildChangeMetadata<'_>,
         graph: &G,
         mapper: &mut ActorMapper<'_>,
     ) -> Result<(ChangeHash, u64), Error> {
-        let (prefix, _) = deps_prefix(change, graph);
+        let (prefix, _) = deps_prefix(change, graph)?;
         match std::mem::take(&mut self.encoder) {
             OpEncoderStrategy::Tail(tail, num_ops) => {
                 Ok((hash_parts(ChunkType::Change, &[&prefix, &tail]), num_ops))
@@ -825,7 +827,7 @@ impl<'a> ChangeCollector<'a> {
             changes,
             builders,
             last: None,
-            preds: HashMap::default(),
+            preds: Default::default(),
             hashing: None,
             error: None,
         })
@@ -1206,51 +1208,12 @@ impl<'a> ChangeCollector<'a> {
             }
 
             let all_deps = BundleDeps::new(num_changes, &changes, deps);
-            let change = self.builders[change.builder]
-                .finish(&change, &all_deps, &mut self.mapper)
-                .unwrap();
+            let change =
+                self.builders[change.builder].finish(&change, &all_deps, &mut self.mapper)?;
 
             changes.push(Change::from(change));
         }
         Ok(changes)
-    }
-
-    /// Drop the ops of every change `known` has a hash for, ahead of
-    /// [`Self::member_hashes`].
-    pub(crate) fn skipping(mut self, known: &[Option<ChangeHash>]) -> Self {
-        for (change, hash) in self.changes.iter().zip(known) {
-            self.builders[change.builder].skip = hash.is_some();
-        }
-        self
-    }
-
-    /// Each change's hash: `known[i]` where given, otherwise rebuilt.
-    pub(crate) fn member_hashes(
-        mut self,
-        deps: &[ChangeHash],
-        known: &[Option<ChangeHash>],
-    ) -> Result<Vec<ChangeHash>, Error> {
-        self.flush_deletes();
-        self.take_error()?;
-        let num_changes = self.changes.len();
-        let mut hashes = Vec::with_capacity(num_changes);
-        for (change, known) in self.changes.iter().zip(known) {
-            let hash = match known {
-                Some(hash) => *hash,
-                None => {
-                    let all_deps = MemberHashes {
-                        num_changes,
-                        hashes: &hashes,
-                        deps,
-                    };
-                    self.builders[change.builder]
-                        .hash(change, &all_deps, &mut self.mapper)?
-                        .0
-                }
-            };
-            hashes.push(hash);
-        }
-        Ok(hashes)
     }
 
     pub(crate) fn process_all_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {

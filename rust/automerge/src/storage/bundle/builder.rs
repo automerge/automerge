@@ -252,33 +252,28 @@ impl<'a> BundleBuilder<'a> {
         // Column data (uncompressed) and per-column metadata.
         let mut change_data_buf = Vec::new();
         let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
-        let changes_meta = change_cols.raw_columns();
+        let written_changes_meta = change_cols.raw_columns();
         let mut ops_data_buf = Vec::new();
         let ops_cols = self
             .op_writer
             .finish_with_ranks(&mapper, &mut ops_data_buf, ranks);
-        let ops_meta = ops_cols.raw_columns();
+        let written_ops_meta = ops_cols.raw_columns();
 
         // ---- Uncompressed assembly (used in-memory for iteration) ----
+        // The writers' buffers aren't in spec order, which readers assume.
         let mut data_u = prefix.clone();
-        changes_meta.write(&mut data_u);
-        let changes_data_start_u = data_u.len();
-        data_u.extend_from_slice(&change_data_buf);
-        let changes_data_end_u = data_u.len();
-        ops_meta.write(&mut data_u);
-        let ops_data_start_u = data_u.len();
-        data_u.extend_from_slice(&ops_data_buf);
-        let ops_data_end_u = data_u.len();
+        let (changes_meta, changes_data_u_range) =
+            write_in_spec_order(&written_changes_meta, &change_data_buf, &mut data_u);
+        let (ops_meta, ops_data_u_range) =
+            write_in_spec_order(&written_ops_meta, &ops_data_buf, &mut data_u);
 
         let bytes_u = data_u;
-        let changes_data_u_range = changes_data_start_u..changes_data_end_u;
-        let ops_data_u_range = ops_data_start_u..ops_data_end_u;
 
         // ---- Compressed assembly (used as the on-disk/wire form) ----
         // Per-column DEFLATE above DEFLATE_MIN_SIZE, mirroring Document.
         let mut data_c = prefix;
         let mut compressed_change_data = Vec::new();
-        let changes_meta_c = changes_meta.compress(
+        let changes_meta_c = written_changes_meta.compress(
             &change_data_buf,
             &mut compressed_change_data,
             DEFLATE_MIN_SIZE,
@@ -287,7 +282,7 @@ impl<'a> BundleBuilder<'a> {
         data_c.extend_from_slice(&compressed_change_data);
         let mut compressed_ops_data = Vec::new();
         let ops_meta_c =
-            ops_meta.compress(&ops_data_buf, &mut compressed_ops_data, DEFLATE_MIN_SIZE);
+            written_ops_meta.compress(&ops_data_buf, &mut compressed_ops_data, DEFLATE_MIN_SIZE);
         ops_meta_c.write(&mut data_c);
         data_c.extend_from_slice(&compressed_ops_data);
 
@@ -723,6 +718,24 @@ impl<'a> BundleChangeCols<'a> {
         Ok(c)
     }
 
+    /// Rejects column bytes the decoders would panic on.
+    pub(crate) fn validate(&self) -> Result<(), ParseError> {
+        fn check<T: hexane::ColumnValueRef>(bytes: &[u8]) -> Result<(), ParseError> {
+            use hexane::ColumnEncoding;
+            T::Encoding::<hexane::Leb128>::validate_encoding(bytes)?;
+            Ok(())
+        }
+        check::<Option<ActorIdx>>(self.actor)?;
+        check::<Option<u64>>(self.num_ops)?;
+        check::<Option<String>>(self.message)?;
+        check::<Option<u64>>(self.dep_count)?;
+        check::<Option<ValueMeta>>(self.extra_meta)?;
+        for delta in [self.seq, self.max_op, self.timestamp, self.deps] {
+            check::<Option<i64>>(delta)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn actors(&self) -> hexane::Decoder<'a, Option<ActorIdx>> {
         hexane::decoder::<Option<ActorIdx>>(self.actor)
     }
@@ -842,8 +855,9 @@ impl<'a> BundleChangeIterInner<'a> {
             .next()
             .flatten()
             .ok_or(ReadOpError::MissingValue("max_op"))? as u64;
-        let start_op = (max_op + 1)
-            .checked_sub(num_ops)
+        let start_op = max_op
+            .checked_add(1)
+            .and_then(|m| m.checked_sub(num_ops))
             .filter(|s| *s > 0)
             .ok_or(ReadOpError::MissingValue("num_ops"))?;
         let timestamp = self.timestamp.next().flatten().unwrap_or(0);
@@ -972,6 +986,24 @@ impl BundleKey<'_> {
 }
 
 /// How many of the next `max` items satisfy `pred`; tests once per run.
+fn write_in_spec_order(
+    columns: &RawColumns<compression::Uncompressed>,
+    data: &[u8],
+    out: &mut Vec<u8>,
+) -> (RawColumns<compression::Uncompressed>, Range<usize>) {
+    columns.write(out);
+    let start = out.len();
+    let columns = columns
+        .iter()
+        .map(|c| {
+            let at = out.len() - start;
+            out.extend_from_slice(&data[c.data()]);
+            RawColumn::new(c.spec(), at..at + c.data().len())
+        })
+        .collect();
+    (columns, start..out.len())
+}
+
 fn run_len_while<D: hexane::RunDecoder>(
     mut d: D,
     max: usize,

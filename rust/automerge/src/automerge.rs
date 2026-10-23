@@ -1718,8 +1718,15 @@ impl<H: HashRetention> Automerge<H> {
 
     /// Whether a GC is owed.
     fn rebuild_unhashed_fragment_pins(&mut self) -> bool {
+        let pins = self.change_graph.take_unhashed_fragment_pins();
+        self.rebuild_hashes(pins)
+    }
+
+    /// Records the hash of each of `nodes` that lacks one, rebuilt from
+    /// the document's ops. Whether a GC is owed.
+    fn rebuild_hashes(&mut self, nodes: Vec<crate::change_graph::NodeIdx>) -> bool {
         let mut owes_gc = false;
-        for node in self.change_graph.take_unhashed_fragment_pins() {
+        for node in nodes {
             if self.change_graph.hash_for_node(node).is_none() {
                 let hash = self
                     .rebuild_hash(node)
@@ -2283,45 +2290,30 @@ impl<H: HashRetention> Automerge<H> {
 
         // ── commit: failures below must undo the actor table; the graph is
         // only touched once nothing can fail ──
-        let (added, actor_map) = self.add_bundle_actors(bundle)?;
-        let clock = self.change_graph.current_clock();
-        let mask = self.bundle_mask(bundle, &actor_map)?;
-
-        // ops the clock covers belong to skipped members and are dropped
-        let ops = match BundleApply::new(
-            bundle,
-            actor_map.clone(),
-            &clock,
-            plan.overlap,
-            &self.ops,
-            bundle_ops,
-            mask,
-        ) {
-            Ok(ops) => ops,
-            Err(e) => {
-                self.undo_actor_refs(&added);
-                return Err(e);
-            }
-        };
-        let resolved = match ops.resolve(self) {
-            Ok(r) => r,
-            Err(e) => {
-                self.undo_actor_refs(&added);
-                return Err(e);
-            }
-        };
-
-        let (owes_gc, rehash) = match self.commit_bundle_graph(bundle, plan, &actor_map) {
-            Ok(r) => r,
-            Err(e) => {
-                self.undo_actor_refs(&added);
-                return Err(e);
-            }
-        };
+        let (added, actor_map) = self.add_bundle_actors(bundle);
+        let staged = (|| -> Result<_, AutomergeError> {
+            let clock = self.change_graph.current_clock();
+            let mask = self.bundle_mask(bundle, &actor_map)?;
+            // ops the clock covers belong to skipped members and are dropped
+            let ops = BundleApply::new(
+                bundle,
+                actor_map.clone(),
+                &clock,
+                plan.overlap,
+                &self.ops,
+                bundle_ops,
+                mask,
+            )?;
+            let resolved = ops.resolve(self)?;
+            let graph = self.commit_bundle_graph(bundle, plan, &actor_map)?;
+            Ok((ops, resolved, graph))
+        })();
+        let (ops, resolved, (owes_gc, hashed)) =
+            staged.inspect_err(|_| self.undo_actor_refs(&added))?;
         ops.commit(self, resolved);
         self.debug_assert_mask_indexes();
         self.republish_if_pending();
-        let owes_gc = owes_gc | self.rehash_bundle(bundle, rehash);
+        let owes_gc = owes_gc | self.rehash_bundle(hashed);
         if owes_gc {
             self.change_graph.gc_after_batch();
         }
@@ -2332,6 +2324,21 @@ impl<H: HashRetention> Automerge<H> {
     /// before writing to the document; `None` when the document already
     /// has every member.
     pub(crate) fn plan_bundle<'b>(
+        &self,
+        bundle: &'b Bundle,
+        member_hashes: Option<Vec<ChangeHash>>,
+    ) -> Result<Option<BundlePlan<'b>>, AutomergeError> {
+        let untagged = member_hashes.is_none() && bundle.is_rehashable();
+        let plan = self.plan_bundle_with(bundle, member_hashes)?;
+        if !untagged || plan.is_none() {
+            return Ok(plan);
+        }
+        // a tiny whole document may leave out hashes for us to rebuild;
+        // hashing it before anything is written also checks it
+        self.plan_bundle_with(bundle, Some(bundle.audit::<ChangeHash>()?))
+    }
+
+    fn plan_bundle_with<'b>(
         &self,
         bundle: &'b Bundle,
         member_hashes: Option<Vec<ChangeHash>>,
@@ -2360,6 +2367,8 @@ impl<H: HashRetention> Automerge<H> {
         let mut kept_index = vec![usize::MAX; num_members];
         let mut num_kept = 0;
         let mut next_seq: Vec<Option<u64>> = vec![None; bundle.actors().len()];
+        // a kept member may pin a member this document freed the hash of
+        let mut freed = Vec::new();
         for i in 0..num_members {
             let actor = usize::from(member_actors[i]);
             let seq = member_seqs[i].get();
@@ -2373,10 +2382,17 @@ impl<H: HashRetention> Automerge<H> {
             match seq.cmp(&next) {
                 Ordering::Less => {
                     // already have this change, unless the actor forked
-                    if let Some(hashes) = &member_hashes {
-                        if !self.change_graph.has_change(&hashes[i])? {
-                            let actor = bundle.actors()[actor].clone();
-                            return Err(AutomergeError::DuplicateSeqNumber(seq, actor));
+                    let node = self
+                        .change_graph
+                        .node_for_change_id(&member_id(i), &self.ops.actors);
+                    if let (Some(hashes), Some(node)) = (&member_hashes, node) {
+                        match self.change_graph.hash_for_node(node) {
+                            Some(h) if h != hashes[i] => {
+                                let actor = bundle.actors()[actor].clone();
+                                return Err(AutomergeError::DuplicateSeqNumber(seq, actor));
+                            }
+                            Some(_) => {}
+                            None => freed.push((node, hashes[i])),
                         }
                     }
                     continue;
@@ -2423,8 +2439,8 @@ impl<H: HashRetention> Automerge<H> {
         };
 
         // recorded after the commit
-        let mut hash_pairs: Vec<(crate::change_graph::NodeIdx, ChangeHash)> =
-            Vec::with_capacity(bundle.boundary.len() + bundle.dep_ids.len());
+        let mut hash_pairs: Vec<(crate::change_graph::NodeIdx, ChangeHash)> = freed;
+        hash_pairs.reserve(bundle.boundary.len() + bundle.dep_ids.len());
         for (hash, id) in &bundle.boundary {
             let node = self
                 .change_graph
@@ -2524,9 +2540,9 @@ impl<H: HashRetention> Automerge<H> {
             .iter()
             .filter_map(|(i, hash)| member_node(*i).map(|n| (n, *hash)))
             .collect();
+        self.check_hash_claims(&[&hash_pairs, &head_nodes, &checkpoint_nodes, &retained_nodes])?;
 
         Ok(Some(BundlePlan {
-            keep,
             base,
             overlap,
             kept_hashes,
@@ -2539,19 +2555,44 @@ impl<H: HashRetention> Automerge<H> {
         }))
     }
 
+    /// Rejects claims that give one change two hashes or one hash two
+    /// changes, among themselves or against the document.
+    fn check_hash_claims(
+        &self,
+        claims: &[&[(crate::change_graph::NodeIdx, ChangeHash)]],
+    ) -> Result<(), AutomergeError> {
+        let mut claims: Vec<_> = claims.iter().flat_map(|c| c.iter().copied()).collect();
+        claims.sort_unstable();
+        claims.dedup();
+        let conflict = || MalformedBundle::Invalid("a change hash names two changes").into();
+        if claims.windows(2).any(|w| w[0].0 == w[1].0) {
+            return Err(conflict());
+        }
+        claims.sort_unstable_by_key(|(_, h)| *h);
+        if claims.windows(2).any(|w| w[0].1 == w[1].1) {
+            return Err(conflict());
+        }
+        for (node, hash) in &claims {
+            let graph = &self.change_graph;
+            if graph.node_by_hash(hash).is_some_and(|n| n != *node)
+                || graph.hash_for_node(*node).is_some_and(|h| h != *hash)
+            {
+                return Err(conflict());
+            }
+        }
+        Ok(())
+    }
+
     /// Adds `bundle`'s actors; returns those that were new, for
     /// [`Self::undo_actor_refs`], and the bundle-to-document actor map.
-    pub(crate) fn add_bundle_actors(
-        &mut self,
-        bundle: &Bundle,
-    ) -> Result<(Vec<ActorId>, Vec<usize>), AutomergeError> {
+    pub(crate) fn add_bundle_actors(&mut self, bundle: &Bundle) -> (Vec<ActorId>, Vec<usize>) {
         let added = self.put_actor_refs(bundle.actors());
         let actor_map: Vec<usize> = bundle
             .actors()
             .iter()
             .map(|a| self.ops.lookup_actor(a).expect("actor was just inserted"))
             .collect();
-        Ok((added, actor_map))
+        (added, actor_map)
     }
 
     /// The write-frontier mask for `bundle`'s ops, when it hides some.
@@ -2593,16 +2634,15 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     /// Adds the planned members to the change graph and records the
-    /// hashes the bundle names. Returns whether a GC is owed and what
-    /// [`Self::rehash_bundle`] needs once the ops are in.
+    /// hashes the bundle names. Returns whether a GC is owed and whether
+    /// every member's hash was verified.
     pub(crate) fn commit_bundle_graph(
         &mut self,
         bundle: &Bundle,
         plan: BundlePlan<'_>,
         actor_map: &[usize],
-    ) -> Result<(bool, BundleRehash), AutomergeError> {
+    ) -> Result<(bool, bool), AutomergeError> {
         let BundlePlan {
-            keep,
             base,
             overlap,
             kept_hashes,
@@ -2659,36 +2699,25 @@ impl<H: HashRetention> Automerge<H> {
             };
         }
         self.change_graph.pin_deferred_loose();
-        Ok((
-            owes_gc,
-            BundleRehash {
-                kept: (0..keep.len()).filter(|i| keep[*i]).collect(),
-                base,
-                hashed: kept_hashes.is_some(),
-            },
-        ))
+        Ok((owes_gc, kept_hashes.is_some()))
     }
 
-    /// Records the hashes `bundle` left out, once its ops are in the
-    /// document. Whether a GC is owed.
+    /// Rebuilds the hashes of earlier changes a new fragment pins, once
+    /// `bundle`'s ops are in, and any hash a bundle that wasn't hashed
+    /// left out. Whether a GC is owed.
     ///
-    /// Panics if `bundle` left out a hash this document must retain: its
-    /// changes are already in, so an error would leave the document
-    /// inconsistent.
-    pub(crate) fn rehash_bundle(&mut self, bundle: &Bundle, rehash: BundleRehash) -> bool {
-        // all of these read the delivered ops, so they wait for the commit
+    /// Panics in debug builds if a bundle left out a hash this document
+    /// must retain.
+    pub(crate) fn rehash_bundle(&mut self, hashed: bool) -> bool {
         let mut owes_gc = self.rebuild_unhashed_fragment_pins();
-        if !rehash.hashed {
-            if bundle.is_rehashable() {
-                owes_gc |= self
-                    .rehash_untagged(bundle, &rehash.kept, rehash.base)
-                    .expect("rebuilding the hashes of a bundle already applied");
-            }
+        if !hashed {
             let missing = self.change_graph.missing_retained_hashes();
-            assert!(
-                missing == 0,
-                "bundle left out {missing} change hashes this document must retain"
+            debug_assert!(
+                missing.is_empty(),
+                "bundle left out {} change hashes this document must retain",
+                missing.len()
             );
+            owes_gc |= self.rebuild_hashes(missing);
         }
         owes_gc
     }
@@ -2696,7 +2725,6 @@ impl<H: HashRetention> Automerge<H> {
 
 /// What [`Automerge::plan_bundle`] decides about a bundle.
 pub(crate) struct BundlePlan<'b> {
-    keep: Vec<bool>,
     base: u32,
     overlap: bool,
     kept_hashes: Option<Vec<ChangeHash>>,
@@ -2706,57 +2734,6 @@ pub(crate) struct BundlePlan<'b> {
     head_nodes: Vec<(crate::change_graph::NodeIdx, ChangeHash)>,
     checkpoint_nodes: Vec<(crate::change_graph::NodeIdx, ChangeHash)>,
     retained_nodes: Vec<(crate::change_graph::NodeIdx, ChangeHash)>,
-}
-
-/// What [`Automerge::rehash_bundle`] needs: the members kept, as
-/// positions in the bundle, and the node the first became.
-pub(crate) struct BundleRehash {
-    kept: Vec<usize>,
-    base: u32,
-    hashed: bool,
-}
-
-impl<H: HashRetention> Automerge<H> {
-    /// Records the hash of every member `bundle` delivered without one;
-    /// its member `kept[i]` became node `base + i`. Whether an owed GC is
-    /// due.
-    fn rehash_untagged(
-        &mut self,
-        bundle: &Bundle,
-        kept: &[usize],
-        base: u32,
-    ) -> Result<bool, AutomergeError> {
-        // members this document already had may have lost their hashes,
-        // and a new member can pin them
-        let mut kept = kept.iter().enumerate().peekable();
-        let nodes: Vec<crate::change_graph::NodeIdx> = (0..bundle.member_seqs.len())
-            .map(|m| match kept.next_if(|(_, k)| **k == m) {
-                Some((i, _)) => crate::change_graph::NodeIdx(base + i as u32),
-                None => {
-                    let actor = bundle.actors()[usize::from(bundle.member_actors[m])].clone();
-                    let id = ChangeId::from_parts(actor, bundle.member_seqs[m]);
-                    self.change_graph
-                        .node_for_change_id(&id, &self.ops.actors)
-                        .expect("a member left out of the apply is in the document")
-                }
-            })
-            .collect();
-        let known: Vec<_> = nodes
-            .iter()
-            .map(|n| self.change_graph.hash_for_node(*n))
-            .collect();
-        if known.iter().all(Option::is_some) {
-            return Ok(false);
-        }
-        let hashes = bundle.member_hashes(&known)?;
-        let mut owes_gc = false;
-        for (m, node) in nodes.into_iter().enumerate() {
-            if known[m].is_none() {
-                owes_gc |= self.change_graph.record_node_hash(node, hashes[m]);
-            }
-        }
-        Ok(owes_gc)
-    }
 }
 
 impl<H: HashRetention> Automerge<H> {

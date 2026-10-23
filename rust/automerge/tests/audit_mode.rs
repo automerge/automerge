@@ -646,10 +646,10 @@ fn fragments_work_without_hash_columns() {
     assert_eq!(doc.fragments(..).len(), 1);
 }
 
-/// A forged head hash loads on trust, but audit mode recomputes hashes and
-/// refuses it.
+/// A tiny whole document is hashed before it is applied, so even a
+/// disabled load refuses a forged head hash.
 #[test]
-fn bit_flipped_head_loads_disabled_but_fails_audit() {
+fn bit_flipped_head_of_a_tiny_document_fails_to_load() {
     use sha2::{Digest, Sha256};
 
     let (mut bytes, mut orig) = saved_doc();
@@ -668,18 +668,7 @@ fn bit_flipped_head_loads_disabled_but_fails_audit() {
     bytes[4..8].copy_from_slice(&digest[..4]);
 
     assert!(load_audited(&bytes).is_err());
-
-    let mut doc = AutoCommit::load(&bytes).unwrap();
-    assert_eq!(doc.audit_mode(), AuditMode::Disabled);
-    let (v, _) = doc.get(ROOT, "k").unwrap().unwrap();
-    assert_eq!(v.as_i64(), Some(2));
-    assert_ne!(
-        doc.get_head_hashes(),
-        vec![head],
-        "head should be the forged one"
-    );
-
-    assert!(doc.enable_audit_mode().is_err());
+    assert!(AutoCommit::load(&bytes).is_err());
 }
 
 /// A disabled doc re-emits the hash columns it imported.

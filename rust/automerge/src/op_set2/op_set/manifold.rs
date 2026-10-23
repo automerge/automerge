@@ -145,7 +145,7 @@ pub(crate) struct ApplyManifold<'a> {
     elem_scope: Range<usize>,
 
     top: TopCalc,
-    hint_overshot: bool,
+    malformed: Option<&'static str>,
 }
 
 impl<'a> ApplyManifold<'a> {
@@ -196,7 +196,7 @@ impl<'a> ApplyManifold<'a> {
             consumed: rustc_hash::FxHashSet::default(),
             elem_scope: 0..0,
             top: TopCalc::new(),
-            hint_overshot: false,
+            malformed: None,
         }
     }
 
@@ -241,11 +241,15 @@ impl<'a> ApplyManifold<'a> {
     }
 
     fn close_scope(&mut self) {
-        self.succ_cache.flush(
+        let found = self.succ_cache.flush(
             &mut self.pred_iter,
             &mut self.succ_iter,
             &mut self.value_iter,
         );
+        if !found {
+            self.malformed
+                .get_or_insert("an op's pred is not in the document");
+        }
         self.top
             .finalize(self.op_set, &self.succ_cache.doc_succ.clears);
     }
@@ -266,13 +270,11 @@ impl<'a> ApplyManifold<'a> {
             }
             let op = self.read_op(src);
             self.apply_op(&op);
-            if self.hint_overshot {
-                return Err(
-                    MalformedBundle::Invalid("op position hint overshot its target row").into(),
-                );
+            if let Some(why) = self.malformed {
+                return Err(MalformedBundle::Invalid(why).into());
             }
         }
-        Ok(self.finish())
+        self.finish()
     }
 
     /// Know `objs` from the start, rather than only the objects whose
@@ -445,8 +447,10 @@ impl<'a> ApplyManifold<'a> {
 
     fn apply_op(&mut self, op: &ManifoldOp<'_>) {
         self.record_if_object(op);
-        if op.obj != self.obj {
-            self.enter_object(op.obj);
+        if op.obj != self.obj && !self.enter_object(op.obj) {
+            self.malformed
+                .get_or_insert("an op's object is not in the document");
+            return;
         }
         if self.obj_type == ObjType::Map {
             self.apply_map_op(op);
@@ -458,16 +462,20 @@ impl<'a> ApplyManifold<'a> {
         self.at.row += 1;
     }
 
-    fn enter_object(&mut self, obj: ObjId) {
+    /// False if neither the document nor the fragment has `obj`.
+    fn enter_object(&mut self, obj: ObjId) -> bool {
+        let Some(obj_type) = self
+            .obj_info
+            .object_type(&obj)
+            .or_else(|| self.known_objs.object_type(&obj))
+        else {
+            return false;
+        };
         self.close_scope();
 
         self.obj = obj;
         self.obj_scope = self.obj_id_iter.seek_to_value(self.obj);
-        self.obj_type = self
-            .obj_info
-            .object_type(&self.obj)
-            .or_else(|| self.known_objs.object_type(&self.obj))
-            .unwrap();
+        self.obj_type = obj_type;
 
         self.id_iter.shift(self.obj_scope.clone());
         self.pred_iter.shift(self.obj_scope.clone());
@@ -480,6 +488,7 @@ impl<'a> ApplyManifold<'a> {
             self.key_iter.shift(self.obj_scope.clone());
             self.key = None;
         }
+        true
     }
 
     fn apply_map_op(&mut self, op: &ManifoldOp<'_>) {
@@ -496,7 +505,10 @@ impl<'a> ApplyManifold<'a> {
         self.cache_preds(op);
         if op.action != Action::Delete {
             let r = self.id_iter.seek_to_value(&op.id);
-            assert!(r.is_empty());
+            if !r.is_empty() {
+                self.malformed
+                    .get_or_insert("an op's id is already in the document");
+            }
             self.land(op, r.start);
         }
     }
@@ -573,7 +585,11 @@ impl<'a> ApplyManifold<'a> {
             } else {
                 self.close_scope();
                 self.elem = Some(e);
-                self.open_elem_group(e, op);
+                if !self.open_elem_group(e, op) {
+                    self.malformed
+                        .get_or_insert("an update's element is not in the document");
+                    return;
+                }
             }
         }
         self.cache_preds(op);
@@ -582,24 +598,25 @@ impl<'a> ApplyManifold<'a> {
                 self.elem_scope.start
             } else {
                 let r = self.id_iter.seek_to_value(&op.id);
-                assert!(r.is_empty());
+                if !r.is_empty() {
+                    self.malformed
+                        .get_or_insert("an op's id is already in the document");
+                }
                 r.start
             };
             self.land(op, slot);
         }
     }
 
-    fn open_elem_group(&mut self, e: ElemId, op: &ManifoldOp<'_>) {
+    /// False if the document has no element `e`.
+    fn open_elem_group(&mut self, e: ElemId, op: &ManifoldOp<'_>) -> bool {
         let epos = match self.memo {
             Some((row_id, slot)) if row_id == e.0 => slot,
             _ => {
                 self.widen_id_iter();
                 match self.scan_for_elem(&e.0, op.hint) {
                     Some(p) => p,
-                    None => panic!(
-                        "update target {:?} not found: op {:?} action {:?} pred {:?} id_iter pos {} obj_scope {:?} elem_scope {:?} memo {:?} last_insert {:?}",
-                        e, op.id, op.action, op.preds, self.id_iter.pos(), self.obj_scope, self.elem_scope, self.memo, self.last_insert
-                    ),
+                    None => return false,
                 }
             }
         };
@@ -618,6 +635,7 @@ impl<'a> ApplyManifold<'a> {
         self.id_iter.shift(self.elem_scope.clone());
         self.pred_iter.shift(self.elem_scope.clone());
         self.succ_iter.shift(self.elem_scope.clone());
+        true
     }
 
     fn widen_id_iter(&mut self) {
@@ -643,7 +661,10 @@ impl<'a> ApplyManifold<'a> {
         if found.is_none() && jumped {
             self.id_iter = self.op_set.id_iter_range(&(start..self.obj_scope.end));
             found = self.id_iter.scan_to_value(target);
-            self.hint_overshot |= found.is_some();
+            if found.is_some() {
+                self.malformed
+                    .get_or_insert("op position hint overshot its target row");
+            }
         }
         found
     }
@@ -652,20 +673,27 @@ impl<'a> ApplyManifold<'a> {
         // a hidden successor keeps the link but neither deletes nor increments
         let masked = self.mask.is_some_and(|m| !m.covers(&op.id));
         for pred_id in &op.preds {
-            debug_assert!(self.clock.covers(pred_id), "fragment op had a batch pred");
+            if !self.clock.covers(pred_id) {
+                self.malformed
+                    .get_or_insert("an op's pred is not in the document");
+                continue;
+            }
             self.succ_cache.push(*pred_id, op.id, op.inc, masked);
         }
     }
 
-    pub(crate) fn finish(mut self) -> ManifoldResult {
+    fn finish(mut self) -> Result<ManifoldResult, AutomergeError> {
         self.close_scope();
+        if let Some(why) = self.malformed {
+            return Err(MalformedBundle::Invalid(why).into());
+        }
 
-        ManifoldResult {
+        Ok(ManifoldResult {
             doc_succ: self.succ_cache.doc_succ,
             insert_runs: self.insert_runs,
             doc_tops: self.top.doc_tops,
             batch_tops: self.top.batch_tops,
-        }
+        })
     }
 }
 
@@ -825,7 +853,7 @@ impl SuccCache {
         pred_iter: &mut OpIdIter<'_>,
         succ_iter: &mut SuccIterIter<'_>,
         value_iter: &mut ValueIter<'_>,
-    ) {
+    ) -> bool {
         // sorted preds are in row order, keeping the iterators forward-only
         self.preds.sort_unstable();
         // value_iter cannot re-read a row, so a second increment of the
@@ -833,7 +861,9 @@ impl SuccCache {
         let mut counter_memo: Option<(OpId, bool)> = None;
         for (pred, succ, mut inc, masked) in self.preds.drain(..) {
             let r = pred_iter.seek_to_value(&pred);
-            assert!(r.len() == 1, "covered pred must be present");
+            if r.len() != 1 {
+                return false;
+            }
             if inc.is_some() {
                 let is_counter = match counter_memo {
                     Some((p, ic)) if p == pred => ic,
@@ -851,6 +881,7 @@ impl SuccCache {
             let s = succ_iter.add_succ_at(r.start, succ, inc, masked).unwrap();
             self.doc_succ.push(s);
         }
+        true
     }
 }
 

@@ -543,25 +543,22 @@ impl<H: HashRetention> ChangeGraph<H> {
             || self.heads.contains(hash)
     }
 
-    /// How many hashes this document must retain but lacks, among those
-    /// pinned since the last check and the actor tips.
-    pub(crate) fn missing_retained_hashes(&mut self) -> usize {
+    /// The hashes this document must retain but lacks, among those pinned
+    /// since the last check and the actor tips.
+    pub(crate) fn missing_retained_hashes(&mut self) -> Vec<NodeIdx> {
         if !Self::tracks_pins() {
-            return 0;
+            return Vec::new();
         }
         debug_assert!(self.pins.deferred_from.is_none(), "loose pins deferred");
-        let fresh = std::mem::take(&mut self.pins.fresh);
-        let pins = fresh
-            .into_iter()
-            .filter(|n| self.pins.is_pinned(*n) && self.hashes.get(*n).is_none())
-            .count();
-        let tips = self
-            .seq_index
-            .iter()
-            .filter_map(|seqs| seqs.last())
-            .filter(|n| self.hashes.get(**n).is_none())
-            .count();
-        pins + tips
+        let mut missing = std::mem::take(&mut self.pins.fresh);
+        missing.retain(|n| self.pins.is_pinned(*n) && self.hashes.get(*n).is_none());
+        missing.extend(
+            self.seq_index
+                .iter()
+                .filter_map(|seqs| seqs.last())
+                .filter(|n| self.hashes.get(**n).is_none()),
+        );
+        missing
     }
 
     /// Every pin count, recomputed from the holders. Panics on a mismatch,
@@ -2423,7 +2420,7 @@ impl ChangeGraph<Retained> {
     ///
     /// Panics if a hash this document must retain is already gone.
     pub(crate) fn retain_hashes_only(&mut self) {
-        let gone = self.missing_retained_hashes();
+        let gone = self.missing_retained_hashes().len();
         assert!(
             gone == 0,
             "{gone} change hashes this document must retain are already gone"

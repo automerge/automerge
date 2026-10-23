@@ -193,6 +193,9 @@ impl<'a> Intake<'a> {
     /// The rows whose index or successors the merge must write itself, or
     /// why the fragments do not fit together.
     pub(crate) fn finish(self) -> Result<Fixes, MalformedBundle> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
         let v = self.fix_vals;
         Ok(Fixes {
             rows: self.fix_rows,

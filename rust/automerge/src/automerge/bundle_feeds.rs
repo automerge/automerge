@@ -1,7 +1,7 @@
 //! Loading a document from many bundles at once: one manifold pass over
 //! all of their ops instead of one per bundle.
 
-use super::{Automerge, BundleRehash};
+use super::Automerge;
 use crate::hash_retention::HashRetention;
 use crate::op_set2::op_set::intake::Intake;
 use crate::op_set2::op_set::{ObjIndex, ObjInfo, ObjSeed, OpSet};
@@ -14,7 +14,7 @@ struct Staged {
     bundle: Bundle,
     actor_map: Vec<usize>,
     frag: OpSet,
-    rehash: Option<BundleRehash>,
+    hashed: Option<bool>,
 }
 
 impl<H: HashRetention> Automerge<H> {
@@ -42,12 +42,12 @@ impl<H: HashRetention> Automerge<H> {
                     Err(e) => return Err(e),
                     Ok(plan) => plan,
                 };
-                let (_, actor_map) = self.add_bundle_actors(&bundle)?;
-                let rehash = match plan {
+                let (_, actor_map) = self.add_bundle_actors(&bundle);
+                let hashed = match plan {
                     Some(plan) => {
-                        let (gc, rehash) = self.commit_bundle_graph(&bundle, plan, &actor_map)?;
+                        let (gc, hashed) = self.commit_bundle_graph(&bundle, plan, &actor_map)?;
                         owes_gc |= gc;
-                        Some(rehash)
+                        Some(hashed)
                     }
                     None => None,
                 };
@@ -58,7 +58,7 @@ impl<H: HashRetention> Automerge<H> {
                     bundle,
                     actor_map,
                     frag,
-                    rehash,
+                    hashed,
                 });
             }
             if waiting.len() == before {
@@ -138,8 +138,8 @@ impl<H: HashRetention> Automerge<H> {
         self.debug_assert_mask_indexes();
         self.republish_if_pending();
         for s in staged {
-            if let Some(rehash) = s.rehash {
-                owes_gc |= self.rehash_bundle(&s.bundle, rehash);
+            if let Some(hashed) = s.hashed {
+                owes_gc |= self.rehash_bundle(hashed);
             }
         }
         if owes_gc {
