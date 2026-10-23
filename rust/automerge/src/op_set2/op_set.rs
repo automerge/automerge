@@ -1099,7 +1099,11 @@ impl OpSet {
         if id == types::ROOT {
             ExId::Root
         } else {
-            ExId::Id(id.counter(), self.actors[id.actor()].clone(), id.actor())
+            ExId::Id(
+                id.counter(),
+                self.actors[id.actor()].clone(),
+                u32::try_from(id.actor()).ok(),
+            )
         }
     }
 
