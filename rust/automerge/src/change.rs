@@ -1,13 +1,15 @@
 use std::{borrow::Cow, num::NonZeroU64};
 
 use crate::{
+    actor::ActorTable,
+    change_graph::ChangeGraph,
     columnar::Key as StoredKey,
     storage::{
         change::{Unverified, Verified},
-        parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
+        load, parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
     },
     types::{ActorId, ChangeHash, ElemId},
-    Author,
+    Author, AutomergeError, TextEncoding,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -130,6 +132,18 @@ impl Change {
     // TODO replace all uses of this with TryFrom<&[u8]>
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, LoadError> {
         Self::try_from(&bytes[..])
+    }
+
+    pub fn load_all(data: &[u8]) -> Result<Vec<Change>, AutomergeError> {
+        match load::load_changes(
+            parse::Input::new(data),
+            TextEncoding::platform_default(),
+            &ChangeGraph::new(&ActorTable::new()),
+            load::MarkOrderValidation::Validate,
+        ) {
+            load::LoadedChanges::Complete(changes) => Ok(changes),
+            load::LoadedChanges::Partial { error, .. } => Err(error.into()),
+        }
     }
 
     pub fn decode(&self) -> crate::ExpandedChange {
