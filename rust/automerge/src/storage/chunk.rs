@@ -431,7 +431,7 @@ mod tests {
         let Chunk::Signatures(signatures) = chunk else {
             panic!("expected a signatures chunk");
         };
-        assert!(signatures.entries().is_empty());
+        assert_eq!(signatures.iter().count(), 0);
         assert_eq!(signatures.bytes(), bytes.as_slice());
     }
 
