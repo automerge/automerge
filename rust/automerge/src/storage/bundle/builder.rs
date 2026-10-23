@@ -57,6 +57,8 @@ pub(crate) struct BundleBuilder<'a> {
     target_rows: Vec<(OpId, usize)>,
     /// the first row whose op a pending delete removes
     pred_row: Option<usize>,
+    /// op columns written already, in place of `op_writer`'s
+    written_ops: Option<(BundleOpsColumns, Vec<u8>)>,
 }
 
 impl<'a> BundleBuilder<'a> {
@@ -90,6 +92,7 @@ impl<'a> BundleBuilder<'a> {
             member_rows: Vec::new(),
             target_rows: Vec::new(),
             pred_row: None,
+            written_ops: None,
         })
     }
 
@@ -116,7 +119,20 @@ impl<'a> BundleBuilder<'a> {
             member_rows: Vec::new(),
             target_rows: Vec::new(),
             pred_row: None,
+            written_ops: None,
         }
+    }
+
+    /// [`Self::from_writers`] with op columns already written.
+    pub(crate) fn from_written_ops(
+        mapper: ActorMapper<'a>,
+        change_writer: BundleChangeWriter<'a>,
+        ops: BundleOpsColumns,
+        data: Vec<u8>,
+    ) -> BundleBuilder<'a> {
+        let mut builder = Self::from_writers(mapper, change_writer, BundleOpWriter::default());
+        builder.written_ops = Some((ops, data));
+        builder
     }
 
     pub(crate) fn process_op(&mut self, op: Op<'a>, succ: &[OpId]) {
@@ -324,8 +340,14 @@ impl<'a> BundleBuilder<'a> {
         let mut change_data_buf = Vec::new();
         let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
         let written_changes_meta = change_cols.raw_columns();
-        let mut ops_data_buf = Vec::new();
-        let ops_cols = self.op_writer.finish(&mapper, &mut ops_data_buf, ranks);
+        let (ops_cols, ops_data_buf) = match self.written_ops {
+            Some(written) => written,
+            None => {
+                let mut data = Vec::new();
+                let cols = self.op_writer.finish(&mapper, &mut data, ranks);
+                (cols, data)
+            }
+        };
         let written_ops_meta = ops_cols.raw_columns();
 
         // The writers' buffers aren't in spec order, which readers assume.

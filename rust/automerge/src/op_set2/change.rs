@@ -315,6 +315,12 @@ impl<'a> ActorMapper<'a> {
         self.seen_actors[actor] = true;
     }
 
+    /// Whether every actor has been seen, so the mapping will keep each
+    /// actor's index.
+    pub(crate) fn sees_every_actor(&self) -> bool {
+        self.seen_actors.iter().all(|s| *s)
+    }
+
     pub(crate) fn process_op<C>(&mut self, op: &C)
     where
         C: AsChangeOp,

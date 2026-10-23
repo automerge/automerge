@@ -8,10 +8,39 @@ use crate::op_set2::columns::Columns;
 use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::types::Action;
 use crate::op_set2::types::ActorIdx;
-use crate::storage::bundle::BundleOpWriter;
+use crate::storage::bundle::{BundleOpWriter, BundleOpsColumns};
 use crate::types::{ObjId, OpId};
 
 impl OpSet {
+    /// Every op as bundle op columns, written straight from the document's
+    /// columns. The bundle's actor table must be the document's.
+    pub(crate) fn write_bundle_op_columns(&self, data: &mut Vec<u8>) -> BundleOpsColumns {
+        let c = &self.cols;
+        let empty = data.len()..data.len();
+        BundleOpsColumns {
+            hint: empty.clone(),
+            obj_actor: c.obj_actor.save_to_unless(data, None),
+            obj_ctr: c.obj_ctr.save_to_unless(data, None),
+            key_actor: c.key_actor.save_to_unless(data, None),
+            key_ctr: c.key_ctr.save_to_unless(data, None),
+            key_str: c.key_str.save_to_unless(data, None),
+            id_actor: c.id_actor.save_to(data),
+            insert: c.insert.save_to(data),
+            action: c.action.save_to(data),
+            value_meta: c.value_meta.save_to(data),
+            value: c.value.save_to(data),
+            pred_count: empty.clone(),
+            pred_actor: empty.clone(),
+            pred_ctr: empty,
+            succ_count: c.succ_count.save_to(data),
+            succ_actor: c.succ_actor.save_to(data),
+            succ_ctr: c.succ_ctr.save_to(data),
+            expand: c.expand.save_to_unless(data, false),
+            mark_name: c.mark_name.save_to_unless(data, None),
+            id_ctr: c.id_ctr.save_to(data),
+        }
+    }
+
     pub(crate) fn write_all_bundle_ops<'a>(
         &'a self,
         writer: &mut BundleOpWriter<'a>,

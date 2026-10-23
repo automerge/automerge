@@ -2199,7 +2199,13 @@ impl<H: HashRetention> Automerge<H> {
             .map(change_id)
             .collect::<Option<Vec<_>>>()
             .ok_or_else(unknown)?;
-        let (member_actors, member_seqs) = storage.member_ids().map_err(|_| unknown())?;
+        // the bundle's actors are a sorted subset of the document's
+        let mut actor_index = vec![crate::op_set2::types::ActorIdx::default(); self.ops.actors.len()];
+        for (i, actor) in storage.actors.iter().enumerate() {
+            let doc_index = self.ops.actors.lookup(actor).ok_or_else(unknown)?;
+            actor_index[doc_index] = crate::op_set2::types::ActorIdx::from(i);
+        }
+        let (member_actors, member_seqs) = self.change_graph.actors_and_seqs(nodes, &actor_index);
 
         Ok(Bundle {
             heads,

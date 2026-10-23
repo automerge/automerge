@@ -17,7 +17,7 @@ mod storage;
 pub(crate) use builder::ops;
 pub(crate) use builder::{
     BundleBuilder, BundleChangeCols, BundleChangeIterUnverified, BundleChangeWriter, BundleKey,
-    BundleOpWriter, CleanRun, DeltaRunGrouper, ManifoldOp, ManifoldOps, TailRun,
+    BundleOpWriter, BundleOpsColumns, CleanRun, DeltaRunGrouper, ManifoldOp, ManifoldOps, TailRun,
 };
 pub(crate) use error::ParseError;
 pub(crate) use storage::{BundleStorage, Compressed};
@@ -307,12 +307,16 @@ impl Bundle {
         let mut mapper = ActorMapper::new(&op_set.actors);
         let mut change_writer = BundleChangeWriter::new(nodes.len());
         change_graph.write_bundle_changes(nodes, &mut change_writer, &mut mapper)?;
-        let mut op_writer = BundleOpWriter::default();
-        op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
-        Ok(
+        let builder = if mapper.sees_every_actor() {
+            let mut data = Vec::new();
+            let ops = op_set.write_bundle_op_columns(&mut data);
+            BundleBuilder::from_written_ops(mapper, change_writer, ops, data)
+        } else {
+            let mut op_writer = BundleOpWriter::default();
+            op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
             BundleBuilder::from_writers(mapper, change_writer, op_writer)
-                .finish_with_ranks(&std::collections::HashMap::new()),
-        )
+        };
+        Ok(builder.finish_with_ranks(&std::collections::HashMap::new()))
     }
 
     /// [`Self::storage_for_nodes`] for several bundles at once.

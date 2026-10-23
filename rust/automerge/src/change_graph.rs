@@ -494,11 +494,32 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// Each actor's last change among `nodes`: the tip of a receiver that
     /// holds no later change of that actor.
     fn member_tips(&self, nodes: &[NodeIdx]) -> impl Iterator<Item = NodeIdx> {
-        let mut last = HashMap::new();
+        let mut last: Vec<Option<NodeIdx>> = Vec::new();
         for n in nodes {
-            last.insert(usize::from(self.actors[n.0 as usize]), *n);
+            let actor = usize::from(self.actors[n.0 as usize]);
+            if actor >= last.len() {
+                last.resize(actor + 1, None);
+            }
+            last[actor] = Some(*n);
         }
-        last.into_values()
+        last.into_iter().flatten()
+    }
+
+    /// Each node's actor, through `actor_index`, and seq.
+    pub(crate) fn actors_and_seqs(
+        &self,
+        nodes: &[NodeIdx],
+        actor_index: &[ActorIdx],
+    ) -> (Vec<ActorIdx>, Vec<std::num::NonZeroU64>) {
+        nodes
+            .iter()
+            .map(|n| {
+                let i = n.0 as usize;
+                let seq = std::num::NonZeroU64::new(self.seq[i] as u64)
+                    .expect("a change's seq is at least 1");
+                (actor_index[usize::from(self.actors[i])], seq)
+            })
+            .unzip()
     }
 
     /// Walks whichever is smaller, the members or the uncovered tails, so a
